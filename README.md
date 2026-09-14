@@ -41,6 +41,23 @@ ANTHROPIC_MODEL=claude-sonnet-4-5
 - **Claude Sonnet** extracts atomic CIR insights on ingest. Eval hill-climb stays on the local v1.0–v1.3 ladder so scores do not wobble.
 - Without keys the seed briefing still runs on local parsers/extractors.
 
+## Sharing (Origin + GitHub)
+
+Origin (early beta) is **Internal** or **Private** only — there is no public repo setting. Share the internet-facing copy on GitHub; keep Origin as the Cursor/agent forge.
+
+| Remote | URL | Role |
+| --- | --- | --- |
+| GitHub | [github.com/shashank-code/synapse](https://github.com/shashank-code/synapse) | Public share, CI on `ubuntu-latest` |
+| Origin | [origin.cursor.com/shashank-code/synapse](https://origin.cursor.com/shashank-code/synapse) | Cursor codebase, agent PRs. Set **Internal** to share with the team |
+
+After GitHub exists, mirror it into Origin (`origin repo create-mirrored shashank-code/synapse`) so pushes stay two-way. Day to day:
+
+```bash
+chmod +x scripts/push-both.sh
+git remote add github https://github.com/shashank-code/synapse.git   # once
+./scripts/push-both.sh
+```
+
 ## Tests
 
 ```bash

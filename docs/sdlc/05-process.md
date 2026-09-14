@@ -11,15 +11,17 @@
 7. **Review** — Grokbot / Bugbot on the PR; humans accept gold expansions (new insights).
 8. **Ship**.
 
-## Origin
+## Origin and GitHub
 
-Origin is the source-of-truth git host and PR surface.
+Use **both**. Origin is the Cursor forge (agents, Origin PRs). It cannot host a public repo in the current beta (Internal / Private only). GitHub is the public share URL.
 
+- Preferred dual setup: public GitHub repo `shashank-code/synapse`, then `origin repo create-mirrored shashank-code/synapse` so Origin tracks GitHub as source of truth.
+- Push both remotes with `scripts/push-both.sh`.
 - Open PRs against `main` with REQ IDs in the title or body (`REQ-CLU-002`, …).
-- CI (`.github/workflows/ci.yml`) runs unit tests on every push; e2e when browsers are available.
-- `origin pr checks` is the merge gate. An empty check list locally still means: run `npm test` before you merge.
+- CI (`.github/workflows/ci.yml`) runs unit tests on every GitHub push; e2e when browsers are available.
+- On Origin-native repos, `origin pr checks` is the merge gate. An empty check list locally still means: run `npm test` before you merge.
 
-Use Origin when: opening/updating PRs, reading review threads, confirming CI.
+Use Origin when: agent work, Origin review threads. Use GitHub when: public link, Actions, forks.
 
 ## Cloud Agent
 
