@@ -35,7 +35,7 @@ export function nextPromptVersion(version: string): PromptVersion {
 function kindsFor(strategy: ExtractStrategy): ParsedBlock["kind"][] {
   if (strategy === "bullet-only") return ["bullet"];
   if (strategy === "claim-split") return ["bullet"];
-  return ["bullet", "paragraph", "table_cell", "cell"];
+  return ["bullet", "paragraph", "table_cell", "cell", "chart", "figure"];
 }
 
 function splitClaims(text: string, strategy: ExtractStrategy): string[] {

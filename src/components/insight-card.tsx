@@ -102,8 +102,7 @@ export function AppShell({
         {children}
       </main>
       <footer className="border-t border-border/70 px-4 py-4 text-center text-[11px] text-muted-foreground sm:px-6">
-        CIR JSONL · critique / judge / proposer hill-climb · local parsers with
-        optional LlamaParse
+        CIR JSON · LlamaCloud charts · Claude extractor · critique / judge / proposer
       </footer>
     </div>
   );

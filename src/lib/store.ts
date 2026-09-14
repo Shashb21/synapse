@@ -43,7 +43,7 @@ export async function resetState(): Promise<EngineState> {
 
 export async function addDocument(document: ParsedDocument): Promise<EngineState> {
   const current = await getState();
-  cache = ingestParsedDocument(current, document);
+  cache = await ingestParsedDocument(current, document);
   await persist(cache);
   return cache;
 }

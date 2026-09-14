@@ -1,6 +1,8 @@
 import { assignThemes } from "@/lib/cluster/cluster";
+import { hasAnthropicKey } from "@/lib/config";
 import { critiqueInsights, scoreMetrics } from "@/lib/eval/critique";
 import { judgeCandidate, pickChampion, proposeImprovement } from "@/lib/eval/judge";
+import { proposeWithClaude } from "@/lib/extract/claude-proposer";
 import { proposeInsights } from "@/lib/extract/proposer";
 import { PROMPT_REGISTRY } from "@/lib/extract/prompts";
 import { GOLD_INSIGHTS, SEED_DOCUMENTS } from "@/lib/seed/corpus";
@@ -23,6 +25,28 @@ export function extractAndCluster(
 } {
   const raw = proposeInsights(documents, promptVersion, extractedAt);
   return assignThemes(raw);
+}
+
+export async function extractAndClusterLive(
+  documents: ParsedDocument[],
+  promptVersion: string,
+): Promise<{
+  insights: CanonicalInsight[];
+  themes: EngineState["themes"];
+  theme_links: EngineState["theme_links"];
+  extractor: "claude" | "local";
+}> {
+  if (hasAnthropicKey()) {
+    try {
+      const raw = await proposeWithClaude(documents);
+      if (raw.length > 0) {
+        return { ...assignThemes(raw), extractor: "claude" };
+      }
+    } catch {
+      // Fall through to the local champion.
+    }
+  }
+  return { ...extractAndCluster(documents, promptVersion), extractor: "local" };
 }
 
 export function runEvalSweep(documents: ParsedDocument[]): {
@@ -113,15 +137,15 @@ export function buildSeedState(): EngineState {
   };
 }
 
-export function ingestParsedDocument(
+export async function ingestParsedDocument(
   state: EngineState,
   document: ParsedDocument,
-): EngineState {
+): Promise<EngineState> {
   const documents = [
     ...state.documents.filter((d) => d.id !== document.id),
     document,
   ];
-  const { insights, themes, theme_links } = extractAndCluster(
+  const { insights, themes, theme_links } = await extractAndClusterLive(
     documents,
     state.champion_prompt_version,
   );

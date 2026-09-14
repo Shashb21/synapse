@@ -1,8 +1,22 @@
-import type { ParsedBlock, ParsedDocument, StakeholderFunction } from "@/lib/schema";
-import { parseLocalDocument } from "@/lib/ingest/local-parse";
+import {
+  hasLlamaCloudKey,
+  llamaParseTier,
+} from "@/lib/config";
+import {
+  blocksFromLlamaResult,
+  LLAMA_CHART_PROMPT,
+  type LlamaParseResult,
+} from "@/lib/ingest/llama-blocks";
+import { mimeForFilename, parseLocalDocument } from "@/lib/ingest/local-parse";
+import type { ParsedDocument, StakeholderFunction } from "@/lib/schema";
 import { hashId } from "@/lib/text";
 
-const UPLOAD_URL = "https://api.cloud.llamaindex.ai/api/v1/parsing/upload";
+const BASE = "https://api.cloud.llamaindex.ai";
+
+export type IngestWarning = {
+  parserUsed: "llamaparse" | "local";
+  llamaError?: string;
+};
 
 function guessFunction(filename: string): StakeholderFunction {
   const n = filename.toLowerCase();
@@ -13,74 +27,82 @@ function guessFunction(filename: string): StakeholderFunction {
   return "commercial";
 }
 
-function blocksFromMarkdown(md: string): ParsedBlock[] {
-  const chunks = md
-    .split(/\n{2,}/)
-    .map((c) => c.replace(/^#+\s*/, "").replace(/^\s*[-*]\s+/, "").trim())
-    .filter(Boolean);
-  return chunks.map((text, i) => ({
-    id: `LLAMA-B${String(i + 1).padStart(2, "0")}`,
-    location: {
-      kind: "section" as const,
-      ref: `block ${i + 1}`,
-    },
-    text,
-    kind: i === 0 ? ("title" as const) : text.length > 160 ? ("paragraph" as const) : ("bullet" as const),
-  }));
-}
-
-async function llamaParse(
+async function llamaParseV2(
   filename: string,
   buffer: Buffer,
   apiKey: string,
 ): Promise<ParsedDocument> {
   const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(buffer)]), filename);
   form.append(
-    "file",
-    new Blob([new Uint8Array(buffer)]),
-    filename,
+    "configuration",
+    JSON.stringify({
+      tier: llamaParseTier(),
+      version: "latest",
+      processing_options: {
+        specialized_chart_parsing: "agentic",
+        aggressive_table_extraction: true,
+      },
+      agentic_options: {
+        custom_prompt: LLAMA_CHART_PROMPT,
+      },
+    }),
   );
-  const upload = await fetch(UPLOAD_URL, {
+
+  const upload = await fetch(`${BASE}/api/v2/parse/upload`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
-  if (!upload.ok) {
-    throw new Error(`LlamaParse upload failed (${upload.status})`);
+  const uploaded = (await upload.json()) as {
+    id?: string;
+    status?: string;
+    detail?: unknown;
+  };
+  if (!upload.ok || !uploaded.id) {
+    throw new Error(
+      `LlamaParse upload failed (${upload.status}): ${JSON.stringify(uploaded.detail ?? uploaded)}`,
+    );
   }
-  const job = (await upload.json()) as { id?: string; job_id?: string };
-  const jobId = job.id ?? job.job_id;
-  if (!jobId) throw new Error("LlamaParse did not return a job id");
 
-  let markdown = "";
-  for (let i = 0; i < 30; i += 1) {
-    await new Promise((r) => setTimeout(r, 1500));
+  let result: LlamaParseResult & {
+    job?: { id?: string; status?: string; error_message?: string | null };
+  } = {};
+  for (let i = 0; i < 40; i += 1) {
+    await new Promise((r) => setTimeout(r, 2000));
     const res = await fetch(
-      `https://api.cloud.llamaindex.ai/api/v1/parsing/job/${jobId}/result/markdown`,
+      `${BASE}/api/v2/parse/${uploaded.id}?expand=markdown_full,markdown,items`,
       { headers: { Authorization: `Bearer ${apiKey}` } },
     );
-    if (res.status === 202) continue;
-    if (!res.ok) throw new Error(`LlamaParse poll failed (${res.status})`);
-    const body = (await res.json()) as { markdown?: string };
-    markdown = body.markdown ?? "";
-    if (markdown) break;
+    result = (await res.json()) as typeof result;
+    const status = result.job?.status ?? uploaded.status;
+    if (status === "FAILED" || status === "CANCELLED") {
+      throw new Error(result.job?.error_message ?? `LlamaParse ${status}`);
+    }
+    if (status === "COMPLETED" || result.markdown_full || result.markdown) {
+      break;
+    }
   }
-  if (!markdown) throw new Error("LlamaParse returned empty markdown");
 
-  const blocks = blocksFromMarkdown(markdown).map((b) => ({
+  const blocksRaw = blocksFromLlamaResult(result);
+  if (blocksRaw.length === 0) {
+    throw new Error("LlamaParse returned no extractable text or chart data");
+  }
+  const id = hashId("DOC", `${filename}:llama:${buffer.length}`);
+  const blocks = blocksRaw.map((b, i) => ({
     ...b,
-    id: hashId("BLK", `${filename}:${b.text.slice(0, 40)}`),
+    id: `${id}-B${String(i + 1).padStart(2, "0")}`,
   }));
   return {
-    id: hashId("DOC", `${filename}:llama:${buffer.length}`),
+    id,
     filename,
     title: blocks[0]?.text ?? filename,
     stakeholder_function: guessFunction(filename),
-    mime: "application/octet-stream",
+    mime: mimeForFilename(filename),
     parser: "llamaparse",
     ingested_at: new Date().toISOString(),
     blocks,
-    fullText: markdown,
+    fullText: blocks.map((b) => `[${b.location.ref}] ${b.text}`).join("\n"),
   };
 }
 
@@ -88,14 +110,20 @@ export async function ingestBuffer(args: {
   filename: string;
   buffer: Buffer;
   mime?: string;
-}): Promise<{ document: ParsedDocument; parserUsed: "llamaparse" | "local" }> {
-  const key = process.env.LLAMA_CLOUD_API_KEY;
-  if (key) {
+}): Promise<{
+  document: ParsedDocument;
+  parserUsed: "llamaparse" | "local";
+  llamaError?: string;
+}> {
+  const key = process.env.LLAMA_CLOUD_API_KEY?.trim();
+  if (hasLlamaCloudKey() && key) {
     try {
-      const document = await llamaParse(args.filename, args.buffer, key);
+      const document = await llamaParseV2(args.filename, args.buffer, key);
       return { document, parserUsed: "llamaparse" };
-    } catch {
-      // Fall through to local OCR-free parsers.
+    } catch (error) {
+      const llamaError = error instanceof Error ? error.message : "LlamaParse failed";
+      const document = await parseLocalDocument(args);
+      return { document, parserUsed: "local", llamaError };
     }
   }
   const document = await parseLocalDocument(args);

@@ -57,7 +57,16 @@ export const parsedBlockSchema = z.object({
   location: sourceLocationSchema,
   heading: z.string().optional(),
   text: z.string(),
-  kind: z.enum(["title", "heading", "bullet", "paragraph", "table_cell", "cell"]),
+  kind: z.enum([
+    "title",
+    "heading",
+    "bullet",
+    "paragraph",
+    "table_cell",
+    "cell",
+    "chart",
+    "figure",
+  ]),
 });
 
 export const parsedDocumentSchema = z.object({

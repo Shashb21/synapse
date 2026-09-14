@@ -149,9 +149,13 @@ export async function parseLocalDocument(args: {
     blocks = await parseDocx(args.buffer);
   } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || mime === XLSX_MIME) {
     blocks = parseXlsx(args.buffer);
+  } else if (lower.endsWith(".pdf")) {
+    throw new Error(
+      "PDF ingest needs LlamaCloud (charts/OCR). Set LLAMA_CLOUD_API_KEY.",
+    );
   } else {
     throw new Error(
-      `Unsupported file type: ${args.filename}. Upload PPTX, DOCX, or XLSX.`,
+      `Unsupported file type: ${args.filename}. Upload PPTX, DOCX, XLSX, or PDF.`,
     );
   }
 

@@ -21,20 +21,22 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 | Route | What |
 | --- | --- |
 | `/` | Known / unknown / opportunity briefing |
-| `/ingest` | Upload PPTX, DOCX, XLSX (LlamaParse if keyed, else local) |
+| `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
 | `/evals` | Hill-climb lab |
 | `/sdlc` | Requirements, architecture, TDD |
 
-Optional env (never required for the demo):
+PoC keys (documents may leave the VPC). Copy `.env.example` → `.env.local`:
 
 ```
-LLAMA_CLOUD_API_KEY=     # LlamaParse OCR
-OPENAI_API_KEY=          # reserved for LLM proposer
-XAI_API_KEY=
-ANTHROPIC_API_KEY=
+LLAMA_CLOUD_API_KEY=llx-...
+LLAMA_PARSE_TIER=agentic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-5
 ```
 
-Copy `.env.example` → `.env.local` if you have keys.
+- **LlamaCloud** reads charts/graphs/graphics that native PPTX XML cannot see.
+- **Claude Sonnet** extracts atomic CIR insights on ingest. Eval hill-climb stays on the local v1.0–v1.3 ladder so scores do not wobble.
+- Without keys the seed briefing still runs on local parsers/extractors.
 
 ## Tests
 

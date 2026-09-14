@@ -13,7 +13,7 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | REQ-ING-001 | Ingest native PPTX decks into ordered source blocks (slide + heading + text). | Must |
 | REQ-ING-002 | Ingest native DOCX memos into page/section blocks. | Must |
 | REQ-ING-003 | Ingest native XLSX trackers into sheet/cell blocks. | Must |
-| REQ-ING-004 | Prefer LlamaParse OCR when `LLAMA_CLOUD_API_KEY` is set; fall back to local parsers without failing the job. | Must |
+| REQ-ING-004 | Use LlamaCloud Parse (v2, agentic + specialized chart parsing) as the primary OCR path for PPTX/PDF graphics; fall back to local OOXML if the job fails. | Must |
 | REQ-ING-005 | Persist parsed documents with stakeholder function, parser used, and full text. | Must |
 
 ## Extraction (CIR)

@@ -20,6 +20,14 @@ export default function IngestPage() {
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [providers, setProviders] = useState<{
+    llama_cloud: boolean;
+    anthropic: boolean;
+    live_parser: string;
+    live_extractor: string;
+    anthropic_model: string | null;
+    llama_tier: string | null;
+  } | null>(null);
   const [fixtures, setFixtures] = useState<
     { filename: string; href: string; bytes: number }[]
   >([]);
@@ -40,6 +48,10 @@ export default function IngestPage() {
       .then((r) => r.json())
       .then((d) => setFixtures(d.files ?? []))
       .catch(() => undefined);
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then(setProviders)
+      .catch(() => undefined);
   }, []);
 
   async function onUpload(file: File) {
@@ -56,7 +68,7 @@ export default function IngestPage() {
     }
     setStatus("idle");
     setMessage(
-      `Extracted via ${data.parserUsed} parser · ${data.document.blocks} blocks · function ${FUNCTION_LABELS[data.document.stakeholder_function as StakeholderFunction]}`,
+      `${data.parserUsed === "llamaparse" ? "LlamaCloud" : "Local"} parse · ${data.extractor === "claude" ? "Claude extractor" : "local extractor"} · ${data.document.blocks} blocks${data.llamaError ? ` · LlamaCloud fallback: ${data.llamaError}` : ""}`,
     );
     await refresh();
   }
@@ -69,14 +81,31 @@ export default function IngestPage() {
             Ingest a readout
           </h2>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            Drop the PowerPoint, Word, or Excel the brand team just walked.
-            LlamaParse runs when <code>LLAMA_CLOUD_API_KEY</code> is set;
-            otherwise native PPTX/DOCX/XLSX parsers flatten the file into CIR
-            source blocks.
+            LlamaCloud Parse (agentic, specialized charts) reads PPTX graphics
+            and graphs. Claude Sonnet then extracts atomic CIR insights. Put
+            keys in <code>.env.local</code> — documents may leave the VPC for
+            this PoC.
           </p>
+          {providers ? (
+            <p className="mt-3 text-xs">
+              Parser:{" "}
+              <span className="font-medium">
+                {providers.llama_cloud
+                  ? `LlamaCloud ${providers.llama_tier}`
+                  : "local OOXML (set LLAMA_CLOUD_API_KEY)"}
+              </span>
+              {" · "}
+              Extractor:{" "}
+              <span className="font-medium">
+                {providers.anthropic
+                  ? providers.anthropic_model
+                  : "local (set ANTHROPIC_API_KEY)"}
+              </span>
+            </p>
+          ) : null}
           <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-primary/30 bg-muted/40 px-6 py-10 text-center">
             <span className="text-sm font-medium">
-              Upload PPTX, DOCX, or XLSX
+              Upload PPTX, DOCX, XLSX, or PDF
             </span>
             <span className="mt-1 text-xs text-muted-foreground">
               Stakeholder function is inferred from the filename, then tagged on
@@ -85,7 +114,7 @@ export default function IngestPage() {
             <Input
               className="mt-4 max-w-xs"
               type="file"
-              accept=".pptx,.docx,.xlsx,.ppt,.doc,.xls"
+              accept=".pptx,.docx,.xlsx,.ppt,.doc,.xls,.pdf"
               disabled={status === "loading"}
               onChange={(e) => {
                 const file = e.target.files?.[0];

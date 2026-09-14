@@ -13,7 +13,7 @@ documents[]          1 —n  insights[]          1 —n  theme_links[]  n— 1  
 - **theme_links** is the 1-to-many (insight → themes) join. Themes never copy `statement`.
 - Nested “document → slides → bullets → insights” JSON looks tidy and is hostile to clustering, gold matching, and multi-theme membership.
 
-LlamaParse (when keyed) and local OOXML parsers both emit the same `ParsedDocument` / `ParsedBlock` shape, so the extractor does not care which OCR path ran (REQ-ING-004).
+LlamaCloud Parse v2 (agentic + specialized chart parsing) is the primary ingest path for PPTX/PDF graphics. Local OOXML is the fallback. Both emit the same `ParsedDocument` / `ParsedBlock` shape, including `chart` blocks (REQ-ING-004). Live extraction uses Claude Sonnet (`v1.4-claude`) when `ANTHROPIC_API_KEY` is set; the eval ladder stays on local v1.0–v1.3 so hill-climb scores remain deterministic.
 
 ## Why not vanilla semantic clustering
 
