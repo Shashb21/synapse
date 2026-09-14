@@ -22,8 +22,8 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 | --- | --- |
 | `/` | Known / unknown / opportunity briefing |
 | `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
-| `/evals` | Hill-climb lab |
-| `/sdlc` | Requirements, architecture, TDD |
+| `/evals` | View-only eval tape (hill-climb is automatic) |
+| `/sdlc` | View-only spec tape |
 
 PoC keys (documents may leave the VPC). Copy `.env.example` → `.env.local`:
 

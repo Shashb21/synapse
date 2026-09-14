@@ -149,5 +149,14 @@ export async function ingestParsedDocument(
     documents,
     state.champion_prompt_version,
   );
-  return { ...state, documents, insights, themes, theme_links };
+  const { runs, champion } = runEvalSweep(documents);
+  return {
+    ...state,
+    documents,
+    insights,
+    themes,
+    theme_links,
+    eval_runs: runs,
+    champion_prompt_version: champion,
+  };
 }

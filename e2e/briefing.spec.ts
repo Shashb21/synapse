@@ -21,11 +21,15 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await expect(page.locator("table tbody tr").first()).toBeVisible();
   });
 
-  test("REQ-EVA-009 eval lab scores prompt versions", async ({ page }) => {
+  test("REQ-EVA-009 eval tape shows automatic hill-climb results", async ({
+    page,
+  }) => {
     await page.goto("/evals");
-    await expect(page.getByRole("heading", { name: "Eval lab" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "EVAL TAPE" })).toBeVisible();
     await expect(page.getByText("v1.0-baseline")).toBeVisible();
-    await page.getByRole("button", { name: /Run hill-climb sweep/ }).click();
-    await expect(page.getByText(/Champion/)).toBeVisible();
+    await expect(page.getByText(/CHAMPION/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Run hill-climb sweep/ }),
+    ).toHaveCount(0);
   });
 });
