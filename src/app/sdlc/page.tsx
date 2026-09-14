@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { AppShell, PageIntro } from "@/components/insight-card";
+import { SpecBody } from "@/app/sdlc/spec-body";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,16 @@ const SPECS = [
     id: "GRF",
     title: "Knowledge graph",
   },
+  {
+    slug: "09-flow-high-level.md",
+    id: "FLOW",
+    title: "Flow (process)",
+  },
+  {
+    slug: "10-flow-technical.md",
+    id: "TECH",
+    title: "Flow (technical)",
+  },
 ] as const;
 
 export default async function SdlcPage({
@@ -63,8 +74,8 @@ export default async function SdlcPage({
   return (
     <AppShell active="sdlc">
       <PageIntro kicker="View-only" title="Spec tape">
-        Requirements, architecture, TDD, and eval protocol as written.
-        Hill-climb and tests run off-screen.
+        Requirements, architecture, TDD, eval protocol, and application flow
+        diagrams as written. Hill-climb and tests run off-screen.
       </PageIntro>
       <div className="mb-4 flex flex-wrap gap-1">
         {SPECS.map((s) => (
@@ -84,9 +95,7 @@ export default async function SdlcPage({
       <p className="mb-2 text-xs text-muted-foreground">
         {active.id} · docs/sdlc/{active.slug}
       </p>
-      <pre className="overflow-auto border border-border bg-card p-4 font-mono text-[12px] leading-5 whitespace-pre-wrap text-foreground/90">
-        {body}
-      </pre>
+      <SpecBody markdown={body} />
     </AppShell>
   );
 }

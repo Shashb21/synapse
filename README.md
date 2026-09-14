@@ -26,7 +26,7 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 | `/graph` | Knowledge graph: blends, entity bridges, implications no deck stated |
 | `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
 | `/evals` | View-only eval tape (hill-climb is automatic) |
-| `/sdlc` | View-only spec tape |
+| `/sdlc` | View-only spec tape (requirements, flows, eval protocol) |
 
 PoC keys (documents may leave the VPC). Copy `.env.example` → `.env.local`:
 

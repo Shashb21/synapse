@@ -33,6 +33,13 @@ Suggested Cloud Agent jobs:
 
 Do not let an agent invent theme names. Residuals **propose**; humans **name** on `/catalog`. Splits append a child; they do not delete the parent.
 
+## Application flow
+
+This file is the **engineering** loop. The product loop (ingest → CIR → catalog → graph → brief) is drawn in:
+
+- [09-flow-high-level.md](./09-flow-high-level.md) — what a brand team sees
+- [10-flow-technical.md](./10-flow-technical.md) — modules, APIs, and `EngineState`
+
 ## Grokbot (Bugbot-style review)
 
 On every PR that touches `src/lib/extract`, `src/lib/eval`, `src/lib/cluster`, or gold:

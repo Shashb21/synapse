@@ -67,3 +67,5 @@ Local strategies (`bullet-only` → `claim-split` → `gap-scan` → `full`) imp
 ## Origin / Cloud Agent / Grokbot
 
 See [05-process.md](./05-process.md). CI is the regression spine; Cloud Agent runs evals; Grokbot reviews REQ coverage on the PR.
+
+Application flow diagrams: [09-flow-high-level.md](./09-flow-high-level.md) (process), [10-flow-technical.md](./10-flow-technical.md) (modules and APIs).

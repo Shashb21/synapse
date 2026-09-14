@@ -57,7 +57,7 @@ Unknown beats known when the statement contains gap language (`unquantified`, `n
 - `/themes/[id]` members via join; shows role/score.
 - `/ingest` Office upload + Velmara sample pack.
 - `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button.
-- `/sdlc` view-only spec tape of these docs.
+- `/sdlc` view-only spec tape of these docs, including the high-level and technical flow diagrams.
 
 ## Security / data
 
