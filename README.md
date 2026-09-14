@@ -48,7 +48,7 @@ Origin (early beta) is **Internal** or **Private** only — there is no public r
 | Remote | URL | Role |
 | --- | --- | --- |
 | GitHub | [github.com/shashank-code/synapse](https://github.com/shashank-code/synapse) | Public share, CI on `ubuntu-latest` |
-| Origin | [origin.cursor.com/shashank-code/synapse](https://origin.cursor.com/shashank-code/synapse) | Cursor codebase, agent PRs. Set **Internal** to share with the team |
+| Origin | [cursor.com/codebase/shashank-code/synapse](https://cursor.com/codebase/shashank-code/synapse) | Cursor codebase. **Settings → Permissions → Internal** to share with the team (Origin has no public visibility) |
 
 After GitHub exists, mirror it into Origin (`origin repo create-mirrored shashank-code/synapse`) so pushes stay two-way. Day to day:
 
