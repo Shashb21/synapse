@@ -47,8 +47,8 @@ async function pptxFromDoc(docId: string): Promise<Buffer> {
   return Buffer.from(out as ArrayBuffer);
 }
 
-async function docxFromMed(): Promise<Buffer> {
-  const doc = SEED_DOCUMENTS.find((d) => d.id === "DOC-MED-001")!;
+async function docxFromDoc(docId: string): Promise<Buffer> {
+  const doc = SEED_DOCUMENTS.find((d) => d.id === docId)!;
   const children = [
     new Paragraph({
       text: doc.title,
@@ -72,29 +72,15 @@ async function docxFromMed(): Promise<Buffer> {
   return Buffer.from(buf);
 }
 
-function xlsxFromClinops(): Buffer {
+function xlsxFromDoc(docId: string, sheetName: string): Buffer {
+  const doc = SEED_DOCUMENTS.find((d) => d.id === docId)!;
   const wb = XLSX.utils.book_new();
   const rows = [
-    ["Metric", "Value", "Note"],
-    ["Target enrollment", 420, "Protocol VEL-203 target 420, enrolled 281 (67%) at month 14."],
-    ["Enrolled", 281, "67% of target at month 14"],
-    ["Screen fail rate", "41%", "Primary reason prior TKI washout window."],
-    ["Southern EU activation (months)", 4.2, "Southern EU site activation is 4.2 months versus 2.1 months in the US."],
-    ["US activation (months)", 2.1, "US comparator"],
-    [
-      "Protocol opportunity",
-      "Amendment",
-      "Opportunity: protocol amendment to allow concurrent biopsy during washout.",
-    ],
-    [
-      "Competitive risk",
-      "Unknown",
-      "Unknown: impact of competing NX-441 phase 3 on remaining US sites.",
-    ],
-    ["Japan FPI", "Sep 2026", "Japan first-patient-in slipped from May to September 2026."],
+    ["Ref", "Heading", "Text"],
+    ...doc.blocks.map((b) => [b.location.ref, b.heading ?? "", b.text]),
   ];
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, sheet, "Enrollment");
+  XLSX.utils.book_append_sheet(wb, sheet, sheetName);
   return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
 }
 
@@ -102,8 +88,10 @@ export async function buildAllFixtures(): Promise<FixtureFile[]> {
   const commercial = await pptxFromDoc("DOC-COM-001");
   const access = await pptxFromDoc("DOC-MA-001");
   const marketing = await pptxFromDoc("DOC-MKT-001");
-  const med = await docxFromMed();
-  const xlsx = xlsxFromClinops();
+  const med = await docxFromDoc("DOC-MED-001");
+  const clinops = xlsxFromDoc("DOC-CO-001", "Enrollment");
+  const heor = xlsxFromDoc("DOC-HEOR-001", "ICER");
+  const regulatory = await docxFromDoc("DOC-REG-001");
   return [
     {
       filename: "Velmara_US_Brand_Plan_Q3_2026.pptx",
@@ -123,12 +111,22 @@ export async function buildAllFixtures(): Promise<FixtureFile[]> {
     {
       filename: "VEL-203_Enrollment_Dashboard_Sep2026.xlsx",
       mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      buffer: xlsx,
+      buffer: clinops,
     },
     {
       filename: "Velmara_Unbranded_Campaign_Readout_Q3.pptx",
       mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       buffer: marketing,
+    },
+    {
+      filename: "Velmara_HEOR_ICER_Pack_Sep2026.xlsx",
+      mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: heor,
+    },
+    {
+      filename: "Velmara_FDA_Interaction_Log_Q3_2026.docx",
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: regulatory,
     },
   ];
 }

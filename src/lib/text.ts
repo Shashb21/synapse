@@ -60,7 +60,7 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 const KEYPHRASE =
-  /\b(\d+(\.\d+)?%?|q[1-4]\s*20\d{2}|20\d{2}|aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|osi(mertinib)?|velmara|velmaratinib|egfrm?|nsclc|nx-441|nps|pdufa|amcp|rems|t790m|texas|florida|new york|japan|southeast)\b/gi;
+  /\b(\d+(\.\d+)?%?|q[1-4]\s*20\d{2}|20\d{2}|aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|osi(mertinib)?|velmara|velmaratinib|egfrm?|nsclc|nx-441|nps|pdufa|amcp|rems|t790m|texas|florida|new york|japan|southeast|340b|ild|odac|qaly|wac|prea|etasu|boxed|c797s)\b/gi;
 
 export function keyphrases(text: string): Set<string> {
   const found = new Set<string>();
@@ -100,7 +100,7 @@ export function round4(n: number): number {
 }
 
 const VERBS =
-  /\b(is|are|was|were|has|have|had|will|do|does|did|remain|remains|support|supports|erode|erodes|delay|delayed|request|requested|expect|expected|file|contest|impose|flagged|signaled|exist|exists|asked|misses|determine|slipped|over-index|over-indexes|shift|amend|stand|close|want|need|measure|measured|modeled|fielded|quantified)\b/i;
+  /\b(is|are|was|were|has|have|had|will|do|does|did|remain|remains|support|supports|erode|erodes|delay|delayed|request|requested|expect|expected|file|contest|impose|flagged|signaled|exist|exists|asked|misses|determine|slipped|over-index|over-indexes|shift|amend|stand|close|want|need|measure|measured|modeled|fielded|quantified|occurred|exceeds|paused|declined|incomplete|outstanding|scheduled|proposed|named|called|account|convene|rebase|matching|put|puts)\b/i;
 
 export function looksLikeClaim(text: string): boolean {
   const t = text.trim();

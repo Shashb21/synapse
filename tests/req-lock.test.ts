@@ -32,7 +32,7 @@ function metrics(partial: Partial<EvalMetrics>): EvalMetrics {
 describe("REQ lock coverage", () => {
   it("REQ-ING-005 persists stakeholder function, parser, and full text", () => {
     const state = buildSeedState();
-    expect(state.documents.length).toBeGreaterThanOrEqual(5);
+    expect(state.documents.length).toBeGreaterThanOrEqual(7);
     for (const doc of state.documents) {
       expect(doc.stakeholder_function).toBeTruthy();
       expect(doc.parser).toBe("seed");
@@ -132,11 +132,12 @@ describe("REQ lock coverage", () => {
 
   it("REQ-EVA-001 gold is keyed to source documents", () => {
     const docIds = new Set(SEED_DOCUMENTS.map((d) => d.id));
-    expect(GOLD_INSIGHTS.length).toBeGreaterThan(10);
+    expect(GOLD_INSIGHTS.length).toBeGreaterThanOrEqual(80);
     expect(GOLD_INSIGHTS.every((g) => docIds.has(g.source_document_id))).toBe(
       true,
     );
     expect(GOLD_INSIGHTS.some((g) => g.must_find)).toBe(true);
+    expect(GOLD_INSIGHTS.some((g) => !g.must_find)).toBe(true);
   });
 
   it("REQ-EVA-006 critique returns structured findings", () => {

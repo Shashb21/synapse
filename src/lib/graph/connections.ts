@@ -8,7 +8,7 @@ import type {
 import { hashId, normalize } from "@/lib/text";
 
 const ENTITY =
-  /\b(aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|intracranial|nx-441|nps|pdufa|amcp|t790m|vel-203|japan|southeast|community|rems?|n=28)\b/gi;
+  /\b(aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|intracranial|nx-441|nps|pdufa|amcp|t790m|vel-203|japan|southeast|community|rems?|n=28|340b|ild|odac|wac|qaly|boxed)\b/gi;
 
 const ALIAS: Record<string, string> = {
   unitedhealthcare: "united",
@@ -29,6 +29,12 @@ const ENTITY_LABEL: Record<string, string> = {
   ira: "IRA",
   icer: "ICER",
   pdufa: "PDUFA",
+  "340b": "340B",
+  ild: "ILD",
+  odac: "ODAC",
+  wac: "WAC",
+  qaly: "QALY",
+  boxed: "boxed warning",
 };
 
 function entityLabel(entity: string): string {

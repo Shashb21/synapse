@@ -19,6 +19,9 @@ const UNKNOWN_RES = [
   /\bwithout specifying\b/i,
   /\bimpact of .+ is not\b/i,
   /\bwhether\b/i,
+  /\bremains unspecified\b/i,
+  /\bis outstanding\b/i,
+  /\bhas not been (?:scheduled|filed|proposed|pooled|confirmed)\b/i,
 ];
 
 const OPPORTUNITY_RES = [
@@ -32,6 +35,9 @@ const OPPORTUNITY_RES = [
   /\bshift \d+%?\b/i,
   /\bfund a\b/i,
   /\ballow concurrent\b/i,
+  /\bconvene an?\b/i,
+  /\brequest a type b\b/i,
+  /\bopen two additional\b/i,
 ];
 
 export function classifyStatement(

@@ -37,4 +37,18 @@ The improver (proposer) maps high missed-rate to prose/table extraction, high pa
 
 - One gold row = one atomic claim.
 - `theme_ids[0]` is the primary decision object; additional IDs encode true multi-label membership.
-- Grounded `new` findings become gold only after a human accept. Cloud Agent may open the PR; it may not silently enlarge gold.
+- Grounded `new` findings become gold only after a human accept. Do not silently enlarge gold during a hill-climb run.
+- Expanding gold is allowed when a human asks for coverage; every new row must ground in a seed block (≥ 0.28 similarity) and keep `must_find` honest.
+
+Seed gold (`GOLD_INSIGHTS`) is a scenario pack, not a completeness proof:
+
+| Family | What it stresses |
+| --- | --- |
+| Functions | All seven stakeholder functions, including HEOR tables and Regulatory prose |
+| Classes | known / unknown / opportunity, including negation, conditionals, and “whether” gaps |
+| Surfaces | bullets, paragraphs, cells, `table_cell`, chart, figure |
+| Membership | multi-theme CIR, Unassigned/REMS residual, nice-to-have (`must_find: false`) |
+| Cross-doc | same fact restated (WAC, ICER, IRA, REMS); tension (PDUFA date vs clock pause) |
+| Hard extract | mashed “and both” / “and we”, small-n subgroups, named resistance, 340B/copay law |
+
+Recall is scored on `must_find` only. Footnotes, single-KOL staffing, PREA paperwork, and China CTA sit in gold so critique can still label them missed — they do not fail the champion on their own.

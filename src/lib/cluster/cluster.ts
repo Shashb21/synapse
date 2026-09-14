@@ -26,6 +26,9 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bunrestricted access\b/i,
     /\bnon-formulary\b/i,
     /\bpreferred-product\b/i,
+    /\b340b\b/i,
+    /\bprior auth/i,
+    /\bcopay\b/i,
   ],
   "THEME-EVIDENCE": [
     /\brwe\b/i,
@@ -37,6 +40,10 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bn=\d+/i,
     /\bpayer-ready\b/i,
     /\bdossier\b/i,
+    /\bild\b/i,
+    /\binterstitial lung\b/i,
+    /\bhead-to-head\b/i,
+    /\bsection 14\b/i,
   ],
   "THEME-COMPETITIVE": [
     /\bnx-441\b/i,
@@ -61,6 +68,8 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bprotocol\b/i,
     /\bfirst-patient-in\b/i,
     /\bbiopsy\b/i,
+    /\bhispani/i,
+    /\bscreen fail/i,
   ],
   "THEME-HCP": [
     /\bmessage\b/i,
@@ -70,6 +79,10 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bimpressions\b/i,
     /\bemail open\b/i,
     /\bspend\b/i,
+    /\bshare of voice\b/i,
+    /\bunaided awareness\b/i,
+    /\bdtc\b/i,
+    /\bspeaker bureau\b/i,
   ],
   "THEME-SEQUENCING": [
     /\bsequenc/i,
@@ -78,6 +91,8 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bpost-osi\b/i,
     /\bexon 20\b/i,
     /\bliquid biopsy\b/i,
+    /\bc797s\b/i,
+    /\bmet amplification\b/i,
   ],
   "THEME-POLICY": [
     /\bira\b/i,
@@ -86,6 +101,9 @@ const PATTERNS: Record<string, RegExp[]> = {
     /\bnet price\b/i,
     /\bbudget-impact\b/i,
     /\buptake\b/i,
+    /\bwac\b/i,
+    /\bqaly\b/i,
+    /\b340b\b/i,
   ],
 };
 

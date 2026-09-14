@@ -4,7 +4,7 @@ Status: accepted for v1. IDs are stable; tests and design cite them.
 
 ## Product intent
 
-Cross-functional biopharma teams (commercial, market access, medical affairs, clin ops, marketing) produce PowerPoint, Word, and Excel readouts. An analyst extracts discrete insights, clusters them into themes without duplicating the same finding, and briefs leadership on **what we know**, **what we don’t**, and **opportunities to close gaps**. This product automates that loop and hill-climbs the extractor with a critique / judge / proposer eval system.
+Cross-functional biopharma teams (commercial, market access, medical affairs, clin ops, marketing, HEOR, regulatory) produce PowerPoint, Word, and Excel readouts. An analyst extracts discrete insights, clusters them into themes without duplicating the same finding, and briefs leadership on **what we know**, **what we don’t**, and **opportunities to close gaps**. This product automates that loop and hill-climbs the extractor with a critique / judge / proposer eval system.
 
 ## Ingest
 
