@@ -36,6 +36,16 @@ const SPECS = [
     id: "EVA",
     title: "Eval protocol",
   },
+  {
+    slug: "07-catalog-evolution.md",
+    id: "CAT",
+    title: "Catalog evolution",
+  },
+  {
+    slug: "08-knowledge-graph.md",
+    id: "GRF",
+    title: "Knowledge graph",
+  },
 ] as const;
 
 export default async function SdlcPage({

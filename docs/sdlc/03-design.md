@@ -52,6 +52,8 @@ Unknown beats known when the statement contains gap language (`unquantified`, `n
 
 - `/` theme monitor. Unassigned is always last — residual CIR rows wait there.
 - `/insights` every CIR in one list, filterable by theme (including Unassigned) and class.
+- `/catalog` emerge / split proposals; accept grows the catalog (REQ-CLU-007/008).
+- `/graph` associative memory: theme network plus blend / bridge / gap-closure revelations (REQ-GRF-001/002).
 - `/themes/[id]` members via join; shows role/score.
 - `/ingest` Office upload + Velmara sample pack.
 - `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button.

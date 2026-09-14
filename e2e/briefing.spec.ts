@@ -52,4 +52,21 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await page.getByRole("link", { name: /unassigned/i }).first().click();
     await expect(page.getByText(/catalog floor|unassigned is empty/i)).toBeVisible();
   });
+
+  test("REQ-CLU-007 catalog explains emerge and split", async ({ page }) => {
+    await page.goto("/catalog");
+    await expect(page.getByRole("heading", { name: /^catalog$/i })).toBeVisible();
+    await expect(page.getByText(/when a theme emerges/i)).toBeVisible();
+    await expect(page.getByText(/when a theme splits/i)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /accept into catalog/i }).first(),
+    ).toBeVisible();
+  });
+
+  test("REQ-GRF-001 graph explains blends and revelations", async ({ page }) => {
+    await page.goto("/graph");
+    await expect(page.getByRole("heading", { name: /knowledge graph/i })).toBeVisible();
+    await expect(page.getByText(/revealed connections/i)).toBeVisible();
+    await expect(page.getByText(/blend|bridge|new implication/i).first()).toBeVisible();
+  });
 });

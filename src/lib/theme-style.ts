@@ -123,5 +123,11 @@ export const CLASS_STYLES: Record<
 };
 
 export function themeStyle(id: string): ThemeStyle {
-  return THEME_STYLES[id] ?? THEME_STYLES["THEME-RESIDUAL"]!;
+  if (THEME_STYLES[id]) return THEME_STYLES[id]!;
+  const palette = Object.values(THEME_STYLES).filter(
+    (style) => style !== THEME_STYLES["THEME-RESIDUAL"],
+  );
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length] ?? THEME_STYLES["THEME-RESIDUAL"]!;
 }

@@ -43,13 +43,15 @@ Embedding + k-means / HDBSCAN is a poor primary theming strategy for this workfl
               weak max ─▶ THEME-RESIDUAL (propose new catalog entry)
 ```
 
-Optional embeddings (when an API key exists in a later slice) are a **score booster against catalog centroids**, never the clusterer. Residuals may be grouped to *propose* a new named theme; they are not auto-merged into an unstable blob.
+Optional embeddings (when an API key exists in a later slice) are a **score booster against catalog centroids**, never the clusterer. Residuals may be grouped to *propose* a new named theme ([07-catalog-evolution.md](./07-catalog-evolution.md)); they are not auto-merged into an unstable blob.
+
+The catalog is the ontology. The **knowledge graph** ([08-knowledge-graph.md](./08-knowledge-graph.md)) is associative memory: blends (one CIR, many themes), corroboration, entity bridges, and gap-closures. That is the Zettelkasten / Obsidian layer — not a neural net of opaque weights.
 
 ## Runtime
 
 - Next.js App Router, Node runtime for ingest (zip/xml, mammoth, xlsx).
 - File store `data/runtime/engine-state.json` locally; in-memory fallback on read-only hosts (Vercel).
-- Seed corpus: five Velmara readouts (commercial, access, medical, clin ops, marketing) plus 39 gold CIRs.
+- Seed corpus: five Velmara readouts (commercial, access, medical, clin ops, marketing) plus gold CIRs. Off-catalog claims (e.g. REMS) residual and may **emerge**; a named theme that is briefing two decisions may **split**. Humans accept on `/catalog` ([07-catalog-evolution.md](./07-catalog-evolution.md)).
 
 ## Three-model eval loop
 

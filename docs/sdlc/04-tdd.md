@@ -10,6 +10,8 @@ Cycle: **review spec → accept → write failing/lock test → implement → pa
 | TDD-CLU-02 | REQ-CLU-003 | Two themes, one CIR row | same |
 | TDD-CLU-03 | REQ-CLU-004 | NX-441 does not land in Access | same |
 | TDD-CLU-04 | REQ-CLU-005 | Unmatched → residual | same |
+| TDD-CLU-05 | REQ-CLU-007/008 | Emerge and split proposals | `tests/req-clu-catalog.test.ts` |
+| TDD-GRF-01 | REQ-GRF-001/002 | Blends and revealed bridges | `tests/req-grf-graph.test.ts` |
 | TDD-EXT-01 | REQ-EXT-001 | Atomic split of double-barreled bullet | `tests/req-ext-eval.test.ts` |
 | TDD-KNO-01 | REQ-KNO-002/003 | Unknown vs opportunity cues | same |
 | TDD-EXT-02 | REQ-EXT-004 | CIR schema parse | same |
@@ -21,6 +23,7 @@ Cycle: **review spec → accept → write failing/lock test → implement → pa
 | TDD-E2E-03 | REQ-EVA-009 | View-only eval tape (automatic hill-climb) | same |
 | TDD-E2E-04 | REQ-OPS-003 | View-only spec tape | same |
 | TDD-E2E-05 | REQ-CLU-005 | Insights tab + Unassigned | same |
+| TDD-E2E-06 | REQ-GRF-001 | Graph revelations | same |
 
 ## Commands
 

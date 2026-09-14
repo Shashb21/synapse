@@ -31,7 +31,7 @@ Suggested Cloud Agent jobs:
 - Add a gold insight when critique `kind=new` is human-accepted.
 - Extend local parsers (a new OOXML quirk), with `tests/req-ing-parse.test.ts` updated first.
 
-Do not let an agent invent theme names. Residuals propose; humans name.
+Do not let an agent invent theme names. Residuals **propose**; humans **name** on `/catalog`. Splits append a child; they do not delete the parent.
 
 ## Grokbot (Bugbot-style review)
 

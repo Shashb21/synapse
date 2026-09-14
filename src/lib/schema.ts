@@ -86,7 +86,12 @@ export const themeLinkSchema = z.object({
   theme_id: z.string(),
   score: z.number(),
   role: z.enum(["primary", "secondary"]),
-  method: z.enum(["ontology", "stakeholder_prior", "residual"]),
+  method: z.enum([
+    "ontology",
+    "stakeholder_prior",
+    "residual",
+    "catalog_accept",
+  ]),
 });
 
 export const canonicalInsightSchema = z.object({
@@ -129,6 +134,31 @@ export const themeSchema = z.object({
   known_count: z.number(),
   unknown_count: z.number(),
   opportunity_count: z.number(),
+  parent_theme_id: z.string().optional(),
+});
+
+export const catalogThemeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  summary: z.string(),
+  keywords: z.array(z.string()),
+  parent_theme_id: z.string().optional(),
+});
+
+export const catalogProposalSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["emerge", "split"]),
+  status: z.enum(["proposed", "accepted", "rejected"]),
+  name: z.string(),
+  summary: z.string(),
+  keywords: z.array(z.string()),
+  insight_ids: z.array(z.string()),
+  parent_theme_id: z.string().optional(),
+  rationale: z.string(),
+  sources: z.number(),
+  cohesion: z.number(),
+  created_at: z.string(),
+  decided_at: z.string().optional(),
 });
 
 export const evalMetricsSchema = z.object({
@@ -194,6 +224,8 @@ export const engineStateSchema = z.object({
   themes: z.array(themeSchema),
   eval_runs: z.array(evalRunSchema),
   gold: z.array(goldInsightSchema),
+  catalog: z.array(catalogThemeSchema).default([]),
+  catalog_proposals: z.array(catalogProposalSchema).default([]),
 });
 
 export type SourceLocation = z.infer<typeof sourceLocationSchema>;
@@ -203,6 +235,8 @@ export type CanonicalInsight = z.infer<typeof canonicalInsightSchema>;
 export type ThemeLink = z.infer<typeof themeLinkSchema>;
 export type GoldInsight = z.infer<typeof goldInsightSchema>;
 export type Theme = z.infer<typeof themeSchema>;
+export type CatalogTheme = z.infer<typeof catalogThemeSchema>;
+export type CatalogProposal = z.infer<typeof catalogProposalSchema>;
 export type EvalMetrics = z.infer<typeof evalMetricsSchema>;
 export type CritiqueFinding = z.infer<typeof critiqueFindingSchema>;
 export type JudgeVerdict = z.infer<typeof judgeVerdictSchema>;

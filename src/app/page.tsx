@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 export default async function MonitorPage() {
   const state = await getState();
+  const openProposals = state.catalog_proposals.filter(
+    (p) => p.status === "proposed",
+  ).length;
   const briefs = state.themes
     .map((theme) => ({
       theme,
@@ -31,12 +34,23 @@ export default async function MonitorPage() {
           {state.asset.molecule} · {state.asset.indication}. Situation first —
           open a theme for the constituent insights, sources, and cross-theme
           links. Insights are stored once. Weak matches wait in Unassigned
-          instead of being forced into a theme.
+          instead of being forced into a theme. The{" "}
+          <Link href="/graph" className="underline">
+            graph
+          </Link>{" "}
+          walks those joins for implications no single deck stated.
         </p>
         <p className="mt-2 text-sm">
           As of {state.asset.as_of} · {state.documents.length} sources ·{" "}
           {state.insights.length} insights · {state.themes.length} themes
         </p>
+        {openProposals > 0 ? (
+          <p className="mt-2 text-sm">
+            {openProposals} catalog{" "}
+            {openProposals === 1 ? "proposal" : "proposals"} waiting —{" "}
+            <Link href="/catalog">review emerge and split</Link>
+          </p>
+        ) : null}
       </PageIntro>
 
       <div className="grid gap-3 md:grid-cols-2">

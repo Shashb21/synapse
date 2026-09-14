@@ -59,7 +59,7 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 const KEYPHRASE =
-  /\b(\d+(\.\d+)?%?|q[1-4]\s*20\d{2}|20\d{2}|aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|osi(mertinib)?|velmara|velmaratinib|egfrm?|nsclc|nx-441|nps|pdufa|amcp|t790m|texas|florida|new york|japan|southeast)\b/gi;
+  /\b(\d+(\.\d+)?%?|q[1-4]\s*20\d{2}|20\d{2}|aetna|unitedhealthcare|horizon|medicaid|cms|ira|icer|cns|osi(mertinib)?|velmara|velmaratinib|egfrm?|nsclc|nx-441|nps|pdufa|amcp|rems|t790m|texas|florida|new york|japan|southeast)\b/gi;
 
 export function keyphrases(text: string): Set<string> {
   const found = new Set<string>();

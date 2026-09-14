@@ -22,6 +22,8 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 | --- | --- |
 | `/` | Theme monitor (Unassigned holds weak matches) |
 | `/insights` | All CIR rows; filter by theme or class |
+| `/catalog` | How themes emerge and split; accept into the append-only catalog |
+| `/graph` | Knowledge graph: blends, entity bridges, implications no deck stated |
 | `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
 | `/evals` | View-only eval tape (hill-climb is automatic) |
 | `/sdlc` | View-only spec tape |

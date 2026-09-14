@@ -100,6 +100,12 @@ const commercial: SeedDoc = {
       text: "Stand up a community-focused peer-to-peer program before the first NPP to close the site-of-care evidence gap.",
       kind: "bullet",
     },
+    {
+      location: { kind: "slide", ref: "Slide 8" },
+      heading: "REMS",
+      text: "FDA has not confirmed whether velmaratinib will require a REMS.",
+      kind: "bullet",
+    },
   ],
 };
 
@@ -201,6 +207,12 @@ const medical: SeedDoc = {
       location: { kind: "page", ref: "p.3" },
       heading: "Supportive data",
       text: "Unknown whether KOLs will accept tumor-agnostic EGFR exon 20 data as supportive.",
+      kind: "paragraph",
+    },
+    {
+      location: { kind: "page", ref: "p.4" },
+      heading: "REMS",
+      text: "A REMS for velmaratinib remains unspecified; no elements have been proposed.",
       kind: "paragraph",
     },
   ],
@@ -806,6 +818,26 @@ export const GOLD_INSIGHTS: GoldInsight[] = [
     stakeholder_function: "marketing",
     theme_ids: ["THEME-HCP", "THEME-SEQUENCING", "THEME-COMPETITIVE"],
     must_find: true,
+  },
+  {
+    id: "GOLD-040",
+    statement:
+      "FDA has not confirmed whether velmaratinib will require a REMS.",
+    source_document_id: "DOC-COM-001",
+    classification: "unknown",
+    stakeholder_function: "commercial",
+    theme_ids: ["THEME-RESIDUAL"],
+    must_find: false,
+  },
+  {
+    id: "GOLD-041",
+    statement:
+      "A REMS for velmaratinib remains unspecified; no elements have been proposed.",
+    source_document_id: "DOC-MED-001",
+    classification: "unknown",
+    stakeholder_function: "medical_affairs",
+    theme_ids: ["THEME-RESIDUAL"],
+    must_find: false,
   },
 ];
 

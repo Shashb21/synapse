@@ -1,6 +1,7 @@
 import { THEME_CATALOG } from "@/lib/seed/corpus";
 import type {
   CanonicalInsight,
+  CatalogTheme,
   StakeholderFunction,
   Theme,
   ThemeLink,
@@ -13,8 +14,6 @@ const PRIMARY_FLOOR = 0.45;
 const SECONDARY_FLOOR = 0.9;
 const SECONDARY_RATIO = 0.48;
 const MAX_THEMES = 4;
-
-type CatalogTheme = (typeof THEME_CATALOG)[number];
 
 const PATTERNS: Record<string, RegExp[]> = {
   "THEME-ACCESS": [
@@ -127,8 +126,11 @@ export function scoreTheme(
   return score;
 }
 
-export function linkInsightToThemes(insight: CanonicalInsight): ThemeLink[] {
-  const ranked = THEME_CATALOG.map((theme) => ({
+export function linkInsightToThemes(
+  insight: CanonicalInsight,
+  catalog: CatalogTheme[] = THEME_CATALOG,
+): ThemeLink[] {
+  const ranked = catalog.map((theme) => ({
     theme_id: theme.id,
     score: scoreTheme(insight.statement, insight.stakeholder_function, theme),
   }))
@@ -177,14 +179,17 @@ export function linkInsightToThemes(insight: CanonicalInsight): ThemeLink[] {
   return links;
 }
 
-export function assignThemes(insights: CanonicalInsight[]): {
+export function assignThemes(
+  insights: CanonicalInsight[],
+  catalog: CatalogTheme[] = THEME_CATALOG,
+): {
   insights: CanonicalInsight[];
   themes: Theme[];
   theme_links: ThemeLink[];
 } {
   const corroborated = linkCrossDocument(insights);
   const theme_links = corroborated.flatMap((insight) =>
-    linkInsightToThemes(insight),
+    linkInsightToThemes(insight, catalog),
   );
 
   const byInsight = new Map<string, ThemeLink[]>();
@@ -199,20 +204,21 @@ export function assignThemes(insights: CanonicalInsight[]): {
     theme_ids: (byInsight.get(insight.id) ?? []).map((l) => l.theme_id),
   }));
 
-  const themes: Theme[] = THEME_CATALOG.map((catalog) => {
+  const themes: Theme[] = catalog.map((entry) => {
     const members = unique(
       theme_links
-        .filter((l) => l.theme_id === catalog.id)
+        .filter((l) => l.theme_id === entry.id)
         .map((l) => l.insight_id),
     );
     const records = members
       .map((id) => tagged.find((i) => i.id === id))
       .filter((i): i is CanonicalInsight => Boolean(i));
     return {
-      id: catalog.id,
-      name: catalog.name,
-      summary: catalog.summary,
-      keywords: catalog.keywords,
+      id: entry.id,
+      name: entry.name,
+      summary: entry.summary,
+      keywords: entry.keywords,
+      parent_theme_id: entry.parent_theme_id,
       insight_ids: members,
       known_count: records.filter((m) => m.classification === "known").length,
       unknown_count: records.filter((m) => m.classification === "unknown").length,

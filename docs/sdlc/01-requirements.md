@@ -36,6 +36,8 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | REQ-CLU-004 | Do not force unrelated claims into a neighbouring theme (precision over recall on links). | Must |
 | REQ-CLU-005 | Residual / unmatched claims go to an Unassigned theme and may propose a new catalog entry; they are not silently dropped or semantically mashed. | Must |
 | REQ-CLU-006 | Cross-document sameness is a separate link (`knowledge_state.corroborated_by`), not a theme. | Should |
+| REQ-CLU-007 | Unassigned CIR that cluster as one decision object **emerge** as a catalog proposal. A human accepts the name; the engine does not auto-name. | Must |
+| REQ-CLU-008 | A named theme **splits** when its members form two exclusive decision cohorts. The child is a new catalog entry; the parent is kept. The catalog is append-only. | Must |
 
 ## Knowledge briefing
 
@@ -45,6 +47,8 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | REQ-KNO-002 | Classify explicit gaps / unmeasured quantities as **unknown**. Multi-source unknowns remain unknowns (high-priority gaps). | Must |
 | REQ-KNO-003 | Classify concrete gap-closing actions as **opportunity**. | Must |
 | REQ-KNO-004 | Dashboard presents three panes: known / unknown / opportunities, plus theme coverage. | Must |
+| REQ-GRF-001 | Multi-theme CIR are **blends**: one note, many maps of content. The graph must surface them without copying the statement. | Must |
+| REQ-GRF-002 | As CIR accumulate, the engine reveals **bridges** and **gap-closures** — connections (shared entity, no shared theme, or unknown×known) that no single source stated. | Must |
 
 ## Evals and hill-climb
 

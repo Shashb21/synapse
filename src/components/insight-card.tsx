@@ -8,11 +8,13 @@ export function AppShell({
   active,
 }: {
   children: React.ReactNode;
-  active: "briefing" | "insights" | "ingest" | "evals" | "sdlc";
+  active: "briefing" | "insights" | "catalog" | "graph" | "ingest" | "evals" | "sdlc";
 }) {
   const links = [
     { href: "/", id: "briefing" as const, label: "Monitor" },
     { href: "/insights", id: "insights" as const, label: "Insights" },
+    { href: "/catalog", id: "catalog" as const, label: "Catalog" },
+    { href: "/graph", id: "graph" as const, label: "Graph" },
     { href: "/ingest", id: "ingest" as const, label: "Ingest" },
     { href: "/evals", id: "evals" as const, label: "Eval" },
     { href: "/sdlc", id: "sdlc" as const, label: "Spec" },

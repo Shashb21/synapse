@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildSeedState, ingestParsedDocument } from "@/lib/pipeline";
+import {
+  acceptProposal,
+  rejectProposal,
+  proposeCatalogChanges,
+} from "@/lib/cluster/catalog-evolution";
+import { buildSeedState, ingestParsedDocument, seedCatalog } from "@/lib/pipeline";
 import { engineStateSchema, type EngineState, type ParsedDocument } from "@/lib/schema";
 
 const RUNTIME_DIR = path.join(process.cwd(), "data", "runtime");
@@ -17,11 +22,24 @@ async function persist(state: EngineState) {
   }
 }
 
+function hydrate(state: EngineState): EngineState {
+  const catalog = state.catalog.length > 0 ? state.catalog : seedCatalog();
+  return {
+    ...state,
+    catalog,
+    catalog_proposals: proposeCatalogChanges(
+      state.insights,
+      catalog,
+      state.catalog_proposals,
+    ),
+  };
+}
+
 export async function getState(): Promise<EngineState> {
   if (cache) return cache;
   try {
     const raw = await readFile(STATE_PATH, "utf8");
-    cache = engineStateSchema.parse(JSON.parse(raw));
+    cache = hydrate(engineStateSchema.parse(JSON.parse(raw)));
     return cache;
   } catch {
     cache = buildSeedState();
@@ -39,6 +57,19 @@ export async function resetState(): Promise<EngineState> {
 export async function addDocument(document: ParsedDocument): Promise<EngineState> {
   const current = await getState();
   cache = await ingestParsedDocument(current, document);
+  await persist(cache);
+  return cache;
+}
+
+export async function decideCatalogProposal(
+  proposalId: string,
+  decision: "accepted" | "rejected",
+): Promise<EngineState> {
+  const current = await getState();
+  cache =
+    decision === "accepted"
+      ? acceptProposal(current, proposalId)
+      : rejectProposal(current, proposalId);
   await persist(cache);
   return cache;
 }
@@ -81,6 +112,9 @@ export function dashboardView(state: EngineState) {
       multi_theme: state.insights.filter((i) => i.theme_ids.length > 1).length,
       gold: state.gold.length,
       champion_composite: championRun?.metrics.composite ?? 0,
+      catalog_proposals: state.catalog_proposals.filter((p) => p.status === "proposed")
+        .length,
+      catalog_size: state.catalog.filter((c) => c.id !== "THEME-RESIDUAL").length,
     },
     known,
     unknown,
