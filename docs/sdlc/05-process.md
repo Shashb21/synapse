@@ -15,7 +15,7 @@
 
 Use **both**. Origin is the Cursor forge (agents, Origin PRs). It cannot host a public repo in the current beta (Internal / Private only). GitHub is the public share URL.
 
-- Preferred dual setup: public GitHub repo `shashank-code/synapse`, then `origin repo create-mirrored shashank-code/synapse` so Origin tracks GitHub as source of truth.
+- Preferred dual setup: public GitHub repo `Shashb21/synapse`, then `origin repo create-mirrored Shashb21/synapse` so Origin tracks GitHub as source of truth.
 - Push both remotes with `scripts/push-both.sh`.
 - Open PRs against `main` with REQ IDs in the title or body (`REQ-CLU-002`, …).
 - CI (`.github/workflows/ci.yml`) runs unit tests on every GitHub push; e2e when browsers are available.

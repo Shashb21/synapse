@@ -17,6 +17,6 @@ if git remote get-url github >/dev/null 2>&1; then
   git push -u github "$branch"
 else
   echo "No 'github' remote. Add:" >&2
-  echo "  git remote add github https://github.com/shashank-code/synapse.git" >&2
+  echo "  git remote add github https://github.com/Shashb21/synapse.git" >&2
   exit 1
 fi
