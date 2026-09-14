@@ -42,7 +42,7 @@ Rules (REQ-CLU-002/003):
 | v1.0-baseline | bullet-only | Lossy starting rung; misses prose/tables; keeps compound bullets (partials). |
 | v1.1-atomic | claim-split | Split `and both` / sentences. |
 | v1.2-gap-sensitive | gap-scan | Prose + cells; Open questions → unknown. |
-| v1.3-cross-functional | full | Heading carry, dedup, grounding. Intended champion. |
+| v1.3-cross-functional | full | Heading carry, dedup, grounding. Intended full pipeline; tape champion is v1.2 until composite lifts. |
 
 ## Classification
 
@@ -56,8 +56,8 @@ Unknown beats known when the statement contains gap language (`unquantified`, `n
 - `/graph` associative memory: theme network plus blend / bridge / gap-closure revelations (REQ-GRF-001/002).
 - `/themes/[id]` members via join; shows role/score.
 - `/ingest` Office upload + Velmara sample pack.
-- `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button.
-- `/sdlc` view-only spec tape of these docs, including flow diagrams and the [regression matrix](./11-regression.md).
+- `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button. Contract: [06-eval-protocol.md](./06-eval-protocol.md).
+- `/sdlc` view-only spec tape of these docs, including flow diagrams, the [regression matrix](./11-regression.md), and the [gold inventory](./12-gold-set.md).
 
 ## Security / data
 

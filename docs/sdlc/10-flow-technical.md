@@ -153,7 +153,7 @@ Graph revelations (`blend`, `bridge`, `gap_closure`) are **computed** in `src/li
 | Orchestration | `src/lib/pipeline.ts` |
 | Persistence | `src/lib/store.ts` |
 | Graph | `src/lib/graph/connections.ts` |
-| Eval ladder | `src/lib/eval/critique.ts`, `judge.ts` |
+| Eval ladder | `src/lib/eval/critique.ts`, `judge.ts` — protocol [06-eval-protocol.md](./06-eval-protocol.md), inventory [12-gold-set.md](./12-gold-set.md) |
 | Schema | `src/lib/schema.ts` |
 
 ## Surfaces
@@ -177,6 +177,9 @@ Graph revelations (`blend`, `bridge`, `gap_closure`) are **computed** in `src/li
 | Cross-document corroboration | statement similarity ≥ 0.52 | `cluster.ts` |
 | Emerge | ≥ 2 Unassigned CIR, cohesion ≥ 0.34 | `catalog-evolution.ts` |
 | Split | named theme ≥ 4 CIR; exclusive keyword sets ≥ 2 | `catalog-evolution.ts` |
-| Eval promote | composite up and wrong-rate not +0.05 vs champion | `judge.ts` |
+| Exact gold pair | statement similarity ≥ 0.58 | `critique.ts` |
+| Partial gold pair | ≥ 0.32 | `critique.ts` |
+| Grounding (new vs wrong) | ≥ 0.28 | `critique.ts` / `proposer.ts` |
+| Promote composite delta | ≥ +0.01 and Δwrong ≤ +0.05; must-find recall drop ≤ 0.02 | `judge.ts` |
 
 Hill-climb always uses the **local** v1.0–v1.3 ladder so scores do not wobble when Claude is on for live extract.

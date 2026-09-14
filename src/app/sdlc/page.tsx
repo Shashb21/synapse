@@ -62,6 +62,11 @@ const SPECS = [
     id: "REG",
     title: "Regression",
   },
+  {
+    slug: "12-gold-set.md",
+    id: "GOLD",
+    title: "Gold set",
+  },
 ] as const;
 
 export default async function SdlcPage({
@@ -79,8 +84,8 @@ export default async function SdlcPage({
   return (
     <AppShell active="sdlc">
       <PageIntro kicker="View-only" title="Spec tape">
-        Requirements, architecture, TDD, eval protocol, and application flow
-        diagrams as written. Hill-climb and tests run off-screen.
+        Requirements, architecture, TDD, eval protocol, gold inventory, and
+        application flow diagrams as written. Hill-climb and tests run off-screen.
       </PageIntro>
       <div className="mb-4 flex flex-wrap gap-1">
         {SPECS.map((s) => (

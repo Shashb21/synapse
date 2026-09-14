@@ -51,7 +51,8 @@ The catalog is the ontology. The **knowledge graph** ([08-knowledge-graph.md](./
 
 - Next.js App Router, Node runtime for ingest (zip/xml, mammoth, xlsx).
 - File store `data/runtime/engine-state.json` locally; in-memory fallback on read-only hosts (Vercel).
-- Seed corpus: five Velmara readouts (commercial, access, medical, clin ops, marketing) plus gold CIRs. Off-catalog claims (e.g. REMS) residual and may **emerge**; a named theme that is briefing two decisions may **split**. Humans accept on `/catalog` ([07-catalog-evolution.md](./07-catalog-evolution.md)).
+- Seed corpus: seven Velmara readouts (commercial, access, medical, clin ops, marketing, HEOR, regulatory) plus gold CIRs ([12-gold-set.md](./12-gold-set.md)). Off-catalog claims (e.g. REMS) residual and may **emerge**; a named theme that is briefing two decisions may **split**. Humans accept on `/catalog` ([07-catalog-evolution.md](./07-catalog-evolution.md)).
+- Eval protocol (pairing, composite, safety gate, prompt vs local ladder): [06-eval-protocol.md](./06-eval-protocol.md).
 
 ## Three-model eval loop
 

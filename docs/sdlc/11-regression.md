@@ -49,7 +49,7 @@ A failing eval composite vs the committed champion is a **regress** (REQ-EVA-010
 | REQ-KNO-001/002/003 | `tests/req-lock.test.ts`, `tests/req-ext-eval.test.ts` TDD-KNO-01 |
 | REQ-KNO-004 | `tests/req-kno-theme-brief.test.ts` |
 | REQ-GRF-001/002 | `tests/req-grf-graph.test.ts` |
-| REQ-EVA-001 | `tests/req-lock.test.ts`, `tests/req-eva-gold.test.ts` TDD-EVA-03 |
+| REQ-EVA-001 | `tests/req-lock.test.ts`, `tests/req-eva-gold.test.ts` TDD-EVA-03, `docs/sdlc/12-gold-set.md` |
 | REQ-EVA-002–005 | `tests/req-ext-eval.test.ts` TDD-EVA-02 |
 | REQ-EVA-006/007/008/010 | `tests/req-lock.test.ts` |
 | REQ-EVA-009 | `tests/req-ext-eval.test.ts` TDD-EVA-01 |

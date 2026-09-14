@@ -28,7 +28,7 @@ Cloud Agent is the right worker for **ingest/parser work and gold/prompt patches
 Suggested Cloud Agent jobs:
 
 - After a prompt patch, ingest or reset so `runEvalSweep` lands on the tape; commit only if champion composite rises and REQ-EVA-010 holds.
-- Add a gold insight when critique `kind=new` is human-accepted.
+- Add a gold insight when critique `kind=new` is human-accepted. Hygiene and inventory: [12-gold-set.md](./12-gold-set.md). Protocol: [06-eval-protocol.md](./06-eval-protocol.md).
 - Extend local parsers (a new OOXML quirk), with `tests/req-ing-parse.test.ts` updated first.
 
 Do not let an agent invent theme names. Residuals **propose**; humans **name** on `/catalog`. Splits append a child; they do not delete the parent.

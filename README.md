@@ -51,3 +51,22 @@ npm run test:e2e  # Playwright regression
 ## Data model (flat CIR)
 
 Insights are flat JSON objects plus `theme_links[]` (`insight_id`, `theme_id`, `score`, `role`). Themes hold IDs only. See [`docs/sdlc/03-design.md`](docs/sdlc/03-design.md).
+
+## Documentation
+
+The SDLC pack lives in [`docs/sdlc/`](docs/sdlc/) and is also the in-app Spec tape (`/sdlc`).
+
+| Doc | What |
+| --- | --- |
+| [01-requirements.md](docs/sdlc/01-requirements.md) | REQ IDs (ingest, CIR, catalog, graph, eval, UX) |
+| [02-architecture.md](docs/sdlc/02-architecture.md) | Why CIR + `theme_links`, not nested JSON or k-means |
+| [03-design.md](docs/sdlc/03-design.md) | CIR shape, extractor ladder, routes |
+| [04-tdd.md](docs/sdlc/04-tdd.md) | Test IDs |
+| [05-process.md](docs/sdlc/05-process.md) | Origin / Cloud Agent / gold review loop |
+| [06-eval-protocol.md](docs/sdlc/06-eval-protocol.md) | **Evals:** pairing, metrics, safety gate, how it hill-climbs, prompt vs local |
+| [07-catalog-evolution.md](docs/sdlc/07-catalog-evolution.md) | Emerge / split |
+| [08-knowledge-graph.md](docs/sdlc/08-knowledge-graph.md) | Blends, bridges, gap-closures |
+| [09-flow-high-level.md](docs/sdlc/09-flow-high-level.md) | Business loop |
+| [10-flow-technical.md](docs/sdlc/10-flow-technical.md) | Modules, APIs, `EngineState` |
+| [11-regression.md](docs/sdlc/11-regression.md) | REQ → test → user-flow matrix |
+| [12-gold-set.md](docs/sdlc/12-gold-set.md) | **Gold inventory** (90 CIR, scenarios, known misses) |
