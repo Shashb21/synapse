@@ -20,13 +20,13 @@ export function AppShell({
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-4 px-5 py-4 sm:px-8">
+        <div className="mx-auto flex w-full max-w-[1200px] flex-col items-start gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <Link href="/" className="no-underline">
             <span className="text-lg font-semibold tracking-[0.18em] text-primary">
               SYNAPSE
             </span>
           </Link>
-          <nav className="flex flex-wrap gap-1 rounded-full bg-muted/80 p-1">
+          <nav className="flex max-w-full flex-nowrap gap-1 overflow-x-auto rounded-full bg-muted/80 p-1">
             {links.map((l) => (
               <Link
                 key={l.href}
