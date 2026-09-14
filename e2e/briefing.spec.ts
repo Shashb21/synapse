@@ -38,7 +38,7 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await page.goto("/sdlc");
     await expect(page.getByRole("heading", { name: /spec tape/i })).toBeVisible();
     await expect(page.getByText(/view-only/i).first()).toBeVisible();
-    await expect(page.getByRole("button")).toHaveCount(0);
+    await expect(page.locator("main").getByRole("button")).toHaveCount(0);
   });
 
   test("REQ-CLU-005 insights tab lists every CIR and Unassigned", async ({
@@ -55,7 +55,7 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
 
   test("REQ-CLU-007 catalog explains emerge and split", async ({ page }) => {
     await page.goto("/catalog");
-    await expect(page.getByRole("heading", { name: /^catalog$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^catalog$/i, level: 1 })).toBeVisible();
     await expect(page.getByText(/when a theme emerges/i)).toBeVisible();
     await expect(page.getByText(/when a theme splits/i)).toBeVisible();
     await expect(

@@ -145,7 +145,7 @@ export default async function CatalogPage() {
         </ul>
       )}
 
-      <h2 className="mt-8 text-[13px] font-medium">Catalog</h2>
+      <h2 className="mt-8 text-[13px] font-medium">Named themes</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         Append-only. New names appear under the parent they split from.
       </p>
