@@ -1,209 +1,105 @@
-import { AppShell, InsightCard } from "@/components/insight-card";
+import { AppShell } from "@/components/insight-card";
+import { summarizeTheme } from "@/lib/briefing/theme-summary";
 import { FUNCTION_LABELS } from "@/lib/schema";
-import { dashboardView, getState } from "@/lib/store";
+import { getState } from "@/lib/store";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function BriefingPage() {
+export default async function MonitorPage() {
   const state = await getState();
-  const view = dashboardView(state);
-  const themeNames = (ids: string[]) =>
-    ids
-      .map((id) => view.themes.find((t) => t.id === id)?.name)
-      .filter((n): n is string => Boolean(n));
+  const briefs = state.themes
+    .map((theme) => ({
+      theme,
+      brief: summarizeTheme(theme, state.insights, state.asset.as_of),
+    }))
+    .sort((a, b) => {
+      const rank = { "GAP-HEAVY": 0, ACTIONABLE: 1, STABLE: 2, EMPTY: 3 };
+      const dr = rank[a.brief.posture] - rank[b.brief.posture];
+      if (dr !== 0) return dr;
+      return Date.parse(b.brief.as_of) - Date.parse(a.brief.as_of);
+    });
+
+  const postureColor: Record<string, string> = {
+    "GAP-HEAVY": "text-[var(--unknown)]",
+    ACTIONABLE: "text-[var(--opportunity)]",
+    STABLE: "text-[var(--known)]",
+    EMPTY: "text-muted-foreground",
+  };
 
   return (
     <AppShell active="briefing">
-      <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
-        {[
-          ["Sources", view.kpis.documents],
-          ["Insights", view.kpis.insights],
-          ["Themes", view.kpis.themes],
-          ["Known", view.kpis.known],
-          ["Unknown", view.kpis.unknown],
-          ["Opportunities", view.kpis.opportunities],
-          ["Multi-theme", view.kpis.multi_theme],
-          ["Champion Fβ", view.kpis.champion_composite.toFixed(3)],
-        ].map(([label, value]) => (
-          <div
-            key={String(label)}
-            className="rounded-lg border border-border/80 bg-card px-3 py-3"
-          >
-            <p className="text-[10px] tracking-wider text-muted-foreground uppercase">
-              {label}
-            </p>
-            <p className="font-heading text-2xl text-primary">{value}</p>
-          </div>
-        ))}
-      </section>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-2">
+        <div>
+          <h1 className="text-sm tracking-[0.25em] text-primary">THEME MONITOR</h1>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {state.asset.name.toUpperCase()} {state.asset.molecule} ·{" "}
+            {state.asset.indication} · as of {state.asset.as_of}
+          </p>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {state.documents.length} SRC · {state.insights.length} INS ·{" "}
+          {state.themes.length} THM · {state.champion_prompt_version}
+        </p>
+      </div>
 
-      <p className="mb-5 text-sm text-muted-foreground">
-        Champion extractor{" "}
-        <span className="font-medium text-foreground">
-          {view.champion_prompt_version}
-        </span>
-        {" · "}
-        {view.asset.molecule} · {view.asset.indication} · as of {view.asset.as_of}
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        Situation first. Click a theme for constituent insights, sources, and
+        cross-theme links. Insights are stored once.
       </p>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <Pane
-          title="What we know"
-          hint="Supported facts, triangulated across functions"
-          tone="known"
-          empty="No known insights yet. Ingest a readout."
-        >
-          {view.known.map((i) => (
-            <InsightCard
-              key={i.id}
-              insight={i}
-              themeNames={themeNames(i.theme_ids)}
-            />
-          ))}
-        </Pane>
-        <Pane
-          title="What we don’t know"
-          hint="Explicit gaps, unmeasured quantities, unanswered questions"
-          tone="unknown"
-          empty="No open gaps extracted. That’s usually a miss, not a win."
-        >
-          {view.unknown.map((i) => (
-            <InsightCard
-              key={i.id}
-              insight={i}
-              themeNames={themeNames(i.theme_ids)}
-            />
-          ))}
-        </Pane>
-        <Pane
-          title="Opportunities to close gaps"
-          hint="Concrete actions that would resolve an unknown"
-          tone="opportunity"
-          empty="No closure plays identified."
-        >
-          {view.opportunities.map((i) => (
-            <InsightCard
-              key={i.id}
-              insight={i}
-              themeNames={themeNames(i.theme_ids)}
-            />
-          ))}
-        </Pane>
-      </section>
-
-      <section className="mt-10">
-        <h2 className="font-heading text-2xl text-primary">Themes</h2>
-        <p className="mb-4 text-sm text-muted-foreground">
-        Same insight, many themes — linked, not copied. A formulary delay
-        pending RWE shows up under Access and Evidence without duplicating the
-        CIR.
-        </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          {view.themes.map((theme) => {
-            const total =
-              theme.known_count +
-              theme.unknown_count +
-              theme.opportunity_count;
-            const pct = (n: number) =>
-              total === 0 ? 0 : Math.round((n / total) * 100);
-            return (
-              <Link
-                key={theme.id}
-                href={`/themes/${theme.id}`}
-                className="rounded-xl border border-border/80 bg-card p-4 transition hover:border-primary/30"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-heading text-lg text-primary">
-                      {theme.name}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {theme.summary}
-                    </p>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {theme.insight_ids.length}
-                  </span>
-                </div>
-                <div className="mt-3 flex h-1.5 overflow-hidden rounded-full bg-muted">
-                  <span
-                    className="bg-[var(--known)]"
-                    style={{ width: `${pct(theme.known_count)}%` }}
-                  />
-                  <span
-                    className="bg-[var(--unknown)]"
-                    style={{ width: `${pct(theme.unknown_count)}%` }}
-                  />
-                  <span
-                    className="bg-[var(--opportunity)]"
-                    style={{ width: `${pct(theme.opportunity_count)}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  {theme.known_count} known · {theme.unknown_count} unknown ·{" "}
-                  {theme.opportunity_count} opportunities
-                </p>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <h2 className="font-heading text-2xl text-primary">Coverage by function</h2>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {view.coverageByFunction.map((row) => (
-            <div
-              key={row.function}
-              className="rounded-lg border border-border/80 bg-card px-3 py-3"
-            >
-              <p className="text-sm font-medium">
-                {FUNCTION_LABELS[row.function]}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {row.documents} source{row.documents === 1 ? "" : "s"} ·{" "}
-                {row.insights} insights
-              </p>
+      <div className="grid gap-0 border border-border md:grid-cols-2">
+        {briefs.map(({ theme, brief }) => (
+          <Link
+            key={theme.id}
+            href={`/themes/${theme.id}`}
+            className="block border-b border-border p-3 no-underline last:border-b-0 md:odd:border-r hover:bg-muted/40"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-[13px] tracking-wide text-foreground">
+                {theme.name.toUpperCase()}
+              </h2>
+              <span className={`text-[10px] tracking-widest ${postureColor[brief.posture]}`}>
+                {brief.posture}
+              </span>
             </div>
-          ))}
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              AS OF {brief.as_of_label} · {theme.known_count} KNOWN ·{" "}
+              {theme.unknown_count} UNK · {theme.opportunity_count} OPP ·{" "}
+              {theme.insight_ids.length} INS
+            </p>
+            <p className="mt-2 text-[12px] leading-5 text-foreground/90">
+              {brief.situation}
+            </p>
+          </Link>
+        ))}
+      </div>
+
+      <section className="mt-4 border border-border">
+        <div className="border-b border-border px-3 py-1.5 text-[10px] tracking-widest text-muted-foreground">
+          COVERAGE BY FUNCTION
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          {[...new Set(state.documents.map((d) => d.stakeholder_function))].map(
+            (fn) => {
+              const docs = state.documents.filter((d) => d.stakeholder_function === fn)
+                .length;
+              const ins = state.insights.filter((i) => i.stakeholder_function === fn)
+                .length;
+              return (
+                <div key={fn} className="border-r border-b border-border px-3 py-2 last:border-r-0">
+                  <p className="text-[11px] text-foreground">
+                    {FUNCTION_LABELS[fn]}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {docs} SRC · {ins} INS
+                  </p>
+                </div>
+              );
+            },
+          )}
         </div>
       </section>
     </AppShell>
-  );
-}
-
-function Pane({
-  title,
-  hint,
-  tone,
-  empty,
-  children,
-}: {
-  title: string;
-  hint: string;
-  tone: "known" | "unknown" | "opportunity";
-  empty: string;
-  children: React.ReactNode;
-}) {
-  const items = Array.isArray(children) ? children : [children];
-  const has = items.filter(Boolean).length > 0;
-  return (
-    <div
-      className="flex flex-col rounded-xl border border-border/80 bg-card/70"
-      style={{ borderTopColor: `var(--${tone})`, borderTopWidth: 3 }}
-    >
-      <div className="border-b border-border/60 px-4 py-3">
-        <h2 className="font-heading text-xl text-primary">{title}</h2>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
-      <div className="flex flex-1 flex-col gap-2.5 p-3">
-        {has ? children : (
-          <p className="px-1 py-8 text-center text-sm text-muted-foreground">
-            {empty}
-          </p>
-        )}
-      </div>
-    </div>
   );
 }

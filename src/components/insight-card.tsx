@@ -1,57 +1,6 @@
 import Link from "next/link";
-import { FUNCTION_LABELS, type CanonicalInsight } from "@/lib/schema";
-import { Badge } from "@/components/ui/badge";
-
-const CLASS_STYLES = {
-  known: "text-[var(--known)] bg-[color-mix(in_oklch,var(--known)_12%,white)]",
-  unknown:
-    "text-[var(--unknown)] bg-[color-mix(in_oklch,var(--unknown)_14%,white)]",
-  opportunity:
-    "text-[var(--opportunity)] bg-[color-mix(in_oklch,var(--opportunity)_14%,white)]",
-};
-
-export function InsightCard({
-  insight,
-  themeNames,
-}: {
-  insight: CanonicalInsight;
-  themeNames?: string[];
-}) {
-  const multi = insight.knowledge_state.evidence_strength !== "single_source";
-  return (
-    <article className="rounded-lg border border-border/80 bg-card p-3.5 shadow-[0_1px_0_oklch(0.3_0.02_250/0.04)]">
-      <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase ${CLASS_STYLES[insight.classification]}`}
-        >
-          {insight.classification}
-        </span>
-        <Badge variant="outline" className="font-normal">
-          {FUNCTION_LABELS[insight.stakeholder_function]}
-        </Badge>
-        {(themeNames ?? []).map((name) => (
-          <Badge key={name} variant="secondary" className="font-normal">
-            {name}
-          </Badge>
-        ))}
-        {multi ? (
-          <Badge variant="outline" className="font-normal">
-            {insight.knowledge_state.evidence_strength.replace("_", " ")}
-          </Badge>
-        ) : null}
-      </div>
-      <p className="text-[13.5px] leading-5 text-foreground">{insight.statement}</p>
-      <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-        <span className="font-medium text-foreground/70">
-          {insight.source_location.ref}
-        </span>
-        {" · "}
-        <span className="italic">“{insight.evidence_quote.slice(0, 140)}
-        {insight.evidence_quote.length > 140 ? "…" : ""}”</span>
-      </p>
-    </article>
-  );
-}
+import type { CanonicalInsight, ParsedDocument, Theme } from "@/lib/schema";
+import { FUNCTION_LABELS } from "@/lib/schema";
 
 export function AppShell({
   children,
@@ -61,35 +10,29 @@ export function AppShell({
   active: "briefing" | "ingest" | "evals" | "sdlc";
 }) {
   const links = [
-    { href: "/", id: "briefing" as const, label: "Briefing" },
-    { href: "/ingest", id: "ingest" as const, label: "Ingest" },
-    { href: "/evals", id: "evals" as const, label: "Eval lab" },
-    { href: "/sdlc", id: "sdlc" as const, label: "SDLC" },
+    { href: "/", id: "briefing" as const, label: "MONITOR" },
+    { href: "/ingest", id: "ingest" as const, label: "INGEST" },
+    { href: "/evals", id: "evals" as const, label: "EVAL" },
+    { href: "/sdlc", id: "sdlc" as const, label: "SPEC" },
   ];
   return (
     <div className="flex min-h-full flex-col">
-      <header className="border-b border-border/80 bg-card/80 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
-          <div>
-            <p className="text-[11px] font-medium tracking-[0.22em] text-muted-foreground uppercase">
-              Real-time insights engine
-            </p>
-            <h1 className="font-heading text-3xl tracking-tight text-primary italic sm:text-[2rem]">
-              Velmara
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Cross-functional intelligence for 2L EGFRm NSCLC
-            </p>
+      <header className="border-b border-border bg-[#07090d]">
+        <div className="flex items-stretch">
+          <div className="flex items-center border-r border-border px-3 py-2">
+            <Link href="/" className="text-primary no-underline">
+              <span className="text-[11px] tracking-[0.28em]">SYNAPSE</span>
+            </Link>
           </div>
-          <nav className="flex flex-wrap gap-1">
+          <nav className="flex flex-1 flex-wrap">
             {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                className={`rounded-md px-3 py-1.5 text-sm transition ${
+                className={`border-r border-border px-3 py-2 text-[11px] tracking-widest no-underline ${
                   active === l.id
                     ? "bg-primary text-primary-foreground"
-                    : "text-foreground/70 hover:bg-muted"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
                 {l.label}
@@ -98,12 +41,90 @@ export function AppShell({
           </nav>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-3 py-3 sm:px-4">
         {children}
       </main>
-      <footer className="border-t border-border/70 px-4 py-4 text-center text-[11px] text-muted-foreground sm:px-6">
-        CIR JSON · LlamaCloud charts · Claude extractor · critique / judge / proposer
+      <footer className="border-t border-border px-3 py-1.5 text-[10px] tracking-widest text-muted-foreground">
+        SYNAPSE // THEME MONITOR // CIR LINKED NOT COPIED // LLAMACLOUD+CLAUDE
       </footer>
     </div>
+  );
+}
+
+export function ClassTag({
+  value,
+}: {
+  value: CanonicalInsight["classification"];
+}) {
+  const color =
+    value === "known"
+      ? "text-[var(--known)]"
+      : value === "unknown"
+        ? "text-[var(--unknown)]"
+        : "text-[var(--opportunity)]";
+  return (
+    <span className={`text-[10px] font-semibold tracking-widest ${color}`}>
+      {value === "opportunity" ? "OPP" : value.toUpperCase()}
+    </span>
+  );
+}
+
+export function InsightRow({
+  insight,
+  currentThemeId,
+  themes,
+  documents,
+}: {
+  insight: CanonicalInsight;
+  currentThemeId?: string;
+  themes: Pick<Theme, "id" | "name">[];
+  documents: Pick<ParsedDocument, "id" | "title" | "filename">[];
+}) {
+  const source = documents.find((d) => d.id === insight.source_document_id);
+  const others = insight.theme_ids.filter((id) => id !== currentThemeId);
+  const also = others
+    .map((id) => themes.find((t) => t.id === id))
+    .filter((t): t is Pick<Theme, "id" | "name"> => Boolean(t));
+
+  return (
+    <tr className="border-b border-border align-top hover:bg-muted/50">
+      <td className="px-2 py-2">
+        <ClassTag value={insight.classification} />
+      </td>
+      <td className="px-2 py-2 text-[12.5px] leading-5 text-foreground">
+        {insight.statement}
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          {FUNCTION_LABELS[insight.stakeholder_function]}
+          {insight.knowledge_state.evidence_strength !== "single_source"
+            ? ` · ${insight.knowledge_state.evidence_strength.replace("_", " ")}`
+            : ""}
+        </div>
+      </td>
+      <td className="px-2 py-2 text-[11px]">
+        {source ? (
+          <Link href={`/sources/${source.id}`} className="text-primary">
+            {source.title}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">Unknown source</span>
+        )}
+        <div className="text-[10px] text-muted-foreground">
+          {insight.source_location.ref}
+        </div>
+      </td>
+      <td className="px-2 py-2 text-[11px]">
+        {also.length === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {also.map((t) => (
+              <Link key={t.id} href={`/themes/${t.id}`} className="text-primary">
+                {t.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }

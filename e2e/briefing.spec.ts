@@ -1,30 +1,24 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("REQ-REG-002 end-to-end regression", () => {
-  test("REQ-KNO-004 briefing shows known, unknown, and opportunities", async ({
+  test("REQ-KNO-004 monitor lists themes with situation briefs", async ({
     page,
   }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Velmara" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "What we know" })).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "What we don’t know" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Opportunities to close gaps" }),
-    ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Themes" })).toBeVisible();
+    await expect(page.getByText("SYNAPSE").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "THEME MONITOR" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /ACCESS & FORMULARY/ })).toBeVisible();
+    await expect(page.getByText(/AS OF/)).toBeVisible();
   });
 
-  test("REQ-CLU-002 theme pages link insights without duplicating CIR ids in the briefing", async ({
+  test("REQ-CLU-002 theme drill-in shows source and cross-theme links", async ({
     page,
   }) => {
     await page.goto("/");
-    const knownCards = page.locator("section").filter({ hasText: "What we know" }).locator("article");
-    const count = await knownCards.count();
-    expect(count).toBeGreaterThan(3);
-    await page.getByRole("link", { name: /Access & formulary/ }).first().click();
-    await expect(page.getByText(/linked insights/)).toBeVisible();
+    await page.getByRole("link", { name: /ACCESS & FORMULARY/ }).first().click();
+    await expect(page.getByText("ALSO IN")).toBeVisible();
+    await expect(page.getByText("SOURCE")).toBeVisible();
+    await expect(page.locator("table tbody tr").first()).toBeVisible();
   });
 
   test("REQ-EVA-009 eval lab scores prompt versions", async ({ page }) => {

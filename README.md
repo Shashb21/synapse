@@ -1,8 +1,8 @@
-# Velmara Insights Engine
+# Synapse
 
-Real-time cross-functional insights for biopharma brand teams. Ingest PowerPoint, Word, and Excel readouts, extract atomic Canonical Insight Records, **link** them to themes (one insight, many themes, no copies), and brief **what we know / don’t know / opportunities to close gaps**. A critique → judge → proposer loop hill-climbs the extractor against a gold set.
+Cross-functional biopharma insights **terminal**. Themes first, then constituent insights with sources and cross-theme links. Demo corpus is a fictional asset (Velmara / velmaratinib).
 
-This repo is the v1 slice: a working briefing on a fictional asset (**Velmara / velmaratinib**, 2L EGFRm NSCLC) plus the SDLC pack under `docs/sdlc/`.
+This repo is the v1 slice: Synapse as the product, Velmara as the demo asset, plus the SDLC pack under `docs/sdlc/`.
 
 ## Why linkage instead of semantic clustering
 

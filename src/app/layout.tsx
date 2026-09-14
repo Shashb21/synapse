@@ -1,37 +1,23 @@
-import { Newsreader, Geist, Geist_Mono } from "next/font/google";
 import type { Metadata } from "next";
+import { Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
 
-const newsreader = Newsreader({
-  variable: "--font-newsreader",
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-});
-
 export const metadata: Metadata = {
-  title: "Velmara Insights Engine",
+  title: "Synapse",
   description:
-    "Real-time cross-functional insights for biopharma brand teams: ingest readouts, extract CIR records, cluster themes, and hill-climb the extractor.",
+    "Cross-functional biopharma insights terminal: themes first, then constituent insights with sources and cross-theme links.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-background text-foreground">
+    <html lang="en" className={`${geistMono.variable} dark h-full`}>
+      <body className="min-h-full flex flex-col bg-background text-foreground font-mono">
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>
