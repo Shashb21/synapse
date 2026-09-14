@@ -1,0 +1,12 @@
+---
+description: Push every published branch to Origin and GitHub
+alwaysApply: true
+---
+
+After committing on this repo, push the same branch to both remotes:
+
+```bash
+./scripts/push-both.sh
+```
+
+That is `git push origin` (Cursor Origin) and `git push github` (https://github.com/Shashb21/synapse). Do not ship a change that exists on only one forge. Never commit `GH_TOKEN` or a PAT.
