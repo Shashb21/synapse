@@ -39,6 +39,7 @@ This file is the **engineering** loop. The product loop (ingest → CIR → cata
 
 - [09-flow-high-level.md](./09-flow-high-level.md) — what a brand team sees
 - [10-flow-technical.md](./10-flow-technical.md) — modules, APIs, and `EngineState`
+- [11-regression.md](./11-regression.md) — REQ → test → user-flow matrix
 
 ## Grokbot (Bugbot-style review)
 

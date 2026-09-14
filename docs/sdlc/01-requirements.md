@@ -50,6 +50,19 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | REQ-GRF-001 | Multi-theme CIR are **blends**: one note, many maps of content. The graph must surface them without copying the statement. | Must |
 | REQ-GRF-002 | As CIR accumulate, the engine reveals **bridges** and **gap-closures** — connections (shared entity, no shared theme, or unknown×known) that no single source stated. | Must |
 
+## User flows (surfaces)
+
+| ID | Requirement | Priority |
+| --- | --- | --- |
+| REQ-UX-001 | **Monitor** lists named themes with a situation brief and known/unknown/opportunity counts. Unassigned is last, never dropped. | Must |
+| REQ-UX-002 | **Theme drill-in** shows constituent CIR (unknowns first), source links, and other themes the same CIR sits on. | Must |
+| REQ-UX-003 | **Insights** lists every CIR; filter by theme (including Unassigned) and by class. | Must |
+| REQ-UX-004 | **Catalog** explains emerge and split, lists open proposals with Accept/Reject, and shows named themes with split lineage. | Must |
+| REQ-UX-005 | **Graph** shows the theme network and revealed connections (blend, bridge, new implication) without copying CIR. | Must |
+| REQ-UX-006 | **Ingest** lists sources, exposes PPTX/DOCX/XLSX/PDF upload, and can reset to the seed corpus. | Must |
+| REQ-UX-007 | **Source** page lists CIR extracted from that document. | Must |
+| REQ-UX-008 | **Eval** and **Spec** are view-only tapes (no hill-climb Run control). Spec includes the flow diagrams. | Must |
+
 ## Evals and hill-climb
 
 | ID | Requirement | Priority |
@@ -70,8 +83,9 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | REQ-REG-001 | Unit tests name the requirement ID they lock. | Must |
-| REQ-REG-002 | End-to-end regression covers briefing, theme linkage, and the view-only eval tape. | Must |
+| REQ-REG-002 | End-to-end regression covers the full user flow: monitor, theme, insights, catalog, graph, ingest, source, eval, spec. | Must |
 | REQ-REG-003 | CI runs unit + e2e on Origin. | Should |
+| REQ-REG-004 | `docs/sdlc/11-regression.md` is the coverage matrix: every Must REQ maps to a named test. | Must |
 | REQ-OPS-001 | Hill-climb runs automatically on seed and ingest. Cloud Agent may propose prompt patches as PRs when champion composite rises. | Should |
 | REQ-OPS-002 | Grokbot / Bugbot reviews PRs for eval regressions and missing REQ mapping. | Should |
 | REQ-OPS-003 | SDLC docs (this set) are the system of record for architecture and TDD. | Must |

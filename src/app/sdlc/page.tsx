@@ -57,6 +57,11 @@ const SPECS = [
     id: "TECH",
     title: "Flow (technical)",
   },
+  {
+    slug: "11-regression.md",
+    id: "REG",
+    title: "Regression",
+  },
 ] as const;
 
 export default async function SdlcPage({

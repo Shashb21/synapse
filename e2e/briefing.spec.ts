@@ -40,6 +40,7 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await expect(page.getByText(/view-only/i).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /flow \(process\)/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /flow \(technical\)/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^regression$/i })).toBeVisible();
     await expect(page.locator("main").getByRole("button")).toHaveCount(0);
   });
 
