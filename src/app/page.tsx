@@ -1,7 +1,9 @@
-import { AppShell } from "@/components/insight-card";
+import { AppShell, PageIntro } from "@/components/insight-card";
+import { PostureChip } from "@/components/theme-chip";
 import { summarizeTheme } from "@/lib/briefing/theme-summary";
 import { FUNCTION_LABELS } from "@/lib/schema";
 import { getState } from "@/lib/store";
+import { CLASS_STYLES, themeStyle } from "@/lib/theme-style";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -20,79 +22,98 @@ export default async function MonitorPage() {
       return Date.parse(b.brief.as_of) - Date.parse(a.brief.as_of);
     });
 
-  const postureColor: Record<string, string> = {
-    "GAP-HEAVY": "text-[var(--unknown)]",
-    ACTIONABLE: "text-[var(--opportunity)]",
-    STABLE: "text-[var(--known)]",
-    EMPTY: "text-muted-foreground",
-  };
-
   return (
     <AppShell active="briefing">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-2">
-        <div>
-          <h1 className="text-sm tracking-[0.25em] text-primary">THEME MONITOR</h1>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {state.asset.name.toUpperCase()} {state.asset.molecule} ·{" "}
-            {state.asset.indication} · as of {state.asset.as_of}
-          </p>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {state.documents.length} SRC · {state.insights.length} INS ·{" "}
-          {state.themes.length} THM · {state.champion_prompt_version}
+      <PageIntro kicker="Velmara" title="Theme monitor">
+        <p>
+          {state.asset.molecule} · {state.asset.indication}. Situation first —
+          open a theme for the constituent insights, sources, and cross-theme
+          links. Insights are stored once.
         </p>
+        <p className="mt-2 text-sm">
+          As of {state.asset.as_of} · {state.documents.length} sources ·{" "}
+          {state.insights.length} insights · {state.themes.length} themes
+        </p>
+      </PageIntro>
+
+      <div className="grid gap-5 md:grid-cols-2">
+        {briefs.map(({ theme, brief }) => {
+          const color = themeStyle(theme.id);
+          return (
+            <Link
+              key={theme.id}
+              href={`/themes/${theme.id}`}
+              className="group relative block overflow-hidden rounded-2xl border bg-card p-6 no-underline shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg sm:p-7"
+              style={{
+                borderColor: color.border,
+                background: `linear-gradient(165deg, ${color.bg} 0%, var(--card) 46%)`,
+                boxShadow: `0 18px 40px -24px ${color.glow}`,
+              }}
+            >
+              <span
+                className="absolute inset-y-0 left-0 w-1.5"
+                style={{ backgroundColor: color.hue }}
+              />
+              <div className="flex items-start justify-between gap-3 pl-2">
+                <h2
+                  className="text-xl font-semibold tracking-tight"
+                  style={{ color: color.fg }}
+                >
+                  {theme.name}
+                </h2>
+                <PostureChip posture={brief.posture} />
+              </div>
+              <p className="mt-2 pl-2 text-sm text-muted-foreground">
+                As of {brief.as_of_label}
+              </p>
+              <p className="mt-4 pl-2 text-[15px] leading-7 text-foreground/90">
+                {brief.situation}
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2 pl-2">
+                <CountChip
+                  label="Known"
+                  count={theme.known_count}
+                  color={CLASS_STYLES.known}
+                />
+                <CountChip
+                  label="Unknown"
+                  count={theme.unknown_count}
+                  color={CLASS_STYLES.unknown}
+                />
+                <CountChip
+                  label="Opportunity"
+                  count={theme.opportunity_count}
+                  color={CLASS_STYLES.opportunity}
+                />
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
-      <p className="mb-3 text-[11px] text-muted-foreground">
-        Situation first. Click a theme for constituent insights, sources, and
-        cross-theme links. Insights are stored once.
-      </p>
-
-      <div className="grid gap-0 border border-border md:grid-cols-2">
-        {briefs.map(({ theme, brief }) => (
-          <Link
-            key={theme.id}
-            href={`/themes/${theme.id}`}
-            className="block border-b border-border p-3 no-underline last:border-b-0 md:odd:border-r hover:bg-muted/40"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-[13px] tracking-wide text-foreground">
-                {theme.name.toUpperCase()}
-              </h2>
-              <span className={`text-[10px] tracking-widest ${postureColor[brief.posture]}`}>
-                {brief.posture}
-              </span>
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              AS OF {brief.as_of_label} · {theme.known_count} KNOWN ·{" "}
-              {theme.unknown_count} UNK · {theme.opportunity_count} OPP ·{" "}
-              {theme.insight_ids.length} INS
-            </p>
-            <p className="mt-2 text-[12px] leading-5 text-foreground/90">
-              {brief.situation}
-            </p>
-          </Link>
-        ))}
-      </div>
-
-      <section className="mt-4 border border-border">
-        <div className="border-b border-border px-3 py-1.5 text-[10px] tracking-widest text-muted-foreground">
-          COVERAGE BY FUNCTION
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <section className="mt-12">
+        <h2 className="text-lg font-semibold text-foreground">
+          Coverage by function
+        </h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[...new Set(state.documents.map((d) => d.stakeholder_function))].map(
             (fn) => {
-              const docs = state.documents.filter((d) => d.stakeholder_function === fn)
-                .length;
-              const ins = state.insights.filter((i) => i.stakeholder_function === fn)
-                .length;
+              const docs = state.documents.filter(
+                (d) => d.stakeholder_function === fn,
+              ).length;
+              const ins = state.insights.filter(
+                (i) => i.stakeholder_function === fn,
+              ).length;
               return (
-                <div key={fn} className="border-r border-b border-border px-3 py-2 last:border-r-0">
-                  <p className="text-[11px] text-foreground">
+                <div
+                  key={fn}
+                  className="rounded-2xl border border-border/80 bg-card px-5 py-4"
+                >
+                  <p className="text-base font-medium text-foreground">
                     {FUNCTION_LABELS[fn]}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {docs} SRC · {ins} INS
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {docs} sources · {ins} insights
                   </p>
                 </div>
               );
@@ -101,5 +122,25 @@ export default async function MonitorPage() {
         </div>
       </section>
     </AppShell>
+  );
+}
+
+function CountChip({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: { fg: string; bg: string };
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+      style={{ color: color.fg, backgroundColor: color.bg }}
+    >
+      <span className="tabular-nums font-semibold">{count}</span>
+      {label}
+    </span>
   );
 }

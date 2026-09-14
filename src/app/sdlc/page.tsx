@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { AppShell } from "@/components/insight-card";
+import { AppShell, PageIntro } from "@/components/insight-card";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -44,8 +44,7 @@ export default async function SdlcPage({
   searchParams: Promise<{ spec?: string }>;
 }) {
   const { spec } = await searchParams;
-  const active =
-    SPECS.find((s) => s.slug === spec) ?? SPECS[0]!;
+  const active = SPECS.find((s) => s.slug === spec) ?? SPECS[0]!;
   const body = await readFile(
     path.join(process.cwd(), "docs", "sdlc", active.slug),
     "utf8",
@@ -53,32 +52,29 @@ export default async function SdlcPage({
 
   return (
     <AppShell active="sdlc">
-      <div className="mb-3 border-b border-border pb-2">
-        <h1 className="text-sm tracking-[0.25em] text-primary">SPEC TAPE</h1>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          View-only. Requirements, architecture, TDD, and eval protocol as
-          written. Hill-climb and tests run off-screen.
-        </p>
-      </div>
-      <div className="mb-3 flex flex-wrap border border-border">
+      <PageIntro kicker="View-only" title="Spec tape">
+        Requirements, architecture, TDD, and eval protocol as written.
+        Hill-climb and tests run off-screen.
+      </PageIntro>
+      <div className="mb-6 flex flex-wrap gap-2">
         {SPECS.map((s) => (
           <Link
             key={s.slug}
             href={`/sdlc?spec=${s.slug}`}
-            className={`border-r border-border px-3 py-1.5 text-[10px] tracking-widest no-underline last:border-r-0 ${
+            className={`rounded-full px-3.5 py-1.5 text-sm no-underline transition ${
               s.slug === active.slug
                 ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                : "bg-muted text-muted-foreground hover:bg-card hover:text-foreground"
             }`}
           >
-            {s.id}
+            {s.title}
           </Link>
         ))}
       </div>
-      <p className="mb-2 text-[11px] text-muted-foreground">
-        {active.id} · {active.title} · docs/sdlc/{active.slug}
+      <p className="mb-3 text-sm text-muted-foreground">
+        {active.id} · docs/sdlc/{active.slug}
       </p>
-      <pre className="overflow-auto border border-border bg-[#07090d] p-3 text-[11px] leading-5 whitespace-pre-wrap text-foreground/90">
+      <pre className="overflow-auto rounded-2xl border border-border bg-card p-6 font-mono text-sm leading-7 whitespace-pre-wrap text-foreground/90 sm:p-8">
         {body}
       </pre>
     </AppShell>

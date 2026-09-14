@@ -1,6 +1,6 @@
 "use client";
 
-import { AppShell } from "@/components/insight-card";
+import { AppShell, PageIntro } from "@/components/insight-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FUNCTION_LABELS, type StakeholderFunction } from "@/lib/schema";
@@ -78,45 +78,42 @@ export default function IngestPage() {
 
   return (
     <AppShell active="ingest">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <section className="rounded-xl border border-border/80 bg-card p-5">
-          <h2 className="font-heading text-2xl text-primary">
-            Ingest a readout
-          </h2>
-          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            LlamaCloud Parse (agentic, specialized charts) reads PPTX graphics
-            and graphs. Claude Sonnet then extracts atomic CIR insights. The
-            eval hill-climb re-scores automatically after each ingest — EVAL
-            and SPEC are view-only. Put keys in <code>.env.local</code> —
-            documents may leave the VPC for this PoC.
-          </p>
+      <PageIntro title="Ingest a readout">
+        LlamaCloud Parse reads PPTX graphics and graphs. Claude Sonnet then
+        extracts atomic CIR insights. The eval hill-climb re-scores
+        automatically after each ingest — Eval and Spec are view-only.
+      </PageIntro>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
+          <h2 className="text-xl font-semibold">Upload</h2>
           {providers ? (
-            <p className="mt-3 text-xs">
+            <p className="mt-2 text-sm text-muted-foreground">
               Parser:{" "}
-              <span className="font-medium">
+              <span className="font-medium text-foreground">
                 {providers.llama_cloud
                   ? `LlamaCloud ${providers.llama_tier}`
                   : "local OOXML (set LLAMA_CLOUD_API_KEY)"}
               </span>
               {" · "}
               Extractor:{" "}
-              <span className="font-medium">
+              <span className="font-medium text-foreground">
                 {providers.anthropic
                   ? providers.anthropic_model
                   : "local (set ANTHROPIC_API_KEY)"}
               </span>
             </p>
           ) : null}
-          <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-primary/30 bg-muted/40 px-6 py-10 text-center">
-            <span className="text-sm font-medium">
-              Upload PPTX, DOCX, XLSX, or PDF
+          <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-6 py-12 text-center transition hover:bg-primary/10">
+            <span className="text-base font-medium">
+              Drop a PPTX, DOCX, XLSX, or PDF
             </span>
-            <span className="mt-1 text-xs text-muted-foreground">
+            <span className="mt-2 text-sm text-muted-foreground">
               Stakeholder function is inferred from the filename, then tagged on
               every insight
             </span>
             <Input
-              className="mt-4 max-w-xs"
+              className="mt-5 max-w-xs"
               type="file"
               accept=".pptx,.docx,.xlsx,.ppt,.doc,.xls,.pdf"
               disabled={status === "loading"}
@@ -128,27 +125,26 @@ export default function IngestPage() {
           </label>
           {message ? (
             <p
-              className={`mt-4 text-sm ${status === "error" ? "text-destructive" : "text-foreground"}`}
+              className={`mt-5 text-sm leading-6 ${status === "error" ? "text-destructive" : "text-foreground"}`}
             >
               {message}
             </p>
           ) : null}
           {status === "loading" ? (
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-3 text-sm text-muted-foreground">
               Extracting atomic insights and re-running the eval tape…
             </p>
           ) : null}
         </section>
 
-        <section className="rounded-xl border border-border/80 bg-card p-5">
-          <h2 className="font-heading text-2xl text-primary">
-            Velmara sample pack
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Five cross-functional readouts used as the gold eval corpus. Download
-            and re-upload to watch the pipeline run on real Office files.
+        <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
+          <h2 className="text-xl font-semibold">Velmara sample pack</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Five cross-functional readouts used as the gold eval corpus.
+            Download and re-upload to watch the pipeline run on real Office
+            files.
           </p>
-          <ul className="mt-4 space-y-2">
+          <ul className="mt-5 space-y-3">
             {fixtures.length === 0 ? (
               <li className="text-sm text-muted-foreground">
                 Generating sample files…
@@ -157,13 +153,13 @@ export default function IngestPage() {
               fixtures.map((f) => (
                 <li key={f.filename}>
                   <a
-                    className="text-sm text-primary underline-offset-2 hover:underline"
+                    className="text-sm text-primary no-underline hover:underline"
                     href={f.href}
                     download
                   >
                     {f.filename}
                   </a>
-                  <span className="ml-2 text-[11px] text-muted-foreground">
+                  <span className="ml-2 text-xs text-muted-foreground">
                     {(f.bytes / 1024).toFixed(1)} KB
                   </span>
                 </li>
@@ -173,37 +169,42 @@ export default function IngestPage() {
         </section>
       </div>
 
-      <section className="mt-8">
-        <h2 className="font-heading text-2xl text-primary">Source library</h2>
+      <section className="mt-10">
+        <h2 className="text-xl font-semibold">Source library</h2>
         {docs.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
+          <p className="mt-4 text-sm text-muted-foreground">
             No documents ingested yet.
           </p>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-xl border border-border/80 bg-card">
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-border bg-card">
             <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="border-b bg-muted/50 text-[11px] tracking-wider text-muted-foreground uppercase">
+              <thead className="border-b border-border text-xs tracking-wide text-muted-foreground uppercase">
                 <tr>
-                  <th className="px-3 py-2">Document</th>
-                  <th className="px-3 py-2">Function</th>
-                  <th className="px-3 py-2">Parser</th>
-                  <th className="px-3 py-2">Blocks</th>
+                  <th className="px-5 py-3.5">Document</th>
+                  <th className="px-5 py-3.5">Function</th>
+                  <th className="px-5 py-3.5">Parser</th>
+                  <th className="px-5 py-3.5">Blocks</th>
                 </tr>
               </thead>
               <tbody>
                 {docs.map((d) => (
-                  <tr key={d.id} className="border-b border-border/60">
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{d.title}</div>
-                      <div className="text-[11px] text-muted-foreground">
+                  <tr key={d.id} className="border-b border-border last:border-b-0">
+                    <td className="px-5 py-4">
+                      <a
+                        href={`/sources/${d.id}`}
+                        className="font-medium text-primary no-underline hover:underline"
+                      >
+                        {d.title}
+                      </a>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         {d.filename}
                       </div>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-5 py-4">
                       {FUNCTION_LABELS[d.stakeholder_function]}
                     </td>
-                    <td className="px-3 py-2">{d.parser}</td>
-                    <td className="px-3 py-2">{d.blocks}</td>
+                    <td className="px-5 py-4">{d.parser}</td>
+                    <td className="px-5 py-4">{d.blocks}</td>
                   </tr>
                 ))}
               </tbody>
@@ -211,7 +212,7 @@ export default function IngestPage() {
           </div>
         )}
         <form
-          className="mt-4"
+          className="mt-5"
           onSubmit={async (e) => {
             e.preventDefault();
             await fetch("/api/reset", { method: "POST" });

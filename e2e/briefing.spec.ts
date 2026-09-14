@@ -6,28 +6,29 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
   }) => {
     await page.goto("/");
     await expect(page.getByText("SYNAPSE").first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "THEME MONITOR" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /ACCESS & FORMULARY/ })).toBeVisible();
-    await expect(page.getByText(/AS OF/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /theme monitor/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /access & formulary/i })).toBeVisible();
+    await expect(page.getByText(/as of/i).first()).toBeVisible();
   });
 
   test("REQ-CLU-002 theme drill-in shows source and cross-theme links", async ({
     page,
   }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: /ACCESS & FORMULARY/ }).first().click();
-    await expect(page.getByText("ALSO IN")).toBeVisible();
-    await expect(page.getByText("SOURCE")).toBeVisible();
-    await expect(page.locator("table tbody tr").first()).toBeVisible();
+    await page.getByRole("link", { name: /access & formulary/i }).first().click();
+    await expect(page.getByRole("heading", { name: /access & formulary/i })).toBeVisible();
+    await expect(page.getByText(/also sit on other themes/i)).toBeVisible();
+    await expect(page.locator("article").first()).toBeVisible();
+    await expect(page.getByRole("link").filter({ hasText: /evidence|source|brand|payer/i }).first()).toBeVisible();
   });
 
   test("REQ-EVA-009 eval tape shows automatic hill-climb results", async ({
     page,
   }) => {
     await page.goto("/evals");
-    await expect(page.getByRole("heading", { name: "EVAL TAPE" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /eval tape/i })).toBeVisible();
     await expect(page.getByText("v1.0-baseline")).toBeVisible();
-    await expect(page.getByText(/CHAMPION/)).toBeVisible();
+    await expect(page.getByText(/champion/i).first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Run hill-climb sweep/ }),
     ).toHaveCount(0);
@@ -35,8 +36,8 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
 
   test("REQ-OPS-003 spec tape is view-only", async ({ page }) => {
     await page.goto("/sdlc");
-    await expect(page.getByRole("heading", { name: "SPEC TAPE" })).toBeVisible();
-    await expect(page.getByText(/View-only/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /spec tape/i })).toBeVisible();
+    await expect(page.getByText(/view-only/i).first()).toBeVisible();
     await expect(page.getByRole("button")).toHaveCount(0);
   });
 });

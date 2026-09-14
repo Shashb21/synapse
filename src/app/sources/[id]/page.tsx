@@ -1,4 +1,4 @@
-import { AppShell, InsightRow } from "@/components/insight-card";
+import { AppShell, InsightCard, PageIntro } from "@/components/insight-card";
 import { FUNCTION_LABELS } from "@/lib/schema";
 import { getState } from "@/lib/store";
 import Link from "next/link";
@@ -19,41 +19,35 @@ export default async function SourcePage({
 
   return (
     <AppShell active="ingest">
-      <p className="text-[10px] tracking-widest text-muted-foreground">
-        <Link href="/ingest" className="text-muted-foreground">
-          INGEST
+      <p className="mb-6 text-sm text-muted-foreground">
+        <Link href="/ingest" className="text-muted-foreground no-underline hover:text-foreground">
+          Ingest
         </Link>
-        {" / SOURCE"}
+        <span className="mx-2">/</span>
+        Source
       </p>
-      <h1 className="mt-2 text-sm tracking-[0.2em] text-primary">
-        {doc.title.toUpperCase()}
-      </h1>
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        {doc.filename} · {FUNCTION_LABELS[doc.stakeholder_function]} · {doc.parser} ·{" "}
-        {doc.blocks.length} blocks · {insights.length} insights
-      </p>
-      <div className="mt-4 overflow-x-auto border border-border">
-        <table className="w-full min-w-[860px] text-left">
-          <thead className="border-b border-border bg-muted/40 text-[10px] tracking-widest text-muted-foreground">
-            <tr>
-              <th className="px-2 py-2">CLS</th>
-              <th className="px-2 py-2">INSIGHT</th>
-              <th className="px-2 py-2">LOCATION</th>
-              <th className="px-2 py-2">THEMES</th>
-            </tr>
-          </thead>
-          <tbody>
-            {insights.map((insight) => (
-              <InsightRow
-                key={insight.id}
-                insight={insight}
-                themes={state.themes}
-                documents={[{ id: doc.id, title: doc.title, filename: doc.filename }]}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <PageIntro title={doc.title}>
+        <p>
+          {doc.filename} · {FUNCTION_LABELS[doc.stakeholder_function]} ·{" "}
+          {doc.parser} · {doc.blocks.length} blocks · {insights.length} insights
+        </p>
+      </PageIntro>
+      {insights.length === 0 ? (
+        <p className="text-base text-muted-foreground">
+          No insights extracted from this source yet.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {insights.map((insight) => (
+            <InsightCard
+              key={insight.id}
+              insight={insight}
+              themes={state.themes}
+              documents={[{ id: doc.id, title: doc.title, filename: doc.filename }]}
+            />
+          ))}
+        </div>
+      )}
     </AppShell>
   );
 }

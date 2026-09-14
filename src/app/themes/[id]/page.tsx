@@ -1,6 +1,8 @@
-import { AppShell, InsightRow } from "@/components/insight-card";
+import { AppShell, InsightCard, PageIntro } from "@/components/insight-card";
+import { PostureChip, ThemeChip } from "@/components/theme-chip";
 import { summarizeTheme } from "@/lib/briefing/theme-summary";
 import { getState } from "@/lib/store";
+import { CLASS_STYLES, themeStyle } from "@/lib/theme-style";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -27,58 +29,89 @@ export default async function ThemePage({
     title: d.title,
     filename: d.filename,
   }));
+  const color = themeStyle(theme.id);
 
   return (
     <AppShell active="briefing">
-      <p className="text-[10px] tracking-widest text-muted-foreground">
-        <Link href="/" className="text-muted-foreground">
-          MONITOR
+      <p className="mb-6 text-sm text-muted-foreground">
+        <Link href="/" className="text-muted-foreground no-underline hover:text-foreground">
+          Monitor
         </Link>
-        {" / "}
-        {theme.name.toUpperCase()}
+        <span className="mx-2">/</span>
+        <span style={{ color: color.fg }}>{theme.name}</span>
       </p>
-      <div className="mt-2 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-2">
-        <h1 className="text-sm tracking-[0.2em] text-primary">
-          {theme.name.toUpperCase()}
-        </h1>
-        <p className="text-[10px] text-muted-foreground">
-          AS OF {brief.as_of_label} · {brief.posture} · {insights.length} INS
+      <PageIntro title={theme.name}>
+        <div className="flex flex-wrap items-center gap-3">
+          <PostureChip posture={brief.posture} />
+          <span className="text-sm">As of {brief.as_of_label}</span>
+        </div>
+        <p className="mt-4 text-foreground/90">{brief.situation}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span
+            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            style={{
+              color: CLASS_STYLES.known.fg,
+              backgroundColor: CLASS_STYLES.known.bg,
+            }}
+          >
+            {theme.known_count} known
+          </span>
+          <span
+            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            style={{
+              color: CLASS_STYLES.unknown.fg,
+              backgroundColor: CLASS_STYLES.unknown.bg,
+            }}
+          >
+            {theme.unknown_count} unknown
+          </span>
+          <span
+            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            style={{
+              color: CLASS_STYLES.opportunity.fg,
+              backgroundColor: CLASS_STYLES.opportunity.bg,
+            }}
+          >
+            {theme.opportunity_count} opportunities
+          </span>
+        </div>
+        <p className="mt-3 text-sm">
+          The same insight may also sit on other themes — linked, not copied.
         </p>
-      </div>
-      <p className="mt-3 max-w-4xl text-[13px] leading-5">{brief.situation}</p>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        {theme.known_count} known · {theme.unknown_count} unknown ·{" "}
-        {theme.opportunity_count} opportunities. Same CIR may also sit on other
-        themes — linked, not copied.
-      </p>
+      </PageIntro>
 
       {insights.length === 0 ? (
-        <p className="mt-6 text-sm text-muted-foreground">No insights linked.</p>
+        <p className="text-base text-muted-foreground">No insights linked yet.</p>
       ) : (
-        <div className="mt-4 overflow-x-auto border border-border">
-          <table className="w-full min-w-[860px] text-left">
-            <thead className="border-b border-border bg-muted/40 text-[10px] tracking-widest text-muted-foreground">
-              <tr>
-                <th className="px-2 py-2">CLS</th>
-                <th className="px-2 py-2">INSIGHT</th>
-                <th className="px-2 py-2">SOURCE</th>
-                <th className="px-2 py-2">ALSO IN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {insights.map((insight) => (
-                <InsightRow
-                  key={insight.id}
-                  insight={insight}
-                  currentThemeId={id}
-                  themes={state.themes}
-                  documents={docs}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Insights</h2>
+            <p className="text-sm text-muted-foreground">
+              Unknowns first · {insights.length} in this theme
+            </p>
+          </div>
+          {insights.map((insight) => (
+            <InsightCard
+              key={insight.id}
+              insight={insight}
+              currentThemeId={id}
+              themes={state.themes}
+              documents={docs}
+            />
+          ))}
         </div>
       )}
+
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold">Other themes</h2>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {state.themes
+            .filter((t) => t.id !== id)
+            .map((t) => (
+              <ThemeChip key={t.id} id={t.id} name={t.name} href={`/themes/${t.id}`} />
+            ))}
+        </div>
+      </div>
     </AppShell>
   );
 }
