@@ -57,10 +57,10 @@ export default async function InsightsPage({
   }));
 
   const chip = (active: boolean) =>
-    `rounded-full px-3 py-1.5 text-sm no-underline transition ${
+    `rounded-md px-2 py-1 text-[12px] no-underline ${
       active
-        ? "bg-primary text-primary-foreground"
-        : "bg-muted text-muted-foreground hover:bg-card hover:text-foreground"
+        ? "bg-muted text-foreground"
+        : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
     }`;
 
   return (
@@ -112,7 +112,7 @@ export default async function InsightsPage({
                 theme: themeId,
                 cls: active ? undefined : value,
               })}
-              className="rounded-full border px-3 py-1.5 text-sm no-underline"
+              className="rounded-md border px-2 py-1 text-[12px] no-underline"
               style={{
                 color: s.fg,
                 backgroundColor: active ? s.bg : "transparent",
@@ -126,13 +126,13 @@ export default async function InsightsPage({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-card p-8 text-base leading-7 text-muted-foreground">
+        <div className="border border-border bg-card p-6 text-[13px] leading-5 text-muted-foreground">
           {themeId === RESIDUAL_THEME_ID
             ? "Unassigned is empty. New readouts that do not clear the catalog floor will land here, held once, so they can propose a new theme instead of being smeared into an existing one."
             : "No insights match these filters."}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {filtered.map((insight) => (
             <InsightCard
               key={insight.id}

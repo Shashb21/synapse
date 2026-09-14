@@ -37,7 +37,7 @@ export default async function SourcePage({
           No insights extracted from this source yet.
         </p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {insights.map((insight) => (
             <InsightCard
               key={insight.id}

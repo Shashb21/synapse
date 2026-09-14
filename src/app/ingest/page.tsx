@@ -84,11 +84,11 @@ export default function IngestPage() {
         automatically after each ingest — Eval and Spec are view-only.
       </PageIntro>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <h2 className="text-xl font-semibold">Upload</h2>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <section className="border border-border bg-card p-4">
+          <h2 className="text-[13px] font-medium">Upload</h2>
           {providers ? (
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-[13px] text-muted-foreground">
               Parser:{" "}
               <span className="font-medium text-foreground">
                 {providers.llama_cloud
@@ -104,11 +104,11 @@ export default function IngestPage() {
               </span>
             </p>
           ) : null}
-          <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-6 py-12 text-center transition hover:bg-primary/10">
-            <span className="text-base font-medium">
+          <label className="mt-4 flex cursor-pointer flex-col items-center justify-center border border-dashed border-border bg-muted/30 px-4 py-10 text-center hover:bg-muted/50">
+            <span className="text-[13px] font-medium">
               Drop a PPTX, DOCX, XLSX, or PDF
             </span>
-            <span className="mt-2 text-sm text-muted-foreground">
+            <span className="mt-1 text-xs text-muted-foreground">
               Stakeholder function is inferred from the filename, then tagged on
               every insight
             </span>
@@ -137,9 +137,9 @@ export default function IngestPage() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <h2 className="text-xl font-semibold">Velmara sample pack</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        <section className="border border-border bg-card p-4">
+          <h2 className="text-[13px] font-medium">Velmara sample pack</h2>
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
             Five cross-functional readouts used as the gold eval corpus.
             Download and re-upload to watch the pipeline run on real Office
             files.
@@ -153,7 +153,7 @@ export default function IngestPage() {
               fixtures.map((f) => (
                 <li key={f.filename}>
                   <a
-                    className="text-sm text-primary no-underline hover:underline"
+                    className="text-[13px] text-foreground no-underline hover:underline"
                     href={f.href}
                     download
                   >
@@ -169,30 +169,30 @@ export default function IngestPage() {
         </section>
       </div>
 
-      <section className="mt-10">
-        <h2 className="text-xl font-semibold">Source library</h2>
+      <section className="mt-6">
+        <h2 className="text-[13px] font-medium">Source library</h2>
         {docs.length === 0 ? (
           <p className="mt-4 text-sm text-muted-foreground">
             No documents ingested yet.
           </p>
         ) : (
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-border bg-card">
-            <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="border-b border-border text-xs tracking-wide text-muted-foreground uppercase">
+          <div className="mt-3 overflow-x-auto border border-border bg-card">
+            <table className="w-full min-w-[640px] text-left text-[13px]">
+              <thead className="border-b border-border text-[11px] text-muted-foreground">
                 <tr>
-                  <th className="px-5 py-3.5">Document</th>
-                  <th className="px-5 py-3.5">Function</th>
-                  <th className="px-5 py-3.5">Parser</th>
-                  <th className="px-5 py-3.5">Blocks</th>
+                  <th className="px-3 py-2 font-medium">Document</th>
+                  <th className="px-3 py-2 font-medium">Function</th>
+                  <th className="px-3 py-2 font-medium">Parser</th>
+                  <th className="px-3 py-2 font-medium">Blocks</th>
                 </tr>
               </thead>
               <tbody>
                 {docs.map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-b-0">
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-2.5">
                       <a
                         href={`/sources/${d.id}`}
-                        className="font-medium text-primary no-underline hover:underline"
+                        className="font-medium text-foreground no-underline hover:underline"
                       >
                         {d.title}
                       </a>
@@ -200,11 +200,11 @@ export default function IngestPage() {
                         {d.filename}
                       </div>
                     </td>
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-2.5">
                       {FUNCTION_LABELS[d.stakeholder_function]}
                     </td>
-                    <td className="px-5 py-4">{d.parser}</td>
-                    <td className="px-5 py-4">{d.blocks}</td>
+                    <td className="px-3 py-2.5">{d.parser}</td>
+                    <td className="px-3 py-2.5">{d.blocks}</td>
                   </tr>
                 ))}
               </tbody>

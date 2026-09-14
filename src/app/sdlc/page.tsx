@@ -56,25 +56,25 @@ export default async function SdlcPage({
         Requirements, architecture, TDD, and eval protocol as written.
         Hill-climb and tests run off-screen.
       </PageIntro>
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-1">
         {SPECS.map((s) => (
           <Link
             key={s.slug}
             href={`/sdlc?spec=${s.slug}`}
-            className={`rounded-full px-3.5 py-1.5 text-sm no-underline transition ${
+            className={`rounded-md px-2 py-1 text-[12px] no-underline ${
               s.slug === active.slug
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-card hover:text-foreground"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
             }`}
           >
             {s.title}
           </Link>
         ))}
       </div>
-      <p className="mb-3 text-sm text-muted-foreground">
+      <p className="mb-2 text-xs text-muted-foreground">
         {active.id} · docs/sdlc/{active.slug}
       </p>
-      <pre className="overflow-auto rounded-2xl border border-border bg-card p-6 font-mono text-sm leading-7 whitespace-pre-wrap text-foreground/90 sm:p-8">
+      <pre className="overflow-auto border border-border bg-card p-4 font-mono text-[12px] leading-5 whitespace-pre-wrap text-foreground/90">
         {body}
       </pre>
     </AppShell>

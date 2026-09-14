@@ -2,7 +2,7 @@ import { AppShell, InsightCard, PageIntro } from "@/components/insight-card";
 import { PostureChip, ThemeChip } from "@/components/theme-chip";
 import { summarizeTheme } from "@/lib/briefing/theme-summary";
 import { getState } from "@/lib/store";
-import { CLASS_STYLES, themeStyle } from "@/lib/theme-style";
+import { CLASS_STYLES } from "@/lib/theme-style";
 import { RESIDUAL_THEME_ID } from "@/lib/cluster/cluster";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -30,7 +30,6 @@ export default async function ThemePage({
     title: d.title,
     filename: d.filename,
   }));
-  const color = themeStyle(theme.id);
 
   return (
     <AppShell active="briefing">
@@ -39,7 +38,7 @@ export default async function ThemePage({
           Monitor
         </Link>
         <span className="mx-2">/</span>
-        <span style={{ color: color.fg }}>{theme.name}</span>
+        <span className="text-foreground">{theme.name}</span>
       </p>
       <PageIntro title={theme.name}>
         <div className="flex flex-wrap items-center gap-3">
@@ -49,7 +48,7 @@ export default async function ThemePage({
         <p className="mt-4 text-foreground/90">{brief.situation}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <span
-            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium"
             style={{
               color: CLASS_STYLES.known.fg,
               backgroundColor: CLASS_STYLES.known.bg,
@@ -58,7 +57,7 @@ export default async function ThemePage({
             {theme.known_count} known
           </span>
           <span
-            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium"
             style={{
               color: CLASS_STYLES.unknown.fg,
               backgroundColor: CLASS_STYLES.unknown.bg,
@@ -67,7 +66,7 @@ export default async function ThemePage({
             {theme.unknown_count} unknown
           </span>
           <span
-            className="rounded-full px-2.5 py-1 text-xs font-medium"
+            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium"
             style={{
               color: CLASS_STYLES.opportunity.fg,
               backgroundColor: CLASS_STYLES.opportunity.bg,
@@ -90,10 +89,10 @@ export default async function ThemePage({
             : "No insights linked yet."}
         </p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Insights</h2>
-            <p className="text-sm text-muted-foreground">
+            <h2 className="text-[13px] font-medium">Insights</h2>
+            <p className="text-xs text-muted-foreground">
               {id === RESIDUAL_THEME_ID
                 ? "Held for a new catalog entry"
                 : "Unknowns first"}{" "}
@@ -112,9 +111,9 @@ export default async function ThemePage({
         </div>
       )}
 
-      <div className="mt-10">
-        <h2 className="text-lg font-semibold">Other themes</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-6">
+        <h2 className="text-[13px] font-medium">Other themes</h2>
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {state.themes
             .filter((t) => t.id !== id)
             .map((t) => (

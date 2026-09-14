@@ -39,40 +39,32 @@ export default async function MonitorPage() {
         </p>
       </PageIntro>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         {briefs.map(({ theme, brief }) => {
           const color = themeStyle(theme.id);
           return (
             <Link
               key={theme.id}
               href={`/themes/${theme.id}`}
-              className="group relative block overflow-hidden rounded-2xl border bg-card p-6 no-underline shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg sm:p-7"
-              style={{
-                borderColor: color.border,
-                background: `linear-gradient(165deg, ${color.bg} 0%, var(--card) 46%)`,
-                boxShadow: `0 18px 40px -24px ${color.glow}`,
-              }}
+              className="relative block border border-border bg-card p-4 no-underline hover:bg-muted/40"
             >
               <span
-                className="absolute inset-y-0 left-0 w-1.5"
+                className="absolute inset-y-0 left-0 w-[3px]"
                 style={{ backgroundColor: color.hue }}
               />
-              <div className="flex items-start justify-between gap-3 pl-2">
-                <h2
-                  className="text-xl font-semibold tracking-tight"
-                  style={{ color: color.fg }}
-                >
+              <div className="flex items-start justify-between gap-3 pl-3">
+                <h2 className="text-[13px] font-medium text-foreground">
                   {theme.name}
                 </h2>
                 <PostureChip posture={brief.posture} />
               </div>
-              <p className="mt-2 pl-2 text-sm text-muted-foreground">
+              <p className="mt-1 pl-3 text-xs text-muted-foreground">
                 As of {brief.as_of_label}
               </p>
-              <p className="mt-4 pl-2 text-[15px] leading-7 text-foreground/90">
+              <p className="mt-3 pl-3 text-[13px] leading-5 text-foreground/90">
                 {brief.situation}
               </p>
-              <div className="mt-5 flex flex-wrap gap-2 pl-2">
+              <div className="mt-3 flex flex-wrap gap-1.5 pl-3">
                 <CountChip
                   label="Known"
                   count={theme.known_count}
@@ -94,11 +86,11 @@ export default async function MonitorPage() {
         })}
       </div>
 
-      <section className="mt-12">
-        <h2 className="text-lg font-semibold text-foreground">
+      <section className="mt-8">
+        <h2 className="text-[13px] font-medium text-foreground">
           Coverage by function
         </h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[...new Set(state.documents.map((d) => d.stakeholder_function))].map(
             (fn) => {
               const docs = state.documents.filter(
@@ -110,12 +102,12 @@ export default async function MonitorPage() {
               return (
                 <div
                   key={fn}
-                  className="rounded-2xl border border-border/80 bg-card px-5 py-4"
+                  className="border border-border bg-card px-4 py-3"
                 >
-                  <p className="text-base font-medium text-foreground">
+                  <p className="text-[13px] font-medium text-foreground">
                     {FUNCTION_LABELS[fn]}
                   </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {docs} sources · {ins} insights
                   </p>
                 </div>
@@ -139,7 +131,7 @@ function CountChip({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium"
       style={{ color: color.fg, backgroundColor: color.bg }}
     >
       <span className="tabular-nums font-semibold">{count}</span>

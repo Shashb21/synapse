@@ -5,7 +5,7 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     page,
   }) => {
     await page.goto("/");
-    await expect(page.getByText("SYNAPSE").first()).toBeVisible();
+    await expect(page.getByText("Synapse").first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /theme monitor/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /access & formulary/i })).toBeVisible();
     await expect(page.getByText(/as of/i).first()).toBeVisible();

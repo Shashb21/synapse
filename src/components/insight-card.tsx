@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { CanonicalInsight, ParsedDocument, Theme } from "@/lib/schema";
 import { FUNCTION_LABELS } from "@/lib/schema";
-import { themeStyle } from "@/lib/theme-style";
 import { ClassChip, ThemeChip } from "@/components/theme-chip";
 
 export function AppShell({
@@ -19,23 +18,21 @@ export function AppShell({
     { href: "/sdlc", id: "sdlc" as const, label: "Spec" },
   ];
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-col items-start gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <Link href="/" className="no-underline">
-            <span className="text-lg font-semibold tracking-[0.18em] text-primary">
-              SYNAPSE
-            </span>
+    <div className="flex min-h-full flex-col bg-background">
+      <header className="sticky top-0 z-20 border-b border-border bg-background">
+        <div className="mx-auto flex w-full max-w-[1100px] items-center gap-6 px-4 py-2.5 sm:px-6">
+          <Link href="/" className="text-[13px] font-medium text-foreground no-underline">
+            Synapse
           </Link>
-          <nav className="flex max-w-full flex-nowrap gap-1 overflow-x-auto rounded-full bg-muted/80 p-1">
+          <nav className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
             {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm whitespace-nowrap no-underline transition ${
+                className={`shrink-0 rounded-md px-2.5 py-1 text-[13px] no-underline ${
                   active === l.id
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-background hover:text-foreground"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                 }`}
               >
                 {l.label}
@@ -44,12 +41,9 @@ export function AppShell({
           </nav>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1200px] flex-1 px-5 py-8 sm:px-8 sm:py-10">
+      <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-6 sm:px-6">
         {children}
       </main>
-      <footer className="border-t border-border/70 px-5 py-4 text-center text-xs text-muted-foreground sm:px-8">
-        Themes first · insights linked, not copied · LlamaCloud + Claude
-      </footer>
     </div>
   );
 }
@@ -64,17 +58,13 @@ export function PageIntro({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="mb-8">
+    <div className="mb-6">
       {kicker ? (
-        <p className="mb-2 text-xs font-medium tracking-[0.16em] text-primary uppercase">
-          {kicker}
-        </p>
+        <p className="mb-1 text-[11px] text-muted-foreground">{kicker}</p>
       ) : null}
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-        {title}
-      </h1>
+      <h1 className="text-lg font-medium text-foreground">{title}</h1>
       {children ? (
-        <div className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">
+        <div className="mt-2 max-w-3xl text-[13px] leading-5 text-muted-foreground">
           {children}
         </div>
       ) : null}
@@ -97,17 +87,10 @@ export function InsightCard({
   const linked = insight.theme_ids
     .map((id) => themes.find((t) => t.id === id))
     .filter((t): t is Pick<Theme, "id" | "name"> => Boolean(t));
-  const accent = themeStyle(linked[0]?.id ?? currentThemeId ?? "THEME-RESIDUAL");
 
   return (
-    <article
-      className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6"
-      style={{
-        borderColor: accent.border,
-        boxShadow: `0 12px 32px -18px ${accent.glow}`,
-      }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
+    <article className="border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-1.5">
         <ClassChip value={insight.classification} />
         {linked.map((t) => (
           <ThemeChip
@@ -119,12 +102,15 @@ export function InsightCard({
           />
         ))}
       </div>
-      <p className="mt-4 text-[15px] leading-7 text-foreground sm:text-base">
+      <p className="mt-3 text-[13px] leading-5 text-foreground">
         {insight.statement}
       </p>
-      <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         {source ? (
-          <Link href={`/sources/${source.id}`} className="text-primary no-underline hover:underline">
+          <Link
+            href={`/sources/${source.id}`}
+            className="text-muted-foreground no-underline hover:text-foreground hover:underline"
+          >
             {source.title}
           </Link>
         ) : (
