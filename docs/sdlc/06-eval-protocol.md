@@ -1,5 +1,7 @@
 # Eval protocol
 
+Hill-climb (`runEvalSweep`) runs automatically when the engine seeds and after every document ingest. `/evals` and `/sdlc` are view-only.
+
 ## Failure modes (critique)
 
 | Kind | Meaning | Cost |

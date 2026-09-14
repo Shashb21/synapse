@@ -1,11 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  buildSeedState,
-  extractAndCluster,
-  ingestParsedDocument,
-  runEvalSweep,
-} from "@/lib/pipeline";
+import { buildSeedState, ingestParsedDocument } from "@/lib/pipeline";
 import { engineStateSchema, type EngineState, type ParsedDocument } from "@/lib/schema";
 
 const RUNTIME_DIR = path.join(process.cwd(), "data", "runtime");
@@ -44,25 +39,6 @@ export async function resetState(): Promise<EngineState> {
 export async function addDocument(document: ParsedDocument): Promise<EngineState> {
   const current = await getState();
   cache = await ingestParsedDocument(current, document);
-  await persist(cache);
-  return cache;
-}
-
-export async function rerunEvals(): Promise<EngineState> {
-  const current = await getState();
-  const { runs, champion } = runEvalSweep(current.documents);
-  const { insights, themes, theme_links } = extractAndCluster(
-    current.documents,
-    champion,
-  );
-  cache = {
-    ...current,
-    eval_runs: runs,
-    champion_prompt_version: champion,
-    insights,
-    themes,
-    theme_links,
-  };
   await persist(cache);
   return cache;
 }

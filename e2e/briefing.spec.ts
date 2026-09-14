@@ -32,4 +32,11 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
       page.getByRole("button", { name: /Run hill-climb sweep/ }),
     ).toHaveCount(0);
   });
+
+  test("REQ-OPS-003 spec tape is view-only", async ({ page }) => {
+    await page.goto("/sdlc");
+    await expect(page.getByRole("heading", { name: "SPEC TAPE" })).toBeVisible();
+    await expect(page.getByText(/View-only/)).toBeVisible();
+    await expect(page.getByRole("button")).toHaveCount(0);
+  });
 });

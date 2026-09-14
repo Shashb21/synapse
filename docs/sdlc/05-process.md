@@ -6,7 +6,7 @@
 2. **Architecture / design** cite those IDs.
 3. **TDD** (`04-tdd.md`) accepts tests before code. PR description lists REQ IDs touched.
 4. **Implement** on the working branch. Keep CIR and `theme_links` the contract.
-5. **Eval sweep** (`POST /api/evals`) — critique / judge / proposer. Champion may move only through the safety gate.
+5. **Eval sweep** — automatic on seed load and every ingest (`runEvalSweep`). EVAL and SPEC are view-only tapes. Champion may move only through the safety gate.
 6. **Regression** `npm test && npm run test:e2e`.
 7. **Review** — Grokbot / Bugbot on the PR; humans accept gold expansions (new insights).
 8. **Ship**.
@@ -23,11 +23,11 @@ Use Origin when: opening/updating PRs, reading review threads, confirming CI.
 
 ## Cloud Agent
 
-Cloud Agent is the right worker for **eval hill-climbs and ingest/parser work**, not for rewriting the theme catalog by vibe.
+Cloud Agent is the right worker for **ingest/parser work and gold/prompt patches**, not for rewriting the theme catalog by vibe. Hill-climb runs in-process; do not add a Run button back to EVAL.
 
 Suggested Cloud Agent jobs:
 
-- Re-run `runEvalSweep` after a prompt patch; commit only if champion composite rises and REQ-EVA-010 holds.
+- After a prompt patch, ingest or reset so `runEvalSweep` lands on the tape; commit only if champion composite rises and REQ-EVA-010 holds.
 - Add a gold insight when critique `kind=new` is human-accepted.
 - Extend local parsers (a new OOXML quirk), with `tests/req-ing-parse.test.ts` updated first.
 

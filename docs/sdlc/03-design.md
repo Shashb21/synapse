@@ -53,8 +53,8 @@ Unknown beats known when the statement contains gap language (`unquantified`, `n
 - `/` briefing: three panes + theme index. Multi-theme insights show every linked badge once; the card is not repeated per theme in a pane.
 - `/themes/[id]` members via join; shows role/score.
 - `/ingest` Office upload + Velmara sample pack.
-- `/evals` hill-climb table, critique findings, proposer patch.
-- `/sdlc` index into these docs.
+- `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button.
+- `/sdlc` view-only spec tape of these docs.
 
 ## Security / data
 

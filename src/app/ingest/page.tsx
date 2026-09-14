@@ -67,8 +67,11 @@ export default function IngestPage() {
       return;
     }
     setStatus("idle");
+    const champion = data.dashboard?.champion_prompt_version as
+      | string
+      | undefined;
     setMessage(
-      `${data.parserUsed === "llamaparse" ? "LlamaCloud" : "Local"} parse · ${data.extractor === "claude" ? "Claude extractor" : "local extractor"} · ${data.document.blocks} blocks${data.llamaError ? ` · LlamaCloud fallback: ${data.llamaError}` : ""}`,
+      `${data.parserUsed === "llamaparse" ? "LlamaCloud" : "Local"} parse · ${data.extractor === "claude" ? "Claude extractor" : "local extractor"} · ${data.document.blocks} blocks · eval ${champion ?? "tape updated"}${data.llamaError ? ` · LlamaCloud fallback: ${data.llamaError}` : ""}`,
     );
     await refresh();
   }
@@ -82,9 +85,10 @@ export default function IngestPage() {
           </h2>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
             LlamaCloud Parse (agentic, specialized charts) reads PPTX graphics
-            and graphs. Claude Sonnet then extracts atomic CIR insights. Put
-            keys in <code>.env.local</code> — documents may leave the VPC for
-            this PoC.
+            and graphs. Claude Sonnet then extracts atomic CIR insights. The
+            eval hill-climb re-scores automatically after each ingest — EVAL
+            and SPEC are view-only. Put keys in <code>.env.local</code> —
+            documents may leave the VPC for this PoC.
           </p>
           {providers ? (
             <p className="mt-3 text-xs">
@@ -131,7 +135,7 @@ export default function IngestPage() {
           ) : null}
           {status === "loading" ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              Extracting atomic insights…
+              Extracting atomic insights and re-running the eval tape…
             </p>
           ) : null}
         </section>

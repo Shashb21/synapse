@@ -18,7 +18,8 @@ Cycle: **review spec → accept → write failing/lock test → implement → pa
 | TDD-ING-01 | REQ-ING-001/002/003 | PPTX/DOCX/XLSX → blocks | `tests/req-ing-parse.test.ts` |
 | TDD-E2E-01 | REQ-KNO-004 | Briefing three panes | `e2e/briefing.spec.ts` |
 | TDD-E2E-02 | REQ-CLU-002 | Theme page linkage | same |
-| TDD-E2E-03 | REQ-EVA-009 | Eval lab sweep | same |
+| TDD-E2E-03 | REQ-EVA-009 | View-only eval tape (automatic hill-climb) | same |
+| TDD-E2E-04 | REQ-OPS-003 | View-only spec tape | same |
 
 ## Commands
 

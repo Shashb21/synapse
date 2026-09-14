@@ -66,9 +66,9 @@ Cross-functional biopharma teams (commercial, market access, medical affairs, cl
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | REQ-REG-001 | Unit tests name the requirement ID they lock. | Must |
-| REQ-REG-002 | End-to-end regression covers briefing, theme linkage, and eval lab. | Must |
+| REQ-REG-002 | End-to-end regression covers briefing, theme linkage, and the view-only eval tape. | Must |
 | REQ-REG-003 | CI runs unit + e2e on Origin. | Should |
-| REQ-OPS-001 | Cloud Agent may run eval sweeps and propose prompt patches as PRs. | Should |
+| REQ-OPS-001 | Hill-climb runs automatically on seed and ingest. Cloud Agent may propose prompt patches as PRs when champion composite rises. | Should |
 | REQ-OPS-002 | Grokbot / Bugbot reviews PRs for eval regressions and missing REQ mapping. | Should |
 | REQ-OPS-003 | SDLC docs (this set) are the system of record for architecture and TDD. | Must |
 
