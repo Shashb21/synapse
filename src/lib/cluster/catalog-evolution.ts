@@ -21,10 +21,22 @@ const NAME_STOP = new Set([
   "gap",
   "play",
   "remain",
+  "remains",
   "still",
   "also",
   "both",
   "additional",
+  "have",
+  "been",
+  "from",
+  "this",
+  "that",
+  "with",
+  "will",
+  "does",
+  "exists",
+  "whether",
+  "confirmed",
 ]);
 
 /** Alias families so CNS / intracranial / brain-mets / n=28 brief as one object. */
@@ -141,7 +153,12 @@ function pickChildCohort(
 function bestKeywordSplit(
   members: CanonicalInsight[],
   keywords: string[],
-): { child: CanonicalInsight[]; k1: string; k2: string } | null {
+): {
+  child: CanonicalInsight[];
+  k1: string;
+  k2: string;
+  score: number;
+} | null {
   const tagged = members.map((insight) => ({
     insight,
     keys: hitSet(insight.statement, keywords),
@@ -176,6 +193,7 @@ function bestKeywordSplit(
     child: pickChildCohort(best.k1, best.ex1, best.k2, best.ex2),
     k1: best.k1,
     k2: best.k2,
+    score: best.score,
   };
 }
 
@@ -183,10 +201,11 @@ export function keywordsFromInsights(insights: CanonicalInsight[]): string[] {
   const counts = new Map<string, number>();
   for (const insight of insights) {
     for (const token of normalize(insight.statement).split(" ")) {
-      if (token.length < 4 || NAME_STOP.has(token) || /^\d+$/.test(token)) {
+      const clean = token.replace(/^\.+|\.+$/g, "");
+      if (clean.length < 4 || NAME_STOP.has(clean) || /^\d+$/.test(clean)) {
         continue;
       }
-      counts.set(token, (counts.get(token) ?? 0) + 1);
+      counts.set(clean, (counts.get(clean) ?? 0) + 1);
     }
   }
   return [...counts.entries()]
@@ -250,27 +269,50 @@ export function proposeCatalogChanges(
   }
 
   const named = catalog.filter((t) => t.id !== RESIDUAL_THEME_ID);
+  const splitCandidates: {
+    theme: CatalogTheme;
+    child: CanonicalInsight[];
+    k1: string;
+    k2: string;
+    score: number;
+  }[] = [];
   for (const theme of named) {
     const members = insights.filter((i) => i.theme_ids.includes(theme.id));
     if (members.length < SPLIT_MIN_THEME) continue;
     const split = bestKeywordSplit(members, theme.keywords);
     if (!split || split.child.length < SPLIT_MIN_EXCLUSIVE) continue;
+    splitCandidates.push({ theme, ...split });
+  }
+  const bestScore = Math.max(0, ...splitCandidates.map((c) => c.score));
+  const splits =
+    bestScore === 0
+      ? []
+      : splitCandidates
+          .filter((c) => c.score === bestScore)
+          .sort(
+            (a, b) =>
+              b.child.length - a.child.length ||
+              a.theme.id.localeCompare(b.theme.id),
+          )
+          .slice(0, 1);
+
+  for (const split of splits) {
     const insight_ids = split.child.map((g) => g.id);
     const id = proposalId("split", insight_ids);
     if (decided.has(id)) continue;
     const keywords = keywordsFromInsights(split.child);
-    const name = titleFromKeywords(keywords, `${theme.name} (split)`);
+    const name = titleFromKeywords(keywords, `${split.theme.name} (split)`);
     const cohesion = meanPairwise(split.child);
     next.push({
       id,
       kind: "split",
       status: "proposed",
       name,
-      summary: `A cohort inside ${theme.name} is a separate decision object.`,
+      summary: `A cohort inside ${split.theme.name} is a separate decision object.`,
       keywords,
       insight_ids,
-      parent_theme_id: theme.id,
-      rationale: `${theme.name} is briefing two decision objects (${split.k1} vs ${split.k2}). Child of ${split.child.length} CIR; parent stays. Catalog is append-only.`,
+      parent_theme_id: split.theme.id,
+      rationale: `${split.theme.name} is briefing two decision objects (${split.k1} vs ${split.k2}). Child of ${split.child.length} CIR; parent stays. Catalog is append-only.`,
       sources: sourceCount(split.child),
       cohesion,
       created_at: now,

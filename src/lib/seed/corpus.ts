@@ -212,7 +212,7 @@ const medical: SeedDoc = {
     {
       location: { kind: "page", ref: "p.4" },
       heading: "REMS",
-      text: "A REMS for velmaratinib remains unspecified; no elements have been proposed.",
+      text: "A REMS for velmaratinib remains unspecified, with no elements proposed.",
       kind: "paragraph",
     },
   ],
@@ -832,7 +832,7 @@ export const GOLD_INSIGHTS: GoldInsight[] = [
   {
     id: "GOLD-041",
     statement:
-      "A REMS for velmaratinib remains unspecified; no elements have been proposed.",
+      "A REMS for velmaratinib remains unspecified, with no elements proposed.",
     source_document_id: "DOC-MED-001",
     classification: "unknown",
     stakeholder_function: "medical_affairs",

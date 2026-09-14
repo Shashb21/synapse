@@ -25,7 +25,7 @@ A named theme splits when it is **briefing two decision objects**.
 2. Canonicalize aliases so families group: `cns` / `intracranial` / `brain` / `brain-mets` / `n=28`; `discontinuation` / `persistence`.
 3. Each member’s hit-set is those aliased keywords, or `{__none__}` if none match.
 4. Find the keyword pair `(k1, k2)` maximizing `|exclusive(k1)| × |exclusive(k2)|`, where exclusive(k) = members hitting k and not the other. Both exclusive sets must be ≥ 2.
-5. Propose a **child** from the **smaller** exclusive set. One split proposal per parent.
+5. Propose a **child** from the **smaller** exclusive set. If several named themes qualify, only the strongest pair is queued so splits do not fire on every theme.
 6. Accepting appends the child (`parent_theme_id` set), re-links, and force-adds a join for those CIR while **keeping the parent**. The parent is never deleted. Statements are not copied.
 
 Example: Evidence gaps may later yield a CNS RWE theme if intracranial package and 6-month discontinuation stop briefing as one situation.

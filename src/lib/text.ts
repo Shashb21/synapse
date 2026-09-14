@@ -42,6 +42,7 @@ export function normalize(text: string): string {
 export function tokens(text: string): string[] {
   return normalize(text)
     .split(" ")
+    .map((t) => t.replace(/^\.+|\.+$/g, ""))
     .map((t) => t.replace(/(ing|ed|es|s)$/i, ""))
     .filter((t) => t.length > 1 && !STOP.has(t));
 }
