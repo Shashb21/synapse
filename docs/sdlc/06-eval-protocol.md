@@ -1,0 +1,38 @@
+# Eval protocol
+
+## Failure modes (critique)
+
+| Kind | Meaning | Cost |
+| --- | --- | --- |
+| wrong | Ungrounded, inverted, or fabricated | Highest — never brief |
+| missed | Gold / source claim with no extracted counterpart | High — silent gap |
+| partial | Double-barreled, generic, missing the operative noun | Medium — unusable in a VP briefing |
+| new | Grounded extracted claim not in gold | Bonus if quote is real; queue for gold review |
+
+## Metrics
+
+- Precision uses full credit for exact pairs and half credit for partials.
+- Recall is computed on `must_find` gold only.
+- Composite = `0.34 F1 + 0.22 (1 − wrong) + 0.20 (1 − missed) + 0.14 (1 − partial) + 0.10 min(new, 0.25)`.
+
+## Judge safety gate (REQ-EVA-010)
+
+Promote only if:
+
+1. Δ wrong-rate ≤ +0.05 vs champion
+2. Δ composite ≥ +0.01
+3. must-find recall does not drop more than 0.02
+
+Otherwise **hold** or **regress**. Wrong is more expensive than missed.
+
+## Hill-climb ladder
+
+`v1.0-baseline` (bullets only) → `v1.1-atomic` → `v1.2-gap-sensitive` → `v1.3-cross-functional`.
+
+The improver (proposer) maps high missed-rate to prose/table extraction, high partial-rate to atomic split, high wrong-rate to a grounding threshold.
+
+## Gold hygiene
+
+- One gold row = one atomic claim.
+- `theme_ids[0]` is the primary decision object; additional IDs encode true multi-label membership.
+- Grounded `new` findings become gold only after a human accept. Cloud Agent may open the PR; it may not silently enlarge gold.

@@ -1,0 +1,47 @@
+# SDLC process — Origin, Cloud Agent, Grokbot
+
+## Loop
+
+1. **Requirements** (`01-requirements.md`) get IDs. No silent scope.
+2. **Architecture / design** cite those IDs.
+3. **TDD** (`04-tdd.md`) accepts tests before code. PR description lists REQ IDs touched.
+4. **Implement** on the working branch. Keep CIR and `theme_links` the contract.
+5. **Eval sweep** (`POST /api/evals`) — critique / judge / proposer. Champion may move only through the safety gate.
+6. **Regression** `npm test && npm run test:e2e`.
+7. **Review** — Grokbot / Bugbot on the PR; humans accept gold expansions (new insights).
+8. **Ship**.
+
+## Origin
+
+Origin is the source-of-truth git host and PR surface.
+
+- Open PRs against `main` with REQ IDs in the title or body (`REQ-CLU-002`, …).
+- CI (`.github/workflows/ci.yml`) runs unit tests on every push; e2e when browsers are available.
+- `origin pr checks` is the merge gate. An empty check list locally still means: run `npm test` before you merge.
+
+Use Origin when: opening/updating PRs, reading review threads, confirming CI.
+
+## Cloud Agent
+
+Cloud Agent is the right worker for **eval hill-climbs and ingest/parser work**, not for rewriting the theme catalog by vibe.
+
+Suggested Cloud Agent jobs:
+
+- Re-run `runEvalSweep` after a prompt patch; commit only if champion composite rises and REQ-EVA-010 holds.
+- Add a gold insight when critique `kind=new` is human-accepted.
+- Extend local parsers (a new OOXML quirk), with `tests/req-ing-parse.test.ts` updated first.
+
+Do not let an agent invent theme names. Residuals propose; humans name.
+
+## Grokbot (Bugbot-style review)
+
+On every PR that touches `src/lib/extract`, `src/lib/eval`, `src/lib/cluster`, or gold:
+
+- Fail review if a new extractor path has no REQ-ID test.
+- Fail review if `theme_links` is bypassed (copying `statement` onto a theme, or assigning a single `theme_id` again).
+- Flag gold edits that drop `must_find` without a judge rationale.
+- Flag LlamaParse-only logic with no local fallback (REQ-ING-004).
+
+## Local vs hosted LLM
+
+v1 ships a deterministic proposer/critique/judge so the product works without keys. When `OPENAI_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY` is later wired, the **same JSON contracts and gold set** score the LLM path. Do not fork the CIR schema per vendor.
