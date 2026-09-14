@@ -81,4 +81,29 @@ describe("REQ-CLU-001 catalog multi-label linkage", () => {
     expect(links[0]?.theme_id).toBe("THEME-RESIDUAL");
     expect(links[0]?.method).toBe("residual");
   });
+
+  it("REQ-CLU-005 keeps Unassigned on the catalog even when empty", () => {
+    const { themes, insights } = assignThemes([
+      insight(
+        "Formulary decisions at Aetna are delayed into Q1 2027 because both accounts requested 6-month discontinuation RWE.",
+        { id: "INS-ACCESS" },
+      ),
+    ]);
+    const residual = themes.find((t) => t.id === "THEME-RESIDUAL");
+    expect(residual).toBeTruthy();
+    expect(residual?.insight_ids).toEqual([]);
+    expect(insights[0]?.theme_ids).not.toContain("THEME-RESIDUAL");
+  });
+
+  it("REQ-CLU-005 lists unmatched CIR rows on Unassigned without dropping them", () => {
+    const { themes, insights } = assignThemes([
+      insight("The weather in Basel was unseasonably mild during the advisory.", {
+        id: "INS-WEATHER",
+      }),
+    ]);
+    const residual = themes.find((t) => t.id === "THEME-RESIDUAL");
+    expect(insights).toHaveLength(1);
+    expect(insights[0]?.theme_ids).toEqual(["THEME-RESIDUAL"]);
+    expect(residual?.insight_ids).toEqual(["INS-WEATHER"]);
+  });
 });

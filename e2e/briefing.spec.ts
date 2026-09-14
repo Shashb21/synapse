@@ -40,4 +40,16 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await expect(page.getByText(/view-only/i).first()).toBeVisible();
     await expect(page.getByRole("button")).toHaveCount(0);
   });
+
+  test("REQ-CLU-005 insights tab lists every CIR and Unassigned", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: /^insights$/i }).click();
+    await expect(page.getByRole("heading", { name: /all insights/i })).toBeVisible();
+    await expect(page.locator("article").first()).toBeVisible();
+    await expect(page.getByText(/unassigned/i).first()).toBeVisible();
+    await page.getByRole("link", { name: /unassigned/i }).first().click();
+    await expect(page.getByText(/catalog floor|unassigned is empty/i)).toBeVisible();
+  });
 });

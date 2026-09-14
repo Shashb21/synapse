@@ -3,6 +3,7 @@ import { PostureChip, ThemeChip } from "@/components/theme-chip";
 import { summarizeTheme } from "@/lib/briefing/theme-summary";
 import { getState } from "@/lib/store";
 import { CLASS_STYLES, themeStyle } from "@/lib/theme-style";
+import { RESIDUAL_THEME_ID } from "@/lib/cluster/cluster";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -76,18 +77,27 @@ export default async function ThemePage({
           </span>
         </div>
         <p className="mt-3 text-sm">
-          The same insight may also sit on other themes — linked, not copied.
+          {id === RESIDUAL_THEME_ID
+            ? "These claims stayed out of the named catalog. They are still CIR rows — linked here only — until a human adds a theme."
+            : "The same insight may also sit on other themes — linked, not copied."}
         </p>
       </PageIntro>
 
       {insights.length === 0 ? (
-        <p className="text-base text-muted-foreground">No insights linked yet.</p>
+        <p className="text-base leading-7 text-muted-foreground">
+          {id === RESIDUAL_THEME_ID
+            ? "Unassigned is empty. New claims that miss the catalog floor land here, held once, until a human names a theme."
+            : "No insights linked yet."}
+        </p>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Insights</h2>
             <p className="text-sm text-muted-foreground">
-              Unknowns first · {insights.length} in this theme
+              {id === RESIDUAL_THEME_ID
+                ? "Held for a new catalog entry"
+                : "Unknowns first"}{" "}
+              · {insights.length} in this theme
             </p>
           </div>
           {insights.map((insight) => (

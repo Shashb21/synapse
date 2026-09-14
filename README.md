@@ -20,7 +20,8 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
 | Route | What |
 | --- | --- |
-| `/` | Known / unknown / opportunity briefing |
+| `/` | Theme monitor (Unassigned holds weak matches) |
+| `/insights` | All CIR rows; filter by theme or class |
 | `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
 | `/evals` | View-only eval tape (hill-climb is automatic) |
 | `/sdlc` | View-only spec tape |

@@ -16,6 +16,8 @@ export default async function MonitorPage() {
       brief: summarizeTheme(theme, state.insights, state.asset.as_of),
     }))
     .sort((a, b) => {
+      if (a.theme.id === "THEME-RESIDUAL") return 1;
+      if (b.theme.id === "THEME-RESIDUAL") return -1;
       const rank = { "GAP-HEAVY": 0, ACTIONABLE: 1, STABLE: 2, EMPTY: 3 };
       const dr = rank[a.brief.posture] - rank[b.brief.posture];
       if (dr !== 0) return dr;
@@ -28,7 +30,8 @@ export default async function MonitorPage() {
         <p>
           {state.asset.molecule} · {state.asset.indication}. Situation first —
           open a theme for the constituent insights, sources, and cross-theme
-          links. Insights are stored once.
+          links. Insights are stored once. Weak matches wait in Unassigned
+          instead of being forced into a theme.
         </p>
         <p className="mt-2 text-sm">
           As of {state.asset.as_of} · {state.documents.length} sources ·{" "}

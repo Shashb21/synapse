@@ -9,10 +9,11 @@ export function AppShell({
   active,
 }: {
   children: React.ReactNode;
-  active: "briefing" | "ingest" | "evals" | "sdlc";
+  active: "briefing" | "insights" | "ingest" | "evals" | "sdlc";
 }) {
   const links = [
     { href: "/", id: "briefing" as const, label: "Monitor" },
+    { href: "/insights", id: "insights" as const, label: "Insights" },
     { href: "/ingest", id: "ingest" as const, label: "Ingest" },
     { href: "/evals", id: "evals" as const, label: "Eval" },
     { href: "/sdlc", id: "sdlc" as const, label: "Spec" },
@@ -31,7 +32,7 @@ export function AppShell({
               <Link
                 key={l.href}
                 href={l.href}
-                className={`rounded-full px-3.5 py-1.5 text-sm no-underline transition ${
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm whitespace-nowrap no-underline transition ${
                   active === l.id
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-background hover:text-foreground"

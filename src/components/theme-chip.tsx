@@ -19,14 +19,14 @@ export function ThemeChip({
 }) {
   const s = themeStyle(id);
   const className = `inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium no-underline transition ${
-    current ? "opacity-70" : "hover:brightness-125"
+    current ? "ring-1 ring-current" : "hover:brightness-125"
   }`;
   const style = {
     color: s.fg,
     backgroundColor: s.bg,
     borderColor: s.border,
   };
-  if (href && !current) {
+  if (href) {
     return (
       <Link href={href} className={className} style={style}>
         {name}

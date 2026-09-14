@@ -20,6 +20,7 @@ Cycle: **review spec → accept → write failing/lock test → implement → pa
 | TDD-E2E-02 | REQ-CLU-002 | Theme page linkage | same |
 | TDD-E2E-03 | REQ-EVA-009 | View-only eval tape (automatic hill-climb) | same |
 | TDD-E2E-04 | REQ-OPS-003 | View-only spec tape | same |
+| TDD-E2E-05 | REQ-CLU-005 | Insights tab + Unassigned | same |
 
 ## Commands
 

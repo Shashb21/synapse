@@ -18,6 +18,16 @@ describe("REQ-KNO-004 theme-first situation briefs", () => {
     expect(brief.posture).not.toBe("EMPTY");
   });
 
+  it("REQ-CLU-005 residual briefs stay out of named themes", () => {
+    const { insights, themes } = assignThemes(
+      proposeInsights(SEED_DOCUMENTS, "v1.3-cross-functional"),
+    );
+    const residual = themes.find((t) => t.id === "THEME-RESIDUAL");
+    expect(residual).toBeTruthy();
+    const brief = summarizeTheme(residual!, insights, "2026-09-14T10:00:00.000Z");
+    expect(brief.situation).toMatch(/catalog floor/i);
+  });
+
   it("formats terminal timestamps", () => {
     expect(formatTerminalTime("2026-09-14T10:00:00.000Z")).toBe("14-SEP-26 10:00Z");
   });

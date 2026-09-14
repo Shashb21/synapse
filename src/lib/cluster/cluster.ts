@@ -7,7 +7,8 @@ import type {
 } from "@/lib/schema";
 import { statementSimilarity, tokens } from "@/lib/text";
 
-const RESIDUAL_ID = "THEME-RESIDUAL";
+export const RESIDUAL_THEME_ID = "THEME-RESIDUAL";
+const RESIDUAL_ID = RESIDUAL_THEME_ID;
 const PRIMARY_FLOOR = 0.45;
 const SECONDARY_FLOOR = 0.9;
 const SECONDARY_RATIO = 0.48;
@@ -218,7 +219,7 @@ export function assignThemes(insights: CanonicalInsight[]): {
       opportunity_count: records.filter((m) => m.classification === "opportunity")
         .length,
     };
-  }).filter((t) => t.insight_ids.length > 0);
+  }).filter((t) => t.id === RESIDUAL_ID || t.insight_ids.length > 0);
 
   return { insights: tagged, themes, theme_links };
 }

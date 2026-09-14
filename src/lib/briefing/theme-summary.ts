@@ -59,10 +59,15 @@ export function summarizeTheme(
   else if (theme.opportunity_count > 0 && theme.unknown_count > 0) posture = "ACTIONABLE";
 
   const parts: string[] = [];
+  if (theme.id === "THEME-RESIDUAL") {
+    parts.push(
+      "Did not clear the catalog floor. Held once in Unassigned — not dropped, and not mashed into the nearest theme. Humans name a new catalog entry from this queue.",
+    );
+  }
   if (known) parts.push(clip(known.statement));
   if (unknown) parts.push(`Gap: ${clip(unknown.statement, 140)}`);
   if (opportunity) parts.push(`Play: ${clip(opportunity.statement, 140)}`);
-  if (parts.length === 0) {
+  if (parts.length === 0 && theme.id !== "THEME-RESIDUAL") {
     parts.push(theme.summary);
   }
 
