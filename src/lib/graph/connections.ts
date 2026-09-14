@@ -17,6 +17,24 @@ const ALIAS: Record<string, string> = {
   "n=28": "cns",
 };
 
+const ENTITY_LABEL: Record<string, string> = {
+  cns: "CNS",
+  community: "community / site of care",
+  rems: "REMS",
+  "nx-441": "NX-441",
+  aetna: "Aetna",
+  united: "UnitedHealthcare",
+  nps: "NPS",
+  amcp: "AMCP",
+  ira: "IRA",
+  icer: "ICER",
+  pdufa: "PDUFA",
+};
+
+function entityLabel(entity: string): string {
+  return ENTITY_LABEL[entity] ?? entity;
+}
+
 export type RevelationKind = "blend" | "bridge" | "gap_closure";
 
 export type Revelation = {
@@ -68,53 +86,108 @@ function insightById(
   return insights.find((i) => i.id === id);
 }
 
+function sortedIds(ids: string[]): string[] {
+  return [...new Set(ids)].sort();
+}
+
+function mergeRevelation(
+  existing: Revelation | undefined,
+  next: Revelation,
+): Revelation {
+  if (!existing) return next;
+  return {
+    ...existing,
+    insight_ids: sortedIds([...existing.insight_ids, ...next.insight_ids]).slice(
+      0,
+      4,
+    ),
+    score: Math.max(existing.score, next.score),
+  };
+}
+
+function pickDiverse(revelations: Revelation[], limit: number): Revelation[] {
+  const ranked = [...revelations].sort(
+    (a, b) => b.score - a.score || a.title.localeCompare(b.title),
+  );
+  const byKind: Record<RevelationKind, Revelation[]> = {
+    blend: [],
+    bridge: [],
+    gap_closure: [],
+  };
+  for (const row of ranked) byKind[row.kind].push(row);
+  const picked: Revelation[] = [];
+  const used = new Set<string>();
+  const take = (kind: RevelationKind, n: number) => {
+    for (const row of byKind[kind]) {
+      if (picked.length >= limit) return;
+      if (used.has(row.id)) continue;
+      if (n <= 0) return;
+      picked.push(row);
+      used.add(row.id);
+      n -= 1;
+    }
+  };
+  take("blend", 4);
+  take("bridge", 3);
+  take("gap_closure", 4);
+  for (const row of ranked) {
+    if (picked.length >= limit) break;
+    if (used.has(row.id)) continue;
+    picked.push(row);
+    used.add(row.id);
+  }
+  return picked.sort(
+    (a, b) => b.score - a.score || a.title.localeCompare(b.title),
+  );
+}
+
 export function buildKnowledgeGraph(state: {
   insights: CanonicalInsight[];
   themes: Theme[];
   theme_links: ThemeLink[];
 }): KnowledgeGraph {
   const { insights, themes } = state;
-  const revelations: Revelation[] = [];
+  const blended = new Map<string, Revelation>();
 
   for (const insight of insights) {
-    const theme_ids = namedThemes(insight.theme_ids);
+    const theme_ids = sortedIds(namedThemes(insight.theme_ids));
     if (theme_ids.length < 2) continue;
     const names = theme_ids.map((id) => themeName(themes, id));
-    revelations.push({
-      id: hashId("REV", `blend:${insight.id}`),
-      kind: "blend",
-      title: `${names.join(" × ")}`,
-      why: `One CIR sits on ${names.join(" and ")}. That intersection is the briefing object — the documents never copied the sentence; the join did.`,
-      insight_ids: [insight.id],
-      theme_ids,
-      score: theme_ids.length * 3,
-    });
+    const key = `blend:${theme_ids.join("+")}`;
+    blended.set(
+      key,
+      mergeRevelation(blended.get(key), {
+        id: hashId("REV", key),
+        kind: "blend",
+        title: names.join(" × "),
+        why: `CIR on ${names.join(" and ")} stay one note. The intersection is the briefing object — copying the sentence onto each theme would hide the join.`,
+        insight_ids: [insight.id],
+        theme_ids,
+        score: theme_ids.length * 3 + 1,
+      }),
+    );
   }
 
-  const seenPair = new Set<string>();
+  const linked = new Map<string, Revelation>();
   for (let i = 0; i < insights.length; i += 1) {
     for (let j = i + 1; j < insights.length; j += 1) {
       const a = insights[i]!;
       const b = insights[j]!;
-      const entitiesA = entityMentions(a.statement);
-      const entitiesB = entityMentions(b.statement);
-      const shared = [...entitiesA].filter((e) => entitiesB.has(e));
+      const shared = [...entityMentions(a.statement)].filter((e) =>
+        entityMentions(b.statement).has(e),
+      );
       if (shared.length === 0) continue;
+      if (a.knowledge_state.corroborated_by.includes(b.id)) continue;
 
       const themesA = new Set(namedThemes(a.theme_ids));
       const themesB = new Set(namedThemes(b.theme_ids));
+      const theme_ids = sortedIds([...themesA, ...themesB]);
+      if (theme_ids.length === 0) continue;
       const themeOverlap = [...themesA].filter((t) => themesB.has(t));
-      const pairKey = `${a.id}:${b.id}:${shared.sort().join(",")}`;
-      if (seenPair.has(pairKey)) continue;
-      seenPair.add(pairKey);
-
-      const alreadySameClaim = a.knowledge_state.corroborated_by.includes(b.id);
-      if (alreadySameClaim) continue;
-
       const entity = shared[0]!;
-      const theme_ids = [...new Set([...themesA, ...themesB])];
       const namesA = [...themesA].map((id) => themeName(themes, id));
       const namesB = [...themesB].map((id) => themeName(themes, id));
+      const label = entityLabel(entity);
 
       const classes = new Set([a.classification, b.classification]);
       const gapPair =
@@ -124,42 +197,57 @@ export function buildKnowledgeGraph(state: {
         a.stakeholder_function !== b.stakeholder_function;
       const differentDocs = a.source_document_id !== b.source_document_id;
       const noSharedTheme = themeOverlap.length === 0;
+      const otherClass =
+        a.classification === "unknown" ? b.classification : a.classification;
 
       if (gapPair && (noSharedTheme || differentFunctions)) {
-        revelations.push({
-          id: hashId("REV", `gap:${a.id}:${b.id}:${entity}`),
-          kind: "gap_closure",
-          title: `${entity.toUpperCase()} across ${[...new Set([...namesA, ...namesB])].slice(0, 3).join(" / ")}`,
-          why: `An unknown and a ${b.classification === "unknown" ? a.classification : b.classification} both mention ${entity}. No source wrote the combined implication; it only exists once both CIR are in the graph.`,
-          entity,
-          insight_ids: [a.id, b.id],
-          theme_ids,
-          score:
-            5 +
-            (differentDocs ? 2 : 0) +
-            (differentFunctions ? 2 : 0) +
-            (noSharedTheme ? 2 : 0),
-        });
+        const key = `gap:${entity}:${theme_ids.join("+")}`;
+        linked.set(
+          key,
+          mergeRevelation(linked.get(key), {
+            id: hashId("REV", key),
+            kind: "gap_closure",
+            title: `${label} across ${theme_ids
+              .map((id) => themeName(themes, id))
+              .slice(0, 3)
+              .join(" / ")}`,
+            why: `An unknown and a ${otherClass} both mention ${label}. No source wrote the combined implication; it only exists once both CIR are in the graph.`,
+            entity,
+            insight_ids: [a.id, b.id],
+            theme_ids,
+            score:
+              5 +
+              (differentDocs ? 2 : 0) +
+              (differentFunctions ? 2 : 0) +
+              (noSharedTheme ? 2 : 0),
+          }),
+        );
         continue;
       }
 
       if (noSharedTheme && differentDocs) {
-        revelations.push({
-          id: hashId("REV", `bridge:${a.id}:${b.id}:${entity}`),
-          kind: "bridge",
-          title: `${entity} links ${namesA[0] ?? "Unassigned"} to ${namesB[0] ?? "Unassigned"}`,
-          why: `${entity} appears in two claims that do not share a theme. The decks never cross-referenced them; walking the graph did.`,
-          entity,
-          insight_ids: [a.id, b.id],
-          theme_ids,
-          score: 3 + shared.length + (differentFunctions ? 1 : 0),
-        });
+        const key = `bridge:${entity}:${theme_ids.join("+")}`;
+        linked.set(
+          key,
+          mergeRevelation(linked.get(key), {
+            id: hashId("REV", key),
+            kind: "bridge",
+            title: `${label} links ${namesA[0] ?? "Unassigned"} to ${namesB[0] ?? "Unassigned"}`,
+            why: `${label} appears in two claims that do not share a theme. The decks never cross-referenced them; walking the graph did.`,
+            entity,
+            insight_ids: [a.id, b.id],
+            theme_ids,
+            score: 3 + shared.length + (differentFunctions ? 1 : 0),
+          }),
+        );
       }
     }
   }
 
-  revelations.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  const capped = revelations.slice(0, 14);
+  const capped = pickDiverse(
+    [...blended.values(), ...linked.values()],
+    12,
+  );
 
   const named = themes.filter(
     (t) => t.id !== RESIDUAL_THEME_ID && t.insight_ids.length > 0,
