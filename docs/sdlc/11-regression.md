@@ -28,7 +28,7 @@ A failing eval composite vs the committed champion is a **regress** (REQ-EVA-010
 | Ingest sources + upload control | REQ-UX-006, REQ-ING-005 | `tests/req-lock.test.ts` | `e2e/user-flow.spec.ts` |
 | Source page CIR | REQ-UX-007 | — (join is CIR `source_document_id`) | `e2e/user-flow.spec.ts` |
 | Eval tape view-only, automatic hill-climb | REQ-UX-008, REQ-EVA-009, REQ-OPS-001 | `tests/req-ext-eval.test.ts` | TDD-E2E-03 |
-| Spec tape + flow diagrams | REQ-UX-008, REQ-OPS-003, REQ-REG-004 | — | TDD-E2E-04 |
+| Spec tape + flow diagrams | REQ-UX-008, REQ-OPS-003, REQ-REG-004 | `tests/req-docs-mermaid.test.ts` | TDD-E2E-04 |
 
 ## Engine Must REQ → tests
 

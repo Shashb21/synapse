@@ -6,44 +6,44 @@ Synapse is not a file cabinet of PPTX. Each readout adds **notes**. Themes are *
 
 ```mermaid
 flowchart TD
-  subgraph sources [Functions produce readouts]
-    com[Commercial]
-    acc[Market access]
-    med[Medical affairs]
-    ops[ClinOps]
-    mkt[Marketing]
+  subgraph sources["Functions produce readouts"]
+    com["Commercial"]
+    acc["Market access"]
+    med["Medical affairs"]
+    ops["ClinOps"]
+    mkt["Marketing"]
   end
 
-  sources --> ingest[Ingest a deck into Synapse]
-  ingest --> extract[Extract atomic insights]
-  extract --> classify[Classify known / unknown / opportunity]
-  classify --> score[Score against the current catalog]
+  sources --> ingest["Ingest a deck into Synapse"]
+  ingest --> extract["Extract atomic insights"]
+  extract --> classify["Classify known / unknown / opportunity"]
+  classify --> score["Score against the current catalog"]
 
-  score -->|clears the floor| join[Link the CIR onto one or more named themes]
-  score -->|weak max| residual[Hold once in Unassigned]
+  score -->|"clears the floor"| join["Link the CIR onto one or more named themes"]
+  score -->|"weak max"| residual["Hold once in Unassigned"]
 
-  join --> monitor[Theme monitor: situation, known, unknown, opportunity]
-  residual --> emergeQ{Do two or more Unassigned claims share a decision?}
-  emergeQ -->|no| wait[Wait for the next deck]
-  emergeQ -->|yes| emerge[Emerge proposal on Catalog]
+  join --> monitor["Theme monitor: situation, known, unknown, opportunity"]
+  residual --> emergeQ{"Do two or more Unassigned claims share a decision?"}
+  emergeQ -->|no| wait["Wait for the next deck"]
+  emergeQ -->|yes| emerge["Emerge proposal on Catalog"]
 
-  join --> splitQ{Is this named theme briefing two decisions?}
-  splitQ -->|no| graph
-  splitQ -->|yes| split[Split proposal on Catalog]
+  join --> splitQ{"Is this named theme briefing two decisions?"}
+  splitQ -->|no| kg
+  splitQ -->|yes| split["Split proposal on Catalog"]
 
-  emerge --> human[Human accepts or rejects]
+  emerge --> human["Human accepts or rejects"]
   split --> human
-  human -->|accept emerge| grow[Catalog appends a new theme]
-  human -->|accept split| child[Catalog appends a child; parent stays]
+  human -->|"accept emerge"| grow["Catalog appends a new theme"]
+  human -->|"accept split"| child["Catalog appends a child, parent stays"]
   human -->|reject| wait
   grow --> join
   child --> join
 
-  join --> graph[Knowledge graph walks joins]
-  residual --> graph
-  graph --> reveal[Revelations: blend, bridge, new implication]
+  join --> kg["Knowledge graph walks joins"]
+  residual --> kg
+  kg --> reveal["Revelations: blend, bridge, new implication"]
   reveal --> monitor
-  monitor --> next[Next readout arrives]
+  monitor --> next["Next readout arrives"]
   next --> ingest
   wait --> ingest
 ```

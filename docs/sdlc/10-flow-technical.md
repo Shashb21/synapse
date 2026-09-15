@@ -8,64 +8,64 @@ Runtime is Next.js App Router, Node for zip/xml ingest. System of record is a fl
 
 ```mermaid
 flowchart TB
-  subgraph entry [Entry]
-    seed[buildSeedState]
+  subgraph entry["Entry"]
+    seed["buildSeedState"]
     post["POST /api/ingest"]
     accept["POST /api/catalog"]
   end
 
-  subgraph parse [Parse]
-    llama[LlamaParse v2 agentic]
-    ooxml[local OOXML / mammoth / xlsx]
-    blocks[ParsedDocument + ParsedBlock]
+  subgraph parse["Parse"]
+    llama["LlamaParse v2 agentic"]
+    ooxml["local OOXML / mammoth / xlsx"]
+    blocks["ParsedDocument + ParsedBlock"]
   end
 
-  subgraph extract [Extract]
+  subgraph extract["Extract"]
     claude["Claude Sonnet v1.4-claude"]
-    local["local proposer v1.0–v1.3"]
-    cir[CanonicalInsight rows]
+    local["local proposer v1.0-v1.3"]
+    cir["CanonicalInsight rows"]
   end
 
-  subgraph link [Link]
-    classify[classifyStatement]
-    score[scoreTheme / linkInsightToThemes]
-    cross[linkCrossDocument]
-    residual[THEME-RESIDUAL if max score under floor]
+  subgraph linkStep["Link"]
+    classify["classifyStatement"]
+    score["scoreTheme / linkInsightToThemes"]
+    cross["linkCrossDocument"]
+    residual["THEME-RESIDUAL if max score under floor"]
   end
 
-  subgraph evolve [Catalog]
-    propose[proposeCatalogChanges]
-    emerge[emerge: Unassigned cluster]
-    split[split: keyword partition]
-    force[acceptProposal force-link]
+  subgraph evolve["Catalog"]
+    propose["proposeCatalogChanges"]
+    emerge["emerge: Unassigned cluster"]
+    split["split: keyword partition"]
+    force["acceptProposal force-link"]
   end
 
-  subgraph eval [Hill-climb — automatic]
-    sweep[runEvalSweep]
-    critique[critique partial/wrong/missed/new]
-    judge[judge + safety gate]
-    champ[champion_prompt_version]
+  subgraph eval["Hill-climb automatic"]
+    sweep["runEvalSweep"]
+    critique["critique partial/wrong/missed/new"]
+    judge["judge + safety gate"]
+    champ["champion_prompt_version"]
   end
 
-  subgraph persist [State]
+  subgraph persist["State"]
     json["data/runtime/engine-state.json"]
   end
 
-  subgraph read [Read models]
-    monitor["/ Monitor"]
-    insights["/insights"]
-    catalogUI["/catalog"]
-    graphUI["/graph"]
-    evals["/evals tape"]
+  subgraph read["Read models"]
+    monitor["Monitor"]
+    insights["insights"]
+    catalogUI["catalog"]
+    graphUI["graph"]
+    evals["evals tape"]
   end
 
   seed --> extract
   post --> llama
-  llama -->|fail or no key| ooxml
+  llama -->|"fail or no key"| ooxml
   llama --> blocks
   ooxml --> blocks
   blocks --> claude
-  claude -->|no key / empty| local
+  claude -->|"no key or empty"| local
   claude --> cir
   local --> cir
   cir --> classify --> score
@@ -100,7 +100,7 @@ sequenceDiagram
   participant Store as engine-state.json
   participant Eval as runEvalSweep
 
-  Analyst->>Ingest: PPTX / DOCX / XLSX / PDF
+  Analyst->>Ingest: PPTX DOCX XLSX or PDF
   Ingest->>Parse: filename, buffer, mime
   alt LlamaCloud key present
     Parse->>Parse: LlamaParse agentic
@@ -112,10 +112,10 @@ sequenceDiagram
   Pipe->>Pipe: Claude or local proposeInsights
   Pipe->>Pipe: assignThemes current catalog
   Pipe->>Pipe: proposeCatalogChanges prior proposals
-  Pipe->>Eval: extract ladder v1.0–v1.3 vs gold
+  Pipe->>Eval: extract ladder v1.0-v1.3 vs gold
   Eval-->>Pipe: champion if safety gate holds
   Pipe->>Store: persist EngineState
-  Store-->>Analyst: dashboard JSON; UI refreshes
+  Store-->>Analyst: dashboard JSON then UI refresh
 ```
 
 Catalog accept is a separate write path: `POST /api/catalog` → `decideCatalogProposal` → `acceptProposal` / `rejectProposal` → persist. Rejected fingerprints are not queued again. Accept appends `catalog[]`, re-runs `assignThemes`, and force-links `proposal.insight_ids` (`method: catalog_accept`). CIR rows are not copied.

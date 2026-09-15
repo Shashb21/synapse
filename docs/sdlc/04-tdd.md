@@ -24,6 +24,7 @@ Cycle: **review spec → accept → write failing/lock test → implement → pa
 | TDD-E2E-02 | REQ-CLU-002 / UX-002 | Theme page linkage | same |
 | TDD-E2E-03 | REQ-EVA-009 / UX-008 | View-only eval tape | same |
 | TDD-E2E-04 | REQ-OPS-003 / UX-008 | View-only spec tape + flows | same |
+| TDD-EVA-04 | REQ-UX-008 | Spec mermaid blocks parse on mermaid 12 | `tests/req-docs-mermaid.test.ts` |
 | TDD-E2E-05 | REQ-CLU-005 / UX-003 | Insights tab + Unassigned | same |
 | TDD-E2E-06 | REQ-GRF-001 / UX-005 | Graph revelations | same |
 | TDD-E2E-07 | REQ-CLU-007 / UX-004 | Catalog emerge/split | same |
