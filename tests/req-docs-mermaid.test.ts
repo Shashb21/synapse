@@ -8,6 +8,7 @@ import mermaid from "mermaid";
 import { splitSpec } from "@/app/sdlc/spec-body";
 
 const DOCS = [
+  "docs/problem-and-solution.md",
   "docs/sdlc/09-flow-high-level.md",
   "docs/sdlc/10-flow-technical.md",
 ];

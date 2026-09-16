@@ -2,11 +2,13 @@
 
 Cross-functional biopharma insights **terminal**. Themes first, then constituent insights with sources and cross-theme links. Demo corpus is a fictional asset (Velmara / velmaratinib).
 
-This repo is the v1 slice: Synapse as the product, Velmara as the demo asset, plus the SDLC pack under `docs/sdlc/`.
+This repo is the v1 slice: Synapse as the product, Velmara as the demo asset, plus the docs pack under `docs/`.
+
+**Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) — problem statement (the analyst loop, why embeddings and nested JSON fail) and the proposed solution (CIR, catalog + `theme_links`, emerge/split, knowledge graph, eval hill-climb).
 
 ## Why linkage instead of semantic clustering
 
-Unsupervised embeddings mash “access” and “evidence” into an unstable blob and either **duplicate** the card or **force a single theme**. Brand themes are decision objects. v1 uses a versioned catalog and a `theme_links` join table: the CIR is stored once; Access and Evidence both point at it. Embeddings, when added later, score near-duplicates across decks — they do not name themes. Full argument: [`docs/sdlc/02-architecture.md`](docs/sdlc/02-architecture.md).
+Unsupervised embeddings mash “access” and “evidence” into an unstable blob and either **duplicate** the card or **force a single theme**. Brand themes are decision objects. v1 uses a versioned catalog and a `theme_links` join table: the CIR is stored once; Access and Evidence both point at it. Embeddings, when added later, score near-duplicates across decks — they do not name themes. Full argument: [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/sdlc/02-architecture.md`](docs/sdlc/02-architecture.md).
 
 ## Run locally
 
@@ -26,7 +28,7 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 | `/graph` | Knowledge graph: blends, entity bridges, implications no deck stated |
 | `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
 | `/evals` | View-only eval tape (hill-climb is automatic) |
-| `/sdlc` | View-only spec tape (requirements, flows, regression matrix) |
+| `/sdlc` | View-only spec tape (problem/solution paper, requirements, flows, regression matrix) |
 
 PoC keys (documents may leave the VPC). Copy `.env.example` → `.env.local`:
 
@@ -71,10 +73,11 @@ Insights are flat JSON objects plus `theme_links[]` (`insight_id`, `theme_id`, `
 
 ## Documentation
 
-The SDLC pack lives in [`docs/sdlc/`](docs/sdlc/) and is also the in-app Spec tape (`/sdlc`).
+Start with the product paper, then the SDLC pack. Both render on `/sdlc`. Index: [`docs/README.md`](docs/README.md).
 
 | Doc | What |
 | --- | --- |
+| [problem-and-solution.md](docs/problem-and-solution.md) | **Problem statement and proposed solution** |
 | [01-requirements.md](docs/sdlc/01-requirements.md) | REQ IDs (ingest, CIR, catalog, graph, eval, UX) |
 | [02-architecture.md](docs/sdlc/02-architecture.md) | Why CIR + `theme_links`, not nested JSON or k-means |
 | [03-design.md](docs/sdlc/03-design.md) | CIR shape, extractor ladder, routes |

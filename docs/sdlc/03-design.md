@@ -57,7 +57,7 @@ Unknown beats known when the statement contains gap language (`unquantified`, `n
 - `/themes/[id]` members via join; shows role/score.
 - `/ingest` Office upload + Velmara sample pack.
 - `/evals` view-only tape of the automatic hill-climb (critique, judge, proposer). No Run button. Contract: [06-eval-protocol.md](./06-eval-protocol.md).
-- `/sdlc` view-only spec tape of these docs, including flow diagrams, the [regression matrix](./11-regression.md), and the [gold inventory](./12-gold-set.md).
+- `/sdlc` view-only spec tape of these docs, including the [problem and solution paper](../problem-and-solution.md), flow diagrams, the [regression matrix](./11-regression.md), and the [gold inventory](./12-gold-set.md).
 
 ## Security / data
 

@@ -166,7 +166,7 @@ Graph revelations (`blend`, `bridge`, `gap_closure`) are **computed** in `src/li
 | `/graph` | `buildKnowledgeGraph(state)` | none |
 | `/ingest` | provider status | `POST /api/ingest` |
 | `/evals` | `eval_runs` | none (hill-climb is on seed/ingest) |
-| `/sdlc` | `docs/sdlc/*` | none |
+| `/sdlc` | `docs/problem-and-solution.md` and `docs/sdlc/*` | none |
 
 ## Thresholds the diagrams hide
 

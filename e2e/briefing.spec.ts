@@ -38,6 +38,7 @@ test.describe("REQ-REG-002 end-to-end regression", () => {
     await page.goto("/sdlc");
     await expect(page.getByRole("heading", { name: /spec tape/i })).toBeVisible();
     await expect(page.getByText(/view-only/i).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /problem & solution/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /flow \(process\)/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /flow \(technical\)/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^regression$/i })).toBeVisible();

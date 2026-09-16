@@ -108,6 +108,8 @@ test.describe("REQ-REG-002 complete user flow", () => {
     await page.goto("/sdlc");
     await expectNav(page);
     await expect(page.getByRole("heading", { name: /spec tape/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /problem & solution/i })).toBeVisible();
+    await expect(page.getByText(/canonical insight record/i).first()).toBeVisible();
     await page.getByRole("link", { name: /flow \(process\)/i }).click();
     await expect(page.getByText(/business loop|atomic insights|catalog/i).first()).toBeVisible();
     await page.getByRole("link", { name: /flow \(technical\)/i }).click();
