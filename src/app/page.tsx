@@ -77,12 +77,14 @@ export default async function HomePage() {
       </PageIntro>
 
       <section className="mb-10" aria-labelledby="inbox">
-        <h2 id="inbox" className="text-[15px] font-medium text-foreground">
-          Inbox
+        <div className="mb-1 flex items-baseline gap-2">
+          <h2 id="inbox" className="text-[15px] font-medium text-foreground">
+            Inbox
+          </h2>
           {inboxCount ? (
-            <span className="ml-2 text-[12px] font-normal text-muted-foreground">{inboxCount}</span>
+            <span className="text-[12px] text-muted-foreground">{inboxCount}</span>
           ) : null}
-        </h2>
+        </div>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
           Newly extracted gaps and tactics. Accept, reject, or modify before they join the plan.
         </p>

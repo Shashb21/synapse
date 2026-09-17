@@ -9,7 +9,9 @@ async function resetBlank(page: import("@playwright/test").Page) {
       actor_function: "evidence_lead",
     }),
   });
-  expect(res.ok()).toBeTruthy();
+  if (!res.ok()) {
+    throw new Error(`reset failed: ${res.status()} ${await res.text()}`);
+  }
 }
 
 test.describe.configure({ mode: "serial" });
@@ -31,7 +33,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("link", { name: /^needs$/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^sources$/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^plan$/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /next/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
   });
 
   test("ingest on the wizard extracts gaps and tactics to review", async ({ page }) => {
@@ -40,7 +42,7 @@ test.describe("wizard once, plan forever", () => {
     await page.getByPlaceholder("A. Rao").fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
     await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
-    await page.getByRole("button", { name: /next/i }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
     await expect(page.getByRole("heading", { name: /review gaps and tactics/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
@@ -67,7 +69,7 @@ test.describe("wizard once, plan forever", () => {
     await page.getByRole("button", { name: /go to the plan/i }).click();
     await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
     await expect(page.getByText(/living plan/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^inbox$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^inbox/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();
@@ -76,7 +78,7 @@ test.describe("wizard once, plan forever", () => {
     await page.getByRole("button", { name: /ingest this file/i }).nth(1).click();
     await page.getByPlaceholder("A. Rao").fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
-    await page.getByRole("heading", { name: /^inbox$/i }).scrollIntoViewIfNeeded();
+    await page.getByRole("heading", { name: /^inbox/i }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByText(/intracranial|sequencing after osimertinib/i).first()).toBeVisible();
   });
