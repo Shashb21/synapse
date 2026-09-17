@@ -54,6 +54,37 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
+    const gapCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
+      .first();
+    await expect(gapCard.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
+    await expect(gapCard.getByText(/^None$/)).toBeVisible();
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
+    await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toHaveCount(0);
+    await expect(gapCard.getByText(/no accepted tactic to assign yet/i)).toBeVisible();
+  });
+
+  test("create tactic on a review gap lists it on that gap", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: /ingest this file/i }).first().click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^ingest$/i }).click();
+    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    const gapCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
+      .first();
+    await expect(gapCard.getByText(/^None$/)).toBeVisible();
+    await gapCard.getByRole("button", { name: /create tactic/i }).click();
+    await page.getByPlaceholder("Tactic name").fill("Elderly SoC chart review");
+    await page.getByPlaceholder("Evidence question").fill("Does the review cover elderly vs regional SoC?");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^create$/i }).click();
+    await expect(gapCard.getByRole("link", { name: /elderly soc chart review/i })).toBeVisible();
+    await expect(gapCard.getByText(/^None$/)).toHaveCount(0);
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
   });
 
   test("enter the plan then new ingest lands in the inbox", async ({ page }) => {

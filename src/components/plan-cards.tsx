@@ -10,6 +10,7 @@ import {
 import { LockForm } from "@/components/lock-form";
 import type {
   PlanGapCard,
+  PlanTactic,
   ReviewGapCard,
   ReviewTacticCard,
   UnprioritizedGapCard,
@@ -21,7 +22,117 @@ import {
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
 
-export function ReviewCard({ card }: { card: ReviewGapCard }) {
+type AvailableTactic = { id: string; name: string };
+
+function GapTacticsBlock({
+  gapId,
+  residualId,
+  tactics,
+  availableTactics,
+}: {
+  gapId: string;
+  residualId?: string | null;
+  tactics: PlanTactic[];
+  availableTactics: AvailableTactic[];
+}) {
+  const unmapped = availableTactics.filter((t) => !tactics.some((mapped) => mapped.id === t.id));
+  return (
+    <div className="mt-3">
+      <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</h3>
+      {tactics.length === 0 ? (
+        <p className="mt-1 text-[12px] text-muted-foreground">None</p>
+      ) : (
+        <ul className="mt-1 grid gap-1.5">
+          {tactics.map((tactic) => (
+            <li key={tactic.id}>
+              <Link
+                href={`/tactics/${tactic.id}`}
+                className="flex flex-wrap items-center gap-1.5 text-[12px] text-foreground no-underline hover:underline"
+              >
+                <span>{tactic.name}</span>
+                <TacticBadge status={tactic.status} />
+                {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
+                {tactic.stale ? <StaleFlag stale /> : null}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {unmapped.length > 0 ? (
+          <LockForm
+            label="Assign tactic"
+            action="assign_tactic"
+            extra={{ gap_id: gapId }}
+            confirmLabel="Assign"
+          >
+            <label className="grid gap-1 text-[12px] text-muted-foreground">
+              Existing tactic
+              <select
+                name="tactic_id"
+                required
+                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+              >
+                {unmapped.map((tactic) => (
+                  <option key={tactic.id} value={tactic.id}>
+                    {tactic.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </LockForm>
+        ) : availableTactics.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">No accepted tactic to assign yet.</p>
+        ) : null}
+        <LockForm
+          label="Create tactic"
+          action="create_tactic"
+          extra={{
+            gap_id: gapId,
+            residual_ids: residualId ?? "",
+          }}
+          confirmLabel="Create"
+        >
+          <input
+            name="name"
+            required
+            placeholder="Tactic name"
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          />
+          <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+            {TACTIC_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {TACTIC_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+          <input
+            name="evidence_question"
+            required
+            placeholder="Evidence question"
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          />
+          <input type="hidden" name="description" value="Proposed from the IEGP plan." />
+          <input type="hidden" name="population" value="To be specified" />
+          <input type="hidden" name="intervention" value="Velmara" />
+          <input type="hidden" name="comparator" value="To be specified" />
+          <input type="hidden" name="outcomes" value="To be specified" />
+          <input type="hidden" name="geography" value="US + EU5" />
+          <input type="hidden" name="owner" value="" />
+          <input type="hidden" name="function" value="evidence_lead" />
+        </LockForm>
+      </div>
+    </div>
+  );
+}
+
+export function ReviewCard({
+  card,
+  availableTactics,
+}: {
+  card: ReviewGapCard;
+  availableTactics: AvailableTactic[];
+}) {
   return (
     <article className="border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -42,6 +153,12 @@ export function ReviewCard({ card }: { card: ReviewGapCard }) {
           ))}
         </ul>
       ) : null}
+      <GapTacticsBlock
+        gapId={card.gap_id}
+        residualId={card.residual_id}
+        tactics={card.tactics}
+        availableTactics={availableTactics}
+      />
       <div className="mt-3 flex flex-wrap gap-2">
         <LockForm
           label="Accept gap"
@@ -168,7 +285,13 @@ export function ReviewTacticCardView({ card }: { card: ReviewTacticCard }) {
   );
 }
 
-export function PrioritizeCard({ card }: { card: UnprioritizedGapCard }) {
+export function PrioritizeCard({
+  card,
+  availableTactics,
+}: {
+  card: UnprioritizedGapCard;
+  availableTactics: AvailableTactic[];
+}) {
   return (
     <article className="border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -182,6 +305,12 @@ export function PrioritizeCard({ card }: { card: UnprioritizedGapCard }) {
         {card.gap_name}
       </Link>
       <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.residual}</p>
+      <GapTacticsBlock
+        gapId={card.gap_id}
+        residualId={card.residual_id}
+        tactics={card.tactics}
+        availableTactics={availableTactics}
+      />
       <div className="mt-3">
         <LockForm
           label="Set priority"
@@ -214,13 +343,10 @@ export function PrioritizeCard({ card }: { card: UnprioritizedGapCard }) {
 export function GapPlanCard({
   card,
   availableTactics,
-  canAssign,
 }: {
   card: PlanGapCard;
-  availableTactics: { id: string; name: string }[];
-  canAssign?: boolean;
+  availableTactics: AvailableTactic[];
 }) {
-  const unmapped = availableTactics.filter((t) => !card.tactics.some((mapped) => mapped.id === t.id));
   return (
     <article className="border border-border bg-background p-3">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -234,90 +360,12 @@ export function GapPlanCard({
         {card.gap_name}
       </Link>
       <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.residual}</p>
-      <h3 className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</h3>
-      {card.tactics.length === 0 ? (
-        <p className="mt-1 text-[12px] text-muted-foreground">No tactic mapped yet.</p>
-      ) : (
-        <ul className="mt-1 grid gap-1.5">
-          {card.tactics.map((tactic) => (
-            <li key={tactic.id}>
-              <Link
-                href={`/tactics/${tactic.id}`}
-                className="flex flex-wrap items-center gap-1.5 text-[12px] text-foreground no-underline hover:underline"
-              >
-                <span>{tactic.name}</span>
-                <TacticBadge status={tactic.status} />
-                {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-                {tactic.stale ? <StaleFlag stale /> : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-      {canAssign ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {unmapped.length > 0 ? (
-            <LockForm
-              label="Assign tactic"
-              action="assign_tactic"
-              extra={{ gap_id: card.gap_id }}
-              confirmLabel="Assign"
-            >
-              <label className="grid gap-1 text-[12px] text-muted-foreground">
-                Existing tactic
-                <select
-                  name="tactic_id"
-                  required
-                  className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-                >
-                  {unmapped.map((tactic) => (
-                    <option key={tactic.id} value={tactic.id}>
-                      {tactic.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </LockForm>
-          ) : null}
-          <LockForm
-            label="Create tactic"
-            action="create_tactic"
-            extra={{
-              gap_id: card.gap_id,
-              residual_ids: card.residual_id ?? "",
-            }}
-            confirmLabel="Create"
-          >
-            <input
-              name="name"
-              required
-              placeholder="Tactic name"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            />
-            <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
-              {TACTIC_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {TACTIC_TYPE_LABELS[type]}
-                </option>
-              ))}
-            </select>
-            <input
-              name="evidence_question"
-              required
-              placeholder="Evidence question"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            />
-            <input type="hidden" name="description" value="Proposed from the IEGP plan." />
-            <input type="hidden" name="population" value="To be specified" />
-            <input type="hidden" name="intervention" value="Velmara" />
-            <input type="hidden" name="comparator" value="To be specified" />
-            <input type="hidden" name="outcomes" value="To be specified" />
-            <input type="hidden" name="geography" value="US + EU5" />
-            <input type="hidden" name="owner" value="" />
-            <input type="hidden" name="function" value="evidence_lead" />
-          </LockForm>
-        </div>
-      ) : null}
+      <GapTacticsBlock
+        gapId={card.gap_id}
+        residualId={card.residual_id}
+        tactics={card.tactics}
+        availableTactics={availableTactics}
+      />
     </article>
   );
 }
@@ -326,10 +374,12 @@ export function ReviewQueue({
   gaps,
   tactics,
   emptyHint,
+  availableTactics,
 }: {
   gaps: ReviewGapCard[];
   tactics: ReviewTacticCard[];
   emptyHint: string;
+  availableTactics: AvailableTactic[];
 }) {
   if (gaps.length === 0 && tactics.length === 0) {
     return <p className="text-[12px] text-muted-foreground">{emptyHint}</p>;
@@ -345,7 +395,7 @@ export function ReviewQueue({
         ) : (
           <div className="grid gap-3">
             {gaps.map((card) => (
-              <ReviewCard key={card.gap_id} card={card} />
+              <ReviewCard key={card.gap_id} card={card} availableTactics={availableTactics} />
             ))}
           </div>
         )}
@@ -368,7 +418,13 @@ export function ReviewQueue({
   );
 }
 
-export function PrioritizeQueue({ cards }: { cards: UnprioritizedGapCard[] }) {
+export function PrioritizeQueue({
+  cards,
+  availableTactics,
+}: {
+  cards: UnprioritizedGapCard[];
+  availableTactics: AvailableTactic[];
+}) {
   if (cards.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
@@ -379,7 +435,7 @@ export function PrioritizeQueue({ cards }: { cards: UnprioritizedGapCard[] }) {
   return (
     <div className="grid gap-3">
       {cards.map((card) => (
-        <PrioritizeCard key={card.gap_id} card={card} />
+        <PrioritizeCard key={card.gap_id} card={card} availableTactics={availableTactics} />
       ))}
     </div>
   );

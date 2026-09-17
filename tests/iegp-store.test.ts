@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard } from "@/lib/iegp/store";
+import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
 describe("IEGP postgres store", () => {
@@ -154,5 +155,40 @@ describe("IEGP postgres store", () => {
     });
     const after = await loadState();
     expect(after.asset.wizard_complete).toBe(true);
+  });
+
+  it("shows an assigned accepted tactic on a candidate review card", async () => {
+    await resetSeed();
+    await ingestDemoSource({
+      demo_id: "heor-interview",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const ingested = await loadState();
+    const emptyWorkspace = buildPlanWorkspace(ingested);
+    expect(emptyWorkspace.review.length).toBeGreaterThan(0);
+    expect(emptyWorkspace.review.every((c) => c.tactics.length === 0)).toBe(true);
+    expect(emptyWorkspace.availableTactics).toHaveLength(0);
+
+    const tactic = ingested.tactics.find((t) => t.review_status === "candidate");
+    const gap = ingested.gaps.find((g) => g.status === "candidate");
+    expect(tactic).toBeTruthy();
+    expect(gap).toBeTruthy();
+    await lockTacticReview({
+      tactic_id: tactic!.id,
+      review_status: "accepted",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await assignTacticToGap({
+      gap_id: gap!.id,
+      tactic_id: tactic!.id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const mapped = buildPlanWorkspace(await loadState());
+    const card = mapped.review.find((c) => c.gap_id === gap!.id);
+    expect(card?.tactics.some((t) => t.id === tactic!.id)).toBe(true);
+    expect(mapped.review.filter((c) => c.gap_id !== gap!.id).every((c) => c.tactics.length === 0)).toBe(true);
   });
 });

@@ -209,4 +209,32 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(workspace.reviewTactics).toHaveLength(0);
     expect(workspace.availableTactics.some((t) => t.id === "TAC-REG")).toBe(true);
   });
+
+  it("puts mapped tactics on review and unprioritized cards, and leaves empty gaps empty", () => {
+    const seed = buildSeed();
+    const workspace = buildPlanWorkspace(seed);
+    const ild = workspace.review.find((c) => c.gap_id === "GAP-ILD");
+    expect(ild).toBeTruthy();
+    expect(ild!.tactics).toHaveLength(0);
+    const os = workspace.unprioritized.find((c) => c.gap_id === "GAP-OS");
+    expect(os).toBeTruthy();
+    expect(os!.tactics).toHaveLength(0);
+
+    const mapped = buildPlanWorkspace({
+      ...seed,
+      coverages: [
+        ...seed.coverages,
+        {
+          ...seed.coverages[0]!,
+          id: "COV-ILD-REG",
+          gap_id: "GAP-ILD",
+          tactic_id: "TAC-REG",
+        },
+      ],
+    });
+    expect(mapped.review.find((c) => c.gap_id === "GAP-ILD")!.tactics.some((t) => t.id === "TAC-REG")).toBe(
+      true,
+    );
+    expect(mapped.unprioritized.find((c) => c.gap_id === "GAP-OS")!.tactics).toHaveLength(0);
+  });
 });

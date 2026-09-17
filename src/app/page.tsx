@@ -44,6 +44,7 @@ export default async function HomePage() {
               <ReviewQueue
                 gaps={workspace.review}
                 tactics={workspace.reviewTactics}
+                availableTactics={workspace.availableTactics}
                 emptyHint="Ingest a source first, then review what it extracted."
               />
             </section>
@@ -55,7 +56,10 @@ export default async function HomePage() {
                 Accepted open and partial gaps with a residual. You lock High, Medium, or Low —
                 the engine does not suggest a band.
               </p>
-              <PrioritizeQueue cards={workspace.unprioritized} />
+              <PrioritizeQueue
+                cards={workspace.unprioritized}
+                availableTactics={workspace.availableTactics}
+              />
             </section>
           }
           enterPlan={
@@ -91,6 +95,7 @@ export default async function HomePage() {
         <ReviewQueue
           gaps={workspace.review}
           tactics={workspace.reviewTactics}
+          availableTactics={workspace.availableTactics}
           emptyHint="Inbox is empty. Ingest another source below when you have new material."
         />
       </section>
@@ -102,7 +107,10 @@ export default async function HomePage() {
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
           Accepted gaps still missing a human-locked band.
         </p>
-        <PrioritizeQueue cards={workspace.unprioritized} />
+        <PrioritizeQueue
+          cards={workspace.unprioritized}
+          availableTactics={workspace.availableTactics}
+        />
       </section>
 
       <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
@@ -135,7 +143,6 @@ export default async function HomePage() {
                     key={card.gap_id}
                     card={card}
                     availableTactics={workspace.availableTactics}
-                    canAssign
                   />
                 ))
               )}

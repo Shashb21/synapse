@@ -583,6 +583,7 @@ export type ReviewGapCard = {
   residual_id: string | null;
   residual: string;
   needs: { id: string; statement: string }[];
+  tactics: PlanTactic[];
 };
 
 export type ReviewTacticCard = {
@@ -599,6 +600,7 @@ export type UnprioritizedGapCard = {
   gap_status: GapStatus;
   residual_id: string;
   residual: string;
+  tactics: PlanTactic[];
 };
 
 const STATUS_ORDER: Record<TacticStatus, number> = {
@@ -687,6 +689,7 @@ export function buildPlanWorkspace(state: IegpState): {
       residual_id: residual?.id ?? null,
       residual: residual?.statement ?? "Residual will be drafted on accept.",
       needs,
+      tactics: mappedTactics(state, gap.id, residual?.id),
     });
   }
 
@@ -715,6 +718,7 @@ export function buildPlanWorkspace(state: IegpState): {
       gap_status: gap.status,
       residual_id: residual.id,
       residual: residual.statement,
+      tactics: mappedTactics(state, gap.id, residual.id),
     });
   }
 
