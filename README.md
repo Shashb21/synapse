@@ -1,18 +1,31 @@
-# Synapse
+# Synapse IEGP
 
-Cross-functional biopharma insights **terminal**. Themes first, then constituent insights with sources and cross-theme links. Demo corpus is a fictional asset (Velmara / velmaratinib).
+Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Synapse principles still apply: atomic records, joins instead of copies, residuals that do not overwrite the parent, human locks at every gate, evals against gold.
 
-This repo is the v1 slice: Synapse as the product, Velmara as the demo asset, plus the docs pack under `docs/`.
+This is not a study tracker or a gap spreadsheet. It connects:
 
-**Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) — problem statement (the analyst loop, why embeddings and nested JSON fail) and the proposed solution (CIR, catalog + `theme_links`, emerge/split, knowledge graph, eval hill-climb).
+objectives → candidate evidence needs → gaps → tactics → dimensional coverage → residual needs → priority → human-authored tactics → forward roadmap → stale-and-re-lock monitoring.
 
-## Why linkage instead of semantic clustering
+Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC).
 
-Unsupervised embeddings mash “access” and “evidence” into an unstable blob and either **duplicate** the card or **force a single theme**. Brand themes are decision objects. v1 uses a versioned catalog and a `theme_links` join table: the CIR is stored once; Access and Evidence both point at it. Embeddings, when added later, score near-duplicates across decks — they do not name themes. Full argument: [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/sdlc/02-architecture.md`](docs/sdlc/02-architecture.md).
+**Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/iegp-model.md`](docs/iegp-model.md).
+
+## Why this is not clustering or a tracker
+
+- A stakeholder quote is a **candidate need**, not a validated gap.
+- A tactic (or a publication) existing is not coverage. Coverage is ten dimensions plus an overall degree, human-locked.
+- One registry can map to sequencing, HCRU and QoL without copying the protocol onto three cards.
+- When coverage is partial, a **residual** is drafted; the original gap stays.
+- Coverage ≠ priority. An 80%-covered HTA residual can still be Critical.
 
 ## Run locally
 
+Postgres is required.
+
 ```bash
+docker compose up -d postgres
+# or: local Postgres with user/password/db `synapse`
+cp .env.example .env.local   # set DATABASE_URL
 npm install
 npm test
 npm run dev
@@ -22,71 +35,41 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
 | Route | What |
 | --- | --- |
-| `/` | Theme monitor (Unassigned holds weak matches) |
-| `/insights` | All CIR rows; filter by theme or class |
-| `/catalog` | How themes emerge and split; accept into the append-only catalog |
-| `/graph` | Knowledge graph: blends, entity bridges, implications no deck stated |
-| `/ingest` | Upload PPTX/DOCX/XLSX/PDF via LlamaCloud + Claude |
-| `/evals` | View-only eval tape (hill-climb is automatic) |
-| `/sdlc` | View-only spec tape (problem/solution paper, requirements, flows, regression matrix) |
+| `/` | Plan: objectives, gap inventory, residual priority |
+| `/needs` | Candidate / accepted / rejected evidence needs |
+| `/gaps` | Gap inventory |
+| `/gaps/[id]` | Needs, dimensional tactic mappings, residual, status lock |
+| `/tactics` | Tactic objects + human-authored proposal |
+| `/residuals` | Residual statements and locked priority bands |
+| `/roadmap` | Ongoing / planned / proposed only |
+| `/sources` | Interviews, TLR, internal materials; ingest marks coverage stale |
+| `/evals` | View-only gold tape (needs + coverage; engine cannot auto-close) |
+| `/sdlc` | Spec tape |
 
-PoC keys (documents may leave the VPC). Copy `.env.example` → `.env.local`:
-
-```
-LLAMA_CLOUD_API_KEY=llx-...
-LLAMA_PARSE_TIER=agentic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-5
-```
-
-- **LlamaCloud** reads charts/graphs/graphics that native PPTX XML cannot see.
-- **Claude Sonnet** extracts atomic CIR insights on ingest. Eval hill-climb stays on the local v1.0–v1.3 ladder so scores do not wobble.
-- Without keys the seed briefing still runs on local parsers/extractors.
+No login. Locks record a typed name and function.
 
 ## Sharing (Origin + GitHub)
 
-Origin (early beta) is **Internal** or **Private** only — there is no public repo setting. Share the internet-facing copy on GitHub; keep Origin as the Cursor/agent forge.
-
 | Remote | URL | Role |
 | --- | --- | --- |
-| GitHub | [github.com/Shashb21/synapse](https://github.com/Shashb21/synapse) | Public share, CI on `ubuntu-latest` |
-| Origin | [cursor.com/codebase/shashank-code/synapse](https://cursor.com/codebase/shashank-code/synapse) | Cursor codebase. **Settings → Permissions → Internal** to share with the team (Origin has no public visibility) |
-
-After GitHub exists, mirror it into Origin (`origin repo create-mirrored shashank-code/synapse`) so pushes stay two-way. Day to day:
+| GitHub | [github.com/Shashb21/synapse](https://github.com/Shashb21/synapse) | Public share, CI |
+| Origin | [cursor.com/codebase/shashank-code/synapse](https://cursor.com/codebase/shashank-code/synapse) | Cursor codebase |
 
 ```bash
-chmod +x scripts/push-both.sh
-git remote add github https://github.com/Shashb21/synapse.git   # once
 ./scripts/push-both.sh
 ```
 
 ## Tests
 
 ```bash
-npm test          # unit tests named with REQ IDs
-npm run test:e2e  # Playwright regression
+npm test          # engine, seed invariants, postgres store
+npm run test:e2e  # Playwright against port 43217
 ```
-
-## Data model (flat CIR)
-
-Insights are flat JSON objects plus `theme_links[]` (`insight_id`, `theme_id`, `score`, `role`). Themes hold IDs only. See [`docs/sdlc/03-design.md`](docs/sdlc/03-design.md).
 
 ## Documentation
 
-Start with the product paper, then the SDLC pack. Both render on `/sdlc`. Index: [`docs/README.md`](docs/README.md).
-
 | Doc | What |
 | --- | --- |
-| [problem-and-solution.md](docs/problem-and-solution.md) | **Problem statement and proposed solution** |
-| [01-requirements.md](docs/sdlc/01-requirements.md) | REQ IDs (ingest, CIR, catalog, graph, eval, UX) |
-| [02-architecture.md](docs/sdlc/02-architecture.md) | Why CIR + `theme_links`, not nested JSON or k-means |
-| [03-design.md](docs/sdlc/03-design.md) | CIR shape, extractor ladder, routes |
-| [04-tdd.md](docs/sdlc/04-tdd.md) | Test IDs |
-| [05-process.md](docs/sdlc/05-process.md) | Origin / Cloud Agent / gold review loop |
-| [06-eval-protocol.md](docs/sdlc/06-eval-protocol.md) | **Evals:** pairing, metrics, safety gate, how it hill-climbs, prompt vs local |
-| [07-catalog-evolution.md](docs/sdlc/07-catalog-evolution.md) | Emerge / split |
-| [08-knowledge-graph.md](docs/sdlc/08-knowledge-graph.md) | Blends, bridges, gap-closures |
-| [09-flow-high-level.md](docs/sdlc/09-flow-high-level.md) | Business loop |
-| [10-flow-technical.md](docs/sdlc/10-flow-technical.md) | Modules, APIs, `EngineState` |
-| [11-regression.md](docs/sdlc/11-regression.md) | REQ → test → user-flow matrix |
-| [12-gold-set.md](docs/sdlc/12-gold-set.md) | **Gold inventory** (90 CIR, scenarios, known misses) |
+| [problem-and-solution.md](docs/problem-and-solution.md) | Problem statement and proposed IEGP |
+| [iegp-model.md](docs/iegp-model.md) | Locked objects, gates, priority, refresh |
+| [docs/sdlc/](docs/sdlc/) | Historical CIR/theme SDLC (lineage, not live SoR) |

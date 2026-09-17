@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import {
+  coverageEval,
+  draftResidualStatement,
+  engineMaySetStatus,
+  extractCandidateNeeds,
+  needEvalMetrics,
+  pairNeeds,
+  suggestGapStatus,
+  suggestPriority,
+} from "@/lib/iegp/engine";
+import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
+import type { GapTacticCoverage } from "@/lib/iegp/types";
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+
+function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
+  const dimensions = emptyDimensions();
+  for (const key of Object.keys(dims) as (keyof typeof dims)[]) {
+    dimensions[key] = dims[key]!;
+  }
+  return {
+    id: "c",
+    gap_id: "g",
+    tactic_id: "t",
+    dimensions,
+    overall,
+    overall_rationale: "test",
+    overall_lock: unlocked(),
+    stale: false,
+  };
+}
+
+describe("IEGP engine", () => {
+  it("never allows the engine to write addressed", () => {
+    expect(engineMaySetStatus("validated_addressed")).toBe(false);
+    expect(engineMaySetStatus("validated_partial")).toBe(true);
+  });
+
+  it("drafts a residual that keeps the parent gap and flags a missing comparator", () => {
+    const coverage = cov("partial", {
+      population: { value: "yes", rationale: "", lock: unlocked() },
+      intervention: { value: "yes", rationale: "", lock: unlocked() },
+      comparator: { value: "no", rationale: "", lock: unlocked() },
+      outcomes: { value: "yes", rationale: "", lock: unlocked() },
+      decision_utility: { value: "no", rationale: "", lock: unlocked() },
+    });
+    const draft = draftResidualStatement({
+      gap: {
+        name: "Elderly vs SoC",
+        statement: "Limited evidence on comparative effectiveness in elderly patients.",
+        domain: "comparative_effectiveness",
+      },
+      coverages: [coverage],
+    });
+    expect(draft.statement.toLowerCase()).toMatch(/comparative|standard of care/);
+    expect(draft.rationale).toMatch(/preserved|Uncovered/i);
+  });
+
+  it("does not treat a tactic existing as fully addressed", () => {
+    const coverage = cov("limited", {
+      relevance: { value: "partial", rationale: "", lock: unlocked() },
+      comparator: { value: "no", rationale: "", lock: unlocked() },
+    });
+    expect(suggestGapStatus([coverage])).toBe("validated_open");
+  });
+
+  it("suggests priority without using cost or effort", () => {
+    const pri = suggestPriority({
+      residual: { statement: "IRA BIM remaining" },
+      objective: {
+        strategic_importance: 5,
+        decision_date: "2026-12-01",
+        key_decision: "P&T",
+      },
+      coverages: [],
+      stakeholder: "hta",
+      today: new Date("2026-09-17"),
+    });
+    expect(pri.score).toBeGreaterThan(50);
+    expect(pri.reasons.join(" ")).not.toMatch(/\bcost\b|\bbudget\b|\beffort\b/i);
+  });
+
+  it("pairs extracted needs to gold without double-claiming", () => {
+    const pairs = pairNeeds(
+      [
+        { id: "e1", statement: "Need to understand the economic burden associated with recurrence after velmaratinib.", source_id: "s" },
+        { id: "e2", statement: "Unrelated fabricated claim about penguins.", source_id: "s" },
+      ],
+      [
+        { id: "g1", statement: "Need to understand the economic burden associated with recurrence after velmaratinib.", source_id: "s", must_find: true },
+      ],
+    );
+    expect(pairs.some((p) => p.kind === "exact" && p.gold_id === "g1")).toBe(true);
+    expect(pairs.some((p) => p.kind === "wrong" && p.extract_id === "e2")).toBe(true);
+    const metrics = needEvalMetrics(pairs, [{ id: "g1", must_find: true }], 2);
+    expect(metrics.recall).toBe(1);
+  });
+
+  it("extracts candidate-need cues from source blocks", () => {
+    const rows = extractCandidateNeeds([
+      {
+        id: "b",
+        source_id: "s",
+        heading: "Burden",
+        text: "We need to understand the economic burden associated with recurrence. The weather was fine.",
+      },
+    ]);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]!.statement).toMatch(/economic burden/i);
+  });
+
+  it("scores gold coverage overall degrees", () => {
+    const result = coverageEval(
+      [{ gap_id: "g", tactic_id: "t", overall: "partial" }],
+      [{ gap_id: "g", tactic_id: "t", overall: "partial" }],
+    );
+    expect(result.exact).toBe(1);
+    expect(result.wrong).toBe(0);
+  });
+
+  it("has ten coverage dimensions", () => {
+    expect(COVERAGE_DIMENSIONS).toHaveLength(10);
+  });
+});

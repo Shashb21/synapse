@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Synapse",
+  title: "Synapse IEGP",
   description:
-    "Cross-functional biopharma insights: themes first, then constituent insights with sources and cross-theme links.",
+    "Digital integrated evidence generation plan: evidence needs, gaps, tactics, coverage, residuals, priority, and roadmap.",
 };
 
 export default function RootLayout({

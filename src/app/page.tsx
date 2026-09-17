@@ -1,155 +1,118 @@
-import { AppShell, PageIntro } from "@/components/insight-card";
-import { PostureChip } from "@/components/theme-chip";
-import { summarizeTheme } from "@/lib/briefing/theme-summary";
-import { FUNCTION_LABELS } from "@/lib/schema";
-import { getState } from "@/lib/store";
-import { CLASS_STYLES, themeStyle } from "@/lib/theme-style";
 import Link from "next/link";
+import { AppShell, PageIntro } from "@/components/app-shell";
+import { GapBadge, PriorityBadge, StaleFlag } from "@/components/iegp-badges";
+import { loadState } from "@/lib/iegp/store";
+import { LockForm } from "@/components/lock-form";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
-export default async function MonitorPage() {
-  const state = await getState();
-  const openProposals = state.catalog_proposals.filter(
-    (p) => p.status === "proposed",
-  ).length;
-  const briefs = state.themes
-    .map((theme) => ({
-      theme,
-      brief: summarizeTheme(theme, state.insights, state.asset.as_of),
-    }))
-    .sort((a, b) => {
-      if (a.theme.id === "THEME-RESIDUAL") return 1;
-      if (b.theme.id === "THEME-RESIDUAL") return -1;
-      const rank = { "GAP-HEAVY": 0, ACTIONABLE: 1, STABLE: 2, EMPTY: 3 };
-      const dr = rank[a.brief.posture] - rank[b.brief.posture];
-      if (dr !== 0) return dr;
-      return Date.parse(b.brief.as_of) - Date.parse(a.brief.as_of);
-    });
+export default async function PlanPage() {
+  const state = await loadState();
+  const candidateNeeds = state.needs.filter((n) => n.status === "candidate").length;
+  const stale = state.coverages.filter((c) => c.stale).length;
+  const byStatus = Object.fromEntries(
+    ["candidate", "validated_open", "validated_partial", "validated_addressed", "excluded"].map(
+      (s) => [s, state.gaps.filter((g) => g.status === s).length],
+    ),
+  );
+  const ranked = state.priorities
+    .slice()
+    .sort((a, b) => b.suggested_score - a.suggested_score);
 
   return (
-    <AppShell active="briefing">
-      <PageIntro kicker="Velmara" title="Theme monitor">
-        <p>
-          {state.asset.molecule} · {state.asset.indication}. Situation first —
-          open a theme for the constituent insights, sources, and cross-theme
-          links. Insights are stored once. Weak matches wait in Unassigned
-          instead of being forced into a theme. The{" "}
-          <Link href="/graph" className="underline">
-            graph
-          </Link>{" "}
-          walks those joins for implications no single deck stated.
-        </p>
-        <p className="mt-2 text-sm">
-          As of {state.asset.as_of} · {state.documents.length} sources ·{" "}
-          {state.insights.length} insights · {state.themes.length} themes
-        </p>
-        {openProposals > 0 ? (
-          <p className="mt-2 text-sm">
-            {openProposals} catalog{" "}
-            {openProposals === 1 ? "proposal" : "proposals"} waiting —{" "}
-            <Link href="/catalog">review emerge and split</Link>
-          </p>
-        ) : null}
+    <AppShell active="plan">
+      <PageIntro kicker={state.asset.inn} title={`${state.asset.name} integrated evidence plan`}>
+        {state.asset.indication} · {state.asset.geography}. Living plan. Coverage is not
+        priority. Residuals do not overwrite parent gaps. Every gate is a human lock.
       </PageIntro>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {briefs.map(({ theme, brief }) => {
-          const color = themeStyle(theme.id);
-          return (
-            <Link
-              key={theme.id}
-              href={`/themes/${theme.id}`}
-              className="relative block border border-border bg-card p-4 no-underline hover:bg-muted/40"
-            >
-              <span
-                className="absolute inset-y-0 left-0 w-[3px]"
-                style={{ backgroundColor: color.hue }}
-              />
-              <div className="flex items-start justify-between gap-3 pl-3">
-                <h2 className="text-[13px] font-medium text-foreground">
-                  {theme.name}
-                </h2>
-                <PostureChip posture={brief.posture} />
-              </div>
-              <p className="mt-1 pl-3 text-xs text-muted-foreground">
-                As of {brief.as_of_label}
-              </p>
-              <p className="mt-3 pl-3 text-[13px] leading-5 text-foreground/90">
-                {brief.situation}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-1.5 pl-3">
-                <CountChip
-                  label="Known"
-                  count={theme.known_count}
-                  color={CLASS_STYLES.known}
-                />
-                <CountChip
-                  label="Unknown"
-                  count={theme.unknown_count}
-                  color={CLASS_STYLES.unknown}
-                />
-                <CountChip
-                  label="Opportunity"
-                  count={theme.opportunity_count}
-                  color={CLASS_STYLES.opportunity}
-                />
-              </div>
-            </Link>
-          );
-        })}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Objectives" value={state.objectives.length} href="/" />
+        <Stat label="Candidate needs" value={candidateNeeds} href="/needs" />
+        <Stat label="Open / partial gaps" value={(byStatus.validated_open ?? 0) + (byStatus.validated_partial ?? 0)} href="/gaps" />
+        <Stat label="Stale mappings" value={stale} href="/gaps" />
       </div>
 
-      <section className="mt-8">
-        <h2 className="text-[13px] font-medium text-foreground">
-          Coverage by function
-        </h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[...new Set(state.documents.map((d) => d.stakeholder_function))].map(
-            (fn) => {
-              const docs = state.documents.filter(
-                (d) => d.stakeholder_function === fn,
-              ).length;
-              const ins = state.insights.filter(
-                (i) => i.stakeholder_function === fn,
-              ).length;
+      <div className="mb-8 grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Gap inventory</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-2 text-[13px]">
+            {state.gaps.map((g) => (
+              <Link key={g.id} href={`/gaps/${g.id}`} className="flex items-start justify-between gap-3 no-underline">
+                <span className="text-foreground">{g.name}</span>
+                <GapBadge status={g.status} />
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Residual priority (locked bands)</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-[13px]">
+            {ranked.map((p) => {
+              const residual = state.residuals.find((r) => r.id === p.residual_id);
               return (
-                <div
-                  key={fn}
-                  className="border border-border bg-card px-4 py-3"
-                >
-                  <p className="text-[13px] font-medium text-foreground">
-                    {FUNCTION_LABELS[fn]}
+                <Link key={p.id} href="/residuals" className="grid gap-1 no-underline">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-foreground">{residual?.statement.slice(0, 90)}…</span>
+                    <PriorityBadge band={p.band} />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Suggested {p.suggested_score} / {p.suggested_band}
+                    {p.override_reason ? ` · override: ${p.override_reason}` : ""}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {docs} sources · {ins} insights
-                  </p>
-                </div>
+                </Link>
               );
-            },
-          )}
-        </div>
-      </section>
+            })}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Strategic objectives</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          {state.objectives.map((o) => (
+            <div key={o.id} className="border border-border p-3">
+              <p className="text-[13px] text-foreground">{o.name}</p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {o.key_decision} · {o.decision_date} · importance {o.strategic_importance}/5
+              </p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <LockForm label="Reset Velmara seed" action="reset" />
+        {stale > 0 ? <StaleFlag stale /> : null}
+        <p className="text-[12px] text-muted-foreground">
+          Registry TAC-REG maps to sequencing, HCRU and QoL — one tactic, several gaps. Elderly
+          chart review is Partial because the comparator is missing.
+        </p>
+      </div>
     </AppShell>
   );
 }
 
-function CountChip({
+function Stat({
   label,
-  count,
-  color,
+  value,
+  href,
 }: {
   label: string;
-  count: number;
-  color: { fg: string; bg: string };
+  value: number;
+  href: string;
 }) {
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium"
-      style={{ color: color.fg, backgroundColor: color.bg }}
-    >
-      <span className="tabular-nums font-semibold">{count}</span>
-      {label}
-    </span>
+    <Link href={href} className="border border-border bg-card p-4 no-underline">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl text-foreground">{value}</p>
+    </Link>
   );
 }

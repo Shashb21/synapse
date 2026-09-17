@@ -1,12 +1,18 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { AppShell, PageIntro } from "@/components/insight-card";
+import { AppShell, PageIntro } from "@/components/app-shell";
 import { SpecBody } from "@/app/sdlc/spec-body";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 const SPECS = [
+  {
+    slug: "iegp-model.md",
+    rel: "docs/iegp-model.md",
+    id: "IEGP",
+    title: "IEGP model",
+  },
   {
     slug: "problem-and-solution.md",
     rel: "docs/problem-and-solution.md",
