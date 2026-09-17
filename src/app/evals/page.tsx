@@ -33,8 +33,16 @@ export default async function EvalsPage() {
     <AppShell active="evals">
       <PageIntro kicker="View-only tape" title="Eval tape">
         Gold scores candidate-need recovery from sources and gap–tactic overall coverage.
-        Safety: the engine must never write Validated-Addressed. Humans lock that status.
+        Safety: the engine must never write Validated-Addressed. On a blank workspace this tape
+        stays empty until sources are ingested.
       </PageIntro>
+      {state.sources.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">
+          No sources ingested. engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))}{" "}
+          (must be false).
+        </p>
+      ) : (
+      <>
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <Metric label="Need recall" value={metrics.recall.toFixed(3)} />
         <Metric label="Need precision" value={metrics.precision.toFixed(3)} />
@@ -60,6 +68,8 @@ export default async function EvalsPage() {
           );
         })}
       </div>
+      </>
+      )}
     </AppShell>
   );
 }

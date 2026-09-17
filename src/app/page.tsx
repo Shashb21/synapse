@@ -38,11 +38,10 @@ export default async function PlanPage() {
 
   return (
     <AppShell active="plan">
-      <PageIntro kicker={state.asset.inn} title={`${state.asset.name} IEGP`}>
-        {state.asset.indication} · {state.asset.geography}. Upload sources, extract gaps and
-        tactics, draft residuals, then review. You accept, reject, or modify gaps. You lock
-        priority — the engine does not. Then create or assign tactics. Addressed gaps stay here
-        with the tactics that closed them.
+      <PageIntro kicker={`${state.asset.inn} · blank workspace`} title={`${state.asset.name} IEGP`}>
+        {state.asset.indication} · {state.asset.geography}. This plan starts empty. Upload demo
+        sources, extract gaps and tactics, draft residuals, then review. You accept, reject, or
+        modify gaps. You lock priority — the engine does not. Then create or assign tactics.
       </PageIntro>
 
       <ol className="mb-8 grid gap-2 text-[12px] text-muted-foreground sm:grid-cols-5">
@@ -64,9 +63,9 @@ export default async function PlanPage() {
           <p className="text-[12px] text-muted-foreground">
             No extracted gaps waiting for review.{" "}
             <Link href="/sources" className="text-foreground">
-              Ingest a source
-            </Link>
-            .
+              Ingest a demo source
+            </Link>{" "}
+            to populate this queue.
           </p>
         ) : (
           <div className="grid gap-3">
@@ -159,7 +158,7 @@ export default async function PlanPage() {
       </section>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <LockForm label="Reset Velmara seed" action="reset" />
+        <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
         {stale ? <StaleFlag stale /> : null}
       </div>
     </AppShell>

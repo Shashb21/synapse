@@ -46,6 +46,12 @@ export default async function TacticsPage() {
         </LockForm>
       </div>
 
+      {state.tactics.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No tactics yet. Ingest a demo source to extract inventory, or propose one here after
+          you lock priority on the plan.
+        </p>
+      ) : (
       <div className="grid gap-3">
         {state.tactics.map((tac) => {
           const maps = state.coverages.filter((c) => c.tactic_id === tac.id);
@@ -67,6 +73,7 @@ export default async function TacticsPage() {
           );
         })}
       </div>
+      )}
     </AppShell>
   );
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   assignTacticToGap,
   createProposedTactic,
+  ingestDemoSource,
   ingestNeedFromText,
   lockCoverageDimension,
   lockCoverageOverall,
@@ -154,6 +155,13 @@ export async function POST(request: Request) {
           source_type: body.source_type as never,
           stakeholder_function: body.stakeholder_function as ActorFunction,
           text: body.text,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "ingest_demo":
+        await ingestDemoSource({
+          demo_id: body.demo_id,
           actor_name,
           actor_function,
         });

@@ -329,7 +329,7 @@ const NEED_CUES =
   /\b(need to (know|understand|characterise|characterize|quantify)|insufficient|limited evidence|not (adequately )?characterised|not (adequately )?characterized|evidence gap|unknown whether|no (comparative|rwe|real-world)|lack of|unresolved|open question)\b/i;
 
 const TACTIC_CUES =
-  /\b(phase\s*(iii|3)|vel-\d+|prospective \w+ registry|registry will|chart review|study [a-c]\b|publication|manuscript|congress abstract|budget-impact|cost-effectiveness|network meta|indirect treatment|patient survey|claims study)\b/i;
+  /\b(phase\s*(iii|3)|vel-\d+|prospective \w+ registry|registry will|chart review|study [a-c]\b|publication|manuscript|congress abstract|budget-impact|cost-effectiveness|network meta|indirect treatment|patient survey|claims study|long-term follow-up)\b/i;
 
 function sentencesOf(text: string): string[] {
   return text
@@ -386,11 +386,11 @@ export function guessDomain(text: string): EvidenceDomain {
 
 export function guessTacticType(text: string): TacticType {
   const t = text.toLowerCase();
+  if (/\b(publication|manuscript)/.test(t)) return "publication";
+  if (/\bcongress abstract/.test(t)) return "congress_abstract";
   if (/\bphase\s*(iii|3)|vel-\d+/.test(t)) return "phase3_trial";
   if (/\bregistry/.test(t)) return "registry";
   if (/\bchart review/.test(t)) return "chart_review";
-  if (/\b(publication|manuscript)/.test(t)) return "publication";
-  if (/\bcongress abstract/.test(t)) return "congress_abstract";
   if (/\bbudget-impact|\bbim\b/.test(t)) return "budget_impact_model";
   if (/\bcost-effectiveness|\bcea\b/.test(t)) return "cea";
   if (/\bnetwork meta|\bnma\b/.test(t)) return "nma";
@@ -398,6 +398,7 @@ export function guessTacticType(text: string): TacticType {
   if (/\bsurvey/.test(t)) return "patient_survey";
   if (/\bclaims/.test(t)) return "rwe_study";
   if (/\bslr|systematic literature/.test(t)) return "slr";
+  if (/\blong-term follow/.test(t)) return "long_term_followup";
   return "rwe_study";
 }
 

@@ -29,6 +29,11 @@ export default async function ResidualsPage() {
         stays. Priority is a human lock on this page or on the plan. The engine does not assign a
         band. Effort and cost live on the tactic.
       </PageIntro>
+      {rows.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No residuals yet. They are drafted when you ingest a source and extract a candidate gap.
+        </p>
+      ) : (
       <div className="grid gap-4">
         {rows.map(({ r, gap, pri }) => (
           <article key={r.id} className="border border-border bg-card p-4">
@@ -72,6 +77,7 @@ export default async function ResidualsPage() {
           </article>
         ))}
       </div>
+      )}
     </AppShell>
   );
 }

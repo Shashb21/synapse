@@ -14,6 +14,11 @@ export default async function GapsPage() {
         Gaps are named decision objects. Many candidate needs can join onto one gap.
         Status is Candidate / Open / Partial / Addressed / Excluded — not a binary open/closed.
       </PageIntro>
+      {state.gaps.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No gaps yet. Ingest a demo source to extract candidates.
+        </p>
+      ) : (
       <div className="grid gap-3">
         {state.gaps.map((g) => {
           const needCount = state.need_gap_links.filter((l) => l.gap_id === g.id).length;
@@ -41,6 +46,7 @@ export default async function GapsPage() {
           );
         })}
       </div>
+      )}
     </AppShell>
   );
 }

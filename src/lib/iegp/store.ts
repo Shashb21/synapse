@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
+import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock } from "./types";
 import type { ActorFunction } from "./enums";
@@ -32,7 +33,7 @@ export async function loadState(): Promise<IegpState> {
   const d = db();
   const assetRows = await d.select().from(t.assets);
   if (assetRows.length === 0) {
-    await persistState(buildSeed());
+    await persistState(buildBlankWorkspace());
   }
   return readState();
 }
@@ -180,6 +181,11 @@ export async function persistState(state: IegpState) {
 }
 
 export async function resetSeed() {
+  await persistState(buildBlankWorkspace());
+  return loadState();
+}
+
+export async function resetWorkedExample() {
   await persistState(buildSeed());
   return loadState();
 }
@@ -687,6 +693,7 @@ export async function ingestNeedFromText(args: {
   source_type: IegpState["sources"][0]["source_type"];
   stakeholder_function: ActorFunction;
   text: string;
+  filename?: string;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
@@ -695,7 +702,7 @@ export async function ingestNeedFromText(args: {
   const ingested_at = now();
   await db().insert(t.sources).values({
     id: sourceId,
-    filename: args.title.replaceAll(" ", "_") + ".txt",
+    filename: args.filename ?? args.title.replaceAll(" ", "_") + ".txt",
     title: args.title,
     source_type: args.source_type,
     stakeholder_function: args.stakeholder_function,
@@ -851,4 +858,23 @@ export async function ingestNeedFromText(args: {
     `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); residual drafts created; coverage marked stale.`,
   );
   return sourceId;
+}
+
+export async function ingestDemoSource(args: {
+  demo_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const { demoSourceById } = await import("./demo-pack");
+  const file = demoSourceById(args.demo_id);
+  if (!file) throw new Error("Demo source file not found.");
+  return ingestNeedFromText({
+    title: file.title,
+    source_type: file.source_type,
+    stakeholder_function: file.stakeholder_function,
+    text: file.text,
+    filename: file.filename,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
 }

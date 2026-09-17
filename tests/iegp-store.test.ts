@@ -1,17 +1,21 @@
 import { describe, expect, it } from "vitest";
-import {
-  ingestNeedFromText,
-  loadState,
-  lockGapStatus,
-  lockPriority,
-  modifyGap,
-  resetSeed,
-} from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap } from "@/lib/iegp/store";
+import { buildSeed } from "@/lib/iegp/seed";
 
 describe("IEGP postgres store", () => {
-  it("seeds Velmara and refuses to auto-close a gap as addressed", async () => {
+  it("starts from a blank Velmara workspace", async () => {
     const state = await resetSeed();
     expect(state.asset.id).toBe("ASSET-VELMARA");
+    expect(state.objectives.length).toBeGreaterThan(0);
+    expect(state.sources).toHaveLength(0);
+    expect(state.needs).toHaveLength(0);
+    expect(state.gaps).toHaveLength(0);
+    expect(state.tactics).toHaveLength(0);
+    expect(state.residuals).toHaveLength(0);
+  });
+
+  it("seeds the worked example and refuses to auto-close a gap as addressed", async () => {
+    const state = await resetWorkedExample();
     expect(state.gaps.length).toBeGreaterThan(8);
     await expect(
       lockGapStatus({
@@ -24,7 +28,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("allows addressed with an override note", async () => {
-    await resetSeed();
+    await persistState(buildSeed());
     await lockGapStatus({
       gap_id: "GAP-ELDERLY-CE",
       status: "validated_addressed",
@@ -39,7 +43,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("lets a human lock priority without an engine suggestion or residual lock", async () => {
-    await resetSeed();
+    await persistState(buildSeed());
     await lockPriority({
       residual_id: "RES-OS",
       band: "medium",
@@ -77,18 +81,40 @@ describe("IEGP postgres store", () => {
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
+  it("ingests a demo pack file from a blank workspace", async () => {
+    await resetSeed();
+    await ingestDemoSource({
+      demo_id: "heor-interview",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const state = await loadState();
+    expect(state.sources.some((s) => s.filename === "01-heor-stakeholder-interview.txt")).toBe(true);
+    expect(state.gaps.some((g) => g.status === "candidate")).toBe(true);
+    expect(state.residuals.length).toBeGreaterThan(0);
+    expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
+  });
+
   it("modifies a candidate gap without accepting it", async () => {
     await resetSeed();
+    await ingestDemoSource({
+      demo_id: "medical-plan",
+      actor_name: "S. Iyer",
+      actor_function: "evidence_lead",
+    });
+    const before = await loadState();
+    const gap = before.gaps.find((g) => /ILD|QT/i.test(g.name + g.statement));
+    expect(gap).toBeTruthy();
     await modifyGap({
-      gap_id: "GAP-ILD",
+      gap_id: gap!.id,
       name: "Routine-care ILD / QT",
       statement: "Need ILD and QT characterisation in routine US care, not only the label.",
       actor_name: "S. Iyer",
       actor_function: "evidence_lead",
     });
     const state = await loadState();
-    const gap = state.gaps.find((g) => g.id === "GAP-ILD");
-    expect(gap?.name).toBe("Routine-care ILD / QT");
-    expect(gap?.status).toBe("candidate");
+    const updated = state.gaps.find((g) => g.id === gap!.id);
+    expect(updated?.name).toBe("Routine-care ILD / QT");
+    expect(updated?.status).toBe("candidate");
   });
 });

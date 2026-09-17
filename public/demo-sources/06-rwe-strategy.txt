@@ -1,0 +1,5 @@
+RWE strategy — prospective registry.
+
+The prospective Velmara registry will collect treatment, progression, survival, hospitalisations, sequencing and PROs. It does not include a concurrent SoC comparator in elderly patients.
+
+Limited evidence remains on comparative effectiveness versus regional standard of care in the elderly because the registry is single-arm.

@@ -25,6 +25,12 @@ export default async function RoadmapPage() {
         dossier. Priority is not automatic inclusion — a residual must be accepted onto a tactic
         here.
       </PageIntro>
+      {items.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No forward tactics yet. Completed tactics stay on the dossier once they exist. Ingest
+          sources and assign tactics from the plan first.
+        </p>
+      ) : (
       <ol className="grid gap-3">
         {items.map(({ tactic, item }) => (
           <li key={tactic.id} className="border border-border bg-card p-4">
@@ -61,6 +67,7 @@ export default async function RoadmapPage() {
           </li>
         ))}
       </ol>
+      )}
     </AppShell>
   );
 }

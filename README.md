@@ -6,7 +6,7 @@ This is not a study tracker or a gap spreadsheet. It connects:
 
 objectives → candidate evidence needs → extracted gaps + tactics → residual drafts → human accept/reject/modify → human priority → create/assign tactics → dimensional coverage → forward roadmap → stale-and-re-lock monitoring.
 
-Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC).
+Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**: objectives only, no sources or gaps. Demo files to upload live on `/sources` (`public/demo-sources/`).
 
 **Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/iegp-model.md`](docs/iegp-model.md).
 
@@ -33,16 +33,18 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
+The plan starts **empty**. Open `/sources`, download a demo `.txt`, and ingest it (or click **Ingest this file**). Reset on the plan returns the blank slate.
+
 | Route | What |
 | --- | --- |
-| `/` | IEGP: review extracted gaps, human priority, High / Medium / Low, addressed with tactics |
+| `/` | Blank IEGP: review extracted gaps after ingest, human priority, High / Medium / Low, addressed |
+| `/sources` | Demo pack to download/upload; ingest extracts gaps and tactics |
 | `/needs` | Candidate / accepted / rejected evidence needs |
 | `/gaps` | Gap inventory |
 | `/gaps/[id]` | Needs, dimensional tactic mappings, residual, status lock |
 | `/tactics` | Tactic objects + human-authored proposal |
 | `/residuals` | Residual statements and locked priority bands |
 | `/roadmap` | Ongoing / planned / proposed only |
-| `/sources` | Interviews, TLR, internal materials; ingest marks coverage stale |
 | `/evals` | View-only gold tape (needs + coverage; engine cannot auto-close) |
 | `/sdlc` | Spec tape |
 

@@ -48,10 +48,10 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 ## Surfaces
 
-The home screen (`/`) **is** the IEGP process:
+The home screen (`/`) is a **blank IEGP workspace** plus a demo source pack on `/sources`. Nothing is ingested until a human uploads a file. The loop is:
 
-1. Upload sources. The engine extracts **candidate gaps** and **tactics**, and drafts **residual evidence needs**.
-2. The plan lists open (candidate) gaps with their residuals. Humans **accept, reject, or modify**.
+1. Download or ingest a demo source. The engine extracts **candidate gaps** and **tactics**, and drafts **residual evidence needs**.
+2. The plan lists those gaps with residuals. Humans **accept, reject, or modify**.
 3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band.
 4. After a human lock, tactics can be **created or assigned** onto High / Medium / Low.
 5. **Addressed** gaps stay on the plan with the tactics that closed them.

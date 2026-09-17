@@ -26,6 +26,13 @@ export default async function NeedsPage() {
               <h2 className="mb-2 text-[13px] capitalize text-muted-foreground">
                 {status} ({rows.length})
               </h2>
+              {rows.length === 0 ? (
+                <p className="mb-4 text-[12px] text-muted-foreground">
+                  {status === "candidate"
+                    ? "Empty. Ingest a demo source to extract candidate needs."
+                    : "None."}
+                </p>
+              ) : (
               <div className="grid gap-3">
                 {rows.map((n) => {
                   const source = state.sources.find((s) => s.id === n.source_id);
@@ -88,6 +95,7 @@ export default async function NeedsPage() {
                   );
                 })}
               </div>
+              )}
             </section>
           );
         })}
