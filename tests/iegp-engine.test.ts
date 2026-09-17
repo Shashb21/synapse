@@ -208,6 +208,8 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(workspace.board.high.some((c) => c.gap_id === "GAP-SEQ")).toBe(true);
     expect(workspace.reviewTactics).toHaveLength(0);
     expect(workspace.availableTactics.some((t) => t.id === "TAC-REG")).toBe(true);
+    const registry = workspace.availableTactics.find((t) => t.id === "TAC-REG");
+    expect(registry?.gaps.map((g) => g.id).sort()).toEqual(["GAP-HCRU", "GAP-QOL", "GAP-SEQ"].sort());
   });
 
   it("puts mapped tactics on review and unprioritized cards, and leaves empty gaps empty", () => {

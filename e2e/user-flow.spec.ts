@@ -51,6 +51,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
     await page.getByRole("button", { name: "Next", exact: true }).click();
     await expect(page.getByRole("heading", { name: /review gaps and tactics/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
@@ -62,7 +63,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(gapCard.getByText(/^None$/)).toBeVisible();
     await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
     await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toHaveCount(0);
-    await expect(gapCard.getByText(/no accepted tactic to assign yet/i)).toBeVisible();
+    await expect(gapCard.getByText(/tactic library is empty/i)).toBeVisible();
   });
 
   test("create tactic on a review gap lists it on that gap", async ({ page }) => {
@@ -85,6 +86,8 @@ test.describe("wizard once, plan forever", () => {
     await expect(gapCard.getByRole("link", { name: /elderly soc chart review/i })).toBeVisible();
     await expect(gapCard.getByText(/^None$/)).toHaveCount(0);
     await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /elderly soc chart review/i })).toHaveCount(2);
   });
 
   test("enter the plan then new ingest lands in the inbox", async ({ page }) => {
@@ -108,6 +111,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
     await expect(page.getByText(/living plan/i).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /^inbox/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -190,5 +190,57 @@ describe("IEGP postgres store", () => {
     const card = mapped.review.find((c) => c.gap_id === gap!.id);
     expect(card?.tactics.some((t) => t.id === tactic!.id)).toBe(true);
     expect(mapped.review.filter((c) => c.gap_id !== gap!.id).every((c) => c.tactics.length === 0)).toBe(true);
+    expect(mapped.availableTactics.some((t) => t.id === tactic!.id)).toBe(true);
+  });
+
+  it("puts accepted and created tactics in the library so one tactic tags many gaps", async () => {
+    await resetSeed();
+    await ingestDemoSource({
+      demo_id: "heor-interview",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const ingested = await loadState();
+    const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
+    const [firstGap, secondGap] = ingested.gaps.filter((g) => g.status === "candidate");
+    expect(firstGap && secondGap).toBeTruthy();
+    await lockTacticReview({
+      tactic_id: tactic.id,
+      review_status: "accepted",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await assignTacticToGap({
+      gap_id: firstGap!.id,
+      tactic_id: tactic.id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await assignTacticToGap({
+      gap_id: secondGap!.id,
+      tactic_id: tactic.id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const createdId = await createProposedTactic({
+      name: "Library-only CEA",
+      type: "cea",
+      description: "Created into the library",
+      evidence_question: "What is the cost-effectiveness of Velmara vs SoC?",
+      population: "2L",
+      intervention: "Velmara",
+      comparator: "SoC",
+      outcomes: "QALY",
+      geography: "US + EU5",
+      owner: "A. Rao",
+      function: "heor",
+      residual_ids: [],
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const workspace = buildPlanWorkspace(await loadState());
+    const libraryRow = workspace.availableTactics.find((t) => t.id === tactic.id);
+    expect(libraryRow?.gaps.map((g) => g.id).sort()).toEqual([firstGap!.id, secondGap!.id].sort());
+    expect(workspace.availableTactics.some((t) => t.id === createdId && t.gaps.length === 0)).toBe(true);
   });
 });

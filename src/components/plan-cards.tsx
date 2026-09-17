@@ -13,6 +13,7 @@ import type {
   PlanTactic,
   ReviewGapCard,
   ReviewTacticCard,
+  TacticLibraryItem,
   UnprioritizedGapCard,
 } from "@/lib/iegp/engine";
 import {
@@ -22,7 +23,47 @@ import {
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
 
-type AvailableTactic = { id: string; name: string };
+type AvailableTactic = TacticLibraryItem;
+
+function tacticOptionLabel(tactic: TacticLibraryItem) {
+  if (tactic.gaps.length === 0) return `${tactic.name} · not tagged yet`;
+  if (tactic.gaps.length === 1) return `${tactic.name} · 1 gap`;
+  return `${tactic.name} · ${tactic.gaps.length} gaps`;
+}
+
+function CreateTacticFields() {
+  return (
+    <>
+      <input
+        name="name"
+        required
+        placeholder="Tactic name"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      />
+      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+        {TACTIC_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {TACTIC_TYPE_LABELS[type]}
+          </option>
+        ))}
+      </select>
+      <input
+        name="evidence_question"
+        required
+        placeholder="Evidence question"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      />
+      <input type="hidden" name="description" value="Proposed from the IEGP plan." />
+      <input type="hidden" name="population" value="To be specified" />
+      <input type="hidden" name="intervention" value="Velmara" />
+      <input type="hidden" name="comparator" value="To be specified" />
+      <input type="hidden" name="outcomes" value="To be specified" />
+      <input type="hidden" name="geography" value="US + EU5" />
+      <input type="hidden" name="owner" value="" />
+      <input type="hidden" name="function" value="evidence_lead" />
+    </>
+  );
+}
 
 function GapTacticsBlock({
   gapId,
@@ -67,7 +108,7 @@ function GapTacticsBlock({
             confirmLabel="Assign"
           >
             <label className="grid gap-1 text-[12px] text-muted-foreground">
-              Existing tactic
+              From tactic library
               <select
                 name="tactic_id"
                 required
@@ -75,14 +116,16 @@ function GapTacticsBlock({
               >
                 {unmapped.map((tactic) => (
                   <option key={tactic.id} value={tactic.id}>
-                    {tactic.name}
+                    {tacticOptionLabel(tactic)}
                   </option>
                 ))}
               </select>
             </label>
           </LockForm>
         ) : availableTactics.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">No accepted tactic to assign yet.</p>
+          <p className="text-[11px] text-muted-foreground">
+            Tactic library is empty. Accept an extracted tactic or create one.
+          </p>
         ) : null}
         <LockForm
           label="Create tactic"
@@ -93,33 +136,7 @@ function GapTacticsBlock({
           }}
           confirmLabel="Create"
         >
-          <input
-            name="name"
-            required
-            placeholder="Tactic name"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          />
-          <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
-            {TACTIC_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {TACTIC_TYPE_LABELS[type]}
-              </option>
-            ))}
-          </select>
-          <input
-            name="evidence_question"
-            required
-            placeholder="Evidence question"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          />
-          <input type="hidden" name="description" value="Proposed from the IEGP plan." />
-          <input type="hidden" name="population" value="To be specified" />
-          <input type="hidden" name="intervention" value="Velmara" />
-          <input type="hidden" name="comparator" value="To be specified" />
-          <input type="hidden" name="outcomes" value="To be specified" />
-          <input type="hidden" name="geography" value="US + EU5" />
-          <input type="hidden" name="owner" value="" />
-          <input type="hidden" name="function" value="evidence_lead" />
+          <CreateTacticFields />
         </LockForm>
       </div>
     </div>
@@ -438,5 +455,52 @@ export function PrioritizeQueue({
         <PrioritizeCard key={card.gap_id} card={card} availableTactics={availableTactics} />
       ))}
     </div>
+  );
+}
+
+export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
+  return (
+    <section aria-labelledby="tactic-library">
+      <h2 id="tactic-library" className="text-[15px] font-medium text-foreground">
+        Tactic library
+      </h2>
+      <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+        Extracted tactics enter here after you accept them. Anything you create is added too. Tag
+        the same tactic onto as many gaps as you need — it is not copied.
+      </p>
+      {items.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          Empty. Accept an extracted tactic or create one.
+        </p>
+      ) : (
+        <ul className="grid gap-2">
+          {items.map((item) => (
+            <li key={item.id} className="border border-border bg-background p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <Link
+                  href={`/tactics/${item.id}`}
+                  className="text-[13px] font-medium text-foreground no-underline hover:underline"
+                >
+                  {item.name}
+                </Link>
+                <span className="text-[11px] text-muted-foreground">
+                  {TACTIC_TYPE_LABELS[item.type]}
+                </span>
+              </div>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {item.gaps.length === 0
+                  ? "Not tagged to a gap yet."
+                  : `Tagged on ${item.gaps.map((g) => g.name).join(" · ")}`}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3">
+        <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
+          <CreateTacticFields />
+        </LockForm>
+      </div>
+    </section>
   );
 }

@@ -666,13 +666,37 @@ export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard
   };
 }
 
+export type TacticLibraryItem = {
+  id: string;
+  name: string;
+  type: Tactic["type"];
+  gaps: { id: string; name: string }[];
+};
+
+export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
+  return state.tactics
+    .filter((t) => t.status !== "cancelled" && t.review_status === "accepted")
+    .map((t) => {
+      const gapIds = [
+        ...new Set(state.coverages.filter((c) => c.tactic_id === t.id).map((c) => c.gap_id)),
+      ];
+      const gaps = gapIds
+        .map((id) => state.gaps.find((row) => row.id === id))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row))
+        .filter((row) => row.status !== "excluded")
+        .map((row) => ({ id: row.id, name: row.name }));
+      return { id: t.id, name: t.name, type: t.type, gaps };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function buildPlanWorkspace(state: IegpState): {
   review: ReviewGapCard[];
   reviewTactics: ReviewTacticCard[];
   unprioritized: UnprioritizedGapCard[];
   board: Record<PlanColumn, PlanGapCard[]>;
   addressed: PlanGapCard[];
-  availableTactics: { id: string; name: string }[];
+  availableTactics: TacticLibraryItem[];
 } {
   const review: ReviewGapCard[] = [];
   for (const gap of state.gaps.filter((g) => g.status === "candidate")) {
@@ -743,10 +767,7 @@ export function buildPlanWorkspace(state: IegpState): {
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
-    availableTactics: state.tactics
-      .filter((t) => t.status !== "cancelled" && t.review_status === "accepted")
-      .map((t) => ({ id: t.id, name: t.name }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    availableTactics: buildTacticLibrary(state),
   };
 }
 

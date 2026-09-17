@@ -1,7 +1,7 @@
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
-import { GapPlanCard, PrioritizeQueue, ReviewQueue } from "@/components/plan-cards";
+import { GapPlanCard, PrioritizeQueue, ReviewQueue, TacticLibrary } from "@/components/plan-cards";
 import { Wizard } from "@/components/wizard";
 import { StaleFlag } from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
@@ -47,6 +47,9 @@ export default async function HomePage() {
                 availableTactics={workspace.availableTactics}
                 emptyHint="Ingest a source first, then review what it extracted."
               />
+              <div className="mt-8">
+                <TacticLibrary items={workspace.availableTactics} />
+              </div>
             </section>
           }
           prioritize={
@@ -111,6 +114,10 @@ export default async function HomePage() {
           cards={workspace.unprioritized}
           availableTactics={workspace.availableTactics}
         />
+      </section>
+
+      <section className="mb-10">
+        <TacticLibrary items={workspace.availableTactics} />
       </section>
 
       <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
