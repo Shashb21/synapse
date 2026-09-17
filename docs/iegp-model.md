@@ -12,7 +12,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Source | Interview, TLR, CDP, HEOR/RWE/medical internal material. |
 | Evidence need | Atomic sourced statement. Starts as **candidate**. Never auto-promoted to a gap. |
 | Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). |
-| Tactic | Structured generating or disseminating activity. Status completed / ongoing / planned / proposed / cancelled. |
+| Tactic | Structured generating or disseminating activity. Extracted tactics start as **candidate** and use the same accept / reject / modify gate as gaps. Status completed / ongoing / planned / proposed / cancelled. |
 | Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. |
 | Residual evidence need | Child of a gap. Original gap is preserved. |
 | Priority | Locked band on the residual. Coverage ≠ priority. |
@@ -24,6 +24,7 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 
 1. Candidate need accept / reject (optional gap join on accept)
 2. Extracted gap accept / reject / **modify**
+2b. Extracted tactic accept / reject / **modify** (same gate; assignment only after accept)
 3. Gap status (Candidate / Open / Partial / Addressed / Excluded)
 4. Each of 10 coverage dimensions
 5. Overall coverage degree
@@ -48,13 +49,14 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 ## Surfaces
 
-The home screen (`/`) is a **blank IEGP workspace** plus a demo source pack on `/sources`. Nothing is ingested until a human uploads a file. The loop is:
+The home screen (`/`) is a **wizard once, then the living plan**. First visit is a stepper: upload → review gaps and tactics → prioritize. After **Enter the plan**, you only live on `/`. New ingest drops candidate gaps and tactics into the **inbox** on that same page. The loop is:
 
-1. Download or ingest a demo source. The engine extracts **candidate gaps** and **tactics**, and drafts **residual evidence needs**.
-2. The plan lists those gaps with residuals. Humans **accept, reject, or modify**.
+1. Upload or ingest a demo source. The engine extracts **candidate gaps** and **candidate tactics**, and drafts **residual evidence needs**.
+2. Review both. Humans **accept, reject, or modify** gaps and tactics. Only accepted tactics can be assigned later.
 3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band.
 4. After a human lock, tactics can be **created or assigned** onto High / Medium / Low.
 5. **Addressed** gaps stay on the plan with the tactics that closed them.
+6. Later sources never restart the wizard. They land in the inbox.
 
 Critical locked bands sit in High. Excluded gaps stay off the board. Candidate needs remain sourced atoms and still join onto gaps; they are not auto-promoted.
 

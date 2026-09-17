@@ -7,7 +7,9 @@ describe("Velmara IEGP seed", () => {
   it("is one asset, one indication", () => {
     expect(state.asset.name).toBe("Velmara");
     expect(state.asset.indication).toMatch(/EGFR/i);
+    expect(state.asset.wizard_complete).toBe(true);
     expect(state.objectives.length).toBeGreaterThanOrEqual(4);
+    expect(state.tactics.every((t) => t.review_status === "accepted")).toBe(true);
   });
 
   it("keeps candidate needs from becoming automatic gaps", () => {

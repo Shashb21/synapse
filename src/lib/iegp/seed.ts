@@ -182,6 +182,7 @@ export function buildSeed(): IegpState {
       inn: "velmaratinib",
       indication: "2L EGFR-mutant NSCLC",
       geography: "US + EU5",
+      wizard_complete: true,
     },
     objectives: [
       {
@@ -1733,6 +1734,7 @@ function tactic(
   return {
     id,
     ...rest,
+    review_status: "accepted" as const,
     lock: who ? lock(...who) : unlocked(),
   };
 }

@@ -29,7 +29,8 @@ export function db() {
 const DDL = `
 CREATE TABLE IF NOT EXISTS assets (
   id text PRIMARY KEY, name text NOT NULL, inn text NOT NULL,
-  indication text NOT NULL, geography text NOT NULL
+  indication text NOT NULL, geography text NOT NULL,
+  wizard_complete boolean NOT NULL DEFAULT false
 );
 CREATE TABLE IF NOT EXISTS objectives (
   id text PRIMARY KEY, name text NOT NULL, description text NOT NULL,
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS tactics (
   population text NOT NULL, intervention text NOT NULL, comparator text NOT NULL,
   outcomes text NOT NULL, geography text NOT NULL, data_source text NOT NULL,
   study_design text NOT NULL, lifecycle_stage text NOT NULL, status text NOT NULL,
+  review_status text NOT NULL DEFAULT 'accepted',
   start_date text, evidence_available text, owner text NOT NULL,
   function text NOT NULL, budget text, intended_use text NOT NULL, lock jsonb NOT NULL
 );
@@ -113,6 +115,16 @@ export async function ensureSchema() {
   for (const stmt of DDL.split(";").map((s) => s.trim()).filter(Boolean)) {
     await d.execute(sql.raw(stmt));
   }
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS wizard_complete boolean NOT NULL DEFAULT false",
+    ),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'accepted'",
+    ),
+  );
 }
 
 export async function wipeIegp() {

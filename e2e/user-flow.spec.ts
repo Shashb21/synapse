@@ -14,64 +14,71 @@ async function resetBlank(page: import("@playwright/test").Page) {
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("blank IEGP demo workspace", () => {
+test.describe("wizard once, plan forever", () => {
   test.beforeEach(async ({ page }) => {
     await resetBlank(page);
   });
 
-  test("plan starts empty and points at demo sources", async ({ page }) => {
+  test("first visit is a stepper, not the living plan", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /iegp/i })).toBeVisible();
-    await expect(page.getByText(/blank workspace/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();
-    await expect(page.getByText(/no extracted gaps waiting/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /ingest a demo source/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /reset to blank slate/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
-  });
-
-  test("sources lists uningested demo files and a file upload", async ({ page }) => {
-    await page.goto("/sources");
+    await expect(page.getByRole("heading", { name: /set up the velmara iegp/i })).toBeVisible();
+    await expect(page.getByText(/first visit/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /1\. upload/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /2\. review/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /3\. prioritize/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /demo source files/i })).toBeVisible();
-    await expect(page.getByText(/01-heor-stakeholder-interview.txt/)).toBeVisible();
-    await expect(page.getByText(/not ingested/i).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^download$/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /ingest this file/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /ingest gaps and tactics/i })).toBeVisible();
-    await expect(page.getByText(/none yet/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^high$/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^needs$/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^sources$/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^plan$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /next/i })).toBeDisabled();
   });
 
-  test("ingesting a demo file extracts gaps and tactics onto the plan", async ({ page }) => {
-    await page.goto("/sources");
+  test("ingest on the wizard extracts gaps and tactics to review", async ({ page }) => {
+    await page.goto("/");
     await page.getByRole("button", { name: /ingest this file/i }).first().click();
     await page.getByPlaceholder("A. Rao").fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/ingested/i).first()).toBeVisible();
-    await page.goto("/");
+    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
+    await page.getByRole("button", { name: /next/i }).click();
+    await expect(page.getByRole("heading", { name: /review gaps and tactics/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /modify gap/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
-    await page.goto("/tactics");
-    await expect(page.getByText(/chart review/i).first()).toBeVisible();
   });
 
-  test("needs stay empty until a source is ingested", async ({ page }) => {
-    await page.goto("/needs");
-    await expect(page.getByRole("heading", { name: /evidence needs/i })).toBeVisible();
-    await expect(page.getByText(/empty\. ingest a demo source/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /accept onto gap/i })).toHaveCount(0);
-  });
+  test("enter the plan then new ingest lands in the inbox", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: /ingest this file/i }).first().click();
+    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByRole("button", { name: /^ingest$/i }).click();
+    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
+    await page.getByRole("button", { name: /2\. review/i }).click();
+    await page.getByRole("button", { name: /accept gap/i }).first().click();
+    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+    await page.getByRole("button", { name: /accept tactic/i }).first().click();
+    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+    await page.getByRole("button", { name: /3\. prioritize/i }).click();
+    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await page.getByRole("button", { name: /enter the plan/i }).click();
+    await page.getByPlaceholder("A. Rao").fill("S. Iyer");
+    await page.getByRole("button", { name: /go to the plan/i }).click();
+    await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
+    await expect(page.getByText(/living plan/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^inbox$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();
 
-  test("gaps, residuals, and roadmap are empty on a blank slate", async ({ page }) => {
-    await page.goto("/gaps");
-    await expect(page.getByText(/no gaps yet/i)).toBeVisible();
-    await page.goto("/residuals");
-    await expect(page.getByText(/no residuals yet/i)).toBeVisible();
-    await page.goto("/roadmap");
-    await expect(page.getByText(/completed tactics stay/i).first()).toBeVisible();
-    await expect(page.getByText(/no forward tactics yet/i)).toBeVisible();
+    await page.getByRole("heading", { name: /add sources/i }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: /ingest this file/i }).nth(1).click();
+    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByRole("button", { name: /^ingest$/i }).click();
+    await page.getByRole("heading", { name: /^inbox$/i }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
+    await expect(page.getByText(/intracranial|sequencing after osimertinib/i).first()).toBeVisible();
   });
 
   test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {

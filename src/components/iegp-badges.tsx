@@ -1,4 +1,12 @@
-import { GAP_STATUS_LABELS, type GapStatus, type OverallCoverage, type PriorityBand, type TacticStatus } from "@/lib/iegp/enums";
+import {
+  GAP_STATUS_LABELS,
+  TACTIC_REVIEW_LABELS,
+  type GapStatus,
+  type OverallCoverage,
+  type PriorityBand,
+  type TacticReviewStatus,
+  type TacticStatus,
+} from "@/lib/iegp/enums";
 import { Badge } from "@/components/ui/badge";
 import type { Lock } from "@/lib/iegp/types";
 
@@ -48,6 +56,20 @@ export function TacticBadge({ status }: { status: TacticStatus }) {
   return (
     <Badge variant="outline" className="capitalize">
       {status}
+    </Badge>
+  );
+}
+
+export function TacticReviewBadge({ status }: { status: TacticReviewStatus }) {
+  const tone =
+    status === "accepted"
+      ? "bg-emerald-500/15 text-emerald-300"
+      : status === "rejected"
+        ? "bg-zinc-500/20 text-zinc-400"
+        : "bg-violet-500/15 text-violet-300";
+  return (
+    <Badge variant="outline" className={tone}>
+      {TACTIC_REVIEW_LABELS[status]}
     </Badge>
   );
 }

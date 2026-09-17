@@ -515,6 +515,14 @@ export type ReviewGapCard = {
   needs: { id: string; statement: string }[];
 };
 
+export type ReviewTacticCard = {
+  tactic_id: string;
+  name: string;
+  type: Tactic["type"];
+  evidence_question: string;
+  description: string;
+};
+
 export type UnprioritizedGapCard = {
   gap_id: string;
   gap_name: string;
@@ -588,6 +596,7 @@ export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard
 
 export function buildPlanWorkspace(state: IegpState): {
   review: ReviewGapCard[];
+  reviewTactics: ReviewTacticCard[];
   unprioritized: UnprioritizedGapCard[];
   board: Record<PlanColumn, PlanGapCard[]>;
   addressed: PlanGapCard[];
@@ -610,6 +619,16 @@ export function buildPlanWorkspace(state: IegpState): {
       needs,
     });
   }
+
+  const reviewTactics: ReviewTacticCard[] = state.tactics
+    .filter((t) => t.review_status === "candidate")
+    .map((t) => ({
+      tactic_id: t.id,
+      name: t.name,
+      type: t.type,
+      evidence_question: t.evidence_question,
+      description: t.description,
+    }));
 
   const prioritizedResidual = new Set(
     state.priorities.filter((p) => p.lock.locked).map((p) => p.residual_id),
@@ -646,12 +665,22 @@ export function buildPlanWorkspace(state: IegpState): {
 
   return {
     review,
+    reviewTactics,
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
     availableTactics: state.tactics
-      .filter((t) => t.status !== "cancelled")
+      .filter((t) => t.status !== "cancelled" && t.review_status === "accepted")
       .map((t) => ({ id: t.id, name: t.name }))
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
+}
+
+export function wizardStartStep(
+  state: Pick<IegpState, "sources">,
+  workspace: Pick<ReturnType<typeof buildPlanWorkspace>, "review" | "reviewTactics">,
+): 1 | 2 | 3 {
+  if (state.sources.length === 0) return 1;
+  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) return 2;
+  return 3;
 }

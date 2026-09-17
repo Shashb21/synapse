@@ -4,9 +4,9 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → candidate evidence needs → extracted gaps + tactics → residual drafts → human accept/reject/modify → human priority → create/assign tactics → dimensional coverage → forward roadmap → stale-and-re-lock monitoring.
+objectives → candidate evidence needs → extracted gaps + tactics → residual drafts → human accept/reject/modify (gaps and tactics) → human priority → living plan (inbox + High / Medium / Low + addressed).
 
-Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**: objectives only, no sources or gaps. Demo files to upload live on `/sources` (`public/demo-sources/`).
+Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is a stepper on `/` (upload → review → prioritize). After you enter the plan, new ingest drops into the inbox on that same page. Demo files live in `public/demo-sources/`.
 
 **Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/iegp-model.md`](docs/iegp-model.md).
 
@@ -33,18 +33,11 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
-The plan starts **empty**. Open `/sources`, download a demo `.txt`, and ingest it (or click **Ingest this file**). Reset on the plan returns the blank slate.
+The first visit is a **stepper** on `/`. Ingest a demo file, review gaps and tactics, lock priority, then enter the plan. Reset returns the blank slate and the wizard.
 
 | Route | What |
 | --- | --- |
-| `/` | Blank IEGP: review extracted gaps after ingest, human priority, High / Medium / Low, addressed |
-| `/sources` | Demo pack to download/upload; ingest extracts gaps and tactics |
-| `/needs` | Candidate / accepted / rejected evidence needs |
-| `/gaps` | Gap inventory |
-| `/gaps/[id]` | Needs, dimensional tactic mappings, residual, status lock |
-| `/tactics` | Tactic objects + human-authored proposal |
-| `/residuals` | Residual statements and locked priority bands |
-| `/roadmap` | Ongoing / planned / proposed only |
+| `/` | First visit: upload → review → prioritize. After that: living plan with inbox, H/M/L, addressed, add-sources |
 | `/evals` | View-only gold tape (needs + coverage; engine cannot auto-close) |
 | `/sdlc` | Spec tape |
 

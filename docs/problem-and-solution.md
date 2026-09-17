@@ -43,34 +43,40 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics → residual drafts → human accept/reject/modify → human priority → create/assign tactics → High/Medium/Low plan + addressed → stale-and-re-lock monitoring.
+Strategic objectives → sources → extracted gaps + tactics → residual drafts → human accept/reject/modify (gaps and tactics) → human priority → enter the living plan → create/assign accepted tactics → High/Medium/Low + inbox + addressed.
 
 ### IEGP process (new plan)
 
 ```mermaid
 flowchart TD
+  wizard["First visit: stepper"]
   upload["1. Upload sources"]
-  extract["2. Extract gaps and tactics"]
-  residual["3. Draft residual evidence needs"]
-  openlist["4. List open gaps + residuals"]
-  decide{"5. Accept, reject, or modify"}
-  pri["6. Human locks priority"]
-  assign["7. Create or assign tactics"]
-  board["8. High / Medium / Low"]
+  extract["Extract gaps and tactics"]
+  review["Review queue"]
+  decide{"Accept, reject, or modify"}
+  pri["Human locks priority"]
+  enter["Enter the plan"]
+  inbox["Inbox on the plan"]
+  assign["Create or assign accepted tactics"]
+  board["High / Medium / Low"]
   closed["Addressed gaps with tactics"]
+  later["Later ingest"]
+  wizard --> upload
   upload --> extract
-  extract --> residual
-  residual --> openlist
-  openlist --> decide
-  decide -->|modify| openlist
-  decide -->|reject| openlist
+  extract --> review
+  review --> decide
+  decide -->|modify| review
+  decide -->|reject| review
   decide -->|accept| pri
-  pri --> assign
+  pri --> enter
+  enter --> assign
   assign --> board
   board --> closed
+  later --> inbox
+  inbox --> review
 ```
 
-The engine never assigns the priority band. Extracted tactics wait until after that lock. Addressed gaps remain on the plan.
+The engine never assigns the priority band. Extracted tactics wait for the same review as gaps. After the wizard, you only live on the plan.
 
 ### Traceability
 

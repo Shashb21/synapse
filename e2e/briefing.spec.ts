@@ -9,7 +9,7 @@ test("lock dialog records a named actor without login", async ({ page }) => {
       actor_function: "evidence_lead",
     }),
   });
-  await page.goto("/sources");
+  await page.goto("/");
   await page.getByRole("button", { name: /ingest this file/i }).first().click();
   await expect(page.getByText(/type your name and function/i)).toBeVisible();
   await expect(page.getByPlaceholder("A. Rao")).toBeVisible();

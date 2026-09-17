@@ -14,6 +14,7 @@ export const assets = pgTable("assets", {
   inn: text("inn").notNull(),
   indication: text("indication").notNull(),
   geography: text("geography").notNull(),
+  wizard_complete: boolean("wizard_complete").notNull().default(false),
 });
 
 export const objectives = pgTable("objectives", {
@@ -104,6 +105,7 @@ export const tactics = pgTable("tactics", {
   study_design: text("study_design").notNull(),
   lifecycle_stage: text("lifecycle_stage").notNull(),
   status: text("status").notNull(),
+  review_status: text("review_status").notNull().default("accepted"),
   start_date: text("start_date"),
   evidence_available: text("evidence_available"),
   owner: text("owner").notNull(),

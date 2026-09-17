@@ -9,6 +9,7 @@ import type {
   OverallCoverage,
   PriorityBand,
   SourceType,
+  TacticReviewStatus,
   TacticStatus,
   TacticType,
 } from "./enums";
@@ -38,6 +39,7 @@ export type Asset = {
   inn: string;
   indication: string;
   geography: string;
+  wizard_complete: boolean;
 };
 
 export type StrategicObjective = {
@@ -124,6 +126,7 @@ export type Tactic = {
   study_design: string;
   lifecycle_stage: string;
   status: TacticStatus;
+  review_status: TacticReviewStatus;
   start_date: string | null;
   evidence_available: string | null;
   owner: string;

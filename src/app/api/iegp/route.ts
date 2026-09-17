@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   assignTacticToGap,
+  completeWizard,
   createProposedTactic,
   ingestDemoSource,
   ingestNeedFromText,
@@ -12,7 +13,9 @@ import {
   lockResidual,
   lockRoadmapItem,
   lockTactic,
+  lockTacticReview,
   modifyGap,
+  modifyTactic,
   resetSeed,
 } from "@/lib/iegp/store";
 import type { ActorFunction } from "@/lib/iegp/enums";
@@ -123,6 +126,32 @@ export async function POST(request: Request) {
           gap_id: body.gap_id,
           name: body.name,
           statement: body.statement,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "lock_tactic_review":
+        await lockTacticReview({
+          tactic_id: body.tactic_id,
+          review_status: body.review_status as "accepted" | "rejected",
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "modify_tactic":
+        await modifyTactic({
+          tactic_id: body.tactic_id,
+          name: body.name,
+          evidence_question: body.evidence_question,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "complete_wizard":
+        await completeWizard({
           actor_name,
           actor_function,
           note: body.note,

@@ -209,6 +209,19 @@ export const TACTIC_STATUSES = [
 ] as const;
 export type TacticStatus = (typeof TACTIC_STATUSES)[number];
 
+export const TACTIC_REVIEW_STATUSES = [
+  "candidate",
+  "accepted",
+  "rejected",
+] as const;
+export type TacticReviewStatus = (typeof TACTIC_REVIEW_STATUSES)[number];
+
+export const TACTIC_REVIEW_LABELS: Record<TacticReviewStatus, string> = {
+  candidate: "Candidate",
+  accepted: "Accepted",
+  rejected: "Rejected",
+};
+
 export const COVERAGE_DIMENSIONS = [
   "relevance",
   "population",

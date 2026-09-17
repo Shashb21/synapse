@@ -3,7 +3,7 @@ import { resetSeed } from "../src/lib/iegp/store";
 async function main() {
   const state = await resetSeed();
   console.log(
-    `Blank ${state.asset.name} workspace: ${state.needs.length} needs, ${state.gaps.length} gaps, ${state.tactics.length} tactics. Demo files are on /sources.`,
+    `Blank ${state.asset.name} workspace: wizard ${state.asset.wizard_complete ? "complete" : "open"}. Demo files ingest on first visit.`,
   );
   process.exit(0);
 }

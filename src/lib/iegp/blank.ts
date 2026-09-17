@@ -11,6 +11,7 @@ export function buildBlankWorkspace(): IegpState {
       inn: "velmaratinib",
       indication: "2L EGFR-mutant NSCLC",
       geography: "US + EU5",
+      wizard_complete: false,
     },
     objectives: [
       {
@@ -106,7 +107,7 @@ export function buildBlankWorkspace(): IegpState {
         entity_id: "ASSET-VELMARA",
         action: "blank",
         detail:
-          "Blank IEGP workspace. Demo source files are on /sources and are not ingested until a human uploads them.",
+          "Blank IEGP workspace. First visit is upload → review → prioritize. Demo files wait on the wizard until a human ingest them.",
       },
     ],
     gold_needs: [],

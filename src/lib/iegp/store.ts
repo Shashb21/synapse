@@ -75,7 +75,10 @@ async function readState(): Promise<IegpState> {
   ]);
   const asset = assetRows[0]!;
   return {
-    asset,
+    asset: {
+      ...asset,
+      wizard_complete: Boolean(asset.wizard_complete),
+    },
     objectives,
     sources: sources.map((s) => ({
       ...s,
@@ -105,6 +108,7 @@ async function readState(): Promise<IegpState> {
       ...x,
       type: x.type as IegpState["tactics"][0]["type"],
       status: x.status as IegpState["tactics"][0]["status"],
+      review_status: (x.review_status as IegpState["tactics"][0]["review_status"]) || "accepted",
       function: x.function as ActorFunction,
       lock: asLock(x.lock),
     })),
@@ -501,6 +505,7 @@ export async function createProposedTactic(args: {
     study_design: "To be designed",
     lifecycle_stage: "proposed",
     status: "proposed",
+    review_status: "accepted",
     start_date: null,
     evidence_available: null,
     owner: args.owner || args.actor_name,
@@ -541,6 +546,9 @@ export async function assignTacticToGap(args: {
   if (!gap) throw new Error("Gap not found");
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
   if (!tactic) throw new Error("Tactic not found");
+  if (tactic.review_status !== "accepted") {
+    throw new Error("Only accepted tactics can be assigned to a gap.");
+  }
   const existing = state.coverages.find(
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
@@ -836,6 +844,7 @@ export async function ingestNeedFromText(args: {
       study_design: "Extracted — not yet designed",
       lifecycle_stage: "extracted",
       status: "proposed",
+      review_status: "candidate",
       start_date: null,
       evidence_available: null,
       owner: args.actor_name,
@@ -877,4 +886,85 @@ export async function ingestDemoSource(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+}
+
+export async function lockTacticReview(args: {
+  tactic_id: string;
+  review_status: "accepted" | "rejected";
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  if (args.review_status === "rejected" && !args.note?.trim()) {
+    throw new Error("Rejecting a tactic requires a note.");
+  }
+  await db()
+    .update(t.tactics)
+    .set({
+      review_status: args.review_status,
+      lock: makeLock(args.actor_name, args.actor_function, args.note),
+    })
+    .where(eq(t.tactics.id, args.tactic_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "tactic",
+    args.tactic_id,
+    "lock_review",
+    `${tactic.review_status} → ${args.review_status}`,
+  );
+}
+
+export async function modifyTactic(args: {
+  tactic_id: string;
+  name: string;
+  evidence_question: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  await db()
+    .update(t.tactics)
+    .set({
+      name: args.name,
+      evidence_question: args.evidence_question,
+    })
+    .where(eq(t.tactics.id, args.tactic_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "tactic",
+    args.tactic_id,
+    "modify",
+    args.note || `${tactic.name} → ${args.name}`,
+  );
+}
+
+export async function completeWizard(args: {
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  if (state.sources.length === 0) {
+    throw new Error("Ingest at least one source before entering the plan.");
+  }
+  await db()
+    .update(t.assets)
+    .set({ wizard_complete: true })
+    .where(eq(t.assets.id, state.asset.id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "plan",
+    state.asset.id,
+    "complete_wizard",
+    args.note || "Wizard complete. Living on the plan from here.",
+  );
 }

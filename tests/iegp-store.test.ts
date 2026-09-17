@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard } from "@/lib/iegp/store";
 import { buildSeed } from "@/lib/iegp/seed";
 
 describe("IEGP postgres store", () => {
@@ -7,6 +7,7 @@ describe("IEGP postgres store", () => {
     const state = await resetSeed();
     expect(state.asset.id).toBe("ASSET-VELMARA");
     expect(state.objectives.length).toBeGreaterThan(0);
+    expect(state.asset.wizard_complete).toBe(false);
     expect(state.sources).toHaveLength(0);
     expect(state.needs).toHaveLength(0);
     expect(state.gaps).toHaveLength(0);
@@ -79,6 +80,7 @@ describe("IEGP postgres store", () => {
     const residual = state.residuals.find((r) => newGaps.some((g) => g.id === r.gap_id));
     expect(residual).toBeTruthy();
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
+    expect(state.tactics.filter((t) => /chart review/i.test(t.name + t.evidence_question)).every((t) => t.review_status === "candidate")).toBe(true);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
@@ -116,5 +118,39 @@ describe("IEGP postgres store", () => {
     const updated = state.gaps.find((g) => g.id === gap!.id);
     expect(updated?.name).toBe("Routine-care ILD / QT");
     expect(updated?.status).toBe("candidate");
+  });
+
+  it("reviews extracted tactics and only assigns accepted ones", async () => {
+    await resetSeed();
+    await ingestDemoSource({
+      demo_id: "heor-interview",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const before = await loadState();
+    const tactic = before.tactics.find((t) => t.review_status === "candidate");
+    expect(tactic).toBeTruthy();
+    await expect(
+      assignTacticToGap({
+        gap_id: before.gaps[0]!.id,
+        tactic_id: tactic!.id,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      }),
+    ).rejects.toThrow(/accepted tactics/i);
+    await lockTacticReview({
+      tactic_id: tactic!.id,
+      review_status: "accepted",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const accepted = await loadState();
+    expect(accepted.tactics.find((t) => t.id === tactic!.id)?.review_status).toBe("accepted");
+    await completeWizard({
+      actor_name: "S. Iyer",
+      actor_function: "evidence_lead",
+    });
+    const after = await loadState();
+    expect(after.asset.wizard_complete).toBe(true);
   });
 });

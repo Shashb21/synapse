@@ -168,5 +168,7 @@ describe("IEGP engine", () => {
     expect(pfs).toBeTruthy();
     expect(pfs!.tactics.some((t) => t.id === "TAC-VEL-301")).toBe(true);
     expect(workspace.board.high.some((c) => c.gap_id === "GAP-SEQ")).toBe(true);
+    expect(workspace.reviewTactics).toHaveLength(0);
+    expect(workspace.availableTactics.some((t) => t.id === "TAC-REG")).toBe(true);
   });
 });

@@ -1,18 +1,24 @@
 import Link from "next/link";
 
-const LINKS = [
+const PRIMARY = [
   { href: "/", id: "plan", label: "Plan" },
-  { href: "/needs", id: "needs", label: "Needs" },
-  { href: "/gaps", id: "gaps", label: "Gaps" },
-  { href: "/tactics", id: "tactics", label: "Tactics" },
-  { href: "/residuals", id: "residuals", label: "Residuals" },
-  { href: "/roadmap", id: "roadmap", label: "Roadmap" },
-  { href: "/sources", id: "sources", label: "Sources" },
+] as const;
+
+const SECONDARY = [
   { href: "/evals", id: "evals", label: "Eval" },
   { href: "/sdlc", id: "sdlc", label: "Spec" },
 ] as const;
 
-export type ShellId = (typeof LINKS)[number]["id"];
+export type ShellId =
+  | "plan"
+  | "needs"
+  | "gaps"
+  | "tactics"
+  | "residuals"
+  | "roadmap"
+  | "sources"
+  | "evals"
+  | "sdlc";
 
 export function AppShell({
   children,
@@ -21,6 +27,7 @@ export function AppShell({
   children: React.ReactNode;
   active: ShellId;
 }) {
+  const links = [...PRIMARY, ...SECONDARY];
   return (
     <div className="flex min-h-full flex-col bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background">
@@ -29,7 +36,7 @@ export function AppShell({
             Synapse IEGP
           </Link>
           <nav className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
-            {LINKS.map((l) => (
+            {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
