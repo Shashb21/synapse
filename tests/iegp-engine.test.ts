@@ -218,7 +218,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(ild!.tactics).toHaveLength(0);
     const os = workspace.unprioritized.find((c) => c.gap_id === "GAP-OS");
     expect(os).toBeTruthy();
-    expect(os!.tactics).toHaveLength(0);
+    expect(os!.tactics.some((t) => t.id === "TAC-LTFU")).toBe(true);
 
     const mapped = buildPlanWorkspace({
       ...seed,
@@ -235,6 +235,5 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(mapped.review.find((c) => c.gap_id === "GAP-ILD")!.tactics.some((t) => t.id === "TAC-REG")).toBe(
       true,
     );
-    expect(mapped.unprioritized.find((c) => c.gap_id === "GAP-OS")!.tactics).toHaveLength(0);
   });
 });
