@@ -39,7 +39,14 @@ test.describe("wizard once, plan forever", () => {
   test("ingest on the wizard extracts gaps and tactics to review", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    const name = page.getByLabel(/^name$/i);
+    await expect(name).toHaveValue("");
+    await expect(name).toHaveAttribute("placeholder", "Your name");
+    await expect(page.getByText(/empty until you type/i)).toBeVisible();
+    await expect(page.getByLabel(/^function$/i)).toHaveValue("evidence_lead");
+    await page.getByRole("button", { name: /^ingest$/i }).click();
+    await expect(page.getByText(/placeholder, not a filled value/i)).toBeVisible();
+    await name.fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
     await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
     await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -52,20 +59,20 @@ test.describe("wizard once, plan forever", () => {
   test("enter the plan then new ingest lands in the inbox", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
     await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
     await page.getByRole("button", { name: /2\. review/i }).click();
     await page.getByRole("button", { name: /accept gap/i }).first().click();
-    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
     await page.getByRole("button", { name: /accept tactic/i }).first().click();
-    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
     await page.getByRole("button", { name: /3\. prioritize/i }).click();
     await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
     await page.getByRole("button", { name: /enter the plan/i }).click();
-    await page.getByPlaceholder("A. Rao").fill("S. Iyer");
+    await page.getByLabel(/^name$/i).fill("S. Iyer");
     await page.getByRole("button", { name: /go to the plan/i }).click();
     await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
     await expect(page.getByText(/living plan/i).first()).toBeVisible();
@@ -76,7 +83,7 @@ test.describe("wizard once, plan forever", () => {
 
     await page.getByRole("heading", { name: /add sources/i }).scrollIntoViewIfNeeded();
     await page.getByRole("button", { name: /ingest this file/i }).nth(1).click();
-    await page.getByPlaceholder("A. Rao").fill("A. Rao");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
     await page.getByRole("heading", { name: /^inbox/i }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
