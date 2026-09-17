@@ -47,7 +47,9 @@ Tactic status change or new ingest marks related coverage **stale** and unlocks 
 
 Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safety: zero unlocked Addressed rows; `engineMaySetStatus("validated_addressed")` is false.
 
-## v1 non-goals
+## Surfaces
+
+The home screen (`/`) **is** the IEGP: three boxes — High, Medium, Low — of prioritized gaps with the tactics mapped to each. Critical locked bands sit in High. Excluded and fully addressed gaps stay off this board.
 
 - AI tactic ideation
 - Auth / RBAC

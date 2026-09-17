@@ -70,6 +70,11 @@ describe("Velmara IEGP seed", () => {
     expect(state.roadmap.some((r) => completed.includes(r.tactic_id))).toBe(false);
   });
 
+  it("places caregiver in low so the three plan boxes are populated", () => {
+    const pri = state.priorities.find((p) => p.residual_id === "RES-CAREGIVER");
+    expect(pri?.band).toBe("low");
+  });
+
   it("locks every seed residual before priority", () => {
     for (const pri of state.priorities) {
       const residual = state.residuals.find((r) => r.id === pri.residual_id);

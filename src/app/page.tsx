@@ -1,118 +1,115 @@
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { GapBadge, PriorityBadge, StaleFlag } from "@/components/iegp-badges";
+import {
+  CoverageBadge,
+  GapBadge,
+  PriorityBadge,
+  StaleFlag,
+  TacticBadge,
+} from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
 import { LockForm } from "@/components/lock-form";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildPlanBoard, type PlanColumn, type PlanGapCard } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
 
+const COLUMNS: { id: PlanColumn; title: string; hint: string }[] = [
+  { id: "high", title: "High", hint: "Critical and high locked bands" },
+  { id: "medium", title: "Medium", hint: "Decision-relevant, not this cycle's blocker" },
+  { id: "low", title: "Low", hint: "Keep on the inventory; do not staff first" },
+];
+
 export default async function PlanPage() {
   const state = await loadState();
-  const candidateNeeds = state.needs.filter((n) => n.status === "candidate").length;
-  const stale = state.coverages.filter((c) => c.stale).length;
-  const byStatus = Object.fromEntries(
-    ["candidate", "validated_open", "validated_partial", "validated_addressed", "excluded"].map(
-      (s) => [s, state.gaps.filter((g) => g.status === s).length],
-    ),
-  );
-  const ranked = state.priorities
-    .slice()
-    .sort((a, b) => b.suggested_score - a.suggested_score);
+  const board = buildPlanBoard(state);
+  const stale = state.coverages.some((c) => c.stale);
 
   return (
     <AppShell active="plan">
-      <PageIntro kicker={state.asset.inn} title={`${state.asset.name} integrated evidence plan`}>
-        {state.asset.indication} · {state.asset.geography}. Living plan. Coverage is not
-        priority. Residuals do not overwrite parent gaps. Every gate is a human lock.
+      <PageIntro kicker={state.asset.inn} title={`${state.asset.name} IEGP`}>
+        {state.asset.indication} · {state.asset.geography}. Prioritized gaps and the tactics
+        mapped to them. Coverage is not priority — a partial HTA residual can still sit in High.
       </PageIntro>
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Objectives" value={state.objectives.length} href="/" />
-        <Stat label="Candidate needs" value={candidateNeeds} href="/needs" />
-        <Stat label="Open / partial gaps" value={(byStatus.validated_open ?? 0) + (byStatus.validated_partial ?? 0)} href="/gaps" />
-        <Stat label="Stale mappings" value={stale} href="/gaps" />
-      </div>
-
-      <div className="mb-8 grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Gap inventory</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 text-[13px]">
-            {state.gaps.map((g) => (
-              <Link key={g.id} href={`/gaps/${g.id}`} className="flex items-start justify-between gap-3 no-underline">
-                <span className="text-foreground">{g.name}</span>
-                <GapBadge status={g.status} />
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Residual priority (locked bands)</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 text-[13px]">
-            {ranked.map((p) => {
-              const residual = state.residuals.find((r) => r.id === p.residual_id);
-              return (
-                <Link key={p.id} href="/residuals" className="grid gap-1 no-underline">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-foreground">{residual?.statement.slice(0, 90)}…</span>
-                    <PriorityBadge band={p.band} />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Suggested {p.suggested_score} / {p.suggested_band}
-                    {p.override_reason ? ` · override: ${p.override_reason}` : ""}
-                  </p>
-                </Link>
-              );
-            })}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Strategic objectives</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          {state.objectives.map((o) => (
-            <div key={o.id} className="border border-border p-3">
-              <p className="text-[13px] text-foreground">{o.name}</p>
-              <p className="mt-1 text-[12px] text-muted-foreground">
-                {o.key_decision} · {o.decision_date} · importance {o.strategic_importance}/5
-              </p>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {COLUMNS.map((col) => (
+          <section
+            key={col.id}
+            className="border border-border bg-card/40 p-3"
+            aria-labelledby={`plan-${col.id}`}
+          >
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <h2 id={`plan-${col.id}`} className="text-[15px] font-medium text-foreground">
+                {col.title}
+              </h2>
+              <span className="text-[11px] text-muted-foreground">
+                {board[col.id].length}
+              </span>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+            <p className="mb-3 text-[11px] text-muted-foreground">{col.hint}</p>
+            <div className="grid gap-3">
+              {board[col.id].length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">No gaps in this band.</p>
+              ) : (
+                board[col.id].map((card) => (
+                  <GapPlanCard key={card.gap_id} card={card} />
+                ))
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
         <LockForm label="Reset Velmara seed" action="reset" />
-        {stale > 0 ? <StaleFlag stale /> : null}
-        <p className="text-[12px] text-muted-foreground">
-          Registry TAC-REG maps to sequencing, HCRU and QoL — one tactic, several gaps. Elderly
-          chart review is Partial because the comparator is missing.
-        </p>
+        {stale ? <StaleFlag stale /> : null}
       </div>
     </AppShell>
   );
 }
 
-function Stat({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number;
-  href: string;
-}) {
+function GapPlanCard({ card }: { card: PlanGapCard }) {
   return (
-    <Link href={href} className="border border-border bg-card p-4 no-underline">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl text-foreground">{value}</p>
-    </Link>
+    <article className="border border-border bg-background p-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <PriorityBadge band={card.band} />
+        <GapBadge status={card.gap_status} />
+      </div>
+      <Link
+        href={`/gaps/${card.gap_id}`}
+        className="mt-2 block text-[13px] font-medium text-foreground no-underline hover:underline"
+      >
+        {card.gap_name}
+      </Link>
+      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.residual}</p>
+      <h3 className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Tactics
+      </h3>
+      {card.tactics.length === 0 ? (
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          No tactic mapped.{" "}
+          <Link href="/tactics" className="text-foreground">
+            Propose one
+          </Link>
+          .
+        </p>
+      ) : (
+        <ul className="mt-1 grid gap-1.5">
+          {card.tactics.map((tactic) => (
+            <li key={tactic.id}>
+              <Link
+                href={`/tactics/${tactic.id}`}
+                className="flex flex-wrap items-center gap-1.5 text-[12px] text-foreground no-underline hover:underline"
+              >
+                <span>{tactic.name}</span>
+                <TacticBadge status={tactic.status} />
+                {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
+                {tactic.stale ? <StaleFlag stale /> : null}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
   );
 }

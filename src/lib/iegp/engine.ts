@@ -5,6 +5,7 @@ import {
   type GapStatus,
   type OverallCoverage,
   type PriorityBand,
+  type TacticStatus,
 } from "./enums";
 import type {
   DimensionAssessment,
@@ -12,6 +13,7 @@ import type {
   ResidualNeed,
   StrategicObjective,
   EvidenceGap,
+  IegpState,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
 
@@ -346,4 +348,92 @@ export function extractCandidateNeeds(
     }
   }
   return out;
+}
+
+export type PlanColumn = "high" | "medium" | "low";
+
+export function planColumn(band: PriorityBand): PlanColumn {
+  if (band === "critical" || band === "high") return "high";
+  if (band === "medium") return "medium";
+  return "low";
+}
+
+export type PlanTactic = {
+  id: string;
+  name: string;
+  status: TacticStatus;
+  overall: OverallCoverage | null;
+  stale: boolean;
+};
+
+export type PlanGapCard = {
+  gap_id: string;
+  gap_name: string;
+  gap_status: GapStatus;
+  residual_id: string;
+  residual: string;
+  band: PriorityBand;
+  score: number;
+  tactics: PlanTactic[];
+};
+
+const STATUS_ORDER: Record<TacticStatus, number> = {
+  ongoing: 0,
+  planned: 1,
+  proposed: 2,
+  completed: 3,
+  cancelled: 4,
+};
+
+export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard[]> {
+  const cards: PlanGapCard[] = [];
+  for (const residual of state.residuals) {
+    const gap = state.gaps.find((g) => g.id === residual.gap_id);
+    if (!gap || gap.status === "excluded" || gap.status === "validated_addressed") continue;
+    const priority = state.priorities.find((p) => p.residual_id === residual.id);
+    if (!priority?.lock.locked) continue;
+    const mapped: PlanTactic[] = [];
+    for (const coverage of state.coverages.filter((c) => c.gap_id === gap.id)) {
+      const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
+      if (!tactic) continue;
+      mapped.push({
+        id: tactic.id,
+        name: tactic.name,
+        status: tactic.status,
+        overall: coverage.overall,
+        stale: coverage.stale,
+      });
+    }
+    const extra: PlanTactic[] = [];
+    for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residual.id))) {
+      const tactic = state.tactics.find((t) => t.id === item.tactic_id);
+      if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
+      extra.push({
+        id: tactic.id,
+        name: tactic.name,
+        status: tactic.status,
+        overall: null,
+        stale: false,
+      });
+    }
+    const tactics = [...mapped, ...extra].sort(
+      (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
+    );
+    cards.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      gap_status: gap.status,
+      residual_id: residual.id,
+      residual: residual.statement,
+      band: priority.band,
+      score: priority.suggested_score,
+      tactics,
+    });
+  }
+  cards.sort((a, b) => b.score - a.score);
+  return {
+    high: cards.filter((c) => planColumn(c.band) === "high"),
+    medium: cards.filter((c) => planColumn(c.band) === "medium"),
+    low: cards.filter((c) => planColumn(c.band) === "low"),
+  };
 }

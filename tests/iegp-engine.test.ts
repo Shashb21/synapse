@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPlanBoard,
   coverageEval,
   draftResidualStatement,
   engineMaySetStatus,
   extractCandidateNeeds,
   needEvalMetrics,
   pairNeeds,
+  planColumn,
   suggestGapStatus,
   suggestPriority,
 } from "@/lib/iegp/engine";
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
+import { buildSeed } from "@/lib/iegp/seed";
 import type { GapTacticCoverage } from "@/lib/iegp/types";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 
@@ -120,5 +123,15 @@ describe("IEGP engine", () => {
 
   it("has ten coverage dimensions", () => {
     expect(COVERAGE_DIMENSIONS).toHaveLength(10);
+  });
+
+  it("boards the IEGP as high / medium / low with associated tactics", () => {
+    expect(planColumn("critical")).toBe("high");
+    const board = buildPlanBoard(buildSeed());
+    expect(board.high.some((c) => c.gap_id === "GAP-ELDERLY-CE")).toBe(true);
+    const elderly = board.high.find((c) => c.gap_id === "GAP-ELDERLY-CE")!;
+    expect(elderly.tactics.some((t) => t.id === "TAC-ELDERLY-RWE")).toBe(true);
+    expect(board.medium.some((c) => c.gap_id === "GAP-CNS")).toBe(true);
+    expect(board.low.some((c) => c.gap_id === "GAP-CAREGIVER")).toBe(true);
   });
 });

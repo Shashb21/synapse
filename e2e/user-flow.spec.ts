@@ -1,14 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("IEGP user flow", () => {
-  test("plan monitor shows Velmara and gap inventory", async ({ page }) => {
+  test("plan is the IEGP: high / medium / low gaps with tactics", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /integrated evidence plan/i })).toBeVisible();
-    await expect(page.getByText(/velmara/i).first()).toBeVisible();
-    await expect(page.getByText(/elderly comparative/i).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^needs$/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^gaps$/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^roadmap$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /iegp/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /elderly comparative/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /retrospective rwe/i }).first()).toBeVisible();
+    await expect(page.getByText(/caregiver burden/i).first()).toBeVisible();
   });
 
   test("needs inbox keeps candidates from becoming gaps", async ({ page }) => {

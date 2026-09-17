@@ -35,7 +35,7 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
 | Route | What |
 | --- | --- |
-| `/` | Plan: objectives, gap inventory, residual priority |
+| `/` | IEGP: High / Medium / Low prioritized gaps with associated tactics |
 | `/needs` | Candidate / accepted / rejected evidence needs |
 | `/gaps` | Gap inventory |
 | `/gaps/[id]` | Needs, dimensional tactic mappings, residual, status lock |
