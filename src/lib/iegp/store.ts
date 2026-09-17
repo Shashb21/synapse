@@ -11,7 +11,9 @@ import {
   extractCandidateGaps,
   extractCandidateNeeds,
   extractCandidateTactics,
+  gapNameFromStatement,
   residualRequired,
+  splitSourceIntoBlocks,
   similarRecord,
   suggestGapStatus,
   unlocked,
@@ -717,17 +719,15 @@ export async function ingestNeedFromText(args: {
     ingested_at,
     full_text: args.text,
   });
-  const blockId = `${sourceId}-B01`;
-  await db().insert(t.sourceBlocks).values({
-    id: blockId,
+  const sections = splitSourceIntoBlocks(args.text, args.title);
+  const blocks = sections.map((section, i) => ({
+    id: `${sourceId}-B${String(i + 1).padStart(2, "0")}`,
     source_id: sourceId,
-    heading: args.title,
-    text: args.text,
-    location: "Uploaded note",
-  });
-  const blocks = [
-    { id: blockId, source_id: sourceId, text: args.text, heading: args.title },
-  ];
+    heading: section.heading,
+    text: section.text,
+    location: section.heading === "Note" ? "Uploaded note" : section.heading,
+  }));
+  if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
   const extractedNeeds = extractCandidateNeeds(blocks);
   const extractedGaps = extractCandidateGaps(blocks);
   const extractedTactics = extractCandidateTactics(blocks);
@@ -753,7 +753,7 @@ export async function ingestNeedFromText(args: {
     ? extractedGaps
     : needRows.map((row) => ({
         id: row.id,
-        name: row.statement.split(/\s+/).slice(0, 8).join(" "),
+        name: gapNameFromStatement(row.statement),
         statement: row.statement,
         domain: "unmet_need" as const,
         source_id: sourceId,

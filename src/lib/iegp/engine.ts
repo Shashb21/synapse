@@ -402,13 +402,83 @@ export function guessTacticType(text: string): TacticType {
   return "rwe_study";
 }
 
-export function gapNameFromStatement(statement: string, heading?: string): string {
-  if (heading && heading.length > 3 && heading.length < 60 && !/^(note|findings|summary)$/i.test(heading)) {
-    return heading;
+const SOURCE_TITLE_CUES =
+  /\b(interview|excerpt|dossier|strategy|advisory|stakeholder|clinical development plan|literature review)\b/i;
+
+/** Short in-document labels such as "Elderly" or "CNS", not the source title. */
+export function isSectionHeading(line: string, sourceTitle?: string): boolean {
+  const t = line.trim().replace(/^#+\s*/, "");
+  if (t.length < 2 || t.length > 42) return false;
+  if (/[.?!]$/.test(t) || /[—–]/.test(t)) return false;
+  if (sourceTitle && t.toLowerCase() === sourceTitle.trim().toLowerCase()) return false;
+  const words = t.split(/\s+/);
+  if (words.length > 6) return false;
+  if (SOURCE_TITLE_CUES.test(t) && words.length >= 3) return false;
+  if (words.length === 1) return /[A-Za-z]/.test(t);
+  return words.every(
+    (w) => /^[A-Z0-9]/.test(w) || /^(and|of|vs|versus|the|in|for)$/i.test(w),
+  );
+}
+
+export function splitSourceIntoBlocks(
+  text: string,
+  sourceTitle?: string,
+): { heading: string; text: string }[] {
+  const lines = text.replaceAll("\r\n", "\n").split("\n");
+  const blocks: { heading: string; text: string }[] = [];
+  let heading = "";
+  let buf: string[] = [];
+
+  const flush = () => {
+    const body = buf.join("\n").trim();
+    if (!body) {
+      heading = "";
+      buf = [];
+      return;
+    }
+    blocks.push({ heading: heading || "Note", text: body });
+    heading = "";
+    buf = [];
+  };
+
+  for (const line of lines) {
+    if (isSectionHeading(line, sourceTitle)) {
+      flush();
+      heading = line.trim().replace(/^#+\s*/, "");
+      continue;
+    }
+    buf.push(line);
   }
-  const cleaned = statement.replace(/^(we\s+|there\s+is\s+)/i, "").replace(/\.$/, "");
-  const words = cleaned.split(/\s+/).slice(0, 8).join(" ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  flush();
+  if (blocks.length === 0) {
+    return [{ heading: "Note", text: text.trim() }];
+  }
+  return blocks;
+}
+
+/** Card title for a gap or extracted tactic. Never the source document name. */
+export function gapNameFromStatement(statement: string, heading?: string): string {
+  const cleaned = statement
+    .replace(/\s+/g, " ")
+    .replace(/^(we\s+|there\s+is\s+|kols\s+)/i, "")
+    .replace(/^(need to (know|understand|characterise|characterize|quantify)\s+)/i, "")
+    .replace(/^limited evidence (remains )?(on |characterises |characterizes )?/i, "")
+    .replace(/^insufficient (evidence|data) (on |in )?/i, "")
+    .replace(/\.$/, "")
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
+  const fromStatement = words
+    ? words.charAt(0).toUpperCase() + words.slice(1)
+    : "Unnamed gap";
+  if (
+    heading &&
+    !/^(note|findings|summary)$/i.test(heading) &&
+    isSectionHeading(heading) &&
+    !fromStatement.toLowerCase().startsWith(heading.toLowerCase())
+  ) {
+    return `${heading}: ${fromStatement.charAt(0).toLowerCase()}${fromStatement.slice(1)}`;
+  }
+  return fromStatement;
 }
 
 export type ExtractedGap = {
@@ -464,7 +534,7 @@ export function extractCandidateTactics(
       const statement = sentence.replace(/\s+/g, " ");
       out.push({
         id: `XTAC-${String(n).padStart(3, "0")}`,
-        name: gapNameFromStatement(statement, block.heading),
+        name: gapNameFromStatement(statement),
         type: guessTacticType(statement),
         evidence_question: statement,
         source_id: block.source_id,

@@ -93,6 +93,8 @@ describe("IEGP postgres store", () => {
     const state = await loadState();
     expect(state.sources.some((s) => s.filename === "01-heor-stakeholder-interview.txt")).toBe(true);
     expect(state.gaps.some((g) => g.status === "candidate")).toBe(true);
+    expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
+    expect(state.gaps.some((g) => /economic burden|elderly|comparative/i.test(g.name))).toBe(true);
     expect(state.residuals.length).toBeGreaterThan(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });

@@ -42,6 +42,7 @@ describe("blank demo workspace", () => {
     const gaps = extractCandidateGaps(blocks);
     const tactics = extractCandidateTactics(blocks);
     expect(gaps.some((g) => /comparative effectiveness|economic burden/i.test(g.statement))).toBe(true);
+    expect(gaps.every((g) => !/heor stakeholder interviews/i.test(g.name))).toBe(true);
     expect(tactics.some((t) => t.type === "chart_review")).toBe(true);
   });
 });

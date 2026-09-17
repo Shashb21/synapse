@@ -8,9 +8,11 @@ import {
   extractCandidateGaps,
   extractCandidateNeeds,
   extractCandidateTactics,
+  gapNameFromStatement,
   needEvalMetrics,
   pairNeeds,
   planColumn,
+  splitSourceIntoBlocks,
   suggestGapStatus,
   suggestPriority,
 } from "@/lib/iegp/engine";
@@ -135,6 +137,42 @@ describe("IEGP engine", () => {
     expect(gaps.some((g) => /comparative effectiveness/i.test(g.statement))).toBe(true);
     expect(tactics.some((t) => t.type === "phase3_trial")).toBe(true);
     expect(tactics.some((t) => t.type === "registry")).toBe(true);
+  });
+
+  it("names gaps from the statement, not the source title", () => {
+    const gaps = extractCandidateGaps([
+      {
+        id: "b",
+        source_id: "s",
+        heading: "HEOR stakeholder interviews",
+        text: "We need to understand the economic burden associated with recurrence after velmaratinib. Limited evidence characterises direct costs.",
+      },
+    ]);
+    expect(gaps.length).toBeGreaterThan(0);
+    for (const gap of gaps) {
+      expect(gap.name.toLowerCase()).not.toMatch(/heor|interview/);
+    }
+    expect(gaps.some((g) => /economic burden/i.test(g.name))).toBe(true);
+    expect(
+      gapNameFromStatement(
+        "We need to understand comparative effectiveness of Velmara versus regional standard of care.",
+        "HEOR stakeholder interviews",
+      ),
+    ).not.toMatch(/interview/i);
+  });
+
+  it("splits a demo source into section blocks such as Elderly", () => {
+    const text = `HEOR stakeholder interviews — Velmara.
+
+Burden
+We need to understand the economic burden associated with recurrence after velmaratinib.
+
+Elderly
+We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients.`;
+    const blocks = splitSourceIntoBlocks(text, "HEOR stakeholder interviews");
+    expect(blocks.some((b) => b.heading === "Burden")).toBe(true);
+    expect(blocks.some((b) => b.heading === "Elderly")).toBe(true);
+    expect(blocks.every((b) => b.heading !== "HEOR stakeholder interviews")).toBe(true);
   });
 
   it("scores gold coverage overall degrees", () => {
