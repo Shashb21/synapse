@@ -4,8 +4,17 @@ import * as t from "./schema";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock } from "./types";
 import type { ActorFunction } from "./enums";
-import { draftResidualStatement, residualRequired, suggestGapStatus, suggestPriority } from "./engine";
-import { unlocked } from "./engine";
+import {
+  draftResidualStatement,
+  emptyDimensions,
+  extractCandidateGaps,
+  extractCandidateNeeds,
+  extractCandidateTactics,
+  residualRequired,
+  similarRecord,
+  suggestGapStatus,
+  unlocked,
+} from "./engine";
 
 function asLock(value: unknown): Lock {
   const v = value as Lock;
@@ -424,31 +433,14 @@ export async function lockPriority(args: {
   const state = await loadState();
   const residual = state.residuals.find((r) => r.id === args.residual_id);
   if (!residual) throw new Error("Residual not found");
-  if (!residual.lock.locked) {
-    throw new Error("Lock the residual statement before priority.");
-  }
-  const gap = state.gaps.find((g) => g.id === residual.gap_id)!;
-  const objective = state.objectives.find((o) => o.id === gap.objective_id)!;
-  const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  const suggested = suggestPriority({
-    residual,
-    objective,
-    coverages,
-    stakeholder: state.needs.find((n) =>
-      state.need_gap_links.some(
-        (l) => l.gap_id === gap.id && l.need_id === n.id && l.role === "primary",
-      ),
-    )?.stakeholder,
-  });
   const existing = state.priorities.find((p) => p.residual_id === args.residual_id);
   const row = {
     residual_id: args.residual_id,
-    suggested_score: suggested.score,
-    suggested_band: suggested.band,
+    suggested_score: 0,
+    suggested_band: args.band,
     band: args.band,
-    override_reason:
-      args.band !== suggested.band ? args.override_reason ?? "Human override" : args.override_reason ?? null,
-    reasons: suggested.reasons,
+    override_reason: args.override_reason ?? null,
+    reasons: ["Human-locked. The engine does not assign priority."],
     lock: makeLock(args.actor_name, args.actor_function, args.override_reason),
   };
   if (existing) {
@@ -482,6 +474,7 @@ export async function createProposedTactic(args: {
   owner: string;
   function: ActorFunction;
   residual_ids: string[];
+  gap_id?: string;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
@@ -491,21 +484,21 @@ export async function createProposedTactic(args: {
     id,
     name: args.name,
     type: args.type,
-    description: args.description,
+    description: args.description || args.name,
     evidence_question: args.evidence_question,
-    population: args.population,
-    intervention: args.intervention,
-    comparator: args.comparator,
-    outcomes: args.outcomes,
-    geography: args.geography,
+    population: args.population || "To be specified",
+    intervention: args.intervention || "Velmara",
+    comparator: args.comparator || "To be specified",
+    outcomes: args.outcomes || "To be specified",
+    geography: args.geography || state.asset.geography,
     data_source: "To be designed",
     study_design: "To be designed",
     lifecycle_stage: "proposed",
     status: "proposed",
     start_date: null,
     evidence_available: null,
-    owner: args.owner,
-    function: args.function,
+    owner: args.owner || args.actor_name,
+    function: args.function || "evidence_lead",
     budget: null,
     intended_use: args.residual_ids.join(", "),
     lock: unlocked(),
@@ -518,7 +511,87 @@ export async function createProposedTactic(args: {
     "create_proposed",
     args.name,
   );
+  if (args.gap_id) {
+    await assignTacticToGap({
+      gap_id: args.gap_id,
+      tactic_id: id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: "Created from the plan and assigned to this gap.",
+    });
+  }
   return id;
+}
+
+export async function assignTacticToGap(args: {
+  gap_id: string;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  const existing = state.coverages.find(
+    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
+  );
+  if (existing) {
+    throw new Error("That tactic is already assigned to this gap.");
+  }
+  const coverageId = nextId("COV", state.coverages.map((c) => c.id));
+  await db().insert(t.coverages).values({
+    id: coverageId,
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    dimensions: emptyDimensions(),
+    overall: "limited",
+    overall_rationale:
+      args.note ||
+      "Assigned from the plan. Coverage dimensions are unlocked until a human assesses them.",
+    overall_lock: unlocked(),
+    stale: true,
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "coverage",
+    coverageId,
+    "assign_tactic",
+    `${args.tactic_id} → ${args.gap_id}`,
+  );
+  await ensureResidualDraft(args.gap_id);
+}
+
+export async function modifyGap(args: {
+  gap_id: string;
+  name: string;
+  statement: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  await db()
+    .update(t.gaps)
+    .set({ name: args.name, statement: args.statement })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "modify",
+    args.note || `${gap.name} → ${args.name}`,
+  );
+  const residual = state.residuals.find((r) => r.gap_id === args.gap_id);
+  if (!residual || !residual.lock.locked) {
+    await ensureResidualDraft(args.gap_id);
+  }
 }
 
 export async function lockTactic(args: {
@@ -629,7 +702,6 @@ export async function ingestNeedFromText(args: {
     ingested_at,
     full_text: args.text,
   });
-  const sentences = args.text.split(/(?<=[.?!])\s+/).filter((s) => s.trim().length > 20);
   const blockId = `${sourceId}-B01`;
   await db().insert(t.sourceBlocks).values({
     id: blockId,
@@ -638,22 +710,47 @@ export async function ingestNeedFromText(args: {
     text: args.text,
     location: "Uploaded note",
   });
-  const { extractCandidateNeeds } = await import("./engine");
-  const extracted = extractCandidateNeeds([
+  const blocks = [
     { id: blockId, source_id: sourceId, text: args.text, heading: args.title },
-  ]);
+  ];
+  const extractedNeeds = extractCandidateNeeds(blocks);
+  const extractedGaps = extractCandidateGaps(blocks);
+  const extractedTactics = extractCandidateTactics(blocks);
+  const fallbackSentences = args.text
+    .split(/(?<=[.?!])\s+/)
+    .filter((s) => s.trim().length > 20)
+    .slice(0, 3)
+    .map((s, idx) => ({
+      id: `tmp-${idx}`,
+      statement: s,
+      source_id: sourceId,
+      source_quote: s,
+    }));
+  const needRows = extractedNeeds.length ? extractedNeeds : fallbackSentences;
   const obj = state.objectives[0]!;
-  let i = 0;
-  for (const row of extracted.length ? extracted : sentences.slice(0, 3).map((s, idx) => ({
-    id: `tmp-${idx}`,
-    statement: s,
-    source_id: sourceId,
-    source_quote: s,
-  }))) {
-    i += 1;
-    const id = nextId("NEED", [...state.needs.map((n) => n.id), `NEED-${100 + i}`]);
+  const needIds = [...state.needs.map((n) => n.id)];
+  const gapIds = [...state.gaps.map((g) => g.id)];
+  const tacticIds = [...state.tactics.map((x) => x.id)];
+  const createdGapIds: string[] = [];
+  const createdNeedIds: string[] = [];
+
+  const gapPool = extractedGaps.length
+    ? extractedGaps
+    : needRows.map((row) => ({
+        id: row.id,
+        name: row.statement.split(/\s+/).slice(0, 8).join(" "),
+        statement: row.statement,
+        domain: "unmet_need" as const,
+        source_id: sourceId,
+        source_quote: row.source_quote,
+      }));
+
+  for (const row of needRows) {
+    const needId = nextId("NEED", needIds);
+    needIds.push(needId);
+    createdNeedIds.push(needId);
     await db().insert(t.needs).values({
-      id,
+      id: needId,
       statement: row.statement,
       domain: "unmet_need",
       stakeholder: args.stakeholder_function,
@@ -672,8 +769,77 @@ export async function ingestNeedFromText(args: {
       lock: unlocked(),
     });
   }
-  const relatedGaps = state.gaps.map((g) => g.id);
-  for (const c of state.coverages.filter((c) => relatedGaps.includes(c.gap_id))) {
+
+  for (const [index, gapRow] of gapPool.entries()) {
+    const existing = state.gaps.find(
+      (g) =>
+        g.status !== "excluded" &&
+        (similarRecord(g.statement, gapRow.statement) || similarRecord(g.name, gapRow.name)),
+    );
+    const linkedNeedId = createdNeedIds[Math.min(index, createdNeedIds.length - 1)];
+    if (existing) {
+      continue;
+    }
+    const gapId = nextId("GAP", gapIds);
+    gapIds.push(gapId);
+    createdGapIds.push(gapId);
+    await db().insert(t.gaps).values({
+      id: gapId,
+      name: gapRow.name,
+      statement: gapRow.statement,
+      domain: gapRow.domain,
+      objective_id: obj.id,
+      status: "candidate",
+      exclusion_reason: null,
+      exclusion_note: null,
+      lock: unlocked(),
+    });
+    if (linkedNeedId) {
+      await db()
+        .insert(t.needGapLinks)
+        .values({ need_id: linkedNeedId, gap_id: gapId, role: "primary" })
+        .onConflictDoNothing();
+    }
+    await ensureResidualDraft(gapId);
+  }
+
+  let tacticCount = 0;
+  for (const tac of extractedTactics) {
+    const dup = state.tactics.find(
+      (existing) =>
+        similarRecord(existing.name, tac.name) ||
+        similarRecord(existing.evidence_question, tac.evidence_question, 0.45),
+    );
+    if (dup) continue;
+    const tacticId = nextId("TAC", tacticIds);
+    tacticIds.push(tacticId);
+    tacticCount += 1;
+    await db().insert(t.tactics).values({
+      id: tacticId,
+      name: tac.name,
+      type: tac.type,
+      description: `Extracted from ${args.title}. Human must assign this tactic to a prioritized gap. Not ideation — inventory from the source.`,
+      evidence_question: tac.evidence_question,
+      population: "To be specified",
+      intervention: "Velmara",
+      comparator: "To be specified",
+      outcomes: "To be specified",
+      geography: state.asset.geography,
+      data_source: args.title,
+      study_design: "Extracted — not yet designed",
+      lifecycle_stage: "extracted",
+      status: "proposed",
+      start_date: null,
+      evidence_available: null,
+      owner: args.actor_name,
+      function: args.actor_function,
+      budget: null,
+      intended_use: `Extracted from ${sourceId}`,
+      lock: unlocked(),
+    });
+  }
+
+  for (const c of state.coverages) {
     await db().update(t.coverages).set({ stale: true }).where(eq(t.coverages.id, c.id));
   }
   await appendAudit(
@@ -682,7 +848,7 @@ export async function ingestNeedFromText(args: {
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; candidate needs queued; coverage marked stale for re-lock.`,
+    `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); residual drafts created; coverage marked stale.`,
   );
   return sourceId;
 }

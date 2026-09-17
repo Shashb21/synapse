@@ -21,11 +21,13 @@ export function LockForm({
   action,
   extra,
   children,
+  confirmLabel,
 }: {
   label: string;
   action: string;
   extra?: Record<string, string>;
   children?: React.ReactNode;
+  confirmLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -107,7 +109,7 @@ export function LockForm({
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Locking…" : "Lock"}
+              {pending ? "Saving…" : confirmLabel ?? "Lock"}
             </Button>
           </DialogFooter>
         </form>

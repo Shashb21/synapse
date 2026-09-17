@@ -837,6 +837,18 @@ export function buildSeed(): IegpState {
         exclusion_note: null,
         status_lock: lock(...lead, "VEL-301 addresses this question. Human lock after pressure-test."),
       },
+      {
+        id: "GAP-ILD",
+        name: "ILD and QT in routine care",
+        statement:
+          "Need safety characterisation of ILD and QT in routine care — extracted as a candidate, not yet accepted.",
+        domain: "safety",
+        objective_id: "OBJ-DIFF",
+        status: "candidate",
+        exclusion_reason: null,
+        exclusion_note: null,
+        status_lock: unlocked(),
+      },
     ],
     need_gap_links: [
       { need_id: "NEED-003", gap_id: "GAP-ELDERLY-CE", role: "primary" },
@@ -858,6 +870,7 @@ export function buildSeed(): IegpState {
       { need_id: "NEED-019", gap_id: "GAP-OS", role: "primary" },
       { need_id: "NEED-017", gap_id: "GAP-CONGRESS", role: "primary" },
       { need_id: "NEED-020", gap_id: "GAP-RECUR-ECON", role: "supporting" },
+      { need_id: "NEED-021", gap_id: "GAP-ILD", role: "primary" },
     ],
     tactics: [
       tactic("TAC-VEL-301", {
@@ -1436,6 +1449,42 @@ export function buildSeed(): IegpState {
         draft_rationale: "Hospitalisations better covered than ED/OP.",
         lock: lock(...rao),
       },
+      {
+        id: "RES-SEQ",
+        gap_id: "GAP-SEQ",
+        statement:
+          "Where Velmara sits versus NX-441 after osimertinib failure remains only partially characterised.",
+        domain: "treatment_sequencing",
+        draft_rationale: "Registry captures patterns; NX-441 comparator is thin. Parent gap preserved.",
+        lock: lock(...chen),
+      },
+      {
+        id: "RES-QOL",
+        gap_id: "GAP-QOL",
+        statement:
+          "Frail-patient PRO and routine-care QoL beyond mixed-age trial EORTC remain residual.",
+        domain: "qol_pro",
+        draft_rationale: "Registry PROs exist; frail instruments do not. Parent gap preserved.",
+        lock: lock(...hale),
+      },
+      {
+        id: "RES-OS",
+        gap_id: "GAP-OS",
+        statement:
+          "Overall survival beyond the VEL-301 primary PFS analysis will miss the 2026 value story.",
+        domain: "long_term_outcomes",
+        draft_rationale: "LTFU is the right tactic at the wrong time. Residual drafted; priority not yet locked.",
+        lock: unlocked(),
+      },
+      {
+        id: "RES-ILD",
+        gap_id: "GAP-ILD",
+        statement:
+          "ILD and QT incidence in routine care remains an extracted residual until the candidate gap is accepted.",
+        domain: "safety",
+        draft_rationale: "Drafted from the candidate ILD/QT gap. Parent preserved. Human must accept or reject.",
+        lock: unlocked(),
+      },
     ],
     priorities: [
       {
@@ -1502,6 +1551,26 @@ export function buildSeed(): IegpState {
         band: "medium",
         override_reason: null,
         reasons: ["Partial hospitalisations already in hand"],
+        lock: lock(...lead),
+      },
+      {
+        id: "PRI-SEQ",
+        residual_id: "RES-SEQ",
+        suggested_score: 0,
+        suggested_band: "high",
+        band: "high",
+        override_reason: null,
+        reasons: ["Human-locked. The engine does not assign priority."],
+        lock: lock(...lead),
+      },
+      {
+        id: "PRI-QOL",
+        residual_id: "RES-QOL",
+        suggested_score: 0,
+        suggested_band: "medium",
+        band: "medium",
+        override_reason: null,
+        reasons: ["Human-locked. The engine does not assign priority."],
         lock: lock(...lead),
       },
       {

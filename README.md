@@ -4,7 +4,7 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → candidate evidence needs → gaps → tactics → dimensional coverage → residual needs → priority → human-authored tactics → forward roadmap → stale-and-re-lock monitoring.
+objectives → candidate evidence needs → extracted gaps + tactics → residual drafts → human accept/reject/modify → human priority → create/assign tactics → dimensional coverage → forward roadmap → stale-and-re-lock monitoring.
 
 Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC).
 
@@ -35,7 +35,7 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
 | Route | What |
 | --- | --- |
-| `/` | IEGP: High / Medium / Low prioritized gaps with associated tactics |
+| `/` | IEGP: review extracted gaps, human priority, High / Medium / Low, addressed with tactics |
 | `/needs` | Candidate / accepted / rejected evidence needs |
 | `/gaps` | Gap inventory |
 | `/gaps/[id]` | Needs, dimensional tactic mappings, residual, status lock |

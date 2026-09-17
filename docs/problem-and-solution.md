@@ -43,7 +43,34 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → evidence needs → sources → gaps → existing/ongoing/planned tactics → dimensional coverage → residual needs → priority → human-authored new tactics → integrated roadmap → stale-and-re-lock monitoring.
+Strategic objectives → sources → extracted gaps + tactics → residual drafts → human accept/reject/modify → human priority → create/assign tactics → High/Medium/Low plan + addressed → stale-and-re-lock monitoring.
+
+### IEGP process (new plan)
+
+```mermaid
+flowchart TD
+  upload["1. Upload sources"]
+  extract["2. Extract gaps and tactics"]
+  residual["3. Draft residual evidence needs"]
+  openlist["4. List open gaps + residuals"]
+  decide{"5. Accept, reject, or modify"}
+  pri["6. Human locks priority"]
+  assign["7. Create or assign tactics"]
+  board["8. High / Medium / Low"]
+  closed["Addressed gaps with tactics"]
+  upload --> extract
+  extract --> residual
+  residual --> openlist
+  openlist --> decide
+  decide -->|modify| openlist
+  decide -->|reject| openlist
+  decide -->|accept| pri
+  pri --> assign
+  assign --> board
+  board --> closed
+```
+
+The engine never assigns the priority band. Extracted tactics wait until after that lock. Addressed gaps remain on the plan.
 
 ### Traceability
 
@@ -53,7 +80,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system creates a **candidate evidence need**. It does not create `Gap = insufficient elderly evidence`. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept joins that need onto a named gap.
+The system extracts a **candidate evidence need** and a **candidate gap**, plus a residual draft. It does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto priority.
 
 ### Worked mapping (Velmara seed)
 
@@ -72,7 +99,7 @@ Tactic: retrospective RWE in patients aged ≥65, no comparator.
 
 Residual (parent preserved): comparative outcomes versus relevant regional SoC in elderly patients remain insufficiently characterised.
 
-Priority: suggested Critical (HTA decision date, uncovered comparator). Human locks the band.
+Priority: human-locked High (HTA decision date, uncovered comparator). The engine does not propose a band.
 
 ### One tactic, several gaps
 
@@ -93,7 +120,7 @@ flowchart TD
 
 ### Priority (locked)
 
-Suggested score from strategic importance × decision urgency × residual severity × stakeholder criticality. Humans lock Critical / High / Medium / Low and may override with a reason. Engine never places a residual on the roadmap.
+Humans lock High / Medium / Low. The engine does not assign a band. Effort and cost live on the tactic. Engine never places a residual on the roadmap.
 
 ### Refresh
 

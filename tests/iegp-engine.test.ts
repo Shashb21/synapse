@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPlanBoard,
+  buildPlanWorkspace,
   coverageEval,
   draftResidualStatement,
   engineMaySetStatus,
+  extractCandidateGaps,
   extractCandidateNeeds,
+  extractCandidateTactics,
   needEvalMetrics,
   pairNeeds,
   planColumn,
@@ -112,6 +115,28 @@ describe("IEGP engine", () => {
     expect(rows[0]!.statement).toMatch(/economic burden/i);
   });
 
+  it("extracts candidate gaps and tactics from the same source", () => {
+    const blocks = [
+      {
+        id: "b1",
+        source_id: "s",
+        heading: "Elderly",
+        text: "We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients. Limited evidence remains on that question.",
+      },
+      {
+        id: "b2",
+        source_id: "s",
+        heading: "VEL-301",
+        text: "VEL-301 Phase III versus osimertinib addresses PFS in 2L EGFR-mutant NSCLC. The prospective Velmara registry will collect treatment and PROs.",
+      },
+    ];
+    const gaps = extractCandidateGaps(blocks);
+    const tactics = extractCandidateTactics(blocks);
+    expect(gaps.some((g) => /comparative effectiveness/i.test(g.statement))).toBe(true);
+    expect(tactics.some((t) => t.type === "phase3_trial")).toBe(true);
+    expect(tactics.some((t) => t.type === "registry")).toBe(true);
+  });
+
   it("scores gold coverage overall degrees", () => {
     const result = coverageEval(
       [{ gap_id: "g", tactic_id: "t", overall: "partial" }],
@@ -133,5 +158,15 @@ describe("IEGP engine", () => {
     expect(elderly.tactics.some((t) => t.id === "TAC-ELDERLY-RWE")).toBe(true);
     expect(board.medium.some((c) => c.gap_id === "GAP-CNS")).toBe(true);
     expect(board.low.some((c) => c.gap_id === "GAP-CAREGIVER")).toBe(true);
+  });
+
+  it("keeps addressed gaps on the workspace with their tactics", () => {
+    const workspace = buildPlanWorkspace(buildSeed());
+    expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
+    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
+    const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
+    expect(pfs).toBeTruthy();
+    expect(pfs!.tactics.some((t) => t.id === "TAC-VEL-301")).toBe(true);
+    expect(workspace.board.high.some((c) => c.gap_id === "GAP-SEQ")).toBe(true);
   });
 });

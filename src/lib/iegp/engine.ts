@@ -2,10 +2,12 @@ import {
   COVERAGE_DIMENSIONS,
   type CoverageDimension,
   type DimensionValue,
+  type EvidenceDomain,
   type GapStatus,
   type OverallCoverage,
   type PriorityBand,
   type TacticStatus,
+  type TacticType,
 } from "./enums";
 import type {
   DimensionAssessment,
@@ -14,6 +16,7 @@ import type {
   StrategicObjective,
   EvidenceGap,
   IegpState,
+  Tactic,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
 
@@ -145,7 +148,11 @@ export function draftResidualStatement(args: {
 }
 
 export function residualRequired(status: GapStatus): boolean {
-  return status === "validated_partial" || status === "validated_open";
+  return (
+    status === "candidate" ||
+    status === "validated_partial" ||
+    status === "validated_open"
+  );
 }
 
 const STAKEHOLDER_WEIGHT: Record<string, number> = {
@@ -321,6 +328,16 @@ export function coverageEval(
 const NEED_CUES =
   /\b(need to (know|understand|characterise|characterize|quantify)|insufficient|limited evidence|not (adequately )?characterised|not (adequately )?characterized|evidence gap|unknown whether|no (comparative|rwe|real-world)|lack of|unresolved|open question)\b/i;
 
+const TACTIC_CUES =
+  /\b(phase\s*(iii|3)|vel-\d+|prospective \w+ registry|registry will|chart review|study [a-c]\b|publication|manuscript|congress abstract|budget-impact|cost-effectiveness|network meta|indirect treatment|patient survey|claims study)\b/i;
+
+function sentencesOf(text: string): string[] {
+  return text
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 24);
+}
+
 export function extractCandidateNeeds(
   blocks: { id: string; source_id: string; text: string; heading: string }[],
 ): { id: string; statement: string; source_id: string; source_quote: string }[] {
@@ -332,11 +349,7 @@ export function extractCandidateNeeds(
   }[] = [];
   let n = 0;
   for (const block of blocks) {
-    const sentences = block.text
-      .split(/(?<=[.?!])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 24);
-    for (const sentence of sentences) {
+    for (const sentence of sentencesOf(block.text)) {
       if (!NEED_CUES.test(sentence) && !NEED_CUES.test(block.heading)) continue;
       n += 1;
       out.push({
@@ -348,6 +361,121 @@ export function extractCandidateNeeds(
     }
   }
   return out;
+}
+
+export function guessDomain(text: string): EvidenceDomain {
+  const t = text.toLowerCase();
+  if (/\b(comparat|versus|vs\.? |standard of care|soc)\b/.test(t)) {
+    return "comparative_effectiveness";
+  }
+  if (/\b(ira|budget impact|net-price)\b/.test(t)) return "budget_impact";
+  if (/\b(cost|economic burden|repeat procedure)\b/.test(t)) return "economics";
+  if (/\b(cns|intracranial|brain metast)\b/.test(t)) return "efficacy";
+  if (/\bsequenc/.test(t)) return "treatment_sequencing";
+  if (/\b(hcru|hospitalisation|hospitalization|emergency-department|ed use)\b/.test(t)) {
+    return "hcru";
+  }
+  if (/\bcaregiver/.test(t)) return "caregiver_burden";
+  if (/\b(qol|pro|eortc)\b/.test(t)) return "qol_pro";
+  if (/\b(persist|discontinu)/.test(t)) return "adherence";
+  if (/\b(ild|safety|qt)\b/.test(t)) return "safety";
+  if (/\b(overall survival|\bos\b)\b/.test(t)) return "long_term_outcomes";
+  if (/\b(65|elderly|frail|subpopulation)/.test(t)) return "subpopulations";
+  return "unmet_need";
+}
+
+export function guessTacticType(text: string): TacticType {
+  const t = text.toLowerCase();
+  if (/\bphase\s*(iii|3)|vel-\d+/.test(t)) return "phase3_trial";
+  if (/\bregistry/.test(t)) return "registry";
+  if (/\bchart review/.test(t)) return "chart_review";
+  if (/\b(publication|manuscript)/.test(t)) return "publication";
+  if (/\bcongress abstract/.test(t)) return "congress_abstract";
+  if (/\bbudget-impact|\bbim\b/.test(t)) return "budget_impact_model";
+  if (/\bcost-effectiveness|\bcea\b/.test(t)) return "cea";
+  if (/\bnetwork meta|\bnma\b/.test(t)) return "nma";
+  if (/\bindirect treatment|\bitc\b/.test(t)) return "itc";
+  if (/\bsurvey/.test(t)) return "patient_survey";
+  if (/\bclaims/.test(t)) return "rwe_study";
+  if (/\bslr|systematic literature/.test(t)) return "slr";
+  return "rwe_study";
+}
+
+export function gapNameFromStatement(statement: string, heading?: string): string {
+  if (heading && heading.length > 3 && heading.length < 60 && !/^(note|findings|summary)$/i.test(heading)) {
+    return heading;
+  }
+  const cleaned = statement.replace(/^(we\s+|there\s+is\s+)/i, "").replace(/\.$/, "");
+  const words = cleaned.split(/\s+/).slice(0, 8).join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export type ExtractedGap = {
+  id: string;
+  name: string;
+  statement: string;
+  domain: EvidenceDomain;
+  source_id: string;
+  source_quote: string;
+};
+
+export function extractCandidateGaps(
+  blocks: { id: string; source_id: string; text: string; heading: string }[],
+): ExtractedGap[] {
+  const out: ExtractedGap[] = [];
+  let n = 0;
+  for (const block of blocks) {
+    for (const sentence of sentencesOf(block.text)) {
+      if (!NEED_CUES.test(sentence) && !NEED_CUES.test(block.heading)) continue;
+      n += 1;
+      const statement = sentence.replace(/\s+/g, " ");
+      out.push({
+        id: `XGAP-${String(n).padStart(3, "0")}`,
+        name: gapNameFromStatement(statement, block.heading),
+        statement,
+        domain: guessDomain(`${block.heading} ${statement}`),
+        source_id: block.source_id,
+        source_quote: sentence.slice(0, 280),
+      });
+    }
+  }
+  return out;
+}
+
+export type ExtractedTactic = {
+  id: string;
+  name: string;
+  type: TacticType;
+  evidence_question: string;
+  source_id: string;
+  source_quote: string;
+};
+
+export function extractCandidateTactics(
+  blocks: { id: string; source_id: string; text: string; heading: string }[],
+): ExtractedTactic[] {
+  const out: ExtractedTactic[] = [];
+  let n = 0;
+  for (const block of blocks) {
+    for (const sentence of sentencesOf(block.text)) {
+      if (!TACTIC_CUES.test(sentence) && !TACTIC_CUES.test(block.heading)) continue;
+      n += 1;
+      const statement = sentence.replace(/\s+/g, " ");
+      out.push({
+        id: `XTAC-${String(n).padStart(3, "0")}`,
+        name: gapNameFromStatement(statement, block.heading),
+        type: guessTacticType(statement),
+        evidence_question: statement,
+        source_id: block.source_id,
+        source_quote: sentence.slice(0, 280),
+      });
+    }
+  }
+  return out;
+}
+
+export function similarRecord(a: string, b: string, floor = 0.5): boolean {
+  return statementSimilarity(a, b) >= floor;
 }
 
 export type PlanColumn = "high" | "medium" | "low";
@@ -370,11 +498,28 @@ export type PlanGapCard = {
   gap_id: string;
   gap_name: string;
   gap_status: GapStatus;
-  residual_id: string;
+  residual_id: string | null;
   residual: string;
-  band: PriorityBand;
+  band: PriorityBand | null;
   score: number;
   tactics: PlanTactic[];
+};
+
+export type ReviewGapCard = {
+  gap_id: string;
+  gap_name: string;
+  statement: string;
+  residual_id: string | null;
+  residual: string;
+  needs: { id: string; statement: string }[];
+};
+
+export type UnprioritizedGapCard = {
+  gap_id: string;
+  gap_name: string;
+  gap_status: GapStatus;
+  residual_id: string;
+  residual: string;
 };
 
 const STATUS_ORDER: Record<TacticStatus, number> = {
@@ -385,6 +530,35 @@ const STATUS_ORDER: Record<TacticStatus, number> = {
   cancelled: 4,
 };
 
+function asPlanTactic(tactic: Tactic, overall: OverallCoverage | null, stale: boolean): PlanTactic {
+  return {
+    id: tactic.id,
+    name: tactic.name,
+    status: tactic.status,
+    overall,
+    stale,
+  };
+}
+
+export function mappedTactics(state: IegpState, gapId: string, residualId?: string | null): PlanTactic[] {
+  const mapped: PlanTactic[] = [];
+  for (const coverage of state.coverages.filter((c) => c.gap_id === gapId)) {
+    const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
+    if (!tactic) continue;
+    mapped.push(asPlanTactic(tactic, coverage.overall, coverage.stale));
+  }
+  if (residualId) {
+    for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residualId))) {
+      const tactic = state.tactics.find((t) => t.id === item.tactic_id);
+      if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
+      mapped.push(asPlanTactic(tactic, null, false));
+    }
+  }
+  return mapped.sort(
+    (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
+  );
+}
+
 export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard[]> {
   const cards: PlanGapCard[] = [];
   for (const residual of state.residuals) {
@@ -392,33 +566,6 @@ export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard
     if (!gap || gap.status === "excluded" || gap.status === "validated_addressed") continue;
     const priority = state.priorities.find((p) => p.residual_id === residual.id);
     if (!priority?.lock.locked) continue;
-    const mapped: PlanTactic[] = [];
-    for (const coverage of state.coverages.filter((c) => c.gap_id === gap.id)) {
-      const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
-      if (!tactic) continue;
-      mapped.push({
-        id: tactic.id,
-        name: tactic.name,
-        status: tactic.status,
-        overall: coverage.overall,
-        stale: coverage.stale,
-      });
-    }
-    const extra: PlanTactic[] = [];
-    for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residual.id))) {
-      const tactic = state.tactics.find((t) => t.id === item.tactic_id);
-      if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
-      extra.push({
-        id: tactic.id,
-        name: tactic.name,
-        status: tactic.status,
-        overall: null,
-        stale: false,
-      });
-    }
-    const tactics = [...mapped, ...extra].sort(
-      (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
-    );
     cards.push({
       gap_id: gap.id,
       gap_name: gap.name,
@@ -427,13 +574,83 @@ export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard
       residual: residual.statement,
       band: priority.band,
       score: priority.suggested_score,
-      tactics,
+      tactics: mappedTactics(state, gap.id, residual.id),
     });
   }
   cards.sort((a, b) => b.score - a.score);
   return {
-    high: cards.filter((c) => planColumn(c.band) === "high"),
-    medium: cards.filter((c) => planColumn(c.band) === "medium"),
-    low: cards.filter((c) => planColumn(c.band) === "low"),
+    high: cards.filter((c) => c.band && planColumn(c.band) === "high"),
+    medium: cards.filter((c) => c.band && planColumn(c.band) === "medium"),
+    low: cards.filter((c) => c.band && planColumn(c.band) === "low"),
+  };
+}
+
+export function buildPlanWorkspace(state: IegpState): {
+  review: ReviewGapCard[];
+  unprioritized: UnprioritizedGapCard[];
+  board: Record<PlanColumn, PlanGapCard[]>;
+  addressed: PlanGapCard[];
+  availableTactics: { id: string; name: string }[];
+} {
+  const review: ReviewGapCard[] = [];
+  for (const gap of state.gaps.filter((g) => g.status === "candidate")) {
+    const residual = state.residuals.find((r) => r.gap_id === gap.id);
+    const needs = state.need_gap_links
+      .filter((l) => l.gap_id === gap.id)
+      .map((l) => state.needs.find((n) => n.id === l.need_id))
+      .filter((n): n is NonNullable<typeof n> => Boolean(n))
+      .map((n) => ({ id: n.id, statement: n.statement }));
+    review.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      statement: gap.statement,
+      residual_id: residual?.id ?? null,
+      residual: residual?.statement ?? "Residual will be drafted on accept.",
+      needs,
+    });
+  }
+
+  const prioritizedResidual = new Set(
+    state.priorities.filter((p) => p.lock.locked).map((p) => p.residual_id),
+  );
+  const unprioritized: UnprioritizedGapCard[] = [];
+  for (const residual of state.residuals) {
+    if (prioritizedResidual.has(residual.id)) continue;
+    const gap = state.gaps.find((g) => g.id === residual.gap_id);
+    if (!gap) continue;
+    if (gap.status !== "validated_open" && gap.status !== "validated_partial") continue;
+    unprioritized.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      gap_status: gap.status,
+      residual_id: residual.id,
+      residual: residual.statement,
+    });
+  }
+
+  const addressed: PlanGapCard[] = [];
+  for (const gap of state.gaps.filter((g) => g.status === "validated_addressed")) {
+    const residual = state.residuals.find((r) => r.gap_id === gap.id);
+    addressed.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      gap_status: gap.status,
+      residual_id: residual?.id ?? null,
+      residual: residual?.statement ?? "No residual — this gap is addressed.",
+      band: null,
+      score: 0,
+      tactics: mappedTactics(state, gap.id, residual?.id),
+    });
+  }
+
+  return {
+    review,
+    unprioritized,
+    board: buildPlanBoard(state),
+    addressed,
+    availableTactics: state.tactics
+      .filter((t) => t.status !== "cancelled")
+      .map((t) => ({ id: t.id, name: t.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
   };
 }

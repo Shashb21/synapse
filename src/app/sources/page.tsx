@@ -10,14 +10,14 @@ export default async function SourcesPage() {
   return (
     <AppShell active="sources">
       <PageIntro kicker="Interviews, TLR, internal materials" title="Sources">
-        No single source determines a gap. Ingesting a note creates candidate needs and marks
-        related coverage stale so humans re-lock. Traceability is source → need → gap → tactic →
-        residual → priority → roadmap.
+        Upload a note. The engine extracts candidate gaps and tactics, drafts residual evidence
+        needs, and marks related coverage stale. Humans then accept, reject, or modify gaps on
+        the plan — the engine does not prioritize.
       </PageIntro>
 
       <div className="mb-6 border border-border bg-card p-4">
         <h2 className="mb-3 text-[13px] text-foreground">Ingest a note</h2>
-        <LockForm label="Ingest candidate needs" action="ingest">
+        <LockForm label="Ingest gaps and tactics" action="ingest" confirmLabel="Ingest">
           <input name="title" required placeholder="Title" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" />
           <select name="source_type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
             {SOURCE_TYPES.map((s) => (
@@ -32,7 +32,7 @@ export default async function SourcesPage() {
           <textarea
             name="text"
             required
-            placeholder="Paste interview notes or TLR findings. Cue phrases such as 'need to understand' or 'limited evidence' become candidate needs."
+            placeholder="Paste interview notes or TLR findings. Gap cues such as 'need to understand' or 'limited evidence' become candidate gaps. Mentions of trials, registries, chart reviews, or publications become extracted tactics."
             className="min-h-28 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
           />
         </LockForm>
@@ -41,12 +41,20 @@ export default async function SourcesPage() {
       <div className="grid gap-3">
         {state.sources.map((s) => {
           const needCount = state.needs.filter((n) => n.source_id === s.id).length;
+          const gapCount = state.need_gap_links.filter((l) =>
+            state.needs.some((n) => n.id === l.need_id && n.source_id === s.id),
+          ).length;
+          const tacticCount = state.tactics.filter((tac) =>
+            tac.intended_use.includes(s.id) || tac.data_source === s.title,
+          ).length;
           return (
             <article key={s.id} className="border border-border bg-card p-4">
               <p className="text-[13px] text-foreground">{s.title}</p>
               <p className="mt-1 text-[12px] text-muted-foreground">
                 {SOURCE_TYPE_LABELS[s.source_type]} · {FUNCTION_LABELS[s.stakeholder_function]} ·{" "}
-                {needCount} need{needCount === 1 ? "" : "s"}
+                {needCount} need{needCount === 1 ? "" : "s"} · {gapCount} linked gap
+                {gapCount === 1 ? "" : "s"}
+                {tacticCount ? ` · ${tacticCount} extracted tactic${tacticCount === 1 ? "" : "s"}` : ""}
               </p>
               <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
                 {s.full_text.slice(0, 280)}

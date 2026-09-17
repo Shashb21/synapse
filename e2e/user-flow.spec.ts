@@ -10,6 +10,13 @@ test.describe("IEGP user flow", () => {
     await expect(page.getByRole("link", { name: /elderly comparative/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /retrospective rwe/i }).first()).toBeVisible();
     await expect(page.getByText(/caregiver burden/i).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /open gaps and residual/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /modify gap/i }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^addressed$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /pivotal pfs/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /assign tactic/i }).first()).toBeVisible();
   });
 
   test("needs inbox keeps candidates from becoming gaps", async ({ page }) => {
@@ -40,7 +47,7 @@ test.describe("IEGP user flow", () => {
     await page.goto("/residuals");
     await expect(page.getByText(/coverage ≠ priority|coverage is not priority/i).first()).toBeVisible();
     await expect(page.getByText(/standard of care in elderly/i).first()).toBeVisible();
-    await expect(page.getByText(/locked medium/i).first()).toBeVisible();
+    await expect(page.getByText(/does not assign a band|human lock/i).first()).toBeVisible();
   });
 
   test("roadmap is forward-only", async ({ page }) => {
@@ -56,6 +63,13 @@ test.describe("IEGP user flow", () => {
     await expect(page.getByText(/engineMaySetStatus/i)).toBeVisible();
     await expect(page.getByText(/false/i).first()).toBeVisible();
     await expect(page.locator("main").getByRole("button")).toHaveCount(0);
+  });
+
+  test("sources ingest extracts gaps and tactics", async ({ page }) => {
+    await page.goto("/sources");
+    await expect(page.getByRole("heading", { name: /sources/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /ingest gaps and tactics/i })).toBeVisible();
+    await expect(page.getByText(/extracts candidate gaps and tactics/i)).toBeVisible();
   });
 
   test("spec tape includes IEGP model", async ({ page }) => {

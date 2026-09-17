@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  assignTacticToGap,
   createProposedTactic,
   ingestNeedFromText,
   lockCoverageDimension,
@@ -10,6 +11,7 @@ import {
   lockResidual,
   lockRoadmapItem,
   lockTactic,
+  modifyGap,
   resetSeed,
 } from "@/lib/iegp/store";
 import type { ActorFunction } from "@/lib/iegp/enums";
@@ -101,8 +103,28 @@ export async function POST(request: Request) {
           owner: body.owner,
           function: body.function as ActorFunction,
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
+          gap_id: body.gap_id || undefined,
           actor_name,
           actor_function,
+        });
+        break;
+      case "assign_tactic":
+        await assignTacticToGap({
+          gap_id: body.gap_id,
+          tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "modify_gap":
+        await modifyGap({
+          gap_id: body.gap_id,
+          name: body.name,
+          statement: body.statement,
+          actor_name,
+          actor_function,
+          note: body.note,
         });
         break;
       case "lock_tactic":

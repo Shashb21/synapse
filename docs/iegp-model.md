@@ -23,21 +23,20 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 
 1. Candidate need accept / reject (optional gap join on accept)
-2. Gap status (Candidate / Open / Partial / Addressed / Excluded)
-3. Each of 10 coverage dimensions
-4. Overall coverage degree
-5. Residual statement (engine drafts from uncovered dimensions; human edits and locks)
-6. Priority band (engine suggests a score; human locks Critical / High / Medium / Low)
-7. Proposed tactic (human-authored)
-8. Roadmap row
+2. Extracted gap accept / reject / **modify**
+3. Gap status (Candidate / Open / Partial / Addressed / Excluded)
+4. Each of 10 coverage dimensions
+5. Overall coverage degree
+6. Residual statement (engine drafts from uncovered dimensions; human edits and locks)
+7. Priority band (**human only** — the engine does not suggest or assign a band)
+8. Create or assign a tactic (human-authored proposals; extracted tactics are inventory, not ideation)
+9. Roadmap row
 
 Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine never writes Addressed.
 
-## Priority formula (suggested, not auto-applied)
+## Priority (human lock)
 
-`score ≈ 100 × importance × time-urgency × residual-severity × stakeholder-weight`
-
-Effort and cost live on the tactic, not on the need. Priority ≠ roadmap inclusion.
+Priority is a human lock of High / Medium / Low (Critical folds into High on the plan). The engine does not assign a band. Effort and cost live on the tactic, not on the need. Priority ≠ roadmap inclusion.
 
 ## Refresh (living plan)
 
@@ -49,9 +48,19 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 ## Surfaces
 
-The home screen (`/`) **is** the IEGP: three boxes — High, Medium, Low — of prioritized gaps with the tactics mapped to each. Critical locked bands sit in High. Excluded and fully addressed gaps stay off this board.
+The home screen (`/`) **is** the IEGP process:
 
-- AI tactic ideation
+1. Upload sources. The engine extracts **candidate gaps** and **tactics**, and drafts **residual evidence needs**.
+2. The plan lists open (candidate) gaps with their residuals. Humans **accept, reject, or modify**.
+3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band.
+4. After a human lock, tactics can be **created or assigned** onto High / Medium / Low.
+5. **Addressed** gaps stay on the plan with the tactics that closed them.
+
+Critical locked bands sit in High. Excluded gaps stay off the board. Candidate needs remain sourced atoms and still join onto gaps; they are not auto-promoted.
+
+## v1 non-goals
+
+- AI tactic ideation (extraction of existing studies from sources is inventory, not ideation)
 - Auth / RBAC
 - Multi-asset, multi-indication, country overlay plans
 - Named annual snapshots (audit log is history)

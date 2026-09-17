@@ -75,6 +75,18 @@ describe("Velmara IEGP seed", () => {
     expect(pri?.band).toBe("low");
   });
 
+  it("keeps an extracted candidate gap in the review queue", () => {
+    const gap = state.gaps.find((g) => g.id === "GAP-ILD");
+    expect(gap?.status).toBe("candidate");
+    expect(state.residuals.some((r) => r.gap_id === "GAP-ILD" && !r.lock.locked)).toBe(true);
+  });
+
+  it("leaves long-term OS unprioritized so the plan can prompt a human lock", () => {
+    const residual = state.residuals.find((r) => r.id === "RES-OS");
+    expect(residual).toBeTruthy();
+    expect(state.priorities.some((p) => p.residual_id === "RES-OS")).toBe(false);
+  });
+
   it("locks every seed residual before priority", () => {
     for (const pri of state.priorities) {
       const residual = state.residuals.find((r) => r.id === pri.residual_id);

@@ -13,8 +13,8 @@ export default async function TacticsPage() {
   return (
     <AppShell active="tactics">
       <PageIntro kicker="Structured objects, not a text field" title="Tactics">
-        Generation and dissemination are both tactics. One tactic can map to many gaps
-        (see the prospective registry). Human-authored proposals only — no AI ideation in v1.
+        Human-authored proposals and extracted inventory. Assign from the plan after a
+        human locks priority — no AI ideation.
       </PageIntro>
 
       <div className="mb-6 border border-border bg-card p-4">
