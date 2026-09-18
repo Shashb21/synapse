@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,11 +28,13 @@ export function SplitGapDialog({
   gapName,
   residualName,
   tactics,
+  children,
 }: {
   gapId: string;
   gapName: string;
   residualName: string;
   tactics: PlanTactic[];
+  children?: ReactNode;
 }) {
   const router = useRouter();
   const nameId = useId();
@@ -118,7 +120,26 @@ export function SplitGapDialog({
         if (next) reset();
       }}
     >
-      <DialogTrigger render={<Button size="sm" />}>Resolve partial</DialogTrigger>
+      <span className="inline-flex flex-wrap items-center gap-2">
+        {children ? (
+          <DialogTrigger
+            render={
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-auto p-0 hover:bg-transparent"
+                aria-label="Resolve this Partially Addressed gap by splitting or rewriting"
+              />
+            }
+          >
+            {children}
+          </DialogTrigger>
+        ) : null}
+        <Button type="button" size="sm" onClick={() => setOpen(true)}>
+          Split or rewrite
+        </Button>
+      </span>
       <DialogContent className="z-[60] sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Resolve Partially Addressed gap</DialogTitle>

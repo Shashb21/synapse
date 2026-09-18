@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -332,22 +332,37 @@ describe("IEGP postgres store", () => {
         actor_function: "heor",
         reason: "",
       }),
-    ).rejects.toThrow(/reason is required/i);
+    ).rejects.toThrow(/cannot stay/i);
     const cancelled = (await loadState()).gaps.find((g) => g.id === gapId)!;
     expect(cancelled.status).toBe("validated_partial");
     expect(cancelled.status_override).toBeNull();
 
-    await overrideGapStatus({
+    const liveId = await rewritePartialGap({
       gap_id: gapId,
+      name: "White-space leftover after mapping",
+      status: "validated_open",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await expect(
+      overrideGapStatus({
+        gap_id: liveId,
+        status: "validated_addressed",
+        actor_name: "A. Rao",
+        actor_function: "heor",
+        reason: "",
+      }),
+    ).rejects.toThrow(/reason is required/i);
+    await overrideGapStatus({
+      gap_id: liveId,
       status: "validated_open",
       actor_name: "A. Rao",
       actor_function: "heor",
       reason: "Joined tactic is off-question; keep as white space.",
     });
-    const overridden = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    const overridden = (await loadState()).gaps.find((g) => g.id === liveId)!;
     expect(overridden.status).toBe("validated_open");
     expect(overridden.status_override?.reason).toMatch(/off-question/i);
-    expect(overridden.status_override?.from).toBe("validated_partial");
     expect(overridden.status_override?.to).toBe("validated_open");
     expect(overridden.status_override?.actor_name).toBe("A. Rao");
   });

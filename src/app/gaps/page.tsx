@@ -14,11 +14,11 @@ export default async function GapsPage() {
       <PageIntro kicker="Decision objects" title="Evidence gaps">
         Gaps are named decision objects. Many candidate needs can join onto one gap.
         Status is computed Open / Partially Addressed / Addressed from joined tactics and published
-        literature. Click a gap to override with a reason.
+        literature. Click Open or Addressed to override with a reason. Click Partial to split or rewrite.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No gaps yet. Ingest a demo source to extract candidates.
+          No gaps yet. Ingest a source on Upload — extracted gaps land here already mapped.
         </p>
       ) : (
       <div className="grid gap-3">

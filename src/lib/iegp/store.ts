@@ -479,6 +479,12 @@ export async function lockGapStatus(args: {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
+  if (args.status === "validated_partial") {
+    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+  }
+  if (displayedGapStatus(gap) === "validated_partial" && args.status !== "excluded") {
+    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+  }
   if (args.status === "validated_addressed") {
     const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
     const computed = computeGapStatus(cov, state.tactics, {
@@ -546,16 +552,16 @@ export async function overrideGapStatus(args: {
   actor_name: string;
   actor_function: ActorFunction;
 }) {
-  const reason = requireOverrideReason(args.reason ?? args.note);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
-  if (args.status === "validated_partial") {
+  if (args.status === "validated_partial" || displayedGapStatus(gap) === "validated_partial") {
     throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
   }
   if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
     throw new Error("Only live Open or Addressed gaps can be overridden.");
   }
+  const reason = requireOverrideReason(args.reason ?? args.note);
   const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
   const computed =
     gap.computed_status ??

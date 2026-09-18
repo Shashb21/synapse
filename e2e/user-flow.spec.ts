@@ -56,6 +56,6 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(statusGuide.getByText("Partially Addressed", { exact: true })).toBeVisible();
     await expect(statusGuide.getByText("Addressed", { exact: true })).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /validate status|resolve partial/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /validate status|split or rewrite/i }).first()).toBeVisible();
   });
 });

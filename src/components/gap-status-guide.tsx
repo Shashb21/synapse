@@ -29,8 +29,10 @@ export function GapStatusGuide({ compact = false }: { compact?: boolean }) {
               {GAP_STATUS_LABELS[status]}
             </dt>
             <dd className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-              {GAP_STATUS_DEFINITIONS[status]} Computed by the application from joined tactics and
-              published literature. Click a gap to override with a reason.
+              {GAP_STATUS_DEFINITIONS[status]}{" "}
+              {status === "validated_partial"
+                ? "Click Partial to split or rewrite — it cannot stay."
+                : "Click Open or Addressed to override with a reason."}
             </dd>
           </div>
         ))}

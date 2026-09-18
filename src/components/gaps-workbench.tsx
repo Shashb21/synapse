@@ -145,7 +145,14 @@ export function GapsWorkbench({
             <article key={card.gap_id} className="border border-border bg-background p-4">
               <div className="flex flex-wrap items-center gap-2">
                 {card.gap_status === "validated_partial" ? (
-                  <GapBadge status={card.gap_status} />
+                  <SplitGapDialog
+                    gapId={card.gap_id}
+                    gapName={card.gap_name}
+                    residualName={card.residual?.statement || card.gap_name}
+                    tactics={card.tactics}
+                  >
+                    <GapBadge status={card.gap_status} />
+                  </SplitGapDialog>
                 ) : (
                   <GapStatusOverride
                     gapId={card.gap_id}
@@ -198,14 +205,7 @@ export function GapsWorkbench({
                 )}
               </ul>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {card.gap_status === "validated_partial" ? (
-                  <SplitGapDialog
-                    gapId={card.gap_id}
-                    gapName={card.gap_name}
-                    residualName={card.residual?.statement || card.gap_name}
-                    tactics={card.tactics}
-                  />
-                ) : !card.human_validated ? (
+                {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
                   <LockForm
                     label="Validate status"
                     action="validate_gap"

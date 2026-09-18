@@ -43,36 +43,30 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics → **one Review step** with inner tabs (Gaps / Tactics, residual evidence needs on Gaps) → mappings (engine-computed Open / Partially Addressed / Addressed; click to override with a reason) → living plan.
+Strategic objectives → sources → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps.
 
-### IEGP process (single Review step)
+### IEGP process (Upload → Gaps → Prioritize → Tactics)
 
 ```mermaid
 flowchart TD
   upload["Upload sources"]
-  extract["Extract gaps and tactics"]
-  review["Review inner tabs: Gaps (incl. residuals) · Tactics"]
-  create["Create gap · Create tactic"]
-  acceptChild["Accept residual → child gap, parent preserved"]
-  rejectChild["Reject residual → persist, do not spam"]
-  map["Mappings: suggested joins; engine computes Open / Partial / Addressed"]
-  board["Plan: High / Medium / Low priority; gap status Open / Partial / Addressed"]
+  extract["Extract gaps and tactics already mapped"]
+  gaps["Gaps workbench: engine status, validate, split or rewrite"]
+  create["Add Open gap · Add Addressed gap with tactic"]
+  pri["Prioritize: High / Medium / Low on Open gaps"]
+  tac["Tactics: create and assign for Open gaps"]
   later["Later ingest"]
   upload --> extract
-  extract --> review
-  create --> review
-  review --> acceptChild
-  review --> rejectChild
-  review --> map
-  acceptChild --> board
-  rejectChild --> board
-  map --> board
+  extract --> gaps
+  create --> gaps
+  gaps --> pri
+  pri --> tac
   later --> upload
 ```
 
-Create gap and Create tactic are visible on Review (Gaps tab / Tactics tab) and Library. Gap cards show an evidence-topic title once. Residual is its own Review **Gaps** row — leftover wording after partial coverage, not a copy of the parent. Accepting it splits: new Open child, covered parent Addressed. Gantt / gates timeline is parked (docs only).
+Gaps is the combined mapped + status workbench. There is no Review / Mappings wizard step and no candidate accept/reject inbox. Gap cards show an evidence-topic title once. Partial cannot stay: split LEFT = Addressed + tactic, RIGHT = Open leftover, or rewrite the original as Open or Addressed. The original is retired into version history. Gantt / gates timeline is parked (docs only).
 
-After mapping, gap status is **computed**: **Open** (no completed/ongoing/planned tactics and no published literature; proposed does not count), **Partially Addressed** (some evidence, residual leftover, gap can split), or **Addressed** (evidence sufficient to fully close). Humans may override by clicking the gap and giving a reason. Override wins until cleared or marked stale on ingest/coverage refresh (disagreement is shown; the engine does not silent-clobber). Plan High / Medium / Low remain priority bands, not those statuses.
+Gap status is **computed**: **Open** (no completed/ongoing/planned tactics and no published literature; proposed does not count), **Partially Addressed** (some evidence, residual leftover — must split or rewrite), or **Addressed** (evidence sufficient to fully close). Humans validate every live gap before Prioritize. Click Open or Addressed to override with a reason. Override wins until cleared or marked stale on ingest/coverage refresh (disagreement is shown; the engine does not silent-clobber). Plan High / Medium / Low remain priority bands, not those statuses.
 
 ### Traceability
 
@@ -82,7 +76,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system extracts a **candidate evidence need** and a **candidate gap**. It does not dump a residual paragraph onto the card and does not accept the gap. Pressure-test is a backend engine: when extracted tactics only partially cover the parent, a leftover draft appears on the Review **Gaps** tab. Accept / reject / modify happens there. After that, humans live on Mappings (joins; engine-computed status with click+reason override) and the plan.
+The system extracts a **candidate evidence need** and a **live gap** already mapped to extracted tactics, with engine-computed status. It does not dump a residual paragraph onto the card and does not present an accept/reject inbox. Pressure-test is a backend engine: when extracted tactics only partially cover the parent, Gaps shows **Partially Addressed**. The user must split or rewrite before Prioritize. Click Open or Addressed to override with a reason.
 
 ### Worked mapping (Velmara seed)
 
@@ -99,7 +93,7 @@ Tactic: retrospective RWE in patients aged ≥65, no comparator.
 | Comparative effectiveness / decision utility | No |
 | **Overall** | **Partial** |
 
-Residual (parent preserved, leftover is a **new gap** after accept): comparative outcomes versus relevant regional SoC.
+Residual (parent retired into version history; leftover is a **new Open gap** after split): comparative outcomes versus relevant regional SoC.
 
 Priority: human-locked High (HTA decision date, uncovered comparator). The engine does not propose a band.
 

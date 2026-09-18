@@ -1357,7 +1357,7 @@ export function buildPlanWorkspace(state: IegpState): {
   for (const gap of state.gaps) {
     if (!isLiveGap(gap)) continue;
     const shown = displayedGapStatus(gap);
-    if (shown !== "validated_open" && shown !== "validated_partial") continue;
+    if (shown !== "validated_open") continue;
     const residual = state.residuals.find((r) => r.gap_id === gap.id);
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const computed = computedForGap(state, gap, children);
@@ -1396,9 +1396,7 @@ export function buildPlanWorkspace(state: IegpState): {
     const gap = state.gaps.find((g) => g.id === residual.gap_id);
     if (!gap) continue;
     const shown = displayedGapStatus(gap);
-    if (shown !== "validated_open" && shown !== "validated_partial") continue;
-    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-    if (!residualDraftEligible({ gap, coverages }) && shown !== "validated_partial") continue;
+    if (shown !== "validated_open") continue;
     unprioritized.push({
       gap_id: gap.id,
       gap_name: gap.name,

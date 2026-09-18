@@ -93,7 +93,7 @@ describe("Velmara IEGP seed", () => {
     expect(pri?.band).toBe("low");
   });
 
-  it("keeps an extracted candidate gap in the review queue", () => {
+  it("keeps an extracted candidate gap off the Gaps workbench", () => {
     const gap = state.gaps.find((g) => g.id === "GAP-ILD");
     expect(gap?.status).toBe("candidate");
     expect(state.residuals.some((r) => r.gap_id === "GAP-ILD" && !r.lock.locked)).toBe(true);

@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, StaleFlag } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
+import { SplitGapDialog } from "@/components/split-gap-dialog";
 import {
   COVERAGE_DIMENSIONS,
   DIMENSION_LABELS,
@@ -19,6 +20,7 @@ import { loadState } from "@/lib/iegp/store";
 import {
   computeGapStatus,
   displayedGapStatus,
+  mappedTactics,
   suggestResidualGaps,
   uncoveredDimensions,
 } from "@/lib/iegp/engine";
@@ -49,6 +51,7 @@ export default async function GapDetailPage({
   });
   const missing = uncoveredDimensions(coverages);
   const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
+  const tactics = mappedTactics(state, gap.id);
   const parent = gap.parent_gap_id
     ? state.gaps.find((g) => g.id === gap.parent_gap_id)
     : undefined;
@@ -60,7 +63,16 @@ export default async function GapDetailPage({
     <AppShell active="gaps">
       <PageIntro kicker={gap.id} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {mapped ? (
+        {shown === "validated_partial" ? (
+          <SplitGapDialog
+            gapId={gap.id}
+            gapName={gap.name}
+            residualName={leftover?.statement || gap.name}
+            tactics={tactics}
+          >
+            <GapBadge status={shown} />
+          </SplitGapDialog>
+        ) : mapped ? (
           <GapStatusOverride
             gapId={gap.id}
             status={shown}
@@ -80,8 +92,10 @@ export default async function GapDetailPage({
       </div>
       <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
-        {GAP_STATUS_DEFINITIONS[shown]} Click the status to override with a required reason. Cancel
-        does not change status.
+        {GAP_STATUS_DEFINITIONS[shown]}{" "}
+        {shown === "validated_partial"
+          ? "Click Partially Addressed to split (Addressed + tactic on the left, Open leftover on the right) or rewrite the original. Partial cannot stay."
+          : "Click Open or Addressed to override with a required reason. Cancel does not change status."}
       </p>
 
       <section className="mb-8">
@@ -228,9 +242,9 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {leftover ? (
+      {leftover && shown === "validated_partial" ? (
         <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Residual evidence need</h2>
+          <h2 className="text-[13px] text-muted-foreground">Suggested leftover (right side of split)</h2>
           <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
           <ul className="mt-2 grid gap-1">
             {leftover.reasons.map((reason) => (
@@ -239,20 +253,6 @@ export default async function GapDetailPage({
               </li>
             ))}
           </ul>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <LockForm
-              label="Accept as new gap"
-              action="accept_residual_gap"
-              extra={{ parent_gap_id: leftover.parent_gap_id, statement: leftover.statement }}
-              confirmLabel="Accept as new gap"
-            />
-            <LockForm
-              label="Reject leftover"
-              action="reject_residual_gap"
-              extra={{ parent_gap_id: leftover.parent_gap_id }}
-              confirmLabel="Reject leftover"
-            />
-          </div>
         </section>
       ) : null}
 
@@ -274,14 +274,7 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {shown === "candidate" ? (
-        <LockForm
-          label="Accept gap"
-          action="lock_gap"
-          extra={{ gap_id: gap.id, status: "validated_open" }}
-          confirmLabel="Accept"
-        />
-      ) : shown !== "excluded" ? (
+      {shown === "excluded" ? null : shown === "candidate" ? null : (
         <LockForm
           label="Exclude gap"
           action="lock_gap"
@@ -304,7 +297,7 @@ export default async function GapDetailPage({
             </select>
           </label>
         </LockForm>
-      ) : null}
+      )}
     </AppShell>
   );
 }

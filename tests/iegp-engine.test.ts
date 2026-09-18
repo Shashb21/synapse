@@ -22,6 +22,8 @@ import {
   splitSourceIntoBlocks,
   requireOverrideReason,
   suggestGapStatus,
+  gapsReadyForPrioritize,
+  displayedGapStatus,
   planNavCounts,
   suggestMappings,
   suggestPriority,
@@ -58,6 +60,15 @@ describe("IEGP engine", () => {
     expect(engineMaySetStatus("validated_partial")).toBe(true);
     expect(engineMaySetStatus("validated_open")).toBe(true);
     expect(engineMaySetStatus("candidate")).toBe(false);
+  });
+
+  it("does not treat a workspace as ready for Prioritize while Partial or unvalidated gaps remain", () => {
+    expect(gapsReadyForPrioritize(buildBlankWorkspace())).toBe(false);
+    const seed = buildSeed();
+    expect(seed.gaps.some((g) => displayedGapStatus(g) === "validated_partial")).toBe(true);
+    expect(gapsReadyForPrioritize(seed)).toBe(false);
+    const counts = planNavCounts(buildPlanWorkspace(seed));
+    expect(counts.unvalidated).toBeGreaterThan(0);
   });
 
   it("requires a non-empty reason to override computed status", () => {
@@ -438,7 +449,8 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ELDERLY-CE")).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(false);
-    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
+    expect(workspace.unprioritized.every((c) => c.gap_status === "validated_open")).toBe(true);
+    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
     expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
