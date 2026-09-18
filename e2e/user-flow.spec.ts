@@ -160,7 +160,7 @@ test.describe("wizard once, plan forever", () => {
       .filter({ has: page.getByRole("button", { name: /accept mapping/i }) })
       .first();
     await expect(suggestion).toBeVisible();
-    await expect(suggestion.getByText(gapName, { exact: false })).toBeVisible();
+    await expect(suggestion.locator("p").first()).toHaveText(gapName);
     await suggestion.getByRole("button", { name: /accept mapping/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept mapping$/i }).click();
@@ -168,7 +168,7 @@ test.describe("wizard once, plan forever", () => {
 
     await page.getByRole("button", { name: /3\. prioritize/i }).click();
     const prioritized = page.locator("article").filter({ hasText: gapName }).first();
-    await expect(prioritized.getByRole("link", { name: tacticName, exact: true })).toBeVisible();
+    await expect(prioritized.locator("a", { hasText: tacticName })).toBeVisible();
 
     await page.getByRole("button", { name: /2\. review/i }).click();
     await page.getByRole("button", { name: /create gap/i }).first().click();
