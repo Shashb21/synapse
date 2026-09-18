@@ -8,6 +8,7 @@ import {
   PrioritizeQueue,
   ReviewQueue,
   SuggestedMappings,
+  SuggestedResidualGaps,
   TacticLibrary,
 } from "@/components/plan-cards";
 import { StaleFlag } from "@/components/iegp-badges";
@@ -68,8 +69,8 @@ function PlaceIntro({
   if (place === "library") {
     return (
       <PageIntro kicker="Accepted inventory" title="Tactic library">
-        Extracted tactics enter after you accept them. Create gap and Create tactic live here.
-        Creating a tactic adds it as accepted. Tag the same tactic onto as many gaps as you need.
+        Extracted tactics enter after you accept them. Create a tactic here — it is added as
+        accepted. Tag the same tactic onto as many gaps as you need.
       </PageIntro>
     );
   }
@@ -111,7 +112,6 @@ export default async function HomePage({
       <ReviewQueue
         gaps={workspace.review}
         tactics={workspace.reviewTactics}
-        residuals={workspace.residualGapSuggestions}
         availableTactics={workspace.availableTactics}
         emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
       />
@@ -125,6 +125,7 @@ export default async function HomePage({
     pane = gates.mappingsUnlocked ? (
       <div className="grid gap-10">
         <SuggestedMappings items={workspace.mappingSuggestions} />
+        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
         <section aria-labelledby="accepted-gaps">
           <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
             Accepted gaps

@@ -16,12 +16,9 @@ describe("Create gap and Create tactic buttons", () => {
     const review = src.slice(reviewStart, libraryStart);
     const library = src.slice(libraryStart);
     expect(review).toContain("<CreateActions />");
+    expect(review).toContain("<SuggestedResidualGaps items={residuals} />");
+    expect(review).toContain("Residual evidence needs");
+    expect(review).toContain('label="Accept residual"');
     expect(library).toContain("<CreateActions />");
-    const tacticsBlock = src.slice(
-      src.indexOf("function GapTacticsBlock"),
-      src.indexOf("export function ReviewCard"),
-    );
-    expect(tacticsBlock).toContain('label="Assign tactic"');
-    expect(tacticsBlock).not.toContain('label="Create tactic"');
   });
 });

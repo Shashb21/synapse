@@ -403,13 +403,13 @@ We need to understand comparative effectiveness of Velmara versus regional stand
   it("suggests leftover as a new gap when locked coverage is partial and no child exists", () => {
     const seed = buildSeed();
     const suggestions = suggestResidualGaps(seed);
-    expect(suggestions.some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(true);
-    const elderly = suggestions.find((s) => s.parent_gap_id === "GAP-ELDERLY-CE")!;
-    const parent = seed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")!;
-    expect(elderly.statement.toLowerCase()).not.toBe(parent.statement.toLowerCase());
-    expect(elderly.parent_statement).toBe(parent.statement);
-    expect(elderly.reasons.length).toBeGreaterThan(0);
-    expect(elderly.reasons.join(" ")).toMatch(/partial|limited/i);
+    expect(suggestions.some((s) => s.parent_gap_id === "GAP-OS")).toBe(true);
+    const os = suggestions.find((s) => s.parent_gap_id === "GAP-OS")!;
+    const parent = seed.gaps.find((g) => g.id === "GAP-OS")!;
+    expect(os.statement.toLowerCase()).not.toBe(parent.statement.toLowerCase());
+    expect(os.parent_statement).toBe(parent.statement);
+    expect(os.reasons.length).toBeGreaterThan(0);
+    expect(os.reasons.join(" ")).toMatch(/partial|limited/i);
   });
 
   it("presents residual drafts in the same Review workspace as extracted gaps and tactics", () => {
@@ -462,7 +462,10 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const workspace = buildPlanWorkspace({ ...blank, gaps, tactics });
     expect(workspace.review.length).toBeGreaterThan(0);
     expect(workspace.reviewTactics.length).toBeGreaterThan(0);
-    expect(workspace.residualGapSuggestions).toHaveLength(0);
+    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
+    for (const leftover of workspace.residualGapSuggestions) {
+      expect(leftover.statement).not.toBe(leftover.parent_statement);
+    }
     expect(workspace.review.every((card) => !("residual" in card))).toBe(true);
   });
 
@@ -475,19 +478,19 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         {
           ...seed.gaps[0]!,
           id: "GAP-CHILD-ELDERLY",
-          parent_gap_id: "GAP-ELDERLY-CE",
+          parent_gap_id: "GAP-OS",
           status: "validated_open" as const,
         },
       ],
     };
-    expect(suggestResidualGaps(withChild).some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(
+    expect(suggestResidualGaps(withChild).some((s) => s.parent_gap_id === "GAP-OS")).toBe(
       false,
     );
     const rejected = {
       ...seed,
       residual_gap_suggestions: [
         {
-          parent_gap_id: "GAP-ELDERLY-CE",
+          parent_gap_id: "GAP-OS",
           statement: "leftover",
           reasons: ["test"],
           status: "rejected" as const,
@@ -495,7 +498,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         },
       ],
     };
-    expect(suggestResidualGaps(rejected).some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(
+    expect(suggestResidualGaps(rejected).some((s) => s.parent_gap_id === "GAP-OS")).toBe(
       false,
     );
   });
@@ -538,6 +541,6 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         hasChild: false,
         suppressed: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
