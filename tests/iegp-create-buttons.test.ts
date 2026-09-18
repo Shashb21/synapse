@@ -18,7 +18,7 @@ describe("Create gap and Create tactic buttons", () => {
     expect(review).toContain("<CreateActions />");
     expect(review).toContain("<SuggestedResidualGaps items={residuals} />");
     expect(review).toContain("Residual evidence needs");
-    expect(review).toContain('label="Accept residual"');
+    expect(review).toContain('label="Accept as new gap"');
     expect(library).toContain("<CreateActions />");
   });
 });
