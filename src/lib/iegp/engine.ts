@@ -179,8 +179,9 @@ export function residualDraftEligible(args: {
 }
 
 /**
- * Leftover-as-new-gap: human-locked overall of partial/limited.
- * Unlocked assignment defaults (overall "limited") and inferred drafts do not enqueue.
+ * Residual-as-gap: prefer human-locked overall of partial/limited.
+ * Pressure-test drafts use overall "partial" without a human lock.
+ * Unlocked assignment placeholders are "limited" and must not enqueue a leftover.
  */
 export function residualGapEligible(args: {
   gap: Pick<EvidenceGap, "status">;
@@ -189,15 +190,13 @@ export function residualGapEligible(args: {
   suppressed: boolean;
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
-  if (
-    args.gap.status === "candidate" ||
-    args.gap.status === "excluded" ||
-    args.gap.status === "validated_addressed"
-  ) {
-    return false;
-  }
-  return residualDraftEligible(args);
+  if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
+  if (args.coverages.length === 0) return false;
+  if (residualDraftEligible(args)) return true;
+  return args.coverages.some((c) => !c.overall_lock.locked && c.overall === "partial");
 }
+
+
 
 function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
   return tactic.review_status !== "rejected" && tactic.status !== "cancelled";
@@ -307,13 +306,19 @@ function needsForGap(state: IegpState, gapId: string) {
 
 function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
   const stored = state.coverages.filter((c) => c.gap_id === gap.id);
-  if (!residualDraftEligible({ gap, coverages: stored })) return [];
-  return stored.filter(
-    (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
-  );
+  if (residualDraftEligible({ gap, coverages: stored })) {
+    return stored.filter(
+      (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
+    );
+  }
+  const unlockedPartial = stored.filter((c) => !c.overall_lock.locked && c.overall === "partial");
+  if (unlockedPartial.length > 0) return unlockedPartial;
+  if (stored.length > 0) return [];
+  return inferPressureTestCoverages(gap, state.tactics, { needs: needsForGap(state, gap.id) });
 }
 
-/** Ranked leftover-as-new-gap drafts for Mappings. Engine suggests; it does not create the child. */
+
+/** Ranked leftover-as-new-gap drafts for Review. Engine suggests; it does not create the child. */
 export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
   const suppressed = new Set(
     state.residual_gap_suggestions
@@ -573,7 +578,7 @@ export function guessDomain(text: string): EvidenceDomain {
   if (/\bcaregiver/.test(t)) return "caregiver_burden";
   if (/\b(qol|pro|eortc)\b/.test(t)) return "qol_pro";
   if (/\b(persist|discontinu)/.test(t)) return "adherence";
-  if (/\b(ild|safety|qt)\b/.test(t)) return "safety";
+  if (/\b(ild|safety|qt|pneumonitis)\b/.test(t)) return "safety";
   if (/\b(overall survival|\bos\b)\b/.test(t)) return "long_term_outcomes";
   if (/\b(65|elderly|frail|subpopulation)/.test(t)) return "subpopulations";
   return "unmet_need";
@@ -1088,17 +1093,18 @@ export function buildPlanWorkspace(state: IegpState): {
     });
   }
 
+  const reviewResiduals = suggestResidualGaps(state);
   return {
     review,
     reviewTactics,
-    reviewResiduals: [],
+    reviewResiduals,
     openGaps,
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
     mappingSuggestions: suggestMappings(state),
-    residualGapSuggestions: suggestResidualGaps(state),
+    residualGapSuggestions: reviewResiduals,
   };
 }
 
@@ -1140,16 +1146,17 @@ export function defaultPlanPlace(
   state: IegpState,
   workspace: Pick<
     ReturnType<typeof buildPlanWorkspace>,
-    "review" | "reviewTactics" | "mappingSuggestions" | "residualGapSuggestions"
+    "review" | "reviewTactics" | "reviewResiduals"
   >,
 ): PlanPlace {
   if (state.asset.wizard_complete) return "plan";
   if (state.sources.length === 0) return "upload";
-  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) {
+  if (
+    workspace.review.length > 0 ||
+    workspace.reviewTactics.length > 0 ||
+    workspace.reviewResiduals.length > 0
+  ) {
     return "review";
-  }
-  if (workspace.mappingSuggestions.length > 0 || workspace.residualGapSuggestions.length > 0) {
-    return "mappings";
   }
   return "review";
 }
@@ -1159,7 +1166,8 @@ export function planNavCounts(workspace: ReturnType<typeof buildPlanWorkspace>):
   mappings: number;
 } {
   return {
-    review: workspace.review.length + workspace.reviewTactics.length,
-    mappings: workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
+    review:
+      workspace.review.length + workspace.reviewTactics.length + workspace.reviewResiduals.length,
+    mappings: workspace.mappingSuggestions.length,
   };
 }
