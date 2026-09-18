@@ -4,9 +4,9 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → candidate evidence needs → extracted gaps + tactics → residual drafts → human accept/reject/modify (gaps and tactics) → human priority → living plan (inbox + High / Medium / Low + addressed).
+objectives → candidate evidence needs → extracted gaps + tactics → human accept/reject/modify (gaps and tactics) → coverage lock → residual (only if partial/limited) → human priority → living plan (sidebar: Upload, Review, Mappings, Library, Plan).
 
-Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is a stepper on `/` (upload → review → prioritize). After you enter the plan, new ingest drops into the inbox on that same page. Demo files live in `public/demo-sources/`.
+Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is the **Upload** pane on `/`. After you enter the plan, new ingest stays on Upload and drops into Review. Demo files live in `public/demo-sources/`.
 
 **Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/iegp-model.md`](docs/iegp-model.md).
 
@@ -33,11 +33,11 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
-The first visit is a **stepper** on `/`. Ingest a demo file, review gaps and tactics, lock priority, then enter the plan. Reset returns the blank slate and the wizard.
+The first visit is **Upload** on `/`. Ingest a demo file, review gaps and tactics, map or assign tactics, lock coverage, then enter the plan. Reset returns the blank slate.
 
 | Route | What |
 | --- | --- |
-| `/` | First visit: upload → review → prioritize. After that: living plan with inbox, H/M/L, addressed, add-sources |
+| `/` | Sidebar places: Upload, Review, Mappings, Library, Plan (H/M/L + addressed). Query `?place=` |
 | `/evals` | View-only gold tape (needs + coverage; engine cannot auto-close) |
 | `/sdlc` | Spec tape |
 

@@ -103,6 +103,7 @@ export type EvidenceGap = {
   exclusion_reason: ExclusionReason | null;
   exclusion_note: string | null;
   status_lock: Lock;
+  parent_gap_id: string | null;
 };
 
 export type NeedGapLink = {
@@ -210,6 +211,14 @@ export type MappingSuggestionRecord = {
   lock: Lock;
 };
 
+export type ResidualGapSuggestionRecord = {
+  parent_gap_id: string;
+  statement: string;
+  reasons: string[];
+  status: "accepted" | "rejected";
+  lock: Lock;
+};
+
 export type IegpState = {
   asset: Asset;
   objectives: StrategicObjective[];
@@ -221,6 +230,7 @@ export type IegpState = {
   tactics: Tactic[];
   coverages: GapTacticCoverage[];
   mapping_suggestions: MappingSuggestionRecord[];
+  residual_gap_suggestions: ResidualGapSuggestionRecord[];
   residuals: ResidualNeed[];
   priorities: PriorityAssessment[];
   roadmap: RoadmapItem[];

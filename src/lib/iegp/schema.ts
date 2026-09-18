@@ -78,6 +78,7 @@ export const gaps = pgTable("gaps", {
   exclusion_reason: text("exclusion_reason"),
   exclusion_note: text("exclusion_note"),
   lock: jsonb("lock").notNull(),
+  parent_gap_id: text("parent_gap_id"),
 });
 
 export const needGapLinks = pgTable(
@@ -136,6 +137,14 @@ export const mappingSuggestions = pgTable(
   },
   (t) => [primaryKey({ columns: [t.gap_id, t.tactic_id] })],
 );
+
+export const residualGapSuggestions = pgTable("residual_gap_suggestions", {
+  parent_gap_id: text("parent_gap_id").primaryKey(),
+  statement: text("statement").notNull(),
+  reasons: jsonb("reasons").notNull(),
+  status: text("status").notNull(),
+  lock: jsonb("lock").notNull(),
+});
 
 export const residuals = pgTable("residuals", {
   id: text("id").primaryKey(),

@@ -10,8 +10,10 @@ import {
 import { LockForm } from "@/components/lock-form";
 import type {
   MappingSuggestion,
+  OpenGapCard,
   PlanGapCard,
   PlanTactic,
+  ResidualGapSuggestion,
   ReviewGapCard,
   ReviewTacticCard,
   TacticLibraryItem,
@@ -114,14 +116,29 @@ function CreateTacticFields() {
   );
 }
 
+function CreateTacticButton() {
+  return (
+    <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
+      <CreateTacticFields />
+    </LockForm>
+  );
+}
+
+function CreateActions() {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <CreateGapButton />
+      <CreateTacticButton />
+    </div>
+  );
+}
+
 function GapTacticsBlock({
   gapId,
-  residualId,
   tactics,
   availableTactics,
 }: {
   gapId: string;
-  residualId?: string | null;
   tactics: PlanTactic[];
   availableTactics: AvailableTactic[];
 }) {
@@ -173,20 +190,9 @@ function GapTacticsBlock({
           </LockForm>
         ) : availableTactics.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
-            Tactic library is empty. Accept an extracted tactic or create one.
+            Tactic library is empty. Accept an extracted tactic in Review, or create one in Library.
           </p>
         ) : null}
-        <LockForm
-          label="Create tactic"
-          action="create_tactic"
-          extra={{
-            gap_id: gapId,
-            residual_ids: residualId ?? "",
-          }}
-          confirmLabel="Create"
-        >
-          <CreateTacticFields />
-        </LockForm>
       </div>
     </div>
   );
@@ -206,22 +212,12 @@ export function ReviewCard({
       </div>
       <Link
         href={`/gaps/${card.gap_id}`}
-        className="mt-2 block text-[13px] font-medium text-foreground no-underline hover:underline"
+        className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.gap_name}
+        {card.statement}
       </Link>
-      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.statement}</p>
-      <p className="mt-2 text-[12px] leading-5 text-foreground">Residual: {card.residual}</p>
-      {card.needs.length > 0 ? (
-        <ul className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
-          {card.needs.map((need) => (
-            <li key={need.id}>{need.statement}</li>
-          ))}
-        </ul>
-      ) : null}
       <GapTacticsBlock
         gapId={card.gap_id}
-        residualId={card.residual_id}
         tactics={card.tactics}
         availableTactics={availableTactics}
       />
@@ -366,14 +362,12 @@ export function PrioritizeCard({
       </div>
       <Link
         href={`/gaps/${card.gap_id}`}
-        className="mt-2 block text-[13px] font-medium text-foreground no-underline hover:underline"
+        className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.gap_name}
+        {card.statement}
       </Link>
-      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.residual}</p>
       <GapTacticsBlock
         gapId={card.gap_id}
-        residualId={card.residual_id}
         tactics={card.tactics}
         availableTactics={availableTactics}
       />
@@ -421,14 +415,12 @@ export function GapPlanCard({
       </div>
       <Link
         href={`/gaps/${card.gap_id}`}
-        className="mt-2 block text-[13px] font-medium text-foreground no-underline hover:underline"
+        className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.gap_name}
+        {card.statement}
       </Link>
-      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{card.residual}</p>
       <GapTacticsBlock
         gapId={card.gap_id}
-        residualId={card.residual_id}
         tactics={card.tactics}
         availableTactics={availableTactics}
       />
@@ -451,7 +443,7 @@ export function ReviewQueue({
     return (
       <div className="grid gap-3">
         <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
-        <CreateGapButton />
+        <CreateActions />
       </div>
     );
   }
@@ -462,7 +454,7 @@ export function ReviewQueue({
           <h3 id="review-gaps" className="text-[13px] font-medium text-foreground">
             Gaps
           </h3>
-          <CreateGapButton />
+          <CreateActions />
         </div>
         {gaps.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">No candidate gaps in the queue.</p>
@@ -502,7 +494,8 @@ export function PrioritizeQueue({
   if (cards.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
-        All accepted gaps with residuals have a human-locked priority.
+        No leftover to prioritize. Open accepted gaps wait on Mappings for tactics, coverage, and
+        leftover-as-new-gap suggestions.
       </p>
     );
   }
@@ -512,6 +505,59 @@ export function PrioritizeQueue({
         <PrioritizeCard key={card.gap_id} card={card} availableTactics={availableTactics} />
       ))}
     </div>
+  );
+}
+
+export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
+  return (
+    <section aria-labelledby="suggested-residual-gaps">
+      <h2 id="suggested-residual-gaps" className="text-[15px] font-medium text-foreground">
+        Leftover as a new gap
+      </h2>
+      <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+        After a pressure-test, partial or limited coverage means the leftover evidence need is a new
+        gap. Accept creates that child (parent stays). Reject persists so this pair is not suggested
+        again.
+      </p>
+      {items.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No leftover-as-gap suggestions. Lock overall coverage as partial or limited on a mapped
+          gap first.
+        </p>
+      ) : (
+        <ul className="grid gap-3">
+          {items.map((item) => (
+            <li key={item.parent_gap_id} className="border border-border bg-background p-4">
+              <p className="text-[11px] text-muted-foreground">Parent (preserved)</p>
+              <p className="mt-1 text-[13px] leading-5 text-foreground">{item.parent_statement}</p>
+              <p className="mt-3 text-[11px] text-muted-foreground">Suggested new gap</p>
+              <p className="mt-1 text-[13px] leading-5 text-foreground">{item.statement}</p>
+              <ul className="mt-2 grid gap-1">
+                {item.reasons.map((reason) => (
+                  <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <LockForm
+                  label="Accept as new gap"
+                  action="accept_residual_gap"
+                  extra={{ parent_gap_id: item.parent_gap_id, statement: item.statement }}
+                  confirmLabel="Accept as new gap"
+                />
+                <LockForm
+                  label="Reject leftover"
+                  action="reject_residual_gap"
+                  extra={{ parent_gap_id: item.parent_gap_id }}
+                  confirmLabel="Reject leftover"
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -528,7 +574,7 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No mapping suggestions. Accept a gap and a tactic, or create one.
+          No mapping suggestions. Accept a gap and a tactic, or create a tactic in Library.
         </p>
       ) : (
         <ul className="grid gap-3">
@@ -537,8 +583,7 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
               key={`${item.gap_id}::${item.tactic_id}`}
               className="border border-border bg-background p-4"
             >
-              <p className="text-[13px] font-medium text-foreground">{item.gap_name}</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{item.gap_statement}</p>
+              <p className="text-[13px] leading-5 text-foreground">{item.gap_statement}</p>
               <p className="mt-2 text-[12px] text-foreground">
                 Tactic:{" "}
                 <Link
@@ -580,16 +625,12 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
 export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
   return (
     <section aria-labelledby="tactic-library">
-      <h2 id="tactic-library" className="text-[15px] font-medium text-foreground">
-        Tactic library
-      </h2>
-      <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-        Extracted tactics enter here after you accept them. Anything you create is added too. Tag
-        the same tactic onto as many gaps as you need — it is not copied.
+      <p id="tactic-library" className="mb-4 text-[12px] text-muted-foreground">
+        Tag the same tactic onto as many gaps as you need — it is not copied.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          Empty. Accept an extracted tactic or create one.
+          Empty. Accept an extracted tactic in Review, or create one here.
         </p>
       ) : (
         <ul className="grid gap-2">
@@ -615,12 +656,47 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
           ))}
         </ul>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
-          <CreateTacticFields />
-        </LockForm>
-        <CreateGapButton />
+      <div className="mt-3">
+        <CreateActions />
       </div>
     </section>
+  );
+}
+
+export function OpenGapsQueue({
+  cards,
+  availableTactics,
+}: {
+  cards: OpenGapCard[];
+  availableTactics: AvailableTactic[];
+}) {
+  if (cards.length === 0) {
+    return (
+      <p className="text-[12px] text-muted-foreground">
+        Accept a gap in Review, then map or assign a library tactic.
+      </p>
+    );
+  }
+  return (
+    <div className="grid gap-3">
+      {cards.map((card) => (
+        <article key={card.gap_id} className="border border-border bg-background p-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <GapBadge status={card.gap_status} />
+          </div>
+          <Link
+            href={`/gaps/${card.gap_id}`}
+            className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
+          >
+            {card.statement}
+          </Link>
+          <GapTacticsBlock
+            gapId={card.gap_id}
+            tactics={card.tactics}
+            availableTactics={availableTactics}
+          />
+        </article>
+      ))}
+    </div>
   );
 }

@@ -7,6 +7,7 @@ import type { IegpState, Lock } from "./types";
 import type { ActorFunction, EvidenceDomain } from "./enums";
 import { EVIDENCE_DOMAINS } from "./enums";
 import {
+  draftResidualGapSuggestion,
   draftResidualStatement,
   emptyDimensions,
   extractCandidateGaps,
@@ -14,11 +15,12 @@ import {
   extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
-  residualRequired,
+  residualDraftEligible,
   splitSourceIntoBlocks,
   similarRecord,
   suggestGapStatus,
   suggestMappings as rankMappingSuggestions,
+  suggestResidualGaps as rankResidualGapSuggestions,
   tacticEligibleForMapping,
   unlocked,
 } from "./engine";
@@ -57,6 +59,7 @@ async function readState(): Promise<IegpState> {
     tactics,
     coverages,
     mapping_suggestions,
+    residual_gap_suggestions,
     residuals,
     priorities,
     roadmap,
@@ -74,6 +77,7 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.tactics),
     d.select().from(t.coverages),
     d.select().from(t.mappingSuggestions),
+    d.select().from(t.residualGapSuggestions),
     d.select().from(t.residuals),
     d.select().from(t.priorities),
     d.select().from(t.roadmap),
@@ -107,6 +111,7 @@ async function readState(): Promise<IegpState> {
       status: g.status as IegpState["gaps"][0]["status"],
       exclusion_reason: g.exclusion_reason as IegpState["gaps"][0]["exclusion_reason"],
       status_lock: asLock(g.lock),
+      parent_gap_id: g.parent_gap_id ?? null,
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -130,6 +135,13 @@ async function readState(): Promise<IegpState> {
       gap_id: m.gap_id,
       tactic_id: m.tactic_id,
       status: m.status as IegpState["mapping_suggestions"][0]["status"],
+      lock: asLock(m.lock),
+    })),
+    residual_gap_suggestions: residual_gap_suggestions.map((m) => ({
+      parent_gap_id: m.parent_gap_id,
+      statement: m.statement,
+      reasons: m.reasons as string[],
+      status: m.status as IegpState["residual_gap_suggestions"][0]["status"],
       lock: asLock(m.lock),
     })),
     residuals: residuals.map((r) => ({
@@ -193,6 +205,9 @@ export async function persistState(state: IegpState) {
   if (state.mapping_suggestions.length) {
     await d.insert(t.mappingSuggestions).values(state.mapping_suggestions);
   }
+  if (state.residual_gap_suggestions.length) {
+    await d.insert(t.residualGapSuggestions).values(state.residual_gap_suggestions);
+  }
   if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
   if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
   if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
@@ -232,7 +247,7 @@ export async function appendAudit(
   detail: string,
 ) {
   await db().insert(t.audit).values({
-    id: `AUD-${Date.now()}`,
+    id: `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     at: now(),
     actor_name,
     actor_function,
@@ -328,9 +343,6 @@ export async function lockGapStatus(args: {
     "lock_status",
     `${gap.status} → ${args.status}`,
   );
-  if (residualRequired(args.status)) {
-    await ensureResidualDraft(args.gap_id);
-  }
 }
 
 export async function lockCoverageDimension(args: {
@@ -400,8 +412,8 @@ async function ensureResidualDraft(gap_id: string) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === gap_id);
   if (!gap) return;
-  if (gap.status === "validated_addressed" || gap.status === "excluded") return;
   const coverages = state.coverages.filter((c) => c.gap_id === gap_id);
+  if (!residualDraftEligible({ gap, coverages })) return;
   const draft = draftResidualStatement({ gap, coverages });
   const existing = state.residuals.find((r) => r.gap_id === gap_id);
   if (existing) {
@@ -593,7 +605,6 @@ export async function assignTacticToGap(args: {
     "assign_tactic",
     `${args.tactic_id} → ${args.gap_id}`,
   );
-  await ensureResidualDraft(args.gap_id);
 }
 
 async function upsertMappingSuggestion(args: {
@@ -700,6 +711,136 @@ export async function rejectMapping(args: {
   );
 }
 
+async function upsertResidualGapSuggestion(args: {
+  parent_gap_id: string;
+  statement: string;
+  reasons: string[];
+  status: "accepted" | "rejected";
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const row = {
+    parent_gap_id: args.parent_gap_id,
+    statement: args.statement,
+    reasons: args.reasons,
+    status: args.status,
+    lock: makeLock(args.actor_name, args.actor_function, args.note),
+  };
+  const existing = state.residual_gap_suggestions.find((m) => m.parent_gap_id === args.parent_gap_id);
+  if (existing) {
+    await db()
+      .update(t.residualGapSuggestions)
+      .set({
+        statement: row.statement,
+        reasons: row.reasons,
+        status: row.status,
+        lock: row.lock,
+      })
+      .where(eq(t.residualGapSuggestions.parent_gap_id, args.parent_gap_id));
+    return;
+  }
+  await db().insert(t.residualGapSuggestions).values(row);
+}
+
+export async function suggestResidualGaps() {
+  return rankResidualGapSuggestions(await loadState());
+}
+
+export async function acceptResidualGap(args: {
+  parent_gap_id: string;
+  statement?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
+  if (!parent) throw new Error("Parent gap not found");
+  const rejected = state.residual_gap_suggestions.find(
+    (row) => row.parent_gap_id === args.parent_gap_id && row.status === "rejected",
+  );
+  if (rejected) {
+    throw new Error("That leftover was rejected. It will not be suggested again.");
+  }
+  if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
+    throw new Error("A child gap already exists for this leftover.");
+  }
+  const coverages = state.coverages.filter((c) => c.gap_id === args.parent_gap_id);
+  const draft = draftResidualGapSuggestion({ gap: parent, coverages });
+  const statement = (args.statement || draft.statement).trim();
+  if (!statement) throw new Error("Statement is required.");
+  const childId = await createGap({
+    statement,
+    domain: draft.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Accepted leftover as a new gap. Parent preserved.",
+    parent_gap_id: args.parent_gap_id,
+  });
+  if (parent.status !== "validated_partial") {
+    await lockGapStatus({
+      gap_id: args.parent_gap_id,
+      status: "validated_partial",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: args.note || "Leftover accepted as a child gap.",
+    });
+  }
+  await upsertResidualGapSuggestion({
+    parent_gap_id: args.parent_gap_id,
+    statement,
+    reasons: draft.reasons,
+    status: "accepted",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Accepted leftover as a new gap.",
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "residual_gap",
+    args.parent_gap_id,
+    "accept_residual_gap",
+    `${args.parent_gap_id} → ${childId}`,
+  );
+  return childId;
+}
+
+export async function rejectResidualGap(args: {
+  parent_gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
+  if (!parent) throw new Error("Parent gap not found");
+  if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
+    throw new Error("A child gap already exists for this leftover.");
+  }
+  const coverages = state.coverages.filter((c) => c.gap_id === args.parent_gap_id);
+  const draft = draftResidualGapSuggestion({ gap: parent, coverages });
+  await upsertResidualGapSuggestion({
+    parent_gap_id: args.parent_gap_id,
+    statement: draft.statement,
+    reasons: draft.reasons,
+    status: "rejected",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Rejected leftover-as-new-gap suggestion.",
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "residual_gap",
+    args.parent_gap_id,
+    "reject_residual_gap",
+    `${args.parent_gap_id} leftover suppressed`,
+  );
+}
+
 export async function createGap(args: {
   name?: string;
   statement: string;
@@ -707,6 +848,7 @@ export async function createGap(args: {
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
+  parent_gap_id?: string | null;
 }) {
   const statement = args.statement.trim();
   if (!statement) throw new Error("Statement is required.");
@@ -714,6 +856,10 @@ export async function createGap(args: {
   const state = await loadState();
   const obj = state.objectives[0];
   if (!obj) throw new Error("No strategic objective to attach this gap to.");
+  if (args.parent_gap_id) {
+    const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
+    if (!parent) throw new Error("Parent gap not found");
+  }
   const name = args.name?.trim() || gapNameFromStatement(statement);
   const id = nextId(
     "GAP",
@@ -729,9 +875,9 @@ export async function createGap(args: {
     exclusion_reason: null,
     exclusion_note: null,
     lock: makeLock(args.actor_name, args.actor_function, args.note),
+    parent_gap_id: args.parent_gap_id ?? null,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
-  await ensureResidualDraft(id);
   return id;
 }
 
@@ -759,7 +905,7 @@ export async function modifyGap(args: {
     args.note || `${gap.name} → ${args.name}`,
   );
   const residual = state.residuals.find((r) => r.gap_id === args.gap_id);
-  if (!residual || !residual.lock.locked) {
+  if (residual && !residual.lock.locked) {
     await ensureResidualDraft(args.gap_id);
   }
 }
@@ -962,6 +1108,7 @@ export async function ingestNeedFromText(args: {
       exclusion_reason: null,
       exclusion_note: null,
       lock: unlocked(),
+      parent_gap_id: null,
     });
     if (linkedNeedId) {
       await db()
@@ -969,7 +1116,6 @@ export async function ingestNeedFromText(args: {
         .values({ need_id: linkedNeedId, gap_id: gapId, role: "primary" })
         .onConflictDoNothing();
     }
-    await ensureResidualDraft(gapId);
   }
 
   let tacticCount = 0;
@@ -1018,7 +1164,7 @@ export async function ingestNeedFromText(args: {
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); residual drafts created; coverage marked stale.`,
+    `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); coverage marked stale.`,
   );
   return sourceId;
 }

@@ -95,6 +95,7 @@ export function buildBlankWorkspace(): IegpState {
     tactics: [],
     coverages: [],
     mapping_suggestions: [],
+    residual_gap_suggestions: [],
     residuals: [],
     priorities: [],
     roadmap: [],
@@ -108,7 +109,7 @@ export function buildBlankWorkspace(): IegpState {
         entity_id: "ASSET-VELMARA",
         action: "blank",
         detail:
-          "Blank IEGP workspace. First visit is upload → review → prioritize. Demo files wait on the wizard until a human ingest them.",
+          "Blank IEGP workspace. Sidebar places: upload → review → mappings → library → plan. Demo files wait on Upload until a human ingest them.",
       },
     ],
     gold_needs: [],

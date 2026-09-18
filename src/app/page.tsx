@@ -1,14 +1,25 @@
+import type { ReactNode } from "react";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
-import { GapPlanCard, PrioritizeQueue, ReviewQueue, SuggestedMappings, TacticLibrary } from "@/components/plan-cards";
-import { Wizard } from "@/components/wizard";
+import {
+  GapPlanCard,
+  OpenGapsQueue,
+  PrioritizeQueue,
+  ReviewQueue,
+  SuggestedMappings,
+  SuggestedResidualGaps,
+  TacticLibrary,
+} from "@/components/plan-cards";
 import { StaleFlag } from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
-  wizardStartStep,
+  defaultPlanPlace,
+  isPlanPlace,
+  planGates,
   type PlanColumn,
+  type PlanPlace,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
@@ -19,192 +30,248 @@ const COLUMNS: { id: PlanColumn; title: string; hint: string }[] = [
   { id: "low", title: "Low", hint: "Keep on the inventory; do not staff first" },
 ];
 
-export default async function HomePage() {
+function PlaceIntro({
+  place,
+  wizardComplete,
+}: {
+  place: PlanPlace;
+  wizardComplete: boolean;
+}) {
+  if (place === "upload") {
+    return (
+      <PageIntro
+        kicker={wizardComplete ? "Living plan · ingest" : "First visit · ingest"}
+        title="Upload sources"
+      >
+        Demo files and your own notes extract candidate gaps and tactics into Review. After you
+        enter the plan, ingest stays here — it does not restart a wizard.
+      </PageIntro>
+    );
+  }
+  if (place === "review") {
+    return (
+      <PageIntro kicker="Step 1 · validate extracted objects" title="Review">
+        Candidate gaps and tactics from ingest. Accept, reject, or modify. Create gap and Create
+        tactic live here. Residuals are not copied onto these cards.
+      </PageIntro>
+    );
+  }
+  if (place === "mappings") {
+    return (
+      <PageIntro kicker="Step 2 · pressure-test" title="Mappings">
+        A scored engine drafts gap–tactic joins (not an LLM). After coverage is locked partial or
+        limited, leftover evidence need is suggested as a new gap. Accept creates the child; the
+        parent stays.
+      </PageIntro>
+    );
+  }
+  if (place === "library") {
+    return (
+      <PageIntro kicker="Accepted inventory" title="Tactic library">
+        Extracted tactics enter after you accept them. Create gap and Create tactic live here.
+        Creating a tactic adds it as accepted. Tag the same tactic onto as many gaps as you need.
+      </PageIntro>
+    );
+  }
+  return (
+    <PageIntro kicker={wizardComplete ? "Living plan" : "Ready for the plan"} title="Plan">
+      High / Medium / Low after a human locks priority. Open accepted gaps wait on Mappings for
+      tactics, coverage, and leftover-as-new-gap suggestions.
+    </PageIntro>
+  );
+}
+
+function LockedPlace({ title, body }: { title: string; body: string }) {
+  return (
+    <section className="border border-border bg-card/40 p-4">
+      <h2 className="text-[15px] font-medium text-foreground">{title}</h2>
+      <p className="mt-1 text-[12px] text-muted-foreground">{body}</p>
+    </section>
+  );
+}
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ place?: string }>;
+}) {
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
+  const gates = planGates(state);
+  const requested = (await searchParams).place;
+  const fallback = defaultPlanPlace(state, workspace);
+  const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
+  const stale = state.coverages.some((c) => c.stale);
 
-  if (!state.asset.wizard_complete) {
-    const start = wizardStartStep(state, workspace);
-    return (
-      <AppShell active="plan">
-        <PageIntro kicker={`${state.asset.inn} · first visit`} title={`Set up the ${state.asset.name} IEGP`}>
-          Wizard once, plan forever. Upload sources, accept or reject the extracted gaps and
-          tactics, then lock priority yourself. After you enter the plan, this stepper goes away.
-        </PageIntro>
-        <Wizard
-          initialStep={start}
-          hasSources={state.sources.length > 0}
-          upload={<IngestPanel sources={state.sources} />}
-          review={
-            <section>
-              <h2 className="text-[15px] font-medium text-foreground">Review gaps and tactics</h2>
-              <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-                Same gate for both. Accept, reject, or modify. After both are accepted, a scored
-                mapping engine drafts gap–tactic joins for you to accept or reject. You can also
-                create a gap here.
-              </p>
-              <ReviewQueue
-                gaps={workspace.review}
-                tactics={workspace.reviewTactics}
-                availableTactics={workspace.availableTactics}
-                emptyHint="Ingest a source first, then review what it extracted."
-              />
-              <div className="mt-8">
-                <SuggestedMappings items={workspace.mappingSuggestions} />
+  let pane: ReactNode;
+  if (place === "upload") {
+    pane = <IngestPanel sources={state.sources} />;
+  } else if (place === "review") {
+    pane = gates.reviewUnlocked ? (
+      <ReviewQueue
+        gaps={workspace.review}
+        tactics={workspace.reviewTactics}
+        availableTactics={workspace.availableTactics}
+        emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
+      />
+    ) : (
+      <LockedPlace
+        title="Review is locked"
+        body="Ingest at least one source on Upload. Candidates land here."
+      />
+    );
+  } else if (place === "mappings") {
+    pane = gates.mappingsUnlocked ? (
+      <div className="grid gap-10">
+        <SuggestedMappings items={workspace.mappingSuggestions} />
+        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
+        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
+        <section aria-labelledby="accepted-gaps">
+          <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
+            Accepted gaps
+          </h2>
+          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+            Assign from the library onto an accepted open or partial gap. Coverage is still unknown
+            until you lock it on the gap.
+          </p>
+          <OpenGapsQueue
+            cards={workspace.openGaps}
+            availableTactics={workspace.availableTactics}
+          />
+        </section>
+      </div>
+    ) : (
+      <LockedPlace
+        title="Mappings is locked"
+        body="Ingest a source, then accept a gap and a tactic in Review."
+      />
+    );
+  } else if (place === "library") {
+    pane = gates.libraryUnlocked ? (
+      <TacticLibrary items={workspace.availableTactics} />
+    ) : (
+      <LockedPlace
+        title="Library is locked"
+        body="Ingest a source, then accept an extracted tactic or create one here after Review unlocks."
+      />
+    );
+  } else if (!gates.planUnlocked) {
+    pane = (
+      <LockedPlace
+        title="Plan is locked"
+        body="Ingest a source, then accept a gap or tactic. The plan lists prioritized residuals — not every open gap."
+      />
+    );
+  } else {
+    pane = (
+      <>
+        {!state.asset.wizard_complete ? (
+          <div className="mb-8 border border-border bg-card/40 p-4">
+            <h2 className="text-[15px] font-medium text-foreground">Enter the plan</h2>
+            <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+            Wizard once, plan forever. After this, the home page opens here. Later ingest stays on
+            Upload and drops candidates into Review.
+            </p>
+            <LockForm
+              label="Enter the plan"
+              action="complete_wizard"
+              confirmLabel="Go to the plan"
+            />
+          </div>
+        ) : null}
+
+        <section className="mb-10" aria-labelledby="prioritize-gaps">
+          <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">
+            Prioritize
+          </h2>
+          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+            Leftover after a mapped tactic only partially fills the gap. You lock High, Medium, or
+            Low — the engine does not suggest a band. The leftover sentence is a child gap, not a
+            second copy on the parent.
+          </p>
+          <PrioritizeQueue
+            cards={workspace.unprioritized}
+            availableTactics={workspace.availableTactics}
+          />
+        </section>
+
+        <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
+        <p className="mb-4 text-[12px] text-muted-foreground">
+          After the band is locked, assign an accepted tactic. Coverage is not priority.
+        </p>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {COLUMNS.map((col) => (
+            <section
+              key={col.id}
+              className="border border-border bg-card/40 p-3"
+              aria-labelledby={`plan-${col.id}`}
+            >
+              <div className="mb-3 flex items-baseline justify-between gap-2">
+                <h2 id={`plan-${col.id}`} className="text-[15px] font-medium text-foreground">
+                  {col.title}
+                </h2>
+                <span className="text-[11px] text-muted-foreground">
+                  {workspace.board[col.id].length}
+                </span>
               </div>
-              <div className="mt-8">
-                <TacticLibrary items={workspace.availableTactics} />
+              <p className="mb-3 text-[11px] text-muted-foreground">{col.hint}</p>
+              <div className="grid gap-3">
+                {workspace.board[col.id].length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">No gaps in this band.</p>
+                ) : (
+                  workspace.board[col.id].map((card) => (
+                    <GapPlanCard
+                      key={card.gap_id}
+                      card={card}
+                      availableTactics={workspace.availableTactics}
+                    />
+                  ))
+                )}
               </div>
             </section>
-          }
-          prioritize={
-            <section>
-              <h2 className="text-[15px] font-medium text-foreground">Prioritize</h2>
-              <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-                Accepted open and partial gaps with a residual. You lock High, Medium, or Low —
-                the engine does not suggest a band.
-              </p>
-              <PrioritizeQueue
-                cards={workspace.unprioritized}
-                availableTactics={workspace.availableTactics}
-              />
-            </section>
-          }
-          enterPlan={
-            <LockForm label="Enter the plan" action="complete_wizard" confirmLabel="Go to the plan" />
-          }
-        />
-      </AppShell>
+          ))}
+        </div>
+
+        <section className="mt-10" aria-labelledby="addressed-gaps">
+          <h2 id="addressed-gaps" className="text-[15px] font-medium text-foreground">
+            Addressed
+          </h2>
+          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+            Closed gaps remain on the plan with the tactics that addressed them. The engine never
+            writes this status.
+          </p>
+          {workspace.addressed.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No addressed gaps yet.</p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {workspace.addressed.map((card) => (
+                <GapPlanCard
+                  key={card.gap_id}
+                  card={card}
+                  availableTactics={workspace.availableTactics}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
+          {stale ? <StaleFlag stale /> : null}
+        </div>
+      </>
     );
   }
 
-  const stale = state.coverages.some((c) => c.stale);
-  const inboxCount = workspace.review.length + workspace.reviewTactics.length;
-
   return (
-    <AppShell active="plan">
-      <PageIntro kicker={`${state.asset.inn} · living plan`} title={`${state.asset.name} IEGP`}>
-        {state.asset.indication} · {state.asset.geography}. New ingest drops candidate gaps and
-        tactics into the inbox on this page. You still lock priority. Assign only accepted tactics.
-      </PageIntro>
-
-      <section className="mb-10" aria-labelledby="inbox">
-        <div className="mb-1 flex items-baseline gap-2">
-          <h2 id="inbox" className="text-[15px] font-medium text-foreground">
-            Inbox
-          </h2>
-          {inboxCount ? (
-            <span className="text-[12px] text-muted-foreground">{inboxCount}</span>
-          ) : null}
+    <AppShell active={place}>
+      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} />
+      {pane}
+      {place === "upload" ? (
+        <div className="mt-8">
+          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
         </div>
-        <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Newly extracted gaps and tactics. Accept, reject, or modify before they join the plan.
-          A scored mapping engine drafts joins between accepted gaps and library tactics below.
-        </p>
-        <ReviewQueue
-          gaps={workspace.review}
-          tactics={workspace.reviewTactics}
-          availableTactics={workspace.availableTactics}
-          emptyHint="Inbox is empty. Ingest another source below when you have new material."
-        />
-      </section>
-
-      <div className="mb-10">
-        <SuggestedMappings items={workspace.mappingSuggestions} />
-      </div>
-
-      <section className="mb-10" aria-labelledby="prioritize-gaps">
-        <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">
-          Prioritize
-        </h2>
-        <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Accepted gaps still missing a human-locked band.
-        </p>
-        <PrioritizeQueue
-          cards={workspace.unprioritized}
-          availableTactics={workspace.availableTactics}
-        />
-      </section>
-
-      <section className="mb-10">
-        <TacticLibrary items={workspace.availableTactics} />
-      </section>
-
-      <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
-      <p className="mb-4 text-[12px] text-muted-foreground">
-        After the band is locked, create a tactic or assign an accepted one. Coverage is not
-        priority.
-      </p>
-      <div className="grid gap-4 lg:grid-cols-3">
-        {COLUMNS.map((col) => (
-          <section
-            key={col.id}
-            className="border border-border bg-card/40 p-3"
-            aria-labelledby={`plan-${col.id}`}
-          >
-            <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 id={`plan-${col.id}`} className="text-[15px] font-medium text-foreground">
-                {col.title}
-              </h2>
-              <span className="text-[11px] text-muted-foreground">
-                {workspace.board[col.id].length}
-              </span>
-            </div>
-            <p className="mb-3 text-[11px] text-muted-foreground">{col.hint}</p>
-            <div className="grid gap-3">
-              {workspace.board[col.id].length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">No gaps in this band.</p>
-              ) : (
-                workspace.board[col.id].map((card) => (
-                  <GapPlanCard
-                    key={card.gap_id}
-                    card={card}
-                    availableTactics={workspace.availableTactics}
-                  />
-                ))
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
-
-      <section className="mt-10" aria-labelledby="addressed-gaps">
-        <h2 id="addressed-gaps" className="text-[15px] font-medium text-foreground">
-          Addressed
-        </h2>
-        <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Closed gaps remain on the plan with the tactics that addressed them. The engine never
-          writes this status.
-        </p>
-        {workspace.addressed.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No addressed gaps yet.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {workspace.addressed.map((card) => (
-              <GapPlanCard
-                key={card.gap_id}
-                card={card}
-                availableTactics={workspace.availableTactics}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mt-10" aria-labelledby="add-sources">
-        <h2 id="add-sources" className="text-[15px] font-medium text-foreground">
-          Add sources
-        </h2>
-        <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          New files extract into the inbox above. They do not restart the wizard.
-        </p>
-        <IngestPanel sources={state.sources} compact />
-      </section>
-
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
-        {stale ? <StaleFlag stale /> : null}
-      </div>
+      ) : null}
     </AppShell>
   );
 }

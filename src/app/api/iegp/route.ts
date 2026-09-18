@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   acceptMapping,
+  acceptResidualGap,
   assignTacticToGap,
   completeWizard,
   createGap,
@@ -19,6 +20,7 @@ import {
   modifyGap,
   modifyTactic,
   rejectMapping,
+  rejectResidualGap,
   resetSeed,
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
@@ -137,6 +139,23 @@ export async function POST(request: Request) {
         await rejectMapping({
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "accept_residual_gap":
+        await acceptResidualGap({
+          parent_gap_id: body.parent_gap_id,
+          statement: body.statement || undefined,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "reject_residual_gap":
+        await rejectResidualGap({
+          parent_gap_id: body.parent_gap_id,
           actor_name,
           actor_function,
           note: body.note,

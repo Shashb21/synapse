@@ -43,40 +43,43 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics → residual drafts → human accept/reject/modify (gaps and tactics) → human priority → enter the living plan → create/assign accepted tactics → High/Medium/Low + inbox + addressed.
+Strategic objectives → sources → extracted gaps + tactics → human accept/reject/modify (gaps and tactics) → coverage lock → residual only if partial/limited → human priority → enter the living plan → High/Medium/Low + addressed.
 
 ### IEGP process (new plan)
 
 ```mermaid
 flowchart TD
-  wizard["First visit: stepper"]
-  upload["1. Upload sources"]
+  upload["Upload"]
   extract["Extract gaps and tactics"]
-  review["Review queue"]
+  review["Review"]
   decide{"Accept, reject, or modify"}
+  mappings["Mappings"]
+  library["Library"]
+  coverage["Lock coverage"]
+  residual["Residual if partial or limited"]
   pri["Human locks priority"]
   enter["Enter the plan"]
-  inbox["Inbox on the plan"]
-  assign["Create or assign accepted tactics"]
-  board["High / Medium / Low"]
+  board["Plan: High / Medium / Low"]
   closed["Addressed gaps with tactics"]
   later["Later ingest"]
-  wizard --> upload
   upload --> extract
   extract --> review
   review --> decide
   decide -->|modify| review
   decide -->|reject| review
-  decide -->|accept| pri
+  decide -->|accept| mappings
+  review --> library
+  mappings --> coverage
+  coverage --> residual
+  residual --> pri
   pri --> enter
-  enter --> assign
-  assign --> board
+  enter --> board
   board --> closed
-  later --> inbox
-  inbox --> review
+  later --> upload
+  later --> review
 ```
 
-The engine never assigns the priority band. Extracted tactics wait for the same review as gaps. After the wizard, you only live on the plan.
+The engine never assigns the priority band. Extracted tactics wait for the same review as gaps. After you enter the plan, `/` opens on Plan; later ingest stays on Upload.
 
 ### Traceability
 
@@ -86,7 +89,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system extracts a **candidate evidence need** and a **candidate gap**, plus a residual draft. It does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto priority.
+The system extracts a **candidate evidence need** and a **candidate gap**. It does not draft a residual and does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto mappings. A residual appears later, if a mapped tactic is locked as partial or limited coverage.
 
 ### Worked mapping (Velmara seed)
 

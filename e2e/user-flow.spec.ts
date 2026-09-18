@@ -14,6 +14,18 @@ async function resetBlank(page: import("@playwright/test").Page) {
   }
 }
 
+async function ingestFirstDemo(page: import("@playwright/test").Page) {
+  await page.goto("/?place=upload");
+  await page.getByRole("button", { name: /ingest this file/i }).first().click();
+  await page.getByLabel(/^name$/i).fill("A. Rao");
+  await page.getByRole("button", { name: /^ingest$/i }).click();
+  await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
+}
+
+function places(page: import("@playwright/test").Page) {
+  return page.getByRole("navigation", { name: "Places" });
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("wizard once, plan forever", () => {
@@ -21,39 +33,29 @@ test.describe("wizard once, plan forever", () => {
     await resetBlank(page);
   });
 
-  test("first visit is a stepper, not the living plan", async ({ page }) => {
+  test("first visit is a sidebar of places, not a stepper", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /set up the velmara iegp/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /upload sources/i })).toBeVisible();
     await expect(page.getByText(/first visit/i).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /1\. upload/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /2\. review/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /3\. prioritize/i })).toBeVisible();
+    await expect(places(page).getByRole("link", { name: /^upload/i })).toBeVisible();
+    await expect(places(page).getByText(/^review$/i)).toBeVisible();
+    await expect(places(page).getByRole("link", { name: /^review/i })).toHaveCount(0);
+    await expect(places(page).getByRole("link", { name: /^plan/i })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: /demo source files/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^high$/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^needs$/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^sources$/i })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /^plan$/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
+    await expect(page.getByRole("navigation", { name: "Tapes" }).getByRole("link", { name: /^eval$/i })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Tapes" }).getByRole("link", { name: /^spec$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /1\. upload/i })).toHaveCount(0);
   });
 
-  test("ingest on the wizard extracts gaps and tactics to review", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    const name = page.getByLabel(/^name$/i);
-    await expect(name).toHaveValue("");
-    await expect(name).toHaveAttribute("placeholder", "Your name");
-    await expect(page.getByText(/empty until you type/i)).toBeVisible();
-    await expect(page.getByLabel(/^function$/i)).toHaveValue("evidence_lead");
-    await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/placeholder, not a filled value/i)).toBeVisible();
-    await name.fill("A. Rao");
-    await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
-    await page.getByRole("button", { name: "Next", exact: true }).click();
-    await expect(page.getByRole("heading", { name: /review gaps and tactics/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toBeVisible();
-    await expect(page.getByText(/no mapping suggestions/i)).toBeVisible();
+  test("ingest extracts gaps and tactics to review with a single statement and assign only", async ({
+    page,
+  }) => {
+    await ingestFirstDemo(page);
+    await places(page).getByRole("link", { name: /^review/i }).click();
+    await expect(page.getByRole("heading", { name: /^review$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
@@ -62,80 +64,84 @@ test.describe("wizard once, plan forever", () => {
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
       .first();
+    const statement = (await gapCard.getByRole("link").first().innerText()).trim();
+    expect(statement.length).toBeGreaterThan(20);
+    const copies = (await gapCard.innerText()).split(statement).length - 1;
+    expect(copies).toBe(1);
+    await expect(gapCard.getByText(/^Residual:/)).toHaveCount(0);
     await expect(gapCard.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
     await expect(gapCard.getByText(/^None$/)).toBeVisible();
-    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
     await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toHaveCount(0);
     await expect(gapCard.getByText(/tactic library is empty/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toHaveCount(0);
   });
 
-  test("create tactic on a review gap lists it on that gap", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
-    await page.getByRole("button", { name: "Next", exact: true }).click();
+  test("create tactic lives on the library, then assign from review", async ({ page }) => {
+    await ingestFirstDemo(page);
+    await places(page).getByRole("link", { name: /^review/i }).click();
     const gapCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
       .first();
-    await expect(gapCard.getByText(/^None$/)).toBeVisible();
-    await gapCard.getByRole("button", { name: /create tactic/i }).click();
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+
+    await places(page).getByRole("link", { name: /^library/i }).click();
+    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
+    await page.getByRole("button", { name: /create tactic/i }).click();
     await page.getByPlaceholder("Tactic name").fill("Elderly SoC chart review");
     await page.getByPlaceholder("Evidence question").fill("Does the review cover elderly vs regional SoC?");
     await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^create$/i }).click();
+    await page.getByRole("button", { name: /add to library/i }).click();
+    await expect(page.getByRole("link", { name: /elderly soc chart review/i })).toBeVisible();
+
+    await places(page).getByRole("link", { name: /^review/i }).click();
+    await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toBeVisible();
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+    await gapCard.getByRole("button", { name: /assign tactic/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^assign$/i }).click();
     await expect(gapCard.getByRole("link", { name: /elderly soc chart review/i })).toBeVisible();
     await expect(gapCard.getByText(/^None$/)).toHaveCount(0);
-    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /elderly soc chart review/i })).toHaveCount(2);
   });
 
-  test("enter the plan then new ingest lands in the inbox", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
-    await page.getByRole("button", { name: /2\. review/i }).click();
+  test("enter the plan then new ingest lands in review", async ({ page }) => {
+    await ingestFirstDemo(page);
+    await places(page).getByRole("link", { name: /^review/i }).click();
     await page.getByRole("button", { name: /accept gap/i }).first().click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
     await page.getByRole("button", { name: /accept tactic/i }).first().click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
-    await page.getByRole("button", { name: /3\. prioritize/i }).click();
-    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await places(page).getByRole("link", { name: /^plan/i }).click();
+    await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
     await page.getByRole("button", { name: /enter the plan/i }).click();
     await page.getByLabel(/^name$/i).fill("S. Iyer");
     await page.getByRole("button", { name: /go to the plan/i }).click();
-    await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
     await expect(page.getByText(/living plan/i).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^inbox/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^low$/i })).toBeVisible();
 
-    await page.getByRole("heading", { name: /add sources/i }).scrollIntoViewIfNeeded();
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
+
+    await places(page).getByRole("link", { name: /^upload/i }).click();
     await page.getByRole("button", { name: /ingest this file/i }).nth(1).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^ingest$/i }).click();
-    await page.getByRole("heading", { name: /^inbox/i }).scrollIntoViewIfNeeded();
+    await places(page).getByRole("link", { name: /^review/i }).click();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByText(/intracranial|sequencing after osimertinib/i).first()).toBeVisible();
   });
 
-  test("accept mapping tags the tactic on the gap; create gap lands in prioritize", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: /ingest this file/i }).first().click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^ingest$/i }).click();
-    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
-    await page.getByRole("button", { name: "Next", exact: true }).click();
+  test("accept mapping tags the tactic; create gap lands on mappings not prioritize", async ({
+    page,
+  }) => {
+    await ingestFirstDemo(page);
+    await places(page).getByRole("link", { name: /^review/i }).click();
 
     const gapCard = page
       .locator("article")
@@ -157,6 +163,7 @@ test.describe("wizard once, plan forever", () => {
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
 
+    await places(page).getByRole("link", { name: /^mappings/i }).click();
     const suggestion = page
       .locator("li")
       .filter({ has: page.getByRole("button", { name: /accept mapping/i }) })
@@ -171,19 +178,61 @@ test.describe("wizard once, plan forever", () => {
     await page.getByRole("button", { name: /^accept mapping$/i }).click();
     await expect(page.getByRole("button", { name: /accept mapping/i })).toHaveCount(0);
 
-    await page.getByRole("button", { name: /3\. prioritize/i }).click();
-    const prioritized = page.locator("article").filter({ hasText: gapName }).first();
-    await expect(prioritized.locator("a", { hasText: tacticName })).toBeVisible();
+    const mapped = page.locator("article").filter({ hasText: gapName }).first();
+    await expect(mapped.locator("a", { hasText: tacticName })).toBeVisible();
 
-    await page.getByRole("button", { name: /2\. review/i }).click();
+    await places(page).getByRole("link", { name: /^review/i }).click();
     await page.getByRole("button", { name: /create gap/i }).first().click();
     await page.getByPlaceholder(/what evidence is missing/i).fill(
       "Need ILD characterisation in community oncology clinics after month six.",
     );
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /add gap/i }).click();
-    await page.getByRole("button", { name: /3\. prioritize/i }).click();
+    await places(page).getByRole("link", { name: /^mappings/i }).click();
     await expect(page.getByText(/community oncology/i).first()).toBeVisible();
+    await places(page).getByRole("link", { name: /^plan/i }).click();
+    await expect(page.getByText(/community oncology/i)).toHaveCount(0);
+  });
+
+  test("locking partial coverage drafts a residual onto the plan", async ({ page }) => {
+    await ingestFirstDemo(page);
+    await places(page).getByRole("link", { name: /^review/i }).click();
+    const gapCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
+      .filter({ hasText: /comparative effectiveness|elderly/i })
+      .first();
+    const statement = (await gapCard.getByRole("link").first().innerText()).trim();
+    await gapCard.getByRole("button", { name: /accept gap/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+    const tacticCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept tactic/i }) })
+      .filter({ hasText: /chart review|≥65|aged 65/i })
+      .first();
+    await tacticCard.getByRole("button", { name: /accept tactic/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+    await places(page).getByRole("link", { name: /^mappings/i }).click();
+    await page.getByRole("button", { name: /accept mapping/i }).first().click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept mapping$/i }).click();
+
+    const mapped = page.locator("article").filter({ hasText: statement }).first();
+    await mapped.getByRole("link").first().click();
+    await expect(page.getByText(/residual \(parent gap preserved\)/i)).toHaveCount(0);
+    await page.getByRole("button", { name: /lock overall coverage/i }).first().click();
+    await page.locator("select[name='overall']").selectOption("partial");
+    await page.locator("textarea[name='rationale']").fill("Only a slice of the gap is covered.");
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^lock$/i }).click();
+    await expect(page.getByText(/residual \(parent gap preserved\)/i)).toBeVisible();
+    const residual = page.locator("section").filter({ hasText: /parent gap preserved/i });
+    await expect(residual.getByText(statement, { exact: true })).toHaveCount(0);
+
+    await places(page).getByRole("link", { name: /^plan/i }).click();
+    await expect(page.getByRole("button", { name: /set priority/i }).first()).toBeVisible();
   });
 
   test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {

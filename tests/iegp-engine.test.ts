@@ -13,6 +13,7 @@ import {
   needEvalMetrics,
   pairNeeds,
   planColumn,
+  residualDraftEligible,
   splitSourceIntoBlocks,
   suggestGapStatus,
   suggestMappings,
@@ -63,7 +64,50 @@ describe("IEGP engine", () => {
       coverages: [coverage],
     });
     expect(draft.statement.toLowerCase()).toMatch(/comparative|standard of care/);
+    expect(draft.statement).not.toMatch(/elderly patients/i);
     expect(draft.rationale).toMatch(/preserved|Uncovered/i);
+  });
+
+  it("only treats locked partial or limited overall coverage as a residual", () => {
+    const unlockedLimited = cov("limited", {});
+    expect(
+      residualDraftEligible({
+        gap: { status: "validated_open" },
+        coverages: [unlockedLimited],
+      }),
+    ).toBe(false);
+    expect(
+      residualDraftEligible({
+        gap: { status: "validated_open" },
+        coverages: [],
+      }),
+    ).toBe(false);
+    const lockedPartial: GapTacticCoverage = {
+      ...cov("partial", {}),
+      overall_lock: {
+        locked: true,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+        locked_at: "2026-09-18T00:00:00Z",
+        note: "Partial.",
+      },
+    };
+    expect(
+      residualDraftEligible({
+        gap: { status: "validated_open" },
+        coverages: [lockedPartial],
+      }),
+    ).toBe(true);
+    const lockedFull: GapTacticCoverage = {
+      ...lockedPartial,
+      overall: "full",
+    };
+    expect(
+      residualDraftEligible({
+        gap: { status: "validated_open" },
+        coverages: [lockedFull],
+      }),
+    ).toBe(false);
   });
 
   it("does not treat a tactic existing as fully addressed", () => {
@@ -268,6 +312,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const ild = workspace.review.find((c) => c.gap_id === "GAP-ILD");
     expect(ild).toBeTruthy();
     expect(ild!.tactics).toHaveLength(0);
+    expect(Object.prototype.hasOwnProperty.call(ild, "residual")).toBe(false);
     const os = workspace.unprioritized.find((c) => c.gap_id === "GAP-OS");
     expect(os).toBeTruthy();
     expect(os!.tactics.some((t) => t.id === "TAC-LTFU")).toBe(true);

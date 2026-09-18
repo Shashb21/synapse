@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS needs (
 CREATE TABLE IF NOT EXISTS gaps (
   id text PRIMARY KEY, name text NOT NULL, statement text NOT NULL,
   domain text NOT NULL, objective_id text NOT NULL, status text NOT NULL,
-  exclusion_reason text, exclusion_note text, lock jsonb NOT NULL
+  exclusion_reason text, exclusion_note text, lock jsonb NOT NULL,
+  parent_gap_id text
 );
 CREATE TABLE IF NOT EXISTS need_gap_links (
   need_id text NOT NULL, gap_id text NOT NULL, role text NOT NULL,
@@ -84,6 +85,10 @@ CREATE TABLE IF NOT EXISTS mapping_suggestions (
   gap_id text NOT NULL, tactic_id text NOT NULL,
   status text NOT NULL, lock jsonb NOT NULL,
   PRIMARY KEY (gap_id, tactic_id)
+);
+CREATE TABLE IF NOT EXISTS residual_gap_suggestions (
+  parent_gap_id text PRIMARY KEY, statement text NOT NULL,
+  reasons jsonb NOT NULL, status text NOT NULL, lock jsonb NOT NULL
 );
 CREATE TABLE IF NOT EXISTS residuals (
   id text PRIMARY KEY, gap_id text NOT NULL, statement text NOT NULL,
@@ -140,6 +145,9 @@ export async function ensureSchema() {
       "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS lock jsonb NOT NULL DEFAULT '{}'::jsonb",
     ),
   );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parent_gap_id text"),
+  );
 }
 
 export async function wipeIegp() {
@@ -153,6 +161,7 @@ export async function wipeIegp() {
     "residuals",
     "coverages",
     "mapping_suggestions",
+    "residual_gap_suggestions",
     "need_gap_links",
     "needs",
     "gaps",

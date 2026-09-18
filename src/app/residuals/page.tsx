@@ -31,7 +31,8 @@ export default async function ResidualsPage() {
       </PageIntro>
       {rows.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No residuals yet. They are drafted when you ingest a source and extract a candidate gap.
+          No residuals yet. They are drafted when a mapped tactic is locked as partial or limited
+          coverage.
         </p>
       ) : (
       <div className="grid gap-4">

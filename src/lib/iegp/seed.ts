@@ -175,7 +175,7 @@ export function buildSeed(): IegpState {
       .map((b) => b.text)
       .join("\n");
 
-  return {
+  const state = {
     asset: {
       id: "ASSET-VELMARA",
       name: "Velmara",
@@ -1385,6 +1385,7 @@ export function buildSeed(): IegpState {
       }),
     ],
     mapping_suggestions: [],
+    residual_gap_suggestions: [],
     residuals: [
       {
         id: "RES-ELDERLY-SOC",
@@ -1675,6 +1676,12 @@ export function buildSeed(): IegpState {
       { id: "GOLD-C-006", gap_id: "GAP-SEQ", tactic_id: "TAC-REG", overall: "partial" },
     ],
   };
+
+  return {
+    ...state,
+    residual_gap_suggestions: [],
+    gaps: state.gaps.map((gap) => ({ ...gap, parent_gap_id: null })),
+  } as IegpState;
 }
 
 function need(

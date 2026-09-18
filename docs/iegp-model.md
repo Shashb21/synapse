@@ -14,7 +14,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). |
 | Tactic | Structured generating or disseminating activity. Extracted tactics start as **candidate** and use the same accept / reject / modify gate as gaps. Status completed / ongoing / planned / proposed / cancelled. |
 | Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. Suggested mappings rank accepted gaps against accepted tactics; a human accept writes this join. Reject persists so that pair is not suggested again. |
-| Residual evidence need | Child of a gap. Original gap is preserved. |
+| Residual evidence need | Child of a gap. Original gap is preserved. Drafted only after a tactic is assigned **and** coverage is understood as partial or limited. |
 | Priority | Locked band on the residual. Coverage ≠ priority. |
 | Roadmap item | Ongoing + planned + proposed tactics only. Completed stay on the dossier. |
 
@@ -28,14 +28,18 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 3. Gap status (Candidate / Open / Partial / Addressed / Excluded)
 4. Each of 10 coverage dimensions
 5. Overall coverage degree
-6. Residual statement (engine drafts from uncovered dimensions; human edits and locks)
+6. Residual statement (engine drafts from uncovered dimensions **only when overall coverage is locked partial or limited**; human edits and locks)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
-8. Create or assign a tactic (human-authored proposals; extracted tactics are inventory, not ideation)
+8. Assign a tactic from the library onto a gap (human-authored proposals are created in the library as accepted; extracted tactics are inventory, not ideation)
 8b. Suggested mapping accept / reject (a scored mapping engine drafts the join; accept is the same coverage write as Assign; reject suppresses the pair)
-8c. Create a gap (human-authored; starts as validated open with a residual draft)
+8c. Create a gap (human-authored; starts as validated open with **no** residual)
 9. Roadmap row
 
+There is **no residual** on ingest, gap accept, or create-gap. Assigning a tactic is not enough if coverage is still unknown (unlocked overall, including the placeholder `limited` written at assign). Draft a residual only when mapped coverage is human-locked **partial** or **limited**. Full coverage and `not_relevant` do not create a residual. No tactics means no residual. Open accepted gaps with no residual are unmapped or fully uncovered — they wait for tactics/coverage; they are not “prioritize leftover residuals.” Priority still lives on the residual when one exists.
+
 Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine never writes Addressed.
+
+Create tactic is a library action, not a validation action. Gap review, create-gap, and inbox validation expose **Assign tactic** from the library only.
 
 Suggested mappings are drafted by a deterministic scored engine (statement/question similarity, domain–type affinity, shared population/comparator/outcome cues, and a penalty when the tactic is dissemination-only). The engine never writes coverage; a human accept or reject is the gate. Mapping is inventory join, not tactic ideation — not an LLM and not embedding-clusters.
 
@@ -53,16 +57,23 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 ## Surfaces
 
-The home screen (`/`) is a **wizard once, then the living plan**. First visit is a stepper: upload → review gaps and tactics → prioritize. After **Enter the plan**, you only live on `/`. New ingest drops candidate gaps and tactics into the **inbox** on that same page. The loop is:
+The home screen (`/`) is a **wizard once, then the living plan**, as a Cursor-like left sidebar of places. The main pane shows one place. First visit starts on Upload; Review / Mappings / Library unlock after at least one source; Plan unlocks after a source plus at least one accept (or after **Enter the plan**). After wizard complete, `/` opens on Plan. New ingest stays on Upload and drops candidates into Review.
 
-1. Upload or ingest a demo source. The engine extracts **candidate gaps** and **candidate tactics**, and drafts **residual evidence needs**.
-2. Review both. Humans **accept, reject, or modify** gaps and tactics. Only accepted tactics can be assigned later. After a gap and a tactic are accepted, **suggested mappings** appear for accept or reject. **Create gap** lives here and next to the tactic library — not a new nav item.
-3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band. Human-created gaps land here too.
-4. After a human lock, tactics can be **created or assigned** onto High / Medium / Low.
-5. **Addressed** gaps stay on the plan with the tactics that closed them.
-6. Later sources never restart the wizard. They land in the inbox.
+| Place | What |
+| --- | --- |
+| Upload | Demo pack + ingest. Later sources never restart a stepper. |
+| Review | Candidate gaps and tactics; accept / reject / modify; Create gap. One sentence per gap. No residual. Assign tactic only — no Create tactic. |
+| Mappings | Suggested mappings (scored engine) plus assign from the library onto accepted gaps. |
+| Library | Accepted and created tactics. **Create tactic** lives here. |
+| Plan | Prioritize leftover residuals, then High / Medium / Low and Addressed. |
 
-Critical locked bands sit in High. Excluded gaps stay off the board. Candidate needs remain sourced atoms and still join onto gaps; they are not auto-promoted.
+Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates and mapping suggestions.
+
+Gap cards show the gap **once** as a sentence. They do not echo the statement as residual, needs list, and body.
+
+## Parked — Plan vision (not in this pass)
+
+The Plan surface should grow into a visual of gaps and tactics with **gates** (dependencies: tactic B blocked until tactic A completes) and a **timeline as a Gantt chart**. Sidebar IA is shaped so Plan can absorb that later. No Gantt and no dependency graph in the current UI.
 
 ## v1 non-goals
 

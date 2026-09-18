@@ -149,26 +149,122 @@ export function draftResidualStatement(args: {
   const status = suggestGapStatus(args.coverages);
   let statement: string;
   if (status === "validated_addressed") {
-    statement = `No residual: ${args.gap.name} is adequately addressed by existing tactics.`;
+    statement = "No residual: existing tactics adequately address this gap.";
   } else if (missing.includes("comparator")) {
-    statement = `Comparative outcomes versus the relevant standard of care remain insufficiently characterised for: ${args.gap.statement}`;
+    statement =
+      "Comparative outcomes versus the relevant standard of care remain insufficiently characterised.";
   } else if (missing.includes("population")) {
-    statement = `The relevant population is not adequately represented for: ${args.gap.statement}`;
+    statement = "The relevant population is not adequately represented.";
   } else if (args.gap.domain === "economics" || missing.includes("outcomes")) {
-    statement = `Limited evidence remains on ${args.gap.domain.replaceAll("_", " ")} for: ${args.gap.statement}`;
+    statement = `Limited evidence remains on ${args.gap.domain.replaceAll("_", " ")}.`;
   } else {
-    statement = `Residual evidence need on ${args.gap.name}: ${args.gap.statement} Uncovered or only partial dimensions: ${labels || "overall coverage"}.`;
+    statement = `Uncovered or only partial dimensions remain: ${labels || "overall coverage"}.`;
   }
   const rationale = `Drafted from ${args.coverages.length} tactic mapping(s). Suggested gap status ${status}. Uncovered dimensions: ${missing.join(", ") || "none"}. Original gap is preserved.`;
   return { statement, rationale, domain: args.gap.domain };
 }
 
-export function residualRequired(status: GapStatus): boolean {
-  return (
-    status === "candidate" ||
-    status === "validated_partial" ||
-    status === "validated_open"
+/** Leftover evidence need exists only after a tactic is assigned and coverage is understood as partial/limited. */
+export function residualDraftEligible(args: {
+  gap: Pick<EvidenceGap, "status">;
+  coverages: GapTacticCoverage[];
+}): boolean {
+  if (args.gap.status === "validated_addressed" || args.gap.status === "excluded") return false;
+  if (args.coverages.length === 0) return false;
+  return args.coverages.some(
+    (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
   );
+}
+
+/**
+ * Residual-as-gap: prefer human-locked overall of partial/limited.
+ * Unlocked assignment defaults (overall "limited") do not enqueue a leftover.
+ */
+export function residualGapEligible(args: {
+  gap: Pick<EvidenceGap, "status">;
+  coverages: GapTacticCoverage[];
+  hasChild: boolean;
+  suppressed: boolean;
+}): boolean {
+  if (args.suppressed || args.hasChild) return false;
+  if (
+    args.gap.status === "candidate" ||
+    args.gap.status === "excluded" ||
+    args.gap.status === "validated_addressed"
+  ) {
+    return false;
+  }
+  return residualDraftEligible(args);
+}
+
+export type ResidualGapSuggestion = {
+  parent_gap_id: string;
+  parent_name: string;
+  parent_statement: string;
+  statement: string;
+  reasons: string[];
+  domain: EvidenceGap["domain"];
+};
+
+/** Draft leftover text that is not a copy of the parent gap sentence. */
+export function draftResidualGapSuggestion(args: {
+  gap: Pick<EvidenceGap, "id" | "name" | "statement" | "domain">;
+  coverages: GapTacticCoverage[];
+}): ResidualGapSuggestion {
+  const draft = draftResidualStatement({ gap: args.gap, coverages: args.coverages });
+  let statement = draft.statement;
+  if (
+    similarRecord(statement, args.gap.statement, 0.62) ||
+    similarRecord(statement, args.gap.name, 0.62)
+  ) {
+    const missing = uncoveredDimensions(args.coverages);
+    statement = `Uncovered or only partial dimensions remain: ${missing.slice(0, 4).join(", ") || "overall coverage"}.`;
+  }
+  const locked = args.coverages.filter((c) => c.overall_lock.locked);
+  const pool = locked.length > 0 ? locked : args.coverages;
+  const overalls = [...new Set(pool.map((c) => c.overall))];
+  const missing = uncoveredDimensions(args.coverages);
+  const status = suggestGapStatus(args.coverages);
+  return {
+    parent_gap_id: args.gap.id,
+    parent_name: args.gap.name,
+    parent_statement: args.gap.statement,
+    statement,
+    reasons: [
+      `Pressure-test coverage overall ${overalls.join(", ")} (${locked.length ? "human-locked" : "engine draft"}).`,
+      `Suggested gap status ${status}. Parent stays; leftover is a new gap.`,
+      `Uncovered or partial dimensions: ${missing.join(", ") || "none"}.`,
+    ],
+    domain: draft.domain,
+  };
+}
+
+/** Ranked leftover-as-new-gap drafts. Engine suggests; it does not create the child. */
+export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
+  const suppressed = new Set(
+    state.residual_gap_suggestions
+      .filter((row) => row.status === "rejected" || row.status === "accepted")
+      .map((row) => row.parent_gap_id),
+  );
+  const childByParent = new Set(
+    state.gaps.map((gap) => gap.parent_gap_id).filter((id): id is string => Boolean(id)),
+  );
+  const out: ResidualGapSuggestion[] = [];
+  for (const gap of state.gaps) {
+    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+    if (
+      !residualGapEligible({
+        gap,
+        coverages,
+        hasChild: childByParent.has(gap.id),
+        suppressed: suppressed.has(gap.id),
+      })
+    ) {
+      continue;
+    }
+    out.push(draftResidualGapSuggestion({ gap, coverages }));
+  }
+  return out;
 }
 
 const STAKEHOLDER_WEIGHT: Record<string, number> = {
@@ -689,22 +785,30 @@ export type PlanTactic = {
 export type PlanGapCard = {
   gap_id: string;
   gap_name: string;
+  statement: string;
+  residual: string;
   gap_status: GapStatus;
   residual_id: string | null;
-  residual: string;
   band: PriorityBand | null;
   score: number;
   tactics: PlanTactic[];
+  parent_gap_id: string | null;
 };
 
 export type ReviewGapCard = {
   gap_id: string;
   gap_name: string;
   statement: string;
-  residual_id: string | null;
-  residual: string;
-  needs: { id: string; statement: string }[];
   tactics: PlanTactic[];
+};
+
+export type OpenGapCard = {
+  gap_id: string;
+  gap_name: string;
+  statement: string;
+  gap_status: GapStatus;
+  tactics: PlanTactic[];
+  parent_gap_id: string | null;
 };
 
 export type ReviewTacticCard = {
@@ -718,9 +822,10 @@ export type ReviewTacticCard = {
 export type UnprioritizedGapCard = {
   gap_id: string;
   gap_name: string;
+  statement: string;
+  residual: string;
   gap_status: GapStatus;
   residual_id: string;
-  residual: string;
   tactics: PlanTactic[];
 };
 
@@ -771,12 +876,14 @@ export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard
     cards.push({
       gap_id: gap.id,
       gap_name: gap.name,
+      statement: gap.statement,
+      residual: residual.statement,
       gap_status: gap.status,
       residual_id: residual.id,
-      residual: residual.statement,
       band: priority.band,
       score: priority.suggested_score,
       tactics: mappedTactics(state, gap.id, residual.id),
+      parent_gap_id: gap.parent_gap_id,
     });
   }
   cards.sort((a, b) => b.score - a.score);
@@ -814,28 +921,36 @@ export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
 export function buildPlanWorkspace(state: IegpState): {
   review: ReviewGapCard[];
   reviewTactics: ReviewTacticCard[];
+  openGaps: OpenGapCard[];
   unprioritized: UnprioritizedGapCard[];
   board: Record<PlanColumn, PlanGapCard[]>;
   addressed: PlanGapCard[];
   availableTactics: TacticLibraryItem[];
   mappingSuggestions: MappingSuggestion[];
+  residualGapSuggestions: ResidualGapSuggestion[];
 } {
   const review: ReviewGapCard[] = [];
   for (const gap of state.gaps.filter((g) => g.status === "candidate")) {
-    const residual = state.residuals.find((r) => r.gap_id === gap.id);
-    const needs = state.need_gap_links
-      .filter((l) => l.gap_id === gap.id)
-      .map((l) => state.needs.find((n) => n.id === l.need_id))
-      .filter((n): n is NonNullable<typeof n> => Boolean(n))
-      .map((n) => ({ id: n.id, statement: n.statement }));
     review.push({
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
-      residual_id: residual?.id ?? null,
-      residual: residual?.statement ?? "Residual will be drafted on accept.",
-      needs,
+      tactics: mappedTactics(state, gap.id),
+    });
+  }
+
+  const openGaps: OpenGapCard[] = [];
+  for (const gap of state.gaps.filter(
+    (g) => g.status === "validated_open" || g.status === "validated_partial",
+  )) {
+    const residual = state.residuals.find((r) => r.gap_id === gap.id);
+    openGaps.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      statement: gap.statement,
+      gap_status: gap.status,
       tactics: mappedTactics(state, gap.id, residual?.id),
+      parent_gap_id: gap.parent_gap_id,
     });
   }
 
@@ -858,12 +973,15 @@ export function buildPlanWorkspace(state: IegpState): {
     const gap = state.gaps.find((g) => g.id === residual.gap_id);
     if (!gap) continue;
     if (gap.status !== "validated_open" && gap.status !== "validated_partial") continue;
+    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+    if (!residualDraftEligible({ gap, coverages })) continue;
     unprioritized.push({
       gap_id: gap.id,
       gap_name: gap.name,
+      statement: gap.statement,
+      residual: residual.statement,
       gap_status: gap.status,
       residual_id: residual.id,
-      residual: residual.statement,
       tactics: mappedTactics(state, gap.id, residual.id),
     });
   }
@@ -874,31 +992,80 @@ export function buildPlanWorkspace(state: IegpState): {
     addressed.push({
       gap_id: gap.id,
       gap_name: gap.name,
+      statement: gap.statement,
+      residual: residual?.statement ?? "No residual — this gap is addressed.",
       gap_status: gap.status,
       residual_id: residual?.id ?? null,
-      residual: residual?.statement ?? "No residual — this gap is addressed.",
       band: null,
       score: 0,
       tactics: mappedTactics(state, gap.id, residual?.id),
+      parent_gap_id: gap.parent_gap_id,
     });
   }
 
   return {
     review,
     reviewTactics,
+    openGaps,
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
     mappingSuggestions: suggestMappings(state),
+    residualGapSuggestions: suggestResidualGaps(state),
   };
 }
 
-export function wizardStartStep(
-  state: Pick<IegpState, "sources">,
+export const PLAN_PLACES = ["upload", "review", "mappings", "library", "plan"] as const;
+export type PlanPlace = (typeof PLAN_PLACES)[number];
+
+export function isPlanPlace(value: string | undefined): value is PlanPlace {
+  return Boolean(value && (PLAN_PLACES as readonly string[]).includes(value));
+}
+
+export function planGates(state: IegpState): {
+  hasSources: boolean;
+  hasAccepts: boolean;
+  reviewUnlocked: boolean;
+  mappingsUnlocked: boolean;
+  libraryUnlocked: boolean;
+  planUnlocked: boolean;
+} {
+  const hasSources = state.sources.length > 0;
+  const hasAccepts =
+    state.gaps.some(
+      (g) =>
+        g.status === "validated_open" ||
+        g.status === "validated_partial" ||
+        g.status === "validated_addressed",
+    ) || state.tactics.some((t) => t.review_status === "accepted");
+  const reviewUnlocked = hasSources;
+  return {
+    hasSources,
+    hasAccepts,
+    reviewUnlocked,
+    mappingsUnlocked: reviewUnlocked,
+    libraryUnlocked: reviewUnlocked,
+    planUnlocked: state.asset.wizard_complete || (hasSources && hasAccepts),
+  };
+}
+
+export function defaultPlanPlace(
+  state: IegpState,
   workspace: Pick<ReturnType<typeof buildPlanWorkspace>, "review" | "reviewTactics">,
-): 1 | 2 | 3 {
-  if (state.sources.length === 0) return 1;
-  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) return 2;
-  return 3;
+): PlanPlace {
+  if (state.asset.wizard_complete) return "plan";
+  if (state.sources.length === 0) return "upload";
+  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) return "review";
+  return "review";
+}
+
+export function planNavCounts(workspace: ReturnType<typeof buildPlanWorkspace>): {
+  review: number;
+  mappings: number;
+} {
+  return {
+    review: workspace.review.length + workspace.reviewTactics.length,
+    mappings: workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
+  };
 }
