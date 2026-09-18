@@ -51,9 +51,9 @@ function PlaceIntro({
   if (place === "review") {
     return (
       <PageIntro kicker="Accept, reject, or modify" title="Review">
-        Extracted gaps and extracted tactics. Accept, reject, or modify. Create a gap here. Assign
-        an accepted library tactic onto a gap — Create tactic lives on Library. No residual until
-        coverage is locked partial or limited.
+        Step 1 after ingest: validate extracted gaps and tactics (accept / reject / modify). Create
+        gap and Create tactic live here. Leftover-as-new-gap suggestions appear on Mappings after a
+        pressure-test.
       </PageIntro>
     );
   }
@@ -69,8 +69,8 @@ function PlaceIntro({
   if (place === "library") {
     return (
       <PageIntro kicker="Accepted inventory" title="Tactic library">
-        Extracted tactics enter after you accept them. Create a tactic here — it is added as
-        accepted. Tag the same tactic onto as many gaps as you need.
+        Extracted tactics enter after you accept them. Create gap and Create tactic live here too.
+        A created tactic is added as accepted. Tag the same tactic onto as many gaps as you need.
       </PageIntro>
     );
   }
