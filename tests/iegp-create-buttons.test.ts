@@ -10,14 +10,16 @@ describe("Create gap and Create tactic buttons", () => {
     expect(src).toContain('label="Create gap"');
     expect(src).toContain('label="Create tactic"');
     const reviewStart = src.indexOf("export function ReviewQueue");
+    const reviewEnd = src.indexOf("export function PrioritizeQueue");
     const libraryStart = src.indexOf("export function TacticLibrary");
     const tacticsBlock = src.slice(
       src.indexOf("function GapTacticsBlock"),
       src.indexOf("export function ReviewCard"),
     );
     expect(reviewStart).toBeGreaterThan(0);
-    expect(libraryStart).toBeGreaterThan(reviewStart);
-    const review = src.slice(reviewStart, libraryStart);
+    expect(reviewEnd).toBeGreaterThan(reviewStart);
+    expect(libraryStart).toBeGreaterThan(reviewEnd);
+    const review = src.slice(reviewStart, reviewEnd);
     const library = src.slice(libraryStart);
     expect(review).toContain("<CreateGapButton />");
     expect(review).not.toContain("<CreateTacticButton />");
