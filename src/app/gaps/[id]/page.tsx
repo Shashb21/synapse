@@ -11,6 +11,7 @@ import {
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
   GAP_STATUSES,
+  GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
   OVERALL_COVERAGE,
 } from "@/lib/iegp/enums";
@@ -51,6 +52,9 @@ export default async function GapDetailPage({
           Engine suggests {GAP_STATUS_LABELS[suggested]} (never auto-applied)
         </span>
       </div>
+      <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
+        {GAP_STATUS_DEFINITIONS[gap.status]}
+      </p>
 
       <section className="mb-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs</h2>

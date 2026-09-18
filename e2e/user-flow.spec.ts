@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 async function resetBlank(page: import("@playwright/test").Page) {
   const res = await page.request.post("/api/iegp", {
@@ -22,8 +22,14 @@ async function ingestFirstDemo(page: import("@playwright/test").Page) {
   await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
 }
 
-function places(page: import("@playwright/test").Page) {
+function places(page: Page) {
   return page.getByRole("navigation", { name: "Places" });
+}
+
+async function reviewTab(page: Page, tab: "gaps" | "tactics") {
+  const name = tab === "gaps" ? /^Gaps\b/i : /^Tactics\b/i;
+  await page.getByRole("tab", { name }).click();
+  await expect(page.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
 }
 
 test.describe.configure({ mode: "serial" });
@@ -56,15 +62,21 @@ test.describe("wizard once, plan forever", () => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
     await expect(page.getByRole("heading", { name: /^review$/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Gaps\b/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Tactics\b/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Gaps\b/i })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^tactics$/i }).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /create tactic/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept as new gap/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
+    await expect(page.getByRole("term", { name: /^open$/i })).toBeVisible();
+    await expect(page.getByText(/complete white space/i)).toBeVisible();
+    await expect(page.getByRole("term", { name: /^partially addressed$/i })).toBeVisible();
+    await expect(page.getByRole("term", { name: /^addressed$/i })).toBeVisible();
     const gapCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
@@ -80,11 +92,25 @@ test.describe("wizard once, plan forever", () => {
     await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toHaveCount(0);
     await expect(gapCard.getByText(/tactic library is empty/i)).toBeVisible();
     await expect(page.getByRole("heading", { name: /suggested mappings/i })).toHaveCount(0);
+
+    await reviewTab(page, "tactics");
+    await expect(page.getByRole("heading", { name: /^tactics$/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /create tactic/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /create gap/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("tab", { name: /^Gaps\b/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Tactics\b/i })).toBeVisible();
+    await reviewTab(page, "gaps");
+    await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
   });
 
   test("create tactic lives on the library, then assign from review", async ({ page }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
     const gapCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
@@ -101,9 +127,12 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("link", { name: /elderly soc chart review/i })).toBeVisible();
 
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
     await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toBeVisible();
     await expect(gapCard.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+    await reviewTab(page, "tactics");
     await expect(page.getByRole("button", { name: /create tactic/i })).toBeVisible();
+    await reviewTab(page, "gaps");
     await gapCard.getByRole("button", { name: /assign tactic/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^assign$/i }).click();
@@ -114,9 +143,11 @@ test.describe("wizard once, plan forever", () => {
   test("enter the plan then new ingest lands in review", async ({ page }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
     await page.getByRole("button", { name: /accept gap/i }).first().click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
+    await reviewTab(page, "tactics");
     await page.getByRole("button", { name: /accept tactic/i }).first().click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
@@ -148,6 +179,7 @@ test.describe("wizard once, plan forever", () => {
   }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
 
     const gapCard = page
       .locator("article")
@@ -159,6 +191,7 @@ test.describe("wizard once, plan forever", () => {
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept$/i }).click();
 
+    await reviewTab(page, "tactics");
     const tacticCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept tactic/i }) })
@@ -186,8 +219,12 @@ test.describe("wizard once, plan forever", () => {
 
     const mapped = page.locator("article").filter({ hasText: gapName }).first();
     await expect(mapped.locator("a", { hasText: tacticName })).toBeVisible();
+    await expect(mapped.getByRole("button", { name: /^open$/i })).toBeVisible();
+    await expect(mapped.getByRole("button", { name: /partially addressed/i })).toBeVisible();
+    await expect(mapped.getByRole("button", { name: /^addressed$/i })).toBeVisible();
 
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
     await page.getByRole("button", { name: /create gap/i }).first().click();
     await page.getByPlaceholder(/what evidence is missing/i).fill(
       "Need ILD characterisation in community oncology clinics after month six.",
@@ -205,6 +242,7 @@ test.describe("wizard once, plan forever", () => {
   }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
+    await reviewTab(page, "gaps");
     await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
     const residualCard = page
       .locator("article")

@@ -12,7 +12,7 @@ export default async function GapsPage() {
     <AppShell active="gaps">
       <PageIntro kicker="Decision objects" title="Evidence gaps">
         Gaps are named decision objects. Many candidate needs can join onto one gap.
-        Status is Candidate / Open / Partial / Addressed / Excluded — not a binary open/closed.
+        Status is Candidate / Open / Partially Addressed / Addressed / Excluded — not a binary open/closed.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">

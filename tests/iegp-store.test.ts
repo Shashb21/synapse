@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -424,7 +424,8 @@ describe("IEGP postgres store", () => {
     const accepted = await loadState();
     expect(accepted.gaps.find((g) => g.id === childId)?.parent_gap_id).toBe(gap.id);
     expect(accepted.gaps.find((g) => g.id === childId)?.status).toBe("validated_open");
-    expect(accepted.gaps.find((g) => g.id === gap.id)?.status).toBe("validated_partial");
+    expect(accepted.gaps.find((g) => g.id === gap.id)?.status).toBe("validated_addressed");
+    expect(accepted.gaps.find((g) => g.id === gap.id)?.statement).toBe(gap.statement);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
     const otherGap = ingested.gaps.find((g) => g.status === "candidate" && g.id !== gap.id)!;
@@ -458,5 +459,57 @@ describe("IEGP postgres store", () => {
     });
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === otherGap.id)).toBe(false);
     expect((await loadState()).gaps.some((g) => g.parent_gap_id === otherGap.id)).toBe(false);
+  });
+  it("classifies a mapped gap as Open, Partially Addressed, or Addressed without overwriting the parent", async () => {
+    await persistState(buildSeed());
+    await classifyMappedGap({
+      gap_id: "GAP-ELDERLY-CE",
+      status: "validated_partial",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const partial = await loadState();
+    expect(partial.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_partial");
+    expect(
+      partial.residual_gap_suggestions.some(
+        (s) => s.parent_gap_id === "GAP-ELDERLY-CE" && s.status === "candidate",
+      ),
+    ).toBe(true);
+    const statement = partial.gaps.find((g) => g.id === "GAP-ELDERLY-CE")!.statement;
+
+    await classifyMappedGap({
+      gap_id: "GAP-ELDERLY-CE",
+      status: "validated_open",
+      confirm_unfilled: true,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const opened = await loadState();
+    expect(opened.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_open");
+    expect(opened.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.statement).toBe(statement);
+
+    await expect(
+      classifyMappedGap({
+        gap_id: "GAP-ELDERLY-CE",
+        status: "validated_open",
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      }),
+    ).rejects.toThrow(/confirm Open/i);
+
+    await classifyMappedGap({
+      gap_id: "GAP-ELDERLY-CE",
+      status: "validated_addressed",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const closed = await loadState();
+    expect(closed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_addressed");
+    expect(closed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.statement).toBe(statement);
+    expect(
+      closed.residual_gap_suggestions.some(
+        (s) => s.parent_gap_id === "GAP-ELDERLY-CE" && s.status === "candidate",
+      ),
+    ).toBe(false);
   });
 });

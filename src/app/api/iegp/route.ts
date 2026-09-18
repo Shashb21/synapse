@@ -3,6 +3,7 @@ import {
   acceptMapping,
   acceptResidualGap,
   assignTacticToGap,
+  classifyMappedGap,
   completeWizard,
   createGap,
   createProposedTactic,
@@ -57,6 +58,16 @@ export async function POST(request: Request) {
           status: body.status as never,
           exclusion_reason: (body.exclusion_reason || undefined) as never,
           exclusion_note: body.exclusion_note,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "classify_gap":
+        await classifyMappedGap({
+          gap_id: body.gap_id,
+          status: body.status as never,
+          confirm_unfilled: body.confirm_unfilled === "1" || body.confirm_unfilled === "true",
           actor_name,
           actor_function,
           note: body.note,

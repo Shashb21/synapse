@@ -4,9 +4,10 @@ import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock } from "./types";
-import type { ActorFunction, EvidenceDomain } from "./enums";
+import type { ActorFunction, EvidenceDomain, MappedGapStatus } from "./enums";
 import { EVIDENCE_DOMAINS } from "./enums";
 import {
+  countingCoverages,
   draftResidualGapSuggestion,
   emptyDimensions,
   extractCandidateGaps,
@@ -319,7 +320,7 @@ export async function lockGapStatus(args: {
   if (!gap) throw new Error("Gap not found");
   if (args.status === "validated_addressed") {
     const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
-    const suggested = suggestGapStatus(cov);
+    const suggested = suggestGapStatus(cov, state.tactics);
     if (suggested !== "validated_addressed" && !args.note) {
       throw new Error(
         "Cannot lock Addressed unless coverage is Full, or provide a note explaining the override. Engine never auto-closes gaps.",
@@ -344,6 +345,82 @@ export async function lockGapStatus(args: {
     "lock_status",
     `${gap.status} → ${args.status}`,
   );
+}
+
+export async function classifyMappedGap(args: {
+  gap_id: string;
+  status: MappedGapStatus;
+  confirm_unfilled?: boolean;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.status === "candidate" || gap.status === "excluded") {
+    throw new Error("Accept the gap in Review before classifying Open / Partially Addressed / Addressed.");
+  }
+  const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
+  const counting = countingCoverages(coverages, state.tactics);
+  if (args.status === "validated_open" && counting.length > 0 && !args.confirm_unfilled) {
+    throw new Error(
+      "Joined tactics or published literature exist. Confirm Open if they should not count as filling this gap. Proposed tactics do not count.",
+    );
+  }
+  const note =
+    args.note ||
+    (args.status === "validated_open" && counting.length > 0
+      ? "Human locked Open; joined tactics/literature do not count as filling this gap."
+      : args.status === "validated_addressed"
+        ? "Human locked Addressed after mapping. No residual."
+        : args.status === "validated_partial"
+          ? "Human locked Partially Addressed. Residual leftover is a new Open gap if accepted."
+          : undefined);
+  await lockGapStatus({
+    gap_id: args.gap_id,
+    status: args.status,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note,
+  });
+  if (args.status === "validated_partial") {
+    const after = await loadState();
+    const g = after.gaps.find((row) => row.id === args.gap_id);
+    if (g) {
+      const hasChild = after.gaps.some((row) => row.parent_gap_id === g.id);
+      const existing = after.residual_gap_suggestions.find((row) => row.parent_gap_id === g.id);
+      if (!hasChild && existing?.status !== "accepted" && existing?.status !== "rejected") {
+        const mapped = after.coverages.filter((c) => c.gap_id === g.id);
+        const draft = draftResidualGapSuggestion({ gap: g, coverages: mapped });
+        await upsertResidualGapSuggestion({
+          parent_gap_id: g.id,
+          statement: existing?.status === "candidate" ? existing.statement : draft.statement,
+          reasons: draft.reasons,
+          status: "candidate",
+          actor_name: args.actor_name,
+          actor_function: args.actor_function,
+          note: "Human locked Partially Addressed. Residual leftover drafted for split.",
+        });
+      }
+    }
+    await persistEligibleResidualDrafts();
+  }
+  if (args.status === "validated_addressed") {
+    const after = await loadState();
+    const existing = after.residual_gap_suggestions.find((row) => row.parent_gap_id === args.gap_id);
+    if (existing?.status === "candidate") {
+      await upsertResidualGapSuggestion({
+        parent_gap_id: args.gap_id,
+        statement: existing.statement,
+        reasons: existing.reasons,
+        status: "rejected",
+        actor_name: args.actor_name,
+        actor_function: args.actor_function,
+        note: "Human locked Addressed. No residual.",
+      });
+    }
+  }
 }
 
 export async function lockCoverageDimension(args: {
@@ -861,16 +938,18 @@ export async function acceptResidualGap(args: {
     domain: draft?.domain ?? parent.domain,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
-    note: args.note || "Accepted leftover as a new gap. Parent preserved.",
+    note: args.note || "Accepted leftover as a new Open gap. Parent statement preserved.",
     parent_gap_id: args.parent_gap_id,
   });
-  if (parent.status === "validated_open") {
+  if (parent.status !== "validated_addressed" && parent.status !== "excluded") {
     await lockGapStatus({
       gap_id: args.parent_gap_id,
-      status: "validated_partial",
+      status: "validated_addressed",
       actor_name: args.actor_name,
       actor_function: args.actor_function,
-      note: args.note || "Leftover accepted as a child gap.",
+      note:
+        args.note ||
+        "Human split: covered portion locked as Addressed. Residual accepted as a new Open gap. Parent statement preserved.",
     });
   }
   await upsertResidualGapSuggestion({

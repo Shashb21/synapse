@@ -255,6 +255,7 @@ export function residualGapEligible(args: {
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
   if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
+  if (args.gap.status === "validated_partial") return true;
   if (args.coverages.length === 0) return false;
   if (residualDraftEligible(args)) return true;
   return args.coverages.some((c) => !c.overall_lock.locked && c.overall === "partial");
@@ -419,9 +420,24 @@ export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
       continue;
     }
     const coverages = coveragesForResidualDraft(state, gap);
-    if (coverages.length === 0) continue;
+    const saved = edited.get(gap.id);
+    if (coverages.length === 0) {
+      if (gap.status === "validated_partial" && saved) {
+        out.push({
+          parent_gap_id: gap.id,
+          parent_name: gap.name,
+          parent_statement: gap.statement,
+          statement: saved,
+          reasons: [
+            "Human locked Partially Addressed. Residual leftover is a new Open gap if accepted.",
+          ],
+          domain: gap.domain,
+        });
+      }
+      continue;
+    }
     const draft = draftResidualGapSuggestion({ gap, coverages });
-    const statement = edited.get(gap.id) ?? draft.statement;
+    const statement = saved ?? draft.statement;
     out.push({ ...draft, statement });
   }
   return out;

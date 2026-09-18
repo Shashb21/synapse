@@ -31,7 +31,7 @@ import { buildSeed } from "@/lib/iegp/seed";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { EvidenceGap, GapTacticCoverage, Tactic } from "@/lib/iegp/types";
-import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { COVERAGE_DIMENSIONS, GAP_STATUS_DEFINITIONS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
   const dimensions = emptyDimensions();
@@ -54,6 +54,16 @@ describe("IEGP engine", () => {
   it("never allows the engine to write addressed", () => {
     expect(engineMaySetStatus("validated_addressed")).toBe(false);
     expect(engineMaySetStatus("validated_partial")).toBe(true);
+  });
+
+  it("maps validated_* enums to Open / Partially Addressed / Addressed", () => {
+    expect(GAP_STATUS_LABELS.validated_open).toBe("Open");
+    expect(GAP_STATUS_LABELS.validated_partial).toBe("Partially Addressed");
+    expect(GAP_STATUS_LABELS.validated_addressed).toBe("Addressed");
+    expect(GAP_STATUS_DEFINITIONS.validated_open).toMatch(/Proposed tactics do not count/i);
+    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/residual evidence need/i);
+    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/the gap splits/i);
+    expect(GAP_STATUS_DEFINITIONS.validated_addressed).toMatch(/fully close this gap/i);
   });
 
   it("drafts a residual that keeps the parent gap and flags a missing comparator", () => {
@@ -571,6 +581,14 @@ We need to understand comparative effectiveness of Velmara versus regional stand
       residualGapEligible({
         gap: { status: "candidate" },
         coverages: [inferredPartial],
+        hasChild: false,
+        suppressed: false,
+      }),
+    ).toBe(true);
+    expect(
+      residualGapEligible({
+        gap: { status: "validated_partial" },
+        coverages: [cov("limited", {})],
         hasChild: false,
         suppressed: false,
       }),

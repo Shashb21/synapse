@@ -80,7 +80,7 @@ function placesOf(nav: PlanNavModel): PlaceItem[] {
       id: "review",
       href: "/?place=review",
       label: "Review",
-      hint: nav.reviewUnlocked ? "Gaps, tactics, and residuals" : "Ingest a source first",
+      hint: nav.reviewUnlocked ? "Gaps and tactics inner tabs" : "Ingest a source first",
       icon: Inbox,
       count: nav.reviewCount,
       unlocked: nav.reviewUnlocked,

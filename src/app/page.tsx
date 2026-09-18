@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
+import { GapStatusGuide } from "@/components/gap-status-guide";
 import {
   GapPlanCard,
   OpenGapsQueue,
@@ -20,6 +21,7 @@ import {
   type PlanColumn,
   type PlanPlace,
 } from "@/lib/iegp/engine";
+import type { ReviewTab } from "@/components/review-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -50,17 +52,18 @@ function PlaceIntro({
   if (place === "review") {
     return (
       <PageIntro kicker="Accept, reject, or modify" title="Review">
-        One validation step after ingest: extracted gaps, extracted tactics, and residual evidence
-        needs when pressure-testing says a parent is already partial. Accept residual creates that
-        leftover as a new gap. Create gap and Create tactic live here.
+        Inner tabs after ingest: Gaps (candidates and residual evidence needs) and Tactics. Accept
+        residual creates the leftover as a new Open gap. Create gap lives on Gaps; Create tactic
+        lives on Tactics.
       </PageIntro>
     );
   }
   if (place === "mappings") {
     return (
       <PageIntro kicker="Inventory joins" title="Mappings">
-        A scored engine suggests gap–tactic pairs after both are accepted. Accept or reject those
-        drafts, or assign from the library onto an accepted gap.
+        A scored engine suggests gap–tactic pairs after both are accepted. Classify a mapped gap as
+        Open, Partially Addressed, or Addressed. Partially Addressed presents a residual draft and
+        split. Addressed has no residual. The engine never writes Addressed.
       </PageIntro>
     );
   }
@@ -74,8 +77,8 @@ function PlaceIntro({
   }
   return (
     <PageIntro kicker={wizardComplete ? "Living plan" : "Ready for the plan"} title="Plan">
-      High / Medium / Low lists prioritized leftovers after a tactic only partially fills a gap.
-      Open accepted gaps with no residual wait on Mappings for tactics and coverage.
+      High / Medium / Low are priority bands on leftovers. Gap status is Open, Partially Addressed,
+      or Addressed — not those bands. Open accepted gaps with no residual wait on Mappings.
     </PageIntro>
   );
 }
@@ -92,14 +95,16 @@ function LockedPlace({ title, body }: { title: string; body: string }) {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ place?: string }>;
+  searchParams: Promise<{ place?: string; tab?: string }>;
 }) {
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
-  const requested = (await searchParams).place;
+  const params = await searchParams;
+  const requested = params.place;
   const fallback = defaultPlanPlace(state, workspace);
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
+  const reviewTab: ReviewTab = params.tab === "tactics" ? "tactics" : "gaps";
   const stale = state.coverages.some((c) => c.stale);
 
   let pane: ReactNode;
@@ -107,13 +112,17 @@ export default async function HomePage({
     pane = <IngestPanel sources={state.sources} />;
   } else if (place === "review") {
     pane = gates.reviewUnlocked ? (
-      <ReviewQueue
-        gaps={workspace.review}
-        tactics={workspace.reviewTactics}
-        residuals={workspace.residualGapSuggestions}
-        availableTactics={workspace.availableTactics}
-        emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
-      />
+      <>
+        <GapStatusGuide compact />
+        <ReviewQueue
+          tab={reviewTab}
+          gaps={workspace.review}
+          tactics={workspace.reviewTactics}
+          residuals={workspace.residualGapSuggestions}
+          availableTactics={workspace.availableTactics}
+          emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
+        />
+      </>
     ) : (
       <LockedPlace
         title="Review is locked"
@@ -123,14 +132,16 @@ export default async function HomePage({
   } else if (place === "mappings") {
     pane = gates.mappingsUnlocked ? (
       <div className="grid gap-10">
+        <GapStatusGuide />
         <SuggestedMappings items={workspace.mappingSuggestions} />
         <section aria-labelledby="accepted-gaps">
           <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
             Accepted gaps
           </h2>
           <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            Assign from the library onto an accepted open or partial gap. Coverage is still unknown
-            until you lock it on the gap.
+            Assign from the library onto an accepted Open or Partially Addressed gap. Classify
+            status from joined completed, ongoing, or planned tactics and published literature.
+            Coverage is still unknown until you lock it on the gap.
           </p>
           <OpenGapsQueue
             cards={workspace.openGaps}
@@ -178,6 +189,8 @@ export default async function HomePage({
           </div>
         ) : null}
 
+        <GapStatusGuide />
+
         <section className="mb-10" aria-labelledby="prioritize-gaps">
           <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">
             Prioritize
@@ -194,7 +207,8 @@ export default async function HomePage({
 
         <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
         <p className="mb-4 text-[12px] text-muted-foreground">
-          After the band is locked, assign an accepted tactic. Coverage is not priority.
+          After the band is locked, assign an accepted tactic. Coverage is not priority. Gap status
+          is Open / Partially Addressed / Addressed.
         </p>
         <div className="grid gap-4 lg:grid-cols-3">
           {COLUMNS.map((col) => (
@@ -234,8 +248,8 @@ export default async function HomePage({
             Addressed
           </h2>
           <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            Closed gaps remain on the plan with the tactics that addressed them. The engine never
-            writes this status.
+            Closed gaps remain on the plan with the tactics that addressed them. Status is Addressed
+            — not a priority band. The engine never writes this status.
           </p>
           {workspace.addressed.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No addressed gaps yet.</p>

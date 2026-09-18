@@ -25,7 +25,7 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 1. Candidate need accept / reject (optional gap join on accept)
 2. Extracted gap accept / reject / **modify**
 2b. Extracted tactic accept / reject / **modify** (same gate; assignment only after accept)
-3. Gap status (Candidate / Open / Partial / Addressed / Excluded)
+3. Gap status (Candidate / **Open** / **Partially Addressed** / **Addressed** / Excluded)
 4. Each of 10 coverage dimensions
 5. Overall coverage degree
 6. Residual leftover (engine drafts from pressure-test or locked partial/limited; human accepts it **as a new gap**, rejects, or modifies in Review)
@@ -35,13 +35,32 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 8c. Create a gap (human-authored; starts as validated open)
 9. Roadmap row
 
-There is **no residual paragraph** copied onto the parent gap card. After ingest, Review is **one validation step**: extracted gaps, extracted tactics, and residual evidence needs. The engine drafts a residual when pressure-testing (deterministic mapping/coverage vs extracted tactics) says the parent is already **partial**. Human accepts that leftover **as a new gap**, rejects it, or modifies the statement. Assigning a tactic is not enough if coverage is still the unlocked placeholder `limited`. Full coverage and `not_relevant` do not enqueue a leftover. Reject persists so that parent is not suggested again.
+There is **no residual paragraph** copied onto the parent gap card. After ingest, Review is **one validation step** with inner tabs:
 
-**Create gap** and **Create tactic** are visible on Review and Library. Creating a tactic adds it to the library as accepted. Creating a gap is `validated_open`.
+- **Gaps** — candidate/extracted gaps (accept / reject / modify), residual evidence needs (leftover gaps), **Create gap**. Counts on the tab label.
+- **Tactics** — candidate/extracted tactics (accept / reject / modify), **Create tactic**. Counts on the tab label.
+
+The engine drafts a residual when pressure-testing (deterministic mapping/coverage vs extracted tactics) says the parent is already **partial**, or when a human classifies a mapped gap as **Partially Addressed**. Human accepts that leftover **as a new Open gap** (topic-style name, not “We still need…”), rejects it, or modifies the statement. The covered parent is then human-locked **Addressed**. Assigning a tactic is not enough if coverage is still the unlocked placeholder `limited`. Full coverage and `not_relevant` do not enqueue a leftover. Reject persists so that parent is not suggested again.
+
+**Create gap** and **Create tactic** are visible on Review (on their inner tabs) and Library. Creating a tactic adds it to the library as accepted. Creating a gap is `validated_open` (**Open**).
 
 Suggested mappings are drafted by a deterministic scored engine (statement/question similarity, domain–type affinity, shared population/comparator/outcome cues, and a penalty when the tactic is dissemination-only). The engine never writes coverage; a human accept or reject is the gate. Mapping is inventory join, not tactic ideation — not an LLM and not embedding-clusters.
 
-Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine never writes Addressed.
+## Gap status after validation / mapping
+
+Enums stay `validated_open` / `validated_partial` / `validated_addressed`. Human-facing labels:
+
+| Label | Enum | Definition |
+| --- | --- | --- |
+| **Open** | `validated_open` | Complete white space: no completed, ongoing, or **planned** tactics AND no published literature addressing this gap. Proposed tactics do **not** count as addressing. |
+| **Partially Addressed** | `validated_partial` | Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a **residual evidence need**. This can be added as a **new gap**, and the addressed part becomes an **Addressed** gap — **the gap splits**. |
+| **Addressed** | `validated_addressed` | Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap. |
+
+On **Mappings**, classify a mapped gap as Open / Partially Addressed / Addressed from joined tactics + publications. Open warns if counting joins exist (confirm they do not fill the gap). Partially Addressed presents the residual draft and split action. Addressed has no residual.
+
+Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine may **draft** a residual and suggest a split; it never writes Addressed without a human lock/accept. Unlocked / limited-only assignment must not pretend a gap is Addressed.
+
+**Counting rules:** completed + ongoing + planned tactics count. **Proposed** does not. Publications are tactics; they count as published literature when status is **completed**, or when the type is a publication tactic (`publication`, `congress_abstract`, `evidence_dissemination`) with `evidence_available` set.
 
 ## Priority (human lock)
 
@@ -62,15 +81,15 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 Two-step loop is compressed into Review:
 
 1. **Ingest → extract gaps and tactics**.
-2. **Review is one validation step**: accept / reject / modify extracted gaps, extracted tactics, and residual evidence needs. Engine drafts a residual when pressure-testing says the parent is already **partial**. Accept residual creates a child gap (`parent_gap_id`); parent stays. Reject persists. **Create gap** and **Create tactic** are visible on Review and Library.
+2. **Review is one validation step** with **Gaps** and **Tactics** inner tabs: accept / reject / modify extracted gaps, extracted tactics, and residual evidence needs (on Gaps). Engine drafts a residual when pressure-testing says the parent is already **partial**, or when the human classifies Partially Addressed. Accept residual creates a child **Open** gap (`parent_gap_id`); the covered parent is human-locked **Addressed**. Parent statement stays. Reject persists. **Create gap** (Gaps tab) and **Create tactic** (Tactics tab) are visible on Review and Library.
 
 | Place | What |
 | --- | --- |
 | Upload | Demo pack + ingest. Later sources never restart a stepper. |
-| Review | Candidate gaps, tactics, and residual evidence needs; accept / reject / modify; **Create gap** and **Create tactic**. Residual is its own row (leftover question), not a copy of the parent sentence. |
-| Mappings | Suggested mappings (scored engine) plus assign from the library onto accepted gaps. |
+| Review | Inner tabs: **Gaps** (candidates + residual evidence needs + Create gap) and **Tactics** (candidates + Create tactic). Accept / reject / modify. Residual is its own row (leftover question), not a copy of the parent sentence. |
+| Mappings | Suggested mappings (scored engine) plus assign from the library onto accepted gaps. Classify Open / Partially Addressed / Addressed. |
 | Library | Accepted and created tactics. **Create gap** and **Create tactic** live here too. |
-| Plan | Prioritize, then High / Medium / Low and Addressed. |
+| Plan | Prioritize, then High / Medium / Low **priority bands**. Gap status on cards is Open / Partially Addressed / Addressed. |
 
 Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps, tactics, residuals) and mapping suggestions.
 

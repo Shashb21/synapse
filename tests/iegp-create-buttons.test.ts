@@ -15,10 +15,19 @@ describe("Create gap and Create tactic buttons", () => {
     expect(libraryStart).toBeGreaterThan(reviewStart);
     const review = src.slice(reviewStart, libraryStart);
     const library = src.slice(libraryStart);
-    expect(review).toContain("<CreateActions />");
+    expect(review).toContain("<CreateGapButton />");
+    expect(review).toContain("<CreateTacticButton />");
+    expect(review).toContain("ReviewInnerTabs");
     expect(review).toContain("<SuggestedResidualGaps items={residuals} />");
     expect(review).toContain("Residual evidence needs");
     expect(review).toContain('label="Accept as new gap"');
     expect(library).toContain("<CreateActions />");
+  });
+
+  it("wires Review inner tabs from the home page", () => {
+    const page = readFileSync(path.join(process.cwd(), "src/app/page.tsx"), "utf8");
+    expect(page).toContain("tab={reviewTab}");
+    expect(page).toContain('params.tab === "tactics"');
+    expect(page).toContain("GapStatusGuide");
   });
 });

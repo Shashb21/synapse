@@ -24,9 +24,12 @@ import {
   EVIDENCE_DOMAINS,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
+  GAP_STATUS_DEFINITIONS,
+  GAP_STATUS_LABELS,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
+import { ReviewInnerTabs, ReviewTabEmpty, type ReviewTab } from "@/components/review-tabs";
 
 type AvailableTactic = TacticLibraryItem;
 
@@ -430,61 +433,89 @@ export function GapPlanCard({
 }
 
 export function ReviewQueue({
+  tab,
   gaps,
   tactics,
   residuals,
   emptyHint,
   availableTactics,
 }: {
+  tab: ReviewTab;
   gaps: ReviewGapCard[];
   tactics: ReviewTacticCard[];
   residuals: ResidualGapSuggestion[];
   emptyHint: string;
   availableTactics: AvailableTactic[];
 }) {
-  if (gaps.length === 0 && tactics.length === 0 && residuals.length === 0) {
-    return (
+  const gapCount = gaps.length + residuals.length;
+  const tacticCount = tactics.length;
+
+  const gapsPane =
+    gaps.length === 0 && residuals.length === 0 ? (
       <div className="grid gap-3">
-        <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
-        <CreateActions />
+        <ReviewTabEmpty>
+          {emptyHint} No candidate gaps or residual evidence needs.
+        </ReviewTabEmpty>
+        <CreateGapButton />
+      </div>
+    ) : (
+      <div className="grid gap-8">
+        <section aria-labelledby="review-gaps">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="review-gaps" className="text-[13px] font-medium text-foreground">
+              Gaps
+            </h2>
+            <CreateGapButton />
+          </div>
+          {gaps.length === 0 ? (
+            <ReviewTabEmpty>No candidate gaps in the queue.</ReviewTabEmpty>
+          ) : (
+            <div className="grid gap-3">
+              {gaps.map((card) => (
+                <ReviewCard key={card.gap_id} card={card} availableTactics={availableTactics} />
+              ))}
+            </div>
+          )}
+        </section>
+        <SuggestedResidualGaps items={residuals} />
       </div>
     );
-  }
-  return (
-    <div className="grid gap-8">
-      <section aria-labelledby="review-gaps">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 id="review-gaps" className="text-[13px] font-medium text-foreground">
-            Gaps
-          </h3>
-          <CreateActions />
-        </div>
-        {gaps.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No candidate gaps in the queue.</p>
-        ) : (
-          <div className="grid gap-3">
-            {gaps.map((card) => (
-              <ReviewCard key={card.gap_id} card={card} availableTactics={availableTactics} />
-            ))}
-          </div>
-        )}
-      </section>
+
+  const tacticsPane =
+    tactics.length === 0 ? (
       <section aria-labelledby="review-tactics">
-        <h3 id="review-tactics" className="mb-3 text-[13px] font-medium text-foreground">
-          Tactics
-        </h3>
-        {tactics.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No candidate tactics in the queue.</p>
-        ) : (
-          <div className="grid gap-3">
-            {tactics.map((card) => (
-              <ReviewTacticCardView key={card.tactic_id} card={card} />
-            ))}
-          </div>
-        )}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="review-tactics" className="text-[13px] font-medium text-foreground">
+            Tactics
+          </h2>
+          <CreateTacticButton />
+        </div>
+        <ReviewTabEmpty>No candidate tactics in the queue.</ReviewTabEmpty>
       </section>
-      <SuggestedResidualGaps items={residuals} />
-    </div>
+    ) : (
+      <section aria-labelledby="review-tactics">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="review-tactics" className="text-[13px] font-medium text-foreground">
+            Tactics
+          </h2>
+          <CreateTacticButton />
+        </div>
+        <div className="grid gap-3">
+          {tactics.map((card) => (
+            <ReviewTacticCardView key={card.tactic_id} card={card} />
+          ))}
+        </div>
+      </section>
+    );
+
+  return (
+    <ReviewInnerTabs
+      tab={tab}
+      gapCount={gapCount}
+      tacticCount={tacticCount}
+      gaps={gapsPane}
+      tactics={tacticsPane}
+    />
   );
 }
 
@@ -719,11 +750,71 @@ export function OpenGapsQueue({
           >
             {card.gap_name}
           </Link>
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            Engine suggests {GAP_STATUS_LABELS[card.suggested_status]} (never auto-applied).
+            Completed, ongoing, and planned tactics count; proposed does not.
+          </p>
           <GapTacticsBlock
             gapId={card.gap_id}
             tactics={card.tactics}
             availableTactics={availableTactics}
           />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <LockForm
+              label="Open"
+              action="classify_gap"
+              extra={{
+                gap_id: card.gap_id,
+                status: "validated_open",
+                ...(card.counting_join_count > 0 ? { confirm_unfilled: "1" } : {}),
+              }}
+              confirmLabel="Lock Open"
+            >
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {GAP_STATUS_DEFINITIONS.validated_open}
+              </p>
+              {card.counting_join_count > 0 ? (
+                <p className="text-[12px] leading-5 text-amber-300">
+                  Joined tactics or published literature exist. Locking Open means they do not count
+                  as filling this gap.
+                </p>
+              ) : null}
+            </LockForm>
+            <LockForm
+              label="Partially Addressed"
+              action="classify_gap"
+              extra={{ gap_id: card.gap_id, status: "validated_partial" }}
+              confirmLabel="Lock Partially Addressed"
+            >
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {GAP_STATUS_DEFINITIONS.validated_partial}
+              </p>
+            </LockForm>
+            <LockForm
+              label="Addressed"
+              action="classify_gap"
+              extra={{ gap_id: card.gap_id, status: "validated_addressed" }}
+              confirmLabel="Lock Addressed"
+            >
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {GAP_STATUS_DEFINITIONS.validated_addressed} No residual. The engine does not write
+                this status; you confirm it here.
+              </p>
+            </LockForm>
+          </div>
+          {card.gap_status === "validated_partial" && card.residual ? (
+            <div className="mt-4">
+              <p className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Split — residual draft
+              </p>
+              <ResidualGapCard item={card.residual} />
+            </div>
+          ) : card.gap_status === "validated_partial" ? (
+            <p className="mt-3 text-[12px] text-muted-foreground">
+              Partially Addressed: a residual draft appears when locked coverage is partial or
+              limited. Accept it as a new Open gap to split.
+            </p>
+          ) : null}
         </article>
       ))}
     </div>

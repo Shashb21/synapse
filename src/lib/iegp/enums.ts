@@ -143,9 +143,9 @@ export type GapStatus = (typeof GAP_STATUSES)[number];
 
 export const GAP_STATUS_LABELS: Record<GapStatus, string> = {
   candidate: "Candidate",
-  validated_open: "Validated — open",
-  validated_partial: "Validated — partially addressed",
-  validated_addressed: "Validated — addressed",
+  validated_open: "Open",
+  validated_partial: "Partially Addressed",
+  validated_addressed: "Addressed",
   excluded: "Excluded / not a gap",
 };
 
@@ -153,9 +153,9 @@ export const GAP_STATUS_LABELS: Record<GapStatus, string> = {
 export const GAP_STATUS_DEFINITIONS: Record<GapStatus, string> = {
   candidate: "Extracted or created; not yet validated.",
   validated_open:
-    "No completed, ongoing, or planned tactics and no published literature addressing this gap. Proposed tactics do not count as addressing.",
+    "Complete white space: no completed, ongoing, or planned tactics AND no published literature addressing this gap. Proposed tactics do not count as addressing.",
   validated_partial:
-    "Some evidence from completed, ongoing, or planned tactics and/or published literature that supports but does not fully close this gap. The remainder is a residual evidence need.",
+    "Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a residual evidence need. This can be added as a new gap, and the addressed part becomes an Addressed gap — the gap splits.",
   validated_addressed:
     "Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap.",
   excluded: "Not an evidence gap.",
