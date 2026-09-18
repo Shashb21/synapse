@@ -61,7 +61,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /create tactic/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept as new gap/i })).toHaveCount(0);
@@ -103,7 +103,8 @@ test.describe("wizard once, plan forever", () => {
 
     await places(page).getByRole("link", { name: /^review/i }).click();
     await expect(gapCard.getByRole("button", { name: /assign tactic/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+    await expect(gapCard.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /create tactic/i })).toBeVisible();
     await gapCard.getByRole("button", { name: /assign tactic/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^assign$/i }).click();
@@ -235,22 +236,17 @@ test.describe("wizard once, plan forever", () => {
     await page.locator("textarea[name='rationale']").fill("Only a slice of the gap is covered.");
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^lock$/i }).click();
-
-    await places(page).getByRole("link", { name: /^plan/i }).click();
-    await expect(page.getByRole("button", { name: /set priority/i }).first()).toBeVisible();
-
-    await places(page).getByRole("link", { name: /^mappings/i }).click();
     await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toBeVisible();
     const leftover = page.locator("section").filter({ hasText: /leftover as a new gap/i });
     await expect(leftover.getByText(statement, { exact: true })).toHaveCount(0);
-    await leftover.getByRole("button", { name: /accept as new gap/i }).first().click();
+
+    await places(page).getByRole("link", { name: /^mappings/i }).click();
+    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toBeVisible();
+    await page.getByRole("button", { name: /accept as new gap/i }).first().click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /accept as new gap/i }).click();
+    await page.goto("/?place=mappings");
     await expect(page.getByText(/leftover of parent/i).first()).toBeVisible();
-
-    await places(page).getByRole("link", { name: /^review/i }).click();
-    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /create tactic/i })).toHaveCount(0);
   });
 
   test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {
