@@ -4,12 +4,8 @@ import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
-import {
-  GapPlanCard,
-  OpenGapsQueue,
-  PrioritizeQueue,
-  TacticLibrary,
-} from "@/components/plan-cards";
+import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
+import { TacticsPlace } from "@/components/tactics-place";
 import { StaleFlag } from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
 import {
@@ -114,24 +110,11 @@ export default async function HomePage({
       <LockedPlace title="Gaps is locked" body="Ingest at least one source on Upload." />
     );
   } else if (place === "tactics") {
-    pane = gates.tacticsUnlocked ? (
-      <div className="grid gap-10">
-        <section>
-          <h2 className="mb-2 text-[15px] font-medium">Open gaps</h2>
-          <p className="mb-4 text-[12px] text-muted-foreground">
-            Assign library tactics or create a new one on an Open gap.
-          </p>
-          <OpenGapsQueue
-            cards={workspace.openGaps.filter((c) => c.gap_status === "validated_open")}
-            availableTactics={workspace.availableTactics}
-          />
-        </section>
-        <TacticLibrary items={workspace.availableTactics} />
-      </div>
-    ) : (
-      <LockedPlace
-        title="Tactics is locked"
-        body="Validate gaps, then prioritize Open gaps. Tactics is the next stage."
+    pane = (
+      <TacticsPlace
+        unlocked={gates.tacticsUnlocked}
+        openGaps={workspace.openGaps}
+        availableTactics={workspace.availableTactics}
       />
     );
   } else if (!gates.planUnlocked) {

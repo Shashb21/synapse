@@ -58,4 +58,16 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /validate status|split or rewrite/i }).first()).toBeVisible();
   });
+
+  test("tactics place URLs explain the lock instead of 404", async ({ page }) => {
+    const query = await page.goto("/?place=tactics");
+    expect(query?.ok()).toBe(true);
+    await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /tactics is locked/i })).toBeVisible();
+
+    const dedicated = await page.goto("/tactics");
+    expect(dedicated?.ok()).toBe(true);
+    await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /tactics is locked/i })).toBeVisible();
+  });
 });

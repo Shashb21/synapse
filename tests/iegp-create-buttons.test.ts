@@ -27,12 +27,22 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(chrome).toContain('label: "Gaps"');
     expect(chrome).toContain('label: "Prioritize"');
     expect(chrome).toContain('label: "Tactics"');
+    expect(chrome).toContain('href: "/?place=upload"');
+    expect(chrome).toContain('href: "/?place=gaps"');
+    expect(chrome).toContain('href: "/?place=plan"');
+    expect(chrome).toContain('href: "/?place=tactics"');
+    expect(chrome).not.toContain('href: "/tactics"');
     expect(chrome).not.toContain('label: "Review"');
     expect(chrome).not.toContain('label: "Mappings"');
     const page = readFileSync(path.join(process.cwd(), "src/app/page.tsx"), "utf8");
     expect(page).toContain("GapsWorkbench");
     expect(page).toContain('place === "gaps"');
     expect(page).toContain('place === "tactics"');
+    expect(page).toContain("TacticsPlace");
+    const tacticsRoute = readFileSync(path.join(process.cwd(), "src/app/tactics/page.tsx"), "utf8");
+    expect(tacticsRoute).toContain("TacticsPlace");
+    expect(tacticsRoute).toContain("tacticsUnlocked");
+    expect(tacticsRoute).not.toContain("Propose a tactic");
   });
 
   it("override dialog requires a reason, omits Partial, and Cancel does not save", () => {
