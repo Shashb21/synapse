@@ -149,6 +149,25 @@ export const GAP_STATUS_LABELS: Record<GapStatus, string> = {
   excluded: "Excluded / not a gap",
 };
 
+/** Human-facing explanations for mapped gap states. */
+export const GAP_STATUS_DEFINITIONS: Record<GapStatus, string> = {
+  candidate: "Extracted or created; not yet validated.",
+  validated_open:
+    "No completed, ongoing, or planned tactics and no published literature addressing this gap. Proposed tactics do not count as addressing.",
+  validated_partial:
+    "Some evidence from completed, ongoing, or planned tactics and/or published literature that supports but does not fully close this gap. The remainder is a residual evidence need.",
+  validated_addressed:
+    "Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap.",
+  excluded: "Not an evidence gap.",
+};
+
+export const MAPPED_GAP_STATUSES = [
+  "validated_open",
+  "validated_partial",
+  "validated_addressed",
+] as const;
+export type MappedGapStatus = (typeof MAPPED_GAP_STATUSES)[number];
+
 export const TACTIC_TYPES = [
   "phase3_trial",
   "rwe_study",
