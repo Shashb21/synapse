@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -16,7 +16,7 @@ describe("IEGP postgres store", () => {
     expect(state.residuals).toHaveLength(0);
   });
 
-  it("seeds the worked example and refuses to auto-close a gap as addressed", async () => {
+  it("seeds the worked example and refuses Addressed without a reason when coverage is not full", async () => {
     const state = await resetWorkedExample();
     expect(state.gaps.length).toBeGreaterThan(8);
     await expect(
@@ -26,7 +26,7 @@ describe("IEGP postgres store", () => {
         actor_name: "Test",
         actor_function: "evidence_lead",
       }),
-    ).rejects.toThrow(/never auto-closes|Cannot lock Addressed/i);
+    ).rejects.toThrow(/reason is required|Cannot lock Addressed/i);
   });
 
   it("allows addressed with an override note", async () => {
@@ -82,7 +82,7 @@ describe("IEGP postgres store", () => {
     expect(state.tactics.filter((t) => /chart review/i.test(t.name + t.evidence_question)).every((t) => t.review_status === "candidate")).toBe(true);
     const workspace = buildPlanWorkspace(state);
     for (const card of workspace.review) {
-      expect("residual" in card).toBe(false);
+      expect(card.residual).toBeNull();
       if (card.gap_name != card.statement) {
         const body = `${card.gap_name}\n${card.statement}`;
         expect(body.split(card.statement).length - 1).toBe(1);
@@ -467,6 +467,7 @@ describe("IEGP postgres store", () => {
       status: "validated_partial",
       actor_name: "A. Rao",
       actor_function: "heor",
+      note: "Chart review is only a slice; leftover remains.",
     });
     const partial = await loadState();
     expect(partial.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_partial");
@@ -480,9 +481,9 @@ describe("IEGP postgres store", () => {
     await classifyMappedGap({
       gap_id: "GAP-ELDERLY-CE",
       status: "validated_open",
-      confirm_unfilled: true,
       actor_name: "A. Rao",
       actor_function: "heor",
+      note: "Joined tactics do not fill this question.",
     });
     const opened = await loadState();
     expect(opened.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_open");
@@ -495,13 +496,14 @@ describe("IEGP postgres store", () => {
         actor_name: "A. Rao",
         actor_function: "heor",
       }),
-    ).rejects.toThrow(/confirm Open/i);
+    ).rejects.toThrow(/reason is required/i);
 
     await classifyMappedGap({
       gap_id: "GAP-ELDERLY-CE",
       status: "validated_addressed",
       actor_name: "A. Rao",
       actor_function: "heor",
+      note: "Governance closed the remainder this cycle.",
     });
     const closed = await loadState();
     expect(closed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_addressed");
@@ -511,5 +513,71 @@ describe("IEGP postgres store", () => {
         (s) => s.parent_gap_id === "GAP-ELDERLY-CE" && s.status === "candidate",
       ),
     ).toBe(false);
+  });
+
+  it("computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "White-space leftover after mapping",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
+
+    const tacticId = await createProposedTactic({
+      name: "Proposed chart review",
+      type: "chart_review",
+      description: "Proposed only",
+      evidence_question: "Does community care capture the leftover?",
+      population: "2L",
+      intervention: "Velmara",
+      comparator: "SoC",
+      outcomes: "ILD",
+      geography: "US + EU5",
+      owner: "A. Rao",
+      function: "heor",
+      residual_ids: [],
+      gap_id: gapId,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
+
+    await lockTactic({
+      tactic_id: tacticId,
+      status: "planned",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const partial = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(partial.status).toBe("validated_partial");
+    expect(partial.computed_status).toBe("validated_partial");
+
+    await expect(
+      overrideGapStatus({
+        gap_id: gapId,
+        status: "validated_open",
+        actor_name: "A. Rao",
+        actor_function: "heor",
+        reason: "",
+      }),
+    ).rejects.toThrow(/reason is required/i);
+    const cancelled = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(cancelled.status).toBe("validated_partial");
+    expect(cancelled.status_override).toBeNull();
+
+    await overrideGapStatus({
+      gap_id: gapId,
+      status: "validated_open",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+      reason: "Joined tactic is off-question; keep as white space.",
+    });
+    const overridden = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(overridden.status).toBe("validated_open");
+    expect(overridden.status_override?.reason).toMatch(/off-question/i);
+    expect(overridden.status_override?.from).toBe("validated_partial");
+    expect(overridden.status_override?.to).toBe("validated_open");
+    expect(overridden.status_override?.actor_name).toBe("A. Rao");
   });
 });

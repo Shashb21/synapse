@@ -155,7 +155,7 @@ export const GAP_STATUS_DEFINITIONS: Record<GapStatus, string> = {
   validated_open:
     "Complete white space: no completed, ongoing, or planned tactics AND no published literature addressing this gap. Proposed tactics do not count as addressing.",
   validated_partial:
-    "Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a residual evidence need. This can be added as a new gap, and the addressed part becomes an Addressed gap — the gap splits.",
+    "Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a residual evidence need. This status cannot stay: split into an Addressed gap (with its tactic) and an Open leftover, or rewrite the original as Open or Addressed.",
   validated_addressed:
     "Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap.",
   excluded: "Not an evidence gap.",

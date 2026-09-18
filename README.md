@@ -33,18 +33,18 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
-The first visit is **Upload** on `/`. Ingest a demo file. Review is one validation step with inner tabs: **Gaps** (candidates, residual evidence needs, Create gap) and **Tactics** (candidates, Create tactic). Then map or assign tactics, classify Open / Partially Addressed / Addressed, and enter the plan. Reset returns the blank slate.
+The first visit is **Upload** on `/`. Ingest a demo file. Review is one validation step with inner tabs: **Gaps** (candidates, residual evidence needs, Create gap) and **Tactics** (candidates, Create tactic). Then map or assign tactics. Gap status is **computed** from joined tactics and published literature; click a gap to override with a required reason. Enter the plan. Reset returns the blank slate.
 
 Gap status after mapping (not the Plan High / Medium / Low bands):
 
 - **Open** — complete white space: no completed, ongoing, or planned tactics AND no published literature addressing this gap. Proposed tactics do not count as addressing.
 - **Partially Addressed** — some evidence (completed / ongoing / planned tactics and/or published literature) that supports but does not fully close the gap. The remainder is a residual evidence need that can split into a new Open gap; the covered part becomes Addressed.
-- **Addressed** — published literature and/or completed, ongoing, or planned tactics fully close the gap. Humans lock this; the engine never writes it.
+- **Addressed** — published literature and/or completed, ongoing, or planned tactics fully close the gap. The engine computes this when evidence is sufficient. A human override requires a reason and wins until cleared or marked stale on ingest/coverage refresh.
 
 | Route | What |
 | --- | --- |
 | `/` | Sidebar places: Upload, Review (`?tab=gaps\|tactics`), Mappings, Library, Plan (H/M/L priority bands + Addressed status). Query `?place=` |
-| `/evals` | View-only gold tape (needs + coverage; engine cannot auto-close) |
+| `/evals` | View-only gold tape (needs + coverage; engine computes Addressed when evidence closes) |
 | `/sdlc` | Spec tape |
 
 No login. Locks record a typed name and function.

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { GapBadge } from "@/components/iegp-badges";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
+import { displayedGapStatus } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export default async function GapsPage() {
     <AppShell active="gaps">
       <PageIntro kicker="Decision objects" title="Evidence gaps">
         Gaps are named decision objects. Many candidate needs can join onto one gap.
-        Status is Candidate / Open / Partially Addressed / Addressed / Excluded — not a binary open/closed.
+        Status is computed Open / Partially Addressed / Addressed from joined tactics and published
+        literature. Click a gap to override with a reason.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -30,7 +32,7 @@ export default async function GapsPage() {
               className="border border-border bg-card p-4 no-underline"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <GapBadge status={g.status} />
+                <GapBadge status={displayedGapStatus(g)} />
                 <span className="text-[12px] text-muted-foreground">
                   {DOMAIN_LABELS[g.domain]}
                 </span>

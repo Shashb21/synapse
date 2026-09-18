@@ -3,11 +3,12 @@ import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
-import type { IegpState, Lock } from "./types";
+import type { IegpState, Lock, GapStatusOverride } from "./types";
 import type { ActorFunction, EvidenceDomain, MappedGapStatus } from "./enums";
 import { EVIDENCE_DOMAINS } from "./enums";
 import {
-  countingCoverages,
+  computeGapStatus,
+  displayedGapStatus,
   draftResidualGapSuggestion,
   emptyDimensions,
   extractCandidateGaps,
@@ -15,15 +16,32 @@ import {
   extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
+  isLiveGap,
+  requireOverrideReason,
   residualGapEligible,
   splitSourceIntoBlocks,
   similarRecord,
-  suggestGapStatus,
   suggestMappings as rankMappingSuggestions,
   suggestResidualGaps as rankResidualGapSuggestions,
   tacticEligibleForMapping,
   unlocked,
 } from "./engine";
+
+function asStatusOverride(value: unknown): GapStatusOverride | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as GapStatusOverride;
+  if (!v.status || !v.reason || !v.actor_name || !v.from || !v.to) return null;
+  return {
+    status: v.status,
+    from: v.from,
+    to: v.to,
+    reason: v.reason,
+    actor_name: v.actor_name,
+    actor_function: v.actor_function,
+    at: v.at,
+    stale: Boolean(v.stale),
+  };
+}
 
 function asLock(value: unknown): Lock {
   const v = value as Lock;
@@ -66,6 +84,7 @@ async function readState(): Promise<IegpState> {
     audit,
     gold_needs,
     gold_coverages,
+    gap_versions,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -84,12 +103,14 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.audit),
     d.select().from(t.goldNeeds),
     d.select().from(t.goldCoverages),
+    d.select().from(t.gapVersions),
   ]);
   const asset = assetRows[0]!;
   return {
     asset: {
       ...asset,
       wizard_complete: Boolean(asset.wizard_complete),
+      tactics_unlocked: Boolean(asset.tactics_unlocked),
     },
     objectives,
     sources: sources.map((s) => ({
@@ -112,6 +133,10 @@ async function readState(): Promise<IegpState> {
       exclusion_reason: g.exclusion_reason as IegpState["gaps"][0]["exclusion_reason"],
       status_lock: asLock(g.lock),
       parent_gap_id: g.parent_gap_id ?? null,
+      computed_status: (g.computed_status as IegpState["gaps"][0]["computed_status"]) ?? null,
+      status_override: asStatusOverride(g.status_override),
+      retired: Boolean(g.retired),
+      human_validated: Boolean(g.human_validated),
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -172,6 +197,13 @@ async function readState(): Promise<IegpState> {
       ...g,
       overall: g.overall as IegpState["gold_coverages"][0]["overall"],
     })),
+    gap_versions: gap_versions.map((row) => ({
+      ...row,
+      status: row.status as IegpState["gaps"][0]["status"],
+      domain: row.domain as IegpState["gaps"][0]["domain"],
+      event: row.event as IegpState["gap_versions"][0]["event"],
+      actor_function: row.actor_function as ActorFunction,
+    })),
   };
 }
 
@@ -197,7 +229,14 @@ export async function persistState(state: IegpState) {
     await d.insert(t.gaps).values(
       state.gaps.map((g) => {
         const { status_lock, ...rest } = g;
-        return { ...rest, lock: status_lock };
+        return {
+          ...rest,
+          lock: status_lock,
+          computed_status: g.computed_status ?? null,
+          status_override: g.status_override ?? null,
+          retired: g.retired ?? false,
+          human_validated: g.human_validated ?? false,
+        };
       }),
     );
   }
@@ -216,6 +255,7 @@ export async function persistState(state: IegpState) {
   if (state.audit.length) await d.insert(t.audit).values(state.audit);
   if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
   if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
+  if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
 }
 
 export async function resetSeed() {
@@ -306,84 +346,18 @@ export async function lockNeed(args: {
   );
 }
 
-export async function lockGapStatus(args: {
-  gap_id: string;
-  status: IegpState["gaps"][0]["status"];
-  exclusion_reason?: IegpState["gaps"][0]["exclusion_reason"];
-  exclusion_note?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-  note?: string;
-}) {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (args.status === "validated_addressed") {
-    const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
-    const suggested = suggestGapStatus(cov, state.tactics);
-    if (suggested !== "validated_addressed" && !args.note) {
-      throw new Error(
-        "Cannot lock Addressed unless coverage is Full, or provide a note explaining the override. Engine never auto-closes gaps.",
-      );
-    }
-  }
-  const lk = makeLock(args.actor_name, args.actor_function, args.note);
-  await db()
-    .update(t.gaps)
-    .set({
-      status: args.status,
-      exclusion_reason: args.exclusion_reason ?? null,
-      exclusion_note: args.exclusion_note ?? null,
-      lock: lk,
-    })
-    .where(eq(t.gaps.id, args.gap_id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "gap",
-    args.gap_id,
-    "lock_status",
-    `${gap.status} → ${args.status}`,
+function childParents(state: IegpState): Set<string> {
+  return new Set(
+    state.gaps.map((g) => g.parent_gap_id).filter((id): id is string => Boolean(id)),
   );
 }
 
-export async function classifyMappedGap(args: {
+async function applyMappedStatusSideEffects(args: {
   gap_id: string;
   status: MappedGapStatus;
-  confirm_unfilled?: boolean;
   actor_name: string;
   actor_function: ActorFunction;
-  note?: string;
 }) {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.status === "candidate" || gap.status === "excluded") {
-    throw new Error("Accept the gap in Review before classifying Open / Partially Addressed / Addressed.");
-  }
-  const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
-  const counting = countingCoverages(coverages, state.tactics);
-  if (args.status === "validated_open" && counting.length > 0 && !args.confirm_unfilled) {
-    throw new Error(
-      "Joined tactics or published literature exist. Confirm Open if they should not count as filling this gap. Proposed tactics do not count.",
-    );
-  }
-  const note =
-    args.note ||
-    (args.status === "validated_open" && counting.length > 0
-      ? "Human locked Open; joined tactics/literature do not count as filling this gap."
-      : args.status === "validated_addressed"
-        ? "Human locked Addressed after mapping. No residual."
-        : args.status === "validated_partial"
-          ? "Human locked Partially Addressed. Residual leftover is a new Open gap if accepted."
-          : undefined);
-  await lockGapStatus({
-    gap_id: args.gap_id,
-    status: args.status,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    note,
-  });
   if (args.status === "validated_partial") {
     const after = await loadState();
     const g = after.gaps.find((row) => row.id === args.gap_id);
@@ -400,7 +374,7 @@ export async function classifyMappedGap(args: {
           status: "candidate",
           actor_name: args.actor_name,
           actor_function: args.actor_function,
-          note: "Human locked Partially Addressed. Residual leftover drafted for split.",
+          note: "Partially Addressed. Residual leftover drafted for split.",
         });
       }
     }
@@ -417,10 +391,248 @@ export async function classifyMappedGap(args: {
         status: "rejected",
         actor_name: args.actor_name,
         actor_function: args.actor_function,
-        note: "Human locked Addressed. No residual.",
+        note: "Addressed. No residual.",
       });
     }
   }
+}
+
+export async function syncComputedGapStatuses(gapId?: string) {
+  const state = await loadState();
+  const children = childParents(state);
+  const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
+  for (const gap of gaps) {
+    if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
+      if (gap.computed_status !== null) {
+        await db().update(t.gaps).set({ computed_status: null }).where(eq(t.gaps.id, gap.id));
+      }
+      continue;
+    }
+    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+    const computed = computeGapStatus(coverages, state.tactics, {
+      hasAcceptedChild: children.has(gap.id),
+    });
+    const override = gap.status_override;
+    if (override) {
+      const stale = override.status !== computed;
+      await db()
+        .update(t.gaps)
+        .set({
+          computed_status: computed,
+          status: override.status,
+          status_override: { ...override, stale },
+        })
+        .where(eq(t.gaps.id, gap.id));
+      if (stale && !override.stale) {
+        await appendAudit(
+          "Engine",
+          "evidence_lead",
+          "gap",
+          gap.id,
+          "status_override_stale",
+          `Override ${override.status} disagrees with computed ${computed}`,
+        );
+      }
+      continue;
+    }
+    if (gap.status !== computed || gap.computed_status !== computed) {
+      await db()
+        .update(t.gaps)
+        .set({
+          status: computed,
+          computed_status: computed,
+          lock: unlocked(),
+          status_override: null,
+          human_validated: false,
+        })
+        .where(eq(t.gaps.id, gap.id));
+      if (gap.status !== computed) {
+        await appendAudit(
+          "Engine",
+          "evidence_lead",
+          "gap",
+          gap.id,
+          "compute_status",
+          `${gap.status} → ${computed}`,
+        );
+        await applyMappedStatusSideEffects({
+          gap_id: gap.id,
+          status: computed,
+          actor_name: "Engine",
+          actor_function: "evidence_lead",
+        });
+      }
+    }
+  }
+}
+
+export async function lockGapStatus(args: {
+  gap_id: string;
+  status: IegpState["gaps"][0]["status"];
+  exclusion_reason?: IegpState["gaps"][0]["exclusion_reason"];
+  exclusion_note?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (args.status === "validated_addressed") {
+    const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
+    const computed = computeGapStatus(cov, state.tactics, {
+      hasAcceptedChild: childParents(state).has(gap.id),
+    });
+    if (computed !== "validated_addressed" && !args.note) {
+      throw new Error(
+        "A reason is required to override computed gap status. Cannot lock Addressed unless coverage is Full.",
+      );
+    }
+  }
+  const lk = makeLock(args.actor_name, args.actor_function, args.note);
+  const mapped =
+    args.status === "validated_open" ||
+    args.status === "validated_partial" ||
+    args.status === "validated_addressed";
+  const wasMapped =
+    gap.status === "validated_open" ||
+    gap.status === "validated_partial" ||
+    gap.status === "validated_addressed";
+  const asOverride = Boolean(wasMapped && mapped && args.note?.trim());
+  const override = asOverride
+    ? {
+        status: args.status as MappedGapStatus,
+        from: gap.status,
+        to: args.status as MappedGapStatus,
+        reason: args.note!.trim(),
+        actor_name: args.actor_name,
+        actor_function: args.actor_function,
+        at: now(),
+        stale: false,
+      }
+    : mapped
+      ? gap.status_override
+      : null;
+  await db()
+    .update(t.gaps)
+    .set({
+      status: args.status,
+      exclusion_reason: args.exclusion_reason ?? null,
+      exclusion_note: args.exclusion_note ?? null,
+      lock: lk,
+      computed_status: mapped ? (gap.computed_status ?? args.status) : null,
+      status_override: override,
+    })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "lock_status",
+    `${gap.status} → ${args.status}`,
+  );
+  if (mapped) {
+    await syncComputedGapStatuses(args.gap_id);
+  }
+}
+
+export async function overrideGapStatus(args: {
+  gap_id: string;
+  status: MappedGapStatus;
+  reason?: string;
+  note?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const reason = requireOverrideReason(args.reason ?? args.note);
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.status === "candidate" || gap.status === "excluded") {
+    throw new Error("Accept the gap in Review before overriding Open / Partially Addressed / Addressed.");
+  }
+  const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
+  const computed =
+    gap.computed_status ??
+    computeGapStatus(coverages, state.tactics, {
+      hasAcceptedChild: childParents(state).has(gap.id),
+    });
+  const from = gap.status;
+  const override: GapStatusOverride = {
+    status: args.status,
+    from,
+    to: args.status,
+    reason,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    at: now(),
+    stale: args.status !== computed,
+  };
+  await db()
+    .update(t.gaps)
+    .set({
+      status: args.status,
+      computed_status: computed,
+      status_override: override,
+      lock: makeLock(args.actor_name, args.actor_function, reason),
+    })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "override_status",
+    `${from} → ${args.status}: ${reason}`,
+  );
+  await applyMappedStatusSideEffects({
+    gap_id: args.gap_id,
+    status: args.status,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+}
+
+export async function clearGapStatusOverride(args: {
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  await db()
+    .update(t.gaps)
+    .set({ status_override: null, lock: unlocked() })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "clear_status_override",
+    args.note || `Cleared override; engine computed ${gap.computed_status ?? "status"} applies.`,
+  );
+  await syncComputedGapStatuses(args.gap_id);
+}
+
+export async function classifyMappedGap(args: {
+  gap_id: string;
+  status: MappedGapStatus;
+  confirm_unfilled?: boolean;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  await overrideGapStatus({
+    gap_id: args.gap_id,
+    status: args.status,
+    reason: args.note,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
 }
 
 export async function lockCoverageDimension(args: {
@@ -454,6 +666,7 @@ export async function lockCoverageDimension(args: {
     "lock_dimension",
     `${args.dimension}=${args.value}`,
   );
+  await syncComputedGapStatuses(row.gap_id);
 }
 
 export async function lockCoverageOverall(args: {
@@ -489,6 +702,7 @@ export async function lockCoverageOverall(args: {
     actor_function: args.actor_function,
   });
   await persistEligibleResidualDrafts();
+  await syncComputedGapStatuses(row.gap_id);
 }
 
 
@@ -694,6 +908,7 @@ export async function assignTacticToGap(args: {
     "assign_tactic",
     `${args.tactic_id} → ${args.gap_id}`,
   );
+  await syncComputedGapStatuses(args.gap_id);
 }
 
 async function upsertMappingSuggestion(args: {
@@ -1108,8 +1323,14 @@ export async function createGap(args: {
     exclusion_note: null,
     lock: makeLock(args.actor_name, args.actor_function, args.note),
     parent_gap_id: args.parent_gap_id ?? null,
+    computed_status: "validated_open",
+    status_override: null,
+    retired: false,
+    human_validated: false,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
+  await syncComputedGapStatuses(id);
+  if (args.parent_gap_id) await syncComputedGapStatuses(args.parent_gap_id);
   return id;
 }
 
@@ -1180,6 +1401,12 @@ export async function lockTactic(args: {
     "lock_status",
     `${prev} → ${args.status} (stale coverage queued)`,
   );
+  if (prev !== args.status) {
+    const related = state.coverages.filter((c) => c.tactic_id === args.tactic_id);
+    for (const c of related) {
+      await syncComputedGapStatuses(c.gap_id);
+    }
+  }
 }
 
 export async function lockRoadmapItem(args: {
@@ -1337,6 +1564,10 @@ export async function ingestNeedFromText(args: {
       exclusion_note: null,
       lock: unlocked(),
       parent_gap_id: null,
+      computed_status: null,
+      status_override: null,
+      retired: false,
+      human_validated: false,
     });
     if (linkedNeedId) {
       await db()
@@ -1392,10 +1623,37 @@ export async function ingestNeedFromText(args: {
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); coverage marked stale.`,
+    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${tacticCount} tactic(s); mappings applied; coverage marked stale.`,
   );
+  await autoJoinMappings(args.actor_name, args.actor_function);
   await persistEligibleResidualDrafts();
+  await syncComputedGapStatuses();
   return sourceId;
+}
+
+async function autoJoinMappings(actor_name: string, actor_function: ActorFunction) {
+  const suggestions = rankMappingSuggestions(await loadState());
+  for (const item of suggestions) {
+    const current = await loadState();
+    const exists = current.coverages.some(
+      (c) => c.gap_id === item.gap_id && c.tactic_id === item.tactic_id,
+    );
+    if (exists) continue;
+    const gap = current.gaps.find((g) => g.id === item.gap_id);
+    const tactic = current.tactics.find((x) => x.id === item.tactic_id);
+    if (!gap || !tactic || !isLiveGap(gap)) continue;
+    try {
+      await assignTacticToGap({
+        gap_id: item.gap_id,
+        tactic_id: item.tactic_id,
+        actor_name,
+        actor_function,
+        note: "Engine-applied mapping after ingest.",
+      });
+    } catch {
+      // Duplicate or ineligible pair — skip.
+    }
+  }
 }
 
 export async function ingestDemoSource(args: {
@@ -1496,4 +1754,366 @@ export async function completeWizard(args: {
     "complete_wizard",
     args.note || "Wizard complete. Living on the plan from here.",
   );
+}
+
+export async function unlockTacticsStage(args: {
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  if (!state.asset.wizard_complete) {
+    throw new Error("Prioritize open gaps before tactics.");
+  }
+  await db()
+    .update(t.assets)
+    .set({ tactics_unlocked: true })
+    .where(eq(t.assets.id, state.asset.id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "plan",
+    state.asset.id,
+    "unlock_tactics",
+    args.note || "Tactics stage unlocked for open gaps.",
+  );
+}
+
+async function insertGapVersion(args: {
+  live_gap_id: string;
+  retired_gap_id: string;
+  snapshot: IegpState["gaps"][0];
+  event: IegpState["gap_versions"][0]["event"];
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const id = nextId(
+    "GV",
+    state.gap_versions.map((row) => row.id),
+  );
+  await db().insert(t.gapVersions).values({
+    id,
+    live_gap_id: args.live_gap_id,
+    retired_gap_id: args.retired_gap_id,
+    name: args.snapshot.name,
+    statement: args.snapshot.statement,
+    status: args.snapshot.status,
+    domain: args.snapshot.domain,
+    event: args.event,
+    at: now(),
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+}
+
+async function retireGap(gap_id: string) {
+  await db()
+    .update(t.gaps)
+    .set({
+      retired: true,
+      human_validated: true,
+      lock: unlocked(),
+    })
+    .where(eq(t.gaps.id, gap_id));
+}
+
+async function insertClosingCoverage(args: {
+  gap_id: string;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note: string;
+}) {
+  const state = await loadState();
+  const existing = state.coverages.find(
+    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
+  );
+  if (existing) {
+    await db()
+      .update(t.coverages)
+      .set({
+        overall: "full",
+        overall_rationale: args.note,
+        overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+        stale: false,
+      })
+      .where(eq(t.coverages.id, existing.id));
+    return;
+  }
+  const coverageId = nextId(
+    "COV",
+    state.coverages.map((c) => c.id),
+  );
+  await db().insert(t.coverages).values({
+    id: coverageId,
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    dimensions: emptyDimensions(),
+    overall: "full",
+    overall_rationale: args.note,
+    overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+    stale: false,
+  });
+}
+
+export async function validateGap(args: {
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap || !isLiveGap(gap)) throw new Error("Gap not found");
+  const shown = displayedGapStatus(gap);
+  if (shown === "validated_partial") {
+    throw new Error("Partially Addressed cannot stay. Split or rewrite this gap first.");
+  }
+  if (shown !== "validated_open" && shown !== "validated_addressed") {
+    throw new Error("Only Open or Addressed gaps can be validated.");
+  }
+  await db()
+    .update(t.gaps)
+    .set({
+      human_validated: true,
+      lock: makeLock(args.actor_name, args.actor_function, args.note),
+    })
+    .where(eq(t.gaps.id, args.gap_id));
+  if (shown === "validated_open") {
+    await ensurePriorityResidual(args.gap_id, args.actor_name, args.actor_function);
+  }
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "validate",
+    args.note || `Validated ${shown}`,
+  );
+}
+
+async function ensurePriorityResidual(
+  gap_id: string,
+  actor_name: string,
+  actor_function: ActorFunction,
+) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === gap_id);
+  if (!gap) return;
+  if (state.residuals.some((r) => r.gap_id === gap_id)) return;
+  await db().insert(t.residuals).values({
+    id: nextId(
+      "RES",
+      state.residuals.map((r) => r.id),
+    ),
+    gap_id,
+    statement: gap.name,
+    domain: gap.domain,
+    draft_rationale: "Open gap queued for priority.",
+    review_status: "accepted",
+    created_gap_id: null,
+    lock: makeLock(actor_name, actor_function, "Open gap ready to prioritize."),
+  });
+}
+
+export async function splitPartialGap(args: {
+  parent_gap_id: string;
+  addressed_name: string;
+  open_name: string;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const addressed_name = args.addressed_name.trim();
+  const open_name = args.open_name.trim();
+  if (!addressed_name || !open_name) throw new Error("Both split titles are required.");
+  const state = await loadState();
+  const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
+  if (!parent || !isLiveGap(parent)) throw new Error("Gap not found");
+  if (displayedGapStatus(parent) !== "validated_partial") {
+    throw new Error("Only Partially Addressed gaps can split.");
+  }
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Select the tactic that addresses the closed slice.");
+  const addressedId = await createGap({
+    name: addressed_name,
+    statement: addressed_name,
+    domain: parent.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: "Split: addressed slice.",
+    parent_gap_id: parent.id,
+  });
+  const openId = await createGap({
+    name: open_name,
+    statement: open_name,
+    domain: parent.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: "Split: residual open leftover.",
+    parent_gap_id: parent.id,
+  });
+  await insertClosingCoverage({
+    gap_id: addressedId,
+    tactic_id: args.tactic_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: "Split: this tactic closes the addressed slice.",
+  });
+  await syncComputedGapStatuses(addressedId);
+  await db()
+    .update(t.gaps)
+    .set({
+      status: "validated_addressed",
+      computed_status: "validated_addressed",
+      human_validated: true,
+      lock: makeLock(args.actor_name, args.actor_function, "Split addressed slice."),
+    })
+    .where(eq(t.gaps.id, addressedId));
+  await db()
+    .update(t.gaps)
+    .set({
+      status: "validated_open",
+      computed_status: "validated_open",
+      human_validated: true,
+      lock: makeLock(args.actor_name, args.actor_function, "Split open leftover."),
+    })
+    .where(eq(t.gaps.id, openId));
+  await ensurePriorityResidual(openId, args.actor_name, args.actor_function);
+  await insertGapVersion({
+    live_gap_id: addressedId,
+    retired_gap_id: parent.id,
+    snapshot: parent,
+    event: "split",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await insertGapVersion({
+    live_gap_id: openId,
+    retired_gap_id: parent.id,
+    snapshot: parent,
+    event: "split",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await retireGap(parent.id);
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    parent.id,
+    "split",
+    `${parent.id} → addressed ${addressedId}, open ${openId}`,
+  );
+  return { addressedId, openId };
+}
+
+export async function rewritePartialGap(args: {
+  gap_id: string;
+  name: string;
+  status: "validated_open" | "validated_addressed";
+  tactic_id?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const name = args.name.trim();
+  if (!name) throw new Error("Rewritten gap title is required.");
+  if (args.status === "validated_addressed" && !args.tactic_id) {
+    throw new Error("Addressed gaps need an accompanying tactic.");
+  }
+  const state = await loadState();
+  const original = state.gaps.find((g) => g.id === args.gap_id);
+  if (!original || !isLiveGap(original)) throw new Error("Gap not found");
+  if (displayedGapStatus(original) !== "validated_partial") {
+    throw new Error("Only Partially Addressed gaps can be rewritten this way.");
+  }
+  const liveId = await createGap({
+    name,
+    statement: name,
+    domain: original.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Rewritten from a Partially Addressed gap. Original retired to history.",
+    parent_gap_id: original.id,
+  });
+  if (args.status === "validated_addressed" && args.tactic_id) {
+    await insertClosingCoverage({
+      gap_id: liveId,
+      tactic_id: args.tactic_id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: "Rewritten as Addressed with this tactic.",
+    });
+  }
+  await syncComputedGapStatuses(liveId);
+  await db()
+    .update(t.gaps)
+    .set({
+      status: args.status,
+      computed_status: args.status,
+      human_validated: true,
+      lock: makeLock(args.actor_name, args.actor_function, args.note),
+    })
+    .where(eq(t.gaps.id, liveId));
+  if (args.status === "validated_open") {
+    await ensurePriorityResidual(liveId, args.actor_name, args.actor_function);
+  }
+  await insertGapVersion({
+    live_gap_id: liveId,
+    retired_gap_id: original.id,
+    snapshot: original,
+    event: "rewrite",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await retireGap(original.id);
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    original.id,
+    "rewrite",
+    `${original.id} → ${liveId} (${args.status})`,
+  );
+  return liveId;
+}
+
+export async function createAddressedGap(args: {
+  name?: string;
+  statement: string;
+  domain?: EvidenceDomain;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  if (!args.tactic_id) throw new Error("Addressed gaps need an accompanying tactic.");
+  const id = await createGap({
+    name: args.name,
+    statement: args.statement,
+    domain: args.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note,
+  });
+  await insertClosingCoverage({
+    gap_id: id,
+    tactic_id: args.tactic_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: "Created as Addressed with accompanying tactic.",
+  });
+  await db()
+    .update(t.gaps)
+    .set({
+      status: "validated_addressed",
+      computed_status: "validated_addressed",
+      human_validated: true,
+      lock: makeLock(args.actor_name, args.actor_function, args.note),
+    })
+    .where(eq(t.gaps.id, id));
+  return id;
 }

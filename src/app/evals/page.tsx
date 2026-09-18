@@ -33,13 +33,14 @@ export default async function EvalsPage() {
     <AppShell active="evals">
       <PageIntro kicker="View-only tape" title="Eval tape">
         Gold scores candidate-need recovery from sources and gap–tactic overall coverage.
-        Safety: the engine must never write Addressed. On a blank workspace this tape
-        stays empty until sources are ingested.
+        Gap status is computed by the engine (Open / Partially Addressed / Addressed). Human
+        override requires a reason and is marked stale on ingest or coverage refresh — never
+        silent-clobbered.
       </PageIntro>
       {state.sources.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">
           No sources ingested. engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))}{" "}
-          (must be false).
+          (must be true — the engine computes Addressed when evidence fully closes).
         </p>
       ) : (
       <>
@@ -49,11 +50,11 @@ export default async function EvalsPage() {
         <Metric label="Need composite" value={metrics.composite.toFixed(3)} />
         <Metric label="Exact / partial / missed / wrong" value={`${metrics.exact} / ${metrics.partial} / ${metrics.missed} / ${metrics.wrong}`} />
         <Metric label="Coverage gold exact" value={`${cov.exact}/${state.gold_coverages.length}`} />
-        <Metric label="Auto-closed gaps" value={String(autoClose.length)} />
+        <Metric label="Computed addressed (no override)" value={String(autoClose.length)} />
       </div>
       <p className="mb-4 text-[13px] text-muted-foreground">
         engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))} (must be
-        false). Unlocked addressed rows: {autoClose.length === 0 ? "none" : autoClose.map((g) => g.id).join(", ")}.
+        true). Computed addressed without override: {autoClose.length === 0 ? "none" : autoClose.map((g) => g.id).join(", ")}.
       </p>
       <h2 className="mb-2 text-[13px] text-muted-foreground">Extracted candidate needs (local cues)</h2>
       <div className="grid gap-2">

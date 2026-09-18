@@ -30,7 +30,8 @@ const DDL = `
 CREATE TABLE IF NOT EXISTS assets (
   id text PRIMARY KEY, name text NOT NULL, inn text NOT NULL,
   indication text NOT NULL, geography text NOT NULL,
-  wizard_complete boolean NOT NULL DEFAULT false
+  wizard_complete boolean NOT NULL DEFAULT false,
+  tactics_unlocked boolean NOT NULL DEFAULT false
 );
 CREATE TABLE IF NOT EXISTS objectives (
   id text PRIMARY KEY, name text NOT NULL, description text NOT NULL,
@@ -60,7 +61,15 @@ CREATE TABLE IF NOT EXISTS gaps (
   id text PRIMARY KEY, name text NOT NULL, statement text NOT NULL,
   domain text NOT NULL, objective_id text NOT NULL, status text NOT NULL,
   exclusion_reason text, exclusion_note text, lock jsonb NOT NULL,
-  parent_gap_id text
+  parent_gap_id text, computed_status text, status_override jsonb,
+  retired boolean NOT NULL DEFAULT false,
+  human_validated boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS gap_versions (
+  id text PRIMARY KEY, live_gap_id text NOT NULL, retired_gap_id text NOT NULL,
+  name text NOT NULL, statement text NOT NULL, status text NOT NULL,
+  domain text NOT NULL, event text NOT NULL, at text NOT NULL,
+  actor_name text NOT NULL, actor_function text NOT NULL
 );
 CREATE TABLE IF NOT EXISTS need_gap_links (
   need_id text NOT NULL, gap_id text NOT NULL, role text NOT NULL,
@@ -151,12 +160,31 @@ export async function ensureSchema() {
     sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parent_gap_id text"),
   );
   await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS computed_status text"),
+  );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS status_override jsonb"),
+  );
+  await d.execute(
     sql.raw(
       "ALTER TABLE residuals ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'candidate'",
     ),
   );
   await d.execute(
     sql.raw("ALTER TABLE residuals ADD COLUMN IF NOT EXISTS created_gap_id text"),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS tactics_unlocked boolean NOT NULL DEFAULT false",
+    ),
+  );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS retired boolean NOT NULL DEFAULT false"),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS human_validated boolean NOT NULL DEFAULT false",
+    ),
   );
 }
 
@@ -174,6 +202,7 @@ export async function wipeIegp() {
     "residual_gap_suggestions",
     "need_gap_links",
     "needs",
+    "gap_versions",
     "gaps",
     "tactics",
     "source_blocks",

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, StaleFlag } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import {
   COVERAGE_DIMENSIONS,
   DIMENSION_LABELS,
@@ -10,13 +11,17 @@ import {
   DIMENSION_VALUES,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
-  GAP_STATUSES,
   GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
   OVERALL_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
-import { suggestGapStatus, suggestResidualGaps, uncoveredDimensions } from "@/lib/iegp/engine";
+import {
+  computeGapStatus,
+  displayedGapStatus,
+  suggestResidualGaps,
+  uncoveredDimensions,
+} from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -34,26 +39,49 @@ export default async function GapDetailPage({
     .map((l) => ({ link: l, need: state.needs.find((n) => n.id === l.need_id)! }))
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  const suggested = suggestGapStatus(coverages, state.tactics);
+  const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
+  const computed = computeGapStatus(coverages, state.tactics, {
+    hasAcceptedChild: children.length > 0,
+  });
+  const shown = displayedGapStatus({
+    ...gap,
+    computed_status: gap.computed_status ?? computed,
+  });
   const missing = uncoveredDimensions(coverages);
   const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
-  const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
   const parent = gap.parent_gap_id
     ? state.gaps.find((g) => g.id === gap.parent_gap_id)
     : undefined;
+
+  const mapped =
+    shown === "validated_open" || shown === "validated_partial" || shown === "validated_addressed";
 
   return (
     <AppShell active="gaps">
       <PageIntro kicker={gap.id} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <GapBadge status={gap.status} />
-        <LockMeta lock={gap.status_lock} />
-        <span className="text-[12px] text-muted-foreground">
-          Engine suggests {GAP_STATUS_LABELS[suggested]} (never auto-applied)
-        </span>
+        {mapped ? (
+          <GapStatusOverride
+            gapId={gap.id}
+            status={shown}
+            computedStatus={computed}
+            override={gap.status_override}
+          />
+        ) : (
+          <GapBadge status={shown} />
+        )}
+        {mapped && !gap.status_override ? (
+          <span className="text-[11px] text-muted-foreground">
+            Engine computed {GAP_STATUS_LABELS[computed]}
+          </span>
+        ) : (
+          <LockMeta lock={gap.status_lock} />
+        )}
       </div>
+      <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
-        {GAP_STATUS_DEFINITIONS[gap.status]}
+        {GAP_STATUS_DEFINITIONS[shown]} Click the status to override with a required reason. Cancel
+        does not change status.
       </p>
 
       <section className="mb-8">
@@ -228,37 +256,55 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      <LockForm label="Lock gap status" action="lock_gap" extra={{ gap_id: gap.id }}>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
-          Status
-          <select
-            name="status"
-            defaultValue={gap.status}
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-          >
-            {GAP_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {GAP_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
-          Exclusion reason (if excluded)
-          <select
-            name="exclusion_reason"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-            defaultValue={gap.exclusion_reason ?? ""}
-          >
-            <option value="">—</option>
-            {EXCLUSION_REASONS.map((r) => (
-              <option key={r} value={r}>
-                {EXCLUSION_LABELS[r]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </LockForm>
+      {state.gap_versions.filter((row) => row.live_gap_id === gap.id).length > 0 ? (
+        <section className="mb-8">
+          <h2 className="mb-2 text-[13px] text-muted-foreground">Version history</h2>
+          <ul className="grid gap-2">
+            {state.gap_versions
+              .filter((row) => row.live_gap_id === gap.id)
+              .map((row) => (
+                <li key={row.id} className="border border-border bg-card p-3 text-[13px]">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {row.event} · {row.retired_gap_id} · {row.at.slice(0, 10)} · {row.actor_name}
+                  </p>
+                  <p className="mt-1">{row.name}</p>
+                </li>
+              ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {shown === "candidate" ? (
+        <LockForm
+          label="Accept gap"
+          action="lock_gap"
+          extra={{ gap_id: gap.id, status: "validated_open" }}
+          confirmLabel="Accept"
+        />
+      ) : shown !== "excluded" ? (
+        <LockForm
+          label="Exclude gap"
+          action="lock_gap"
+          extra={{ gap_id: gap.id, status: "excluded" }}
+          confirmLabel="Exclude"
+        >
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Exclusion reason
+            <select
+              name="exclusion_reason"
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+              defaultValue={gap.exclusion_reason ?? "not_defined"}
+              required
+            >
+              {EXCLUSION_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {EXCLUSION_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </LockForm>
+      ) : null}
     </AppShell>
   );
 }

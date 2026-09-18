@@ -30,4 +30,13 @@ describe("Create gap and Create tactic buttons", () => {
     expect(page).toContain('params.tab === "tactics"');
     expect(page).toContain("GapStatusGuide");
   });
+
+  it("override dialog requires a reason and Cancel does not save", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/components/gap-status-override.tsx"), "utf8");
+    expect(src).toContain('action: "override_gap_status"');
+    expect(src).toContain("A reason is required to override computed gap status.");
+    expect(src).toContain("Cancel");
+    expect(src).toContain("Cancel does not change status.");
+    expect(src).toMatch(/name="reason"/);
+  });
 });

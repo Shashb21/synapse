@@ -5,6 +5,7 @@ import type {
   EvidenceDomain,
   ExclusionReason,
   GapStatus,
+  MappedGapStatus,
   NeedStatus,
   OverallCoverage,
   PriorityBand,
@@ -41,6 +42,7 @@ export type Asset = {
   indication: string;
   geography: string;
   wizard_complete: boolean;
+  tactics_unlocked: boolean;
 };
 
 export type StrategicObjective = {
@@ -94,6 +96,17 @@ export type EvidenceNeed = {
   status_lock: Lock;
 };
 
+export type GapStatusOverride = {
+  status: MappedGapStatus;
+  from: GapStatus;
+  to: MappedGapStatus;
+  reason: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  at: string;
+  stale: boolean;
+};
+
 export type EvidenceGap = {
   id: string;
   name: string;
@@ -105,6 +118,28 @@ export type EvidenceGap = {
   exclusion_note: string | null;
   status_lock: Lock;
   parent_gap_id: string | null;
+  /** Engine-computed Open / Partial / Addressed. Null for candidate or excluded. */
+  computed_status: MappedGapStatus | null;
+  /** Human override. Wins until cleared or marked stale on ingest/coverage refresh. */
+  status_override: GapStatusOverride | null;
+  retired: boolean;
+  human_validated: boolean;
+};
+
+export type GapVersionEvent = "split" | "rewrite";
+
+export type GapVersion = {
+  id: string;
+  live_gap_id: string;
+  retired_gap_id: string;
+  name: string;
+  statement: string;
+  status: GapStatus;
+  domain: EvidenceDomain;
+  event: GapVersionEvent;
+  at: string;
+  actor_name: string;
+  actor_function: ActorFunction;
 };
 
 export type NeedGapLink = {
@@ -240,4 +275,5 @@ export type IegpState = {
   audit: AuditEvent[];
   gold_needs: GoldNeed[];
   gold_coverages: GoldCoverage[];
+  gap_versions: GapVersion[];
 };

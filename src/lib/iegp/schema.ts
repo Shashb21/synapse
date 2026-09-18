@@ -15,6 +15,7 @@ export const assets = pgTable("assets", {
   indication: text("indication").notNull(),
   geography: text("geography").notNull(),
   wizard_complete: boolean("wizard_complete").notNull().default(false),
+  tactics_unlocked: boolean("tactics_unlocked").notNull().default(false),
 });
 
 export const objectives = pgTable("objectives", {
@@ -79,6 +80,24 @@ export const gaps = pgTable("gaps", {
   exclusion_note: text("exclusion_note"),
   lock: jsonb("lock").notNull(),
   parent_gap_id: text("parent_gap_id"),
+  computed_status: text("computed_status"),
+  status_override: jsonb("status_override"),
+  retired: boolean("retired").notNull().default(false),
+  human_validated: boolean("human_validated").notNull().default(false),
+});
+
+export const gapVersions = pgTable("gap_versions", {
+  id: text("id").primaryKey(),
+  live_gap_id: text("live_gap_id").notNull(),
+  retired_gap_id: text("retired_gap_id").notNull(),
+  name: text("name").notNull(),
+  statement: text("statement").notNull(),
+  status: text("status").notNull(),
+  domain: text("domain").notNull(),
+  event: text("event").notNull(),
+  at: text("at").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
 });
 
 export const needGapLinks = pgTable(

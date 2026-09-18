@@ -266,11 +266,11 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByText(leftover, { exact: true }).first()).toBeVisible();
   });
 
-  test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {
+  test("eval tape is view-only and engine computes addressed when evidence closes", async ({ page }) => {
     await page.goto("/evals");
     await expect(page.getByRole("heading", { name: /eval tape/i })).toBeVisible();
     await expect(page.getByText(/engineMaySetStatus/i)).toBeVisible();
-    await expect(page.getByText(/false/i).first()).toBeVisible();
+    await expect(page.getByText(/true/i).first()).toBeVisible();
     await expect(page.locator("main").getByRole("button")).toHaveCount(0);
   });
 

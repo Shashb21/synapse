@@ -8,6 +8,7 @@ import {
   TacticReviewBadge,
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import type {
   MappingSuggestion,
   OpenGapCard,
@@ -24,7 +25,6 @@ import {
   EVIDENCE_DOMAINS,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
-  GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
@@ -213,6 +213,9 @@ export function ReviewCard({
     <article className="border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-1.5">
         <GapBadge status="candidate" />
+        <span className="text-[11px] text-muted-foreground">
+          Engine: {GAP_STATUS_LABELS[card.computed_status]}
+        </span>
       </div>
       <Link
         href={`/gaps/${card.gap_id}`}
@@ -361,9 +364,15 @@ export function PrioritizeCard({
   return (
     <article className="border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-1.5">
-        <GapBadge status={card.gap_status} />
+        <GapStatusOverride
+          gapId={card.gap_id}
+          status={card.gap_status}
+          computedStatus={card.computed_status}
+          override={card.status_override}
+        />
         <span className="text-[11px] text-amber-300">Priority unlocked</span>
       </div>
+      <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <Link
         href={`/gaps/${card.gap_id}`}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
@@ -415,8 +424,14 @@ export function GapPlanCard({
     <article className="border border-border bg-background p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         {card.band ? <PriorityBadge band={card.band} /> : null}
-        <GapBadge status={card.gap_status} />
+        <GapStatusOverride
+          gapId={card.gap_id}
+          status={card.gap_status}
+          computedStatus={card.computed_status}
+          override={card.status_override}
+        />
       </div>
+      <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <Link
         href={`/gaps/${card.gap_id}`}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
@@ -529,7 +544,7 @@ export function PrioritizeQueue({
   if (cards.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
-        No leftover to prioritize. Open accepted gaps wait on Mappings for tactics and coverage.
+        No leftover to prioritize. Validate Open gaps on Gaps first.
       </p>
     );
   }
@@ -739,7 +754,12 @@ export function OpenGapsQueue({
       {cards.map((card) => (
         <article key={card.gap_id} className="border border-border bg-background p-4">
           <div className="flex flex-wrap items-center gap-1.5">
-            <GapBadge status={card.gap_status} />
+            <GapStatusOverride
+              gapId={card.gap_id}
+              status={card.gap_status}
+              computedStatus={card.computed_status}
+              override={card.status_override}
+            />
             {card.parent_gap_id ? (
               <span className="text-[11px] text-muted-foreground">Leftover of parent</span>
             ) : null}
@@ -751,57 +771,18 @@ export function OpenGapsQueue({
             {card.gap_name}
           </Link>
           <p className="mt-2 text-[12px] text-muted-foreground">
-            Engine suggests {GAP_STATUS_LABELS[card.suggested_status]} (never auto-applied).
-            Completed, ongoing, and planned tactics count; proposed does not.
+            Engine computed {GAP_STATUS_LABELS[card.computed_status]}. Click the status to override
+            with a reason. Completed, ongoing, and planned tactics count; proposed does not.
           </p>
+          <GapStatusDisagreement
+            computedStatus={card.computed_status}
+            override={card.status_override}
+          />
           <GapTacticsBlock
             gapId={card.gap_id}
             tactics={card.tactics}
             availableTactics={availableTactics}
           />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <LockForm
-              label="Open"
-              action="classify_gap"
-              extra={{
-                gap_id: card.gap_id,
-                status: "validated_open",
-                ...(card.counting_join_count > 0 ? { confirm_unfilled: "1" } : {}),
-              }}
-              confirmLabel="Lock Open"
-            >
-              <p className="text-[12px] leading-5 text-muted-foreground">
-                {GAP_STATUS_DEFINITIONS.validated_open}
-              </p>
-              {card.counting_join_count > 0 ? (
-                <p className="text-[12px] leading-5 text-amber-300">
-                  Joined tactics or published literature exist. Locking Open means they do not count
-                  as filling this gap.
-                </p>
-              ) : null}
-            </LockForm>
-            <LockForm
-              label="Partially Addressed"
-              action="classify_gap"
-              extra={{ gap_id: card.gap_id, status: "validated_partial" }}
-              confirmLabel="Lock Partially Addressed"
-            >
-              <p className="text-[12px] leading-5 text-muted-foreground">
-                {GAP_STATUS_DEFINITIONS.validated_partial}
-              </p>
-            </LockForm>
-            <LockForm
-              label="Addressed"
-              action="classify_gap"
-              extra={{ gap_id: card.gap_id, status: "validated_addressed" }}
-              confirmLabel="Lock Addressed"
-            >
-              <p className="text-[12px] leading-5 text-muted-foreground">
-                {GAP_STATUS_DEFINITIONS.validated_addressed} No residual. The engine does not write
-                this status; you confirm it here.
-              </p>
-            </LockForm>
-          </div>
           {card.gap_status === "validated_partial" && card.residual ? (
             <div className="mt-4">
               <p className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">

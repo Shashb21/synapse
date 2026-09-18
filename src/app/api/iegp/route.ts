@@ -3,8 +3,9 @@ import {
   acceptMapping,
   acceptResidualGap,
   assignTacticToGap,
-  classifyMappedGap,
+  clearGapStatusOverride,
   completeWizard,
+  createAddressedGap,
   createGap,
   createProposedTactic,
   ingestDemoSource,
@@ -24,6 +25,11 @@ import {
   rejectMapping,
   rejectResidualGap,
   resetSeed,
+  overrideGapStatus,
+  rewritePartialGap,
+  splitPartialGap,
+  unlockTacticsStage,
+  validateGap,
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import type { CoverageDimension } from "@/lib/iegp/enums";
@@ -64,10 +70,18 @@ export async function POST(request: Request) {
         });
         break;
       case "classify_gap":
-        await classifyMappedGap({
+      case "override_gap_status":
+        await overrideGapStatus({
           gap_id: body.gap_id,
           status: body.status as never,
-          confirm_unfilled: body.confirm_unfilled === "1" || body.confirm_unfilled === "true",
+          reason: body.reason || body.note,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "clear_gap_status_override":
+        await clearGapStatusOverride({
+          gap_id: body.gap_id,
           actor_name,
           actor_function,
           note: body.note,
@@ -223,6 +237,54 @@ export async function POST(request: Request) {
         break;
       case "complete_wizard":
         await completeWizard({
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "unlock_tactics":
+        await unlockTacticsStage({
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "validate_gap":
+        await validateGap({
+          gap_id: body.gap_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "split_partial_gap":
+        await splitPartialGap({
+          parent_gap_id: body.parent_gap_id || body.gap_id,
+          addressed_name: body.addressed_name,
+          open_name: body.open_name,
+          tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "rewrite_partial_gap":
+        await rewritePartialGap({
+          gap_id: body.gap_id,
+          name: body.name,
+          status: body.status as "validated_open" | "validated_addressed",
+          tactic_id: body.tactic_id || undefined,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "create_addressed_gap":
+        await createAddressedGap({
+          name: body.name,
+          statement: body.statement,
+          domain: (body.domain || undefined) as EvidenceDomain | undefined,
+          tactic_id: body.tactic_id,
           actor_name,
           actor_function,
           note: body.note,

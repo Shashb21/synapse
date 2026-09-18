@@ -61,9 +61,9 @@ function PlaceIntro({
   if (place === "mappings") {
     return (
       <PageIntro kicker="Inventory joins" title="Mappings">
-        A scored engine suggests gap–tactic pairs after both are accepted. Classify a mapped gap as
-        Open, Partially Addressed, or Addressed. Partially Addressed presents a residual draft and
-        split. Addressed has no residual. The engine never writes Addressed.
+        A scored engine suggests gap–tactic pairs after both are accepted. Status is computed from
+        joined completed, ongoing, or planned tactics and published literature. Click a gap to
+        override with a required reason. Partially Addressed presents a residual draft and split.
       </PageIntro>
     );
   }
@@ -139,9 +139,10 @@ export default async function HomePage({
             Accepted gaps
           </h2>
           <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            Assign from the library onto an accepted Open or Partially Addressed gap. Classify
-            status from joined completed, ongoing, or planned tactics and published literature.
-            Coverage is still unknown until you lock it on the gap.
+            Assign from the library onto an accepted Open or Partially Addressed gap. Status is
+            computed from joined completed, ongoing, or planned tactics and published literature.
+            Click the gap to override with a reason. Coverage is still unknown until you lock it on
+            the gap.
           </p>
           <OpenGapsQueue
             cards={workspace.openGaps}
@@ -249,7 +250,8 @@ export default async function HomePage({
           </h2>
           <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
             Closed gaps remain on the plan with the tactics that addressed them. Status is Addressed
-            — not a priority band. The engine never writes this status.
+            — not a priority band. The engine computes this when evidence is sufficient to fully
+            close; a human override requires a reason.
           </p>
           {workspace.addressed.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No addressed gaps yet.</p>

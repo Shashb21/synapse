@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanBoard,
   buildPlanWorkspace,
+  computeGapStatus,
   coverageEval,
   countingCoverages,
   draftResidualStatement,
@@ -19,6 +20,7 @@ import {
   residualDraftEligible,
   residualGapEligible,
   splitSourceIntoBlocks,
+  requireOverrideReason,
   suggestGapStatus,
   planNavCounts,
   suggestMappings,
@@ -51,9 +53,17 @@ function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCover
 }
 
 describe("IEGP engine", () => {
-  it("never allows the engine to write addressed", () => {
-    expect(engineMaySetStatus("validated_addressed")).toBe(false);
+  it("allows the engine to compute Open, Partially Addressed, and Addressed", () => {
+    expect(engineMaySetStatus("validated_addressed")).toBe(true);
     expect(engineMaySetStatus("validated_partial")).toBe(true);
+    expect(engineMaySetStatus("validated_open")).toBe(true);
+    expect(engineMaySetStatus("candidate")).toBe(false);
+  });
+
+  it("requires a non-empty reason to override computed status", () => {
+    expect(() => requireOverrideReason("")).toThrow(/reason is required/i);
+    expect(() => requireOverrideReason("   ")).toThrow(/reason is required/i);
+    expect(requireOverrideReason(" Coverage is out of cycle. ")).toBe("Coverage is out of cycle.");
   });
 
   it("maps validated_* enums to Open / Partially Addressed / Addressed", () => {
@@ -62,7 +72,7 @@ describe("IEGP engine", () => {
     expect(GAP_STATUS_LABELS.validated_addressed).toBe("Addressed");
     expect(GAP_STATUS_DEFINITIONS.validated_open).toMatch(/Proposed tactics do not count/i);
     expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/residual evidence need/i);
-    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/the gap splits/i);
+    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/split/i);
     expect(GAP_STATUS_DEFINITIONS.validated_addressed).toMatch(/fully close this gap/i);
   });
 
@@ -131,12 +141,39 @@ describe("IEGP engine", () => {
     ).toBe(false);
   });
 
-  it("does not treat a tactic existing as fully addressed", () => {
-    const coverage = cov("limited", {
+  it("computes Open when only proposed tactics exist", () => {
+    const proposed = {
+      id: "t",
+      status: "proposed" as const,
+      type: "rwe_study" as const,
+      evidence_available: null,
+    };
+    const unlockedLimited = cov("limited", {});
+    expect(computeGapStatus([unlockedLimited], [proposed])).toBe("validated_open");
+    expect(countingCoverages([unlockedLimited], [proposed])).toHaveLength(0);
+  });
+
+  it("computes Partial when planned, completed, or publication evidence is partial", () => {
+    const planned = {
+      id: "t",
+      status: "planned" as const,
+      type: "rwe_study" as const,
+      evidence_available: null,
+    };
+    const completed = { ...planned, status: "completed" as const };
+    const publication = {
+      id: "t",
+      status: "completed" as const,
+      type: "publication" as const,
+      evidence_available: "2025-01-01",
+    };
+    const partial = cov("partial", {
       relevance: { value: "partial", rationale: "", lock: unlocked() },
       comparator: { value: "no", rationale: "", lock: unlocked() },
     });
-    expect(suggestGapStatus([coverage])).toBe("validated_open");
+    expect(computeGapStatus([partial], [planned])).toBe("validated_partial");
+    expect(computeGapStatus([partial], [completed])).toBe("validated_partial");
+    expect(computeGapStatus([partial], [publication])).toBe("validated_partial");
   });
 
   it("does not count proposed tactics toward addressing, and unlocked limited is never Addressed", () => {
@@ -169,7 +206,7 @@ describe("IEGP engine", () => {
     const unlockedLimited = cov("limited", {});
     expect(countingCoverages([unlockedLimited], [proposed])).toHaveLength(0);
     expect(suggestGapStatus([unlockedLimited], [proposed])).toBe("validated_open");
-    expect(suggestGapStatus([unlockedLimited], [planned])).toBe("validated_open");
+    expect(suggestGapStatus([unlockedLimited], [planned])).toBe("validated_partial");
 
     const unlockedFull: GapTacticCoverage = {
       ...cov("full", {
@@ -197,7 +234,7 @@ describe("IEGP engine", () => {
       },
     };
     expect(suggestGapStatus([lockedFull], [planned])).toBe("validated_addressed");
-    expect(engineMaySetStatus("validated_addressed")).toBe(false);
+    expect(engineMaySetStatus("validated_addressed")).toBe(true);
   });
 
   it("suggests priority without using cost or effort", () => {
@@ -419,7 +456,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const ild = workspace.review.find((c) => c.gap_id === "GAP-ILD");
     expect(ild).toBeTruthy();
     expect(ild!.tactics).toHaveLength(0);
-    expect(Object.prototype.hasOwnProperty.call(ild, "residual")).toBe(false);
+    expect(ild!.residual).toBeNull();
     const os = workspace.reviewResiduals.find((c) => c.parent_gap_id === "GAP-OS");
     expect(os).toBeTruthy();
     expect(os!.statement).not.toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);

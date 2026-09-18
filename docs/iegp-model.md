@@ -56,9 +56,9 @@ Enums stay `validated_open` / `validated_partial` / `validated_addressed`. Human
 | **Partially Addressed** | `validated_partial` | Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a **residual evidence need**. This can be added as a **new gap**, and the addressed part becomes an **Addressed** gap — **the gap splits**. |
 | **Addressed** | `validated_addressed` | Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap. |
 
-On **Mappings**, classify a mapped gap as Open / Partially Addressed / Addressed from joined tactics + publications. Open warns if counting joins exist (confirm they do not fill the gap). Partially Addressed presents the residual draft and split action. Addressed has no residual.
+On **Mappings**, the engine computes Open / Partially Addressed / Addressed from joined tactics + publications. Click a gap to override; a non-empty reason is required. Cancel does not save. Partially Addressed presents the residual draft and split action. Addressed has no residual.
 
-Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine may **draft** a residual and suggest a split; it never writes Addressed without a human lock/accept. Unlocked / limited-only assignment must not pretend a gap is Addressed.
+Override wins until cleared or marked stale on ingest/coverage refresh. Stale overrides show disagreement with the new computed status; they are not silent-clobbered. Unlocked / limited-only assignment must not pretend a gap is Addressed (that is Partially Addressed until coverage is locked Full).
 
 **Counting rules:** completed + ongoing + planned tactics count. **Proposed** does not. Publications are tactics; they count as published literature when status is **completed**, or when the type is a publication tactic (`publication`, `congress_abstract`, `evidence_dissemination`) with `evidence_available` set.
 

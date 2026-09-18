@@ -12,6 +12,7 @@ export function buildBlankWorkspace(): IegpState {
       indication: "2L EGFR-mutant NSCLC",
       geography: "US + EU5",
       wizard_complete: false,
+      tactics_unlocked: false,
     },
     objectives: [
       {
@@ -114,5 +115,6 @@ export function buildBlankWorkspace(): IegpState {
     ],
     gold_needs: [],
     gold_coverages: [],
+    gap_versions: [],
   };
 }

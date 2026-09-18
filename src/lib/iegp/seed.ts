@@ -183,6 +183,7 @@ export function buildSeed(): IegpState {
       indication: "2L EGFR-mutant NSCLC",
       geography: "US + EU5",
       wizard_complete: true,
+      tactics_unlocked: true,
     },
     objectives: [
       {
@@ -1675,12 +1676,25 @@ export function buildSeed(): IegpState {
       { id: "GOLD-C-005", gap_id: "GAP-RECUR-ECON", tactic_id: "TAC-NH", overall: "partial" },
       { id: "GOLD-C-006", gap_id: "GAP-SEQ", tactic_id: "TAC-REG", overall: "partial" },
     ],
+    gap_versions: [],
   };
 
   return {
     ...state,
     residual_gap_suggestions: [],
-    gaps: state.gaps.map((gap) => ({ ...gap, parent_gap_id: null })),
+    gaps: state.gaps.map((gap) => ({
+      ...gap,
+      parent_gap_id: null,
+      computed_status:
+        gap.status === "validated_open" ||
+        gap.status === "validated_partial" ||
+        gap.status === "validated_addressed"
+          ? gap.status
+          : null,
+      status_override: null,
+      retired: false,
+      human_validated: gap.status !== "candidate" && gap.status !== "excluded",
+    })),
     residuals: state.residuals.map((residual) => ({
       ...residual,
       review_status: residual.lock.locked ? ("accepted" as const) : ("candidate" as const),
