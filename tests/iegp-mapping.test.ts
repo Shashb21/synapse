@@ -138,30 +138,6 @@ describe("gap–tactic mapping engine", () => {
     ).toBe(false);
   });
 
-  it("maps a pneumonitis safety gap to an extracted chart review above the floor", () => {
-    const scored = scoreGapTacticMapping(
-      {
-        name: "Pneumonitis rates in community hospitals after month six of Velmara.",
-        statement:
-          "We need to understand pneumonitis rates in community hospitals after month six of Velmara.",
-        domain: "safety",
-      },
-      {
-        name: "EU5 hospital chart review",
-        type: "chart_review",
-        description: "Extracted from affiliate note.",
-        evidence_question: "A chart review in three EU5 hospitals is already underway.",
-        population: "To be specified",
-        intervention: "Velmara",
-        comparator: "To be specified",
-        outcomes: "To be specified",
-        study_design: "Extracted — not yet designed",
-      },
-    );
-    expect(scored.score).toBeGreaterThanOrEqual(MAPPING_SCORE_FLOOR);
-    expect(scored.reasons.length).toBeGreaterThanOrEqual(2);
-  });
-
   it("returns non-empty reasons for every shown suggestion and caps the list", () => {
     const seed = buildSeed();
     const suggestions = suggestMappings(seed);

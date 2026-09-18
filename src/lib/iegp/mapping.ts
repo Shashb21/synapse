@@ -95,11 +95,6 @@ const CUE_FAMILIES: CueFamily[] = [
     test: (t) => /\bild\b|\binterstitial|\bqt\b|\bpneumonitis\b/i.test(t),
   },
   {
-    id: "hospital_setting",
-    label: "hospital / community setting",
-    test: (t) => /\bcommunity hospitals?\b|\bhospitals?\b/i.test(t),
-  },
-  {
     id: "sequencing",
     label: "treatment sequencing",
     test: (t) => /\bsequenc|\btreatment pattern/i.test(t),
@@ -298,7 +293,7 @@ export function scoreGapTacticMapping(
     caregiver_burden: ["caregiver", "qol"],
     budget_impact: ["ira"],
     economics: ["recurrence", "hcru"],
-    safety: ["ild", "hospital_setting"],
+    safety: ["ild"],
     efficacy: ["cns"],
     adherence: ["persistence"],
     subpopulations: ["elderly"],
