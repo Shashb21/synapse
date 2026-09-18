@@ -16,7 +16,6 @@ import {
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { suggestGapStatus, suggestResidualGaps, uncoveredDimensions } from "@/lib/iegp/engine";
-import { GapStatusGuide } from "@/components/gap-status-guide";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +51,6 @@ export default async function GapDetailPage({
           Engine suggests {GAP_STATUS_LABELS[suggested]} (never auto-applied)
         </span>
       </div>
-      <GapStatusGuide compact />
 
       <section className="mb-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs</h2>
