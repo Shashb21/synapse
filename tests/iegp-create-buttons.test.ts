@@ -10,7 +10,9 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain('label="Add tactic"');
     expect(src).toContain("create_addressed_gap");
     expect(src).toContain("SplitGapDialog");
-    expect(src).toContain("constituent need");
+    expect(src).toContain("View constituent needs");
+    expect(src).toContain("No constituent needs yet.");
+    expect(src).toContain("CoverageDimensionsMenu");
     expect(src).toContain("No tactics mapped");
     expect(src).toContain("Needs validation");
     expect(src).not.toContain("Accept gap");
@@ -77,5 +79,29 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(detail).toContain("Change overall coverage");
     expect(detail).toContain("Also mapped on");
     expect(detail).toContain("confirm_coverage_review");
+    expect(detail).toContain("CoverageDimensionsMenu");
+    expect(detail).toContain("No constituent needs yet.");
+  });
+
+  it("replaces stale re-lock copy and distinguishes sibling review from outdated coverage", () => {
+    const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
+    expect(badges).toContain("Coverage outdated — tactic or sources changed");
+    expect(badges).toContain("Review coverage — also mapped elsewhere");
+    expect(badges).not.toContain(">Stale — re-lock<");
+    expect(badges).not.toContain(">Needs review<");
+    const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
+    expect(workbench).toContain("View constituent needs");
+    expect(workbench).toContain("CoverageDimensionsMenu");
+    expect(workbench).not.toContain("re-lock");
+    const menu = readFileSync(path.join(process.cwd(), "src/components/coverage-dimensions-menu.tsx"), "utf8");
+    expect(menu).toContain("Dimensions");
+    expect(menu).toContain("Overall");
+    expect(menu).toContain("COVERAGE_DIMENSIONS");
+    const tactics = readFileSync(path.join(process.cwd(), "src/app/tactics/[id]/page.tsx"), "utf8");
+    expect(tactics).not.toContain("re-lock");
+    const model = readFileSync(path.join(process.cwd(), "docs/iegp-model.md"), "utf8");
+    expect(model).not.toContain("re-lock");
+    const problem = readFileSync(path.join(process.cwd(), "docs/problem-and-solution.md"), "utf8");
+    expect(problem).not.toContain("re-lock");
   });
 });

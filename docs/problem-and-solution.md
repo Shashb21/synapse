@@ -120,7 +120,7 @@ Humans lock High / Medium / Low. The engine does not assign a band. Effort and c
 
 ### Refresh
 
-Living plan. Tactic status change or ingest marks coverage stale and queues residuals for re-lock. Nothing auto-closes.
+Living plan. Tactic status change or ingest marks coverage outdated for review. Residuals stay open for a human to reassess. Nothing auto-closes.
 
 ---
 

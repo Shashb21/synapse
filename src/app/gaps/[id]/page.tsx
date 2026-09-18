@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, StaleFlag } from "@/components/iegp-badges";
+import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
@@ -19,6 +20,7 @@ import {
 import { loadState } from "@/lib/iegp/store";
 import {
   computeGapStatus,
+  coverageDimensionValues,
   displayedGapStatus,
   liveGapsMappedToTactic,
   mappedTactics,
@@ -110,7 +112,7 @@ export default async function GapDetailPage({
         </p>
         <div className="grid gap-2">
           {needs.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No constituent needs linked yet.</p>
+            <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
           ) : (
             needs.map(({ need, link }) => {
               const source = state.sources.find((s) => s.id === need.source_id);
@@ -148,6 +150,10 @@ export default async function GapDetailPage({
                 <CoverageBadge overall={c.overall} />
                 <StaleFlag stale={c.stale} />
                 <NeedsReviewFlag needsReview={c.needs_review} />
+                <CoverageDimensionsMenu
+                  overall={c.overall}
+                  dimensions={coverageDimensionValues(c.dimensions)}
+                />
               </div>
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">

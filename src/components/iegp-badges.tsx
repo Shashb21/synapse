@@ -86,18 +86,40 @@ export function LockMeta({ lock }: { lock: Lock }) {
   );
 }
 
+/**
+ * Coverage (this gap–tactic pair) may be out of date because the tactic’s
+ * status changed or new evidence was ingested. Dimension values are not
+ * automatically trusted until a human reviews them. Older copy said
+ * “Stale — re-lock”; “re-lock” was leftover from calling every coverage
+ * edit “Lock” and did not mean freeze forever.
+ */
 export function StaleFlag({ stale }: { stale: boolean }) {
   if (!stale) return null;
   return (
-    <Badge variant="destructive">Stale — re-lock</Badge>
+    <Badge
+      variant="destructive"
+      className="h-auto max-w-full whitespace-normal text-left"
+      title="This gap–tactic coverage judgment may be out of date because the tactic’s status changed or new evidence was ingested. Review the dimensions; they are not automatically trusted."
+    >
+      Coverage outdated — tactic or sources changed
+    </Badge>
   );
 }
 
+/**
+ * A sibling live gap mapped to the same tactic had a dimension or overall
+ * change. Values were not copied onto this gap. Distinct from outdated
+ * coverage (`stale`), which is tactic-status or ingest.
+ */
 export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
   if (!needsReview) return null;
   return (
-    <Badge variant="outline" className="border-amber-500/40 bg-amber-500/15 text-amber-200">
-      Needs review
+    <Badge
+      variant="outline"
+      className="h-auto max-w-full whitespace-normal border-amber-500/40 bg-amber-500/15 text-left text-amber-200"
+      title="Another live gap that uses this tactic changed a dimension or overall. Confirm or edit this gap’s own coverage. Values were not copied."
+    >
+      Review coverage — also mapped elsewhere
     </Badge>
   );
 }

@@ -64,7 +64,7 @@ Priority is a human lock of High / Medium / Low (Critical folds into High on the
 
 ## Refresh (living plan)
 
-Tactic status change or new ingest marks related coverage **stale** and unlocks residuals for re-lock. Nothing auto-closes.
+Tactic status change or new ingest marks related coverage **outdated** (review the dimensions; they are not automatically trusted until a human reviews them) and unlocks residuals so a human can reassess. Nothing auto-closes. Distinct from **needs review**, which flags a sibling gap after a dimension change on the same tactic.
 
 ## Evals
 
@@ -75,7 +75,7 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. The 
 `/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
 1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
-2. **Gaps** shows every live gap as a card (title, statement, mapped tactics, constituent-need count). Humans validate Open and Addressed. Partial must **split** (Addressed + chosen tactics on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
+2. **Gaps** shows every live gap as a card (title, statement, mapped tactics with a dimensions dropdown, **View constituent needs**). Humans validate Open and Addressed. Partial must **split** (Addressed + chosen tactics on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
 3. **Prioritize** High / Medium / Low on Open gaps.
 4. **Tactics** create and assign tactics for Open gaps.
 

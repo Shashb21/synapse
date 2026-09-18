@@ -679,6 +679,18 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(workspace.review[0]?.gap_status).toBe("validated_partial");
   });
 
+  it("puts the 10 coverage dimensions plus overall on mapped tactics for workbench cards", () => {
+    const workspace = buildPlanWorkspace(buildSeed());
+    const elderly = workspace.review.find((c) => c.gap_id === "GAP-ELDERLY-CE");
+    const tactic = elderly?.tactics.find((t) => t.dimensions);
+    expect(tactic?.overall).toMatch(/full|partial|limited|not_relevant/);
+    expect(tactic?.dimensions).toBeTruthy();
+    expect(Object.keys(tactic!.dimensions!).sort()).toEqual([...COVERAGE_DIMENSIONS].sort());
+    for (const dim of COVERAGE_DIMENSIONS) {
+      expect(["yes", "partial", "no", "unknown"]).toContain(tactic!.dimensions![dim]);
+    }
+  });
+
   it("lists other live gaps mapped to the same tactic without treating the source gap as a sibling", () => {
     const seed = buildSeed();
     const siblings = liveGapsMappedToTactic(seed, "TAC-REG", "GAP-HCRU");

@@ -1147,6 +1147,8 @@ export type PlanTactic = {
   stale: boolean;
   needs_review: boolean;
   counts_toward_addressing: boolean;
+  /** Per-dimension yes/partial/no/unknown for this gap–tactic pair. Null when there is no coverage row. */
+  dimensions: Record<CoverageDimension, DimensionValue> | null;
 };
 
 export type PlanGapCard = {
@@ -1230,11 +1232,22 @@ const STATUS_ORDER: Record<TacticStatus, number> = {
   cancelled: 4,
 };
 
+export function coverageDimensionValues(
+  dimensions: Record<CoverageDimension, DimensionAssessment>,
+): Record<CoverageDimension, DimensionValue> {
+  const out = {} as Record<CoverageDimension, DimensionValue>;
+  for (const dim of COVERAGE_DIMENSIONS) {
+    out[dim] = dimensions[dim].value;
+  }
+  return out;
+}
+
 function asPlanTactic(
   tactic: Tactic,
   overall: OverallCoverage | null,
   stale: boolean,
   needs_review = false,
+  dimensions: Record<CoverageDimension, DimensionValue> | null = null,
 ): PlanTactic {
   return {
     id: tactic.id,
@@ -1244,6 +1257,7 @@ function asPlanTactic(
     stale,
     needs_review,
     counts_toward_addressing: tacticCountsTowardAddressing(tactic),
+    dimensions,
   };
 }
 
@@ -1266,13 +1280,21 @@ export function mappedTactics(state: IegpState, gapId: string, residualId?: stri
   for (const coverage of state.coverages.filter((c) => c.gap_id === gapId)) {
     const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
     if (!tactic) continue;
-    mapped.push(asPlanTactic(tactic, coverage.overall, coverage.stale, coverage.needs_review));
+    mapped.push(
+      asPlanTactic(
+        tactic,
+        coverage.overall,
+        coverage.stale,
+        coverage.needs_review,
+        coverageDimensionValues(coverage.dimensions),
+      ),
+    );
   }
   if (residualId) {
     for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residualId))) {
       const tactic = state.tactics.find((t) => t.id === item.tactic_id);
       if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
-      mapped.push(asPlanTactic(tactic, null, false, false));
+      mapped.push(asPlanTactic(tactic, null, false, false, null));
     }
   }
   return mapped.sort(

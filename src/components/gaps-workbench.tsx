@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { GapBadge } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, NeedsReviewFlag, StaleFlag, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
+import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import {
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
@@ -17,18 +18,20 @@ import {
   filterReviewGapCards,
   reviewGapFilterCounts,
   sortReviewGapCards,
+  type PlanTactic,
   type ReviewGapCard,
   type ReviewGapFilter,
   type TacticLibraryItem,
 } from "@/lib/iegp/engine";
-import { CoverageBadge, NeedsReviewFlag, StaleFlag, TacticBadge } from "@/components/iegp-badges";
 import { Button } from "@/components/ui/button";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -134,36 +137,54 @@ function CreateTacticInline() {
   );
 }
 
-function ConstituentNeedsHint({ card }: { card: ReviewGapCard }) {
-  const count = card.need_count;
-  const label = `${count} constituent need${count === 1 ? "" : "s"}`;
-  if (count === 0) {
-    return <span className="text-[12px] text-muted-foreground">No constituent needs</span>;
-  }
+function ConstituentNeedsButton({ card }: { card: ReviewGapCard }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className="text-left text-[12px] text-muted-foreground underline decoration-dotted underline-offset-2"
-          />
-        }
+    <Dialog>
+      <DialogTrigger render={<Button type="button" size="sm" variant="outline" />}>
+        View constituent needs
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Constituent needs</DialogTitle>
+          <DialogDescription>
+            Sourced statements this gap stands for. Role is primary or supporting.
+          </DialogDescription>
+        </DialogHeader>
+        {card.needs.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
+        ) : (
+          <ul className="grid gap-2">
+            {card.needs.map((need) => (
+              <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
+                <p className="text-[11px] capitalize text-muted-foreground">
+                  {need.role}
+                  {need.source_title ? ` · ${need.source_title}` : ""}
+                </p>
+                <p className="mt-1">{need.statement}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MappedTacticRow({ tactic }: { tactic: PlanTactic }) {
+  return (
+    <li className="flex flex-wrap items-center gap-1.5">
+      <Link
+        href={`/tactics/${tactic.id}`}
+        className="text-[12px] text-foreground no-underline hover:underline"
       >
-        {label}
-      </TooltipTrigger>
-      <TooltipContent className="max-w-sm whitespace-normal text-left">
-        <p className="mb-1 font-medium">Sourced statements this gap stands for</p>
-        <ul className="grid gap-1.5">
-          {card.needs.map((need) => (
-            <li key={need.id}>
-              <span className="capitalize">{need.role}</span>
-              {need.source_title ? ` · ${need.source_title}` : ""} — {need.statement}
-            </li>
-          ))}
-        </ul>
-      </TooltipContent>
-    </Tooltip>
+        {tactic.name}
+      </Link>
+      <TacticBadge status={tactic.status} />
+      {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
+      {tactic.stale ? <StaleFlag stale /> : null}
+      <NeedsReviewFlag needsReview={tactic.needs_review} />
+      <CoverageDimensionsMenu overall={tactic.overall} dimensions={tactic.dimensions} />
+    </li>
   );
 }
 
@@ -186,8 +207,7 @@ export function GapsWorkbench({
   const unvalidated = counts.needs_validation;
 
   return (
-    <TooltipProvider>
-      <div className="grid gap-6">
+    <div className="grid gap-6">
         <p className="text-[12px] leading-5 text-muted-foreground">
           Engine computes Open (no addressing tactics or literature), Partially Addressed (some
           evidence, leftover remains — split or rewrite), or Addressed (evidence fully closes the
@@ -272,29 +292,18 @@ export function GapsWorkbench({
                   />
                   <div className="mt-3">
                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
-                    <ul className="mt-1 flex flex-wrap gap-1.5">
+                    <ul className="mt-1 grid gap-1.5">
                       {card.tactics.length === 0 ? (
                         <li className="text-[12px] text-muted-foreground">No tactics mapped</li>
                       ) : (
                         card.tactics.map((tactic) => (
-                          <li key={tactic.id}>
-                            <Link
-                              href={`/tactics/${tactic.id}`}
-                              className="inline-flex flex-wrap items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[12px] no-underline hover:underline"
-                            >
-                              <span>{tactic.name}</span>
-                              <TacticBadge status={tactic.status} />
-                              {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-                              {tactic.stale ? <StaleFlag stale /> : null}
-                              <NeedsReviewFlag needsReview={tactic.needs_review} />
-                            </Link>
-                          </li>
+                          <MappedTacticRow key={tactic.id} tactic={tactic} />
                         ))
                       )}
                     </ul>
                   </div>
                   <div className="mt-3">
-                    <ConstituentNeedsHint card={card} />
+                    <ConstituentNeedsButton card={card} />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
@@ -334,7 +343,6 @@ export function GapsWorkbench({
             </>
           )}
         </div>
-      </div>
-    </TooltipProvider>
+    </div>
   );
 }
