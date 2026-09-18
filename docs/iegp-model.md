@@ -14,7 +14,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). |
 | Tactic | Structured generating or disseminating activity. Extracted tactics start as **candidate** and use the same accept / reject / modify gate as gaps. Status completed / ongoing / planned / proposed / cancelled. |
 | Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. Suggested mappings rank accepted gaps against accepted tactics; a human accept writes this join. Reject persists so that pair is not suggested again. |
-| Residual evidence need | Seed/plan object used to prioritize leftovers. After a pressure-test, leftover is **not** dumped onto the parent; it is suggested as a **new gap**. |
+| Residual evidence need | Engine drafts a ResidualNeed for Plan priority only after a tactic is assigned **and** overall coverage is human-locked **partial** or **limited**. Leftover-as-new-gap is a separate Mappings suggestion. Full / unknown / no tactics = no residual. |
 | Priority | Locked band on the residual. Coverage ≠ priority. |
 | Roadmap item | Ongoing + planned + proposed tactics only. Completed stay on the dossier. |
 
@@ -35,14 +35,11 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 8c. Create a gap (human-authored; starts as validated open)
 9. Roadmap row
 
-There is **no residual paragraph** copied onto the parent gap card. Two steps:
+There is **no residual paragraph** copied onto the parent gap card. The gap statement appears **once**.
 
-1. **Ingest → extract gaps and tactics → human validates** those objects (accept / reject / modify).
-2. **Backend pressure-test** (deterministic mapping + coverage engine, not an LLM). When assigned coverage overall is human-locked **partial** or **limited** and no child gap exists, the engine suggests leftover as a **new gap** `{ parent_gap_id, statement, reasons }`. Human accepts → child gap created (`parent_gap_id`); parent → `validated_partial`. Reject persists; do not spam.
+**Residual gate:** there cannot be any residual evidence need until a tactic is assigned **and** mapped coverage is understood to only partially fill the gap. Do not draft on ingest, gap accept, or create-gap. Assigning a tactic is not enough if coverage is still unknown (unlocked placeholder `limited`). Draft/show a ResidualNeed (Plan → Prioritize) only when overall is human-locked **partial** or **limited**. Full = no residual. `not_relevant` = no residual. No tactics = no residual. Open accepted gaps with no residual are unmapped or fully uncovered — they wait on Mappings; they are not fake residuals on Prioritize. Leftover-as-new-gap uses the same coverage gate and lives on Mappings, not Review.
 
-Assigning a tactic is not enough if coverage is still the unlocked placeholder `limited`. Full coverage and `not_relevant` do not enqueue a leftover.
-
-**Create gap** and **Create tactic** are visible on Review and Library. Creating a tactic adds it to the library as accepted. Creating a gap is `validated_open`.
+**Create gap** lives on Review (and Assign tactic from the library). **Create tactic** lives on the tactic library only; human-created tactics enter the library as accepted.
 
 Suggested mappings are drafted by a deterministic scored engine (statement/question similarity, domain–type affinity, shared population/comparator/outcome cues, and a penalty when the tactic is dissemination-only). The engine never writes coverage; a human accept or reject is the gate. Mapping is inventory join, not tactic ideation — not an LLM and not embedding-clusters.
 
@@ -64,18 +61,15 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 `/` is a Cursor-like **left sidebar** of places: **Upload**, **Review**, **Mappings**, **Library**, **Plan**. Desktop rail + mobile drawer. The main pane shows one place. First visit starts on Upload; Review / Mappings / Library unlock after at least one source; Plan unlocks after a source plus at least one accept (or after **Enter the plan**). After wizard complete, `/` opens on Plan. New ingest stays on Upload and drops candidates into Review.
 
-Two-step loop:
-
-1. **Ingest → extract gaps and tactics → Review** (accept / reject / modify). **Create gap** and **Create tactic** are visible on Review and Library.
-2. **Mappings pressure-test**: scored gap–tactic drafts, then leftover-as-new-gap after locked partial/limited coverage. Accept creates a child gap (`parent_gap_id`); parent stays as `validated_partial`. Reject persists.
+First visit is still upload → review → mappings → (plan), gated in the sidebar until sources and accepts exist. Wizard once, plan forever: after Enter the plan, `/` opens on Plan; later ingest stays on Upload and drops candidates into Review.
 
 | Place | What |
 | --- | --- |
 | Upload | Demo pack + ingest. Later sources never restart a stepper. |
-| Review | Candidate gaps and tactics; accept / reject / modify; **Create gap** and **Create tactic**. No leftover dump. |
-| Mappings | Suggested mappings (scored engine), leftover-as-new-gap suggestions, plus assign from the library onto accepted gaps. |
-| Library | Accepted and created tactics. **Create gap** and **Create tactic** live here too. |
-| Plan | Prioritize, then High / Medium / Low and Addressed. |
+| Review | Candidate gaps and tactics; accept / reject / modify; **Create gap**; **Assign tactic**. No residual. No Create tactic. |
+| Mappings | Suggested mappings (scored engine) plus assign from the library. Leftover-as-new-gap after locked partial/limited coverage. |
+| Library | Accepted and created tactics. **Create tactic** lives here. |
+| Plan | Prioritize residual H/M/L (when a residual exists) and Addressed. No residual copy on review cards. |
 
 Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps + tactics) and mapping + leftover suggestions.
 
