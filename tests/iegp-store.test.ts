@@ -271,8 +271,14 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    const gap = ingested.gaps.find((g) => g.status === "candidate")!;
+    const gap = ingested.gaps.find(
+      (g) =>
+        g.status === "candidate" &&
+        /elderly|comparative effectiveness/i.test(`${g.name} ${g.statement}`),
+    )!;
     const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
+    expect(gap).toBeTruthy();
+    expect(tactic).toBeTruthy();
     expect((await suggestMappings()).length).toBe(0);
 
     await lockGapStatus({
@@ -313,6 +319,8 @@ describe("IEGP postgres store", () => {
     const afterCreate = await suggestMappings();
     const pair = afterCreate.find((s) => s.gap_id === createdId && s.tactic_id === tactic.id);
     expect(pair).toBeTruthy();
+    expect(pair!.reasons.length).toBeGreaterThanOrEqual(2);
+    expect(pair!.reasons.join(" ")).toMatch(/elderly|chart review|comparative|65/i);
     await acceptMapping({
       gap_id: createdId,
       tactic_id: tactic.id,

@@ -140,6 +140,7 @@ test.describe("wizard once, plan forever", () => {
     const gapCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
+      .filter({ hasText: /comparative effectiveness|elderly/i })
       .first();
     const gapName = (await gapCard.getByRole("link").first().innerText()).trim();
     await gapCard.getByRole("button", { name: /accept gap/i }).click();
@@ -149,6 +150,7 @@ test.describe("wizard once, plan forever", () => {
     const tacticCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept tactic/i }) })
+      .filter({ hasText: /chart review|≥65|aged 65/i })
       .first();
     const tacticName = (await tacticCard.getByRole("link").first().innerText()).trim();
     await tacticCard.getByRole("button", { name: /accept tactic/i }).click();
@@ -161,6 +163,9 @@ test.describe("wizard once, plan forever", () => {
       .first();
     await expect(suggestion).toBeVisible();
     await expect(suggestion.locator("p").first()).toHaveText(gapName);
+    await expect(suggestion.locator("ul li").first()).toBeVisible();
+    await expect(suggestion.locator("ul li").first()).toHaveText(/.{12,}/);
+    await expect(suggestion.getByText(/score:\s*\d/i)).toHaveCount(0);
     await suggestion.getByRole("button", { name: /accept mapping/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /^accept mapping$/i }).click();

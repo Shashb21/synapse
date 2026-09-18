@@ -31,11 +31,13 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 6. Residual statement (engine drafts from uncovered dimensions; human edits and locks)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
 8. Create or assign a tactic (human-authored proposals; extracted tactics are inventory, not ideation)
-8b. Suggested mapping accept / reject (engine ranks by statement similarity; accept is the same coverage write as Assign; reject suppresses the pair)
+8b. Suggested mapping accept / reject (a scored mapping engine drafts the join; accept is the same coverage write as Assign; reject suppresses the pair)
 8c. Create a gap (human-authored; starts as validated open with a residual draft)
 9. Roadmap row
 
 Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine never writes Addressed.
+
+Suggested mappings are drafted by a deterministic scored engine (statement/question similarity, domain–type affinity, shared population/comparator/outcome cues, and a penalty when the tactic is dissemination-only). The engine never writes coverage; a human accept or reject is the gate. Mapping is inventory join, not tactic ideation — not an LLM and not embedding-clusters.
 
 ## Priority (human lock)
 

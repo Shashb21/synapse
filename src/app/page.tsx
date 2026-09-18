@@ -39,8 +39,9 @@ export default async function HomePage() {
             <section>
               <h2 className="text-[15px] font-medium text-foreground">Review gaps and tactics</h2>
               <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-                Same gate for both. Accept, reject, or modify. Suggested mappings appear after you
-                accept a gap and a tactic. You can also create a gap here.
+                Same gate for both. Accept, reject, or modify. After both are accepted, a scored
+                mapping engine drafts gap–tactic joins for you to accept or reject. You can also
+                create a gap here.
               </p>
               <ReviewQueue
                 gaps={workspace.review}
@@ -98,7 +99,7 @@ export default async function HomePage() {
         </div>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
           Newly extracted gaps and tactics. Accept, reject, or modify before they join the plan.
-          Suggested mappings between accepted gaps and library tactics sit below.
+          A scored mapping engine drafts joins between accepted gaps and library tactics below.
         </p>
         <ReviewQueue
           gaps={workspace.review}

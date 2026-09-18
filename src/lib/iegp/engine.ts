@@ -1,6 +1,5 @@
 import {
   COVERAGE_DIMENSIONS,
-  DOMAIN_LABELS,
   type CoverageDimension,
   type DimensionValue,
   type EvidenceDomain,
@@ -20,6 +19,22 @@ import type {
   Tactic,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
+import {
+  MAPPING_SCORE_FLOOR,
+  MAPPING_SUGGESTION_CAP,
+  scoreGapTacticMapping,
+  type MappingSuggestion,
+} from "./mapping";
+
+export {
+  MAPPING_SCORE_FLOOR,
+  MAPPING_SUGGESTION_CAP,
+  scoreGapTacticMapping,
+  isDisseminationTactic,
+  type MappingScore,
+  type MappingScoreExtras,
+  type MappingSuggestion,
+} from "./mapping";
 
 export const unlocked = (): {
   locked: false;
@@ -596,44 +611,6 @@ export function similarRecord(a: string, b: string, floor = 0.5): boolean {
 }
 
 const ACCEPTED_GAP_FOR_MAPPING: GapStatus[] = ["validated_open", "validated_partial"];
-export const MAPPING_SUGGESTION_CAP = 12;
-
-export type MappingSuggestion = {
-  gap_id: string;
-  gap_name: string;
-  gap_statement: string;
-  tactic_id: string;
-  tactic_name: string;
-  why: string;
-  score: number;
-};
-
-function mappingSimilarity(gap: EvidenceGap, tactic: Tactic): number {
-  return Math.max(
-    statementSimilarity(gap.statement, tactic.evidence_question),
-    statementSimilarity(gap.statement, tactic.name),
-    statementSimilarity(gap.name, tactic.evidence_question),
-    statementSimilarity(gap.name, tactic.name),
-  );
-}
-
-function sharedDomainCue(gap: EvidenceGap, tactic: Tactic): boolean {
-  const hay = `${tactic.name} ${tactic.evidence_question} ${tactic.description}`.toLowerCase();
-  const label = DOMAIN_LABELS[gap.domain].toLowerCase();
-  const slug = gap.domain.replaceAll("_", " ");
-  return hay.includes(label) || hay.includes(slug);
-}
-
-function mappingWhy(gap: EvidenceGap, sim: number, domainCue: boolean): string {
-  const label = DOMAIN_LABELS[gap.domain];
-  if (domainCue && sim >= 0.28) {
-    return `Similar statement and evidence question, plus a shared ${label} cue.`;
-  }
-  if (domainCue) return `Shared ${label} cue.`;
-  if (sim >= 0.5) return "Similar gap statement and tactic evidence question.";
-  if (sim >= 0.18) return "Related wording in the gap statement and evidence question.";
-  return "Possible match from wording overlap. Review before accepting.";
-}
 
 export function gapEligibleForMapping(status: GapStatus): boolean {
   return ACCEPTED_GAP_FOR_MAPPING.includes(status);
@@ -653,6 +630,15 @@ export function suggestMappings(state: IegpState): MappingSuggestion[] {
   const covered = new Set(
     state.coverages.map((row) => `${row.gap_id}::${row.tactic_id}`),
   );
+  const needsByGap = new Map<string, IegpState["needs"]>();
+  for (const link of state.need_gap_links) {
+    const need = state.needs.find((row) => row.id === link.need_id);
+    if (!need) continue;
+    const list = needsByGap.get(link.gap_id) ?? [];
+    list.push(need);
+    needsByGap.set(link.gap_id, list);
+  }
+  const residualByGap = new Map(state.residuals.map((row) => [row.gap_id, row.statement]));
   const gaps = state.gaps.filter((gap) => gapEligibleForMapping(gap.status));
   const tactics = state.tactics.filter((tactic) => tacticEligibleForMapping(tactic));
   const out: MappingSuggestion[] = [];
@@ -660,16 +646,21 @@ export function suggestMappings(state: IegpState): MappingSuggestion[] {
     for (const tactic of tactics) {
       const key = `${gap.id}::${tactic.id}`;
       if (rejected.has(key) || covered.has(key)) continue;
-      const sim = mappingSimilarity(gap, tactic);
-      const domainCue = sharedDomainCue(gap, tactic);
+      const scored = scoreGapTacticMapping(gap, tactic, {
+        needs: needsByGap.get(gap.id),
+        residual_statement: residualByGap.get(gap.id),
+        rejected: false,
+        covered: false,
+      });
+      if (scored.score < MAPPING_SCORE_FLOOR) continue;
       out.push({
         gap_id: gap.id,
         gap_name: gap.name,
         gap_statement: gap.statement,
         tactic_id: tactic.id,
         tactic_name: tactic.name,
-        why: mappingWhy(gap, sim, domainCue),
-        score: sim + (domainCue ? 0.08 : 0),
+        reasons: scored.reasons,
+        score: scored.score,
       });
     }
   }

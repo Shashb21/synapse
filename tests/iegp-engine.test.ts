@@ -303,6 +303,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
       expect(seed.coverages.some((c) => c.gap_id === row.gap_id && c.tactic_id === row.tactic_id)).toBe(
         false,
       );
+      expect(row.reasons.length).toBeGreaterThanOrEqual(2);
     }
     expect(suggestions.some((s) => s.gap_id === "GAP-ILD")).toBe(false);
     expect(suggestions.some((s) => s.gap_id === "GAP-CONGRESS")).toBe(false);

@@ -522,8 +522,9 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
         Suggested mappings
       </h2>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-        Ranked by statement and evidence-question similarity. Accept writes a coverage join. Reject
-        keeps the pair off this list. Nothing is auto-assigned.
+        A scored mapping engine drafts inventory joins (wording, domain/type fit, shared IEGP cues).
+        Accept writes a coverage join. Reject keeps the pair off this list. Nothing is auto-assigned,
+        and this is not an LLM.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -547,7 +548,13 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
                   {item.tactic_name}
                 </Link>
               </p>
-              <p className="mt-1 text-[12px] text-muted-foreground">{item.why}</p>
+              <ul className="mt-2 grid gap-1">
+                {item.reasons.map((reason) => (
+                  <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
               <div className="mt-3 flex flex-wrap gap-2">
                 <LockForm
                   label="Accept mapping"
