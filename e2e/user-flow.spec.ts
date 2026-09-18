@@ -58,13 +58,12 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /^review$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^tactics$/i }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /create tactic/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /accept as new gap/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /accept as new gap/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     const gapCard = page
       .locator("article")
@@ -209,17 +208,17 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
     const residualCard = page
       .locator("article")
-      .filter({ has: page.getByRole("button", { name: /accept residual/i }) })
+      .filter({ has: page.getByRole("button", { name: /accept as new gap/i }) })
       .first();
     await expect(residualCard).toBeVisible();
-    await expect(residualCard.getByRole("button", { name: /reject residual/i })).toBeVisible();
-    await expect(residualCard.getByRole("button", { name: /modify residual/i })).toBeVisible();
+    await expect(residualCard.getByRole("button", { name: /reject leftover/i })).toBeVisible();
+    await expect(residualCard.getByRole("button", { name: /modify statement/i })).toBeVisible();
     const leftover = (await residualCard.locator("p").nth(1).innerText()).trim();
     await expect(residualCard.getByText(/^Parent:/)).toBeVisible();
     expect(leftover.length).toBeGreaterThan(12);
-    await residualCard.getByRole("button", { name: /accept residual/i }).click();
+    await residualCard.getByRole("button", { name: /accept as new gap/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /add as gap/i }).click();
+    await page.getByRole("button", { name: /accept as new gap/i }).click();
 
     await places(page).getByRole("link", { name: /^mappings/i }).click();
     await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);

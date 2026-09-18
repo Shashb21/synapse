@@ -411,6 +411,7 @@ export async function lockCoverageOverall(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  await persistEligibleResidualDrafts();
 }
 
 
@@ -755,6 +756,70 @@ async function upsertResidualGapSuggestion(args: {
   await db().insert(t.residualGapSuggestions).values(row);
 }
 
+async function consumeResidualRecord(args: {
+  gap_id: string;
+  statement: string;
+  domain: EvidenceDomain;
+  rationale: string;
+  review_status: "candidate" | "accepted" | "rejected";
+  created_gap_id: string | null;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const existing = state.residuals.find((row) => row.gap_id === args.gap_id);
+  const lock =
+    args.review_status === "candidate"
+      ? existing?.lock.locked
+        ? existing.lock
+        : unlocked()
+      : makeLock(args.actor_name, args.actor_function, args.note);
+  const row = {
+    statement: args.statement,
+    domain: args.domain,
+    draft_rationale: args.rationale || existing?.draft_rationale || "Pressure-test leftover.",
+    review_status: args.review_status,
+    created_gap_id: args.created_gap_id,
+    lock,
+  };
+  if (existing) {
+    if (
+      (existing.review_status === "accepted" || existing.review_status === "rejected") &&
+      args.review_status === "candidate"
+    ) {
+      return;
+    }
+    await db().update(t.residuals).set(row).where(eq(t.residuals.id, existing.id));
+    return;
+  }
+  await db().insert(t.residuals).values({
+    id: nextId(
+      "RES",
+      state.residuals.map((r) => r.id),
+    ),
+    gap_id: args.gap_id,
+    ...row,
+  });
+}
+
+async function persistEligibleResidualDrafts() {
+  const state = await loadState();
+  for (const draft of rankResidualGapSuggestions(state)) {
+    await consumeResidualRecord({
+      gap_id: draft.parent_gap_id,
+      statement: draft.statement,
+      domain: draft.domain,
+      rationale: draft.reasons.join(" "),
+      review_status: "candidate",
+      created_gap_id: null,
+      actor_name: "Engine",
+      actor_function: "evidence_lead",
+      note: "Pressure-test draft. Human must accept, reject, or modify in Review.",
+    });
+  }
+}
+
 export async function suggestResidualGaps() {
   return rankResidualGapSuggestions(await loadState());
 }
@@ -817,6 +882,17 @@ export async function acceptResidualGap(args: {
     actor_function: args.actor_function,
     note: args.note || "Accepted leftover as a new gap.",
   });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? []).join(" "),
+    review_status: "accepted",
+    created_gap_id: childId,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Accepted leftover as a new gap.",
+  });
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -854,6 +930,17 @@ export async function modifyResidualGap(args: {
     actor_function: args.actor_function,
     note: args.note || "Modified residual statement.",
   });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? ["Human modified the leftover statement."]).join(" "),
+    review_status: "candidate",
+    created_gap_id: null,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Modified residual statement.",
+  });
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -882,6 +969,17 @@ export async function rejectResidualGap(args: {
     statement: draft?.statement ?? parent.statement,
     reasons: draft?.reasons ?? ["Human rejected this leftover."],
     status: "rejected",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Rejected leftover-as-new-gap suggestion.",
+  });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement: draft?.statement ?? parent.statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? ["Human rejected this leftover."]).join(" "),
+    review_status: "rejected",
+    created_gap_id: null,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note || "Rejected leftover-as-new-gap suggestion.",
@@ -1217,6 +1315,7 @@ export async function ingestNeedFromText(args: {
     "ingest",
     `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); coverage marked stale.`,
   );
+  await persistEligibleResidualDrafts();
   return sourceId;
 }
 

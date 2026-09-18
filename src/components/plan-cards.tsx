@@ -545,19 +545,19 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
               </ul>
               <div className="mt-3 flex flex-wrap gap-2">
                 <LockForm
-                  label="Accept residual"
+                  label="Accept as new gap"
                   action="accept_residual_gap"
                   extra={{ parent_gap_id: item.parent_gap_id, statement: item.statement }}
-                  confirmLabel="Add as gap"
+                  confirmLabel="Accept as new gap"
                 />
                 <LockForm
-                  label="Reject residual"
+                  label="Reject leftover"
                   action="reject_residual_gap"
                   extra={{ parent_gap_id: item.parent_gap_id }}
-                  confirmLabel="Reject residual"
+                  confirmLabel="Reject leftover"
                 />
                 <LockForm
-                  label="Modify residual"
+                  label="Modify statement"
                   action="modify_residual_gap"
                   extra={{ parent_gap_id: item.parent_gap_id }}
                   confirmLabel="Save statement"

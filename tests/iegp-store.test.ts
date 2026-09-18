@@ -88,9 +88,9 @@ describe("IEGP postgres store", () => {
         expect(body.split(card.statement).length - 1).toBe(1);
       }
     }
-    expect(workspace.reviewResiduals).toHaveLength(0);
-    expect(workspace.residualGapSuggestions).toHaveLength(0);
-    expect(state.residuals).toHaveLength(0);
+    expect(workspace.reviewResiduals.length).toBeGreaterThan(0);
+    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
+    expect(state.residuals.some((r) => r.review_status === "candidate")).toBe(true);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
