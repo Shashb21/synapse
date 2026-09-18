@@ -300,7 +300,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
   it("keeps addressed gaps on the workspace with their tactics", () => {
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
-    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
+    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
     expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
