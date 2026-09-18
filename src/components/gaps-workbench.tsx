@@ -8,11 +8,15 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import {
+  GAPS_TACTIC_HELPER,
+  MapExistingTactic,
+  RecordMissedFields,
+  RecordMissedTactic,
+} from "@/components/gap-tactic-actions";
+import {
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
   GAP_STATUS_LABELS,
-  TACTIC_TYPE_LABELS,
-  TACTIC_TYPES,
 } from "@/lib/iegp/enums";
 import {
   filterReviewGapCards,
@@ -90,8 +94,9 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
         />
       </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Accompanying tactic
-        <select name="tactic_id" required className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+        Accompanying library tactic
+        <select name="tactic_id" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+          <option value="">Record a missed tactic below</option>
           {tactics.map((tactic) => (
             <option key={tactic.id} value={tactic.id}>
               {tactic.name}
@@ -99,40 +104,11 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
           ))}
         </select>
       </label>
-      {tactics.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">
-          Create a tactic first (planned, ongoing, completed, or a publication).
-        </p>
-      ) : null}
-    </LockForm>
-  );
-}
-
-function CreateTacticInline() {
-  return (
-    <LockForm label="Add tactic" action="create_tactic" confirmLabel="Add tactic">
-      <input name="name" required placeholder="Tactic name" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" />
-      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
-        {TACTIC_TYPES.map((type) => (
-          <option key={type} value={type}>
-            {TACTIC_TYPE_LABELS[type]}
-          </option>
-        ))}
-      </select>
-      <input
-        name="evidence_question"
-        required
-        placeholder="Evidence question"
-        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-      />
-      <input type="hidden" name="description" value="Added from the gaps workbench." />
-      <input type="hidden" name="population" value="To be specified" />
-      <input type="hidden" name="intervention" value="Velmara" />
-      <input type="hidden" name="comparator" value="To be specified" />
-      <input type="hidden" name="outcomes" value="To be specified" />
-      <input type="hidden" name="geography" value="US + EU5" />
-      <input type="hidden" name="owner" value="" />
-      <input type="hidden" name="function" value="evidence_lead" />
+      <p className="text-[11px] text-muted-foreground">
+        Pick a library tactic, or record a missed real study (completed, ongoing, or planned). At least
+        one is required. Do not invent proposed tactics here.
+      </p>
+      <RecordMissedFields prefix />
     </LockForm>
   );
 }
@@ -214,10 +190,10 @@ export function GapsWorkbench({
           gap). A gap is the decision object. Constituent needs are the sourced statements
           underneath it.
         </p>
+        <p className="text-[12px] leading-5 text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
         <div className="flex flex-wrap items-center gap-2">
           <CreateOpenGap />
           <CreateAddressedGap tactics={availableTactics} />
-          <CreateTacticInline />
         </div>
         {cards.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">
@@ -306,6 +282,12 @@ export function GapsWorkbench({
                     <ConstituentNeedsButton card={card} />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <MapExistingTactic
+                      gapId={card.gap_id}
+                      availableTactics={availableTactics}
+                      mappedTacticIds={card.tactics.map((tactic) => tactic.id)}
+                    />
+                    <RecordMissedTactic gapId={card.gap_id} />
                     {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
                       <LockForm
                         label="Validate status"

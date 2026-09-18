@@ -78,7 +78,13 @@ function CreateGapButton() {
 
 function CreateTacticButton() {
   return (
-    <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
+    <LockForm
+      label="Create tactic"
+      action="create_tactic"
+      confirmLabel="Add to library"
+      description="Ideate a proposed tactic after Prioritize. It does not count as addressing until planned, ongoing, or completed."
+    >
+      <input type="hidden" name="origin" value="tactics" />
       <CreateTacticFields />
     </LockForm>
   );

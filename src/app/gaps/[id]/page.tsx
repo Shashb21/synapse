@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, StaleFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
+import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import {
+  buildTacticLibrary,
   computeGapStatus,
   coverageDimensionValues,
   displayedGapStatus,
@@ -55,6 +57,7 @@ export default async function GapDetailPage({
   const missing = uncoveredDimensions(coverages);
   const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const tactics = mappedTactics(state, gap.id);
+  const library = buildTacticLibrary(state);
   const parent = gap.parent_gap_id
     ? state.gaps.find((g) => g.id === gap.parent_gap_id)
     : undefined;
@@ -138,6 +141,14 @@ export default async function GapDetailPage({
           Uncovered or partial dimensions: {missing.join(", ") || "none"}. A tactic existing is not
           coverage. A publication existing is not coverage.
         </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <MapExistingTactic
+            gapId={gap.id}
+            availableTactics={library}
+            mappedTacticIds={coverages.map((c) => c.tactic_id)}
+          />
+          <RecordMissedTactic gapId={gap.id} />
+        </div>
         {coverages.map((c) => {
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
           const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);

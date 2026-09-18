@@ -29,14 +29,14 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 5. Each of 10 coverage dimensions (Change dimension — records the actor and flags other live gaps mapped to the same tactic)
 6. Overall coverage degree (Change overall coverage — same sibling-review flag; values are not copied across gaps)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
-8. Create or assign a tactic on the Tactics stage (after Prioritize)
-9. Add Open gap or Addressed gap (Addressed needs an accompanying tactic)
+8. Create or assign a **proposed** tactic on the Tactics stage (after Prioritize). Gaps does not invent studies.
+9. Add Open gap or Addressed gap (Addressed needs an accompanying library tactic **or** a recorded missed real tactic)
 
 There is **no residual paragraph** copied onto the parent gap card, and **no Review / Mappings wizard steps**. After ingest, **Gaps** is the combined mapped + status workbench.
 
 The engine drafts a leftover statement when pressure-testing says a parent is **Partially Addressed**. Clicking Partial suggests a split: the covered slice becomes Addressed with the mapped tactics the user keeps; leftover tactics are optional on the Open child. Constituent `need_gap_links` copy onto both children. The original is rewritten/deleted but kept in gap version history. Alternatively the user rewrites the original as Open or Addressed (Addressed requires ≥1 tactic).
 
-**Add open gap**, **Add addressed gap**, and **Add tactic** are visible on Gaps. Creating a gap is `validated_open` (**Open**). Creating an Addressed gap requires an accompanying tactic.
+**Add open gap** and **Add addressed gap** are visible on Gaps. Creating a gap is `validated_open` (**Open**). Creating an Addressed gap requires an accompanying tactic (existing library tactic or a recorded missed real study — not `proposed`). Gap cards **Map existing tactic** (assign/mapping APIs) or **Record missed tactic** (completed / ongoing / planned, then auto-map). Do not invent new studies on Gaps — that happens on Tactics after Prioritize. Split uses parent mapped tactics only; no create in the split dialog.
 
 Ingest applies a deterministic scored mapping engine (statement/question similarity, domain–type affinity, shared population/comparator/outcome cues, and a penalty when the tactic is dissemination-only). Mapping is inventory join, not tactic ideation — not an LLM and not embedding-clusters.
 
@@ -75,16 +75,16 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. The 
 `/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
 1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
-2. **Gaps** shows every live gap as a card (title, statement, mapped tactics with a dimensions dropdown, **View constituent needs**). Humans validate Open and Addressed. Partial must **split** (Addressed + chosen tactics on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
+2. **Gaps** shows every live gap as a card (title, statement, mapped tactics with a dimensions dropdown, **View constituent needs**). Humans validate Open and Addressed. **Map existing tactic** or **Record missed tactic** (catch-up, never `proposed`). Partial must **split** (Addressed + chosen mapped tactics on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
 3. **Prioritize** High / Medium / Low on Open gaps.
-4. **Tactics** create and assign tactics for Open gaps.
+4. **Tactics** ideate proposed tactics for Open gaps after Prioritize.
 
 | Place | What |
 | --- | --- |
 | Upload | Demo pack + ingest. |
-| Gaps | Mapped inventory, engine status, validate, split/rewrite, add Open or Addressed (Addressed needs a tactic). |
+| Gaps | Mapped inventory, engine status, validate, split/rewrite, map existing or record missed, add Open or Addressed (Addressed needs a tactic). |
 | Prioritize | Priority bands for Open gaps. Addressed bucket. |
-| Tactics | Create/assign tactics for Open gaps. |
+| Tactics | Ideate/assign proposed tactics for Open gaps. |
 
 Eval and Spec stay as secondary sidebar items.
 

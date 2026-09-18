@@ -228,6 +228,23 @@ export const TACTIC_STATUSES = [
 ] as const;
 export type TacticStatus = (typeof TACTIC_STATUSES)[number];
 
+/** Real inventory statuses Gaps may record. Proposed ideation is Tactics-only. */
+export const CATCH_UP_TACTIC_STATUSES = ["completed", "ongoing", "planned"] as const;
+export type CatchUpTacticStatus = (typeof CATCH_UP_TACTIC_STATUSES)[number];
+
+export const CATCH_UP_REASONS = [
+  "missed_at_ingest",
+  "source_not_uploaded",
+  "remembered_while_reviewing",
+] as const;
+export type CatchUpReason = (typeof CATCH_UP_REASONS)[number];
+
+export const CATCH_UP_REASON_LABELS: Record<CatchUpReason, string> = {
+  missed_at_ingest: "Missed at ingest",
+  source_not_uploaded: "Source not uploaded",
+  remembered_while_reviewing: "Remembered while reviewing this gap",
+};
+
 export const TACTIC_REVIEW_STATUSES = [
   "candidate",
   "accepted",

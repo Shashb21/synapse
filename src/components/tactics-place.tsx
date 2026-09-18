@@ -25,7 +25,9 @@ export function TacticsPlace({
       <section>
         <h2 className="mb-2 text-[15px] font-medium">Open gaps</h2>
         <p className="mb-4 text-[12px] text-muted-foreground">
-          Assign library tactics or create a new one on an Open gap.
+          Ideate proposed tactics here after Prioritize. Assign a library tactic onto an Open gap,
+          or create a new proposed one. Mapping existing inventory and recording missed studies
+          happens on Gaps.
         </p>
         <OpenGapsQueue
           cards={openGaps.filter((c) => c.gap_status === "validated_open")}

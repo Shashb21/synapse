@@ -3,21 +3,39 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 describe("Gaps workbench buttons and leftover inbox", () => {
-  it("exposes Add open gap, Add addressed gap, and Add tactic on the Gaps workbench", () => {
+  it("exposes Add open gap, Add addressed gap, Map existing, and Record missed — not proposed Add tactic", () => {
     const src = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
     expect(src).toContain('label="Add open gap"');
     expect(src).toContain('label="Add addressed gap"');
-    expect(src).toContain('label="Add tactic"');
     expect(src).toContain("create_addressed_gap");
+    expect(src).toContain("MapExistingTactic");
+    expect(src).toContain("RecordMissedTactic");
+    expect(src).toContain("GAPS_TACTIC_HELPER");
     expect(src).toContain("SplitGapDialog");
     expect(src).toContain("View constituent needs");
     expect(src).toContain("No constituent needs yet.");
     expect(src).toContain("CoverageDimensionsMenu");
     expect(src).toContain("No tactics mapped");
     expect(src).toContain("Needs validation");
+    expect(src).not.toContain('label="Add tactic"');
+    expect(src).not.toContain("create_tactic");
     expect(src).not.toContain("Accept gap");
     expect(src).not.toContain("Accept tactic");
     expect(src).not.toContain("Accept as new gap");
+    const actions = readFileSync(path.join(process.cwd(), "src/components/gap-tactic-actions.tsx"), "utf8");
+    expect(actions).toContain('label="Map existing tactic"');
+    expect(actions).toContain("assign_tactic");
+    expect(actions).toContain('label="Record missed tactic"');
+    expect(actions).toContain("record_missed_tactic");
+    expect(actions).toContain("CATCH_UP_TACTIC_STATUSES");
+    expect(actions).not.toContain("proposed");
+    expect(actions).toContain(
+      "Map tactics already in the library, or record one ingest missed or that you remember from a source not yet uploaded. Do not invent new studies here — that happens on Tactics after you prioritize.",
+    );
+    const route = readFileSync(path.join(process.cwd(), "src/app/api/iegp/route.ts"), "utf8");
+    expect(route).toContain('body.origin === "gaps"');
+    expect(route).toContain("recordMissedTactic");
+    expect(route).toContain('case "record_missed_tactic"');
   });
 
   it("does not keep a Review candidate inbox or required Mappings step", () => {
@@ -48,6 +66,11 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(tacticsRoute).toContain("TacticsPlace");
     expect(tacticsRoute).toContain("tacticsUnlocked");
     expect(tacticsRoute).not.toContain("Propose a tactic");
+    const tacticsPlace = readFileSync(path.join(process.cwd(), "src/components/tactics-place.tsx"), "utf8");
+    expect(tacticsPlace).toContain("Ideate proposed tactics here after Prioritize");
+    expect(cards).toContain('label="Create tactic"');
+    expect(cards).toContain("create_tactic");
+    expect(cards).toContain('name="origin" value="tactics"');
   });
 
   it("override dialog requires a reason, omits Partial, and Cancel does not save", () => {
@@ -71,6 +94,10 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(dialog).toContain("tactic_ids");
     expect(dialog).toContain("addressed_statement");
     expect(dialog).toContain("At least one tactic");
+    expect(dialog).not.toContain("create_tactic");
+    expect(dialog).not.toContain("record_missed_tactic");
+    expect(dialog).not.toContain("Record missed");
+    expect(dialog).toContain("Map an existing tactic or record a missed one on Gaps first.");
     const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
     expect(workbench).toContain("<GapBadge status={card.gap_status} />");
     expect(workbench).toContain("SplitGapDialog");
@@ -81,6 +108,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(detail).toContain("confirm_coverage_review");
     expect(detail).toContain("CoverageDimensionsMenu");
     expect(detail).toContain("No constituent needs yet.");
+    expect(detail).toContain("MapExistingTactic");
+    expect(detail).toContain("RecordMissedTactic");
   });
 
   it("replaces stale re-lock copy and distinguishes sibling review from outdated coverage", () => {

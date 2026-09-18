@@ -12,8 +12,9 @@ export default async function TacticsPage() {
   return (
     <AppShell active="tactics">
       <PageIntro kicker="Open gaps only" title="Tactics">
-        Create and assign tactics for Open gaps after they are prioritized. Proposed tactics do not
-        change gap status until they are planned, ongoing, or completed.
+        Create and assign proposed tactics for Open gaps after they are prioritized. Proposed tactics
+        do not change gap status until they are planned, ongoing, or completed. Recording missed
+        real studies happens on Gaps.
       </PageIntro>
       <TacticsPlace
         unlocked={gates.tacticsUnlocked}

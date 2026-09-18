@@ -8,6 +8,7 @@ import {
   createAddressedGap,
   createGap,
   createProposedTactic,
+  recordMissedTactic,
   ingestDemoSource,
   ingestNeedFromText,
   lockCoverageDimension,
@@ -145,6 +146,28 @@ export async function POST(request: Request) {
         });
         break;
       case "create_tactic":
+        if (body.origin === "gaps") {
+          await recordMissedTactic({
+            name: body.name,
+            type: body.type as never,
+            description: body.description,
+            evidence_question: body.evidence_question,
+            population: body.population,
+            intervention: body.intervention,
+            comparator: body.comparator,
+            outcomes: body.outcomes,
+            geography: body.geography,
+            owner: body.owner,
+            function: body.function as ActorFunction,
+            residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
+            gap_id: body.gap_id || undefined,
+            status: body.status,
+            catch_up_reason: body.catch_up_reason,
+            actor_name,
+            actor_function,
+          });
+          break;
+        }
         await createProposedTactic({
           name: body.name,
           type: body.type as never,
@@ -159,6 +182,27 @@ export async function POST(request: Request) {
           function: body.function as ActorFunction,
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
           gap_id: body.gap_id || undefined,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "record_missed_tactic":
+        await recordMissedTactic({
+          name: body.name,
+          type: body.type as never,
+          description: body.description,
+          evidence_question: body.evidence_question,
+          population: body.population,
+          intervention: body.intervention,
+          comparator: body.comparator,
+          outcomes: body.outcomes,
+          geography: body.geography,
+          owner: body.owner,
+          function: body.function as ActorFunction,
+          residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
+          gap_id: body.gap_id || undefined,
+          status: body.status,
+          catch_up_reason: body.catch_up_reason,
           actor_name,
           actor_function,
         });
@@ -311,6 +355,11 @@ export async function POST(request: Request) {
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
           tactic_id: body.tactic_id,
+          missed_name: body.tactic_name,
+          missed_type: (body.tactic_type || undefined) as never,
+          missed_status: body.tactic_status,
+          missed_evidence_question: body.tactic_evidence_question,
+          catch_up_reason: body.catch_up_reason,
           actor_name,
           actor_function,
           note: body.note,

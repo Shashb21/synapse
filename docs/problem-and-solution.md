@@ -52,9 +52,9 @@ flowchart TD
   upload["Upload sources"]
   extract["Extract gaps and tactics already mapped"]
   gaps["Gaps workbench: engine status, validate, split or rewrite"]
-  create["Add Open gap · Add Addressed gap with tactic"]
+  create["Add Open gap · Add Addressed gap with library or missed tactic"]
   pri["Prioritize: High / Medium / Low on Open gaps"]
-  tac["Tactics: create and assign for Open gaps"]
+  tac["Tactics: ideate proposed tactics for Open gaps"]
   later["Later ingest"]
   upload --> extract
   extract --> gaps

@@ -14,6 +14,8 @@ import {
   assignTacticToGap,
   lockCoverageDimension,
   confirmCoverageReview,
+  recordMissedTactic,
+  createTacticFromGaps,
 } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
@@ -347,5 +349,125 @@ describe("partial split and rewrite", () => {
     expect(confirmed.coverages.find((c) => c.id === covB.id)?.needs_review).toBe(false);
     expect(confirmed.coverages.find((c) => c.id === covB.id)?.dimensions.relevance.value).toBe("unknown");
     expect(displayedGapStatus(confirmed.gaps.find((g) => g.id === gapB)!)).toBe(statusB);
+  });
+});
+
+describe("Gaps map existing vs record missed vs proposed", () => {
+  function missedDraft(name: string, status: "completed" | "ongoing" | "planned") {
+    return {
+      name,
+      type: "rwe_study" as const,
+      evidence_question: `${name} question`,
+      status,
+      actor_name: "A. Rao" as const,
+      actor_function: "heor" as const,
+    };
+  }
+
+  it("maps an existing library tactic onto a gap from the Gaps path", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "Need comparative effectiveness versus regional SoC in elderly patients.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const tacticId = await recordMissedTactic(missedDraft("Library claims study", "ongoing"));
+    const before = await loadState();
+    expect(before.coverages.some((c) => c.gap_id === gapId && c.tactic_id === tacticId)).toBe(false);
+    await assignTacticToGap({
+      gap_id: gapId,
+      tactic_id: tacticId,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const after = await loadState();
+    expect(after.coverages.some((c) => c.gap_id === gapId && c.tactic_id === tacticId)).toBe(true);
+    expect(after.tactics.find((t) => t.id === tacticId)?.status).toBe("ongoing");
+  });
+
+  it("records missed ongoing, completed, and planned tactics and auto-maps them onto the gap", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "Need ILD characterisation in community oncology clinics.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const reasons = ["missed_at_ingest", "source_not_uploaded", "remembered_while_reviewing"] as const;
+    const statuses = ["ongoing", "completed", "planned"] as const;
+    const ids: string[] = [];
+    for (const [index, status] of statuses.entries()) {
+      const tacticId = await recordMissedTactic({
+        ...missedDraft(`Catch-up ${status} study`, status),
+        gap_id: gapId,
+        catch_up_reason: reasons[index],
+      });
+      ids.push(tacticId);
+    }
+    const after = await loadState();
+    for (const [index, status] of statuses.entries()) {
+      expect(after.tactics.find((t) => t.id === ids[index])?.status).toBe(status);
+      expect(after.coverages.some((c) => c.gap_id === gapId && c.tactic_id === ids[index])).toBe(true);
+    }
+    expect(after.tactics.filter((t) => ids.includes(t.id)).every((t) => t.status !== "proposed")).toBe(true);
+  });
+
+  it("rejects proposed from the Gaps create-tactic path", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "White-space leftover after mapping",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const draft = {
+      name: "Invented chart review",
+      type: "chart_review" as const,
+      evidence_question: "Would a new chart review close this?",
+      gap_id: gapId,
+      actor_name: "A. Rao" as const,
+      actor_function: "heor" as const,
+    };
+    await expect(recordMissedTactic({ ...draft, status: "proposed" })).rejects.toThrow(/proposed/i);
+    await expect(createTacticFromGaps({ ...draft, status: "proposed" })).rejects.toThrow(
+      /Tactics after you prioritize/i,
+    );
+    await expect(
+      createAddressedGap({
+        statement: "White-space leftover after mapping",
+        missed_name: "Invented chart review",
+        missed_type: "chart_review",
+        missed_status: "proposed",
+        missed_evidence_question: "Would a new chart review close this?",
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      }),
+    ).rejects.toThrow(/proposed/i);
+    const after = await loadState();
+    expect(after.tactics.some((t) => t.name === "Invented chart review")).toBe(false);
+    expect(after.coverages.filter((c) => c.gap_id === gapId)).toHaveLength(0);
+  });
+
+  it("still requires a tactic when adding an Addressed gap", async () => {
+    await resetSeed();
+    await expect(
+      createAddressedGap({
+        statement: "PFS versus osimertinib in the pivotal trial",
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      }),
+    ).rejects.toThrow(/accompanying tactic/i);
+    const viaMissed = await createAddressedGap({
+      statement: "PFS versus osimertinib in the pivotal trial",
+      missed_name: "VEL-301 PFS manuscript",
+      missed_type: "publication",
+      missed_status: "completed",
+      missed_evidence_question: "Is PFS versus osimertinib closed?",
+      catch_up_reason: "source_not_uploaded",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const after = await loadState();
+    expect(displayedGapStatus(after.gaps.find((g) => g.id === viaMissed)!)).toBe("validated_addressed");
+    expect(after.coverages.some((c) => c.gap_id === viaMissed)).toBe(true);
+    expect(after.tactics.find((t) => t.name === "VEL-301 PFS manuscript")?.status).toBe("completed");
   });
 });

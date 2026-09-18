@@ -361,7 +361,7 @@ export function SplitGapDialog({
                   tactics={tactics}
                   selected={addressedTacticIds}
                   onToggle={(id) => setAddressedTacticIds((prev) => toggleId(prev, id))}
-                  empty="Create or map a tactic first."
+                  empty="Map an existing tactic or record a missed one on Gaps first."
                 />
               </div>
             ) : null}

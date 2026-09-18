@@ -4,8 +4,20 @@ import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
-import type { ActorFunction, EvidenceDomain, MappedGapStatus } from "./enums";
-import { EVIDENCE_DOMAINS } from "./enums";
+import type {
+  ActorFunction,
+  CatchUpReason,
+  CatchUpTacticStatus,
+  EvidenceDomain,
+  MappedGapStatus,
+} from "./enums";
+import {
+  CATCH_UP_REASON_LABELS,
+  CATCH_UP_REASONS,
+  CATCH_UP_TACTIC_STATUSES,
+  EVIDENCE_DOMAINS,
+  TACTIC_TYPES,
+} from "./enums";
 import {
   computeGapStatus,
   displayedGapStatus,
@@ -857,6 +869,93 @@ export async function lockPriority(args: {
   );
 }
 
+export const GAPS_PROPOSED_CREATE_ERROR =
+  "Gaps cannot create proposed tactics. Record a completed, ongoing, or planned study, or invent on Tactics after you prioritize.";
+
+function requireCatchUpStatus(status: string | undefined): CatchUpTacticStatus {
+  if (!status || status === "proposed" || status === "cancelled") {
+    throw new Error(GAPS_PROPOSED_CREATE_ERROR);
+  }
+  if (!(CATCH_UP_TACTIC_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(GAPS_PROPOSED_CREATE_ERROR);
+  }
+  return status as CatchUpTacticStatus;
+}
+
+function optionalCatchUpReason(value?: string | null): CatchUpReason | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (!(CATCH_UP_REASONS as readonly string[]).includes(trimmed)) {
+    throw new Error("Unknown catch-up reason.");
+  }
+  return trimmed as CatchUpReason;
+}
+
+type LibraryTacticDraft = {
+  name: string;
+  type: IegpState["tactics"][0]["type"];
+  description: string;
+  evidence_question: string;
+  population?: string;
+  intervention?: string;
+  comparator?: string;
+  outcomes?: string;
+  geography?: string;
+  owner?: string;
+  function?: ActorFunction;
+  residual_ids?: string[];
+  status: IegpState["tactics"][0]["status"];
+  lifecycle_stage: string;
+  intended_use?: string;
+  data_source?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  audit_action: string;
+  note?: string;
+};
+
+async function insertLibraryTactic(args: LibraryTacticDraft) {
+  const state = await loadState();
+  if (!args.name.trim()) throw new Error("Tactic name is required.");
+  if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
+  if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
+  const id = nextId("TAC", state.tactics.map((x) => x.id));
+  const reasonNote = args.note?.trim() || null;
+  await db().insert(t.tactics).values({
+    id,
+    name: args.name.trim(),
+    type: args.type,
+    description: args.description || args.name.trim(),
+    evidence_question: args.evidence_question.trim(),
+    population: args.population || "To be specified",
+    intervention: args.intervention || "Velmara",
+    comparator: args.comparator || "To be specified",
+    outcomes: args.outcomes || "To be specified",
+    geography: args.geography || state.asset.geography,
+    data_source: args.data_source || "To be designed",
+    study_design: "To be designed",
+    lifecycle_stage: args.lifecycle_stage,
+    status: args.status,
+    review_status: "accepted",
+    start_date: null,
+    evidence_available: null,
+    owner: args.owner || args.actor_name,
+    function: args.function || "evidence_lead",
+    budget: null,
+    intended_use: args.intended_use || (args.residual_ids || []).join(", "),
+    lock: reasonNote ? makeLock(args.actor_name, args.actor_function, reasonNote) : unlocked(),
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "tactic",
+    id,
+    args.audit_action,
+    args.name.trim(),
+  );
+  return id;
+}
+
 export async function createProposedTactic(args: {
   name: string;
   type: IegpState["tactics"][0]["type"];
@@ -874,40 +973,25 @@ export async function createProposedTactic(args: {
   actor_name: string;
   actor_function: ActorFunction;
 }) {
-  const state = await loadState();
-  const id = nextId("TAC", state.tactics.map((x) => x.id));
-  await db().insert(t.tactics).values({
-    id,
+  const id = await insertLibraryTactic({
     name: args.name,
     type: args.type,
-    description: args.description || args.name,
+    description: args.description,
     evidence_question: args.evidence_question,
-    population: args.population || "To be specified",
-    intervention: args.intervention || "Velmara",
-    comparator: args.comparator || "To be specified",
-    outcomes: args.outcomes || "To be specified",
-    geography: args.geography || state.asset.geography,
-    data_source: "To be designed",
-    study_design: "To be designed",
-    lifecycle_stage: "proposed",
+    population: args.population,
+    intervention: args.intervention,
+    comparator: args.comparator,
+    outcomes: args.outcomes,
+    geography: args.geography,
+    owner: args.owner,
+    function: args.function,
+    residual_ids: args.residual_ids,
     status: "proposed",
-    review_status: "accepted",
-    start_date: null,
-    evidence_available: null,
-    owner: args.owner || args.actor_name,
-    function: args.function || "evidence_lead",
-    budget: null,
-    intended_use: args.residual_ids.join(", "),
-    lock: unlocked(),
+    lifecycle_stage: "proposed",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    audit_action: "create_proposed",
   });
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "tactic",
-    id,
-    "create_proposed",
-    args.name,
-  );
   if (args.gap_id) {
     await assignTacticToGap({
       gap_id: args.gap_id,
@@ -918,6 +1002,74 @@ export async function createProposedTactic(args: {
     });
   }
   return id;
+}
+
+/** Gaps catch-up create. Rejects `proposed` — ideation is Tactics after Prioritize. */
+export async function recordMissedTactic(args: {
+  name: string;
+  type: IegpState["tactics"][0]["type"];
+  description?: string;
+  evidence_question: string;
+  population?: string;
+  intervention?: string;
+  comparator?: string;
+  outcomes?: string;
+  geography?: string;
+  owner?: string;
+  function?: ActorFunction;
+  residual_ids?: string[];
+  gap_id?: string;
+  status: string;
+  catch_up_reason?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const status = requireCatchUpStatus(args.status);
+  const reason = optionalCatchUpReason(args.catch_up_reason);
+  const reasonLabel = reason ? CATCH_UP_REASON_LABELS[reason] : undefined;
+  const id = await insertLibraryTactic({
+    name: args.name,
+    type: args.type,
+    description:
+      args.description ||
+      `Recorded as catch-up (${status}). Not ideation.`,
+    evidence_question: args.evidence_question,
+    population: args.population,
+    intervention: args.intervention,
+    comparator: args.comparator,
+    outcomes: args.outcomes,
+    geography: args.geography,
+    owner: args.owner,
+    function: args.function,
+    residual_ids: args.residual_ids,
+    status,
+    lifecycle_stage: "recorded",
+    intended_use: reasonLabel || (args.residual_ids || []).join(", "),
+    data_source: reasonLabel || "Recorded while reviewing gaps",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    audit_action: "record_missed",
+    note: reasonLabel,
+  });
+  if (args.gap_id) {
+    await assignTacticToGap({
+      gap_id: args.gap_id,
+      tactic_id: id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: reasonLabel
+        ? `Recorded missed tactic (${reasonLabel}) and mapped onto this gap.`
+        : "Recorded missed tactic and mapped onto this gap.",
+    });
+  }
+  return id;
+}
+
+/** Gaps create-tactic path. Same as recordMissedTactic — rejects `proposed`. */
+export async function createTacticFromGaps(
+  args: Parameters<typeof recordMissedTactic>[0],
+) {
+  return recordMissedTactic(args);
 }
 
 export async function assignTacticToGap(args: {
@@ -2201,12 +2353,33 @@ export async function createAddressedGap(args: {
   name?: string;
   statement: string;
   domain?: EvidenceDomain;
-  tactic_id: string;
+  tactic_id?: string;
+  missed_name?: string;
+  missed_type?: IegpState["tactics"][0]["type"];
+  missed_status?: string;
+  missed_evidence_question?: string;
+  missed_description?: string;
+  catch_up_reason?: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
 }) {
-  if (!args.tactic_id) throw new Error("Addressed gaps need an accompanying tactic.");
+  let tacticId = args.tactic_id?.trim();
+  if (!tacticId) {
+    if (!args.missed_name?.trim()) {
+      throw new Error("Addressed gaps need an accompanying tactic.");
+    }
+    tacticId = await recordMissedTactic({
+      name: args.missed_name,
+      type: args.missed_type || "rwe_study",
+      description: args.missed_description,
+      evidence_question: args.missed_evidence_question || args.statement,
+      status: args.missed_status || "",
+      catch_up_reason: args.catch_up_reason,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+  }
   const id = await createGap({
     name: args.name,
     statement: args.statement,
@@ -2217,7 +2390,7 @@ export async function createAddressedGap(args: {
   });
   await insertClosingCoverage({
     gap_id: id,
-    tactic_id: args.tactic_id,
+    tactic_id: tacticId,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: "Created as Addressed with accompanying tactic.",
