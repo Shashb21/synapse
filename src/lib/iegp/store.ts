@@ -8,12 +8,14 @@ import type { ActorFunction, EvidenceDomain } from "./enums";
 import { EVIDENCE_DOMAINS } from "./enums";
 import {
   draftResidualGapSuggestion,
+  draftResidualStatement,
   emptyDimensions,
   extractCandidateGaps,
   extractCandidateNeeds,
   extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
+  residualDraftEligible,
   residualGapEligible,
   splitSourceIntoBlocks,
   similarRecord,
@@ -406,10 +408,44 @@ export async function lockCoverageOverall(args: {
     "lock_overall",
     args.overall,
   );
+  await ensureResidualDraft(row.gap_id);
   await enqueueResidualGapSuggestion({
     gap_id: row.gap_id,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
+  });
+}
+
+
+async function ensureResidualDraft(gap_id: string) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === gap_id);
+  if (!gap) return;
+  const coverages = state.coverages.filter((c) => c.gap_id === gap_id);
+  if (!residualDraftEligible({ gap, coverages })) return;
+  const draft = draftResidualStatement({ gap, coverages });
+  const existing = state.residuals.find((r) => r.gap_id === gap_id);
+  if (existing) {
+    if (existing.lock.locked) return;
+    await db()
+      .update(t.residuals)
+      .set({
+        statement: draft.statement,
+        draft_rationale: draft.rationale,
+        domain: draft.domain,
+      })
+      .where(eq(t.residuals.id, existing.id));
+    return;
+  }
+  await db().insert(t.residuals).values({
+    id: nextId("RES", state.residuals.map((r) => r.id)),
+    gap_id,
+    statement: draft.statement,
+    domain: draft.domain,
+    draft_rationale: draft.rationale,
+    review_status: "candidate",
+    created_gap_id: null,
+    lock: unlocked(),
   });
 }
 
@@ -797,7 +833,7 @@ export async function acceptResidualGap(args: {
     note: args.note || "Accepted leftover as a new gap. Parent preserved.",
     parent_gap_id: args.parent_gap_id,
   });
-  if (parent.status === "candidate" || parent.status === "validated_open") {
+  if (parent.status === "validated_open") {
     await lockGapStatus({
       gap_id: args.parent_gap_id,
       status: "validated_partial",

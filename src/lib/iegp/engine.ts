@@ -189,7 +189,13 @@ export function residualGapEligible(args: {
   suppressed: boolean;
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
-  if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
+  if (
+    args.gap.status === "candidate" ||
+    args.gap.status === "excluded" ||
+    args.gap.status === "validated_addressed"
+  ) {
+    return false;
+  }
   return residualDraftEligible(args);
 }
 
@@ -300,15 +306,19 @@ function needsForGap(state: IegpState, gapId: string) {
 }
 
 function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
-  return state.coverages.filter(
-    (c) =>
-      c.gap_id === gap.id &&
-      c.overall_lock.locked &&
-      (c.overall === "partial" || c.overall === "limited"),
-  );
+  const stored = state.coverages.filter((c) => c.gap_id === gap.id);
+  if (residualDraftEligible({ gap, coverages: stored })) {
+    return stored.filter(
+      (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
+    );
+  }
+  const unlockedPartial = stored.filter((c) => !c.overall_lock.locked && c.overall === "partial");
+  if (unlockedPartial.length > 0) return unlockedPartial;
+  if (stored.length > 0) return [];
+  return inferPressureTestCoverages(gap, state.tactics, { needs: needsForGap(state, gap.id) });
 }
 
-/** Ranked leftover-as-new-gap drafts for Mappings. Engine suggests; it does not create the child. */
+/** Ranked leftover-as-new-gap drafts for Review. Engine suggests; it does not create the child. */
 export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
   const suppressed = new Set(
     state.residual_gap_suggestions
@@ -1048,7 +1058,6 @@ export function buildPlanWorkspace(state: IegpState): {
   const unprioritized: UnprioritizedGapCard[] = [];
   for (const residual of state.residuals) {
     if (prioritizedResidual.has(residual.id)) continue;
-    if (residual.review_status === "candidate" || residual.review_status === "rejected") continue;
     if (residual.created_gap_id) continue;
     const gap = state.gaps.find((g) => g.id === residual.gap_id);
     if (!gap) continue;

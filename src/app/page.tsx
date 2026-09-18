@@ -8,7 +8,6 @@ import {
   PrioritizeQueue,
   ReviewQueue,
   SuggestedMappings,
-  SuggestedResidualGaps,
   TacticLibrary,
 } from "@/components/plan-cards";
 import { StaleFlag } from "@/components/iegp-badges";
@@ -51,18 +50,17 @@ function PlaceIntro({
   if (place === "review") {
     return (
       <PageIntro kicker="Accept, reject, or modify" title="Review">
-        Step 1 after ingest: validate extracted gaps and tactics. Create gap and Create tactic live
-        here. Leftover evidence need is not dumped onto the parent — it is suggested as a new gap on
-        Mappings after a pressure-test.
+        One validation step after ingest: extracted gaps, extracted tactics, and residual evidence
+        needs when pressure-testing says a parent is already partial. Accept residual creates that
+        leftover as a new gap. Create gap and Create tactic live here.
       </PageIntro>
     );
   }
   if (place === "mappings") {
     return (
       <PageIntro kicker="Inventory joins" title="Mappings">
-        Step 2: a scored engine suggests gap–tactic pairs after both are accepted. When overall
-        coverage is locked partial or limited, leftover is suggested as a new gap. Accept creates the
-        child (parent preserved). Reject persists and does not spam.
+        A scored engine suggests gap–tactic pairs after both are accepted. Accept or reject those
+        drafts, or assign from the library onto an accepted gap.
       </PageIntro>
     );
   }
@@ -112,6 +110,7 @@ export default async function HomePage({
       <ReviewQueue
         gaps={workspace.review}
         tactics={workspace.reviewTactics}
+        residuals={workspace.residualGapSuggestions}
         availableTactics={workspace.availableTactics}
         emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
       />
@@ -125,7 +124,6 @@ export default async function HomePage({
     pane = gates.mappingsUnlocked ? (
       <div className="grid gap-10">
         <SuggestedMappings items={workspace.mappingSuggestions} />
-        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
         <section aria-labelledby="accepted-gaps">
           <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
             Accepted gaps
