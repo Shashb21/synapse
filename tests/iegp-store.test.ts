@@ -16,7 +16,7 @@ describe("IEGP postgres store", () => {
     expect(state.residuals).toHaveLength(0);
   });
 
-  it("seeds the worked example and refuses Addressed without a reason when coverage is not full", async () => {
+  it("seeds the worked example and refuses to lock a Partial as Addressed", async () => {
     const state = await resetWorkedExample();
     expect(state.gaps.length).toBeGreaterThan(8);
     await expect(
@@ -26,20 +26,28 @@ describe("IEGP postgres store", () => {
         actor_name: "Test",
         actor_function: "evidence_lead",
       }),
-    ).rejects.toThrow(/reason is required|Cannot lock Addressed/i);
+    ).rejects.toThrow(/cannot stay/i);
   });
 
-  it("allows addressed with an override note", async () => {
+  it("allows Open to be overridden to Addressed with a reason", async () => {
     await persistState(buildSeed());
+    await expect(
+      lockGapStatus({
+        gap_id: "GAP-CNS",
+        status: "validated_addressed",
+        actor_name: "S. Iyer",
+        actor_function: "evidence_lead",
+      }),
+    ).rejects.toThrow(/reason is required|Cannot lock Addressed/i);
     await lockGapStatus({
-      gap_id: "GAP-ELDERLY-CE",
+      gap_id: "GAP-CNS",
       status: "validated_addressed",
       actor_name: "S. Iyer",
       actor_function: "evidence_lead",
       note: "Governance accepted remaining residual as out of cycle.",
     });
     const state = await loadState();
-    const gap = state.gaps.find((g) => g.id === "GAP-ELDERLY-CE");
+    const gap = state.gaps.find((g) => g.id === "GAP-CNS");
     expect(gap?.status).toBe("validated_addressed");
     expect(gap?.status_lock.locked).toBe(true);
   });
