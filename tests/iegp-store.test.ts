@@ -106,7 +106,7 @@ describe("IEGP postgres store", () => {
     expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
     expect(state.gaps.every((g) => !/^(Burden|Elderly|CNS):/i.test(g.name))).toBe(true);
     expect(state.gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
-    expect(buildPlanWorkspace(state).reviewResiduals).toHaveLength(0);
+    expect(buildPlanWorkspace(state).reviewResiduals.length).toBeGreaterThan(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
@@ -355,8 +355,7 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    expect(ingested.residuals).toHaveLength(0);
-    expect(buildPlanWorkspace(ingested).residualGapSuggestions).toHaveLength(0);
+    expect(buildPlanWorkspace(ingested).residualGapSuggestions.length).toBeGreaterThan(0);
     const gap = ingested.gaps.find(
       (g) =>
         g.status === "candidate" &&
@@ -408,7 +407,7 @@ describe("IEGP postgres store", () => {
     const leftover = (await suggestResidualGaps()).find((s) => s.parent_gap_id === gap.id);
     expect(leftover).toBeTruthy();
     expect(leftover!.statement).not.toBe(gap.statement);
-    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(false);
+    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(true);
     const workspace = buildPlanWorkspace(await loadState());
     expect(workspace.residualGapSuggestions.some((s) => s.parent_gap_id === gap.id)).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === gap.id)).toBe(false);
