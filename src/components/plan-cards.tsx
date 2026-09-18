@@ -125,6 +125,15 @@ function CreateTacticFields() {
 }
 
 
+function CreateActions() {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <CreateGapButton />
+      <CreateTacticButton />
+    </div>
+  );
+}
+
 function GapTacticsBlock({
   gapId,
   tactics,
@@ -423,17 +432,15 @@ export function GapPlanCard({
 export function ReviewQueue({
   gaps,
   tactics,
-  residuals,
   emptyHint,
   availableTactics,
 }: {
   gaps: ReviewGapCard[];
   tactics: ReviewTacticCard[];
-  residuals: ResidualGapSuggestion[];
   emptyHint: string;
   availableTactics: AvailableTactic[];
 }) {
-  if (gaps.length === 0 && tactics.length === 0 && residuals.length === 0) {
+  if (gaps.length === 0 && tactics.length === 0) {
     return (
       <div className="grid gap-3">
         <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
@@ -474,7 +481,6 @@ export function ReviewQueue({
           </div>
         )}
       </section>
-      <SuggestedResidualGaps items={residuals} />
     </div>
   );
 }
@@ -504,10 +510,10 @@ export function PrioritizeQueue({
 
 export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
   return (
-    <section aria-labelledby="review-residuals">
-      <h3 id="review-residuals" className="mb-3 text-[13px] font-medium text-foreground">
-        Residual evidence needs
-      </h3>
+    <section aria-labelledby="suggested-residual-gaps">
+      <h2 id="suggested-residual-gaps" className="text-[15px] font-medium text-foreground">
+        Leftover as a new gap
+      </h2>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
         After a pressure-test, partial or limited coverage means the leftover evidence need is a new
         gap. Accept creates that child (parent stays). Reject persists so this pair is not suggested
@@ -668,7 +674,7 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
         </ul>
       )}
       <div className="mt-3">
-        <CreateTacticButton />
+        <CreateActions />
       </div>
     </section>
   );

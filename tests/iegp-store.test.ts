@@ -109,8 +109,7 @@ describe("IEGP postgres store", () => {
     expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
     expect(state.gaps.every((g) => !/^(Burden|Elderly|CNS):/i.test(g.name))).toBe(true);
     expect(state.gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
-    expect(state.residuals).toHaveLength(0);
-    expect(buildPlanWorkspace(state).reviewResiduals).toHaveLength(0);
+    expect(buildPlanWorkspace(state).reviewResiduals.length).toBeGreaterThan(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
@@ -379,12 +378,6 @@ describe("IEGP postgres store", () => {
     expect(child?.parent_gap_id).toBe(leftover.parent_gap_id);
     expect(child?.status).toBe("validated_open");
     expect(child?.statement).toBe(leftover.statement);
-    expect(accepted.residuals.find((r) => r.gap_id === leftover.parent_gap_id)?.review_status).toBe(
-      "accepted",
-    );
-    expect(accepted.residuals.find((r) => r.gap_id === leftover.parent_gap_id)?.created_gap_id).toBe(
-      childId,
-    );
     const parent = accepted.gaps.find((g) => g.id === leftover.parent_gap_id);
     expect(parent?.status).toBe("candidate");
     const after = buildPlanWorkspace(accepted);

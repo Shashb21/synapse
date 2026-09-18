@@ -43,45 +43,34 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics → human accept/reject/modify → pressure-test mappings + coverage → leftover suggested as a new gap → human priority → living plan.
+Strategic objectives → sources → extracted gaps + tactics → **one Review step** (gaps, tactics, residual evidence needs) → mappings → living plan.
 
-### IEGP process (two-step)
+### IEGP process (single Review step)
 
 ```mermaid
 flowchart TD
-  upload["1. Upload sources"]
+  upload["Upload sources"]
   extract["Extract gaps and tactics"]
-  review["Review: accept / reject / modify"]
-  createGap["Create gap on Review"]
-  createTactic["Create tactic on Library"]
-  map["2. Pressure-test mappings"]
-  cover["Lock coverage"]
-  leftover{"Overall partial / limited?"}
-  residual["Draft ResidualNeed for Plan"]
-  suggest["Suggest leftover as a new gap"]
-  acceptChild["Accept → child gap, parent preserved"]
-  rejectChild["Reject → persist, do not spam"]
+  review["Review: gaps, tactics, residual evidence needs"]
+  create["Create gap · Create tactic"]
+  acceptChild["Accept residual → child gap, parent preserved"]
+  rejectChild["Reject residual → persist, do not spam"]
+  map["Mappings: suggested joins"]
   board["Plan: High / Medium / Low"]
   later["Later ingest"]
   upload --> extract
   extract --> review
-  createGap --> review
-  createTactic --> map
+  create --> review
+  review --> acceptChild
+  review --> rejectChild
   review --> map
-  map --> cover
-  cover --> leftover
-  leftover -->|yes| residual
-  leftover -->|yes, no child yet| suggest
-  leftover -->|no| board
-  residual --> board
-  suggest --> acceptChild
-  suggest --> rejectChild
   acceptChild --> board
   rejectChild --> board
+  map --> board
   later --> upload
 ```
 
-Create gap lives on Review. Create tactic lives on Library. Gap cards show the sentence once. Residual is not drafted on ingest, accept, or create-gap — only after overall coverage is locked partial or limited. Gantt / gates timeline is parked (docs only).
+Create gap and Create tactic are visible on Review and Library. Gap cards show the sentence once. Residual is its own Review row — leftover wording after (proposed) partial coverage, not a copy of the parent. Gantt / gates timeline is parked (docs only).
 
 ### Traceability
 
@@ -91,7 +80,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system extracts a **candidate evidence need** and a **candidate gap**. It does not dump a residual paragraph onto the card and does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto mappings. After coverage is locked partial or limited, leftover is suggested as a new gap.
+The system extracts a **candidate evidence need** and a **candidate gap**. It does not dump a residual paragraph onto the card and does not accept the gap. Pressure-test is a backend engine: when extracted tactics only partially cover the parent, a leftover draft appears in the **same Review list**. Accept / reject / modify happens there. After that, humans live on the plan.
 
 ### Worked mapping (Velmara seed)
 
