@@ -88,12 +88,9 @@ describe("IEGP postgres store", () => {
         expect(body.split(card.statement).length - 1).toBe(1);
       }
     }
-    expect(workspace.reviewResiduals.length).toBeGreaterThan(0);
-    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
-    for (const leftover of workspace.reviewResiduals) {
-      expect(leftover.statement).not.toBe(leftover.parent_statement);
-      expect(leftover.statement.toLowerCase()).not.toMatch(/^parent:/);
-    }
+    expect(workspace.reviewResiduals).toHaveLength(0);
+    expect(workspace.residualGapSuggestions).toHaveLength(0);
+    expect(state.residuals).toHaveLength(0);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
@@ -109,7 +106,7 @@ describe("IEGP postgres store", () => {
     expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
     expect(state.gaps.every((g) => !/^(Burden|Elderly|CNS):/i.test(g.name))).toBe(true);
     expect(state.gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
-    expect(buildPlanWorkspace(state).reviewResiduals.length).toBeGreaterThan(0);
+    expect(buildPlanWorkspace(state).reviewResiduals).toHaveLength(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
@@ -350,7 +347,7 @@ describe("IEGP postgres store", () => {
     ).toBe(false);
   });
 
-  it("presents residuals in Review after ingest and accept residual creates a child gap", async () => {
+  it("locking partial coverage suggests leftover as a new gap; accept creates a child", async () => {
     await resetSeed();
     await ingestDemoSource({
       demo_id: "heor-interview",
@@ -358,45 +355,16 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    const workspace = buildPlanWorkspace(ingested);
-    expect(workspace.review.length).toBeGreaterThan(0);
-    expect(workspace.reviewTactics.length).toBeGreaterThan(0);
-    expect(workspace.reviewResiduals.length).toBeGreaterThan(0);
-    const leftover =
-      workspace.reviewResiduals.find((row) =>
-        /elderly|comparative|standard of care/i.test(`${row.parent_statement} ${row.parent_name}`),
-      ) ?? workspace.reviewResiduals[0]!;
-    expect(leftover.statement).not.toBe(leftover.parent_statement);
-
-    const childId = await acceptResidualGap({
-      parent_gap_id: leftover.parent_gap_id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const accepted = await loadState();
-    const child = accepted.gaps.find((g) => g.id === childId);
-    expect(child?.parent_gap_id).toBe(leftover.parent_gap_id);
-    expect(child?.status).toBe("validated_open");
-    expect(child?.statement).toBe(leftover.statement);
-    const parent = accepted.gaps.find((g) => g.id === leftover.parent_gap_id);
-    expect(parent?.status).toBe("candidate");
-    const after = buildPlanWorkspace(accepted);
-    expect(after.reviewResiduals.some((s) => s.parent_gap_id === leftover.parent_gap_id)).toBe(false);
-    expect(after.openGaps.some((c) => c.gap_id === childId)).toBe(true);
-    expect(after.review.some((c) => c.gap_id === leftover.parent_gap_id)).toBe(true);
-  });
-
-  it("drafts a residual only after overall coverage is locked partial or limited", async () => {
-    await resetSeed();
-    await ingestDemoSource({
-      demo_id: "heor-interview",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const ingested = await loadState();
-    expect(buildPlanWorkspace(ingested).reviewResiduals.length).toBeGreaterThan(0);
-    const gap = ingested.gaps.find((g) => g.status === "candidate")!;
+    expect(ingested.residuals).toHaveLength(0);
+    expect(buildPlanWorkspace(ingested).residualGapSuggestions).toHaveLength(0);
+    const gap = ingested.gaps.find(
+      (g) =>
+        g.status === "candidate" &&
+        /elderly|comparative effectiveness/i.test(`${g.name} ${g.statement}`),
+    )!;
     const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
+    expect(gap).toBeTruthy();
+    expect(tactic).toBeTruthy();
 
     await lockGapStatus({
       gap_id: gap.id,
@@ -404,7 +372,6 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-
     await lockTacticReview({
       tactic_id: tactic.id,
       review_status: "accepted",
@@ -417,11 +384,11 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const assigned = await loadState();
-    const coverage = assigned.coverages.find((c) => c.gap_id === gap.id && c.tactic_id === tactic.id)!;
-    expect(coverage.overall_lock.locked).toBe(false);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
+    const coverage = (await loadState()).coverages.find(
+      (c) => c.gap_id === gap.id && c.tactic_id === tactic.id,
+    )!;
     await lockCoverageOverall({
       coverage_id: coverage.id,
       overall: "full",
@@ -438,13 +405,11 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const partial = await loadState();
-    expect(partial.residuals.some((r) => r.gap_id === gap.id)).toBe(true);
     const leftover = (await suggestResidualGaps()).find((s) => s.parent_gap_id === gap.id);
     expect(leftover).toBeTruthy();
     expect(leftover!.statement).not.toBe(gap.statement);
-    const workspace = buildPlanWorkspace(partial);
-    expect(workspace.unprioritized.some((c) => c.gap_id === gap.id)).toBe(true);
+    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(false);
+    const workspace = buildPlanWorkspace(await loadState());
     expect(workspace.residualGapSuggestions.some((s) => s.parent_gap_id === gap.id)).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === gap.id)).toBe(false);
 
@@ -455,9 +420,8 @@ describe("IEGP postgres store", () => {
     });
     const accepted = await loadState();
     expect(accepted.gaps.find((g) => g.id === childId)?.parent_gap_id).toBe(gap.id);
+    expect(accepted.gaps.find((g) => g.id === childId)?.status).toBe("validated_open");
     expect(accepted.gaps.find((g) => g.id === gap.id)?.status).toBe("validated_partial");
-    expect(accepted.residuals.find((r) => r.gap_id === gap.id)?.review_status).toBe("accepted");
-    expect(accepted.residuals.find((r) => r.gap_id === gap.id)?.created_gap_id).toBe(childId);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
     const otherGap = ingested.gaps.find((g) => g.status === "candidate" && g.id !== gap.id)!;
@@ -483,7 +447,6 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    expect((await loadState()).residuals.some((r) => r.gap_id === otherGap.id)).toBe(true);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === otherGap.id)).toBe(true);
     await rejectResidualGap({
       parent_gap_id: otherGap.id,

@@ -462,10 +462,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const workspace = buildPlanWorkspace({ ...blank, gaps, tactics });
     expect(workspace.review.length).toBeGreaterThan(0);
     expect(workspace.reviewTactics.length).toBeGreaterThan(0);
-    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
-    for (const leftover of workspace.residualGapSuggestions) {
-      expect(leftover.statement).not.toBe(leftover.parent_statement);
-    }
+    expect(workspace.residualGapSuggestions).toHaveLength(0);
     expect(workspace.review.every((card) => !("residual" in card))).toBe(true);
   });
 
@@ -541,6 +538,6 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         hasChild: false,
         suppressed: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
