@@ -125,15 +125,6 @@ function CreateTacticFields() {
 }
 
 
-function CreateActions() {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <CreateGapButton />
-      <CreateTacticButton />
-    </div>
-  );
-}
-
 function GapTacticsBlock({
   gapId,
   tactics,
@@ -444,7 +435,7 @@ export function ReviewQueue({
     return (
       <div className="grid gap-3">
         <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
-        <CreateActions />
+        <CreateGapButton />
       </div>
     );
   }
@@ -455,7 +446,7 @@ export function ReviewQueue({
           <h3 id="review-gaps" className="text-[13px] font-medium text-foreground">
             Gaps
           </h3>
-          <CreateActions />
+          <CreateGapButton />
         </div>
         {gaps.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">No candidate gaps in the queue.</p>
@@ -510,29 +501,26 @@ export function PrioritizeQueue({
 
 export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
   return (
-    <section aria-labelledby="suggested-residual-gaps">
-      <h2 id="suggested-residual-gaps" className="text-[15px] font-medium text-foreground">
+    <section aria-labelledby="leftover-gaps">
+      <h2 id="leftover-gaps" className="text-[15px] font-medium text-foreground">
         Leftover as a new gap
       </h2>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-        After a pressure-test, partial or limited coverage means the leftover evidence need is a new
-        gap. Accept creates that child (parent stays). Reject persists so this pair is not suggested
-        again.
+        After a mapped tactic only partially fills an accepted gap, the leftover question can become
+        its own gap. Accept creates that child. Reject persists. The parent sentence is not copied.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No leftover-as-gap suggestions. Lock overall coverage as partial or limited on a mapped
-          gap first.
+          No leftover to promote. Lock overall coverage to partial or limited on a mapped gap first.
         </p>
       ) : (
         <div className="grid gap-3">
           {items.map((item) => (
             <article key={item.parent_gap_id} className="border border-border bg-background p-4">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Residual leftover
+                Leftover of {item.parent_name}
               </p>
               <p className="mt-2 text-[13px] leading-5 text-foreground">{item.statement}</p>
-              <p className="mt-2 text-[12px] text-muted-foreground">Parent: {item.parent_name}</p>
               <ul className="mt-2 grid gap-1">
                 {item.reasons.map((reason) => (
                   <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
@@ -554,13 +542,13 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
                   confirmLabel="Reject leftover"
                 />
                 <LockForm
-                  label="Modify residual"
+                  label="Modify leftover"
                   action="modify_residual_gap"
                   extra={{ parent_gap_id: item.parent_gap_id }}
                   confirmLabel="Save statement"
                 >
                   <label className="grid gap-1 text-[12px] text-muted-foreground">
-                    Residual statement
+                    Leftover statement
                     <textarea
                       name="statement"
                       required
@@ -674,7 +662,7 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
         </ul>
       )}
       <div className="mt-3">
-        <CreateActions />
+        <CreateTacticButton />
       </div>
     </section>
   );

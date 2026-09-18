@@ -189,10 +189,15 @@ export function residualGapEligible(args: {
   suppressed: boolean;
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
-  if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
+  if (
+    args.gap.status === "candidate" ||
+    args.gap.status === "excluded" ||
+    args.gap.status === "validated_addressed"
+  ) {
+    return false;
+  }
   return residualDraftEligible(args);
 }
-
 
 function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
   return tactic.review_status !== "rejected" && tactic.status !== "cancelled";
@@ -301,11 +306,10 @@ function needsForGap(state: IegpState, gapId: string) {
 }
 
 function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
-  return state.coverages.filter(
-    (c) =>
-      c.gap_id === gap.id &&
-      c.overall_lock.locked &&
-      (c.overall === "partial" || c.overall === "limited"),
+  const stored = state.coverages.filter((c) => c.gap_id === gap.id);
+  if (!residualDraftEligible({ gap, coverages: stored })) return [];
+  return stored.filter(
+    (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
   );
 }
 
@@ -1084,18 +1088,17 @@ export function buildPlanWorkspace(state: IegpState): {
     });
   }
 
-  const reviewResiduals = suggestResidualGaps(state);
   return {
     review,
     reviewTactics,
-    reviewResiduals,
+    reviewResiduals: [],
     openGaps,
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
     mappingSuggestions: suggestMappings(state),
-    residualGapSuggestions: reviewResiduals,
+    residualGapSuggestions: suggestResidualGaps(state),
   };
 }
 

@@ -301,7 +301,8 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
     expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
-    expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
+    expect(workspace.reviewResiduals).toHaveLength(0);
+    expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
     expect(pfs).toBeTruthy();
@@ -320,9 +321,10 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(ild).toBeTruthy();
     expect(ild!.tactics).toHaveLength(0);
     expect(Object.prototype.hasOwnProperty.call(ild, "residual")).toBe(false);
-    const os = workspace.reviewResiduals.find((c) => c.parent_gap_id === "GAP-OS");
+    const os = workspace.residualGapSuggestions.find((c) => c.parent_gap_id === "GAP-OS");
     expect(os).toBeTruthy();
     expect(os!.statement).not.toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);
+    expect(workspace.reviewResiduals).toHaveLength(0);
 
     const mapped = buildPlanWorkspace({
       ...seed,
