@@ -1979,8 +1979,8 @@ async function ensurePriorityResidual(
   });
 }
 
-function uniqueIds(ids: (string | undefined | null)[]): string[] {
-  return [...new Set(ids.map((id) => (id ?? "").trim()).filter(Boolean))];
+function uniqueIds(ids?: (string | undefined | null)[] | null): string[] {
+  return [...new Set((ids ?? []).map((id) => (id ?? "").trim()).filter(Boolean))];
 }
 
 async function copyNeedGapLinks(fromGapId: string, toGapId: string) {
