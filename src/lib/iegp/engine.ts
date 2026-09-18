@@ -511,7 +511,12 @@ export function gapNameFromStatement(statement: string, heading?: string): strin
   const usedStrip = Boolean(stripped && stripped !== body && remainderIsSentence(stripped));
   if (usedStrip) body = stripped;
 
-  if (usedStrip && !NAME_FINITE_VERB.test(body) && wordCount(body) <= 12) {
+  if (
+    usedStrip &&
+    !NAME_FINITE_VERB.test(body) &&
+    /^(the|a|an)\s/i.test(body) &&
+    wordCount(body) <= 12
+  ) {
     body = `${body} is not adequately characterised`;
   }
 
