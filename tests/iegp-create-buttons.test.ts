@@ -4,29 +4,21 @@ import path from "node:path";
 
 describe("Create gap and Create tactic buttons", () => {
   const src = readFileSync(path.join(process.cwd(), "src/components/plan-cards.tsx"), "utf8");
-  const page = readFileSync(path.join(process.cwd(), "src/app/page.tsx"), "utf8");
 
-  it("puts Create gap on Review and Create tactic on Library only", () => {
+  it("exposes Create gap and Create tactic together on Review and Library", () => {
+    expect(src).toMatch(/function CreateActions\(/);
     expect(src).toContain('label="Create gap"');
     expect(src).toContain('label="Create tactic"');
     const reviewStart = src.indexOf("export function ReviewQueue");
     const libraryStart = src.indexOf("export function TacticLibrary");
-    const tacticsBlock = src.slice(
-      src.indexOf("function GapTacticsBlock"),
-      src.indexOf("export function ReviewCard"),
-    );
     expect(reviewStart).toBeGreaterThan(0);
     expect(libraryStart).toBeGreaterThan(reviewStart);
     const review = src.slice(reviewStart, libraryStart);
     const library = src.slice(libraryStart);
-    expect(review).toContain("<CreateGapButton />");
-    expect(review).not.toContain("<CreateTacticButton />");
-    expect(review).not.toContain("SuggestedResidualGaps");
-    expect(library).toContain("<CreateTacticButton />");
-    expect(library).not.toContain("<CreateGapButton />");
-    expect(tacticsBlock).toContain('label="Assign tactic"');
-    expect(tacticsBlock).not.toContain('label="Create tactic"');
-    expect(page).not.toContain("residuals={workspace");
-    expect(page).toContain("<SuggestedResidualGaps items={workspace.residualGapSuggestions} />");
+    expect(review).toContain("<CreateActions />");
+    expect(review).toContain("<SuggestedResidualGaps items={residuals} />");
+    expect(review).toContain("Residual evidence needs");
+    expect(review).toContain('label="Accept as new gap"');
+    expect(library).toContain("<CreateActions />");
   });
 });

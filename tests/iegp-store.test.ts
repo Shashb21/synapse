@@ -59,7 +59,7 @@ describe("IEGP postgres store", () => {
     expect(pri?.reasons.join(" ")).toMatch(/does not assign priority/i);
   });
 
-  it("ingests a source into candidate gaps and tactics without leftover drafts", async () => {
+  it("ingests a source into candidate gaps, tactics, and residual drafts in Review", async () => {
     await resetSeed();
     await ingestNeedFromText({
       title: "Affiliate safety note",
@@ -88,9 +88,9 @@ describe("IEGP postgres store", () => {
         expect(body.split(card.statement).length - 1).toBe(1);
       }
     }
-    expect(workspace.reviewResiduals).toHaveLength(0);
-    expect(workspace.residualGapSuggestions).toHaveLength(0);
-    expect(state.residuals).toHaveLength(0);
+    expect(workspace.reviewResiduals.length).toBeGreaterThan(0);
+    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
+    expect(state.residuals.some((r) => r.review_status === "candidate")).toBe(true);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
@@ -106,8 +106,7 @@ describe("IEGP postgres store", () => {
     expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
     expect(state.gaps.every((g) => !/^(Burden|Elderly|CNS):/i.test(g.name))).toBe(true);
     expect(state.gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
-    expect(buildPlanWorkspace(state).reviewResiduals).toHaveLength(0);
-    expect(state.residuals).toHaveLength(0);
+    expect(buildPlanWorkspace(state).reviewResiduals.length).toBeGreaterThan(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
@@ -356,10 +355,15 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    expect(buildPlanWorkspace(ingested).reviewResiduals).toHaveLength(0);
-    expect(ingested.residuals).toHaveLength(0);
-    const gap = ingested.gaps.find((g) => g.status === "candidate")!;
+    expect(buildPlanWorkspace(ingested).residualGapSuggestions.length).toBeGreaterThan(0);
+    const gap = ingested.gaps.find(
+      (g) =>
+        g.status === "candidate" &&
+        /elderly|comparative effectiveness/i.test(`${g.name} ${g.statement}`),
+    )!;
     const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
+    expect(gap).toBeTruthy();
+    expect(tactic).toBeTruthy();
 
     await lockGapStatus({
       gap_id: gap.id,
@@ -367,8 +371,6 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(false);
-
     await lockTacticReview({
       tactic_id: tactic.id,
       review_status: "accepted",
@@ -381,12 +383,11 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const assigned = await loadState();
-    const coverage = assigned.coverages.find((c) => c.gap_id === gap.id && c.tactic_id === tactic.id)!;
-    expect(coverage.overall_lock.locked).toBe(false);
-    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(false);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
+    const coverage = (await loadState()).coverages.find(
+      (c) => c.gap_id === gap.id && c.tactic_id === tactic.id,
+    )!;
     await lockCoverageOverall({
       coverage_id: coverage.id,
       overall: "full",
@@ -394,7 +395,6 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(false);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
     await lockCoverageOverall({
@@ -404,15 +404,12 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const partial = await loadState();
-    expect(partial.residuals.some((r) => r.gap_id === gap.id)).toBe(true);
     const leftover = (await suggestResidualGaps()).find((s) => s.parent_gap_id === gap.id);
     expect(leftover).toBeTruthy();
     expect(leftover!.statement).not.toBe(gap.statement);
-    const workspace = buildPlanWorkspace(partial);
-    expect(workspace.unprioritized.some((c) => c.gap_id === gap.id)).toBe(true);
+    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(true);
+    const workspace = buildPlanWorkspace(await loadState());
     expect(workspace.residualGapSuggestions.some((s) => s.parent_gap_id === gap.id)).toBe(true);
-    expect(workspace.reviewResiduals).toHaveLength(0);
     expect(workspace.review.some((c) => c.gap_id === gap.id)).toBe(false);
 
     const childId = await acceptResidualGap({
@@ -422,8 +419,8 @@ describe("IEGP postgres store", () => {
     });
     const accepted = await loadState();
     expect(accepted.gaps.find((g) => g.id === childId)?.parent_gap_id).toBe(gap.id);
+    expect(accepted.gaps.find((g) => g.id === childId)?.status).toBe("validated_open");
     expect(accepted.gaps.find((g) => g.id === gap.id)?.status).toBe("validated_partial");
-    expect(accepted.residuals.some((r) => r.gap_id === gap.id)).toBe(true);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
 
     const otherGap = ingested.gaps.find((g) => g.status === "candidate" && g.id !== gap.id)!;
@@ -449,7 +446,6 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    expect((await loadState()).residuals.some((r) => r.gap_id === otherGap.id)).toBe(true);
     expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === otherGap.id)).toBe(true);
     await rejectResidualGap({
       parent_gap_id: otherGap.id,
