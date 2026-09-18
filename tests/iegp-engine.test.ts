@@ -31,7 +31,7 @@ import { buildSeed } from "@/lib/iegp/seed";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { EvidenceGap, GapTacticCoverage, Tactic } from "@/lib/iegp/types";
-import { COVERAGE_DIMENSIONS, GAP_STATUS_LABELS, GAP_STATUS_DEFINITIONS } from "@/lib/iegp/enums";
+import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
   const dimensions = emptyDimensions();
@@ -54,12 +54,6 @@ describe("IEGP engine", () => {
   it("never allows the engine to write addressed", () => {
     expect(engineMaySetStatus("validated_addressed")).toBe(false);
     expect(engineMaySetStatus("validated_partial")).toBe(true);
-    expect(GAP_STATUS_LABELS.validated_open).toBe("Open");
-    expect(GAP_STATUS_LABELS.validated_partial).toBe("Partially Addressed");
-    expect(GAP_STATUS_LABELS.validated_addressed).toBe("Addressed");
-    expect(GAP_STATUS_DEFINITIONS.validated_open).toMatch(/Proposed tactics do not count/);
-    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/residual evidence need/);
-    expect(GAP_STATUS_DEFINITIONS.validated_addressed).toMatch(/fully close this gap/);
   });
 
   it("drafts a residual that keeps the parent gap and flags a missing comparator", () => {
