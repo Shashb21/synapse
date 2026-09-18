@@ -16,6 +16,7 @@ import {
   extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
+  gapsReadyForPrioritize,
   isLiveGap,
   requireOverrideReason,
   residualGapEligible,
@@ -549,8 +550,11 @@ export async function overrideGapStatus(args: {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
-  if (gap.status === "candidate" || gap.status === "excluded") {
-    throw new Error("Accept the gap in Review before overriding Open / Partially Addressed / Addressed.");
+  if (args.status === "validated_partial") {
+    throw new Error("Partially Addressed cannot stay. Split or rewrite the gap instead.");
+  }
+  if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
+    throw new Error("Only live Open or Addressed gaps can be overridden.");
   }
   const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
   const computed =
@@ -1559,12 +1563,12 @@ export async function ingestNeedFromText(args: {
       statement: gapRow.statement,
       domain: gapRow.domain,
       objective_id: obj.id,
-      status: "candidate",
+      status: "validated_open",
       exclusion_reason: null,
       exclusion_note: null,
       lock: unlocked(),
       parent_gap_id: null,
-      computed_status: null,
+      computed_status: "validated_open",
       status_override: null,
       retired: false,
       human_validated: false,
@@ -1602,8 +1606,8 @@ export async function ingestNeedFromText(args: {
       data_source: args.title,
       study_design: "Extracted — not yet designed",
       lifecycle_stage: "extracted",
-      status: "proposed",
-      review_status: "candidate",
+      status: tac.status ?? "proposed",
+      review_status: "accepted",
       start_date: null,
       evidence_available: null,
       owner: args.actor_name,
@@ -1741,6 +1745,11 @@ export async function completeWizard(args: {
   const state = await loadState();
   if (state.sources.length === 0) {
     throw new Error("Ingest at least one source before entering the plan.");
+  }
+  if (!gapsReadyForPrioritize(state)) {
+    throw new Error(
+      "Validate every live gap first. Partially Addressed gaps must be split or rewritten — they cannot stay.",
+    );
   }
   await db()
     .update(t.assets)

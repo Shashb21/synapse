@@ -16,12 +16,11 @@ export async function AppShell({
   const gates = planGates(state);
   const counts = planNavCounts(workspace);
   const nav: PlanNavModel = {
-    reviewCount: counts.review,
-    mappingCount: counts.mappings,
-    reviewUnlocked: gates.reviewUnlocked,
-    mappingsUnlocked: gates.mappingsUnlocked,
-    libraryUnlocked: gates.libraryUnlocked,
+    gapsCount: counts.gaps,
+    unvalidatedCount: counts.unvalidated,
+    gapsUnlocked: gates.gapsUnlocked,
     planUnlocked: gates.planUnlocked,
+    tacticsUnlocked: gates.tacticsUnlocked,
   };
   return (
     <PlanChrome active={active} nav={nav}>

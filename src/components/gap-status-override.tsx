@@ -218,7 +218,7 @@ export function GapStatusOverride({
                 onChange={(e) => setNextStatus(e.target.value as MappedGapStatus)}
                 className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
               >
-                {MAPPED_GAP_STATUSES.map((s) => (
+                {MAPPED_GAP_STATUSES.filter((s) => s !== "validated_partial").map((s) => (
                   <option key={s} value={s}>
                     {GAP_STATUS_LABELS[s]}
                   </option>

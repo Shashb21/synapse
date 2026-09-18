@@ -24,11 +24,11 @@ describe("Create gap and Create tactic buttons", () => {
     expect(library).toContain("<CreateActions />");
   });
 
-  it("wires Review inner tabs from the home page", () => {
+  it("wires the Gaps workbench from the home page", () => {
     const page = readFileSync(path.join(process.cwd(), "src/app/page.tsx"), "utf8");
-    expect(page).toContain("tab={reviewTab}");
-    expect(page).toContain('params.tab === "tactics"');
+    expect(page).toContain("GapsWorkbench");
     expect(page).toContain("GapStatusGuide");
+    expect(page).toContain('place === "gaps"');
   });
 
   it("override dialog requires a reason and Cancel does not save", () => {

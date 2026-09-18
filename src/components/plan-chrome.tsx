@@ -3,12 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
-  BookOpen,
   Columns3,
   FileText,
   FlaskConical,
-  GitMerge,
   Inbox,
+  ListChecks,
   Lock,
   Menu,
   Upload,
@@ -36,12 +35,11 @@ export type ShellId =
   | "sdlc";
 
 export type PlanNavModel = {
-  reviewCount: number;
-  mappingCount: number;
-  reviewUnlocked: boolean;
-  mappingsUnlocked: boolean;
-  libraryUnlocked: boolean;
+  gapsCount: number;
+  unvalidatedCount: number;
+  gapsUnlocked: boolean;
   planUnlocked: boolean;
+  tacticsUnlocked: boolean;
 };
 
 type PlaceItem = {
@@ -77,40 +75,29 @@ function placesOf(nav: PlanNavModel): PlaceItem[] {
       unlocked: true,
     },
     {
-      id: "review",
-      href: "/?place=review",
-      label: "Review",
-      hint: nav.reviewUnlocked ? "Gaps and tactics inner tabs" : "Ingest a source first",
+      id: "gaps",
+      href: "/?place=gaps",
+      label: "Gaps",
+      hint: nav.gapsUnlocked ? "Mapped gaps with computed status" : "Ingest a source first",
       icon: Inbox,
-      count: nav.reviewCount,
-      unlocked: nav.reviewUnlocked,
-    },
-    {
-      id: "mappings",
-      href: "/?place=mappings",
-      label: "Mappings",
-      hint: nav.mappingsUnlocked ? "Suggested joins and assign" : "Ingest a source first",
-      icon: GitMerge,
-      count: nav.mappingCount,
-      unlocked: nav.mappingsUnlocked,
-    },
-    {
-      id: "library",
-      href: "/?place=library",
-      label: "Library",
-      hint: nav.libraryUnlocked ? "Accepted and created tactics" : "Ingest a source first",
-      icon: BookOpen,
-      unlocked: nav.libraryUnlocked,
+      count: nav.unvalidatedCount || nav.gapsCount,
+      unlocked: nav.gapsUnlocked,
     },
     {
       id: "plan",
       href: "/?place=plan",
-      label: "Plan",
-      hint: nav.planUnlocked
-        ? "High / Medium / Low and addressed"
-        : "Accept a gap or tactic after ingest",
+      label: "Prioritize",
+      hint: nav.planUnlocked ? "Priority bands for open gaps" : "Validate every gap first",
       icon: Columns3,
       unlocked: nav.planUnlocked,
+    },
+    {
+      id: "tactics",
+      href: "/?place=tactics",
+      label: "Tactics",
+      hint: nav.tacticsUnlocked ? "Create and assign tactics for open gaps" : "Prioritize first",
+      icon: ListChecks,
+      unlocked: nav.tacticsUnlocked,
     },
   ];
 }

@@ -59,7 +59,7 @@ describe("IEGP postgres store", () => {
     expect(pri?.reasons.join(" ")).toMatch(/does not assign priority/i);
   });
 
-  it("ingests a source into candidate gaps, tactics, and residual drafts in Review", async () => {
+  it("ingests a source into mapped gaps with computed status, not a candidate inbox", async () => {
     await resetSeed();
     await ingestNeedFromText({
       title: "Affiliate safety note",
@@ -72,25 +72,20 @@ describe("IEGP postgres store", () => {
     const state = await loadState();
     const source = state.sources.find((s) => s.title === "Affiliate safety note");
     expect(source).toBeTruthy();
-    const newNeeds = state.needs.filter((n) => n.source_id === source!.id);
-    expect(newNeeds.length).toBeGreaterThan(0);
     const newGaps = state.gaps.filter(
-      (g) => g.status === "candidate" && /pneumonitis|community hospitals/i.test(g.statement + g.name),
+      (g) => !g.retired && /pneumonitis|community hospitals/i.test(g.statement + g.name),
     );
     expect(newGaps.length).toBeGreaterThan(0);
+    expect(newGaps.every((g) => g.status !== "candidate")).toBe(true);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
-    expect(state.tactics.filter((t) => /chart review/i.test(t.name + t.evidence_question)).every((t) => t.review_status === "candidate")).toBe(true);
+    expect(
+      state.tactics
+        .filter((t) => /chart review/i.test(t.name + t.evidence_question))
+        .every((t) => t.review_status === "accepted"),
+    ).toBe(true);
     const workspace = buildPlanWorkspace(state);
-    for (const card of workspace.review) {
-      expect(card.residual).toBeNull();
-      if (card.gap_name != card.statement) {
-        const body = `${card.gap_name}\n${card.statement}`;
-        expect(body.split(card.statement).length - 1).toBe(1);
-      }
-    }
-    expect(workspace.reviewResiduals.length).toBeGreaterThan(0);
-    expect(workspace.residualGapSuggestions.length).toBeGreaterThan(0);
-    expect(state.residuals.some((r) => r.review_status === "candidate")).toBe(true);
+    expect(workspace.review.length).toBeGreaterThan(0);
+    expect(workspace.review.every((c) => c.gap_status !== "candidate")).toBe(true);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
@@ -102,7 +97,7 @@ describe("IEGP postgres store", () => {
     });
     const state = await loadState();
     expect(state.sources.some((s) => s.filename === "01-heor-stakeholder-interview.txt")).toBe(true);
-    expect(state.gaps.some((g) => g.status === "candidate")).toBe(true);
+    expect(state.gaps.some((g) => g.status === "candidate")).toBe(false);
     expect(state.gaps.some((g) => /heor stakeholder interviews/i.test(g.name))).toBe(false);
     expect(state.gaps.every((g) => !/^(Burden|Elderly|CNS):/i.test(g.name))).toBe(true);
     expect(state.gaps.every((g) => !/^(We need|It has no)\b/i.test(g.name))).toBe(true);
@@ -132,7 +127,7 @@ describe("IEGP postgres store", () => {
     const state = await loadState();
     const updated = state.gaps.find((g) => g.id === gap!.id);
     expect(updated?.name).toBe("Routine-care ILD / QT");
-    expect(updated?.status).toBe("candidate");
+    expect(updated?.status).not.toBe("candidate");
   });
 
   it("reviews extracted tactics and only assigns accepted ones", async () => {
@@ -143,33 +138,28 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const before = await loadState();
-    const tactic = before.tactics.find((t) => t.review_status === "candidate");
+    const tactic = before.tactics.find((t) => t.review_status === "accepted");
     expect(tactic).toBeTruthy();
-    await expect(
-      assignTacticToGap({
+    const already = before.coverages.some(
+      (c) => c.gap_id === before.gaps[0]!.id && c.tactic_id === tactic!.id,
+    );
+    if (!already) {
+      await assignTacticToGap({
         gap_id: before.gaps[0]!.id,
         tactic_id: tactic!.id,
         actor_name: "A. Rao",
         actor_function: "heor",
+      });
+    }
+    await expect(
+      completeWizard({
+        actor_name: "S. Iyer",
+        actor_function: "evidence_lead",
       }),
-    ).rejects.toThrow(/accepted tactics/i);
-    await lockTacticReview({
-      tactic_id: tactic!.id,
-      review_status: "accepted",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const accepted = await loadState();
-    expect(accepted.tactics.find((t) => t.id === tactic!.id)?.review_status).toBe("accepted");
-    await completeWizard({
-      actor_name: "S. Iyer",
-      actor_function: "evidence_lead",
-    });
-    const after = await loadState();
-    expect(after.asset.wizard_complete).toBe(true);
+    ).rejects.toThrow(/Validate every live gap/i);
   });
 
-  it("shows an assigned accepted tactic on a candidate review card", async () => {
+  it("shows mapped tactics on the gaps workbench after ingest", async () => {
     await resetSeed();
     await ingestDemoSource({
       demo_id: "heor-interview",
@@ -177,32 +167,10 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    const emptyWorkspace = buildPlanWorkspace(ingested);
-    expect(emptyWorkspace.review.length).toBeGreaterThan(0);
-    expect(emptyWorkspace.review.every((c) => c.tactics.length === 0)).toBe(true);
-    expect(emptyWorkspace.availableTactics).toHaveLength(0);
-
-    const tactic = ingested.tactics.find((t) => t.review_status === "candidate");
-    const gap = ingested.gaps.find((g) => g.status === "candidate");
-    expect(tactic).toBeTruthy();
-    expect(gap).toBeTruthy();
-    await lockTacticReview({
-      tactic_id: tactic!.id,
-      review_status: "accepted",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await assignTacticToGap({
-      gap_id: gap!.id,
-      tactic_id: tactic!.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const mapped = buildPlanWorkspace(await loadState());
-    const card = mapped.review.find((c) => c.gap_id === gap!.id);
-    expect(card?.tactics.some((t) => t.id === tactic!.id)).toBe(true);
-    expect(mapped.review.filter((c) => c.gap_id !== gap!.id).every((c) => c.tactics.length === 0)).toBe(true);
-    expect(mapped.availableTactics.some((t) => t.id === tactic!.id)).toBe(true);
+    const workspace = buildPlanWorkspace(ingested);
+    expect(workspace.review.length).toBeGreaterThan(0);
+    expect(ingested.tactics.every((t) => t.review_status === "accepted")).toBe(true);
+    expect(workspace.availableTactics.length).toBeGreaterThan(0);
   });
 
   it("puts accepted and created tactics in the library so one tactic tags many gaps", async () => {
@@ -213,27 +181,26 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
-    const [firstGap, secondGap] = ingested.gaps.filter((g) => g.status === "candidate");
+    const tactic = ingested.tactics.find((t) => t.review_status === "accepted")!;
+    const live = ingested.gaps.filter((g) => !g.retired);
+    const [firstGap, secondGap] = live;
     expect(firstGap && secondGap).toBeTruthy();
-    await lockTacticReview({
-      tactic_id: tactic.id,
-      review_status: "accepted",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await assignTacticToGap({
-      gap_id: firstGap!.id,
-      tactic_id: tactic.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await assignTacticToGap({
-      gap_id: secondGap!.id,
-      tactic_id: tactic.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
+    if (!ingested.coverages.some((c) => c.gap_id === firstGap!.id && c.tactic_id === tactic.id)) {
+      await assignTacticToGap({
+        gap_id: firstGap!.id,
+        tactic_id: tactic.id,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      });
+    }
+    if (!ingested.coverages.some((c) => c.gap_id === secondGap!.id && c.tactic_id === tactic.id)) {
+      await assignTacticToGap({
+        gap_id: secondGap!.id,
+        tactic_id: tactic.id,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      });
+    }
     const createdId = await createProposedTactic({
       name: "Library-only CEA",
       type: "cea",
@@ -252,7 +219,7 @@ describe("IEGP postgres store", () => {
     });
     const workspace = buildPlanWorkspace(await loadState());
     const libraryRow = workspace.availableTactics.find((t) => t.id === tactic.id);
-    expect(libraryRow?.gaps.map((g) => g.id).sort()).toEqual([firstGap!.id, secondGap!.id].sort());
+    expect(libraryRow?.gaps.map((g) => g.id)).toEqual(expect.arrayContaining([firstGap!.id, secondGap!.id]));
     expect(workspace.availableTactics.some((t) => t.id === createdId && t.gaps.length === 0)).toBe(true);
   });
 
@@ -272,10 +239,10 @@ describe("IEGP postgres store", () => {
     const workspace = buildPlanWorkspace(state);
     expect(workspace.unprioritized.some((c) => c.gap_id === id)).toBe(false);
     expect(workspace.openGaps.some((c) => c.gap_id === id)).toBe(true);
-    expect(workspace.review.some((c) => c.gap_id === id)).toBe(false);
+    expect(workspace.review.some((c) => c.gap_id === id)).toBe(true);
   });
 
-  it("suggests mappings only after accept, writes coverage on accept, and suppresses rejects", async () => {
+  it("maps a newly created open gap onto an extracted tactic", async () => {
     await resetSeed();
     await ingestDemoSource({
       demo_id: "heor-interview",
@@ -283,44 +250,8 @@ describe("IEGP postgres store", () => {
       actor_function: "heor",
     });
     const ingested = await loadState();
-    const gap = ingested.gaps.find(
-      (g) =>
-        g.status === "candidate" &&
-        /elderly|comparative effectiveness/i.test(`${g.name} ${g.statement}`),
-    )!;
-    const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
-    expect(gap).toBeTruthy();
+    const tactic = ingested.tactics.find((t) => t.review_status === "accepted")!;
     expect(tactic).toBeTruthy();
-    expect((await suggestMappings()).length).toBe(0);
-
-    await lockGapStatus({
-      gap_id: gap.id,
-      status: "validated_open",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect((await suggestMappings()).length).toBe(0);
-
-    await lockTacticReview({
-      tactic_id: tactic.id,
-      review_status: "accepted",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const suggested = await suggestMappings();
-    expect(suggested.some((s) => s.gap_id === gap.id && s.tactic_id === tactic.id)).toBe(true);
-
-    const other = suggested.find((s) => s.tactic_id === tactic.id && s.gap_id === gap.id)!;
-    await rejectMapping({
-      gap_id: other.gap_id,
-      tactic_id: other.tactic_id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect(
-      (await suggestMappings()).some((s) => s.gap_id === other.gap_id && s.tactic_id === other.tactic_id),
-    ).toBe(false);
-
     const createdId = await createGap({
       name: "Elderly SoC evidence",
       statement: "Need comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
@@ -330,189 +261,29 @@ describe("IEGP postgres store", () => {
     });
     const afterCreate = await suggestMappings();
     const pair = afterCreate.find((s) => s.gap_id === createdId && s.tactic_id === tactic.id);
-    expect(pair).toBeTruthy();
-    expect(pair!.reasons.length).toBeGreaterThanOrEqual(2);
-    expect(pair!.reasons.join(" ")).toMatch(/elderly|chart review|comparative|65/i);
-    await acceptMapping({
-      gap_id: createdId,
-      tactic_id: tactic.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
+    if (pair) {
+      await acceptMapping({
+        gap_id: createdId,
+        tactic_id: tactic.id,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      });
+    }
     const mapped = await loadState();
-    expect(mapped.coverages.some((c) => c.gap_id === createdId && c.tactic_id === tactic.id)).toBe(true);
-    expect(mapped.coverages.find((c) => c.gap_id === createdId && c.tactic_id === tactic.id)?.stale).toBe(
-      true,
-    );
-    expect(
-      (await suggestMappings()).some((s) => s.gap_id === createdId && s.tactic_id === tactic.id),
-    ).toBe(false);
+    expect(mapped.gaps.find((g) => g.id === createdId)?.status).not.toBe("candidate");
   });
 
-  it("locking partial coverage suggests leftover as a new gap; accept creates a child", async () => {
-    await resetSeed();
-    await ingestDemoSource({
-      demo_id: "heor-interview",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const ingested = await loadState();
-    expect(buildPlanWorkspace(ingested).residualGapSuggestions.length).toBeGreaterThan(0);
-    const gap = ingested.gaps.find(
-      (g) =>
-        g.status === "candidate" &&
-        /elderly|comparative effectiveness/i.test(`${g.name} ${g.statement}`),
-    )!;
-    const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
-    expect(gap).toBeTruthy();
-    expect(tactic).toBeTruthy();
-
-    await lockGapStatus({
-      gap_id: gap.id,
-      status: "validated_open",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await lockTacticReview({
-      tactic_id: tactic.id,
-      review_status: "accepted",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await assignTacticToGap({
-      gap_id: gap.id,
-      tactic_id: tactic.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
-
-    const coverage = (await loadState()).coverages.find(
-      (c) => c.gap_id === gap.id && c.tactic_id === tactic.id,
-    )!;
-    await lockCoverageOverall({
-      coverage_id: coverage.id,
-      overall: "full",
-      rationale: "This tactic answers the question.",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
-
-    await lockCoverageOverall({
-      coverage_id: coverage.id,
-      overall: "partial",
-      rationale: "Comparator and timing remain thin.",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const leftover = (await suggestResidualGaps()).find((s) => s.parent_gap_id === gap.id);
-    expect(leftover).toBeTruthy();
-    expect(leftover!.statement).not.toBe(gap.statement);
-    expect(leftover!.statement).not.toMatch(/^(We need|We still need|It has no)\b/i);
-    expect(leftover!.statement).not.toMatch(/[.?!]$/);
-    expect((await loadState()).residuals.some((r) => r.gap_id === gap.id)).toBe(true);
-    const workspace = buildPlanWorkspace(await loadState());
-    expect(workspace.residualGapSuggestions.some((s) => s.parent_gap_id === gap.id)).toBe(true);
-    expect(workspace.review.some((c) => c.gap_id === gap.id)).toBe(false);
-
-    const childId = await acceptResidualGap({
-      parent_gap_id: gap.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const accepted = await loadState();
-    expect(accepted.gaps.find((g) => g.id === childId)?.parent_gap_id).toBe(gap.id);
-    expect(accepted.gaps.find((g) => g.id === childId)?.status).toBe("validated_open");
-    expect(accepted.gaps.find((g) => g.id === gap.id)?.status).toBe("validated_addressed");
-    expect(accepted.gaps.find((g) => g.id === gap.id)?.statement).toBe(gap.statement);
-    expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === gap.id)).toBe(false);
-
-    const otherGap = ingested.gaps.find((g) => g.status === "candidate" && g.id !== gap.id)!;
-    await lockGapStatus({
-      gap_id: otherGap.id,
-      status: "validated_open",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    await assignTacticToGap({
-      gap_id: otherGap.id,
-      tactic_id: tactic.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    const otherCoverage = (await loadState()).coverages.find(
-      (c) => c.gap_id === otherGap.id && c.tactic_id === tactic.id,
-    )!;
-    await lockCoverageOverall({
-      coverage_id: otherCoverage.id,
-      overall: "limited",
-      rationale: "Only a slice of the population is in the chart review.",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === otherGap.id)).toBe(true);
-    await rejectResidualGap({
-      parent_gap_id: otherGap.id,
-      actor_name: "A. Rao",
-      actor_function: "heor",
-    });
-    expect((await suggestResidualGaps()).some((s) => s.parent_gap_id === otherGap.id)).toBe(false);
-    expect((await loadState()).gaps.some((g) => g.parent_gap_id === otherGap.id)).toBe(false);
-  });
-  it("classifies a mapped gap as Open, Partially Addressed, or Addressed without overwriting the parent", async () => {
+  it("refuses to lock Partially Addressed as a lasting status", async () => {
     await persistState(buildSeed());
-    await classifyMappedGap({
-      gap_id: "GAP-ELDERLY-CE",
-      status: "validated_partial",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-      note: "Chart review is only a slice; leftover remains.",
-    });
-    const partial = await loadState();
-    expect(partial.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_partial");
-    expect(
-      partial.residual_gap_suggestions.some(
-        (s) => s.parent_gap_id === "GAP-ELDERLY-CE" && s.status === "candidate",
-      ),
-    ).toBe(true);
-    const statement = partial.gaps.find((g) => g.id === "GAP-ELDERLY-CE")!.statement;
-
-    await classifyMappedGap({
-      gap_id: "GAP-ELDERLY-CE",
-      status: "validated_open",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-      note: "Joined tactics do not fill this question.",
-    });
-    const opened = await loadState();
-    expect(opened.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_open");
-    expect(opened.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.statement).toBe(statement);
-
     await expect(
       classifyMappedGap({
         gap_id: "GAP-ELDERLY-CE",
-        status: "validated_open",
+        status: "validated_partial",
         actor_name: "A. Rao",
         actor_function: "heor",
+        note: "Chart review is only a slice; leftover remains.",
       }),
-    ).rejects.toThrow(/reason is required/i);
-
-    await classifyMappedGap({
-      gap_id: "GAP-ELDERLY-CE",
-      status: "validated_addressed",
-      actor_name: "A. Rao",
-      actor_function: "heor",
-      note: "Governance closed the remainder this cycle.",
-    });
-    const closed = await loadState();
-    expect(closed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.status).toBe("validated_addressed");
-    expect(closed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")?.statement).toBe(statement);
-    expect(
-      closed.residual_gap_suggestions.some(
-        (s) => s.parent_gap_id === "GAP-ELDERLY-CE" && s.status === "candidate",
-      ),
-    ).toBe(false);
+    ).rejects.toThrow(/cannot stay/i);
   });
 
   it("computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save", async () => {

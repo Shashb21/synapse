@@ -4,7 +4,7 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → candidate evidence needs → extracted gaps + tactics → **one Review step** with inner tabs (**Gaps** / **Tactics**) → living plan (sidebar: Upload, Review, Mappings, Library, Plan).
+objectives → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps.
 
 Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is the **Upload** pane on `/`. After you enter the plan, new ingest stays on Upload and drops into Review. Demo files live in `public/demo-sources/`.
 
@@ -33,7 +33,7 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
-The first visit is **Upload** on `/`. Ingest a demo file. Review is one validation step with inner tabs: **Gaps** (candidates, residual evidence needs, Create gap) and **Tactics** (candidates, Create tactic). Then map or assign tactics. Gap status is **computed** from joined tactics and published literature; click a gap to override with a required reason. Enter the plan. Reset returns the blank slate.
+The first visit is **Upload** on `/`. Ingest a demo file. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
 
 Gap status after mapping (not the Plan High / Medium / Low bands):
 

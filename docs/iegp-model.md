@@ -72,28 +72,27 @@ Tactic status change or new ingest marks related coverage **stale** and unlocks 
 
 ## Evals
 
-Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safety: zero unlocked Addressed rows; `engineMaySetStatus("validated_addressed")` is false.
+Gold: candidate needs from seed sources, and gap–tactic overall coverage. The engine **computes** Open / Partially Addressed / Addressed; humans validate before Prioritize.
 
 ## Surfaces
 
-`/` is a Cursor-like **left sidebar** of places: **Upload**, **Review**, **Mappings**, **Library**, **Plan**. Desktop rail + mobile drawer. The main pane shows one place. First visit starts on Upload; Review / Mappings / Library unlock after at least one source; Plan unlocks after a source plus at least one accept (or after **Enter the plan**). After wizard complete, `/` opens on Plan. New ingest stays on Upload and drops candidates into Review.
+`/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
-Two-step loop is compressed into Review:
-
-1. **Ingest → extract gaps and tactics**.
-2. **Review is one validation step** with **Gaps** and **Tactics** inner tabs: accept / reject / modify extracted gaps, extracted tactics, and residual evidence needs (on Gaps). Engine drafts a residual when pressure-testing says the parent is already **partial**, or when the human classifies Partially Addressed. Accept residual creates a child **Open** gap (`parent_gap_id`); the covered parent is human-locked **Addressed**. Parent statement stays. Reject persists. **Create gap** (Gaps tab) and **Create tactic** (Tactics tab) are visible on Review and Library.
+1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
+2. **Gaps** shows every live gap with mapped tactics and computed status. Humans validate Open and Addressed. Partial must **split** (Addressed + tactic on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
+3. **Prioritize** High / Medium / Low on Open gaps.
+4. **Tactics** create and assign tactics for Open gaps.
 
 | Place | What |
 | --- | --- |
-| Upload | Demo pack + ingest. Later sources never restart a stepper. |
-| Review | Inner tabs: **Gaps** (candidates + residual evidence needs + Create gap) and **Tactics** (candidates + Create tactic). Accept / reject / modify. Residual is its own row (leftover question), not a copy of the parent sentence. |
-| Mappings | Suggested mappings (scored engine) plus assign from the library onto accepted gaps. Classify Open / Partially Addressed / Addressed. |
-| Library | Accepted and created tactics. **Create gap** and **Create tactic** live here too. |
-| Plan | Prioritize, then High / Medium / Low **priority bands**. Gap status on cards is Open / Partially Addressed / Addressed. |
+| Upload | Demo pack + ingest. |
+| Gaps | Mapped inventory, engine status, validate, split/rewrite, add Open or Addressed (Addressed needs a tactic). |
+| Prioritize | Priority bands for Open gaps. Addressed bucket. |
+| Tactics | Create/assign tactics for Open gaps. |
 
-Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps, tactics, residuals) and mapping suggestions.
+Eval and Spec stay as secondary sidebar items.
 
-Gap cards show the gap **once** as an evidence-topic title (noun phrase, not “We need…”). They do not echo the statement as Residual / needs / body.
+Gap titles are evidence-topic noun phrases (not “We need…”).
 
 ## Parked — Plan vision (not in this pass)
 

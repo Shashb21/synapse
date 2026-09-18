@@ -1335,17 +1335,19 @@ export function buildPlanWorkspace(state: IegpState): {
   );
 
   const review: ReviewGapCard[] = [];
-  for (const gap of state.gaps.filter((g) => g.status === "candidate")) {
+  for (const gap of state.gaps.filter(isLiveGap)) {
+    const shown = displayedGapStatus(gap);
+    if (shown === "candidate") continue;
     review.push({
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
       tactics: mappedTactics(state, gap.id),
       computed_status: computedForGap(state, gap, children),
-      gap_status: "candidate",
+      gap_status: shown,
       status_override: gap.status_override ?? null,
       human_validated: gap.human_validated,
-      residual: null,
+      residual: residualByParent.get(gap.id) ?? null,
       parent_gap_id: gap.parent_gap_id,
       history_count: state.gap_versions.filter((row) => row.live_gap_id === gap.id).length,
     });

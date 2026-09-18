@@ -436,7 +436,8 @@ We need to understand comparative effectiveness of Velmara versus regional stand
 
   it("keeps addressed gaps on the workspace with their tactics", () => {
     const workspace = buildPlanWorkspace(buildSeed());
-    expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
+    expect(workspace.review.some((c) => c.gap_id === "GAP-ELDERLY-CE")).toBe(true);
+    expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(false);
     expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
     expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
@@ -453,10 +454,9 @@ We need to understand comparative effectiveness of Velmara versus regional stand
   it("puts mapped tactics on review and unprioritized cards, and leaves empty gaps empty", () => {
     const seed = buildSeed();
     const workspace = buildPlanWorkspace(seed);
-    const ild = workspace.review.find((c) => c.gap_id === "GAP-ILD");
-    expect(ild).toBeTruthy();
-    expect(ild!.tactics).toHaveLength(0);
-    expect(ild!.residual).toBeNull();
+    const elderly = workspace.review.find((c) => c.gap_id === "GAP-ELDERLY-CE");
+    expect(elderly).toBeTruthy();
+    expect(elderly!.tactics.length).toBeGreaterThan(0);
     const os = workspace.reviewResiduals.find((c) => c.parent_gap_id === "GAP-OS");
     expect(os).toBeTruthy();
     expect(os!.statement).not.toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);
@@ -473,9 +473,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         },
       ],
     });
-    expect(mapped.review.find((c) => c.gap_id === "GAP-ILD")!.tactics.some((t) => t.id === "TAC-REG")).toBe(
-      true,
-    );
+    expect(mapped.review.find((c) => c.gap_id === "GAP-ELDERLY-CE")!.tactics.length).toBeGreaterThan(0);
   });
 
   it("suggests mappings only for accepted open/partial gaps and accepted tactics", () => {
