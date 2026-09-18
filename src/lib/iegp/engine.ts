@@ -456,29 +456,69 @@ export function splitSourceIntoBlocks(
   return blocks;
 }
 
-/** Card title for a gap or extracted tactic. Never the source document name. */
-export function gapNameFromStatement(statement: string, heading?: string): string {
-  const cleaned = statement
-    .replace(/\s+/g, " ")
-    .replace(/^(we\s+|there\s+is\s+|kols\s+)/i, "")
-    .replace(/^(need to (know|understand|characterise|characterize|quantify)\s+)/i, "")
-    .replace(/^limited evidence (remains )?(on |characterises |characterizes )?/i, "")
-    .replace(/^insufficient (evidence|data) (on |in )?/i, "")
-    .replace(/\.$/, "")
-    .trim();
-  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
-  const fromStatement = words
-    ? words.charAt(0).toUpperCase() + words.slice(1)
-    : "Unnamed gap";
-  if (
-    heading &&
-    !/^(note|findings|summary)$/i.test(heading) &&
-    isSectionHeading(heading) &&
-    !fromStatement.toLowerCase().startsWith(heading.toLowerCase())
-  ) {
-    return `${heading}: ${fromStatement.charAt(0).toLowerCase()}${fromStatement.slice(1)}`;
+const NAME_NEED_PREFIX =
+  /^(?:(?:we|kols|there\s+is)\s+)?(?:need to (?:know|understand|characterise|characterize|quantify)\s+)/i;
+
+const NAME_TRAILING_FUNCTION =
+  /^(the|a|an|of|vs\.?|versus|and|or|but|in|on|for|with|after|before|to|from|by|as|at|into|than|associated)$/i;
+
+const NAME_FINITE_VERB =
+  /\b(is|are|was|were|isn't|aren't|has|have|had|does|do|did|will|would|can|could|should|may|might|must|remains?|characterises|characterizes|includes?|reports?|measures?|addresses?|collects?|sits?|blocks?|reflects?|exists?)\b/i;
+
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** Keep a readable sentence: ~12–16 words, never a hanging preposition. */
+function clipToReadableSentence(text: string): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  const cutAt = (n: number) => words.slice(0, n).join(" ").replace(/[,;:]+$/, "");
+  if (words.length <= 16) {
+    let n = words.length;
+    while (n > 8 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n -= 1;
+    return cutAt(n);
   }
-  return fromStatement;
+  for (let i = 16; i >= 12; i -= 1) {
+    if (/[,;]$/.test(words[i - 1]!)) return cutAt(i);
+  }
+  let n = 16;
+  while (n > 8 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n -= 1;
+  while (n < words.length && n < 18 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n += 1;
+  return cutAt(n);
+}
+
+function remainderIsSentence(text: string): boolean {
+  if (wordCount(text) < 6) return false;
+  if (/^(on|in|of|for|that|this|whether|the question)\b/i.test(text)) return false;
+  return true;
+}
+
+/**
+ * Card title for a gap or extracted tactic. Derived from the evidence statement only —
+ * never a section heading prefix such as "Burden:" or "Elderly:".
+ */
+export function gapNameFromStatement(statement: string, heading?: string): string {
+  void heading;
+  const cleaned = statement.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Unnamed gap.";
+
+  let body = cleaned.replace(/[.?!]+$/g, "").trim();
+  const firstBreak = body.search(/[.?!]\s/);
+  if (firstBreak > 0) body = body.slice(0, firstBreak).trim();
+
+  const stripped = body.replace(NAME_NEED_PREFIX, "").trim();
+  const usedStrip = Boolean(stripped && stripped !== body && remainderIsSentence(stripped));
+  if (usedStrip) body = stripped;
+
+  if (usedStrip && !NAME_FINITE_VERB.test(body) && wordCount(body) <= 12) {
+    body = `${body} is not adequately characterised`;
+  }
+
+  body = clipToReadableSentence(body);
+  if (!body) return "Unnamed gap.";
+  const named = body.charAt(0).toUpperCase() + body.slice(1);
+  return /[.?!]$/.test(named) ? named : `${named}.`;
 }
 
 export type ExtractedGap = {
@@ -502,7 +542,7 @@ export function extractCandidateGaps(
       const statement = sentence.replace(/\s+/g, " ");
       out.push({
         id: `XGAP-${String(n).padStart(3, "0")}`,
-        name: gapNameFromStatement(statement, block.heading),
+        name: gapNameFromStatement(statement),
         statement,
         domain: guessDomain(`${block.heading} ${statement}`),
         source_id: block.source_id,

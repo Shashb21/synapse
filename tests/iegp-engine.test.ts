@@ -151,6 +151,7 @@ describe("IEGP engine", () => {
     expect(gaps.length).toBeGreaterThan(0);
     for (const gap of gaps) {
       expect(gap.name.toLowerCase()).not.toMatch(/heor|interview/);
+      expect(gap.name).not.toMatch(/^(Burden|Elderly|CNS):/i);
     }
     expect(gaps.some((g) => /economic burden/i.test(g.name))).toBe(true);
     expect(
@@ -159,6 +160,53 @@ describe("IEGP engine", () => {
         "HEOR stakeholder interviews",
       ),
     ).not.toMatch(/interview/i);
+  });
+
+  it("names gaps as sentences from the statement, without a section heading prefix", () => {
+    expect(
+      gapNameFromStatement(
+        "We need to understand the economic burden associated with recurrence after velmaratinib.",
+        "Burden",
+      ),
+    ).toBe(
+      "The economic burden associated with recurrence after velmaratinib is not adequately characterised.",
+    );
+    expect(
+      gapNameFromStatement(
+        "We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
+        "Elderly",
+      ),
+    ).toBe(
+      "Comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
+    );
+    expect(
+      gapNameFromStatement("KOLs need to know intracranial outcomes.", "CNS"),
+    ).toBe("KOLs need to know intracranial outcomes.");
+
+    const text = `HEOR stakeholder interviews — Velmara.
+
+Burden
+We need to understand the economic burden associated with recurrence after velmaratinib.
+
+Elderly
+We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients.`;
+    const blocks = splitSourceIntoBlocks(text, "HEOR stakeholder interviews").map((section, i) => ({
+      id: `b${i}`,
+      source_id: "s",
+      heading: section.heading,
+      text: section.text,
+    }));
+    const gaps = extractCandidateGaps(blocks);
+    expect(gaps.every((g) => !/^(Burden|Elderly):/i.test(g.name))).toBe(true);
+    expect(gaps.some((g) => /^The economic burden associated with recurrence after velmaratinib/i.test(g.name))).toBe(
+      true,
+    );
+    expect(
+      gaps.some((g) =>
+        /^Comparative effectiveness of Velmara versus regional standard of care in elderly patients/i.test(g.name),
+      ),
+    ).toBe(true);
+    expect(gaps.every((g) => /^[A-Z]/.test(g.name) && /[.?!]$/.test(g.name))).toBe(true);
   });
 
   it("splits a demo source into section blocks such as Elderly", () => {
