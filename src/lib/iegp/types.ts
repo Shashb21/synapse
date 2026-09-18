@@ -9,6 +9,7 @@ import type {
   OverallCoverage,
   PriorityBand,
   SourceType,
+  ResidualReviewStatus,
   TacticReviewStatus,
   TacticStatus,
   TacticType,
@@ -154,6 +155,8 @@ export type ResidualNeed = {
   statement: string;
   domain: EvidenceDomain;
   draft_rationale: string;
+  review_status: ResidualReviewStatus;
+  created_gap_id: string | null;
   lock: Lock;
 };
 
@@ -215,7 +218,7 @@ export type ResidualGapSuggestionRecord = {
   parent_gap_id: string;
   statement: string;
   reasons: string[];
-  status: "accepted" | "rejected";
+  status: "candidate" | "accepted" | "rejected";
   lock: Lock;
 };
 

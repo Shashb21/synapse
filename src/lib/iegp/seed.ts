@@ -1681,6 +1681,11 @@ export function buildSeed(): IegpState {
     ...state,
     residual_gap_suggestions: [],
     gaps: state.gaps.map((gap) => ({ ...gap, parent_gap_id: null })),
+    residuals: state.residuals.map((residual) => ({
+      ...residual,
+      review_status: residual.lock.locked ? ("accepted" as const) : ("candidate" as const),
+      created_gap_id: null,
+    })),
   } as IegpState;
 }
 

@@ -222,6 +222,15 @@ export const TACTIC_REVIEW_LABELS: Record<TacticReviewStatus, string> = {
   rejected: "Rejected",
 };
 
+export const RESIDUAL_REVIEW_STATUSES = TACTIC_REVIEW_STATUSES;
+export type ResidualReviewStatus = (typeof RESIDUAL_REVIEW_STATUSES)[number];
+
+export const RESIDUAL_REVIEW_LABELS: Record<ResidualReviewStatus, string> = {
+  candidate: "Residual draft",
+  accepted: "Accepted as gap",
+  rejected: "Rejected",
+};
+
 export const COVERAGE_DIMENSIONS = [
   "relevance",
   "population",

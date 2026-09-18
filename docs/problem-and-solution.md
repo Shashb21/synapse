@@ -43,43 +43,45 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics → human accept/reject/modify (gaps and tactics) → coverage lock → residual only if partial/limited → human priority → enter the living plan → High/Medium/Low + addressed.
+Strategic objectives → sources → extracted gaps + tactics → human accept/reject/modify → pressure-test mappings + coverage → leftover suggested as a new gap → human priority → living plan.
 
-### IEGP process (new plan)
+### IEGP process (two-step)
 
 ```mermaid
 flowchart TD
-  upload["Upload"]
+  upload["1. Upload sources"]
   extract["Extract gaps and tactics"]
-  review["Review"]
-  decide{"Accept, reject, or modify"}
-  mappings["Mappings"]
-  library["Library"]
-  coverage["Lock coverage"]
-  residual["Residual if partial or limited"]
-  pri["Human locks priority"]
-  enter["Enter the plan"]
+  review["Review: accept / reject / modify"]
+  createGap["Create gap on Review"]
+  createTactic["Create tactic on Library"]
+  map["2. Pressure-test mappings"]
+  cover["Lock coverage"]
+  leftover{"Overall partial / limited?"}
+  residual["Draft ResidualNeed for Plan"]
+  suggest["Suggest leftover as a new gap"]
+  acceptChild["Accept → child gap, parent preserved"]
+  rejectChild["Reject → persist, do not spam"]
   board["Plan: High / Medium / Low"]
-  closed["Addressed gaps with tactics"]
   later["Later ingest"]
   upload --> extract
   extract --> review
-  review --> decide
-  decide -->|modify| review
-  decide -->|reject| review
-  decide -->|accept| mappings
-  review --> library
-  mappings --> coverage
-  coverage --> residual
-  residual --> pri
-  pri --> enter
-  enter --> board
-  board --> closed
+  createGap --> review
+  createTactic --> map
+  review --> map
+  map --> cover
+  cover --> leftover
+  leftover -->|yes| residual
+  leftover -->|yes, no child yet| suggest
+  leftover -->|no| board
+  residual --> board
+  suggest --> acceptChild
+  suggest --> rejectChild
+  acceptChild --> board
+  rejectChild --> board
   later --> upload
-  later --> review
 ```
 
-The engine never assigns the priority band. Extracted tactics wait for the same review as gaps. After you enter the plan, `/` opens on Plan; later ingest stays on Upload.
+Create gap lives on Review. Create tactic lives on Library. Gap cards show the sentence once. Residual is not drafted on ingest, accept, or create-gap — only after overall coverage is locked partial or limited. Gantt / gates timeline is parked (docs only).
 
 ### Traceability
 
@@ -89,7 +91,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system extracts a **candidate evidence need** and a **candidate gap**. It does not draft a residual and does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto mappings. A residual appears later, if a mapped tactic is locked as partial or limited coverage.
+The system extracts a **candidate evidence need** and a **candidate gap**. It does not dump a residual paragraph onto the card and does not accept the gap. Pressure-test against TLR, CDP, RWE, and tactics comes next. Only a human accept / reject / modify moves that gap onto mappings. After coverage is locked partial or limited, leftover is suggested as a new gap.
 
 ### Worked mapping (Velmara seed)
 
@@ -106,7 +108,7 @@ Tactic: retrospective RWE in patients aged ≥65, no comparator.
 | Comparative effectiveness / decision utility | No |
 | **Overall** | **Partial** |
 
-Residual (parent preserved): comparative outcomes versus relevant regional SoC in elderly patients remain insufficiently characterised.
+Residual (parent preserved, leftover is a **new gap** after accept): comparative outcomes versus relevant regional SoC in elderly patients remain insufficiently characterised.
 
 Priority: human-locked High (HTA decision date, uncovered comparator). The engine does not propose a band.
 

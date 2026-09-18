@@ -19,6 +19,7 @@ import {
   lockTacticReview,
   modifyGap,
   modifyTactic,
+  modifyResidualGap,
   rejectMapping,
   rejectResidualGap,
   resetSeed,
@@ -156,6 +157,15 @@ export async function POST(request: Request) {
       case "reject_residual_gap":
         await rejectResidualGap({
           parent_gap_id: body.parent_gap_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "modify_residual_gap":
+        await modifyResidualGap({
+          parent_gap_id: body.parent_gap_id,
+          statement: body.statement,
           actor_name,
           actor_function,
           note: body.note,

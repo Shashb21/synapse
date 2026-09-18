@@ -23,7 +23,6 @@ export default async function GapsPage() {
         {state.gaps.map((g) => {
           const needCount = state.need_gap_links.filter((l) => l.gap_id === g.id).length;
           const tacticCount = state.coverages.filter((c) => c.gap_id === g.id).length;
-          const residual = state.residuals.find((r) => r.gap_id === g.id);
           return (
             <Link
               key={g.id}
@@ -36,11 +35,10 @@ export default async function GapsPage() {
                   {DOMAIN_LABELS[g.domain]}
                 </span>
               </div>
-              <p className="mt-2 text-[14px] text-foreground">{g.name}</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">{g.statement}</p>
+              <p className="mt-2 text-[13px] leading-5 text-foreground">{g.statement}</p>
               <p className="mt-2 text-[12px] text-muted-foreground">
                 {needCount} needs · {tacticCount} tactic mappings
-                {residual ? ` · residual: ${residual.statement.slice(0, 80)}…` : ""}
+                {g.parent_gap_id ? " · leftover of parent" : ""}
               </p>
             </Link>
           );

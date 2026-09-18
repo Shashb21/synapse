@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS residual_gap_suggestions (
 );
 CREATE TABLE IF NOT EXISTS residuals (
   id text PRIMARY KEY, gap_id text NOT NULL, statement text NOT NULL,
-  domain text NOT NULL, draft_rationale text NOT NULL, lock jsonb NOT NULL
+  domain text NOT NULL, draft_rationale text NOT NULL,
+  review_status text NOT NULL DEFAULT 'candidate', created_gap_id text,
+  lock jsonb NOT NULL
 );
 CREATE TABLE IF NOT EXISTS priorities (
   id text PRIMARY KEY, residual_id text NOT NULL, suggested_score integer NOT NULL,
@@ -147,6 +149,14 @@ export async function ensureSchema() {
   );
   await d.execute(
     sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parent_gap_id text"),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE residuals ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'candidate'",
+    ),
+  );
+  await d.execute(
+    sql.raw("ALTER TABLE residuals ADD COLUMN IF NOT EXISTS created_gap_id text"),
   );
 }
 

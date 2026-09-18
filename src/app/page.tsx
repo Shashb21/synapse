@@ -8,7 +8,6 @@ import {
   PrioritizeQueue,
   ReviewQueue,
   SuggestedMappings,
-  SuggestedResidualGaps,
   TacticLibrary,
 } from "@/components/plan-cards";
 import { StaleFlag } from "@/components/iegp-badges";
@@ -50,18 +49,19 @@ function PlaceIntro({
   }
   if (place === "review") {
     return (
-      <PageIntro kicker="Step 1 · validate extracted objects" title="Review">
-        Candidate gaps and tactics from ingest. Accept, reject, or modify. Create gap and Create
-        tactic live here. Residuals are not copied onto these cards.
+      <PageIntro kicker="Accept, reject, or modify" title="Review">
+        Step 1 after ingest: validate extracted gaps and tactics. Create gap and Create tactic live
+        here. Leftover evidence need is not dumped onto the parent — it is suggested as a new gap on
+        Mappings after a pressure-test.
       </PageIntro>
     );
   }
   if (place === "mappings") {
     return (
-      <PageIntro kicker="Step 2 · pressure-test" title="Mappings">
-        A scored engine drafts gap–tactic joins (not an LLM). After coverage is locked partial or
-        limited, leftover evidence need is suggested as a new gap. Accept creates the child; the
-        parent stays.
+      <PageIntro kicker="Inventory joins" title="Mappings">
+        Step 2: a scored engine suggests gap–tactic pairs after both are accepted. When overall
+        coverage is locked partial or limited, leftover is suggested as a new gap. Accept creates the
+        child (parent preserved). Reject persists and does not spam.
       </PageIntro>
     );
   }
@@ -75,8 +75,8 @@ function PlaceIntro({
   }
   return (
     <PageIntro kicker={wizardComplete ? "Living plan" : "Ready for the plan"} title="Plan">
-      High / Medium / Low after a human locks priority. Open accepted gaps wait on Mappings for
-      tactics, coverage, and leftover-as-new-gap suggestions.
+      High / Medium / Low lists prioritized leftovers after a tactic only partially fills a gap.
+      Open accepted gaps with no residual wait on Mappings for tactics and coverage.
     </PageIntro>
   );
 }
@@ -111,6 +111,7 @@ export default async function HomePage({
       <ReviewQueue
         gaps={workspace.review}
         tactics={workspace.reviewTactics}
+        residuals={workspace.residualGapSuggestions}
         availableTactics={workspace.availableTactics}
         emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
       />
@@ -124,8 +125,6 @@ export default async function HomePage({
     pane = gates.mappingsUnlocked ? (
       <div className="grid gap-10">
         <SuggestedMappings items={workspace.mappingSuggestions} />
-        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
-        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
         <section aria-labelledby="accepted-gaps">
           <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
             Accepted gaps
@@ -159,7 +158,7 @@ export default async function HomePage({
     pane = (
       <LockedPlace
         title="Plan is locked"
-        body="Ingest a source, then accept a gap or tactic. The plan lists prioritized residuals — not every open gap."
+        body="Ingest a source, then accept a gap or tactic. The plan lists prioritized leftovers — not every open gap."
       />
     );
   } else {
@@ -169,8 +168,8 @@ export default async function HomePage({
           <div className="mb-8 border border-border bg-card/40 p-4">
             <h2 className="text-[15px] font-medium text-foreground">Enter the plan</h2>
             <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-            Wizard once, plan forever. After this, the home page opens here. Later ingest stays on
-            Upload and drops candidates into Review.
+              Wizard once, plan forever. After this, the home page opens here. Later ingest stays on
+              Upload and drops candidates into Review.
             </p>
             <LockForm
               label="Enter the plan"
@@ -185,9 +184,8 @@ export default async function HomePage({
             Prioritize
           </h2>
           <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            Leftover after a mapped tactic only partially fills the gap. You lock High, Medium, or
-            Low — the engine does not suggest a band. The leftover sentence is a child gap, not a
-            second copy on the parent.
+            Leftover residuals after a mapped tactic only partially fills the gap. You lock High,
+            Medium, or Low — the engine does not suggest a band.
           </p>
           <PrioritizeQueue
             cards={workspace.unprioritized}

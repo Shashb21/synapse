@@ -14,14 +14,19 @@ import {
   pairNeeds,
   planColumn,
   residualDraftEligible,
+  residualGapEligible,
   splitSourceIntoBlocks,
   suggestGapStatus,
+  planNavCounts,
   suggestMappings,
   suggestPriority,
+  suggestResidualGaps,
 } from "@/lib/iegp/engine";
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
-import type { GapTacticCoverage } from "@/lib/iegp/types";
+import { buildBlankWorkspace } from "@/lib/iegp/blank";
+import { DEMO_PACK } from "@/lib/iegp/demo-pack";
+import type { EvidenceGap, GapTacticCoverage, Tactic } from "@/lib/iegp/types";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
@@ -295,7 +300,9 @@ We need to understand comparative effectiveness of Velmara versus regional stand
   it("keeps addressed gaps on the workspace with their tactics", () => {
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
-    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
+    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
+    expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
+    expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
     expect(pfs).toBeTruthy();
     expect(pfs!.tactics.some((t) => t.id === "TAC-VEL-301")).toBe(true);
@@ -313,9 +320,9 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(ild).toBeTruthy();
     expect(ild!.tactics).toHaveLength(0);
     expect(Object.prototype.hasOwnProperty.call(ild, "residual")).toBe(false);
-    const os = workspace.unprioritized.find((c) => c.gap_id === "GAP-OS");
+    const os = workspace.reviewResiduals.find((c) => c.parent_gap_id === "GAP-OS");
     expect(os).toBeTruthy();
-    expect(os!.tactics.some((t) => t.id === "TAC-LTFU")).toBe(true);
+    expect(os!.statement).not.toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);
 
     const mapped = buildPlanWorkspace({
       ...seed,
@@ -391,5 +398,146 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(covered.some((s) => s.gap_id === first!.gap_id && s.tactic_id === first!.tactic_id)).toBe(
       false,
     );
+  });
+
+  it("suggests leftover as a new gap when locked coverage is partial and no child exists", () => {
+    const seed = buildSeed();
+    const suggestions = suggestResidualGaps(seed);
+    expect(suggestions.some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(true);
+    const elderly = suggestions.find((s) => s.parent_gap_id === "GAP-ELDERLY-CE")!;
+    const parent = seed.gaps.find((g) => g.id === "GAP-ELDERLY-CE")!;
+    expect(elderly.statement.toLowerCase()).not.toBe(parent.statement.toLowerCase());
+    expect(elderly.parent_statement).toBe(parent.statement);
+    expect(elderly.reasons.length).toBeGreaterThan(0);
+    expect(elderly.reasons.join(" ")).toMatch(/partial|limited/i);
+  });
+
+  it("presents residual drafts in the same Review workspace as extracted gaps and tactics", () => {
+    const file = DEMO_PACK.find((row) => row.id === "heor-interview")!;
+    const blocks = splitSourceIntoBlocks(file.text, file.title).map((section, i) => ({
+      id: `b${i}`,
+      source_id: "s",
+      heading: section.heading,
+      text: section.text,
+    }));
+    const extractedGaps = extractCandidateGaps(blocks);
+    const extractedTactics = extractCandidateTactics(blocks);
+    const blank = buildBlankWorkspace();
+    const gaps: EvidenceGap[] = extractedGaps.map((g, i) => ({
+      id: `GAP-${i + 1}`,
+      name: g.name,
+      statement: g.statement,
+      domain: g.domain,
+      objective_id: blank.objectives[0]!.id,
+      status: "candidate",
+      exclusion_reason: null,
+      exclusion_note: null,
+      status_lock: unlocked(),
+      parent_gap_id: null,
+    }));
+    const tactics: Tactic[] = extractedTactics.map((t, i) => ({
+      id: `TAC-${i + 1}`,
+      name: t.name,
+      type: t.type,
+      description: t.source_quote,
+      evidence_question: t.evidence_question,
+      population: "To be specified",
+      intervention: "Velmara",
+      comparator: "To be specified",
+      outcomes: "To be specified",
+      geography: "US + EU5",
+      data_source: file.title,
+      study_design: "Extracted",
+      lifecycle_stage: "extracted",
+      status: "proposed",
+      review_status: "candidate",
+      start_date: null,
+      evidence_available: null,
+      owner: "A. Rao",
+      function: "heor",
+      budget: null,
+      intended_use: "extracted",
+      lock: unlocked(),
+    }));
+    const workspace = buildPlanWorkspace({ ...blank, gaps, tactics });
+    expect(workspace.review.length).toBeGreaterThan(0);
+    expect(workspace.reviewTactics.length).toBeGreaterThan(0);
+    expect(workspace.residualGapSuggestions).toHaveLength(0);
+    expect(workspace.review.every((card) => !("residual" in card))).toBe(true);
+  });
+
+  it("does not suggest leftover when a child gap exists or the leftover was rejected", () => {
+    const seed = buildSeed();
+    const withChild = {
+      ...seed,
+      gaps: [
+        ...seed.gaps,
+        {
+          ...seed.gaps[0]!,
+          id: "GAP-CHILD-ELDERLY",
+          parent_gap_id: "GAP-ELDERLY-CE",
+          status: "validated_open" as const,
+        },
+      ],
+    };
+    expect(suggestResidualGaps(withChild).some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(
+      false,
+    );
+    const rejected = {
+      ...seed,
+      residual_gap_suggestions: [
+        {
+          parent_gap_id: "GAP-ELDERLY-CE",
+          statement: "leftover",
+          reasons: ["test"],
+          status: "rejected" as const,
+          lock: unlocked(),
+        },
+      ],
+    };
+    expect(suggestResidualGaps(rejected).some((s) => s.parent_gap_id === "GAP-ELDERLY-CE")).toBe(
+      false,
+    );
+  });
+
+  it("does not treat unlocked assignment coverage as a leftover-as-gap suggestion", () => {
+    expect(
+      residualGapEligible({
+        gap: { status: "validated_open" },
+        coverages: [cov("limited", {})],
+        hasChild: false,
+        suppressed: false,
+      }),
+    ).toBe(false);
+    const lockedPartial: GapTacticCoverage = {
+      ...cov("partial", {}),
+      overall_lock: {
+        locked: true,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+        locked_at: "2026-09-18T00:00:00Z",
+        note: "Partial.",
+      },
+    };
+    expect(
+      residualGapEligible({
+        gap: { status: "validated_open" },
+        coverages: [lockedPartial],
+        hasChild: false,
+        suppressed: false,
+      }),
+    ).toBe(true);
+    const inferredPartial: GapTacticCoverage = {
+      ...cov("partial", {}),
+      overall_lock: unlocked(),
+    };
+    expect(
+      residualGapEligible({
+        gap: { status: "candidate" },
+        coverages: [inferredPartial],
+        hasChild: false,
+        suppressed: false,
+      }),
+    ).toBe(false);
   });
 });

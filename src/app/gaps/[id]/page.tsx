@@ -15,7 +15,7 @@ import {
   OVERALL_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
-import { suggestGapStatus, uncoveredDimensions } from "@/lib/iegp/engine";
+import { suggestGapStatus, suggestResidualGaps, uncoveredDimensions } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -33,15 +33,17 @@ export default async function GapDetailPage({
     .map((l) => ({ link: l, need: state.needs.find((n) => n.id === l.need_id)! }))
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  const residual = state.residuals.find((r) => r.gap_id === gap.id);
   const suggested = suggestGapStatus(coverages);
   const missing = uncoveredDimensions(coverages);
+  const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
+  const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
+  const parent = gap.parent_gap_id
+    ? state.gaps.find((g) => g.id === gap.parent_gap_id)
+    : undefined;
 
   return (
     <AppShell active="gaps">
-      <PageIntro kicker={gap.id} title={gap.name}>
-        {gap.statement}
-      </PageIntro>
+      <PageIntro kicker={gap.id} title={gap.statement} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <GapBadge status={gap.status} />
         <LockMeta lock={gap.status_lock} />
@@ -168,13 +170,56 @@ export default async function GapDetailPage({
         })}
       </section>
 
-      {residual ? (
+      {parent ? (
+        <p className="mb-6 text-[12px] text-muted-foreground">
+          Leftover of{" "}
+          <Link href={`/gaps/${parent.id}`} className="text-foreground no-underline hover:underline">
+            {parent.statement}
+          </Link>
+        </p>
+      ) : null}
+
+      {children.length > 0 ? (
+        <section className="mb-8">
+          <h2 className="mb-2 text-[13px] text-muted-foreground">Leftover child gaps</h2>
+          <div className="grid gap-2">
+            {children.map((child) => (
+              <Link
+                key={child.id}
+                href={`/gaps/${child.id}`}
+                className="border border-border bg-card p-3 text-[13px] no-underline"
+              >
+                {child.statement}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {leftover ? (
         <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Residual (parent gap preserved)</h2>
-          <p className="mt-2 text-[13px] text-foreground">{residual.statement}</p>
-          <p className="mt-2 text-[12px] text-muted-foreground">{residual.draft_rationale}</p>
-          <div className="mt-3">
-            <LockMeta lock={residual.lock} />
+          <h2 className="text-[13px] text-muted-foreground">Residual evidence need</h2>
+          <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+          <ul className="mt-2 grid gap-1">
+            {leftover.reasons.map((reason) => (
+              <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
+                {reason}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <LockForm
+              label="Accept as new gap"
+              action="accept_residual_gap"
+              extra={{ parent_gap_id: leftover.parent_gap_id, statement: leftover.statement }}
+              confirmLabel="Accept as new gap"
+            />
+            <LockForm
+              label="Reject leftover"
+              action="reject_residual_gap"
+              extra={{ parent_gap_id: leftover.parent_gap_id }}
+              confirmLabel="Reject leftover"
+            />
           </div>
         </section>
       ) : null}

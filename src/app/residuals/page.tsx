@@ -25,14 +25,13 @@ export default async function ResidualsPage() {
   return (
     <AppShell active="residuals">
       <PageIntro kicker="Coverage ≠ priority" title="Residual evidence needs">
-        A residual is the open portion of a parent gap after tactics are mapped. The original gap
-        stays. Priority is a human lock on this page or on the plan. The engine does not assign a
-        band. Effort and cost live on the tactic.
+        A leftover is the open portion of a parent gap after tactics are pressure-tested. Residual
+        drafts are validated in Review — accept as a new gap, reject, or modify. The original gap
+        stays. Priority is a human lock. The engine does not assign a band.
       </PageIntro>
       {rows.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No residuals yet. They are drafted when a mapped tactic is locked as partial or limited
-          coverage.
+          No leftovers queued here. Residual drafts live on Review with extracted gaps and tactics.
         </p>
       ) : (
       <div className="grid gap-4">

@@ -82,6 +82,14 @@ function CreateGapButton() {
   );
 }
 
+function CreateTacticButton() {
+  return (
+    <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
+      <CreateTacticFields />
+    </LockForm>
+  );
+}
+
 function CreateTacticFields() {
   return (
     <>
@@ -116,22 +124,6 @@ function CreateTacticFields() {
   );
 }
 
-function CreateTacticButton() {
-  return (
-    <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
-      <CreateTacticFields />
-    </LockForm>
-  );
-}
-
-function CreateActions() {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <CreateGapButton />
-      <CreateTacticButton />
-    </div>
-  );
-}
 
 function GapTacticsBlock({
   gapId,
@@ -443,7 +435,7 @@ export function ReviewQueue({
     return (
       <div className="grid gap-3">
         <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
-        <CreateActions />
+        <CreateGapButton />
       </div>
     );
   }
@@ -454,7 +446,7 @@ export function ReviewQueue({
           <h3 id="review-gaps" className="text-[13px] font-medium text-foreground">
             Gaps
           </h3>
-          <CreateActions />
+          <CreateGapButton />
         </div>
         {gaps.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">No candidate gaps in the queue.</p>
@@ -494,8 +486,7 @@ export function PrioritizeQueue({
   if (cards.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
-        No leftover to prioritize. Open accepted gaps wait on Mappings for tactics, coverage, and
-        leftover-as-new-gap suggestions.
+        No leftover to prioritize. Open accepted gaps wait on Mappings for tactics and coverage.
       </p>
     );
   }
@@ -510,28 +501,29 @@ export function PrioritizeQueue({
 
 export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
   return (
-    <section aria-labelledby="suggested-residual-gaps">
-      <h2 id="suggested-residual-gaps" className="text-[15px] font-medium text-foreground">
+    <section aria-labelledby="leftover-gaps">
+      <h2 id="leftover-gaps" className="text-[15px] font-medium text-foreground">
         Leftover as a new gap
       </h2>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-        After a pressure-test, partial or limited coverage means the leftover evidence need is a new
-        gap. Accept creates that child (parent stays). Reject persists so this pair is not suggested
-        again.
+        The leftover question after pressure-testing extracted tactics against the parent. Accept
+        residual creates that leftover as a new gap (parent stays). Reject persists. Modify edits
+        the leftover statement — not a copy of the parent sentence.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No leftover-as-gap suggestions. Lock overall coverage as partial or limited on a mapped
-          gap first.
+          No residual evidence needs. The engine drafts one when pressure-testing says a parent is
+          already partial versus extracted tactics.
         </p>
       ) : (
-        <ul className="grid gap-3">
+        <div className="grid gap-3">
           {items.map((item) => (
-            <li key={item.parent_gap_id} className="border border-border bg-background p-4">
-              <p className="text-[11px] text-muted-foreground">Parent (preserved)</p>
-              <p className="mt-1 text-[13px] leading-5 text-foreground">{item.parent_statement}</p>
-              <p className="mt-3 text-[11px] text-muted-foreground">Suggested new gap</p>
-              <p className="mt-1 text-[13px] leading-5 text-foreground">{item.statement}</p>
+            <article key={item.parent_gap_id} className="border border-border bg-background p-4">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Residual evidence need
+              </p>
+              <p className="mt-2 text-[13px] leading-5 text-foreground">{item.statement}</p>
+              <p className="mt-2 text-[12px] text-muted-foreground">Parent: {item.parent_name}</p>
               <ul className="mt-2 grid gap-1">
                 {item.reasons.map((reason) => (
                   <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
@@ -552,10 +544,26 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
                   extra={{ parent_gap_id: item.parent_gap_id }}
                   confirmLabel="Reject leftover"
                 />
+                <LockForm
+                  label="Modify statement"
+                  action="modify_residual_gap"
+                  extra={{ parent_gap_id: item.parent_gap_id }}
+                  confirmLabel="Save statement"
+                >
+                  <label className="grid gap-1 text-[12px] text-muted-foreground">
+                    Residual statement
+                    <textarea
+                      name="statement"
+                      required
+                      defaultValue={item.statement}
+                      className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
+                    />
+                  </label>
+                </LockForm>
               </div>
-            </li>
+            </article>
           ))}
-        </ul>
+        </div>
       )}
     </section>
   );
@@ -657,7 +665,7 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
         </ul>
       )}
       <div className="mt-3">
-        <CreateActions />
+        <CreateTacticButton />
       </div>
     </section>
   );
@@ -683,6 +691,9 @@ export function OpenGapsQueue({
         <article key={card.gap_id} className="border border-border bg-background p-4">
           <div className="flex flex-wrap items-center gap-1.5">
             <GapBadge status={card.gap_status} />
+            {card.parent_gap_id ? (
+              <span className="text-[11px] text-muted-foreground">Leftover of parent</span>
+            ) : null}
           </div>
           <Link
             href={`/gaps/${card.gap_id}`}

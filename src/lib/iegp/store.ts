@@ -8,14 +8,13 @@ import type { ActorFunction, EvidenceDomain } from "./enums";
 import { EVIDENCE_DOMAINS } from "./enums";
 import {
   draftResidualGapSuggestion,
-  draftResidualStatement,
   emptyDimensions,
   extractCandidateGaps,
   extractCandidateNeeds,
   extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
-  residualDraftEligible,
+  residualGapEligible,
   splitSourceIntoBlocks,
   similarRecord,
   suggestGapStatus,
@@ -147,6 +146,8 @@ async function readState(): Promise<IegpState> {
     residuals: residuals.map((r) => ({
       ...r,
       domain: r.domain as IegpState["residuals"][0]["domain"],
+      review_status: (r.review_status as IegpState["residuals"][0]["review_status"]) || "candidate",
+      created_gap_id: r.created_gap_id ?? null,
       lock: asLock(r.lock),
     })),
     priorities: priorities.map((p) => ({
@@ -405,36 +406,45 @@ export async function lockCoverageOverall(args: {
     "lock_overall",
     args.overall,
   );
-  await ensureResidualDraft(row.gap_id);
+  await enqueueResidualGapSuggestion({
+    gap_id: row.gap_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await persistEligibleResidualDrafts();
 }
 
-async function ensureResidualDraft(gap_id: string) {
+async function enqueueResidualGapSuggestion(args: {
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
   const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === gap_id);
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) return;
-  const coverages = state.coverages.filter((c) => c.gap_id === gap_id);
-  if (!residualDraftEligible({ gap, coverages })) return;
-  const draft = draftResidualStatement({ gap, coverages });
-  const existing = state.residuals.find((r) => r.gap_id === gap_id);
-  if (existing) {
-    if (existing.lock.locked) return;
-    await db()
-      .update(t.residuals)
-      .set({
-        statement: draft.statement,
-        draft_rationale: draft.rationale,
-        domain: draft.domain,
-      })
-      .where(eq(t.residuals.id, existing.id));
+  const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+  const hasChild = state.gaps.some((g) => g.parent_gap_id === gap.id);
+  const existing = state.residual_gap_suggestions.find((row) => row.parent_gap_id === gap.id);
+  if (existing?.status === "accepted" || existing?.status === "rejected") return;
+  if (
+    !residualGapEligible({
+      gap,
+      coverages,
+      hasChild,
+      suppressed: Boolean(existing && existing.status !== "candidate"),
+    })
+  ) {
     return;
   }
-  await db().insert(t.residuals).values({
-    id: nextId("RES", state.residuals.map((r) => r.id)),
-    gap_id,
-    statement: draft.statement,
-    domain: draft.domain,
-    draft_rationale: draft.rationale,
-    lock: unlocked(),
+  const draft = draftResidualGapSuggestion({ gap, coverages });
+  await upsertResidualGapSuggestion({
+    parent_gap_id: gap.id,
+    statement: existing?.status === "candidate" ? existing.statement : draft.statement,
+    reasons: draft.reasons,
+    status: "candidate",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: "Pressure-test leftover suggested as a new gap.",
   });
 }
 
@@ -715,7 +725,7 @@ async function upsertResidualGapSuggestion(args: {
   parent_gap_id: string;
   statement: string;
   reasons: string[];
-  status: "accepted" | "rejected";
+  status: "candidate" | "accepted" | "rejected";
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
@@ -744,8 +754,76 @@ async function upsertResidualGapSuggestion(args: {
   await db().insert(t.residualGapSuggestions).values(row);
 }
 
+async function consumeResidualRecord(args: {
+  gap_id: string;
+  statement: string;
+  domain: EvidenceDomain;
+  rationale: string;
+  review_status: "candidate" | "accepted" | "rejected";
+  created_gap_id: string | null;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const existing = state.residuals.find((row) => row.gap_id === args.gap_id);
+  const lock =
+    args.review_status === "candidate"
+      ? existing?.lock.locked
+        ? existing.lock
+        : unlocked()
+      : makeLock(args.actor_name, args.actor_function, args.note);
+  const row = {
+    statement: args.statement,
+    domain: args.domain,
+    draft_rationale: args.rationale || existing?.draft_rationale || "Pressure-test leftover.",
+    review_status: args.review_status,
+    created_gap_id: args.created_gap_id,
+    lock,
+  };
+  if (existing) {
+    if (
+      (existing.review_status === "accepted" || existing.review_status === "rejected") &&
+      args.review_status === "candidate"
+    ) {
+      return;
+    }
+    await db().update(t.residuals).set(row).where(eq(t.residuals.id, existing.id));
+    return;
+  }
+  await db().insert(t.residuals).values({
+    id: nextId(
+      "RES",
+      state.residuals.map((r) => r.id),
+    ),
+    gap_id: args.gap_id,
+    ...row,
+  });
+}
+
+async function persistEligibleResidualDrafts() {
+  const state = await loadState();
+  for (const draft of rankResidualGapSuggestions(state)) {
+    await consumeResidualRecord({
+      gap_id: draft.parent_gap_id,
+      statement: draft.statement,
+      domain: draft.domain,
+      rationale: draft.reasons.join(" "),
+      review_status: "candidate",
+      created_gap_id: null,
+      actor_name: "Engine",
+      actor_function: "evidence_lead",
+      note: "Pressure-test draft. Human must accept, reject, or modify in Review.",
+    });
+  }
+}
+
 export async function suggestResidualGaps() {
   return rankResidualGapSuggestions(await loadState());
+}
+
+function liveResidualDraft(state: IegpState, parent_gap_id: string) {
+  return rankResidualGapSuggestions(state).find((row) => row.parent_gap_id === parent_gap_id);
 }
 
 export async function acceptResidualGap(args: {
@@ -767,19 +845,24 @@ export async function acceptResidualGap(args: {
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
     throw new Error("A child gap already exists for this leftover.");
   }
-  const coverages = state.coverages.filter((c) => c.gap_id === args.parent_gap_id);
-  const draft = draftResidualGapSuggestion({ gap: parent, coverages });
-  const statement = (args.statement || draft.statement).trim();
+  const draft = liveResidualDraft(state, args.parent_gap_id);
+  const saved = state.residual_gap_suggestions.find(
+    (row) => row.parent_gap_id === args.parent_gap_id && row.status === "candidate",
+  );
+  if (!draft && !saved && !args.statement?.trim()) {
+    throw new Error("No leftover residual to accept.");
+  }
+  const statement = (args.statement || saved?.statement || draft?.statement || "").trim();
   if (!statement) throw new Error("Statement is required.");
   const childId = await createGap({
     statement,
-    domain: draft.domain,
+    domain: draft?.domain ?? parent.domain,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note || "Accepted leftover as a new gap. Parent preserved.",
     parent_gap_id: args.parent_gap_id,
   });
-  if (parent.status !== "validated_partial") {
+  if (parent.status === "candidate" || parent.status === "validated_open") {
     await lockGapStatus({
       gap_id: args.parent_gap_id,
       status: "validated_partial",
@@ -791,8 +874,19 @@ export async function acceptResidualGap(args: {
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
     statement,
-    reasons: draft.reasons,
+    reasons: draft?.reasons ?? saved?.reasons ?? ["Human accepted residual as a new gap."],
     status: "accepted",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Accepted leftover as a new gap.",
+  });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? []).join(" "),
+    review_status: "accepted",
+    created_gap_id: childId,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note || "Accepted leftover as a new gap.",
@@ -808,6 +902,53 @@ export async function acceptResidualGap(args: {
   return childId;
 }
 
+export async function modifyResidualGap(args: {
+  parent_gap_id: string;
+  statement: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const statement = args.statement.trim();
+  if (!statement) throw new Error("Statement is required.");
+  const state = await loadState();
+  const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
+  if (!parent) throw new Error("Parent gap not found");
+  const existing = state.residual_gap_suggestions.find((row) => row.parent_gap_id === args.parent_gap_id);
+  if (existing?.status === "accepted" || existing?.status === "rejected") {
+    throw new Error("That leftover is already locked.");
+  }
+  const draft = liveResidualDraft(state, args.parent_gap_id);
+  await upsertResidualGapSuggestion({
+    parent_gap_id: args.parent_gap_id,
+    statement,
+    reasons: draft?.reasons ?? ["Human modified the leftover statement."],
+    status: "candidate",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Modified residual statement.",
+  });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? ["Human modified the leftover statement."]).join(" "),
+    review_status: "candidate",
+    created_gap_id: null,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Modified residual statement.",
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "residual_gap",
+    args.parent_gap_id,
+    "modify_residual_gap",
+    statement.slice(0, 180),
+  );
+}
+
 export async function rejectResidualGap(args: {
   parent_gap_id: string;
   actor_name: string;
@@ -820,13 +961,23 @@ export async function rejectResidualGap(args: {
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
     throw new Error("A child gap already exists for this leftover.");
   }
-  const coverages = state.coverages.filter((c) => c.gap_id === args.parent_gap_id);
-  const draft = draftResidualGapSuggestion({ gap: parent, coverages });
+  const draft = liveResidualDraft(state, args.parent_gap_id);
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
-    statement: draft.statement,
-    reasons: draft.reasons,
+    statement: draft?.statement ?? parent.statement,
+    reasons: draft?.reasons ?? ["Human rejected this leftover."],
     status: "rejected",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note || "Rejected leftover-as-new-gap suggestion.",
+  });
+  await consumeResidualRecord({
+    gap_id: args.parent_gap_id,
+    statement: draft?.statement ?? parent.statement,
+    domain: draft?.domain ?? parent.domain,
+    rationale: (draft?.reasons ?? ["Human rejected this leftover."]).join(" "),
+    review_status: "rejected",
+    created_gap_id: null,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note || "Rejected leftover-as-new-gap suggestion.",
@@ -904,10 +1055,6 @@ export async function modifyGap(args: {
     "modify",
     args.note || `${gap.name} → ${args.name}`,
   );
-  const residual = state.residuals.find((r) => r.gap_id === args.gap_id);
-  if (residual && !residual.lock.locked) {
-    await ensureResidualDraft(args.gap_id);
-  }
 }
 
 export async function lockTactic(args: {
@@ -1166,6 +1313,7 @@ export async function ingestNeedFromText(args: {
     "ingest",
     `Ingested ${args.title}; ${createdNeedIds.length} candidate need(s), ${createdGapIds.length} candidate gap(s), ${tacticCount} extracted tactic(s); coverage marked stale.`,
   );
+  await persistEligibleResidualDrafts();
   return sourceId;
 }
 

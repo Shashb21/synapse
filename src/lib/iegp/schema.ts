@@ -152,6 +152,8 @@ export const residuals = pgTable("residuals", {
   statement: text("statement").notNull(),
   domain: text("domain").notNull(),
   draft_rationale: text("draft_rationale").notNull(),
+  review_status: text("review_status").notNull().default("candidate"),
+  created_gap_id: text("created_gap_id"),
   lock: jsonb("lock").notNull(),
 });
 

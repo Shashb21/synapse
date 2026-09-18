@@ -22,7 +22,9 @@ import { statementSimilarity } from "@/lib/text";
 import {
   MAPPING_SCORE_FLOOR,
   MAPPING_SUGGESTION_CAP,
+  isDisseminationTactic,
   scoreGapTacticMapping,
+  type MappingScoreExtras,
   type MappingSuggestion,
 } from "./mapping";
 
@@ -177,8 +179,8 @@ export function residualDraftEligible(args: {
 }
 
 /**
- * Residual-as-gap: prefer human-locked overall of partial/limited.
- * Unlocked assignment defaults (overall "limited") do not enqueue a leftover.
+ * Leftover-as-new-gap: human-locked overall of partial/limited.
+ * Unlocked assignment defaults (overall "limited") and inferred drafts do not enqueue.
  */
 export function residualGapEligible(args: {
   gap: Pick<EvidenceGap, "status">;
@@ -187,14 +189,67 @@ export function residualGapEligible(args: {
   suppressed: boolean;
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
-  if (
-    args.gap.status === "candidate" ||
-    args.gap.status === "excluded" ||
-    args.gap.status === "validated_addressed"
-  ) {
-    return false;
-  }
+  if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
   return residualDraftEligible(args);
+}
+
+function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
+  return tactic.review_status !== "rejected" && tactic.status !== "cancelled";
+}
+
+/** Deterministic mapping/coverage vs extracted tactics — not a human lock. */
+export function inferPressureTestCoverages(
+  gap: Pick<EvidenceGap, "id" | "name" | "statement" | "domain">,
+  tactics: Tactic[],
+  extras: { needs?: MappingScoreExtras["needs"] } = {},
+): GapTacticCoverage[] {
+  const hits: GapTacticCoverage[] = [];
+  for (const tactic of tactics) {
+    if (!tacticEligibleForPressureTest(tactic)) continue;
+    if (isDisseminationTactic(tactic) && gap.domain !== "implementation") continue;
+    const scored = scoreGapTacticMapping(gap, tactic, extras);
+    if (scored.score < MAPPING_SCORE_FLOOR) continue;
+    const dimensions = emptyDimensions();
+    const gapHay = `${gap.name} ${gap.statement}`.toLowerCase();
+    const tacticHay =
+      `${tactic.name} ${tactic.evidence_question} ${tactic.description} ${tactic.population} ${tactic.comparator} ${tactic.outcomes}`.toLowerCase();
+    dimensions.relevance = {
+      value: "partial",
+      rationale: scored.reasons[0] ?? "Related extracted tactic.",
+      lock: unlocked(),
+    };
+    const popCue = /elderly|aged|65|frail|cns|brain|community/;
+    dimensions.population = {
+      value: popCue.test(gapHay) && popCue.test(tacticHay) ? "partial" : "unknown",
+      rationale: "",
+      lock: unlocked(),
+    };
+    const wantsComparator = /comparat|versus|vs\.|standard of care|\bsoc\b/.test(gapHay);
+    const singleArm = /no comparative|single-arm|no comparator|not a powered comparative/.test(
+      tacticHay,
+    );
+    if (wantsComparator && (singleArm || !/comparat|versus|standard of care|\bsoc\b/.test(tacticHay))) {
+      dimensions.comparator = { value: "no", rationale: "Extracted tactic has no SoC arm.", lock: unlocked() };
+    } else if (wantsComparator) {
+      dimensions.comparator = { value: "partial", rationale: "", lock: unlocked() };
+    }
+    dimensions.decision_utility = {
+      value: "partial",
+      rationale: "Pressure-test: parent is already partial, not closed.",
+      lock: unlocked(),
+    };
+    hits.push({
+      id: `pt-${gap.id}-${tactic.id}`,
+      gap_id: gap.id,
+      tactic_id: tactic.id,
+      dimensions,
+      overall: "partial",
+      overall_rationale: scored.reasons.join(" "),
+      overall_lock: unlocked(),
+      stale: false,
+    });
+  }
+  return hits;
 }
 
 export type ResidualGapSuggestion = {
@@ -239,7 +294,21 @@ export function draftResidualGapSuggestion(args: {
   };
 }
 
-/** Ranked leftover-as-new-gap drafts. Engine suggests; it does not create the child. */
+function needsForGap(state: IegpState, gapId: string) {
+  const ids = state.need_gap_links.filter((link) => link.gap_id === gapId).map((link) => link.need_id);
+  return state.needs.filter((need) => ids.includes(need.id));
+}
+
+function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
+  return state.coverages.filter(
+    (c) =>
+      c.gap_id === gap.id &&
+      c.overall_lock.locked &&
+      (c.overall === "partial" || c.overall === "limited"),
+  );
+}
+
+/** Ranked leftover-as-new-gap drafts for Mappings. Engine suggests; it does not create the child. */
 export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
   const suppressed = new Set(
     state.residual_gap_suggestions
@@ -249,20 +318,28 @@ export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
   const childByParent = new Set(
     state.gaps.map((gap) => gap.parent_gap_id).filter((id): id is string => Boolean(id)),
   );
+  const edited = new Map(
+    state.residual_gap_suggestions
+      .filter((row) => row.status === "candidate")
+      .map((row) => [row.parent_gap_id, row.statement] as const),
+  );
   const out: ResidualGapSuggestion[] = [];
   for (const gap of state.gaps) {
-    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     if (
       !residualGapEligible({
         gap,
-        coverages,
+        coverages: coveragesForResidualDraft(state, gap),
         hasChild: childByParent.has(gap.id),
         suppressed: suppressed.has(gap.id),
       })
     ) {
       continue;
     }
-    out.push(draftResidualGapSuggestion({ gap, coverages }));
+    const coverages = coveragesForResidualDraft(state, gap);
+    if (coverages.length === 0) continue;
+    const draft = draftResidualGapSuggestion({ gap, coverages });
+    const statement = edited.get(gap.id) ?? draft.statement;
+    out.push({ ...draft, statement });
   }
   return out;
 }
@@ -921,6 +998,7 @@ export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
 export function buildPlanWorkspace(state: IegpState): {
   review: ReviewGapCard[];
   reviewTactics: ReviewTacticCard[];
+  reviewResiduals: ResidualGapSuggestion[];
   openGaps: OpenGapCard[];
   unprioritized: UnprioritizedGapCard[];
   board: Record<PlanColumn, PlanGapCard[]>;
@@ -970,6 +1048,8 @@ export function buildPlanWorkspace(state: IegpState): {
   const unprioritized: UnprioritizedGapCard[] = [];
   for (const residual of state.residuals) {
     if (prioritizedResidual.has(residual.id)) continue;
+    if (residual.review_status === "candidate" || residual.review_status === "rejected") continue;
+    if (residual.created_gap_id) continue;
     const gap = state.gaps.find((g) => g.id === residual.gap_id);
     if (!gap) continue;
     if (gap.status !== "validated_open" && gap.status !== "validated_partial") continue;
@@ -1003,16 +1083,18 @@ export function buildPlanWorkspace(state: IegpState): {
     });
   }
 
+  const reviewResiduals = suggestResidualGaps(state);
   return {
     review,
     reviewTactics,
+    reviewResiduals,
     openGaps,
     unprioritized,
     board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
     mappingSuggestions: suggestMappings(state),
-    residualGapSuggestions: suggestResidualGaps(state),
+    residualGapSuggestions: reviewResiduals,
   };
 }
 
@@ -1052,11 +1134,20 @@ export function planGates(state: IegpState): {
 
 export function defaultPlanPlace(
   state: IegpState,
-  workspace: Pick<ReturnType<typeof buildPlanWorkspace>, "review" | "reviewTactics">,
+  workspace: Pick<
+    ReturnType<typeof buildPlanWorkspace>,
+    "review" | "reviewTactics" | "reviewResiduals"
+  >,
 ): PlanPlace {
   if (state.asset.wizard_complete) return "plan";
   if (state.sources.length === 0) return "upload";
-  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) return "review";
+  if (
+    workspace.review.length > 0 ||
+    workspace.reviewTactics.length > 0 ||
+    workspace.reviewResiduals.length > 0
+  ) {
+    return "review";
+  }
   return "review";
 }
 
@@ -1065,7 +1156,8 @@ export function planNavCounts(workspace: ReturnType<typeof buildPlanWorkspace>):
   mappings: number;
 } {
   return {
-    review: workspace.review.length + workspace.reviewTactics.length,
-    mappings: workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
+    review:
+      workspace.review.length + workspace.reviewTactics.length + workspace.reviewResiduals.length,
+    mappings: workspace.mappingSuggestions.length,
   };
 }
