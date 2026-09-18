@@ -345,6 +345,7 @@ export function inferPressureTestCoverages(
       overall_rationale: scored.reasons.join(" "),
       overall_lock: unlocked(),
       stale: false,
+      needs_review: false,
     });
   }
   return hits;
@@ -1144,6 +1145,8 @@ export type PlanTactic = {
   status: TacticStatus;
   overall: OverallCoverage | null;
   stale: boolean;
+  needs_review: boolean;
+  counts_toward_addressing: boolean;
 };
 
 export type PlanGapCard = {
@@ -1161,6 +1164,13 @@ export type PlanGapCard = {
   parent_gap_id: string | null;
 };
 
+export type ReviewNeedSnippet = {
+  id: string;
+  statement: string;
+  role: "primary" | "supporting";
+  source_title: string | null;
+};
+
 export type ReviewGapCard = {
   gap_id: string;
   gap_name: string;
@@ -1173,6 +1183,9 @@ export type ReviewGapCard = {
   residual: ResidualGapSuggestion | null;
   parent_gap_id: string | null;
   history_count: number;
+  need_count: number;
+  needs: ReviewNeedSnippet[];
+  needs_review: boolean;
 };
 
 export type OpenGapCard = {
@@ -1217,13 +1230,20 @@ const STATUS_ORDER: Record<TacticStatus, number> = {
   cancelled: 4,
 };
 
-function asPlanTactic(tactic: Tactic, overall: OverallCoverage | null, stale: boolean): PlanTactic {
+function asPlanTactic(
+  tactic: Tactic,
+  overall: OverallCoverage | null,
+  stale: boolean,
+  needs_review = false,
+): PlanTactic {
   return {
     id: tactic.id,
     name: tactic.name,
     status: tactic.status,
     overall,
     stale,
+    needs_review,
+    counts_toward_addressing: tacticCountsTowardAddressing(tactic),
   };
 }
 
@@ -1246,13 +1266,13 @@ export function mappedTactics(state: IegpState, gapId: string, residualId?: stri
   for (const coverage of state.coverages.filter((c) => c.gap_id === gapId)) {
     const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
     if (!tactic) continue;
-    mapped.push(asPlanTactic(tactic, coverage.overall, coverage.stale));
+    mapped.push(asPlanTactic(tactic, coverage.overall, coverage.stale, coverage.needs_review));
   }
   if (residualId) {
     for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residualId))) {
       const tactic = state.tactics.find((t) => t.id === item.tactic_id);
       if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
-      mapped.push(asPlanTactic(tactic, null, false));
+      mapped.push(asPlanTactic(tactic, null, false, false));
     }
   }
   return mapped.sort(
@@ -1338,6 +1358,8 @@ export function buildPlanWorkspace(state: IegpState): {
   for (const gap of state.gaps.filter(isLiveGap)) {
     const shown = displayedGapStatus(gap);
     if (shown === "candidate") continue;
+    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+    const linkedNeeds = needsForReviewCard(state, gap.id);
     review.push({
       gap_id: gap.id,
       gap_name: gap.name,
@@ -1350,8 +1372,12 @@ export function buildPlanWorkspace(state: IegpState): {
       residual: residualByParent.get(gap.id) ?? null,
       parent_gap_id: gap.parent_gap_id,
       history_count: state.gap_versions.filter((row) => row.live_gap_id === gap.id).length,
+      need_count: linkedNeeds.length,
+      needs: linkedNeeds,
+      needs_review: coverages.some((c) => c.needs_review),
     });
   }
+  review.sort(compareReviewGapCards);
 
   const openGaps: OpenGapCard[] = [];
   for (const gap of state.gaps) {
@@ -1489,4 +1515,98 @@ export function planNavCounts(workspace: ReturnType<typeof buildPlanWorkspace>):
       (g) => !g.human_validated || g.gap_status === "validated_partial",
     ).length,
   };
+}
+
+function needsForReviewCard(state: IegpState, gapId: string): ReviewNeedSnippet[] {
+  const links = state.need_gap_links.filter((link) => link.gap_id === gapId);
+  const out: ReviewNeedSnippet[] = [];
+  for (const link of links) {
+    const need = state.needs.find((row) => row.id === link.need_id);
+    if (!need) continue;
+    const source = state.sources.find((row) => row.id === need.source_id);
+    out.push({
+      id: need.id,
+      statement: need.statement,
+      role: link.role,
+      source_title: source?.title ?? null,
+    });
+  }
+  return out;
+}
+
+export function reviewGapSortRank(card: Pick<ReviewGapCard, "gap_status" | "human_validated" | "gap_name">): number {
+  if (card.gap_status === "validated_partial") return 0;
+  if (!card.human_validated) return 1;
+  if (card.gap_status === "validated_open") return 2;
+  if (card.gap_status === "validated_addressed") return 3;
+  return 4;
+}
+
+export function compareReviewGapCards(
+  a: Pick<ReviewGapCard, "gap_status" | "human_validated" | "gap_name">,
+  b: Pick<ReviewGapCard, "gap_status" | "human_validated" | "gap_name">,
+): number {
+  return reviewGapSortRank(a) - reviewGapSortRank(b) || a.gap_name.localeCompare(b.gap_name);
+}
+
+export function sortReviewGapCards<T extends Pick<ReviewGapCard, "gap_status" | "human_validated" | "gap_name">>(
+  cards: T[],
+): T[] {
+  return [...cards].sort(compareReviewGapCards);
+}
+
+export const REVIEW_GAP_FILTERS = [
+  "all",
+  "partial",
+  "open",
+  "addressed",
+  "needs_validation",
+] as const;
+export type ReviewGapFilter = (typeof REVIEW_GAP_FILTERS)[number];
+
+export function filterReviewGapCards<T extends Pick<ReviewGapCard, "gap_status" | "human_validated">>(
+  cards: T[],
+  filter: ReviewGapFilter,
+): T[] {
+  if (filter === "partial") return cards.filter((c) => c.gap_status === "validated_partial");
+  if (filter === "open") return cards.filter((c) => c.gap_status === "validated_open");
+  if (filter === "addressed") return cards.filter((c) => c.gap_status === "validated_addressed");
+  if (filter === "needs_validation") {
+    return cards.filter((c) => !c.human_validated || c.gap_status === "validated_partial");
+  }
+  return cards;
+}
+
+export function reviewGapFilterCounts(cards: Pick<ReviewGapCard, "gap_status" | "human_validated">[]): Record<
+  ReviewGapFilter,
+  number
+> {
+  return {
+    all: cards.length,
+    partial: cards.filter((c) => c.gap_status === "validated_partial").length,
+    open: cards.filter((c) => c.gap_status === "validated_open").length,
+    addressed: cards.filter((c) => c.gap_status === "validated_addressed").length,
+    needs_validation: cards.filter(
+      (c) => !c.human_validated || c.gap_status === "validated_partial",
+    ).length,
+  };
+}
+
+export function liveGapsMappedToTactic(
+  state: IegpState,
+  tacticId: string,
+  exceptGapId?: string,
+): { id: string; name: string }[] {
+  const live = new Set(state.gaps.filter(isLiveGap).map((g) => g.id));
+  const ids = [
+    ...new Set(
+      state.coverages
+        .filter((c) => c.tactic_id === tacticId && live.has(c.gap_id) && c.gap_id !== exceptGapId)
+        .map((c) => c.gap_id),
+    ),
+  ];
+  return ids
+    .map((id) => state.gaps.find((g) => g.id === id))
+    .filter((g): g is NonNullable<typeof g> => Boolean(g))
+    .map((g) => ({ id: g.id, name: g.name }));
 }

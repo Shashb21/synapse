@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { CoverageBadge, GapBadge, LockMeta, StaleFlag } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, StaleFlag } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
@@ -20,6 +20,7 @@ import { loadState } from "@/lib/iegp/store";
 import {
   computeGapStatus,
   displayedGapStatus,
+  liveGapsMappedToTactic,
   mappedTactics,
   suggestResidualGaps,
   uncoveredDimensions,
@@ -67,7 +68,9 @@ export default async function GapDetailPage({
           <SplitGapDialog
             gapId={gap.id}
             gapName={gap.name}
+            gapStatement={gap.statement}
             residualName={leftover?.statement || gap.name}
+            residualStatement={leftover?.statement || gap.statement}
             tactics={tactics}
           >
             <GapBadge status={shown} />
@@ -100,14 +103,28 @@ export default async function GapDetailPage({
 
       <section className="mb-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs</h2>
+        <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
+          A gap is the decision object. Constituent needs are the sourced statements underneath it.
+          Role is primary or supporting. Many needs can join one gap without copying the statement
+          onto the card.
+        </p>
         <div className="grid gap-2">
-          {needs.map(({ need, link }) => (
-            <p key={need.id} className="border border-border bg-card p-3 text-[13px]">
-              <span className="text-[11px] text-muted-foreground">{link.role} · {need.id}</span>
-              <br />
-              {need.statement}
-            </p>
-          ))}
+          {needs.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No constituent needs linked yet.</p>
+          ) : (
+            needs.map(({ need, link }) => {
+              const source = state.sources.find((s) => s.id === need.source_id);
+              return (
+                <p key={need.id} className="border border-border bg-card p-3 text-[13px]">
+                  <span className="text-[11px] capitalize text-muted-foreground">
+                    {link.role} · {source?.title || need.source_id}
+                  </span>
+                  <br />
+                  {need.statement}
+                </p>
+              );
+            })
+          )}
         </div>
       </section>
 
@@ -121,6 +138,7 @@ export default async function GapDetailPage({
         </p>
         {coverages.map((c) => {
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
+          const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -129,7 +147,44 @@ export default async function GapDetailPage({
                 </Link>
                 <CoverageBadge overall={c.overall} />
                 <StaleFlag stale={c.stale} />
+                <NeedsReviewFlag needsReview={c.needs_review} />
               </div>
+              {siblings.length > 0 ? (
+                <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
+                  <p className="text-[12px] text-foreground">
+                    Also mapped on {siblings.length} other gap{siblings.length === 1 ? "" : "s"}.
+                    Coverage values stay per gap — changing this row flags siblings for review
+                    without copying yes/partial/no.
+                  </p>
+                  <ul className="mt-2 grid gap-1">
+                    {siblings.map((sibling) => (
+                      <li key={sibling.id}>
+                        <Link
+                          href={`/gaps/${sibling.id}`}
+                          className="text-[12px] text-foreground no-underline hover:underline"
+                        >
+                          {sibling.name}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {c.needs_review ? (
+                <div className="mt-3 border border-border bg-card/40 p-3">
+                  <p className="mb-2 text-[12px] text-muted-foreground">
+                    Another live gap that uses this tactic changed a dimension or overall. Confirm
+                    or edit this gap&apos;s own coverage. Status is not auto-flipped until you do.
+                  </p>
+                  <LockForm
+                    label="Confirm coverage"
+                    action="confirm_coverage_review"
+                    extra={{ coverage_id: c.id }}
+                    confirmLabel="Confirm coverage"
+                    description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
+                  />
+                </div>
+              ) : null}
               <p className="mt-2 text-[12px] text-muted-foreground">{c.overall_rationale}</p>
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-left text-[12px]">
@@ -137,7 +192,7 @@ export default async function GapDetailPage({
                     <tr className="text-muted-foreground">
                       <th className="py-1 font-medium">Dimension</th>
                       <th className="py-1 font-medium">Assessment</th>
-                      <th className="py-1 font-medium">Lock</th>
+                      <th className="py-1 font-medium">Change</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -154,9 +209,11 @@ export default async function GapDetailPage({
                           <td className="py-2 pr-3 capitalize">{cell.value}</td>
                           <td className="py-2">
                             <LockForm
-                              label="Lock dimension"
+                              label="Change dimension"
                               action="lock_dimension"
                               extra={{ coverage_id: c.id, dimension: dim }}
+                              confirmLabel="Change dimension"
+                              description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
                               <label className="grid gap-1 text-[12px] text-muted-foreground">
                                 Value
@@ -183,9 +240,11 @@ export default async function GapDetailPage({
               </div>
               <div className="mt-3">
                 <LockForm
-                  label="Lock overall coverage"
+                  label="Change overall coverage"
                   action="lock_overall"
                   extra={{ coverage_id: c.id }}
+                  confirmLabel="Change overall coverage"
+                  description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >
                   <label className="grid gap-1 text-[12px] text-muted-foreground">
                     Overall

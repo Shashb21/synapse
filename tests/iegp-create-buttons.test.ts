@@ -10,6 +10,9 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain('label="Add tactic"');
     expect(src).toContain("create_addressed_gap");
     expect(src).toContain("SplitGapDialog");
+    expect(src).toContain("constituent need");
+    expect(src).toContain("No tactics mapped");
+    expect(src).toContain("Needs validation");
     expect(src).not.toContain("Accept gap");
     expect(src).not.toContain("Accept tactic");
     expect(src).not.toContain("Accept as new gap");
@@ -63,8 +66,16 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(dialog).toContain("Open");
     expect(dialog).toContain("Partial cannot stay");
     expect(dialog).toContain("Split or rewrite");
+    expect(dialog).toContain("tactic_ids");
+    expect(dialog).toContain("addressed_statement");
+    expect(dialog).toContain("At least one tactic");
     const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
     expect(workbench).toContain("<GapBadge status={card.gap_status} />");
     expect(workbench).toContain("SplitGapDialog");
+    const detail = readFileSync(path.join(process.cwd(), "src/app/gaps/[id]/page.tsx"), "utf8");
+    expect(detail).toContain("Change dimension");
+    expect(detail).toContain("Change overall coverage");
+    expect(detail).toContain("Also mapped on");
+    expect(detail).toContain("confirm_coverage_review");
   });
 });

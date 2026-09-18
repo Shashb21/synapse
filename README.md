@@ -15,7 +15,7 @@ Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The a
 - A stakeholder quote is a **candidate need**, not a validated gap.
 - A tactic (or a publication) existing is not coverage. Coverage is ten dimensions plus an overall degree, human-locked.
 - One registry can map to sequencing, HCRU and QoL without copying the protocol onto three cards.
-- When coverage is partial, the engine shows **Partially Addressed**. That status cannot stay: split into an Addressed slice (with its tactic) and an Open leftover, or rewrite the original. The original is retired into version history so children can trace it.
+- When coverage is partial, the engine shows **Partially Addressed**. That status cannot stay: split into an Addressed slice (with chosen mapped tactics) and an Open leftover, or rewrite the original. The original is retired into version history so children can trace it.
 - Coverage ≠ priority. An 80%-covered HTA leftover can still be High.
 
 ## Run locally

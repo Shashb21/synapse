@@ -43,12 +43,14 @@ export function LockForm({
   extra,
   children,
   confirmLabel,
+  description,
 }: {
   label: string;
   action: string;
   extra?: Record<string, string>;
   children?: React.ReactNode;
   confirmLabel?: string;
+  description?: string;
 }) {
   const router = useRouter();
   const nameId = useId();
@@ -132,7 +134,7 @@ export function LockForm({
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
-              Type your name and function. No login. Every IEGP gate records an actor.
+              {description ?? "Type your name and function. No login. Every IEGP gate records an actor."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-3">

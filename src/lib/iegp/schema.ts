@@ -144,6 +144,7 @@ export const coverages = pgTable("coverages", {
   overall_rationale: text("overall_rationale").notNull(),
   overall_lock: jsonb("overall_lock").notNull(),
   stale: boolean("stale").notNull().default(false),
+  needs_review: boolean("needs_review").notNull().default(false),
 });
 
 export const mappingSuggestions = pgTable(

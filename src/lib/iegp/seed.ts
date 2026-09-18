@@ -64,6 +64,7 @@ function coverage(args: {
     overall_rationale: args.rationale,
     overall_lock: lock(args.who[0], args.who[1], args.rationale),
     stale: args.stale ?? false,
+    needs_review: false,
   };
 }
 

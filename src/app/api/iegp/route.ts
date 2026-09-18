@@ -12,6 +12,7 @@ import {
   ingestNeedFromText,
   lockCoverageDimension,
   lockCoverageOverall,
+  confirmCoverageReview,
   lockGapStatus,
   lockNeed,
   lockPriority,
@@ -35,6 +36,17 @@ import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import type { CoverageDimension } from "@/lib/iegp/enums";
 
 export const runtime = "nodejs";
+
+function idList(...values: (string | undefined)[]): string[] {
+  return [
+    ...new Set(
+      values
+        .flatMap((value) => (value || "").split(","))
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
 export async function POST(request: Request) {
   const body = (await request.json()) as Record<string, string>;
@@ -104,6 +116,14 @@ export async function POST(request: Request) {
           rationale: body.rationale || body.note || "",
           actor_name,
           actor_function,
+        });
+        break;
+      case "confirm_coverage_review":
+        await confirmCoverageReview({
+          coverage_id: body.coverage_id,
+          actor_name,
+          actor_function,
+          note: body.note,
         });
         break;
       case "lock_residual":
@@ -261,8 +281,12 @@ export async function POST(request: Request) {
         await splitPartialGap({
           parent_gap_id: body.parent_gap_id || body.gap_id,
           addressed_name: body.addressed_name,
+          addressed_statement: body.addressed_statement || undefined,
           open_name: body.open_name,
-          tactic_id: body.tactic_id,
+          open_statement: body.open_statement || undefined,
+          tactic_id: body.tactic_id || undefined,
+          tactic_ids: idList(body.tactic_ids, body.tactic_id),
+          open_tactic_ids: idList(body.open_tactic_ids),
           actor_name,
           actor_function,
           note: body.note,
@@ -272,8 +296,10 @@ export async function POST(request: Request) {
         await rewritePartialGap({
           gap_id: body.gap_id,
           name: body.name,
+          statement: body.statement || undefined,
           status: body.status as "validated_open" | "validated_addressed",
           tactic_id: body.tactic_id || undefined,
+          tactic_ids: idList(body.tactic_ids, body.tactic_id),
           actor_name,
           actor_function,
           note: body.note,

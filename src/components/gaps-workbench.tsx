@@ -1,9 +1,11 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { GapBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
-import { GapStatusGuide } from "@/components/gap-status-guide";
 import {
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
@@ -11,8 +13,30 @@ import {
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
-import type { ReviewGapCard, TacticLibraryItem } from "@/lib/iegp/engine";
-import { CoverageBadge, StaleFlag, TacticBadge } from "@/components/iegp-badges";
+import {
+  filterReviewGapCards,
+  reviewGapFilterCounts,
+  sortReviewGapCards,
+  type ReviewGapCard,
+  type ReviewGapFilter,
+  type TacticLibraryItem,
+} from "@/lib/iegp/engine";
+import { CoverageBadge, NeedsReviewFlag, StaleFlag, TacticBadge } from "@/components/iegp-badges";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "partial", label: "Partial" },
+  { id: "open", label: "Open" },
+  { id: "addressed", label: "Addressed" },
+  { id: "needs_validation", label: "Needs validation" },
+];
 
 function CreateOpenGap() {
   return (
@@ -110,6 +134,39 @@ function CreateTacticInline() {
   );
 }
 
+function ConstituentNeedsHint({ card }: { card: ReviewGapCard }) {
+  const count = card.need_count;
+  const label = `${count} constituent need${count === 1 ? "" : "s"}`;
+  if (count === 0) {
+    return <span className="text-[12px] text-muted-foreground">No constituent needs</span>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="text-left text-[12px] text-muted-foreground underline decoration-dotted underline-offset-2"
+          />
+        }
+      >
+        {label}
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm whitespace-normal text-left">
+        <p className="mb-1 font-medium">Sourced statements this gap stands for</p>
+        <ul className="grid gap-1.5">
+          {card.needs.map((need) => (
+            <li key={need.id}>
+              <span className="capitalize">{need.role}</span>
+              {need.source_title ? ` · ${need.source_title}` : ""} — {need.statement}
+            </li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function GapsWorkbench({
   cards,
   availableTactics,
@@ -119,128 +176,165 @@ export function GapsWorkbench({
   availableTactics: TacticLibraryItem[];
   readyForPrioritize: boolean;
 }) {
-  const partials = cards.filter((c) => c.gap_status === "validated_partial").length;
-  const unvalidated = cards.filter((c) => !c.human_validated || c.gap_status === "validated_partial").length;
+  const [filter, setFilter] = useState<ReviewGapFilter>("all");
+  const counts = reviewGapFilterCounts(cards);
+  const visible = useMemo(
+    () => sortReviewGapCards(filterReviewGapCards(cards, filter)),
+    [cards, filter],
+  );
+  const partials = counts.partial;
+  const unvalidated = counts.needs_validation;
 
   return (
-    <div className="grid gap-6">
-      <GapStatusGuide compact />
-      <div className="flex flex-wrap items-center gap-2">
-        <CreateOpenGap />
-        <CreateAddressedGap tactics={availableTactics} />
-        <CreateTacticInline />
-      </div>
-      <p className="text-[12px] text-muted-foreground">
-        Engine computes Open / Partially Addressed / Addressed from completed, ongoing, and planned
-        tactics and published literature. Proposed tactics do not count. Validate each gap to
-        proceed. Partial cannot stay — split or rewrite it.
-      </p>
-      {cards.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          No mapped gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here.
+    <TooltipProvider>
+      <div className="grid gap-6">
+        <p className="text-[12px] leading-5 text-muted-foreground">
+          Engine computes Open (no addressing tactics or literature), Partially Addressed (some
+          evidence, leftover remains — split or rewrite), or Addressed (evidence fully closes the
+          gap). A gap is the decision object. Constituent needs are the sourced statements
+          underneath it.
         </p>
-      ) : (
-        <div className="grid gap-3">
-          {cards.map((card) => (
-            <article key={card.gap_id} className="border border-border bg-background p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                {card.gap_status === "validated_partial" ? (
-                  <SplitGapDialog
-                    gapId={card.gap_id}
-                    gapName={card.gap_name}
-                    residualName={card.residual?.statement || card.gap_name}
-                    tactics={card.tactics}
-                  >
-                    <GapBadge status={card.gap_status} />
-                  </SplitGapDialog>
-                ) : (
-                  <GapStatusOverride
-                    gapId={card.gap_id}
-                    status={card.gap_status}
+        <div className="flex flex-wrap items-center gap-2">
+          <CreateOpenGap />
+          <CreateAddressedGap tactics={availableTactics} />
+          <CreateTacticInline />
+        </div>
+        {cards.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">
+            No mapped gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here.
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter gaps">
+              {FILTER_CHIPS.map((chip) => (
+                <Button
+                  key={chip.id}
+                  type="button"
+                  size="sm"
+                  variant={filter === chip.id ? "default" : "outline"}
+                  aria-pressed={filter === chip.id}
+                  onClick={() => setFilter(chip.id)}
+                >
+                  {chip.label} ({counts[chip.id]})
+                </Button>
+              ))}
+            </div>
+            <div className="grid gap-3">
+              {visible.map((card) => (
+                <article key={card.gap_id} className="border border-border bg-background p-4">
+                  <h2 className="text-[15px] font-medium leading-6 text-foreground">
+                    <Link
+                      href={`/gaps/${card.gap_id}`}
+                      className="whitespace-normal no-underline hover:underline"
+                    >
+                      {card.gap_name}
+                    </Link>
+                  </h2>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {card.gap_status === "validated_partial" ? (
+                      <SplitGapDialog
+                        gapId={card.gap_id}
+                        gapName={card.gap_name}
+                        gapStatement={card.statement}
+                        residualName={card.residual?.statement || card.gap_name}
+                        residualStatement={card.residual?.statement || card.statement}
+                        tactics={card.tactics}
+                      >
+                        <GapBadge status={card.gap_status} />
+                      </SplitGapDialog>
+                    ) : (
+                      <GapStatusOverride
+                        gapId={card.gap_id}
+                        status={card.gap_status}
+                        computedStatus={card.computed_status}
+                        override={card.status_override}
+                      />
+                    )}
+                    {card.human_validated ? (
+                      <span className="text-[11px] text-muted-foreground">Validated</span>
+                    ) : (
+                      <span className="text-[11px] text-amber-300">Needs validation</span>
+                    )}
+                    <NeedsReviewFlag needsReview={card.needs_review} />
+                    {card.parent_gap_id ? (
+                      <span className="text-[11px] text-muted-foreground">From split / rewrite</span>
+                    ) : null}
+                    {card.history_count > 0 ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        {card.history_count} version{card.history_count === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{card.statement}</p>
+                  <GapStatusDisagreement
                     computedStatus={card.computed_status}
                     override={card.status_override}
                   />
-                )}
-                {card.human_validated ? (
-                  <span className="text-[11px] text-muted-foreground">Validated</span>
-                ) : (
-                  <span className="text-[11px] text-amber-300">Needs validation</span>
-                )}
-                {card.parent_gap_id ? (
-                  <span className="text-[11px] text-muted-foreground">From split / rewrite</span>
-                ) : null}
-                {card.history_count > 0 ? (
-                  <span className="text-[11px] text-muted-foreground">
-                    {card.history_count} version{card.history_count === 1 ? "" : "s"}
-                  </span>
-                ) : null}
-              </div>
-              <Link
-                href={`/gaps/${card.gap_id}`}
-                className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
-              >
-                {card.gap_name}
-              </Link>
-              <GapStatusDisagreement
-                computedStatus={card.computed_status}
-                override={card.status_override}
-              />
-              <ul className="mt-3 grid gap-1">
-                {card.tactics.length === 0 ? (
-                  <li className="text-[12px] text-muted-foreground">No mapped tactics.</li>
-                ) : (
-                  card.tactics.map((tactic) => (
-                    <li key={tactic.id}>
-                      <Link
-                        href={`/tactics/${tactic.id}`}
-                        className="inline-flex flex-wrap items-center gap-1.5 text-[12px] no-underline hover:underline"
-                      >
-                        <span>{tactic.name}</span>
-                        <TacticBadge status={tactic.status} />
-                        {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-                        {tactic.stale ? <StaleFlag stale /> : null}
-                      </Link>
-                    </li>
-                  ))
-                )}
-              </ul>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
-                  <LockForm
-                    label="Validate status"
-                    action="validate_gap"
-                    extra={{ gap_id: card.gap_id }}
-                    confirmLabel={`Validate ${GAP_STATUS_LABELS[card.gap_status]}`}
-                  />
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-      <div className="border border-border bg-card/40 p-4">
-        {readyForPrioritize ? (
-          <>
-            <h2 className="text-[15px] font-medium">Continue to prioritize</h2>
-            <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-              Every live gap is validated. Open gaps go to Prioritize, then Tactics.
-            </p>
-            <LockForm
-              label="Continue to prioritize"
-              action="complete_wizard"
-              confirmLabel="Go to prioritize"
-            />
-          </>
-        ) : (
-          <>
-            <h2 className="text-[15px] font-medium">Prioritize is locked</h2>
-            <p className="mt-1 text-[12px] text-muted-foreground">
-              {unvalidated} gap{unvalidated === 1 ? "" : "s"} still need validation
-              {partials ? ` · ${partials} partial must be split or rewritten` : ""}.
-            </p>
+                  <div className="mt-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
+                    <ul className="mt-1 flex flex-wrap gap-1.5">
+                      {card.tactics.length === 0 ? (
+                        <li className="text-[12px] text-muted-foreground">No tactics mapped</li>
+                      ) : (
+                        card.tactics.map((tactic) => (
+                          <li key={tactic.id}>
+                            <Link
+                              href={`/tactics/${tactic.id}`}
+                              className="inline-flex flex-wrap items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[12px] no-underline hover:underline"
+                            >
+                              <span>{tactic.name}</span>
+                              <TacticBadge status={tactic.status} />
+                              {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
+                              {tactic.stale ? <StaleFlag stale /> : null}
+                              <NeedsReviewFlag needsReview={tactic.needs_review} />
+                            </Link>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
+                  <div className="mt-3">
+                    <ConstituentNeedsHint card={card} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
+                      <LockForm
+                        label="Validate status"
+                        action="validate_gap"
+                        extra={{ gap_id: card.gap_id }}
+                        confirmLabel={`Validate ${GAP_STATUS_LABELS[card.gap_status]}`}
+                      />
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
           </>
         )}
+        <div className="border border-border bg-card/40 p-4">
+          {readyForPrioritize ? (
+            <>
+              <h2 className="text-[15px] font-medium">Continue to prioritize</h2>
+              <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+                Every live gap is validated. Open gaps go to Prioritize, then Tactics.
+              </p>
+              <LockForm
+                label="Continue to prioritize"
+                action="complete_wizard"
+                confirmLabel="Go to prioritize"
+              />
+            </>
+          ) : (
+            <>
+              <h2 className="text-[15px] font-medium">Prioritize is locked</h2>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {unvalidated} gap{unvalidated === 1 ? "" : "s"} still need validation
+                {partials ? ` · ${partials} partial must be split or rewritten` : ""}.
+              </p>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

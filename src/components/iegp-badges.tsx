@@ -92,3 +92,12 @@ export function StaleFlag({ stale }: { stale: boolean }) {
     <Badge variant="destructive">Stale — re-lock</Badge>
   );
 }
+
+export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
+  if (!needsReview) return null;
+  return (
+    <Badge variant="outline" className="border-amber-500/40 bg-amber-500/15 text-amber-200">
+      Needs review
+    </Badge>
+  );
+}

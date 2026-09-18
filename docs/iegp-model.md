@@ -24,17 +24,17 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 
 1. Ingest extracts gaps and tactics already mapped, with engine-computed status (no accept/reject inbox)
 2. Human **validate** of each live Open or Addressed gap on Gaps
-3. **Partial** cannot stay: **split** (LEFT Addressed + tactic, RIGHT Open leftover) or **rewrite** original as Open or Addressed. Original is retired into version history.
+3. **Partial** cannot stay: **split** (LEFT Addressed + chosen mapped tactics, RIGHT Open leftover) or **rewrite** original as Open or Addressed. Original is retired into version history.
 4. Click override of Open or Addressed with a required reason (Partial is not a dropdown lock)
-5. Each of 10 coverage dimensions
-6. Overall coverage degree
+5. Each of 10 coverage dimensions (Change dimension — records the actor and flags other live gaps mapped to the same tactic)
+6. Overall coverage degree (Change overall coverage — same sibling-review flag; values are not copied across gaps)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
 8. Create or assign a tactic on the Tactics stage (after Prioritize)
 9. Add Open gap or Addressed gap (Addressed needs an accompanying tactic)
 
 There is **no residual paragraph** copied onto the parent gap card, and **no Review / Mappings wizard steps**. After ingest, **Gaps** is the combined mapped + status workbench.
 
-The engine drafts a leftover statement when pressure-testing says a parent is **Partially Addressed**. Clicking Partial suggests a split: the covered slice becomes Addressed with its tactic; the leftover becomes a new Open gap. The original is rewritten/deleted but kept in gap version history. Split children can find the original from that history. Alternatively the user rewrites the original as Open or Addressed (Addressed requires a tactic).
+The engine drafts a leftover statement when pressure-testing says a parent is **Partially Addressed**. Clicking Partial suggests a split: the covered slice becomes Addressed with the mapped tactics the user keeps; leftover tactics are optional on the Open child. Constituent `need_gap_links` copy onto both children. The original is rewritten/deleted but kept in gap version history. Alternatively the user rewrites the original as Open or Addressed (Addressed requires ≥1 tactic).
 
 **Add open gap**, **Add addressed gap**, and **Add tactic** are visible on Gaps. Creating a gap is `validated_open` (**Open**). Creating an Addressed gap requires an accompanying tactic.
 
@@ -47,12 +47,14 @@ Enums stay `validated_open` / `validated_partial` / `validated_addressed`. Human
 | Label | Enum | Definition |
 | --- | --- | --- |
 | **Open** | `validated_open` | Complete white space: no completed, ongoing, or **planned** tactics AND no published literature addressing this gap. Proposed tactics do **not** count as addressing. |
-| **Partially Addressed** | `validated_partial` | Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a **residual evidence need**. This status **cannot stay**: split into Addressed (with its tactic) and Open leftover, or rewrite the original. |
+| **Partially Addressed** | `validated_partial` | Some evidence, through completed or ongoing or planned tactics and/or published literature, that supports but does not fully close this gap. The remainder is a **residual evidence need**. This status **cannot stay**: split into Addressed (with chosen tactics) and Open leftover, or rewrite the original. |
 | **Addressed** | `validated_addressed` | Evidence from published literature and/or completed, ongoing, or planned tactics is sufficient to fully close this gap. |
 
 On **Gaps**, the engine computes Open / Partially Addressed / Addressed from joined tactics + publications. Click Open or Addressed to override; a non-empty reason is required. Cancel does not save. Click Partial to split or rewrite — Partial is not a lasting lock.
 
 Override of Open/Addressed wins until cleared or marked stale on ingest/coverage refresh. Stale overrides show disagreement with the new computed status; they are not silent-clobbered. Unlocked / limited-only assignment must not pretend a gap is Addressed (that is Partially Addressed until coverage is locked Full).
+
+Changing a dimension or overall on gap A for tactic T flags other **live** gaps mapped to T as **needs review**. Sibling yes/partial/no/overall values are not copied. Sibling status is not auto-flipped; the user opens the flagged gap, confirms or edits, the flag clears, then status recomputes. If that review leaves the sibling Partial, it sorts to the top of Gaps (Partial cannot stay). Tactic status change and ingest keep today’s broader **stale** behaviour.
 
 **Counting rules:** completed + ongoing + planned tactics count. **Proposed** does not. Publications are tactics; they count as published literature when status is **completed**, or when the type is a publication tactic (`publication`, `congress_abstract`, `evidence_dissemination`) with `evidence_available` set.
 
@@ -73,7 +75,7 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. The 
 `/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
 1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
-2. **Gaps** shows every live gap with mapped tactics and computed status. Humans validate Open and Addressed. Partial must **split** (Addressed + tactic on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
+2. **Gaps** shows every live gap as a card (title, statement, mapped tactics, constituent-need count). Humans validate Open and Addressed. Partial must **split** (Addressed + chosen tactics on the left, Open leftover on the right) or **rewrite** the original as Open or Addressed (original retired into version history).
 3. **Prioritize** High / Medium / Low on Open gaps.
 4. **Tactics** create and assign tactics for Open gaps.
 

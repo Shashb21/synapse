@@ -29,6 +29,10 @@ import {
   suggestPriority,
   suggestResidualGaps,
   tacticCountsTowardAddressing,
+  filterReviewGapCards,
+  liveGapsMappedToTactic,
+  reviewGapFilterCounts,
+  sortReviewGapCards,
 } from "@/lib/iegp/engine";
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
@@ -51,6 +55,7 @@ function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCover
     overall_rationale: "test",
     overall_lock: unlocked(),
     stale: false,
+    needs_review: false,
   };
 }
 
@@ -640,5 +645,44 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         suppressed: false,
       }),
     ).toBe(true);
+  });
+
+  it("sorts workbench cards Partial first, then needs-validation, then Open, then Addressed", () => {
+    const cards = [
+      { gap_status: "validated_addressed" as const, human_validated: true, gap_name: "Z addressed" },
+      { gap_status: "validated_open" as const, human_validated: true, gap_name: "Y open" },
+      { gap_status: "validated_addressed" as const, human_validated: false, gap_name: "X needs val" },
+      { gap_status: "validated_partial" as const, human_validated: false, gap_name: "W partial" },
+    ];
+    expect(sortReviewGapCards(cards).map((c) => c.gap_name)).toEqual([
+      "W partial",
+      "X needs val",
+      "Y open",
+      "Z addressed",
+    ]);
+    const mixed = sortReviewGapCards(filterReviewGapCards(cards, "all"));
+    expect(mixed[0]?.gap_status).toBe("validated_partial");
+    const counts = reviewGapFilterCounts(cards);
+    expect(counts.all).toBe(4);
+    expect(counts.partial).toBe(1);
+    expect(counts.open).toBe(1);
+    expect(counts.addressed).toBe(2);
+    expect(counts.needs_validation).toBe(2);
+  });
+
+  it("puts statement and constituent need count on review gap cards", () => {
+    const workspace = buildPlanWorkspace(buildSeed());
+    const elderly = workspace.review.find((c) => c.gap_id === "GAP-ELDERLY-CE");
+    expect(elderly?.statement.length).toBeGreaterThan(20);
+    expect(elderly?.need_count).toBeGreaterThan(0);
+    expect(elderly?.needs.some((n) => n.role === "primary" && n.statement.length > 0)).toBe(true);
+    expect(workspace.review[0]?.gap_status).toBe("validated_partial");
+  });
+
+  it("lists other live gaps mapped to the same tactic without treating the source gap as a sibling", () => {
+    const seed = buildSeed();
+    const siblings = liveGapsMappedToTactic(seed, "TAC-REG", "GAP-HCRU");
+    expect(siblings.map((g) => g.id).sort()).toEqual(["GAP-QOL", "GAP-SEQ"].sort());
+    expect(siblings.some((g) => g.id === "GAP-HCRU")).toBe(false);
   });
 });

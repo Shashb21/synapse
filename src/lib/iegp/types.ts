@@ -182,6 +182,8 @@ export type GapTacticCoverage = {
   overall_rationale: string;
   overall_lock: Lock;
   stale: boolean;
+  /** Sibling coverage flagged after a dimension/overall change on another live gap for the same tactic. Values are not copied. */
+  needs_review: boolean;
 };
 
 export type ResidualNeed = {

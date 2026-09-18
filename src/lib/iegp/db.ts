@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS tactics (
 CREATE TABLE IF NOT EXISTS coverages (
   id text PRIMARY KEY, gap_id text NOT NULL, tactic_id text NOT NULL,
   dimensions jsonb NOT NULL, overall text NOT NULL, overall_rationale text NOT NULL,
-  overall_lock jsonb NOT NULL, stale boolean NOT NULL DEFAULT false
+  overall_lock jsonb NOT NULL, stale boolean NOT NULL DEFAULT false,
+  needs_review boolean NOT NULL DEFAULT false
 );
 CREATE TABLE IF NOT EXISTS mapping_suggestions (
   gap_id text NOT NULL, tactic_id text NOT NULL,
@@ -184,6 +185,11 @@ export async function ensureSchema() {
   await d.execute(
     sql.raw(
       "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS human_validated boolean NOT NULL DEFAULT false",
+    ),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
     ),
   );
 }
