@@ -73,10 +73,11 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept as new gap/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
-    await expect(page.getByRole("term", { name: /^open$/i })).toBeVisible();
-    await expect(page.getByText(/complete white space/i)).toBeVisible();
-    await expect(page.getByRole("term", { name: /^partially addressed$/i })).toBeVisible();
-    await expect(page.getByRole("term", { name: /^addressed$/i })).toBeVisible();
+    const statusGuide = page.getByRole("region", { name: /gap status/i });
+    await expect(statusGuide.getByText("Open", { exact: true })).toBeVisible();
+    await expect(statusGuide.getByText(/complete white space/i)).toBeVisible();
+    await expect(statusGuide.getByText("Partially Addressed", { exact: true })).toBeVisible();
+    await expect(statusGuide.getByText("Addressed", { exact: true })).toBeVisible();
     const gapCard = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
