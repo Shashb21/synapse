@@ -179,8 +179,9 @@ export function residualDraftEligible(args: {
 }
 
 /**
- * Leftover-as-new-gap: human-locked overall of partial/limited.
- * Unlocked assignment defaults (overall "limited") and inferred drafts do not enqueue.
+ * Residual-as-gap: prefer human-locked overall of partial/limited.
+ * Pressure-test drafts use overall "partial" without a human lock.
+ * Unlocked assignment placeholders are "limited" and must not enqueue a leftover.
  */
 export function residualGapEligible(args: {
   gap: Pick<EvidenceGap, "status">;
@@ -190,8 +191,11 @@ export function residualGapEligible(args: {
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
   if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
-  return residualDraftEligible(args);
+  if (args.coverages.length === 0) return false;
+  if (residualDraftEligible(args)) return true;
+  return args.coverages.some((c) => !c.overall_lock.locked && c.overall === "partial");
 }
+
 
 
 function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
@@ -301,13 +305,18 @@ function needsForGap(state: IegpState, gapId: string) {
 }
 
 function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
-  return state.coverages.filter(
-    (c) =>
-      c.gap_id === gap.id &&
-      c.overall_lock.locked &&
-      (c.overall === "partial" || c.overall === "limited"),
-  );
+  const stored = state.coverages.filter((c) => c.gap_id === gap.id);
+  if (residualDraftEligible({ gap, coverages: stored })) {
+    return stored.filter(
+      (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
+    );
+  }
+  const unlockedPartial = stored.filter((c) => !c.overall_lock.locked && c.overall === "partial");
+  if (unlockedPartial.length > 0) return unlockedPartial;
+  if (stored.length > 0) return [];
+  return inferPressureTestCoverages(gap, state.tactics, { needs: needsForGap(state, gap.id) });
 }
+
 
 /** Ranked leftover-as-new-gap drafts for Mappings. Engine suggests; it does not create the child. */
 export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
