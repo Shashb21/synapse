@@ -70,7 +70,7 @@ flowchart TD
   later --> upload
 ```
 
-Create gap and Create tactic are visible on Review and Library. Gap cards show the sentence once. Residual is its own Review row — leftover wording after (proposed) partial coverage, not a copy of the parent. Gantt / gates timeline is parked (docs only).
+Create gap and Create tactic are visible on Review and Library. Gap cards show an evidence-topic title once. Residual is its own Review row — leftover wording after (proposed) partial coverage, not a copy of the parent. Gantt / gates timeline is parked (docs only).
 
 ### Traceability
 
@@ -97,7 +97,7 @@ Tactic: retrospective RWE in patients aged ≥65, no comparator.
 | Comparative effectiveness / decision utility | No |
 | **Overall** | **Partial** |
 
-Residual (parent preserved, leftover is a **new gap** after accept): comparative outcomes versus relevant regional SoC in elderly patients remain insufficiently characterised.
+Residual (parent preserved, leftover is a **new gap** after accept): comparative outcomes versus relevant regional SoC.
 
 Priority: human-locked High (HTA decision date, uncovered comparator). The engine does not propose a band.
 

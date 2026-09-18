@@ -3,6 +3,7 @@ import {
   buildPlanBoard,
   buildPlanWorkspace,
   coverageEval,
+  countingCoverages,
   draftResidualStatement,
   engineMaySetStatus,
   extractCandidateGaps,
@@ -10,6 +11,7 @@ import {
   extractCandidateTactics,
   gapNameFromStatement,
   guessDomain,
+  isPublishedLiterature,
   MAPPING_SUGGESTION_CAP,
   needEvalMetrics,
   pairNeeds,
@@ -22,13 +24,14 @@ import {
   suggestMappings,
   suggestPriority,
   suggestResidualGaps,
+  tacticCountsTowardAddressing,
 } from "@/lib/iegp/engine";
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { EvidenceGap, GapTacticCoverage, Tactic } from "@/lib/iegp/types";
-import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { COVERAGE_DIMENSIONS, GAP_STATUS_LABELS, GAP_STATUS_DEFINITIONS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {
   const dimensions = emptyDimensions();
@@ -51,6 +54,12 @@ describe("IEGP engine", () => {
   it("never allows the engine to write addressed", () => {
     expect(engineMaySetStatus("validated_addressed")).toBe(false);
     expect(engineMaySetStatus("validated_partial")).toBe(true);
+    expect(GAP_STATUS_LABELS.validated_open).toBe("Open");
+    expect(GAP_STATUS_LABELS.validated_partial).toBe("Partially Addressed");
+    expect(GAP_STATUS_LABELS.validated_addressed).toBe("Addressed");
+    expect(GAP_STATUS_DEFINITIONS.validated_open).toMatch(/Proposed tactics do not count/);
+    expect(GAP_STATUS_DEFINITIONS.validated_partial).toMatch(/residual evidence need/);
+    expect(GAP_STATUS_DEFINITIONS.validated_addressed).toMatch(/fully close this gap/);
   });
 
   it("drafts a residual that keeps the parent gap and flags a missing comparator", () => {
@@ -71,6 +80,8 @@ describe("IEGP engine", () => {
     });
     expect(draft.statement.toLowerCase()).toMatch(/comparative|standard of care/);
     expect(draft.statement).not.toMatch(/elderly patients/i);
+    expect(draft.statement).not.toMatch(/^(We need|We still need|It has no)\b/i);
+    expect(draft.statement).not.toMatch(/[.?!]$/);
     expect(draft.rationale).toMatch(/preserved|Uncovered/i);
   });
 
@@ -122,6 +133,67 @@ describe("IEGP engine", () => {
       comparator: { value: "no", rationale: "", lock: unlocked() },
     });
     expect(suggestGapStatus([coverage])).toBe("validated_open");
+  });
+
+  it("does not count proposed tactics toward addressing, and unlocked limited is never Addressed", () => {
+    const proposed = {
+      id: "t",
+      status: "proposed" as const,
+      type: "rwe_study" as const,
+      evidence_available: null,
+    };
+    const planned = { ...proposed, status: "planned" as const };
+    const completedPub = {
+      id: "t",
+      status: "completed" as const,
+      type: "publication" as const,
+      evidence_available: "2025-01-01",
+    };
+    const proposedPubWithEvidence = {
+      id: "t",
+      status: "proposed" as const,
+      type: "publication" as const,
+      evidence_available: "2025-06-01",
+    };
+    expect(tacticCountsTowardAddressing(proposed)).toBe(false);
+    expect(tacticCountsTowardAddressing(planned)).toBe(true);
+    expect(tacticCountsTowardAddressing(completedPub)).toBe(true);
+    expect(isPublishedLiterature(completedPub)).toBe(true);
+    expect(isPublishedLiterature(proposedPubWithEvidence)).toBe(true);
+    expect(tacticCountsTowardAddressing(proposedPubWithEvidence)).toBe(true);
+
+    const unlockedLimited = cov("limited", {});
+    expect(countingCoverages([unlockedLimited], [proposed])).toHaveLength(0);
+    expect(suggestGapStatus([unlockedLimited], [proposed])).toBe("validated_open");
+    expect(suggestGapStatus([unlockedLimited], [planned])).toBe("validated_open");
+
+    const unlockedFull: GapTacticCoverage = {
+      ...cov("full", {
+        relevance: { value: "yes", rationale: "", lock: unlocked() },
+        population: { value: "yes", rationale: "", lock: unlocked() },
+        intervention: { value: "yes", rationale: "", lock: unlocked() },
+        comparator: { value: "yes", rationale: "", lock: unlocked() },
+        outcomes: { value: "yes", rationale: "", lock: unlocked() },
+        geography: { value: "yes", rationale: "", lock: unlocked() },
+        setting: { value: "yes", rationale: "", lock: unlocked() },
+        timing: { value: "yes", rationale: "", lock: unlocked() },
+        methodology: { value: "yes", rationale: "", lock: unlocked() },
+        decision_utility: { value: "yes", rationale: "", lock: unlocked() },
+      }),
+    };
+    expect(suggestGapStatus([unlockedFull], [planned])).toBe("validated_partial");
+    const lockedFull: GapTacticCoverage = {
+      ...unlockedFull,
+      overall_lock: {
+        locked: true,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+        locked_at: "2026-09-18T00:00:00Z",
+        note: "Full.",
+      },
+    };
+    expect(suggestGapStatus([lockedFull], [planned])).toBe("validated_addressed");
+    expect(engineMaySetStatus("validated_addressed")).toBe(false);
   });
 
   it("suggests priority without using cost or effort", () => {
@@ -214,29 +286,42 @@ describe("IEGP engine", () => {
     ).not.toMatch(/interview/i);
   });
 
-  it("names gaps as sentences from the statement, without a section heading prefix", () => {
+  it("names gaps as evidence-topic titles from the statement, without a section heading prefix", () => {
     expect(
       gapNameFromStatement(
         "We need to understand the economic burden associated with recurrence after velmaratinib.",
         "Burden",
       ),
-    ).toBe(
-      "The economic burden associated with recurrence after velmaratinib is not adequately characterised.",
-    );
+    ).toBe("Economic burden of recurrence after velmaratinib");
     expect(
       gapNameFromStatement(
         "We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
         "Elderly",
       ),
     ).toBe(
-      "Comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
+      "Comparative effectiveness of Velmara versus regional standard of care in elderly patients",
     );
     expect(
       gapNameFromStatement("KOLs need to know intracranial outcomes.", "CNS"),
-    ).toBe("KOLs need to know intracranial outcomes.");
-    expect(guessDomain("We need to understand pneumonitis rates in community hospitals.")).toBe(
-      "safety",
+    ).toBe("Intracranial outcomes");
+    expect(
+      gapNameFromStatement("It has no comparative arm versus chemotherapy SoC."),
+    ).toBe("Comparative effectiveness versus chemotherapy SoC");
+    expect(
+      gapNameFromStatement(
+        "We need to understand the economic burden associated with recurrence after velmaratinib. Limited evidence characterises direct costs of repeat procedures in routine practice.",
+      ),
+    ).toBe(
+      "Economic burden of recurrence after velmaratinib, including direct costs of repeat procedures in routine practice",
     );
+    expect(
+      gapNameFromStatement(
+        "Aetna and UnitedHealthcare need to understand 6-month discontinuation in routine care. Limited evidence on persistence is blocking formulary.",
+      ),
+    ).toBe("6-month discontinuation in routine care, including persistence for formulary");
+    expect(
+      gapNameFromStatement("Limited evidence on persistence is blocking formulary."),
+    ).toBe("Persistence for formulary");
 
     const text = `HEOR stakeholder interviews — Velmara.
 
@@ -253,7 +338,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     }));
     const gaps = extractCandidateGaps(blocks);
     expect(gaps.every((g) => !/^(Burden|Elderly):/i.test(g.name))).toBe(true);
-    expect(gaps.some((g) => /^The economic burden associated with recurrence after velmaratinib/i.test(g.name))).toBe(
+    expect(gaps.some((g) => /^Economic burden of recurrence after velmaratinib/i.test(g.name))).toBe(
       true,
     );
     expect(
@@ -261,7 +346,14 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         /^Comparative effectiveness of Velmara versus regional standard of care in elderly patients/i.test(g.name),
       ),
     ).toBe(true);
-    expect(gaps.every((g) => /^[A-Z]/.test(g.name) && /[.?!]$/.test(g.name))).toBe(true);
+    for (const gap of gaps) {
+      expect(gap.name).toMatch(/^[A-Z]/);
+      expect(gap.name).not.toMatch(/[.?!]$/);
+      expect(gap.name).not.toMatch(
+        /^(We need|It has no|There is no|There is a lack of|KOLs need)\b/i,
+      );
+      expect(gap.name).not.toMatch(/is not adequately characterised/i);
+    }
   });
 
   it("splits a demo source into section blocks such as Elderly", () => {

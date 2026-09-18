@@ -45,6 +45,12 @@ describe("blank demo workspace", () => {
     expect(gaps.every((g) => !/heor stakeholder interviews/i.test(g.name))).toBe(true);
     expect(gaps.every((g) => !/^(Burden|Elderly):/i.test(g.name))).toBe(true);
     expect(gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
+    expect(gaps.every((g) => !/^(We need|It has no)\b/i.test(g.name))).toBe(true);
+    expect(gaps.every((g) => !/[.?!]$/.test(g.name))).toBe(true);
     expect(tactics.some((t) => t.type === "chart_review")).toBe(true);
+    for (const gap of gaps) {
+      expect(gap.name).not.toMatch(/^(We need|It has no|There is no)\b/i);
+      expect(gap.name).not.toMatch(/[.?!]$/);
+    }
   });
 });

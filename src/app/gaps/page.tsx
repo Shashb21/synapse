@@ -12,7 +12,8 @@ export default async function GapsPage() {
     <AppShell active="gaps">
       <PageIntro kicker="Decision objects" title="Evidence gaps">
         Gaps are named decision objects. Many candidate needs can join onto one gap.
-        Status is Candidate / Open / Partial / Addressed / Excluded — not a binary open/closed.
+        Status is Candidate / Open / Partially Addressed / Addressed / Excluded — not a binary
+        open/closed.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -35,7 +36,7 @@ export default async function GapsPage() {
                   {DOMAIN_LABELS[g.domain]}
                 </span>
               </div>
-              <p className="mt-2 text-[13px] leading-5 text-foreground">{g.statement}</p>
+              <p className="mt-2 text-[13px] leading-5 text-foreground">{g.name}</p>
               <p className="mt-2 text-[12px] text-muted-foreground">
                 {needCount} needs · {tacticCount} tactic mappings
                 {g.parent_gap_id ? " · leftover of parent" : ""}

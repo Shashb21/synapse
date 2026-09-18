@@ -141,7 +141,7 @@ describe("gap–tactic mapping engine", () => {
   it("maps a pneumonitis safety gap to an extracted chart review above the floor", () => {
     const scored = scoreGapTacticMapping(
       {
-        name: "Pneumonitis rates in community hospitals after month six of Velmara.",
+        name: "Pneumonitis rates in community hospitals after month six of Velmara",
         statement:
           "We need to understand pneumonitis rates in community hospitals after month six of Velmara.",
         domain: "safety",

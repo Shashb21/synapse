@@ -16,6 +16,7 @@ import {
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { suggestGapStatus, suggestResidualGaps, uncoveredDimensions } from "@/lib/iegp/engine";
+import { GapStatusGuide } from "@/components/gap-status-guide";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function GapDetailPage({
     .map((l) => ({ link: l, need: state.needs.find((n) => n.id === l.need_id)! }))
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  const suggested = suggestGapStatus(coverages);
+  const suggested = suggestGapStatus(coverages, state.tactics);
   const missing = uncoveredDimensions(coverages);
   const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
@@ -43,7 +44,7 @@ export default async function GapDetailPage({
 
   return (
     <AppShell active="gaps">
-      <PageIntro kicker={gap.id} title={gap.statement} />
+      <PageIntro kicker={gap.id} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <GapBadge status={gap.status} />
         <LockMeta lock={gap.status_lock} />
@@ -51,6 +52,7 @@ export default async function GapDetailPage({
           Engine suggests {GAP_STATUS_LABELS[suggested]} (never auto-applied)
         </span>
       </div>
+      <GapStatusGuide compact />
 
       <section className="mb-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs</h2>
@@ -189,7 +191,7 @@ export default async function GapDetailPage({
                 href={`/gaps/${child.id}`}
                 className="border border-border bg-card p-3 text-[13px] no-underline"
               >
-                {child.statement}
+                {child.name}
               </Link>
             ))}
           </div>

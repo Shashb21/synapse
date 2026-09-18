@@ -695,7 +695,7 @@ export function buildSeed(): IegpState {
     gaps: [
       {
         id: "GAP-ELDERLY-CE",
-        name: "Elderly comparative effectiveness vs regional SoC",
+        name: "Comparative effectiveness of Velmara versus regional SoC in elderly patients, including HTA-relevant outcomes",
         statement:
           "Limited evidence on comparative effectiveness of velmaratinib versus regional standard of care in elderly patients with advanced EGFR-mutant NSCLC.",
         domain: "comparative_effectiveness",
@@ -707,7 +707,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-RECUR-ECON",
-        name: "Economic burden of recurrence",
+        name: "Economic burden of recurrence after velmaratinib, including costs of repeat procedures and subsequent treatment",
         statement:
           "Need to understand clinical and economic burden associated with recurrence — costs of repeat procedures and subsequent treatment remain thin.",
         domain: "economics",
@@ -719,7 +719,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-CNS",
-        name: "CNS intracranial RWE",
+        name: "Intracranial response and duration in patients with brain metastases",
         statement:
           "Limited evidence on intracranial response and duration in patients with brain metastases.",
         domain: "efficacy",
@@ -731,7 +731,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-SEQ",
-        name: "Real-world treatment patterns / sequencing",
+        name: "Real-world treatment sequencing after osimertinib failure, including Velmara versus NX-441",
         statement:
           "Need real-world treatment sequencing after osimertinib failure, including where Velmara sits versus NX-441.",
         domain: "treatment_sequencing",
@@ -743,7 +743,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-HCRU",
-        name: "HCRU after recurrence",
+        name: "HCRU after recurrence, including hospitalisations, ED use, and outpatient burden",
         statement:
           "Limited evidence on hospitalisations, ED use and outpatient burden associated with recurrence.",
         domain: "hcru",
@@ -755,7 +755,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-QOL",
-        name: "Routine-care QoL / PRO",
+        name: "QoL and PRO in routine care, including frail patients",
         statement:
           "Need PROs in routine care, including frail patients, not only mixed-age trial EORTC.",
         domain: "qol_pro",
@@ -767,7 +767,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-PERSIST",
-        name: "6-month discontinuation RWE",
+        name: "Six-month discontinuation and persistence in US routine care",
         statement:
           "Need 6-month discontinuation / persistence in US routine care for national payer P&T.",
         domain: "adherence",
@@ -779,7 +779,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-IRA",
-        name: "IRA net-price BIM",
+        name: "Budget impact under IRA negotiated-price scenarios",
         statement:
           "Need budget-impact under IRA negotiated-price scenarios.",
         domain: "budget_impact",
@@ -791,7 +791,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-CAREGIVER",
-        name: "Caregiver burden",
+        name: "Caregiver burden in elderly and frail Velmara use",
         statement:
           "Insufficient evidence on caregiver burden in elderly/frail Velmara use.",
         domain: "caregiver_burden",
@@ -803,7 +803,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-OS",
-        name: "Long-term OS",
+        name: "Overall survival beyond the VEL-301 primary PFS analysis",
         statement:
           "Need overall survival beyond the VEL-301 primary PFS analysis.",
         domain: "long_term_outcomes",
@@ -815,7 +815,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-CONGRESS",
-        name: "Congress footprint 2027",
+        name: "Congress presence in 2027",
         statement:
           "Medical affairs wants a bigger congress presence in 2027.",
         domain: "implementation",
@@ -828,7 +828,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-PFS-TRIAL",
-        name: "Pivotal PFS versus osimertinib",
+        name: "Pivotal PFS versus osimertinib in 2L EGFR-mutant NSCLC",
         statement:
           "Pivotal comparative PFS versus osimertinib in 2L EGFR-mutant NSCLC.",
         domain: "efficacy",
@@ -840,7 +840,7 @@ export function buildSeed(): IegpState {
       },
       {
         id: "GAP-ILD",
-        name: "ILD and QT in routine care",
+        name: "ILD and QT incidence in routine care, including monitoring outside academic centres",
         statement:
           "Need safety characterisation of ILD and QT in routine care — extracted as a candidate, not yet accepted.",
         domain: "safety",
@@ -1391,7 +1391,7 @@ export function buildSeed(): IegpState {
         id: "RES-ELDERLY-SOC",
         gap_id: "GAP-ELDERLY-CE",
         statement:
-          "Comparative outcomes versus relevant regional standard of care in elderly patients remain insufficiently characterised.",
+          "Comparative outcomes versus relevant regional standard of care in elderly patients",
         domain: "comparative_effectiveness",
         draft_rationale:
           "Parent GAP-ELDERLY-CE preserved. Chart review covers population/treatment/outcomes; comparator and decision utility are No. Draft locked by HEOR.",
@@ -1401,7 +1401,7 @@ export function buildSeed(): IegpState {
         id: "RES-RECUR-COST",
         gap_id: "GAP-RECUR-ECON",
         statement:
-          "Limited evidence remains on direct economic costs associated with recurrence, including repeat procedures and subsequent treatment.",
+          "Direct economic costs of recurrence, including repeat procedures and subsequent treatment",
         domain: "economics",
         draft_rationale:
           "Parent GAP-RECUR-ECON preserved. Natural-history + HCRU address clinical burden and hospitalisations; costs remain.",
@@ -1411,7 +1411,7 @@ export function buildSeed(): IegpState {
         id: "RES-CNS",
         gap_id: "GAP-CNS",
         statement:
-          "Dedicated intracranial ORR and duration package in brain-metastases patients remains an open evidence need.",
+          "Intracranial ORR and duration in patients with brain metastases",
         domain: "efficacy",
         draft_rationale: "No adequate tactic. Parent gap preserved.",
         lock: lock(...hale, "Open CNS residual."),
@@ -1420,7 +1420,7 @@ export function buildSeed(): IegpState {
         id: "RES-PERSIST",
         gap_id: "GAP-PERSIST",
         statement:
-          "6-month discontinuation in US routine care is still required for Aetna/UHC P&T.",
+          "Six-month discontinuation in US routine care for Aetna/UHC P&T",
         domain: "adherence",
         draft_rationale: "Planned claims study does not yet exist as evidence.",
         lock: lock(...okonkwo),
@@ -1429,7 +1429,7 @@ export function buildSeed(): IegpState {
         id: "RES-IRA",
         gap_id: "GAP-IRA",
         statement:
-          "IRA negotiated-price budget-impact scenario remains unresolved (WAC BIM is not the question).",
+          "IRA negotiated-price budget-impact scenario",
         domain: "budget_impact",
         draft_rationale: "A tactic existing at WAC does not address the IRA question.",
         lock: lock(...okonkwo),
@@ -1438,7 +1438,7 @@ export function buildSeed(): IegpState {
         id: "RES-CAREGIVER",
         gap_id: "GAP-CAREGIVER",
         statement:
-          "Caregiver burden and frail-patient PRO remain unmeasured.",
+          "Caregiver burden and frail-patient PRO",
         domain: "caregiver_burden",
         draft_rationale: "Registry PROs do not include caregiver instruments.",
         lock: lock(...hale),
@@ -1447,7 +1447,7 @@ export function buildSeed(): IegpState {
         id: "RES-HCRU-ED",
         gap_id: "GAP-HCRU",
         statement:
-          "Emergency-department use and outpatient burden after recurrence remain only partially characterised.",
+          "Emergency-department use and outpatient burden after recurrence",
         domain: "hcru",
         draft_rationale: "Hospitalisations better covered than ED/OP.",
         lock: lock(...rao),
@@ -1456,7 +1456,7 @@ export function buildSeed(): IegpState {
         id: "RES-SEQ",
         gap_id: "GAP-SEQ",
         statement:
-          "Where Velmara sits versus NX-441 after osimertinib failure remains only partially characterised.",
+          "Velmara versus NX-441 after osimertinib failure",
         domain: "treatment_sequencing",
         draft_rationale: "Registry captures patterns; NX-441 comparator is thin. Parent gap preserved.",
         lock: lock(...chen),
@@ -1465,7 +1465,7 @@ export function buildSeed(): IegpState {
         id: "RES-QOL",
         gap_id: "GAP-QOL",
         statement:
-          "Frail-patient PRO and routine-care QoL beyond mixed-age trial EORTC remain residual.",
+          "Frail-patient PRO and routine-care QoL beyond mixed-age trial EORTC",
         domain: "qol_pro",
         draft_rationale: "Registry PROs exist; frail instruments do not. Parent gap preserved.",
         lock: lock(...hale),
@@ -1474,7 +1474,7 @@ export function buildSeed(): IegpState {
         id: "RES-OS",
         gap_id: "GAP-OS",
         statement:
-          "Overall survival beyond the VEL-301 primary PFS analysis will miss the 2026 value story.",
+          "Overall survival beyond the VEL-301 primary PFS analysis for the 2026 value story",
         domain: "long_term_outcomes",
         draft_rationale: "LTFU is the right tactic at the wrong time. Residual drafted; priority not yet locked.",
         lock: unlocked(),
@@ -1483,7 +1483,7 @@ export function buildSeed(): IegpState {
         id: "RES-ILD",
         gap_id: "GAP-ILD",
         statement:
-          "ILD and QT incidence in routine care remains an extracted residual until the candidate gap is accepted.",
+          "ILD and QT incidence in routine care",
         domain: "safety",
         draft_rationale: "Drafted from the candidate ILD/QT gap. Parent preserved. Human must accept or reject.",
         lock: unlocked(),

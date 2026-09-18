@@ -1,5 +1,6 @@
 import {
   COVERAGE_DIMENSIONS,
+  DOMAIN_LABELS,
   type CoverageDimension,
   type DimensionValue,
   type EvidenceDomain,
@@ -123,16 +124,73 @@ export function uncoveredDimensions(
   return out;
 }
 
-export function suggestGapStatus(coverages: GapTacticCoverage[]): GapStatus {
-  const relevant = coverages.filter((c) => c.overall !== "not_relevant");
+export type AddressingTactic = Pick<Tactic, "id" | "status" | "type" | "evidence_available">;
+
+const PUBLICATION_TYPES: ReadonlySet<TacticType> = new Set([
+  "publication",
+  "congress_abstract",
+  "evidence_dissemination",
+]);
+
+/**
+ * Publications are tactics. They count as published literature when status is
+ * completed, or when the type is a publication tactic with evidence in hand
+ * (`evidence_available` set). Proposed generation tactics never count.
+ */
+export function isPublishedLiterature(
+  tactic: Pick<Tactic, "type" | "status" | "evidence_available">,
+): boolean {
+  if (!PUBLICATION_TYPES.has(tactic.type)) return false;
+  if (tactic.status === "completed") return true;
+  return Boolean(tactic.evidence_available?.trim());
+}
+
+/** Completed + ongoing + planned count; proposed does not (unless published literature). */
+export function tacticCountsTowardAddressing(
+  tactic: Pick<Tactic, "status" | "type" | "evidence_available">,
+): boolean {
+  if (tactic.status === "cancelled") return false;
+  if (tactic.status === "completed" || tactic.status === "ongoing" || tactic.status === "planned") {
+    return true;
+  }
+  return isPublishedLiterature(tactic);
+}
+
+export function countingCoverages(
+  coverages: GapTacticCoverage[],
+  tactics: AddressingTactic[],
+): GapTacticCoverage[] {
+  const byId = new Map(tactics.map((t) => [t.id, t]));
+  return coverages.filter((c) => {
+    const tactic = byId.get(c.tactic_id);
+    return Boolean(tactic && tacticCountsTowardAddressing(tactic));
+  });
+}
+
+/**
+ * Suggested human-facing status. Never treat unlocked assignment placeholders
+ * (limited, unlocked) as Addressed. Proposed tactics are ignored when `tactics`
+ * is passed. The engine still must not write Addressed.
+ */
+export function suggestGapStatus(
+  coverages: GapTacticCoverage[],
+  tactics?: AddressingTactic[],
+): GapStatus {
+  const pool = tactics ? countingCoverages(coverages, tactics) : coverages;
+  const relevant = pool.filter((c) => c.overall !== "not_relevant");
   if (relevant.length === 0) return "validated_open";
-  const best = bestCoverageFraction(relevant);
-  if (relevant.some((c) => c.overall === "full") && best >= 0.85) {
+
+  const lockedRelevant = relevant.filter((c) => c.overall_lock.locked);
+  const onlyLimited = relevant.every((c) => c.overall === "limited" || c.overall === "not_relevant");
+  if (onlyLimited && lockedRelevant.length === 0) return "validated_open";
+
+  const lockedBest = lockedRelevant.length > 0 ? bestCoverageFraction(lockedRelevant) : 0;
+  if (lockedRelevant.some((c) => c.overall === "full") && lockedBest >= 0.85) {
     return "validated_addressed";
   }
-  if (relevant.every((c) => c.overall === "limited" || c.overall === "not_relevant") && best < 0.35) {
-    return "validated_open";
-  }
+
+  const best = bestCoverageFraction(relevant);
+  if (onlyLimited && best < 0.35) return "validated_open";
   if (best < 0.28) return "validated_open";
   return "validated_partial";
 }
@@ -147,21 +205,27 @@ export function draftResidualStatement(args: {
   coverages: GapTacticCoverage[];
 }): { statement: string; rationale: string; domain: EvidenceGap["domain"] } {
   const missing = uncoveredDimensions(args.coverages);
-  const labels = missing.slice(0, 4).join(", ");
+  const including = missing
+    .slice(0, 4)
+    .map((dim) => dim.replaceAll("_", " "))
+    .join(", ");
   const status = suggestGapStatus(args.coverages);
+  const domainLabel = DOMAIN_LABELS[args.gap.domain];
   let statement: string;
   if (status === "validated_addressed") {
-    statement = "No residual: existing tactics adequately address this gap.";
+    statement = "No residual leftover from existing tactics";
   } else if (missing.includes("comparator")) {
-    statement =
-      "Comparative outcomes versus the relevant standard of care remain insufficiently characterised.";
+    statement = "Comparative outcomes versus the relevant standard of care";
   } else if (missing.includes("population")) {
-    statement = "The relevant population is not adequately represented.";
+    statement = "Population representation in the relevant setting";
   } else if (args.gap.domain === "economics" || missing.includes("outcomes")) {
-    statement = `Limited evidence remains on ${args.gap.domain.replaceAll("_", " ")}.`;
+    statement = `${domainLabel} leftover after mapped tactics`;
   } else {
-    statement = `Uncovered or only partial dimensions remain: ${labels || "overall coverage"}.`;
+    statement = including
+      ? `Uncovered coverage dimensions, including ${including}`
+      : "Uncovered coverage leftover after mapped tactics";
   }
+  statement = gapNameFromStatement(statement);
   const rationale = `Drafted from ${args.coverages.length} tactic mapping(s). Suggested gap status ${status}. Uncovered dimensions: ${missing.join(", ") || "none"}. Original gap is preserved.`;
   return { statement, rationale, domain: args.gap.domain };
 }
@@ -278,7 +342,15 @@ export function draftResidualGapSuggestion(args: {
     similarRecord(statement, args.gap.name, 0.62)
   ) {
     const missing = uncoveredDimensions(args.coverages);
-    statement = `Uncovered or only partial dimensions remain: ${missing.slice(0, 4).join(", ") || "overall coverage"}.`;
+    const leftoverDims = missing
+      .slice(0, 4)
+      .map((dim) => dim.replaceAll("_", " "))
+      .join(", ");
+    statement = gapNameFromStatement(
+      leftoverDims
+        ? `Uncovered coverage dimensions, including ${leftoverDims}`
+        : "Uncovered coverage leftover after mapped tactics",
+    );
   }
   const locked = args.coverages.filter((c) => c.overall_lock.locked);
   const pool = locked.length > 0 ? locked : args.coverages;
@@ -656,74 +728,200 @@ export function splitSourceIntoBlocks(
   return blocks;
 }
 
-const NAME_NEED_PREFIX =
-  /^(?:(?:we|kols|there\s+is)\s+)?(?:need to (?:know|understand|characterise|characterize|quantify)\s+)/i;
-
 const NAME_TRAILING_FUNCTION =
-  /^(the|a|an|of|vs\.?|versus|and|or|but|in|on|for|with|after|before|to|from|by|as|at|into|than|associated)$/i;
+  /^(the|a|an|of|vs\.?|versus|and|or|but|in|on|for|with|after|before|to|from|by|as|at|into|than|associated|including)$/i;
 
-const NAME_FINITE_VERB =
-  /\b(is|are|was|were|isn't|aren't|has|have|had|does|do|did|will|would|can|could|should|may|might|must|remains?|characterises|characterizes|includes?|reports?|measures?|addresses?|collects?|sits?|blocks?|reflects?|exists?)\b/i;
+const ACTOR_NEED_PREFIX =
+  /^(?:(?:we|i|they|kols?|payers?|htas?|affiliates?|stakeholders?|aetna(?: and unitedhealthcare)?|unitedhealthcare)\s+)?need(?:s)? to (?:know|understand|characterise|characterize|quantify|have)\s+/i;
+
+const LACK_PREFIX =
+  /^(?:there is (?:no|a lack of(?:\s+evidence(?:\s+on)?)?)|it has no|it does not (?:have|include)|we don'?t have enough evidence(?:\s+(?:on|in))?|unknown whether)\s+/i;
+
+const LIMITED_PREFIX =
+  /^(?:(?:limited|insufficient) evidence (?:characterises|characterizes|remains on|on|will be available for)|(?:insufficient|limited) data on|evidence gap on|need(?:ed)?(?:\s+to)?)\s+/i;
+
+const INSUFFICIENT_IN = /^(?:limited|insufficient) evidence\s+(in|for)\s+/i;
+
+const TRAILING_DUMMIES = [
+  /\s+is not adequately (?:characterised|characterized)\.?$/i,
+  /\s+is not closed\.?$/i,
+  /\s+remains an open question(?: for .+)?\.?$/i,
+  /\s+remains residual\.?$/i,
+  /\s+will miss the \d{4} value story\.?$/i,
+  /\s+because the registry is single-arm\.?$/i,
+  /\s+(?:is|are) planned as a dissemination tactic\.?$/i,
+  /\s+(?:is|are) planned for \d{4}, but that is dissemination.*$/i,
+  /, but that is dissemination.*$/i,
+  /\s+(?:is|are) planned for \d{4}\.?$/i,
+  /\s+is proposed but has not started\.?$/i,
+  /; long-term follow-up is planned\.?$/i,
+];
+
+function stripTrailingDummies(text: string): string {
+  let body = text.trim();
+  for (let i = 0; i < 6; i += 1) {
+    const next = TRAILING_DUMMIES.reduce((acc, re) => acc.replace(re, ""), body).trim();
+    if (next === body) break;
+    body = next;
+  }
+  return body;
+}
+
+function stripNamePrefixes(text: string): string {
+  let body = text.trim();
+  for (let i = 0; i < 4; i += 1) {
+    const next = stripTrailingDummies(
+      body
+        .replace(/^(?:limited|insufficient) evidence will be available for\s+/i, "evidence availability for ")
+        .replace(ACTOR_NEED_PREFIX, "")
+        .replace(LACK_PREFIX, "")
+        .replace(LIMITED_PREFIX, "")
+        .replace(INSUFFICIENT_IN, "evidence $1 ")
+        .replace(/\band on\b/gi, "and"),
+    );
+    if (next === body) break;
+    body = next;
+  }
+  return body;
+}
+
+/** Turn leftover clauses into a noun phrase instead of a dummy-subject sentence. */
+function clauseToNounPhrase(text: string): string {
+  let body = text.trim();
+
+  const blocking = body.match(/^(.*?)\s+is blocking formulary$/i);
+  if (blocking && blocking[1]!.trim()) {
+    return `${blocking[1]!.trim()} for formulary`;
+  }
+
+  body = stripTrailingDummies(body);
+
+  const noArm = body.match(/^(?:no\s+)?comparative arm versus\s+(.+)$/i);
+  if (noArm) return `Comparative effectiveness versus ${noArm[1]}`;
+
+  const isA = body.match(/^(study\s+[a-c])\s+is a\s+(.+)$/i);
+  if (isA) return `${isA[1]} ${isA[2]}`;
+
+  const underway = body.match(/^(.*?)\s+(?:is|are)\s+already underway(?:\s+(in\s+.+))?$/i);
+  if (underway && wordCount(underway[1]!) >= 3) {
+    return [underway[1], underway[2]].filter(Boolean).join(" ");
+  }
+
+  const addresses = body.match(/^(.*?)\s+addresses\s+(.+)$/i);
+  if (addresses && wordCount(addresses[1]!) >= 2) {
+    return `${addresses[1]} for ${addresses[2]}`;
+  }
+
+  const willCollect = body.match(/^(.*?)\s+will collect\s+(.+)$/i);
+  if (willCollect && wordCount(willCollect[1]!) >= 2) {
+    return `${willCollect[1]}, including ${willCollect[2]}`;
+  }
+
+  const doesNotInclude = body.match(/^(.*?)\s+does not include\s+(.+)$/i);
+  if (doesNotInclude && wordCount(doesNotInclude[1]!) >= 2) {
+    return doesNotInclude[1]!;
+  }
+
+  const measures = body.match(
+    /^(.*?)\s+(?:measures?|reports?|characterises|characterizes|includes?)\s+(.+)$/i,
+  );
+  if (measures && /^(study\s+[a-c]|the .+ registry|.+ model|.+ bim)$/i.test(measures[1]!.trim())) {
+    return `${measures[1]}, including ${measures[2]}`;
+  }
+
+  const reflects = body.match(/^(?:the |a |an )?(.+?)\s+reflects?\s+(.+)$/i);
+  if (reflects) return `${reflects[2]} in ${reflects[1]}`;
+
+  const sits = body.match(/^(?:where |whether )?(.+?)\s+sits?\s+versus\s+(.+)$/i);
+  if (sits) return `${sits[1]} versus ${sits[2]}`;
+
+  const whether = body.match(/^whether\s+(.+)$/i);
+  if (whether) return whether[1]!;
+
+  body = body.replace(/\beconomic burden associated with\b/i, "economic burden of");
+  body = body.replace(/\band on\b/gi, "and");
+  return body;
+}
 
 function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-/** Keep a readable sentence: ~12–16 words, never a hanging preposition. */
-function clipToReadableSentence(text: string): string {
+/** Keep a compact topic title: ~8–24 words, never a hanging preposition. */
+function clipToTopicTitle(text: string): string {
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length === 0) return "";
   const cutAt = (n: number) => words.slice(0, n).join(" ").replace(/[,;:]+$/, "");
-  if (words.length <= 16) {
+  if (words.length <= 24) {
     let n = words.length;
-    while (n > 8 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n -= 1;
+    while (n > 6 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n -= 1;
     return cutAt(n);
   }
-  for (let i = 16; i >= 12; i -= 1) {
+  for (let i = 24; i >= 12; i -= 1) {
     if (/[,;]$/.test(words[i - 1]!)) return cutAt(i);
   }
-  let n = 16;
+  let n = 24;
   while (n > 8 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n -= 1;
-  while (n < words.length && n < 18 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n += 1;
+  while (n < words.length && n < 26 && NAME_TRAILING_FUNCTION.test(words[n - 1]!)) n += 1;
   return cutAt(n);
 }
 
-function remainderIsSentence(text: string): boolean {
-  if (wordCount(text) < 6) return false;
-  if (/^(on|in|of|for|that|this|whether|the question)\b/i.test(text)) return false;
-  return true;
+function stripLeadingArticles(text: string): string {
+  return text.replace(/^(?:the|a|an)\s+/i, "").trim();
+}
+
+function sentenceCaseTopic(text: string): string {
+  if (!text) return text;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function includingFromRest(statement: string, title: string): string {
+  if (/\bincluding\b/i.test(title)) return title;
+  const rest = statement.replace(/\s+/g, " ").trim();
+  const firstBreak = rest.search(/[.?!]\s/);
+  if (firstBreak < 0) return title;
+  const extra = rest.slice(firstBreak + 1).trim();
+  if (!extra) return title;
+  const inc = extra.match(/\bincluding\s+([^.?!]+)/i);
+  if (inc) return `${title}, including ${inc[1]!.trim()}`;
+  const lim = extra.match(
+    /(?:limited|insufficient) evidence (?:characterises|characterizes|remains on|on)\s+([^.?!]+)/i,
+  );
+  if (lim) {
+    const raw = lim[1]!.trim();
+    const clause = stripLeadingArticles(clauseToNounPhrase(stripNamePrefixes(raw)));
+    if (clause && !title.toLowerCase().includes(clause.slice(0, 18).toLowerCase())) {
+      return `${title}, including ${clause}`;
+    }
+  }
+  return title;
 }
 
 /**
- * Card title for a gap or extracted tactic. Derived from the evidence statement only —
- * never a section heading prefix such as "Burden:" or "Elderly:".
+ * Card title for a gap or extracted tactic: a compact evidence-topic noun phrase.
+ * Derived from the evidence statement only — never a section heading prefix such as
+ * "Burden:" or "Elderly:", and never the source title.
  */
 export function gapNameFromStatement(statement: string, heading?: string): string {
   void heading;
   const cleaned = statement.replace(/\s+/g, " ").trim();
-  if (!cleaned) return "Unnamed gap.";
+  if (!cleaned) return "Unnamed gap";
 
   let body = cleaned.replace(/[.?!]+$/g, "").trim();
   const firstBreak = body.search(/[.?!]\s/);
-  if (firstBreak > 0) body = body.slice(0, firstBreak).trim();
+  const first = firstBreak > 0 ? body.slice(0, firstBreak).trim() : body;
 
-  const stripped = body.replace(NAME_NEED_PREFIX, "").trim();
-  const usedStrip = Boolean(stripped && stripped !== body && remainderIsSentence(stripped));
-  if (usedStrip) body = stripped;
-
-  if (
-    usedStrip &&
-    !NAME_FINITE_VERB.test(body) &&
-    /^(the|a|an)\s/i.test(body) &&
-    wordCount(body) <= 12
-  ) {
-    body = `${body} is not adequately characterised`;
+  body = stripNamePrefixes(first);
+  body = clauseToNounPhrase(body);
+  body = stripLeadingArticles(body);
+  if (wordCount(body) < 3) {
+    const retry = clauseToNounPhrase(stripNamePrefixes(first));
+    if (wordCount(retry) >= wordCount(body)) body = stripLeadingArticles(retry);
   }
-
-  body = clipToReadableSentence(body);
-  if (!body) return "Unnamed gap.";
-  const named = body.charAt(0).toUpperCase() + body.slice(1);
-  return /[.?!]$/.test(named) ? named : `${named}.`;
+  body = includingFromRest(cleaned, body);
+  body = clipToTopicTitle(body.replace(/\s+/g, " ").trim());
+  if (!body) return "Unnamed gap";
+  return sentenceCaseTopic(body).replace(/[.?!]+$/g, "").trim() || "Unnamed gap";
 }
 
 export type ExtractedGap = {
@@ -895,8 +1093,11 @@ export type OpenGapCard = {
   gap_name: string;
   statement: string;
   gap_status: GapStatus;
+  suggested_status: GapStatus;
+  counting_join_count: number;
   tactics: PlanTactic[];
   parent_gap_id: string | null;
+  residual: ResidualGapSuggestion | null;
 };
 
 export type ReviewTacticCard = {
@@ -1018,6 +1219,11 @@ export function buildPlanWorkspace(state: IegpState): {
   mappingSuggestions: MappingSuggestion[];
   residualGapSuggestions: ResidualGapSuggestion[];
 } {
+  const reviewResiduals = suggestResidualGaps(state);
+  const residualByParent = new Map(
+    reviewResiduals.map((row) => [row.parent_gap_id, row] as const),
+  );
+
   const review: ReviewGapCard[] = [];
   for (const gap of state.gaps.filter((g) => g.status === "candidate")) {
     review.push({
@@ -1033,13 +1239,17 @@ export function buildPlanWorkspace(state: IegpState): {
     (g) => g.status === "validated_open" || g.status === "validated_partial",
   )) {
     const residual = state.residuals.find((r) => r.gap_id === gap.id);
+    const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     openGaps.push({
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
       gap_status: gap.status,
+      suggested_status: suggestGapStatus(coverages, state.tactics),
+      counting_join_count: countingCoverages(coverages, state.tactics).length,
       tactics: mappedTactics(state, gap.id, residual?.id),
       parent_gap_id: gap.parent_gap_id,
+      residual: residualByParent.get(gap.id) ?? null,
     });
   }
 
@@ -1093,7 +1303,6 @@ export function buildPlanWorkspace(state: IegpState): {
     });
   }
 
-  const reviewResiduals = suggestResidualGaps(state);
   return {
     review,
     reviewTactics,

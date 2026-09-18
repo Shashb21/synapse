@@ -4,6 +4,22 @@ import { buildSeed } from "@/lib/iegp/seed";
 describe("Velmara IEGP seed", () => {
   const state = buildSeed();
 
+  it("phrases every seed gap name as an evidence-topic title", () => {
+    for (const gap of state.gaps) {
+      expect(gap.name).toMatch(/^[A-Z0-9]/);
+      expect(gap.name).not.toMatch(/[.?!]$/);
+      expect(gap.name).not.toMatch(
+        /^(We need|It has no|There is no|There is a lack of|KOLs need)\b/i,
+      );
+      expect(gap.name).not.toMatch(/is not adequately characterised/i);
+      expect(gap.name).not.toMatch(/^(Burden|Elderly|CNS):/i);
+    }
+    for (const residual of state.residuals) {
+      expect(residual.statement).not.toMatch(/^(We need|We still need|It has no)\b/i);
+      expect(residual.statement).not.toMatch(/[.?!]$/);
+    }
+  });
+
   it("is one asset, one indication", () => {
     expect(state.asset.name).toBe("Velmara");
     expect(state.asset.indication).toMatch(/EGFR/i);

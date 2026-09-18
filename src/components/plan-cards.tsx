@@ -40,10 +40,10 @@ function CreateGapFields() {
   return (
     <>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Name (optional — derived from the statement if blank)
+        Name (optional — derived as an evidence-topic title if blank)
         <input
           name="name"
-          placeholder="Gap name"
+          placeholder="Comparative effectiveness in elderly patients, including SoC outcomes"
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
         />
       </label>
@@ -52,7 +52,7 @@ function CreateGapFields() {
         <textarea
           name="statement"
           required
-          placeholder="What evidence is missing, in one sentence."
+          placeholder="What evidence is missing."
           className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
         />
       </label>
@@ -215,7 +215,7 @@ export function ReviewCard({
         href={`/gaps/${card.gap_id}`}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.statement}
+        {card.gap_name}
       </Link>
       <GapTacticsBlock
         gapId={card.gap_id}
@@ -365,7 +365,7 @@ export function PrioritizeCard({
         href={`/gaps/${card.gap_id}`}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.statement}
+        {card.gap_name}
       </Link>
       <GapTacticsBlock
         gapId={card.gap_id}
@@ -418,7 +418,7 @@ export function GapPlanCard({
         href={`/gaps/${card.gap_id}`}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
-        {card.statement}
+        {card.gap_name}
       </Link>
       <GapTacticsBlock
         gapId={card.gap_id}
@@ -511,6 +511,55 @@ export function PrioritizeQueue({
   );
 }
 
+export function ResidualGapCard({ item }: { item: ResidualGapSuggestion }) {
+  return (
+    <article className="border border-border bg-background p-4">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+        Residual evidence need
+      </p>
+      <p className="mt-2 text-[13px] leading-5 text-foreground">{item.statement}</p>
+      <p className="mt-2 text-[12px] text-muted-foreground">Parent: {item.parent_name}</p>
+      <ul className="mt-2 grid gap-1">
+        {item.reasons.map((reason) => (
+          <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
+            {reason}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <LockForm
+          label="Accept as new gap"
+          action="accept_residual_gap"
+          extra={{ parent_gap_id: item.parent_gap_id, statement: item.statement }}
+          confirmLabel="Accept as new gap"
+        />
+        <LockForm
+          label="Reject leftover"
+          action="reject_residual_gap"
+          extra={{ parent_gap_id: item.parent_gap_id }}
+          confirmLabel="Reject leftover"
+        />
+        <LockForm
+          label="Modify statement"
+          action="modify_residual_gap"
+          extra={{ parent_gap_id: item.parent_gap_id }}
+          confirmLabel="Save statement"
+        >
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Residual statement
+            <textarea
+              name="statement"
+              required
+              defaultValue={item.statement}
+              className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
+            />
+          </label>
+        </LockForm>
+      </div>
+    </article>
+  );
+}
+
 export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
   return (
     <section aria-labelledby="review-residuals">
@@ -519,8 +568,8 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
       </h3>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
         The leftover question after pressure-testing extracted tactics against the parent. Accept
-        residual creates that leftover as a new gap (parent stays). Reject persists. Modify edits
-        the leftover statement — not a copy of the parent sentence.
+        residual creates that leftover as a new gap with a topic-style name (parent stays). Reject
+        persists. Modify edits the leftover statement — not a copy of the parent sentence.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -530,50 +579,7 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
       ) : (
         <div className="grid gap-3">
           {items.map((item) => (
-            <article key={item.parent_gap_id} className="border border-border bg-background p-4">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Residual evidence need
-              </p>
-              <p className="mt-2 text-[13px] leading-5 text-foreground">{item.statement}</p>
-              <p className="mt-2 text-[12px] text-muted-foreground">Parent: {item.parent_name}</p>
-              <ul className="mt-2 grid gap-1">
-                {item.reasons.map((reason) => (
-                  <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
-                    {reason}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <LockForm
-                  label="Accept as new gap"
-                  action="accept_residual_gap"
-                  extra={{ parent_gap_id: item.parent_gap_id, statement: item.statement }}
-                  confirmLabel="Accept as new gap"
-                />
-                <LockForm
-                  label="Reject leftover"
-                  action="reject_residual_gap"
-                  extra={{ parent_gap_id: item.parent_gap_id }}
-                  confirmLabel="Reject leftover"
-                />
-                <LockForm
-                  label="Modify statement"
-                  action="modify_residual_gap"
-                  extra={{ parent_gap_id: item.parent_gap_id }}
-                  confirmLabel="Save statement"
-                >
-                  <label className="grid gap-1 text-[12px] text-muted-foreground">
-                    Residual statement
-                    <textarea
-                      name="statement"
-                      required
-                      defaultValue={item.statement}
-                      className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
-                    />
-                  </label>
-                </LockForm>
-              </div>
-            </article>
+            <ResidualGapCard key={item.parent_gap_id} item={item} />
           ))}
         </div>
       )}
@@ -603,7 +609,7 @@ export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
               key={`${item.gap_id}::${item.tactic_id}`}
               className="border border-border bg-background p-4"
             >
-              <p className="text-[13px] leading-5 text-foreground">{item.gap_statement}</p>
+              <p className="text-[13px] leading-5 text-foreground">{item.gap_name}</p>
               <p className="mt-2 text-[12px] text-foreground">
                 Tactic:{" "}
                 <Link
@@ -711,7 +717,7 @@ export function OpenGapsQueue({
             href={`/gaps/${card.gap_id}`}
             className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
           >
-            {card.statement}
+            {card.gap_name}
           </Link>
           <GapTacticsBlock
             gapId={card.gap_id}

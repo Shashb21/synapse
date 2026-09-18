@@ -74,7 +74,7 @@ Two-step loop is compressed into Review:
 
 Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps, tactics, residuals) and mapping suggestions.
 
-Gap cards show the gap **once** as a sentence. They do not echo the statement as Residual / needs / body.
+Gap cards show the gap **once** as an evidence-topic title (noun phrase, not “We need…”). They do not echo the statement as Residual / needs / body.
 
 ## Parked — Plan vision (not in this pass)
 
