@@ -300,7 +300,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
   it("keeps addressed gaps on the workspace with their tactics", () => {
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(true);
-    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(true);
+    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
     expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
@@ -412,6 +412,65 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(os.reasons.join(" ")).toMatch(/partial|limited/i);
   });
 
+it("does not enqueue leftover-as-new-gap drafts from ingest extraction alone", () => {
+    const file = DEMO_PACK.find((row) => row.id === "heor-interview")!;
+    const blocks = splitSourceIntoBlocks(file.text, file.title).map((section, i) => ({
+      id: `b${i}`,
+      source_id: "s",
+      heading: section.heading,
+      text: section.text,
+    }));
+    const extractedGaps = extractCandidateGaps(blocks);
+    const extractedTactics = extractCandidateTactics(blocks);
+    const blank = buildBlankWorkspace();
+    const gaps: EvidenceGap[] = extractedGaps.map((g, i) => ({
+      id: `GAP-${i + 1}`,
+      name: g.name,
+      statement: g.statement,
+      domain: g.domain,
+      objective_id: blank.objectives[0]!.id,
+      status: "candidate",
+      exclusion_reason: null,
+      exclusion_note: null,
+      status_lock: unlocked(),
+      parent_gap_id: null,
+    }));
+    const tactics: Tactic[] = extractedTactics.map((t, i) => ({
+      id: `TAC-${i + 1}`,
+      name: t.name,
+      type: t.type,
+      description: t.source_quote,
+      evidence_question: t.evidence_question,
+      population: "To be specified",
+      intervention: "Velmara",
+      comparator: "To be specified",
+      outcomes: "To be specified",
+      geography: "US + EU5",
+      data_source: file.title,
+      study_design: "Extracted",
+      lifecycle_stage: "extracted",
+      status: "proposed",
+      review_status: "candidate",
+      start_date: null,
+      evidence_available: null,
+      owner: "A. Rao",
+      function: "heor",
+      budget: null,
+      intended_use: "extracted",
+      lock: unlocked(),
+    }));
+    const workspace = buildPlanWorkspace({ ...blank, gaps, tactics });
+    expect(workspace.review.length).toBeGreaterThan(0);
+    expect(workspace.reviewTactics.length).toBeGreaterThan(0);
+    expect(workspace.residualGapSuggestions).toHaveLength(0);
+    expect(workspace.review.every((card) => !("residual" in card))).toBe(true);
+    const counts = planNavCounts(workspace);
+    expect(counts.review).toBe(workspace.review.length + workspace.reviewTactics.length);
+    expect(counts.mappings).toBe(
+      workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
+    );
+  });
+
   it("does not suggest leftover when a child gap exists or the leftover was rejected", () => {
     const seed = buildSeed();
     const withChild = {
@@ -484,6 +543,6 @@ We need to understand comparative effectiveness of Velmara versus regional stand
         hasChild: false,
         suppressed: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

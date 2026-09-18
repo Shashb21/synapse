@@ -91,8 +91,8 @@ const CUE_FAMILIES: CueFamily[] = [
   },
   {
     id: "ild",
-    label: "ILD / QT safety",
-    test: (t) => /\bild\b|\binterstitial|\bqt\b/i.test(t),
+    label: "ILD / QT / pneumonitis safety",
+    test: (t) => /\bild\b|\binterstitial|\bqt\b|\bpneumonitis\b/i.test(t),
   },
   {
     id: "sequencing",

@@ -179,9 +179,8 @@ export function residualDraftEligible(args: {
 }
 
 /**
- * Residual-as-gap: prefer human-locked overall of partial/limited.
- * Pressure-test drafts use overall "partial" without a human lock.
- * Unlocked assignment placeholders are "limited" and must not enqueue a leftover.
+ * Leftover-as-new-gap: human-locked overall of partial/limited.
+ * Unlocked assignment defaults (overall "limited") and inferred drafts do not enqueue.
  */
 export function residualGapEligible(args: {
   gap: Pick<EvidenceGap, "status">;
@@ -191,11 +190,8 @@ export function residualGapEligible(args: {
 }): boolean {
   if (args.suppressed || args.hasChild) return false;
   if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
-  if (args.coverages.length === 0) return false;
-  if (residualDraftEligible(args)) return true;
-  return args.coverages.some((c) => !c.overall_lock.locked && c.overall === "partial");
+  return residualDraftEligible(args);
 }
-
 
 
 function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
@@ -305,18 +301,13 @@ function needsForGap(state: IegpState, gapId: string) {
 }
 
 function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
-  const stored = state.coverages.filter((c) => c.gap_id === gap.id);
-  if (residualDraftEligible({ gap, coverages: stored })) {
-    return stored.filter(
-      (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
-    );
-  }
-  const unlockedPartial = stored.filter((c) => !c.overall_lock.locked && c.overall === "partial");
-  if (unlockedPartial.length > 0) return unlockedPartial;
-  if (stored.length > 0) return [];
-  return inferPressureTestCoverages(gap, state.tactics, { needs: needsForGap(state, gap.id) });
+  return state.coverages.filter(
+    (c) =>
+      c.gap_id === gap.id &&
+      c.overall_lock.locked &&
+      (c.overall === "partial" || c.overall === "limited"),
+  );
 }
-
 
 /** Ranked leftover-as-new-gap drafts for Mappings. Engine suggests; it does not create the child. */
 export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
@@ -1146,17 +1137,16 @@ export function defaultPlanPlace(
   state: IegpState,
   workspace: Pick<
     ReturnType<typeof buildPlanWorkspace>,
-    "review" | "reviewTactics" | "reviewResiduals"
+    "review" | "reviewTactics" | "mappingSuggestions" | "residualGapSuggestions"
   >,
 ): PlanPlace {
   if (state.asset.wizard_complete) return "plan";
   if (state.sources.length === 0) return "upload";
-  if (
-    workspace.review.length > 0 ||
-    workspace.reviewTactics.length > 0 ||
-    workspace.reviewResiduals.length > 0
-  ) {
+  if (workspace.review.length > 0 || workspace.reviewTactics.length > 0) {
     return "review";
+  }
+  if (workspace.mappingSuggestions.length > 0 || workspace.residualGapSuggestions.length > 0) {
+    return "mappings";
   }
   return "review";
 }
@@ -1166,8 +1156,7 @@ export function planNavCounts(workspace: ReturnType<typeof buildPlanWorkspace>):
   mappings: number;
 } {
   return {
-    review:
-      workspace.review.length + workspace.reviewTactics.length + workspace.reviewResiduals.length,
-    mappings: workspace.mappingSuggestions.length,
+    review: workspace.review.length + workspace.reviewTactics.length,
+    mappings: workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
   };
 }

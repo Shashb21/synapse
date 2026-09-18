@@ -198,7 +198,7 @@ export default async function GapDetailPage({
 
       {leftover ? (
         <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Residual evidence need</h2>
+          <h2 className="text-[13px] text-muted-foreground">Leftover as a new gap</h2>
           <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
           <ul className="mt-2 grid gap-1">
             {leftover.reasons.map((reason) => (

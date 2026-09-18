@@ -4,7 +4,7 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → candidate evidence needs → extracted gaps + tactics → **one Review step** (gaps, tactics, residual evidence needs) → living plan (sidebar: Upload, Review, Mappings, Library, Plan).
+objectives → candidate evidence needs → extracted gaps + tactics → Review (validate) → Mappings (pressure-test leftover as a new gap) → living plan (sidebar: Upload, Review, Mappings, Library, Plan).
 
 Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is the **Upload** pane on `/`. After you enter the plan, new ingest stays on Upload and drops into Review. Demo files live in `public/demo-sources/`.
 
@@ -33,7 +33,7 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217)
 
-The first visit is **Upload** on `/`. Ingest a demo file. Review is one validation step: extracted gaps, extracted tactics, and residual evidence needs (accept as a new gap / reject / modify). Then map or assign tactics and enter the plan. Reset returns the blank slate.
+The first visit is **Upload** on `/`. Ingest a demo file. Review validates extracted gaps and tactics. **Create gap** and **Create tactic** live on Review and Library. After you map a tactic and lock overall coverage as partial or limited, Mappings suggests leftover as a new gap. Reset returns the blank slate.
 
 | Route | What |
 | --- | --- |

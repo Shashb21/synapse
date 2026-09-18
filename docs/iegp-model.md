@@ -14,7 +14,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). |
 | Tactic | Structured generating or disseminating activity. Extracted tactics start as **candidate** and use the same accept / reject / modify gate as gaps. Status completed / ongoing / planned / proposed / cancelled. |
 | Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. Suggested mappings rank accepted gaps against accepted tactics; a human accept writes this join. Reject persists so that pair is not suggested again. |
-| Residual evidence need | Engine drafts leftover after a pressure-test (inferred partial, or human-locked partial/limited). Shown in Review. Accept creates a child gap (`parent_gap_id`). Parent is preserved. |
+| Residual evidence need | Seed/plan object used to prioritize leftovers. After a pressure-test, leftover is **not** dumped onto the parent; it is suggested as a **new gap**. |
 | Priority | Locked band on the residual. Coverage ≠ priority. |
 | Roadmap item | Ongoing + planned + proposed tactics only. Completed stay on the dossier. |
 
@@ -28,14 +28,19 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 3. Gap status (Candidate / Open / Partial / Addressed / Excluded)
 4. Each of 10 coverage dimensions
 5. Overall coverage degree
-6. Residual leftover (engine drafts from pressure-test or locked partial/limited; human accepts it **as a new gap**, rejects, or modifies in Review)
+6. Residual leftover (after locked overall partial/limited, engine suggests leftover **as a new gap** on Mappings; human accepts, rejects, or modifies)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
 8. Create or assign a tactic (Create tactic adds to the library as accepted; extracted tactics are inventory, not ideation)
 8b. Suggested mapping accept / reject (a scored mapping engine drafts the join; accept is the same coverage write as Assign; reject suppresses the pair)
 8c. Create a gap (human-authored; starts as validated open)
 9. Roadmap row
 
-There is **no residual paragraph** copied onto the parent gap card. After ingest, Review is **one validation step**: extracted gaps, extracted tactics, and residual evidence needs. The engine drafts a residual when pressure-testing (deterministic mapping/coverage vs extracted tactics) says the parent is already **partial**. Human accepts that leftover **as a new gap**, rejects it, or modifies the statement. Assigning a tactic is not enough if coverage is still the unlocked placeholder `limited`. Full coverage and `not_relevant` do not enqueue a leftover. Reject persists so that parent is not suggested again.
+There is **no residual paragraph** copied onto the parent gap card. Two steps:
+
+1. **Ingest → extract gaps and tactics → human validates** those objects (accept / reject / modify).
+2. **Backend pressure-test** (deterministic mapping + coverage engine, not an LLM). When assigned coverage overall is human-locked **partial** or **limited** and no child gap exists, the engine suggests leftover as a **new gap** `{ parent_gap_id, statement, reasons }`. Human accepts → child gap created (`parent_gap_id`); parent → `validated_partial`. Reject persists; do not spam.
+
+Assigning a tactic is not enough if coverage is still the unlocked placeholder `limited`. Full coverage and `not_relevant` do not enqueue a leftover.
 
 **Create gap** and **Create tactic** are visible on Review and Library. Creating a tactic adds it to the library as accepted. Creating a gap is `validated_open`.
 
@@ -59,20 +64,20 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 
 `/` is a Cursor-like **left sidebar** of places: **Upload**, **Review**, **Mappings**, **Library**, **Plan**. Desktop rail + mobile drawer. The main pane shows one place. First visit starts on Upload; Review / Mappings / Library unlock after at least one source; Plan unlocks after a source plus at least one accept (or after **Enter the plan**). After wizard complete, `/` opens on Plan. New ingest stays on Upload and drops candidates into Review.
 
-Two-step loop is compressed into Review:
+Two-step loop:
 
-1. **Ingest → extract gaps and tactics**.
-2. **Review is one validation step**: accept / reject / modify extracted gaps, extracted tactics, and residual evidence needs. Engine drafts a residual when pressure-testing says the parent is already **partial**. Accept residual creates a child gap (`parent_gap_id`); parent stays. Reject persists. **Create gap** and **Create tactic** are visible on Review and Library.
+1. **Ingest → extract gaps and tactics → Review** (accept / reject / modify). **Create gap** and **Create tactic** are visible on Review and Library.
+2. **Mappings pressure-test**: scored gap–tactic drafts, then leftover-as-new-gap after locked partial/limited coverage. Accept creates a child gap (`parent_gap_id`); parent stays as `validated_partial`. Reject persists.
 
 | Place | What |
 | --- | --- |
 | Upload | Demo pack + ingest. Later sources never restart a stepper. |
-| Review | Candidate gaps, tactics, and residual evidence needs; accept / reject / modify; **Create gap** and **Create tactic**. Residual is its own row (leftover question), not a copy of the parent sentence. |
-| Mappings | Suggested mappings (scored engine) plus assign from the library onto accepted gaps. |
+| Review | Candidate gaps and tactics; accept / reject / modify; **Create gap** and **Create tactic**. No leftover dump. |
+| Mappings | Suggested mappings (scored engine), leftover-as-new-gap suggestions, plus assign from the library onto accepted gaps. |
 | Library | Accepted and created tactics. **Create gap** and **Create tactic** live here too. |
 | Plan | Prioritize, then High / Medium / Low and Addressed. |
 
-Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps, tactics, residuals) and mapping suggestions.
+Eval and Spec stay as secondary sidebar items. Sidebar shows counts for inbox candidates (gaps + tactics) and mapping + leftover suggestions.
 
 Gap cards show the gap **once** as a sentence. They do not echo the statement as Residual / needs / body.
 

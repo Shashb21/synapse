@@ -432,17 +432,15 @@ export function GapPlanCard({
 export function ReviewQueue({
   gaps,
   tactics,
-  residuals,
   emptyHint,
   availableTactics,
 }: {
   gaps: ReviewGapCard[];
   tactics: ReviewTacticCard[];
-  residuals: ResidualGapSuggestion[];
   emptyHint: string;
   availableTactics: AvailableTactic[];
 }) {
-  if (gaps.length === 0 && tactics.length === 0 && residuals.length === 0) {
+  if (gaps.length === 0 && tactics.length === 0) {
     return (
       <div className="grid gap-3">
         <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
@@ -483,7 +481,6 @@ export function ReviewQueue({
           </div>
         )}
       </section>
-      <SuggestedResidualGaps items={residuals} />
     </div>
   );
 }
@@ -513,26 +510,26 @@ export function PrioritizeQueue({
 
 export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[] }) {
   return (
-    <section aria-labelledby="review-residuals">
-      <h3 id="review-residuals" className="mb-3 text-[13px] font-medium text-foreground">
-        Residual evidence needs
-      </h3>
+    <section aria-labelledby="suggested-residual-gaps">
+      <h2 id="suggested-residual-gaps" className="text-[15px] font-medium text-foreground">
+        Leftover as a new gap
+      </h2>
       <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-        The leftover question after pressure-testing extracted tactics against the parent. Accept
-        residual creates that leftover as a new gap (parent stays). Reject persists. Modify edits
-        the leftover statement — not a copy of the parent sentence.
+        After a pressure-test, partial or limited coverage means the leftover evidence need is a new
+        gap. Accept creates that child (parent stays). Reject persists so this pair is not suggested
+        again.
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No residual evidence needs. The engine drafts one when pressure-testing says a parent is
-          already partial versus extracted tactics.
+          No leftover-as-gap suggestions. Lock overall coverage as partial or limited on a mapped
+          gap first.
         </p>
       ) : (
         <div className="grid gap-3">
           {items.map((item) => (
             <article key={item.parent_gap_id} className="border border-border bg-background p-4">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Residual evidence need
+                Residual leftover
               </p>
               <p className="mt-2 text-[13px] leading-5 text-foreground">{item.statement}</p>
               <p className="mt-2 text-[12px] text-muted-foreground">Parent: {item.parent_name}</p>
@@ -557,7 +554,7 @@ export function SuggestedResidualGaps({ items }: { items: ResidualGapSuggestion[
                   confirmLabel="Reject leftover"
                 />
                 <LockForm
-                  label="Modify statement"
+                  label="Modify residual"
                   action="modify_residual_gap"
                   extra={{ parent_gap_id: item.parent_gap_id }}
                   confirmLabel="Save statement"

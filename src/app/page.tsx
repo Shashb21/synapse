@@ -8,6 +8,7 @@ import {
   PrioritizeQueue,
   ReviewQueue,
   SuggestedMappings,
+  SuggestedResidualGaps,
   TacticLibrary,
 } from "@/components/plan-cards";
 import { StaleFlag } from "@/components/iegp-badges";
@@ -50,25 +51,26 @@ function PlaceIntro({
   if (place === "review") {
     return (
       <PageIntro kicker="Accept, reject, or modify" title="Review">
-        One validation step after ingest: extracted gaps, extracted tactics, and residual evidence
-        needs when pressure-testing says a parent is already partial. Accept residual creates that
-        leftover as a new gap. Create gap and Create tactic live here.
+        Step 1 after ingest: validate extracted gaps and tactics (accept / reject / modify). Create
+        gap and Create tactic live here. Leftover-as-new-gap suggestions appear on Mappings after a
+        pressure-test.
       </PageIntro>
     );
   }
   if (place === "mappings") {
     return (
-      <PageIntro kicker="Inventory joins" title="Mappings">
-        A scored engine suggests gap–tactic pairs after both are accepted. Accept or reject those
-        drafts, or assign from the library onto an accepted gap.
+      <PageIntro kicker="Inventory joins and leftover gaps" title="Mappings">
+        Step 2 is a backend pressure-test: scored gap–tactic drafts plus leftover-as-new-gap
+        suggestions after human-locked partial or limited coverage. Accept leftover creates a child
+        gap. Reject persists. Assign from the library onto an accepted gap.
       </PageIntro>
     );
   }
   if (place === "library") {
     return (
       <PageIntro kicker="Accepted inventory" title="Tactic library">
-        Extracted tactics enter after you accept them. Create a tactic here — it is added as
-        accepted. Tag the same tactic onto as many gaps as you need.
+        Extracted tactics enter after you accept them. Create gap and Create tactic live here too.
+        A created tactic is added as accepted. Tag the same tactic onto as many gaps as you need.
       </PageIntro>
     );
   }
@@ -110,7 +112,6 @@ export default async function HomePage({
       <ReviewQueue
         gaps={workspace.review}
         tactics={workspace.reviewTactics}
-        residuals={workspace.residualGapSuggestions}
         availableTactics={workspace.availableTactics}
         emptyHint="Inbox is empty. Ingest a source on Upload when you have new material."
       />
@@ -124,6 +125,7 @@ export default async function HomePage({
     pane = gates.mappingsUnlocked ? (
       <div className="grid gap-10">
         <SuggestedMappings items={workspace.mappingSuggestions} />
+        <SuggestedResidualGaps items={workspace.residualGapSuggestions} />
         <section aria-labelledby="accepted-gaps">
           <h2 id="accepted-gaps" className="text-[15px] font-medium text-foreground">
             Accepted gaps
