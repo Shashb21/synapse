@@ -52,6 +52,9 @@ test.describe("wizard once, plan forever", () => {
     await page.getByRole("button", { name: "Next", exact: true }).click();
     await expect(page.getByRole("heading", { name: /review gaps and tactics/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toBeVisible();
+    await expect(page.getByText(/no mapping suggestions/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
@@ -111,6 +114,7 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /^velmara iegp$/i })).toBeVisible();
     await expect(page.getByText(/living plan/i).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /^inbox/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /tactic library/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^high$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^medium$/i })).toBeVisible();
@@ -123,6 +127,58 @@ test.describe("wizard once, plan forever", () => {
     await page.getByRole("heading", { name: /^inbox/i }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByText(/intracranial|sequencing after osimertinib/i).first()).toBeVisible();
+  });
+
+  test("accept mapping tags the tactic on the gap; create gap lands in prioritize", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: /ingest this file/i }).first().click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^ingest$/i }).click();
+    await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    const gapCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
+      .first();
+    const gapName = (await gapCard.getByRole("link").first().innerText()).trim();
+    await gapCard.getByRole("button", { name: /accept gap/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+
+    const tacticCard = page
+      .locator("article")
+      .filter({ has: page.getByRole("button", { name: /accept tactic/i }) })
+      .first();
+    const tacticName = (await tacticCard.getByRole("link").first().innerText()).trim();
+    await tacticCard.getByRole("button", { name: /accept tactic/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept$/i }).click();
+
+    const suggestion = page
+      .locator("li")
+      .filter({ has: page.getByRole("button", { name: /accept mapping/i }) })
+      .first();
+    await expect(suggestion).toBeVisible();
+    await expect(suggestion.getByText(gapName, { exact: false })).toBeVisible();
+    await suggestion.getByRole("button", { name: /accept mapping/i }).click();
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /^accept mapping$/i }).click();
+    await expect(page.getByRole("button", { name: /accept mapping/i })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /3\. prioritize/i }).click();
+    const prioritized = page.locator("article").filter({ hasText: gapName }).first();
+    await expect(prioritized.getByRole("link", { name: tacticName, exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: /2\. review/i }).click();
+    await page.getByRole("button", { name: /create gap/i }).first().click();
+    await page.getByPlaceholder(/what evidence is missing/i).fill(
+      "Need ILD characterisation in community oncology clinics after month six.",
+    );
+    await page.getByLabel(/^name$/i).fill("A. Rao");
+    await page.getByRole("button", { name: /add gap/i }).click();
+    await page.getByRole("button", { name: /3\. prioritize/i }).click();
+    await expect(page.getByText(/community oncology/i).first()).toBeVisible();
   });
 
   test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {

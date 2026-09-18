@@ -13,7 +13,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Evidence need | Atomic sourced statement. Starts as **candidate**. Never auto-promoted to a gap. |
 | Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). |
 | Tactic | Structured generating or disseminating activity. Extracted tactics start as **candidate** and use the same accept / reject / modify gate as gaps. Status completed / ongoing / planned / proposed / cancelled. |
-| Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. |
+| Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. Suggested mappings rank accepted gaps against accepted tactics; a human accept writes this join. Reject persists so that pair is not suggested again. |
 | Residual evidence need | Child of a gap. Original gap is preserved. |
 | Priority | Locked band on the residual. Coverage ≠ priority. |
 | Roadmap item | Ongoing + planned + proposed tactics only. Completed stay on the dossier. |
@@ -31,6 +31,8 @@ Actor is a typed **name + function**. No login. `user_id` is not required in v1.
 6. Residual statement (engine drafts from uncovered dimensions; human edits and locks)
 7. Priority band (**human only** — the engine does not suggest or assign a band)
 8. Create or assign a tactic (human-authored proposals; extracted tactics are inventory, not ideation)
+8b. Suggested mapping accept / reject (engine ranks by statement similarity; accept is the same coverage write as Assign; reject suppresses the pair)
+8c. Create a gap (human-authored; starts as validated open with a residual draft)
 9. Roadmap row
 
 Addressed may be locked only if coverage supports Full, **or** the actor supplies an override note. The engine never writes Addressed.
@@ -52,8 +54,8 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. Safe
 The home screen (`/`) is a **wizard once, then the living plan**. First visit is a stepper: upload → review gaps and tactics → prioritize. After **Enter the plan**, you only live on `/`. New ingest drops candidate gaps and tactics into the **inbox** on that same page. The loop is:
 
 1. Upload or ingest a demo source. The engine extracts **candidate gaps** and **candidate tactics**, and drafts **residual evidence needs**.
-2. Review both. Humans **accept, reject, or modify** gaps and tactics. Only accepted tactics can be assigned later.
-3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band.
+2. Review both. Humans **accept, reject, or modify** gaps and tactics. Only accepted tactics can be assigned later. After a gap and a tactic are accepted, **suggested mappings** appear for accept or reject. **Create gap** lives here and next to the tactic library — not a new nav item.
+3. Accepted open/partial gaps are prompted for **priority**. The engine does not assign a band. Human-created gaps land here too.
 4. After a human lock, tactics can be **created or assigned** onto High / Medium / Low.
 5. **Addressed** gaps stay on the plan with the tactics that closed them.
 6. Later sources never restart the wizard. They land in the inbox.

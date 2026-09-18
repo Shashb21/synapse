@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS coverages (
   dimensions jsonb NOT NULL, overall text NOT NULL, overall_rationale text NOT NULL,
   overall_lock jsonb NOT NULL, stale boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS mapping_suggestions (
+  gap_id text NOT NULL, tactic_id text NOT NULL,
+  status text NOT NULL, lock jsonb NOT NULL,
+  PRIMARY KEY (gap_id, tactic_id)
+);
 CREATE TABLE IF NOT EXISTS residuals (
   id text PRIMARY KEY, gap_id text NOT NULL, statement text NOT NULL,
   domain text NOT NULL, draft_rationale text NOT NULL, lock jsonb NOT NULL
@@ -125,6 +130,16 @@ export async function ensureSchema() {
       "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'accepted'",
     ),
   );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'rejected'",
+    ),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS lock jsonb NOT NULL DEFAULT '{}'::jsonb",
+    ),
+  );
 }
 
 export async function wipeIegp() {
@@ -137,6 +152,7 @@ export async function wipeIegp() {
     "priorities",
     "residuals",
     "coverages",
+    "mapping_suggestions",
     "need_gap_links",
     "needs",
     "gaps",

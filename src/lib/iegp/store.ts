@@ -1,21 +1,25 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock } from "./types";
-import type { ActorFunction } from "./enums";
+import type { ActorFunction, EvidenceDomain } from "./enums";
+import { EVIDENCE_DOMAINS } from "./enums";
 import {
   draftResidualStatement,
   emptyDimensions,
   extractCandidateGaps,
   extractCandidateNeeds,
   extractCandidateTactics,
+  gapEligibleForMapping,
   gapNameFromStatement,
   residualRequired,
   splitSourceIntoBlocks,
   similarRecord,
   suggestGapStatus,
+  suggestMappings as rankMappingSuggestions,
+  tacticEligibleForMapping,
   unlocked,
 } from "./engine";
 
@@ -52,6 +56,7 @@ async function readState(): Promise<IegpState> {
     need_gap_links,
     tactics,
     coverages,
+    mapping_suggestions,
     residuals,
     priorities,
     roadmap,
@@ -68,6 +73,7 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.needGapLinks),
     d.select().from(t.tactics),
     d.select().from(t.coverages),
+    d.select().from(t.mappingSuggestions),
     d.select().from(t.residuals),
     d.select().from(t.priorities),
     d.select().from(t.roadmap),
@@ -119,6 +125,12 @@ async function readState(): Promise<IegpState> {
       dimensions: c.dimensions as IegpState["coverages"][0]["dimensions"],
       overall: c.overall as IegpState["coverages"][0]["overall"],
       overall_lock: asLock(c.overall_lock),
+    })),
+    mapping_suggestions: mapping_suggestions.map((m) => ({
+      gap_id: m.gap_id,
+      tactic_id: m.tactic_id,
+      status: m.status as IegpState["mapping_suggestions"][0]["status"],
+      lock: asLock(m.lock),
     })),
     residuals: residuals.map((r) => ({
       ...r,
@@ -178,6 +190,9 @@ export async function persistState(state: IegpState) {
   if (state.need_gap_links.length) await d.insert(t.needGapLinks).values(state.need_gap_links);
   if (state.tactics.length) await d.insert(t.tactics).values(state.tactics);
   if (state.coverages.length) await d.insert(t.coverages).values(state.coverages);
+  if (state.mapping_suggestions.length) {
+    await d.insert(t.mappingSuggestions).values(state.mapping_suggestions);
+  }
   if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
   if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
   if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
@@ -579,6 +594,145 @@ export async function assignTacticToGap(args: {
     `${args.tactic_id} → ${args.gap_id}`,
   );
   await ensureResidualDraft(args.gap_id);
+}
+
+async function upsertMappingSuggestion(args: {
+  gap_id: string;
+  tactic_id: string;
+  status: "accepted" | "rejected";
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const row = {
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    status: args.status,
+    lock: makeLock(args.actor_name, args.actor_function, args.note),
+  };
+  const existing = state.mapping_suggestions.find(
+    (m) => m.gap_id === args.gap_id && m.tactic_id === args.tactic_id,
+  );
+  if (existing) {
+    await db()
+      .update(t.mappingSuggestions)
+      .set({ status: row.status, lock: row.lock })
+      .where(
+        and(eq(t.mappingSuggestions.gap_id, args.gap_id), eq(t.mappingSuggestions.tactic_id, args.tactic_id)),
+      );
+    return;
+  }
+  await db().insert(t.mappingSuggestions).values(row);
+}
+
+export async function suggestMappings() {
+  return rankMappingSuggestions(await loadState());
+}
+
+export async function acceptMapping(args: {
+  gap_id: string;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (!gapEligibleForMapping(gap.status)) {
+    throw new Error("Only accepted open or partial gaps can receive a mapping.");
+  }
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  if (!tacticEligibleForMapping(tactic)) {
+    throw new Error("Only accepted, non-cancelled tactics can be mapped.");
+  }
+  await upsertMappingSuggestion({
+    ...args,
+    status: "accepted",
+    note: args.note || "Accepted mapping suggestion.",
+  });
+  await assignTacticToGap({
+    ...args,
+    note: args.note || "Accepted mapping suggestion.",
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "mapping",
+    `${args.gap_id}::${args.tactic_id}`,
+    "accept_mapping",
+    `${args.tactic_id} → ${args.gap_id}`,
+  );
+}
+
+export async function rejectMapping(args: {
+  gap_id: string;
+  tactic_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  const covered = state.coverages.find(
+    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
+  );
+  if (covered) {
+    throw new Error("That tactic already covers this gap. Reject does not remove an assignment.");
+  }
+  await upsertMappingSuggestion({
+    ...args,
+    status: "rejected",
+    note: args.note || "Rejected mapping suggestion.",
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "mapping",
+    `${args.gap_id}::${args.tactic_id}`,
+    "reject_mapping",
+    `${args.tactic_id} ↛ ${args.gap_id}`,
+  );
+}
+
+export async function createGap(args: {
+  name?: string;
+  statement: string;
+  domain?: EvidenceDomain;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const statement = args.statement.trim();
+  if (!statement) throw new Error("Statement is required.");
+  const domain = args.domain && EVIDENCE_DOMAINS.includes(args.domain) ? args.domain : "unmet_need";
+  const state = await loadState();
+  const obj = state.objectives[0];
+  if (!obj) throw new Error("No strategic objective to attach this gap to.");
+  const name = args.name?.trim() || gapNameFromStatement(statement);
+  const id = nextId(
+    "GAP",
+    state.gaps.map((g) => g.id),
+  );
+  await db().insert(t.gaps).values({
+    id,
+    name,
+    statement,
+    domain,
+    objective_id: obj.id,
+    status: "validated_open",
+    exclusion_reason: null,
+    exclusion_note: null,
+    lock: makeLock(args.actor_name, args.actor_function, args.note),
+  });
+  await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
+  await ensureResidualDraft(id);
+  return id;
 }
 
 export async function modifyGap(args: {

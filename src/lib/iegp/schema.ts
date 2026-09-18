@@ -126,6 +126,17 @@ export const coverages = pgTable("coverages", {
   stale: boolean("stale").notNull().default(false),
 });
 
+export const mappingSuggestions = pgTable(
+  "mapping_suggestions",
+  {
+    gap_id: text("gap_id").notNull(),
+    tactic_id: text("tactic_id").notNull(),
+    status: text("status").notNull(),
+    lock: jsonb("lock").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gap_id, t.tactic_id] })],
+);
+
 export const residuals = pgTable("residuals", {
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),

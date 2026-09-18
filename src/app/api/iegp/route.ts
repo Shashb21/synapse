@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import {
+  acceptMapping,
   assignTacticToGap,
   completeWizard,
+  createGap,
   createProposedTactic,
   ingestDemoSource,
   ingestNeedFromText,
@@ -16,9 +18,10 @@ import {
   lockTacticReview,
   modifyGap,
   modifyTactic,
+  rejectMapping,
   resetSeed,
 } from "@/lib/iegp/store";
-import type { ActorFunction } from "@/lib/iegp/enums";
+import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import type { CoverageDimension } from "@/lib/iegp/enums";
 
 export const runtime = "nodejs";
@@ -116,6 +119,34 @@ export async function POST(request: Request) {
         await assignTacticToGap({
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "accept_mapping":
+        await acceptMapping({
+          gap_id: body.gap_id,
+          tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "reject_mapping":
+        await rejectMapping({
+          gap_id: body.gap_id,
+          tactic_id: body.tactic_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "create_gap":
+        await createGap({
+          name: body.name,
+          statement: body.statement,
+          domain: (body.domain || undefined) as EvidenceDomain | undefined,
           actor_name,
           actor_function,
           note: body.note,

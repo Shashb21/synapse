@@ -203,6 +203,13 @@ export type GoldCoverage = {
   overall: OverallCoverage;
 };
 
+export type MappingSuggestionRecord = {
+  gap_id: string;
+  tactic_id: string;
+  status: "accepted" | "rejected";
+  lock: Lock;
+};
+
 export type IegpState = {
   asset: Asset;
   objectives: StrategicObjective[];
@@ -213,6 +220,7 @@ export type IegpState = {
   need_gap_links: NeedGapLink[];
   tactics: Tactic[];
   coverages: GapTacticCoverage[];
+  mapping_suggestions: MappingSuggestionRecord[];
   residuals: ResidualNeed[];
   priorities: PriorityAssessment[];
   roadmap: RoadmapItem[];

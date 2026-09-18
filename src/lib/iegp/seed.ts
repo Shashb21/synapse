@@ -1384,6 +1384,7 @@ export function buildSeed(): IegpState {
         },
       }),
     ],
+    mapping_suggestions: [],
     residuals: [
       {
         id: "RES-ELDERLY-SOC",

@@ -94,6 +94,7 @@ export function buildBlankWorkspace(): IegpState {
     need_gap_links: [],
     tactics: [],
     coverages: [],
+    mapping_suggestions: [],
     residuals: [],
     priorities: [],
     roadmap: [],

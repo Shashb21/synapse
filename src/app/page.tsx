@@ -1,7 +1,7 @@
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
-import { GapPlanCard, PrioritizeQueue, ReviewQueue, TacticLibrary } from "@/components/plan-cards";
+import { GapPlanCard, PrioritizeQueue, ReviewQueue, SuggestedMappings, TacticLibrary } from "@/components/plan-cards";
 import { Wizard } from "@/components/wizard";
 import { StaleFlag } from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
@@ -39,7 +39,8 @@ export default async function HomePage() {
             <section>
               <h2 className="text-[15px] font-medium text-foreground">Review gaps and tactics</h2>
               <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-                Same gate for both. Accept, reject, or modify. The engine does not accept for you.
+                Same gate for both. Accept, reject, or modify. Suggested mappings appear after you
+                accept a gap and a tactic. You can also create a gap here.
               </p>
               <ReviewQueue
                 gaps={workspace.review}
@@ -47,6 +48,9 @@ export default async function HomePage() {
                 availableTactics={workspace.availableTactics}
                 emptyHint="Ingest a source first, then review what it extracted."
               />
+              <div className="mt-8">
+                <SuggestedMappings items={workspace.mappingSuggestions} />
+              </div>
               <div className="mt-8">
                 <TacticLibrary items={workspace.availableTactics} />
               </div>
@@ -94,6 +98,7 @@ export default async function HomePage() {
         </div>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
           Newly extracted gaps and tactics. Accept, reject, or modify before they join the plan.
+          Suggested mappings between accepted gaps and library tactics sit below.
         </p>
         <ReviewQueue
           gaps={workspace.review}
@@ -102,6 +107,10 @@ export default async function HomePage() {
           emptyHint="Inbox is empty. Ingest another source below when you have new material."
         />
       </section>
+
+      <div className="mb-10">
+        <SuggestedMappings items={workspace.mappingSuggestions} />
+      </div>
 
       <section className="mb-10" aria-labelledby="prioritize-gaps">
         <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">

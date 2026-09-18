@@ -9,6 +9,7 @@ import {
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import type {
+  MappingSuggestion,
   PlanGapCard,
   PlanTactic,
   ReviewGapCard,
@@ -17,6 +18,8 @@ import type {
   UnprioritizedGapCard,
 } from "@/lib/iegp/engine";
 import {
+  DOMAIN_LABELS,
+  EVIDENCE_DOMAINS,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
   TACTIC_TYPE_LABELS,
@@ -29,6 +32,52 @@ function tacticOptionLabel(tactic: TacticLibraryItem) {
   if (tactic.gaps.length === 0) return `${tactic.name} · not tagged yet`;
   if (tactic.gaps.length === 1) return `${tactic.name} · 1 gap`;
   return `${tactic.name} · ${tactic.gaps.length} gaps`;
+}
+
+function CreateGapFields() {
+  return (
+    <>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Name (optional — derived from the statement if blank)
+        <input
+          name="name"
+          placeholder="Gap name"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        />
+      </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Statement
+        <textarea
+          name="statement"
+          required
+          placeholder="What evidence is missing, in one sentence."
+          className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
+        />
+      </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Domain
+        <select
+          name="domain"
+          defaultValue="unmet_need"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          {EVIDENCE_DOMAINS.map((domain) => (
+            <option key={domain} value={domain}>
+              {DOMAIN_LABELS[domain]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
+function CreateGapButton() {
+  return (
+    <LockForm label="Create gap" action="create_gap" confirmLabel="Add gap">
+      <CreateGapFields />
+    </LockForm>
+  );
 }
 
 function CreateTacticFields() {
@@ -399,14 +448,22 @@ export function ReviewQueue({
   availableTactics: AvailableTactic[];
 }) {
   if (gaps.length === 0 && tactics.length === 0) {
-    return <p className="text-[12px] text-muted-foreground">{emptyHint}</p>;
+    return (
+      <div className="grid gap-3">
+        <p className="text-[12px] text-muted-foreground">{emptyHint}</p>
+        <CreateGapButton />
+      </div>
+    );
   }
   return (
     <div className="grid gap-8">
       <section aria-labelledby="review-gaps">
-        <h3 id="review-gaps" className="mb-3 text-[13px] font-medium text-foreground">
-          Gaps
-        </h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 id="review-gaps" className="text-[13px] font-medium text-foreground">
+            Gaps
+          </h3>
+          <CreateGapButton />
+        </div>
         {gaps.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">No candidate gaps in the queue.</p>
         ) : (
@@ -458,6 +515,61 @@ export function PrioritizeQueue({
   );
 }
 
+export function SuggestedMappings({ items }: { items: MappingSuggestion[] }) {
+  return (
+    <section aria-labelledby="suggested-mappings">
+      <h2 id="suggested-mappings" className="text-[15px] font-medium text-foreground">
+        Suggested mappings
+      </h2>
+      <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
+        Ranked by statement and evidence-question similarity. Accept writes a coverage join. Reject
+        keeps the pair off this list. Nothing is auto-assigned.
+      </p>
+      {items.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No mapping suggestions. Accept a gap and a tactic, or create one.
+        </p>
+      ) : (
+        <ul className="grid gap-3">
+          {items.map((item) => (
+            <li
+              key={`${item.gap_id}::${item.tactic_id}`}
+              className="border border-border bg-background p-4"
+            >
+              <p className="text-[13px] font-medium text-foreground">{item.gap_name}</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{item.gap_statement}</p>
+              <p className="mt-2 text-[12px] text-foreground">
+                Tactic:{" "}
+                <Link
+                  href={`/tactics/${item.tactic_id}`}
+                  className="font-medium text-foreground no-underline hover:underline"
+                >
+                  {item.tactic_name}
+                </Link>
+              </p>
+              <p className="mt-1 text-[12px] text-muted-foreground">{item.why}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <LockForm
+                  label="Accept mapping"
+                  action="accept_mapping"
+                  extra={{ gap_id: item.gap_id, tactic_id: item.tactic_id }}
+                  confirmLabel="Accept mapping"
+                />
+                <LockForm
+                  label="Reject mapping"
+                  action="reject_mapping"
+                  extra={{ gap_id: item.gap_id, tactic_id: item.tactic_id }}
+                  confirmLabel="Reject mapping"
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
   return (
     <section aria-labelledby="tactic-library">
@@ -496,10 +608,11 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
           ))}
         </ul>
       )}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <LockForm label="Create tactic" action="create_tactic" confirmLabel="Add to library">
           <CreateTacticFields />
         </LockForm>
+        <CreateGapButton />
       </div>
     </section>
   );

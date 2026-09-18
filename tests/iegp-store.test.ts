@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -243,5 +243,89 @@ describe("IEGP postgres store", () => {
     const libraryRow = workspace.availableTactics.find((t) => t.id === tactic.id);
     expect(libraryRow?.gaps.map((g) => g.id).sort()).toEqual([firstGap!.id, secondGap!.id].sort());
     expect(workspace.availableTactics.some((t) => t.id === createdId && t.gaps.length === 0)).toBe(true);
+  });
+
+  it("creates a human gap as validated_open with a residual draft", async () => {
+    await resetSeed();
+    const id = await createGap({
+      statement: "Need ILD characterisation in community oncology clinics after month six.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const state = await loadState();
+    const gap = state.gaps.find((g) => g.id === id);
+    expect(gap?.status).toBe("validated_open");
+    expect(gap?.domain).toBe("unmet_need");
+    expect(gap?.status_lock.locked).toBe(true);
+    expect(state.residuals.some((r) => r.gap_id === id)).toBe(true);
+    const workspace = buildPlanWorkspace(state);
+    expect(workspace.unprioritized.some((c) => c.gap_id === id)).toBe(true);
+    expect(workspace.review.some((c) => c.gap_id === id)).toBe(false);
+  });
+
+  it("suggests mappings only after accept, writes coverage on accept, and suppresses rejects", async () => {
+    await resetSeed();
+    await ingestDemoSource({
+      demo_id: "heor-interview",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const ingested = await loadState();
+    const gap = ingested.gaps.find((g) => g.status === "candidate")!;
+    const tactic = ingested.tactics.find((t) => t.review_status === "candidate")!;
+    expect((await suggestMappings()).length).toBe(0);
+
+    await lockGapStatus({
+      gap_id: gap.id,
+      status: "validated_open",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    expect((await suggestMappings()).length).toBe(0);
+
+    await lockTacticReview({
+      tactic_id: tactic.id,
+      review_status: "accepted",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const suggested = await suggestMappings();
+    expect(suggested.some((s) => s.gap_id === gap.id && s.tactic_id === tactic.id)).toBe(true);
+
+    const other = suggested.find((s) => s.tactic_id === tactic.id && s.gap_id === gap.id)!;
+    await rejectMapping({
+      gap_id: other.gap_id,
+      tactic_id: other.tactic_id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    expect(
+      (await suggestMappings()).some((s) => s.gap_id === other.gap_id && s.tactic_id === other.tactic_id),
+    ).toBe(false);
+
+    const createdId = await createGap({
+      name: "Elderly SoC evidence",
+      statement: "Need comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
+      domain: "comparative_effectiveness",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const afterCreate = await suggestMappings();
+    const pair = afterCreate.find((s) => s.gap_id === createdId && s.tactic_id === tactic.id);
+    expect(pair).toBeTruthy();
+    await acceptMapping({
+      gap_id: createdId,
+      tactic_id: tactic.id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const mapped = await loadState();
+    expect(mapped.coverages.some((c) => c.gap_id === createdId && c.tactic_id === tactic.id)).toBe(true);
+    expect(mapped.coverages.find((c) => c.gap_id === createdId && c.tactic_id === tactic.id)?.stale).toBe(
+      true,
+    );
+    expect(
+      (await suggestMappings()).some((s) => s.gap_id === createdId && s.tactic_id === tactic.id),
+    ).toBe(false);
   });
 });

@@ -9,11 +9,13 @@ import {
   extractCandidateNeeds,
   extractCandidateTactics,
   gapNameFromStatement,
+  MAPPING_SUGGESTION_CAP,
   needEvalMetrics,
   pairNeeds,
   planColumn,
   splitSourceIntoBlocks,
   suggestGapStatus,
+  suggestMappings,
   suggestPriority,
 } from "@/lib/iegp/engine";
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
@@ -284,6 +286,64 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     });
     expect(mapped.review.find((c) => c.gap_id === "GAP-ILD")!.tactics.some((t) => t.id === "TAC-REG")).toBe(
       true,
+    );
+  });
+
+  it("suggests mappings only for accepted open/partial gaps and accepted tactics", () => {
+    const seed = buildSeed();
+    const suggestions = suggestMappings(seed);
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.length).toBeLessThanOrEqual(MAPPING_SUGGESTION_CAP);
+    for (const row of suggestions) {
+      const gap = seed.gaps.find((g) => g.id === row.gap_id);
+      const tactic = seed.tactics.find((t) => t.id === row.tactic_id);
+      expect(gap?.status === "validated_open" || gap?.status === "validated_partial").toBe(true);
+      expect(tactic?.review_status).toBe("accepted");
+      expect(tactic?.status).not.toBe("cancelled");
+      expect(seed.coverages.some((c) => c.gap_id === row.gap_id && c.tactic_id === row.tactic_id)).toBe(
+        false,
+      );
+    }
+    expect(suggestions.some((s) => s.gap_id === "GAP-ILD")).toBe(false);
+    expect(suggestions.some((s) => s.gap_id === "GAP-CONGRESS")).toBe(false);
+    expect(suggestions.some((s) => s.gap_id === "GAP-PFS-TRIAL")).toBe(false);
+    expect(
+      suggestions.some((s) => s.gap_id === "GAP-ELDERLY-CE" && s.tactic_id === "TAC-ELDERLY-RWE"),
+    ).toBe(false);
+  });
+
+  it("drops a mapping after it is rejected or already covered", () => {
+    const seed = buildSeed();
+    const [first] = suggestMappings(seed);
+    expect(first).toBeTruthy();
+    const rejected = suggestMappings({
+      ...seed,
+      mapping_suggestions: [
+        {
+          gap_id: first!.gap_id,
+          tactic_id: first!.tactic_id,
+          status: "rejected",
+          lock: unlocked(),
+        },
+      ],
+    });
+    expect(rejected.some((s) => s.gap_id === first!.gap_id && s.tactic_id === first!.tactic_id)).toBe(
+      false,
+    );
+    const covered = suggestMappings({
+      ...seed,
+      coverages: [
+        ...seed.coverages,
+        {
+          ...seed.coverages[0]!,
+          id: "COV-SUGGEST-TEST",
+          gap_id: first!.gap_id,
+          tactic_id: first!.tactic_id,
+        },
+      ],
+    });
+    expect(covered.some((s) => s.gap_id === first!.gap_id && s.tactic_id === first!.tactic_id)).toBe(
+      false,
     );
   });
 });
