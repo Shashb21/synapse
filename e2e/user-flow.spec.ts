@@ -58,13 +58,12 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByRole("heading", { name: /^review$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^tactics$/i }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /create gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /create tactic/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /accept tactic/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /accept as new gap/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /accept as new gap/i }).first()).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     const gapCard = page
       .locator("article")
@@ -201,52 +200,31 @@ test.describe("wizard once, plan forever", () => {
     await expect(page.getByText(/community oncology/i)).toHaveCount(0);
   });
 
-  test("locking partial coverage suggests leftover as a new gap on mappings", async ({
+  test("review presents residual evidence needs and accept residual creates a child gap", async ({
     page,
   }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^review/i }).click();
-    const gapCard = page
+    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toBeVisible();
+    const residualCard = page
       .locator("article")
-      .filter({ has: page.getByRole("button", { name: /accept gap/i }) })
-      .filter({ hasText: /comparative effectiveness|elderly/i })
+      .filter({ has: page.getByRole("button", { name: /accept as new gap/i }) })
       .first();
-    const statement = (await gapCard.getByRole("link").first().innerText()).trim();
-    await gapCard.getByRole("button", { name: /accept gap/i }).click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^accept$/i }).click();
-    const tacticCard = page
-      .locator("article")
-      .filter({ has: page.getByRole("button", { name: /accept tactic/i }) })
-      .filter({ hasText: /chart review|≥65|aged 65/i })
-      .first();
-    await tacticCard.getByRole("button", { name: /accept tactic/i }).click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^accept$/i }).click();
-    await places(page).getByRole("link", { name: /^mappings/i }).click();
-    await page.getByRole("button", { name: /accept mapping/i }).first().click();
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^accept mapping$/i }).click();
-
-    const mapped = page.locator("article").filter({ hasText: statement }).first();
-    await mapped.getByRole("link").first().click();
-    await expect(page.getByText(/residual \(parent gap preserved\)/i)).toHaveCount(0);
-    await page.getByRole("button", { name: /lock overall coverage/i }).first().click();
-    await page.locator("select[name='overall']").selectOption("partial");
-    await page.locator("textarea[name='rationale']").fill("Only a slice of the gap is covered.");
-    await page.getByLabel(/^name$/i).fill("A. Rao");
-    await page.getByRole("button", { name: /^lock$/i }).click();
-    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toBeVisible();
-    const leftover = page.locator("section").filter({ hasText: /leftover as a new gap/i });
-    await expect(leftover.getByText(statement, { exact: true })).toHaveCount(0);
-
-    await places(page).getByRole("link", { name: /^mappings/i }).click();
-    await expect(page.getByRole("heading", { name: /leftover as a new gap/i })).toBeVisible();
-    await page.getByRole("button", { name: /accept as new gap/i }).first().click();
+    await expect(residualCard).toBeVisible();
+    await expect(residualCard.getByRole("button", { name: /reject leftover/i })).toBeVisible();
+    await expect(residualCard.getByRole("button", { name: /modify statement/i })).toBeVisible();
+    const leftover = (await residualCard.locator("p").nth(1).innerText()).trim();
+    await expect(residualCard.getByText(/^Parent:/)).toBeVisible();
+    expect(leftover.length).toBeGreaterThan(12);
+    await residualCard.getByRole("button", { name: /accept as new gap/i }).click();
     await page.getByLabel(/^name$/i).fill("A. Rao");
     await page.getByRole("button", { name: /accept as new gap/i }).click();
-    await page.goto("/?place=mappings");
+
+    await places(page).getByRole("link", { name: /^mappings/i }).click();
+    await expect(page.getByRole("heading", { name: /residual evidence needs/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /suggested mappings/i })).toBeVisible();
     await expect(page.getByText(/leftover of parent/i).first()).toBeVisible();
+    await expect(page.getByText(leftover, { exact: true }).first()).toBeVisible();
   });
 
   test("eval tape is view-only and engine cannot auto-close", async ({ page }) => {

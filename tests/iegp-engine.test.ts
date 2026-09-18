@@ -9,6 +9,7 @@ import {
   extractCandidateNeeds,
   extractCandidateTactics,
   gapNameFromStatement,
+  guessDomain,
   MAPPING_SUGGESTION_CAP,
   needEvalMetrics,
   pairNeeds,
@@ -233,6 +234,9 @@ describe("IEGP engine", () => {
     expect(
       gapNameFromStatement("KOLs need to know intracranial outcomes.", "CNS"),
     ).toBe("KOLs need to know intracranial outcomes.");
+    expect(guessDomain("We need to understand pneumonitis rates in community hospitals.")).toBe(
+      "safety",
+    );
 
     const text = `HEOR stakeholder interviews — Velmara.
 
@@ -412,65 +416,6 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(os.reasons.join(" ")).toMatch(/partial|limited/i);
   });
 
-it("does not enqueue leftover-as-new-gap drafts from ingest extraction alone", () => {
-    const file = DEMO_PACK.find((row) => row.id === "heor-interview")!;
-    const blocks = splitSourceIntoBlocks(file.text, file.title).map((section, i) => ({
-      id: `b${i}`,
-      source_id: "s",
-      heading: section.heading,
-      text: section.text,
-    }));
-    const extractedGaps = extractCandidateGaps(blocks);
-    const extractedTactics = extractCandidateTactics(blocks);
-    const blank = buildBlankWorkspace();
-    const gaps: EvidenceGap[] = extractedGaps.map((g, i) => ({
-      id: `GAP-${i + 1}`,
-      name: g.name,
-      statement: g.statement,
-      domain: g.domain,
-      objective_id: blank.objectives[0]!.id,
-      status: "candidate",
-      exclusion_reason: null,
-      exclusion_note: null,
-      status_lock: unlocked(),
-      parent_gap_id: null,
-    }));
-    const tactics: Tactic[] = extractedTactics.map((t, i) => ({
-      id: `TAC-${i + 1}`,
-      name: t.name,
-      type: t.type,
-      description: t.source_quote,
-      evidence_question: t.evidence_question,
-      population: "To be specified",
-      intervention: "Velmara",
-      comparator: "To be specified",
-      outcomes: "To be specified",
-      geography: "US + EU5",
-      data_source: file.title,
-      study_design: "Extracted",
-      lifecycle_stage: "extracted",
-      status: "proposed",
-      review_status: "candidate",
-      start_date: null,
-      evidence_available: null,
-      owner: "A. Rao",
-      function: "heor",
-      budget: null,
-      intended_use: "extracted",
-      lock: unlocked(),
-    }));
-    const workspace = buildPlanWorkspace({ ...blank, gaps, tactics });
-    expect(workspace.review.length).toBeGreaterThan(0);
-    expect(workspace.reviewTactics.length).toBeGreaterThan(0);
-    expect(workspace.residualGapSuggestions).toHaveLength(0);
-    expect(workspace.review.every((card) => !("residual" in card))).toBe(true);
-    const counts = planNavCounts(workspace);
-    expect(counts.review).toBe(workspace.review.length + workspace.reviewTactics.length);
-    expect(counts.mappings).toBe(
-      workspace.mappingSuggestions.length + workspace.residualGapSuggestions.length,
-    );
-  });
-
   it("does not suggest leftover when a child gap exists or the leftover was rejected", () => {
     const seed = buildSeed();
     const withChild = {
@@ -543,6 +488,6 @@ it("does not enqueue leftover-as-new-gap drafts from ingest extraction alone", (
         hasChild: false,
         suppressed: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
