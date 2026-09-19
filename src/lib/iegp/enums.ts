@@ -318,6 +318,14 @@ export const OVERALL_COVERAGE = [
 ] as const;
 export type OverallCoverage = (typeof OVERALL_COVERAGE)[number];
 
+/** How much this tactic covers this gap — not tactic lifecycle (ongoing/planned). */
+export const OVERALL_COVERAGE_LABELS: Record<OverallCoverage, string> = {
+  full: "Full coverage",
+  partial: "Partial coverage",
+  limited: "Limited coverage",
+  not_relevant: "Not relevant",
+};
+
 export const PRIORITY_BANDS = ["critical", "high", "medium", "low"] as const;
 export type PriorityBand = (typeof PRIORITY_BANDS)[number];
 

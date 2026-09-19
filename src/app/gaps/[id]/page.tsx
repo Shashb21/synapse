@@ -70,16 +70,17 @@ export default async function GapDetailPage({
       <PageIntro kicker={gap.id} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
-          <SplitGapDialog
-            gapId={gap.id}
-            gapName={gap.name}
-            gapStatement={gap.statement}
-            residualName={leftover?.statement || gap.name}
-            residualStatement={leftover?.statement || gap.statement}
-            tactics={tactics}
-          >
+          <>
             <GapBadge status={shown} />
-          </SplitGapDialog>
+            <SplitGapDialog
+              gapId={gap.id}
+              gapName={gap.name}
+              gapStatement={gap.statement}
+              residualName={leftover?.statement || gap.name}
+              residualStatement={leftover?.statement || gap.statement}
+              tactics={tactics}
+            />
+          </>
         ) : mapped ? (
           <GapStatusOverride
             gapId={gap.id}

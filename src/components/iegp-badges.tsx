@@ -1,5 +1,6 @@
 import {
   GAP_STATUS_LABELS,
+  OVERALL_COVERAGE_LABELS,
   TACTIC_REVIEW_LABELS,
   type GapStatus,
   type OverallCoverage,
@@ -30,8 +31,11 @@ export function GapBadge({ status }: { status: GapStatus }) {
 
 export function CoverageBadge({ overall }: { overall: OverallCoverage }) {
   return (
-    <Badge variant="outline" className="capitalize">
-      {overall.replaceAll("_", " ")}
+    <Badge
+      variant="outline"
+      title="How much this tactic covers this gap (full / partial / limited / not relevant). Separate from whether the tactic is ongoing or planned."
+    >
+      {OVERALL_COVERAGE_LABELS[overall]}
     </Badge>
   );
 }
@@ -99,9 +103,9 @@ export function StaleFlag({ stale }: { stale: boolean }) {
     <Badge
       variant="destructive"
       className="h-auto max-w-full whitespace-normal text-left"
-      title="This gap–tactic coverage judgment may be out of date because the tactic’s status changed or new evidence was ingested. Review the dimensions; they are not automatically trusted."
+      title="This gap–tactic coverage call may be out of date because the tactic’s status changed or new sources were ingested. Open the gap to review coverage. Dimension values are not automatically trusted."
     >
-      Coverage outdated — tactic or sources changed
+      Outdated coverage
     </Badge>
   );
 }

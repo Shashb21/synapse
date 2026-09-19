@@ -6,7 +6,6 @@ import { CoverageBadge, GapBadge, NeedsReviewFlag, StaleFlag, TacticBadge } from
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
-import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import {
   GAPS_TACTIC_HELPER,
   MapExistingTactic,
@@ -28,21 +27,13 @@ import {
   type TacticLibraryItem,
 } from "@/lib/iegp/engine";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "partial", label: "Partial" },
   { id: "open", label: "Open" },
   { id: "addressed", label: "Addressed" },
-  { id: "needs_validation", label: "Needs validation" },
+  { id: "needs_validation", label: "Unconfirmed" },
 ];
 
 function CreateOpenGap() {
@@ -61,7 +52,7 @@ function CreateOpenGap() {
         <textarea
           name="statement"
           required
-          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
       </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
@@ -90,7 +81,7 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
         <textarea
           name="statement"
           required
-          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
       </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
@@ -113,39 +104,6 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
   );
 }
 
-function ConstituentNeedsButton({ card }: { card: ReviewGapCard }) {
-  return (
-    <Dialog>
-      <DialogTrigger render={<Button type="button" size="sm" variant="outline" />}>
-        View constituent needs
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Constituent needs</DialogTitle>
-          <DialogDescription>
-            Sourced statements this gap stands for. Role is primary or supporting.
-          </DialogDescription>
-        </DialogHeader>
-        {card.needs.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
-        ) : (
-          <ul className="grid gap-2">
-            {card.needs.map((need) => (
-              <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
-                <p className="text-[11px] capitalize text-muted-foreground">
-                  {need.role}
-                  {need.source_title ? ` · ${need.source_title}` : ""}
-                </p>
-                <p className="mt-1">{need.statement}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function MappedTacticRow({ tactic }: { tactic: PlanTactic }) {
   return (
     <li className="flex flex-wrap items-center gap-1.5">
@@ -159,7 +117,6 @@ function MappedTacticRow({ tactic }: { tactic: PlanTactic }) {
       {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
       {tactic.stale ? <StaleFlag stale /> : null}
       <NeedsReviewFlag needsReview={tactic.needs_review} />
-      <CoverageDimensionsMenu overall={tactic.overall} dimensions={tactic.dimensions} />
     </li>
   );
 }
@@ -185,10 +142,8 @@ export function GapsWorkbench({
   return (
     <div className="grid gap-6">
         <p className="text-[12px] leading-5 text-muted-foreground">
-          Engine computes Open (no addressing tactics or literature), Partially Addressed (some
-          evidence, leftover remains — split or rewrite), or Addressed (evidence fully closes the
-          gap). A gap is the decision object. Constituent needs are the sourced statements
-          underneath it.
+          Engine computes Open, Partially Addressed, or Addressed. Confirm each gap before Prioritize.
+          Partial must be split or rewritten.
         </p>
         <p className="text-[12px] leading-5 text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
         <div className="flex flex-wrap items-center gap-2">
@@ -216,9 +171,19 @@ export function GapsWorkbench({
               ))}
             </div>
             <div className="grid gap-3">
-              {visible.map((card) => (
-                <article key={card.gap_id} className="border border-border bg-background p-4">
-                  <h2 className="text-[15px] font-medium leading-6 text-foreground">
+              {visible.map((card) => {
+                const unconfirmed = !card.human_validated || card.gap_status === "validated_partial";
+                return (
+                <article
+                  key={card.gap_id}
+                  className={
+                    unconfirmed
+                      ? "border border-border border-l-2 border-l-amber-400 bg-background p-4"
+                      : "border border-border bg-background p-4"
+                  }
+                >
+                  <p className="font-mono text-[11px] text-muted-foreground">{card.gap_id}</p>
+                  <h2 className="mt-1 text-[15px] font-medium leading-6 text-foreground">
                     <Link
                       href={`/gaps/${card.gap_id}`}
                       className="whitespace-normal no-underline hover:underline"
@@ -228,16 +193,7 @@ export function GapsWorkbench({
                   </h2>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {card.gap_status === "validated_partial" ? (
-                      <SplitGapDialog
-                        gapId={card.gap_id}
-                        gapName={card.gap_name}
-                        gapStatement={card.statement}
-                        residualName={card.residual?.statement || card.gap_name}
-                        residualStatement={card.residual?.statement || card.statement}
-                        tactics={card.tactics}
-                      >
-                        <GapBadge status={card.gap_status} />
-                      </SplitGapDialog>
+                      <GapBadge status={card.gap_status} />
                     ) : (
                       <GapStatusOverride
                         gapId={card.gap_id}
@@ -245,11 +201,6 @@ export function GapsWorkbench({
                         computedStatus={card.computed_status}
                         override={card.status_override}
                       />
-                    )}
-                    {card.human_validated ? (
-                      <span className="text-[11px] text-muted-foreground">Validated</span>
-                    ) : (
-                      <span className="text-[11px] text-amber-300">Needs validation</span>
                     )}
                     <NeedsReviewFlag needsReview={card.needs_review} />
                     {card.parent_gap_id ? (
@@ -278,10 +229,17 @@ export function GapsWorkbench({
                       )}
                     </ul>
                   </div>
-                  <div className="mt-3">
-                    <ConstituentNeedsButton card={card} />
-                  </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {card.gap_status === "validated_partial" ? (
+                      <SplitGapDialog
+                        gapId={card.gap_id}
+                        gapName={card.gap_name}
+                        gapStatement={card.statement}
+                        residualName={card.residual?.statement || card.gap_name}
+                        residualStatement={card.residual?.statement || card.statement}
+                        tactics={card.tactics}
+                      />
+                    ) : null}
                     <MapExistingTactic
                       gapId={card.gap_id}
                       availableTactics={availableTactics}
@@ -290,15 +248,16 @@ export function GapsWorkbench({
                     <RecordMissedTactic gapId={card.gap_id} />
                     {card.gap_status === "validated_partial" ? null : !card.human_validated ? (
                       <LockForm
-                        label="Validate status"
+                        label="Confirm status"
                         action="validate_gap"
                         extra={{ gap_id: card.gap_id }}
-                        confirmLabel={`Validate ${GAP_STATUS_LABELS[card.gap_status]}`}
+                        confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
                       />
                     ) : null}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -307,7 +266,7 @@ export function GapsWorkbench({
             <>
               <h2 className="text-[15px] font-medium">Continue to prioritize</h2>
               <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-                Every live gap is validated. Open gaps go to Prioritize, then Tactics.
+                Every live gap is confirmed. Open gaps go to Prioritize, then Tactics.
               </p>
               <LockForm
                 label="Continue to prioritize"
@@ -319,7 +278,7 @@ export function GapsWorkbench({
             <>
               <h2 className="text-[15px] font-medium">Prioritize is locked</h2>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                {unvalidated} gap{unvalidated === 1 ? "" : "s"} still need validation
+                {unvalidated} gap{unvalidated === 1 ? "" : "s"} still unconfirmed
                 {partials ? ` · ${partials} partial must be split or rewritten` : ""}.
               </p>
             </>

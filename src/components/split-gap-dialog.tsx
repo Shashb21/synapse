@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,7 +74,6 @@ export function SplitGapDialog({
   residualName,
   residualStatement,
   tactics,
-  children,
 }: {
   gapId: string;
   gapName: string;
@@ -82,7 +81,6 @@ export function SplitGapDialog({
   residualName: string;
   residualStatement: string;
   tactics: PlanTactic[];
-  children?: ReactNode;
 }) {
   const router = useRouter();
   const nameId = useId();
@@ -207,26 +205,18 @@ export function SplitGapDialog({
         if (next) reset();
       }}
     >
-      <span className="inline-flex flex-wrap items-center gap-2">
-        {children ? (
-          <DialogTrigger
-            render={
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-auto p-0 hover:bg-transparent"
-                aria-label="Resolve this Partially Addressed gap by splitting or rewriting"
-              />
-            }
-          >
-            {children}
-          </DialogTrigger>
-        ) : null}
-        <Button type="button" size="sm" onClick={() => setOpen(true)}>
-          Split or rewrite
-        </Button>
-      </span>
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label="Resolve this Partially Addressed gap by splitting or rewriting"
+          />
+        }
+      >
+        Split or rewrite
+      </DialogTrigger>
       <DialogContent className="z-[60] max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Resolve Partially Addressed gap</DialogTitle>

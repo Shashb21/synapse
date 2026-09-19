@@ -10,6 +10,7 @@ import {
 import {
   COVERAGE_DIMENSIONS,
   DIMENSION_LABELS,
+  OVERALL_COVERAGE_LABELS,
   type CoverageDimension,
   type DimensionValue,
   type OverallCoverage,
@@ -17,7 +18,7 @@ import {
 
 function formatOverall(overall: OverallCoverage | null): string {
   if (!overall) return "unknown";
-  return overall.replaceAll("_", " ");
+  return OVERALL_COVERAGE_LABELS[overall];
 }
 
 export function CoverageDimensionsMenu({

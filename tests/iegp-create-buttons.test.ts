@@ -12,11 +12,13 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain("RecordMissedTactic");
     expect(src).toContain("GAPS_TACTIC_HELPER");
     expect(src).toContain("SplitGapDialog");
-    expect(src).toContain("View constituent needs");
-    expect(src).toContain("No constituent needs yet.");
-    expect(src).toContain("CoverageDimensionsMenu");
+    expect(src).toContain("card.gap_id");
+    expect(src).toContain("Confirm status");
+    expect(src).toContain("Unconfirmed");
     expect(src).toContain("No tactics mapped");
-    expect(src).toContain("Needs validation");
+    expect(src).not.toContain("View constituent needs");
+    expect(src).not.toContain("CoverageDimensionsMenu");
+    expect(src).not.toContain("Needs validation");
     expect(src).not.toContain('label="Add tactic"');
     expect(src).not.toContain("create_tactic");
     expect(src).not.toContain("Accept gap");
@@ -114,13 +116,16 @@ describe("Gaps workbench buttons and leftover inbox", () => {
 
   it("replaces stale re-lock copy and distinguishes sibling review from outdated coverage", () => {
     const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
-    expect(badges).toContain("Coverage outdated — tactic or sources changed");
+    expect(badges).toContain("Outdated coverage");
     expect(badges).toContain("Review coverage — also mapped elsewhere");
+    expect(badges).toContain("OVERALL_COVERAGE_LABELS");
+    const enums = readFileSync(path.join(process.cwd(), "src/lib/iegp/enums.ts"), "utf8");
+    expect(enums).toContain("Limited coverage");
     expect(badges).not.toContain(">Stale — re-lock<");
     expect(badges).not.toContain(">Needs review<");
     const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
-    expect(workbench).toContain("View constituent needs");
-    expect(workbench).toContain("CoverageDimensionsMenu");
+    expect(workbench).not.toContain("View constituent needs");
+    expect(workbench).not.toContain("CoverageDimensionsMenu");
     expect(workbench).not.toContain("re-lock");
     const menu = readFileSync(path.join(process.cwd(), "src/components/coverage-dimensions-menu.tsx"), "utf8");
     expect(menu).toContain("Dimensions");
