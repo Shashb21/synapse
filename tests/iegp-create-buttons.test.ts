@@ -17,7 +17,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain("Unconfirmed");
     expect(src).toContain("No tactics mapped");
     expect(src).not.toContain("{card.statement}</p>");
-    expect(src).not.toContain("View constituent needs");
+    expect(src).toContain("View constituent needs");
+    expect(src).toContain("Where this gap comes from");
     expect(src).not.toContain("CoverageDimensionsMenu");
     expect(src).not.toContain("Needs validation");
     expect(src).not.toContain('label="Add tactic"');
@@ -125,7 +126,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(badges).not.toContain(">Stale — re-lock<");
     expect(badges).not.toContain(">Needs review<");
     const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
-    expect(workbench).not.toContain("View constituent needs");
+    expect(workbench).toContain("View constituent needs");
+    expect(workbench).toContain("Where this gap comes from");
     expect(workbench).not.toContain("CoverageDimensionsMenu");
     expect(workbench).not.toContain("re-lock");
     const menu = readFileSync(path.join(process.cwd(), "src/components/coverage-dimensions-menu.tsx"), "utf8");

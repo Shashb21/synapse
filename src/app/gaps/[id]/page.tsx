@@ -108,11 +108,10 @@ export default async function GapDetailPage({
       </p>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs</h2>
+        <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
-          A gap is the decision object. Constituent needs are the sourced statements underneath it.
-          Role is primary or supporting. Many needs can join one gap without copying the statement
-          onto the card.
+          Where this gap comes from. Constituent needs are the sourced statements extracted from
+          documents or interviews. Role is primary or supporting. Many needs can join one gap.
         </p>
         <div className="grid gap-2">
           {needs.length === 0 ? (

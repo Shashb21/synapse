@@ -27,6 +27,14 @@ import {
   type TacticLibraryItem,
 } from "@/lib/iegp/engine";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -101,6 +109,43 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
       </p>
       <RecordMissedFields prefix />
     </LockForm>
+  );
+}
+
+function ConstituentNeedsButton({ card }: { card: ReviewGapCard }) {
+  const count = card.needs.length;
+  return (
+    <Dialog>
+      <DialogTrigger render={<Button type="button" size="sm" variant="outline" />}>
+        View constituent needs{count ? ` (${count})` : ""}
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Where this gap comes from</DialogTitle>
+          <DialogDescription>
+            Constituent needs are the sourced statements this gap stands for — the document or
+            interview it was extracted from. Many needs can join one gap.
+          </DialogDescription>
+        </DialogHeader>
+        {card.needs.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">
+            No source yet. This gap was added on Gaps, not from ingest.
+          </p>
+        ) : (
+          <ul className="grid gap-2">
+            {card.needs.map((need) => (
+              <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
+                <p className="text-[11px] text-muted-foreground">
+                  {need.source_title || "Unknown source"}
+                  {need.role ? ` · ${need.role}` : ""}
+                </p>
+                <p className="mt-1">{need.statement}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -229,6 +274,7 @@ export function GapsWorkbench({
                     </ul>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <ConstituentNeedsButton card={card} />
                     {card.gap_status === "validated_partial" ? (
                       <SplitGapDialog
                         gapId={card.gap_id}
