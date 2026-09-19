@@ -75,7 +75,7 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. The 
 `/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
 1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
-2. **Gaps** shows every live gap as a card (id, title, status, statement, mapped tactics). Humans confirm Open and Addressed. **Map existing tactic** or **Record missed tactic** (catch-up, never `proposed`). Partial must **split** or **rewrite**. Constituent needs and coverage dimensions live on the gap detail page, not the card.
+2. **Gaps** shows every live gap as a card (id, title, status, mapped tactics). Humans confirm Open and Addressed. **Map existing tactic** or **Record missed tactic** (catch-up, never `proposed`). Partial must **split** or **rewrite**. Constituent needs and coverage dimensions live on the gap detail page, not the card.
 3. **Prioritize** High / Medium / Low on Open gaps.
 4. **Tactics** ideate proposed tactics for Open gaps after Prioritize.
 

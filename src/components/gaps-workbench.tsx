@@ -212,7 +212,6 @@ export function GapsWorkbench({
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{card.statement}</p>
                   <GapStatusDisagreement
                     computedStatus={card.computed_status}
                     override={card.status_override}

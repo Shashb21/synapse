@@ -16,6 +16,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain("Confirm status");
     expect(src).toContain("Unconfirmed");
     expect(src).toContain("No tactics mapped");
+    expect(src).not.toContain("{card.statement}</p>");
     expect(src).not.toContain("View constituent needs");
     expect(src).not.toContain("CoverageDimensionsMenu");
     expect(src).not.toContain("Needs validation");
