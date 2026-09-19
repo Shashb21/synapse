@@ -228,6 +228,14 @@ export const TACTIC_STATUSES = [
 ] as const;
 export type TacticStatus = (typeof TACTIC_STATUSES)[number];
 
+export const TACTIC_STATUS_HELPERS: Record<TacticStatus, string> = {
+  completed: "The study, programme, or publication is finished. Can count toward addressing a gap.",
+  ongoing: "Work is in progress. Can count toward addressing a gap.",
+  planned: "Committed or planned work. Can count toward addressing a gap.",
+  proposed: "An idea only. Does not count toward addressing. Created on Tactics after Prioritize.",
+  cancelled: "Stopped. Does not count toward addressing.",
+};
+
 /** Real inventory statuses Gaps may record. Proposed ideation is Tactics-only. */
 export const CATCH_UP_TACTIC_STATUSES = ["completed", "ongoing", "planned"] as const;
 export type CatchUpTacticStatus = (typeof CATCH_UP_TACTIC_STATUSES)[number];
@@ -326,8 +334,23 @@ export const OVERALL_COVERAGE_LABELS: Record<OverallCoverage, string> = {
   not_relevant: "Not relevant",
 };
 
+export const OVERALL_COVERAGE_HELPERS: Record<OverallCoverage, string> = {
+  full: "This tactic fully covers this gap.",
+  partial: "This tactic covers some of this gap, but not all.",
+  limited:
+    "This tactic only limitedly covers this gap — for example the population or endpoints are too thin. Separate from whether the tactic is ongoing or planned.",
+  not_relevant: "This tactic does not apply to this gap.",
+};
+
 export const PRIORITY_BANDS = ["critical", "high", "medium", "low"] as const;
 export type PriorityBand = (typeof PRIORITY_BANDS)[number];
+
+export const PRIORITY_BAND_HELPERS: Record<PriorityBand, string> = {
+  critical: "Highest urgency among Open gaps. The plan folds Critical into High on the board.",
+  high: "High-priority Open gap — address first.",
+  medium: "Medium-priority Open gap.",
+  low: "Lower-priority Open gap.",
+};
 
 export const EXCLUSION_REASONS = [
   "sufficient_evidence",

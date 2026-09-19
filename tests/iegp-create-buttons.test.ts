@@ -120,7 +120,13 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
     expect(badges).toContain("Outdated coverage");
     expect(badges).toContain("Review coverage — also mapped elsewhere");
-    expect(badges).toContain("OVERALL_COVERAGE_LABELS");
+    expect(badges).toContain("Tooltip");
+    expect(badges).toContain("delay={0}");
+    expect(badges).toContain("nativeButton={false}");
+    expect(badges).toContain("OVERALL_COVERAGE_HELPERS");
+    expect(badges).toContain("GAP_STATUS_DEFINITIONS");
+    expect(badges).toContain("TACTIC_STATUS_HELPERS");
+    expect(badges).toContain("PRIORITY_BAND_HELPERS");
     const enums = readFileSync(path.join(process.cwd(), "src/lib/iegp/enums.ts"), "utf8");
     expect(enums).toContain("Limited coverage");
     expect(badges).not.toContain(">Stale — re-lock<");
