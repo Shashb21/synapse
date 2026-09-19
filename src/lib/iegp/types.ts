@@ -181,12 +181,7 @@ export type GapTacticCoverage = {
   overall: OverallCoverage;
   overall_rationale: string;
   overall_lock: Lock;
-  /**
-   * This gap–tactic coverage judgment may be out of date because the tactic’s
-   * status changed or new evidence was ingested. Dimension values are not
-   * automatically trusted until a human reviews them. Distinct from
-   * `needs_review` (a sibling gap mapped to the same tactic changed a dimension).
-   */
+  /** Unused. Coverage is not marked outdated. Kept on the row for schema compatibility. */
   stale: boolean;
   /** Sibling coverage flagged after a dimension/overall change on another live gap for the same tactic. Values are not copied. */
   needs_review: boolean;

@@ -1104,7 +1104,7 @@ export async function assignTacticToGap(args: {
       args.note ||
       "Assigned from the plan. Coverage dimensions are unlocked until a human assesses them.",
     overall_lock: unlocked(),
-    stale: true,
+    stale: false,
     needs_review: false,
   });
   await appendAudit(
@@ -1587,10 +1587,6 @@ export async function lockTactic(args: {
   if (prev !== args.status) {
     const related = state.coverages.filter((c) => c.tactic_id === args.tactic_id);
     for (const c of related) {
-      await db()
-        .update(t.coverages)
-        .set({ stale: true })
-        .where(eq(t.coverages.id, c.id));
       const residuals = state.residuals.filter((r) => r.gap_id === c.gap_id);
       for (const r of residuals) {
         await db()
@@ -1606,7 +1602,7 @@ export async function lockTactic(args: {
     "tactic",
     args.tactic_id,
     "lock_status",
-    `${prev} → ${args.status} (stale coverage queued)`,
+    `${prev} → ${args.status}`,
   );
   if (prev !== args.status) {
     const related = state.coverages.filter((c) => c.tactic_id === args.tactic_id);
@@ -1821,16 +1817,13 @@ export async function ingestNeedFromText(args: {
     });
   }
 
-  for (const c of state.coverages) {
-    await db().update(t.coverages).set({ stale: true }).where(eq(t.coverages.id, c.id));
-  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${tacticCount} tactic(s); mappings applied; coverage marked stale.`,
+    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${tacticCount} tactic(s); mappings applied.`,
   );
   await autoJoinMappings(args.actor_name, args.actor_function);
   await persistEligibleResidualDrafts();

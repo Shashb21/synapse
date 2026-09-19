@@ -2,7 +2,6 @@ import Link from "next/link";
 import {
   CoverageBadge,
   PriorityBadge,
-  StaleFlag,
   TacticBadge,
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
@@ -160,7 +159,6 @@ function GapTacticsBlock({
                 <span>{tactic.name}</span>
                 <TacticBadge status={tactic.status} />
                 {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-                {tactic.stale ? <StaleFlag stale /> : null}
               </Link>
             </li>
           ))}

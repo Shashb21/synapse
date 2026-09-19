@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, StaleFlag } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
@@ -159,7 +159,6 @@ export default async function GapDetailPage({
                   {tactic?.name}
                 </Link>
                 <CoverageBadge overall={c.overall} />
-                <StaleFlag stale={c.stale} />
                 <NeedsReviewFlag needsReview={c.needs_review} />
                 <CoverageDimensionsMenu
                   overall={c.overall}

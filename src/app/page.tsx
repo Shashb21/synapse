@@ -6,7 +6,6 @@ import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
 import { TacticsPlace } from "@/components/tactics-place";
-import { StaleFlag } from "@/components/iegp-badges";
 import { loadState } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
@@ -95,7 +94,6 @@ export default async function HomePage({
       : params.place;
   const fallback = defaultPlanPlace(state, workspace);
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
-  const stale = state.coverages.some((c) => c.stale);
   const ready = gapsReadyForPrioritize(state);
 
   let pane: ReactNode;
@@ -205,7 +203,6 @@ export default async function HomePage({
             />
           ) : null}
           <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
-          {stale ? <StaleFlag stale /> : null}
         </div>
       </>
     );

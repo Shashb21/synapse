@@ -116,9 +116,10 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(detail).toContain("RecordMissedTactic");
   });
 
-  it("replaces stale re-lock copy and distinguishes sibling review from outdated coverage", () => {
+  it("has hover helpers on badges and no outdated-coverage flag", () => {
     const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
-    expect(badges).toContain("Outdated coverage");
+    expect(badges).not.toContain("Outdated coverage");
+    expect(badges).not.toContain("StaleFlag");
     expect(badges).toContain("Review coverage — also mapped elsewhere");
     expect(badges).toContain("Tooltip");
     expect(badges).toContain("delay={0}");
@@ -135,6 +136,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(workbench).toContain("View constituent needs");
     expect(workbench).toContain("Where this gap comes from");
     expect(workbench).not.toContain("CoverageDimensionsMenu");
+    expect(workbench).not.toContain("StaleFlag");
     expect(workbench).not.toContain("re-lock");
     const menu = readFileSync(path.join(process.cwd(), "src/components/coverage-dimensions-menu.tsx"), "utf8");
     expect(menu).toContain("Dimensions");
@@ -142,6 +144,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(menu).toContain("COVERAGE_DIMENSIONS");
     const tactics = readFileSync(path.join(process.cwd(), "src/app/tactics/[id]/page.tsx"), "utf8");
     expect(tactics).not.toContain("re-lock");
+    expect(tactics).not.toContain("outdated");
     const model = readFileSync(path.join(process.cwd(), "docs/iegp-model.md"), "utf8");
     expect(model).not.toContain("re-lock");
     const problem = readFileSync(path.join(process.cwd(), "docs/problem-and-solution.md"), "utf8");

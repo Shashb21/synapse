@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { CoverageBadge, GapBadge, NeedsReviewFlag, StaleFlag, TacticBadge } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
@@ -160,7 +160,6 @@ function MappedTacticRow({ tactic }: { tactic: PlanTactic }) {
       </Link>
       <TacticBadge status={tactic.status} />
       {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
-      {tactic.stale ? <StaleFlag stale /> : null}
       <NeedsReviewFlag needsReview={tactic.needs_review} />
     </li>
   );

@@ -54,7 +54,7 @@ On **Gaps**, the engine computes Open / Partially Addressed / Addressed from joi
 
 Override of Open/Addressed wins until cleared or marked stale on ingest/coverage refresh. Stale overrides show disagreement with the new computed status; they are not silent-clobbered. Unlocked / limited-only assignment must not pretend a gap is Addressed (that is Partially Addressed until coverage is locked Full).
 
-Changing a dimension or overall on gap A for tactic T flags other **live** gaps mapped to T as **needs review**. Sibling yes/partial/no/overall values are not copied. Sibling status is not auto-flipped; the user opens the flagged gap, confirms or edits, the flag clears, then status recomputes. If that review leaves the sibling Partial, it sorts to the top of Gaps (Partial cannot stay). Tactic status change and ingest keep today’s broader **stale** behaviour.
+Changing a dimension or overall on gap A for tactic T flags other **live** gaps mapped to T as **needs review**. Sibling yes/partial/no/overall values are not copied. Sibling status is not auto-flipped; the user opens the flagged gap, confirms or edits, the flag clears, then status recomputes. If that review leaves the sibling Partial, it sorts to the top of Gaps (Partial cannot stay).
 
 **Counting rules:** completed + ongoing + planned tactics count. **Proposed** does not. Publications are tactics; they count as published literature when status is **completed**, or when the type is a publication tactic (`publication`, `congress_abstract`, `evidence_dissemination`) with `evidence_available` set.
 
@@ -64,7 +64,7 @@ Priority is a human lock of High / Medium / Low (Critical folds into High on the
 
 ## Refresh (living plan)
 
-Tactic status change or new ingest marks related coverage **outdated** (review the dimensions; they are not automatically trusted until a human reviews them) and unlocks residuals so a human can reassess. Nothing auto-closes. Distinct from **needs review**, which flags a sibling gap after a dimension change on the same tactic.
+Tactic status change or new ingest unlocks residuals so a human can reassess. Nothing auto-closes. Coverage rows are not marked outdated. **Needs review** still flags a sibling gap after a dimension change on the same tactic.
 
 ## Evals
 

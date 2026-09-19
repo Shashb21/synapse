@@ -127,27 +127,8 @@ export function LockMeta({ lock }: { lock: Lock }) {
 }
 
 /**
- * Coverage (this gap–tactic pair) may be out of date because the tactic’s
- * status changed or new evidence was ingested. Dimension values are not
- * automatically trusted until a human reviews them. Older copy said
- * “Stale — re-lock”; “re-lock” was leftover from calling every coverage
- * edit “Lock” and did not mean freeze forever.
- */
-export function StaleFlag({ stale }: { stale: boolean }) {
-  if (!stale) return null;
-  return (
-    <BadgeHelp help="This gap–tactic coverage call may be out of date because the tactic’s status changed or new sources were ingested. Open the gap to review coverage. Dimension values are not automatically trusted.">
-      <Badge variant="destructive" className="h-auto max-w-full whitespace-normal text-left">
-        Outdated coverage
-      </Badge>
-    </BadgeHelp>
-  );
-}
-
-/**
  * A sibling live gap mapped to the same tactic had a dimension or overall
- * change. Values were not copied onto this gap. Distinct from outdated
- * coverage (`stale`), which is tactic-status or ingest.
+ * change. Values were not copied onto this gap.
  */
 export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
   if (!needsReview) return null;

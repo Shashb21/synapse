@@ -58,8 +58,8 @@ export default async function TacticDetailPage({
       </div>
       <LockForm label="Lock tactic status" action="lock_tactic" extra={{ tactic_id: tactic.id }}>
         <p className="text-[12px] text-muted-foreground">
-          Changing status marks related coverage outdated for review (tactic or sources
-          changed). Residuals stay open for a human to reassess. Nothing auto-closes.
+          Changing status recomputes related gap status. Residuals stay open for a human to
+          reassess. Nothing auto-closes.
         </p>
         <label className="grid gap-1 text-[12px] text-muted-foreground">
           Status
