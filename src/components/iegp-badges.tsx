@@ -23,7 +23,6 @@ function BadgeHelp({ help, children }: { help: string; children: ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        nativeButton={false}
         delay={0}
         render={<span className="inline-flex max-w-full cursor-help align-middle" />}
       >

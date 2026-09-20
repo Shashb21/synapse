@@ -123,7 +123,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(badges).toContain("Review coverage — also mapped elsewhere");
     expect(badges).toContain("Tooltip");
     expect(badges).toContain("delay={0}");
-    expect(badges).toContain("nativeButton={false}");
+    expect(badges).not.toContain("nativeButton");
     expect(badges).toContain("OVERALL_COVERAGE_HELPERS");
     expect(badges).toContain("GAP_STATUS_DEFINITIONS");
     expect(badges).toContain("TACTIC_STATUS_HELPERS");
