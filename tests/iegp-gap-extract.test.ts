@@ -165,7 +165,7 @@ describe("gap extract agents", () => {
     process.env.CLAUDE_CODE_CREDENTIALS_PATH = "/tmp/synapse-missing-claude-credentials.json";
     setGapExtractCompleter(null);
     try {
-      expect(() => assertGapExtractLlmReady()).toThrow(/OAuth|ANTHROPIC_API_KEY|CLAUDE_CODE/);
+      expect(() => assertGapExtractLlmReady()).toThrow(/OAuth|CLAUDE_CODE/);
     } finally {
       if (prev.ANTHROPIC_API_KEY !== undefined) process.env.ANTHROPIC_API_KEY = prev.ANTHROPIC_API_KEY;
       if (prev.ANTHROPIC_KEY !== undefined) process.env.ANTHROPIC_KEY = prev.ANTHROPIC_KEY;
@@ -185,17 +185,27 @@ describe("gap extract agents", () => {
     }
   });
 
-  it("accepts ANTHROPIC_KEY as the same live extract key", () => {
+  it("does not treat an API key as live extract auth", () => {
     const prevA = process.env.ANTHROPIC_API_KEY;
     const prevB = process.env.ANTHROPIC_KEY;
+    const prevO = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const prevP = process.env.CLAUDE_CODE_CREDENTIALS_PATH;
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.ANTHROPIC_KEY = "test-not-a-real-key";
+    process.env.CLAUDE_CODE_CREDENTIALS_PATH = "/tmp/synapse-missing-claude-credentials.json";
+    setGapExtractCompleter(null);
     try {
       expect(hasAnthropicKey()).toBe(true);
+      expect(() => assertGapExtractLlmReady()).toThrow(/OAuth|CLAUDE_CODE/);
     } finally {
       delete process.env.ANTHROPIC_KEY;
       if (prevA !== undefined) process.env.ANTHROPIC_API_KEY = prevA;
       if (prevB !== undefined) process.env.ANTHROPIC_KEY = prevB;
+      if (prevO !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = prevO;
+      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      if (prevP !== undefined) process.env.CLAUDE_CODE_CREDENTIALS_PATH = prevP;
+      else delete process.env.CLAUDE_CODE_CREDENTIALS_PATH;
     }
   });
 

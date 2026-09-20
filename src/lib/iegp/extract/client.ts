@@ -16,7 +16,7 @@ export function gapExtractLlmReady(): boolean {
 export function assertGapExtractLlmReady() {
   if (gapExtractLlmReady()) return;
   throw new Error(
-    "No Claude Code OAuth session or ANTHROPIC_API_KEY. Gap extraction requires a live LLM (proposer, critic, judge). Run `claude /login` or set CLAUDE_CODE_OAUTH_TOKEN.",
+    "No Claude Code OAuth session. Gap extraction requires a live LLM (proposer, critic, judge). Run `claude /login` or set CLAUDE_CODE_OAUTH_TOKEN.",
   );
 }
 

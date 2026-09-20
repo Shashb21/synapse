@@ -22,10 +22,12 @@ export {
 } from "./oauth";
 export { AgenticGateway, agenticAuthStatus, agenticGateway, completeJson, hasAgenticLlm, hasClaudeCodeOAuth } from "./gateway";
 export { registerReauthHook, clearReauthHooks, clearReauthHistory, reauthHistory, emitReauth } from "./reauth";
+export { assembleObservability } from "./observe";
 export {
   agenticCallLog,
   agenticCallSummary,
   clearAgenticCallLog,
+  previewText,
   recordAgenticCall,
   setAgenticTrackingPersistDb,
   trackingLogPath,

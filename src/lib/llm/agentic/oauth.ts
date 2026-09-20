@@ -90,10 +90,7 @@ export function parseClaudeCodeCredential(
 }
 
 function readEnvCredential(env: NodeJS.ProcessEnv): ClaudeCodeOAuthCredential | null {
-  const accessToken =
-    env.CLAUDE_CODE_OAUTH_TOKEN?.trim() ||
-    env.CLAUDE_CODE_ACCESS_TOKEN?.trim() ||
-    (isOAuthAccessToken(env.ANTHROPIC_API_KEY) ? env.ANTHROPIC_API_KEY?.trim() : undefined);
+  const accessToken = env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || env.CLAUDE_CODE_ACCESS_TOKEN?.trim();
   if (!accessToken) return null;
   const expiresRaw = env.CLAUDE_CODE_OAUTH_EXPIRES_AT?.trim();
   const expiresAt = expiresRaw ? Number(expiresRaw) : undefined;

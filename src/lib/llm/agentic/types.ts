@@ -12,7 +12,7 @@ export const CLAUDE_CODE_OAUTH_BETAS = [
   "oauth-2025-04-20",
 ] as const;
 
-export type AgenticAuthMode = "oauth" | "api_key" | "none";
+export type AgenticAuthMode = "oauth" | "none";
 
 export type AgenticPurpose =
   | "proposer"
@@ -36,7 +36,7 @@ export type ClaudeCodeOAuthCredential = {
 export type AgenticCallRecord = {
   id: string;
   at: string;
-  auth_mode: Exclude<AgenticAuthMode, "none">;
+  auth_mode: "oauth";
   model: string;
   purpose: AgenticPurpose;
   ok: boolean;
@@ -47,13 +47,22 @@ export type AgenticCallRecord = {
   error?: string;
   reauth?: "refreshed" | "failed" | "skipped" | "expiring";
   request_id?: string;
+  session_id?: string;
+  oauth_source?: ClaudeCodeOAuthCredential["source"];
+  system_chars?: number;
+  user_chars?: number;
+  system_preview?: string;
+  user_preview?: string;
 };
 
-export type ReauthEvent =
-  | { type: "expiring"; expiresAt?: number }
-  | { type: "refreshed"; expiresAt?: number }
-  | { type: "refresh_failed"; error: string }
-  | { type: "unauthorized"; error: string };
+export type ReauthEvent = {
+  id?: string;
+  at?: string;
+  type: "expiring" | "refreshed" | "refresh_failed" | "unauthorized";
+  expiresAt?: number;
+  error?: string;
+  request_id?: string;
+};
 
 export type ReauthHook = (event: ReauthEvent) => void | Promise<void>;
 
@@ -68,9 +77,11 @@ export type AgenticAuthStatus = {
   ready: boolean;
   auth_mode: AgenticAuthMode;
   oauth: boolean;
-  api_key: boolean;
   expires_at: number | null;
   reauth_needed: boolean;
-  source: ClaudeCodeOAuthCredential["source"] | "api_key" | null;
+  source: ClaudeCodeOAuthCredential["source"] | null;
+  has_refresh_token: boolean;
+  token_hint: string | null;
+  subscription_type: string | null;
   hint: string | null;
 };

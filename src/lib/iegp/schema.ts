@@ -314,6 +314,21 @@ export const llmCalls = pgTable("llm_calls", {
   error: text("error"),
   reauth: text("reauth"),
   request_id: text("request_id"),
+  session_id: text("session_id"),
+  oauth_source: text("oauth_source"),
+  system_chars: integer("system_chars"),
+  user_chars: integer("user_chars"),
+  system_preview: text("system_preview"),
+  user_preview: text("user_preview"),
+});
+
+export const llmReauthEvents = pgTable("llm_reauth_events", {
+  id: text("id").primaryKey(),
+  at: text("at").notNull(),
+  type: text("type").notNull(),
+  error: text("error"),
+  expires_at: text("expires_at"),
+  request_id: text("request_id"),
 });
 
 export const extractPromptVersions = pgTable("extract_prompt_versions", {

@@ -170,7 +170,13 @@ CREATE TABLE IF NOT EXISTS llm_calls (
   model text NOT NULL, purpose text NOT NULL, ok boolean NOT NULL,
   http_status integer, latency_ms integer NOT NULL,
   input_tokens integer, output_tokens integer,
-  error text, reauth text, request_id text
+  error text, reauth text, request_id text,
+  session_id text, oauth_source text, system_chars integer, user_chars integer,
+  system_preview text, user_preview text
+);
+CREATE TABLE IF NOT EXISTS llm_reauth_events (
+  id text PRIMARY KEY, at text NOT NULL, type text NOT NULL,
+  error text, expires_at text, request_id text
 );
 `;
 
@@ -245,6 +251,12 @@ export async function ensureSchema() {
       "ALTER TABLE needs ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
     ),
   );
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS session_id text"));
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS oauth_source text"));
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS system_chars integer"));
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS user_chars integer"));
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS system_preview text"));
+  await d.execute(sql.raw("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS user_preview text"));
   const { ensureExtractLearning } = await import("./extract/store");
   await ensureExtractLearning();
 }

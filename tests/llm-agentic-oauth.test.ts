@@ -15,6 +15,7 @@ import {
   loadClaudeCodeCredential,
   oauthSystemBlocks,
   persistClaudeCodeCredential,
+  previewText,
   registerReauthHook,
   reauthHistory,
 } from "@/lib/llm/agentic";
@@ -45,7 +46,6 @@ afterEach(() => {
   delete process.env.CLAUDE_CODE_REFRESH_TOKEN;
   delete process.env.CLAUDE_CODE_OAUTH_EXPIRES_AT;
   delete process.env.CLAUDE_CODE_CREDENTIALS_PATH;
-  delete process.env.AGENTIC_AUTH;
   process.env.AGENTIC_TRACKING = "memory";
 });
 
@@ -111,7 +111,6 @@ describe("claude code oauth subsystem (standalone)", () => {
       events.push(event.type);
     });
     const gateway = new AgenticGateway({
-      apiKey: () => undefined,
       model: () => "claude-sonnet-4-5",
       loadCredential: () => ({
         accessToken: "sk-ant-oat01-live",
@@ -162,7 +161,6 @@ describe("claude code oauth subsystem (standalone)", () => {
     });
     let messagesCalls = 0;
     const gateway = new AgenticGateway({
-      apiKey: () => undefined,
       model: () => "claude-sonnet-4-5",
       loadCredential: () => ({
         accessToken: "sk-ant-oat01-stale",
@@ -204,7 +202,6 @@ describe("claude code oauth subsystem (standalone)", () => {
     const path = tempCredPath();
     process.env.CLAUDE_CODE_CREDENTIALS_PATH = path;
     const gateway = new AgenticGateway({
-      apiKey: () => undefined,
       now: () => 1_000_000,
       loadCredential: () => ({
         accessToken: "sk-ant-oat01-old",
@@ -240,32 +237,21 @@ describe("claude code oauth subsystem (standalone)", () => {
     expect(agenticCallLog()[0]?.reauth).toBe("refreshed");
   });
 
-  it("falls back to the API key when no OAuth session exists", async () => {
+  it("never falls back to an API key", async () => {
     const gateway = new AgenticGateway({
-      apiKey: () => "sk-ant-api03-test",
-      workspaceId: () => "wrkspc_test",
       loadCredential: () => null,
       model: () => "claude-sonnet-4-5",
-      fetch: async (_input, init) => {
-        const headers = new Headers(init?.headers);
-        expect(headers.get("x-api-key")).toBe("sk-ant-api03-test");
-        expect(headers.get("authorization")).toBeNull();
-        expect(headers.get("anthropic-workspace-id")).toBe("wrkspc_test");
-        const body = JSON.parse(String(init?.body)) as { system: string };
-        expect(typeof body.system).toBe("string");
-        return jsonResponse(200, {
-          content: [{ type: "text", text: "```json\n{\"via\":\"api_key\"}\n```" }],
-        });
+      fetch: async () => {
+        throw new Error("must not call Anthropic without OAuth");
       },
     });
-    expect(await gateway.completeJson({ system: "sys", user: "user" })).toEqual({ via: "api_key" });
-    expect(agenticCallLog()[0]?.auth_mode).toBe("api_key");
+    await expect(gateway.completeJson({ system: "sys", user: "user" })).rejects.toThrow(/OAuth/);
+    expect(agenticCallLog()[0]?.ok).toBe(false);
+    expect(agenticCallLog()[0]?.auth_mode).toBe("oauth");
   });
 
-  it("throws when AGENTIC_AUTH=oauth and no Claude Code session is present", async () => {
-    process.env.AGENTIC_AUTH = "oauth";
+  it("throws when no Claude Code session is present", async () => {
     const gateway = new AgenticGateway({
-      apiKey: () => "sk-ant-api03-unused",
       loadCredential: () => null,
     });
     await expect(gateway.completeJson({ system: "sys", user: "user" })).rejects.toThrow(/OAuth/);
@@ -273,6 +259,42 @@ describe("claude code oauth subsystem (standalone)", () => {
 
   it("extracts JSON objects from fenced Claude replies", () => {
     expect(extractJsonObject('noise\n```json\n{"a":1}\n```\n')).toEqual({ a: 1 });
+  });
+
+  it("redacts secrets in observability previews", () => {
+    expect(previewText("use sk-ant-oat01-secret-token please")).toContain("[redacted]");
+    expect(previewText("use sk-ant-oat01-secret-token please")).not.toContain("secret-token");
+  });
+
+  it("assembles an observability snapshot of calls and reauth events", async () => {
+    const { assembleObservability } = await import("@/lib/llm/agentic");
+    const gateway = new AgenticGateway({
+      model: () => "claude-sonnet-4-5",
+      loadCredential: () => ({
+        accessToken: "sk-ant-oat01-obs",
+        refreshToken: "refresh-obs",
+        expiresAt: Date.now() + 3_600_000,
+        source: "env",
+      }),
+      fetch: async () =>
+        jsonResponse(200, {
+          content: [{ type: "text", text: '{"ok":true}' }],
+          usage: { input_tokens: 3, output_tokens: 2 },
+        }),
+    });
+    await gateway.completeJson({
+      system: "You are the critic.",
+      user: "Need CE in elderly patients.",
+      purpose: "critic",
+    });
+    const snap = await assembleObservability(50);
+    expect(snap.auth.auth_mode === "oauth" || snap.auth.auth_mode === "none").toBe(true);
+    expect(snap.calls.some((c) => c.purpose === "critic" && c.user_preview?.includes("elderly"))).toBe(
+      true,
+    );
+    expect(snap.summary.total).toBeGreaterThan(0);
+    expect(Array.isArray(snap.reauth)).toBe(true);
+    expect(Array.isArray(snap.extract)).toBe(true);
   });
 });
 
@@ -284,7 +306,7 @@ describe.skipIf(!live)("live agentic gateway", () => {
     const status = agenticAuthStatus();
     expect(status.ready).toBe(true);
     const json = await completeJson({
-      system: 'Reply with JSON only: {"pong":true,"auth":"<oauth|api_key>"} matching how you were authenticated.',
+      system: 'Reply with JSON only: {"pong":true,"auth":"oauth"}.',
       user: "Ping. JSON object only.",
       maxTokens: 64,
       purpose: "validate",

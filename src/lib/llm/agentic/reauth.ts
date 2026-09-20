@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import type { ReauthEvent, ReauthHook } from "./types";
+import { recordReauthEvent } from "./tracking";
 
 const hooks = new Set<ReauthHook>();
 const history: ReauthEvent[] = [];
@@ -24,11 +26,17 @@ export function clearReauthHistory() {
 }
 
 export async function emitReauth(event: ReauthEvent): Promise<void> {
-  history.push(event);
+  const stamped: ReauthEvent = {
+    ...event,
+    id: event.id ?? `RAUTH-${randomUUID().slice(0, 8)}`,
+    at: event.at ?? new Date().toISOString(),
+  };
+  history.push(stamped);
   if (history.length > HISTORY_CAP) history.splice(0, history.length - HISTORY_CAP);
+  await recordReauthEvent(stamped);
   for (const hook of hooks) {
     try {
-      await hook(event);
+      await hook(stamped);
     } catch {
       // Hooks must not break agentic calls.
     }

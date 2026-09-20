@@ -53,9 +53,9 @@ export function hasClaudeCodeOAuth(): boolean {
   return Boolean(loadClaudeCodeCredential());
 }
 
-/** Live LLM is available via Claude Code OAuth (preferred) or an API key. */
+/** Live LLM is available only via Claude Code OAuth. */
 export function hasAgenticLlm(): boolean {
-  return hasClaudeCodeOAuth() || hasAnthropicKey();
+  return hasClaudeCodeOAuth();
 }
 
 /** Identity-linked Anthropic keys need this on every request (`anthropic-workspace-id`). */
@@ -78,15 +78,14 @@ export function llamaParseTier(): "cost_effective" | "agentic" | "agentic_plus" 
 
 export function providerStatus() {
   const oauth = hasClaudeCodeOAuth();
-  const live = hasAgenticLlm();
   return {
     llama_cloud: hasLlamaCloudKey(),
-    anthropic: hasAnthropicKey(),
-    anthropic_model: live ? anthropicModel() : null,
+    anthropic: oauth,
+    anthropic_model: oauth ? anthropicModel() : null,
     llama_tier: hasLlamaCloudKey() ? llamaParseTier() : null,
-    live_extractor: live ? "claude" : "local",
+    live_extractor: oauth ? "claude" : "local",
     live_parser: hasLlamaCloudKey() ? "llamaparse" : "local",
-    auth_mode: oauth ? "oauth" : hasAnthropicKey() ? "api_key" : "none",
+    auth_mode: oauth ? "oauth" : "none",
     oauth,
   };
 }
