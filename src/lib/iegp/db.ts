@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS needs (
   population text NOT NULL, intervention text NOT NULL, comparator text NOT NULL,
   outcome text NOT NULL, timing text NOT NULL, source_id text NOT NULL,
   source_quote text NOT NULL, confidence real NOT NULL, status text NOT NULL,
-  lock jsonb NOT NULL
+  lock jsonb NOT NULL, metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE TABLE IF NOT EXISTS gaps (
   id text PRIMARY KEY, name text NOT NULL, statement text NOT NULL,
@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS gaps (
   exclusion_reason text, exclusion_note text, lock jsonb NOT NULL,
   parent_gap_id text, computed_status text, status_override jsonb,
   retired boolean NOT NULL DEFAULT false,
-  human_validated boolean NOT NULL DEFAULT false
+  human_validated boolean NOT NULL DEFAULT false,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE TABLE IF NOT EXISTS gap_versions (
   id text PRIMARY KEY, live_gap_id text NOT NULL, retired_gap_id text NOT NULL,
@@ -129,6 +130,41 @@ CREATE TABLE IF NOT EXISTS gold_coverages (
   id text PRIMARY KEY, gap_id text NOT NULL, tactic_id text NOT NULL,
   overall text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS extract_runs (
+  id text PRIMARY KEY, kind text NOT NULL, status text NOT NULL,
+  created_at text NOT NULL, started_at text, completed_at text,
+  persist boolean NOT NULL DEFAULT false, format text NOT NULL,
+  prompt_version text NOT NULL, champion_version text NOT NULL,
+  actor_name text NOT NULL, actor_function text NOT NULL, title text NOT NULL,
+  error text, input jsonb NOT NULL, result jsonb, metrics jsonb, source_id text
+);
+CREATE TABLE IF NOT EXISTS extract_run_steps (
+  id text PRIMARY KEY, run_id text NOT NULL, round integer NOT NULL,
+  role text NOT NULL, started_at text NOT NULL, ended_at text,
+  latency_ms integer, request jsonb NOT NULL, response jsonb, error text
+);
+CREATE TABLE IF NOT EXISTS gold_gaps (
+  id text PRIMARY KEY, name text NOT NULL, statement text NOT NULL,
+  domain text NOT NULL, source_key text NOT NULL, source_quote text NOT NULL,
+  must_find boolean NOT NULL, is_gap boolean NOT NULL, origin text NOT NULL,
+  from_gap_id text, metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text NOT NULL, actor_name text, actor_function text
+);
+CREATE TABLE IF NOT EXISTS gap_feedback (
+  id text PRIMARY KEY, at text NOT NULL, gap_id text NOT NULL, kind text NOT NULL,
+  before jsonb NOT NULL, after jsonb NOT NULL,
+  actor_name text NOT NULL, actor_function text NOT NULL,
+  gold_id text, hillclimb_run_id text, error text
+);
+CREATE TABLE IF NOT EXISTS extract_settings (
+  id text PRIMARY KEY, champion_version text NOT NULL, updated_at text NOT NULL,
+  last_hillclimb_at text, last_metrics jsonb, last_error text
+);
+CREATE TABLE IF NOT EXISTS extract_prompt_versions (
+  version text PRIMARY KEY, title text NOT NULL, summary text NOT NULL,
+  system_prompt text NOT NULL, parent_version text, prompt_patch text,
+  origin text NOT NULL, created_at text NOT NULL
+);
 `;
 
 export async function ensureSchema() {
@@ -192,6 +228,18 @@ export async function ensureSchema() {
       "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
     ),
   );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
+    ),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE needs ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
+    ),
+  );
+  const { ensureExtractLearning } = await import("./extract/store");
+  await ensureExtractLearning();
 }
 
 export async function wipeIegp() {

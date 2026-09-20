@@ -56,6 +56,13 @@ export const EVIDENCE_DOMAINS = [
 ] as const;
 export type EvidenceDomain = (typeof EVIDENCE_DOMAINS)[number];
 
+export function domainLabel(domain: string): string {
+  if ((EVIDENCE_DOMAINS as readonly string[]).includes(domain)) {
+    return DOMAIN_LABELS[domain as EvidenceDomain];
+  }
+  return domain.replaceAll("_", " ");
+}
+
 export const DOMAIN_LABELS: Record<EvidenceDomain, string> = {
   efficacy: "Efficacy",
   safety: "Safety",

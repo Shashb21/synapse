@@ -94,6 +94,7 @@ export type EvidenceNeed = {
   confidence: number;
   status: NeedStatus;
   status_lock: Lock;
+  metadata?: Record<string, unknown>;
 };
 
 export type GapStatusOverride = {
@@ -124,6 +125,7 @@ export type EvidenceGap = {
   status_override: GapStatusOverride | null;
   retired: boolean;
   human_validated: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 export type GapVersionEvent = "split" | "rewrite";

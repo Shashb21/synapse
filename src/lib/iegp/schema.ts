@@ -67,6 +67,7 @@ export const needs = pgTable("needs", {
   confidence: real("confidence").notNull(),
   status: text("status").notNull(),
   lock: jsonb("lock").notNull(),
+  metadata: jsonb("metadata").notNull().default({}),
 });
 
 export const gaps = pgTable("gaps", {
@@ -84,6 +85,7 @@ export const gaps = pgTable("gaps", {
   status_override: jsonb("status_override"),
   retired: boolean("retired").notNull().default(false),
   human_validated: boolean("human_validated").notNull().default(false),
+  metadata: jsonb("metadata").notNull().default({}),
 });
 
 export const gapVersions = pgTable("gap_versions", {
@@ -222,4 +224,89 @@ export const goldCoverages = pgTable("gold_coverages", {
   gap_id: text("gap_id").notNull(),
   tactic_id: text("tactic_id").notNull(),
   overall: text("overall").notNull(),
+});
+
+export const extractRuns = pgTable("extract_runs", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(),
+  created_at: text("created_at").notNull(),
+  started_at: text("started_at"),
+  completed_at: text("completed_at"),
+  persist: boolean("persist").notNull().default(false),
+  format: text("format").notNull(),
+  prompt_version: text("prompt_version").notNull(),
+  champion_version: text("champion_version").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  title: text("title").notNull(),
+  error: text("error"),
+  input: jsonb("input").notNull(),
+  result: jsonb("result"),
+  metrics: jsonb("metrics"),
+  source_id: text("source_id"),
+});
+
+export const extractRunSteps = pgTable("extract_run_steps", {
+  id: text("id").primaryKey(),
+  run_id: text("run_id").notNull(),
+  round: integer("round").notNull(),
+  role: text("role").notNull(),
+  started_at: text("started_at").notNull(),
+  ended_at: text("ended_at"),
+  latency_ms: integer("latency_ms"),
+  request: jsonb("request").notNull(),
+  response: jsonb("response"),
+  error: text("error"),
+});
+
+export const goldGaps = pgTable("gold_gaps", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  statement: text("statement").notNull(),
+  domain: text("domain").notNull(),
+  source_key: text("source_key").notNull(),
+  source_quote: text("source_quote").notNull(),
+  must_find: boolean("must_find").notNull(),
+  is_gap: boolean("is_gap").notNull(),
+  origin: text("origin").notNull(),
+  from_gap_id: text("from_gap_id"),
+  metadata: jsonb("metadata").notNull().default({}),
+  created_at: text("created_at").notNull(),
+  actor_name: text("actor_name"),
+  actor_function: text("actor_function"),
+});
+
+export const gapFeedback = pgTable("gap_feedback", {
+  id: text("id").primaryKey(),
+  at: text("at").notNull(),
+  gap_id: text("gap_id").notNull(),
+  kind: text("kind").notNull(),
+  before: jsonb("before").notNull(),
+  after: jsonb("after").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  gold_id: text("gold_id"),
+  hillclimb_run_id: text("hillclimb_run_id"),
+  error: text("error"),
+});
+
+export const extractSettings = pgTable("extract_settings", {
+  id: text("id").primaryKey(),
+  champion_version: text("champion_version").notNull(),
+  updated_at: text("updated_at").notNull(),
+  last_hillclimb_at: text("last_hillclimb_at"),
+  last_metrics: jsonb("last_metrics"),
+  last_error: text("last_error"),
+});
+
+export const extractPromptVersions = pgTable("extract_prompt_versions", {
+  version: text("version").primaryKey(),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  system_prompt: text("system_prompt").notNull(),
+  parent_version: text("parent_version"),
+  prompt_patch: text("prompt_patch"),
+  origin: text("origin").notNull(),
+  created_at: text("created_at").notNull(),
 });

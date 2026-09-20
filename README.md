@@ -67,6 +67,8 @@ npm test          # engine, seed invariants, postgres store
 npm run test:e2e  # Playwright against port 43217
 ```
 
+Gap extraction (proposer / critic / judge) lives at `/extract-runs` and `POST /api/extract/gaps`. It consumes already-parsed markdown or JSON (JSON blocks preferred). Dry-run is the default. Human wording edits and Exclude on Gaps feed gold and hill-climb the prompts.
+
 ## Documentation
 
 | Doc | What |
