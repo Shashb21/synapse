@@ -16,6 +16,7 @@ type Status = {
   llm_ready: boolean;
   anthropic: boolean;
   anthropic_model: string | null;
+  anthropic_workspace: boolean;
   champion_version: string | null;
   last_hillclimb_at: string | null;
   last_error: string | null;
@@ -166,6 +167,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
           <p>LLM ready: {status ? String(status.llm_ready) : "…"}</p>
           <p>Champion: {status?.champion_version ?? "…"}</p>
           <p>Model: {status?.anthropic_model ?? "not set"}</p>
+          <p>Workspace header: {status ? String(status.anthropic_workspace) : "…"}</p>
           <p>Gold gaps: {status?.gold_gap_count ?? "…"}</p>
         </div>
         {status?.last_error ? (

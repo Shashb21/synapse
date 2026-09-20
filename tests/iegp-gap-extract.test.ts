@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { normalizeExtractInput } from "@/lib/iegp/extract/normalize";
 import { runGapExtractionLoop } from "@/lib/iegp/extract/loop";
 import { setGapExtractCompleter, assertGapExtractLlmReady } from "@/lib/iegp/extract/client";
-import { hasAnthropicKey } from "@/lib/config";
+import { hasAnthropicKey, anthropicWorkspaceId } from "@/lib/config";
 import { DEMO_JSON_PACK, DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { allExtractTestDocuments, extractTestManifest } from "@/lib/iegp/demo-json";
 import { startGapExtraction } from "@/lib/iegp/extract/orchestrate";
@@ -176,6 +176,17 @@ describe("gap extract agents", () => {
       delete process.env.ANTHROPIC_KEY;
       if (prevA !== undefined) process.env.ANTHROPIC_API_KEY = prevA;
       if (prevB !== undefined) process.env.ANTHROPIC_KEY = prevB;
+    }
+  });
+
+  it("reads ANTHROPIC_WORKSPACE_ID for identity-linked keys", () => {
+    const prev = process.env.ANTHROPIC_WORKSPACE_ID;
+    process.env.ANTHROPIC_WORKSPACE_ID = "wrkspc_test";
+    try {
+      expect(anthropicWorkspaceId()).toBe("wrkspc_test");
+    } finally {
+      if (prev !== undefined) process.env.ANTHROPIC_WORKSPACE_ID = prev;
+      else delete process.env.ANTHROPIC_WORKSPACE_ID;
     }
   });
 

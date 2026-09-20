@@ -48,6 +48,12 @@ export function hasAnthropicKey(): boolean {
   return Boolean(anthropicApiKey());
 }
 
+/** Identity-linked Anthropic keys need this on every request (`anthropic-workspace-id`). */
+export function anthropicWorkspaceId(): string | undefined {
+  const value = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
+  return value || undefined;
+}
+
 export function anthropicModel(): string {
   return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-5";
 }
