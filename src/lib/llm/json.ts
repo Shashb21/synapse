@@ -5,7 +5,7 @@ export function extractJsonObject(raw: string): unknown {
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
   if (start < 0 || end <= start) {
-    throw new Error("Claude did not return a JSON object");
+    throw new Error("LLM did not return a JSON object");
   }
   return JSON.parse(candidate.slice(start, end + 1));
 }

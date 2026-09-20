@@ -29,7 +29,13 @@ export {
   savePastedClaudeCodeSession,
   startClaudeCodeLogin,
 } from "./login";
-export { AgenticGateway, agenticAuthStatus, agenticGateway, completeJson, hasAgenticLlm, hasClaudeCodeOAuth } from "./gateway";
+export {
+  AgenticGateway,
+  agenticAuthStatus,
+  agenticGateway,
+  hasClaudeCodeOAuth,
+} from "./gateway";
+export { completeJson, hasAgenticLlm } from "../router";
 export { registerReauthHook, clearReauthHooks, clearReauthHistory, reauthHistory, emitReauth } from "./reauth";
 export { assembleObservability } from "./observe";
 export {

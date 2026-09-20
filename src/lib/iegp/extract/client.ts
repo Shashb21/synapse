@@ -1,5 +1,7 @@
-import { completeJson, hasAgenticLlm } from "@/lib/llm/agentic";
+import { completeJson, hasAgenticLlm } from "@/lib/llm/router";
 import type { AgenticCompleteArgs, AgenticPurpose } from "@/lib/llm/agentic";
+import { moduleForPurpose, providerLoginHint, type LlmModuleId } from "@/lib/llm/catalog";
+import { routeForModule } from "@/lib/llm/settings";
 
 export type JsonCompleter = (args: AgenticCompleteArgs) => Promise<unknown>;
 
@@ -9,14 +11,15 @@ export function setGapExtractCompleter(fn: JsonCompleter | null) {
   injected = fn;
 }
 
-export function gapExtractLlmReady(): boolean {
-  return Boolean(injected) || hasAgenticLlm();
+export function gapExtractLlmReady(moduleId: LlmModuleId = "gaps"): boolean {
+  return Boolean(injected) || hasAgenticLlm(moduleId);
 }
 
-export function assertGapExtractLlmReady() {
-  if (gapExtractLlmReady()) return;
+export function assertGapExtractLlmReady(moduleId: LlmModuleId = "gaps") {
+  if (gapExtractLlmReady(moduleId)) return;
+  const provider = routeForModule(moduleId).provider;
   throw new Error(
-    "No Claude Code OAuth session. Gap extraction requires a live LLM (proposer, critic, judge). Run `claude /login` or set CLAUDE_CODE_OAUTH_TOKEN.",
+    `${providerLoginHint(provider, moduleId)} Gap extraction requires a live LLM (proposer, critic, judge).`,
   );
 }
 
@@ -25,8 +28,10 @@ export async function completeExtractJson(args: {
   user: string;
   maxTokens?: number;
   purpose?: AgenticPurpose;
+  module?: LlmModuleId;
 }): Promise<unknown> {
-  assertGapExtractLlmReady();
+  const module = args.module ?? moduleForPurpose(args.purpose);
+  assertGapExtractLlmReady(module);
   const fn = injected ?? completeJson;
-  return fn(args);
+  return fn({ ...args, module });
 }

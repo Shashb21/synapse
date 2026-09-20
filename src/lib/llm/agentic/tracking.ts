@@ -8,7 +8,7 @@ const memory: AgenticCallRecord[] = [];
 const reauthMemory: ReauthEvent[] = [];
 let persistDb = process.env.VITEST ? process.env.AGENTIC_TRACKING_DB === "1" : true;
 
-const SECRET = /sk-ant-[a-z0-9-]+|Bearer\s+\S+/gi;
+const SECRET = /sk-ant-[a-z0-9-]+|sk-or-[a-z0-9-]+|Bearer\s+\S+/gi;
 
 export function previewText(value: string, max = 480): string {
   const redacted = value.replace(SECRET, "[redacted]");
@@ -46,6 +46,7 @@ export function agenticCallSummary(calls: AgenticCallRecord[] = memory) {
   const failed = total - ok;
   const input_tokens = calls.reduce((sum, r) => sum + (r.input_tokens ?? 0), 0);
   const output_tokens = calls.reduce((sum, r) => sum + (r.output_tokens ?? 0), 0);
+  const cost_usd = calls.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
   const latencies = calls.map((r) => r.latency_ms).sort((a, b) => a - b);
   const percentile = (p: number) => {
     if (latencies.length === 0) return 0;
@@ -63,6 +64,7 @@ export function agenticCallSummary(calls: AgenticCallRecord[] = memory) {
     oauth: calls.filter((r) => r.auth_mode === "oauth").length,
     input_tokens,
     output_tokens,
+    cost_usd: Math.round(cost_usd * 1_000_000) / 1_000_000,
     latency_ms_p50: percentile(50),
     latency_ms_p95: percentile(95),
     by_purpose,
@@ -91,6 +93,8 @@ async function writeCallDb(record: AgenticCallRecord) {
       id: record.id,
       at: record.at,
       auth_mode: record.auth_mode,
+      provider: record.provider ?? null,
+      module: record.module ?? null,
       model: record.model,
       purpose: record.purpose,
       ok: record.ok,
@@ -98,6 +102,7 @@ async function writeCallDb(record: AgenticCallRecord) {
       latency_ms: record.latency_ms,
       input_tokens: record.input_tokens ?? null,
       output_tokens: record.output_tokens ?? null,
+      cost_usd: record.cost_usd ?? null,
       error: record.error ?? null,
       reauth: record.reauth ?? null,
       request_id: record.request_id ?? null,
@@ -157,6 +162,8 @@ export async function loadStoredCalls(limit = 400): Promise<AgenticCallRecord[]>
       id: row.id,
       at: row.at,
       auth_mode: "oauth",
+      provider: row.provider ?? undefined,
+      module: row.module ?? undefined,
       model: row.model,
       purpose: row.purpose as AgenticCallRecord["purpose"],
       ok: row.ok,
@@ -164,6 +171,7 @@ export async function loadStoredCalls(limit = 400): Promise<AgenticCallRecord[]>
       latency_ms: row.latency_ms,
       input_tokens: row.input_tokens ?? undefined,
       output_tokens: row.output_tokens ?? undefined,
+      cost_usd: row.cost_usd ?? undefined,
       error: row.error ?? undefined,
       reauth: (row.reauth as AgenticCallRecord["reauth"]) ?? undefined,
       request_id: row.request_id ?? undefined,

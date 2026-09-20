@@ -151,12 +151,16 @@ describe("claude code oauth subsystem (standalone)", () => {
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({
       auth_mode: "oauth",
+      provider: "claude_code",
+      module: "gaps",
       purpose: "judge",
       ok: true,
       http_status: 200,
       input_tokens: 11,
       output_tokens: 7,
     });
+    expect(log[0]?.cost_usd).toBeCloseTo(0.000138, 6);
+    expect(log[0]?.model).toBe("claude-sonnet-4-5");
     expect(events).toEqual([]);
   });
 
@@ -254,6 +258,34 @@ describe("claude code oauth subsystem (standalone)", () => {
     await expect(gateway.completeJson({ system: "sys", user: "user" })).rejects.toThrow(/OAuth/);
     expect(agenticCallLog()[0]?.ok).toBe(false);
     expect(agenticCallLog()[0]?.auth_mode).toBe("oauth");
+    expect(agenticCallLog()[0]?.provider).toBe("claude_code");
+  });
+
+  it("honors an explicit model override on the call", async () => {
+    const gateway = new AgenticGateway({
+      model: () => "claude-sonnet-4-5",
+      loadCredential: () => ({
+        accessToken: "sk-ant-oat01-live",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 3_600_000,
+        source: "env",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        expect(body.model).toBe("claude-opus-override");
+        return jsonResponse(200, {
+          content: [{ type: "text", text: '{"ok":true}' }],
+        });
+      },
+    });
+    await gateway.completeJson({
+      system: "sys",
+      user: "user",
+      purpose: "validate",
+      model: "claude-opus-override",
+    });
+    expect(agenticCallLog()[0]?.model).toBe("claude-opus-override");
+    expect(agenticCallLog()[0]?.module).toBe("validate");
   });
 
   it("throws when no Claude Code session is present", async () => {

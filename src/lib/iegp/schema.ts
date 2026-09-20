@@ -304,6 +304,8 @@ export const llmCalls = pgTable("llm_calls", {
   id: text("id").primaryKey(),
   at: text("at").notNull(),
   auth_mode: text("auth_mode").notNull(),
+  provider: text("provider"),
+  module: text("module"),
   model: text("model").notNull(),
   purpose: text("purpose").notNull(),
   ok: boolean("ok").notNull(),
@@ -311,6 +313,7 @@ export const llmCalls = pgTable("llm_calls", {
   latency_ms: integer("latency_ms").notNull(),
   input_tokens: integer("input_tokens"),
   output_tokens: integer("output_tokens"),
+  cost_usd: real("cost_usd"),
   error: text("error"),
   reauth: text("reauth"),
   request_id: text("request_id"),
@@ -320,6 +323,12 @@ export const llmCalls = pgTable("llm_calls", {
   user_chars: integer("user_chars"),
   system_preview: text("system_preview"),
   user_preview: text("user_preview"),
+});
+
+export const llmSettings = pgTable("llm_settings", {
+  id: text("id").primaryKey(),
+  updated_at: text("updated_at").notNull(),
+  config: jsonb("config").notNull(),
 });
 
 export const llmReauthEvents = pgTable("llm_reauth_events", {

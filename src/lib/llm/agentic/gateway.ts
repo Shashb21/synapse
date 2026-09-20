@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { anthropicModel } from "@/lib/config";
+import { estimateCostUsd, moduleForPurpose } from "@/lib/llm/catalog";
+import { getLlmSettings } from "@/lib/llm/settings";
 import { extractJsonObject } from "../json";
 import {
   ANTHROPIC_MESSAGES_URL,
@@ -213,7 +215,7 @@ export class AgenticGateway {
     httpStatus: number;
     usage?: { input_tokens?: number; output_tokens?: number };
   }> {
-    const model = this.deps.model?.() ?? anthropicModel();
+    const model = this.resolveModel(args);
     const headers = oauthRequestHeaders(credential.accessToken, requestId, this.sessionId);
     const res = await this.fetchImpl()(ANTHROPIC_MESSAGES_URL, {
       method: "POST",
@@ -263,6 +265,10 @@ export class AgenticGateway {
     }
   }
 
+  private resolveModel(args: AgenticCompleteArgs): string {
+    return args.model?.trim() || this.deps.model?.() || anthropicModel();
+  }
+
   private async track(args: {
     args: AgenticCompleteArgs;
     purpose: AgenticPurpose;
@@ -275,17 +281,28 @@ export class AgenticGateway {
     credential: ClaudeCodeOAuthCredential | null;
     error?: string;
   }) {
+    const model = this.resolveModel(args.args);
+    const module = args.args.module || moduleForPurpose(args.purpose);
+    const cost_usd = estimateCostUsd(
+      model,
+      args.usage?.input_tokens,
+      args.usage?.output_tokens,
+      getLlmSettings().costs,
+    );
     const record: AgenticCallRecord = {
       id: `LLM-${randomUUID().slice(0, 8)}`,
       at: new Date(this.now()).toISOString(),
       auth_mode: "oauth",
-      model: this.deps.model?.() ?? anthropicModel(),
+      provider: "claude_code",
+      module,
+      model,
       purpose: args.purpose,
       ok: args.ok,
       http_status: args.http_status,
       latency_ms: Math.max(0, this.now() - args.started),
       input_tokens: args.usage?.input_tokens,
       output_tokens: args.usage?.output_tokens,
+      cost_usd,
       error: args.error,
       reauth: args.reauth,
       request_id: args.request_id,

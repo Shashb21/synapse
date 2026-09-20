@@ -1,5 +1,15 @@
 import { anthropicModel } from "@/lib/config";
 import { getExtractRun, listExtractRuns } from "@/lib/iegp/extract/store";
+import {
+  DEFAULT_COSTS,
+  DEFAULT_MODELS,
+  LLM_MODULES,
+  LLM_PROVIDERS,
+  MODULE_LABELS,
+  PROVIDER_LABELS,
+} from "@/lib/llm/catalog";
+import { allProviderSnapshots } from "@/lib/llm/ready";
+import { loadLlmSettings } from "@/lib/llm/settings";
 import { agenticAuthStatus } from "./gateway";
 import { reauthHistory } from "./reauth";
 import {
@@ -49,10 +59,21 @@ export async function assembleObservability(limit = 400) {
       };
     }),
   );
+  const settings = await loadLlmSettings();
   return {
     at: new Date().toISOString(),
     model: anthropicModel(),
     auth,
+    settings,
+    providers: allProviderSnapshots(),
+    catalog: {
+      providers: LLM_PROVIDERS,
+      modules: LLM_MODULES,
+      provider_labels: PROVIDER_LABELS,
+      module_labels: MODULE_LABELS,
+      default_models: DEFAULT_MODELS,
+      default_costs: DEFAULT_COSTS,
+    },
     summary: agenticCallSummary(calls),
     calls,
     reauth,

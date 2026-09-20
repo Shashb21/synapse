@@ -40,6 +40,8 @@ export type AgenticCallRecord = {
   id: string;
   at: string;
   auth_mode: "oauth";
+  provider?: string;
+  module?: string;
   model: string;
   purpose: AgenticPurpose;
   ok: boolean;
@@ -47,6 +49,7 @@ export type AgenticCallRecord = {
   latency_ms: number;
   input_tokens?: number;
   output_tokens?: number;
+  cost_usd?: number;
   error?: string;
   reauth?: "refreshed" | "failed" | "skipped" | "expiring";
   request_id?: string;
@@ -74,6 +77,10 @@ export type AgenticCompleteArgs = {
   user: string;
   maxTokens?: number;
   purpose?: AgenticPurpose;
+  module?: string;
+  model?: string;
+  /** Explicit provider override (dashboard ping). Skips module routing. */
+  provider?: string;
 };
 
 export type AgenticAuthStatus = {

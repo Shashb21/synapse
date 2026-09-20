@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadClaudeCodeCredential } from "@/lib/llm/agentic/oauth";
+import { hasAgenticLlm as routedHasAgenticLlm } from "@/lib/llm/ready";
 
 const ANTHROPIC_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_KEY", "CLAUDE_API_KEY"] as const;
 
@@ -53,9 +54,9 @@ export function hasClaudeCodeOAuth(): boolean {
   return Boolean(loadClaudeCodeCredential());
 }
 
-/** Live LLM is available only via Claude Code OAuth. */
+/** Live LLM is available when any routed provider is authenticated. */
 export function hasAgenticLlm(): boolean {
-  return hasClaudeCodeOAuth();
+  return routedHasAgenticLlm();
 }
 
 /** Identity-linked Anthropic keys need this on every request (`anthropic-workspace-id`). */

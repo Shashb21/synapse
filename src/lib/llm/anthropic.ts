@@ -1,2 +1,2 @@
 export { extractJsonObject } from "@/lib/llm/json";
-export { completeJson } from "@/lib/llm/agentic";
+export { completeJson, hasAgenticLlm } from "@/lib/llm/router";
