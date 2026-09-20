@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -94,6 +94,7 @@ describe("IEGP postgres store", () => {
     const workspace = buildPlanWorkspace(state);
     expect(workspace.review.length).toBeGreaterThan(0);
     expect(workspace.review.every((c) => c.gap_status !== "candidate")).toBe(true);
+    expect(newGaps.every((g) => state.need_gap_links.some((l) => l.gap_id === g.id))).toBe(true);
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
@@ -248,6 +249,66 @@ describe("IEGP postgres store", () => {
     expect(workspace.unprioritized.some((c) => c.gap_id === id)).toBe(false);
     expect(workspace.openGaps.some((c) => c.gap_id === id)).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === id)).toBe(true);
+    const links = state.need_gap_links.filter((l) => l.gap_id === id);
+    expect(links.length).toBeGreaterThan(0);
+    const need = state.needs.find((n) => n.id === links[0]!.need_id);
+    expect(need?.source_id).toBe("SRC-PLAN-ENTRY");
+  });
+
+  it("flags every source that identified the same gap as a constituent need", async () => {
+    await resetSeed();
+    const text =
+      "Limited evidence characterises comparative effectiveness of Velmara versus regional standard of care in elderly patients with advanced EGFR-mutant NSCLC.";
+    await ingestNeedFromText({
+      title: "HTA briefing",
+      source_type: "other_internal",
+      stakeholder_function: "hta",
+      text,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await ingestNeedFromText({
+      title: "KOL interview",
+      source_type: "stakeholder_interview",
+      stakeholder_function: "medical_affairs",
+      text,
+      actor_name: "M. Hale",
+      actor_function: "medical_affairs",
+    });
+    const state = await loadState();
+    const match = state.gaps.find(
+      (g) =>
+        !g.retired &&
+        g.status !== "excluded" &&
+        /comparative effectiveness/i.test(`${g.statement} ${g.name}`) &&
+        /elderly/i.test(`${g.statement} ${g.name}`),
+    );
+    expect(match).toBeTruthy();
+    const linkedNeeds = state.need_gap_links
+      .filter((l) => l.gap_id === match!.id)
+      .map((l) => state.needs.find((n) => n.id === l.need_id))
+      .filter((n): n is NonNullable<typeof n> => Boolean(n));
+    const sourceIds = new Set(linkedNeeds.map((n) => n.source_id));
+    expect(sourceIds.size).toBeGreaterThanOrEqual(2);
+    const titles = [...sourceIds].map((id) => state.sources.find((s) => s.id === id)?.title);
+    expect(titles).toEqual(expect.arrayContaining(["HTA briefing", "KOL interview"]));
+  });
+
+  it("repairs a live gap that lost its constituent need links", async () => {
+    await resetSeed();
+    const id = await createGap({
+      statement: "Need pneumonitis characterisation in community clinics.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const before = await loadState();
+    await persistState({
+      ...before,
+      need_gap_links: before.need_gap_links.filter((l) => l.gap_id !== id),
+    });
+    expect((await loadState()).need_gap_links.filter((l) => l.gap_id === id)).toHaveLength(0);
+    await ensureAllLiveGapsHaveNeeds();
+    expect((await loadState()).need_gap_links.filter((l) => l.gap_id === id).length).toBeGreaterThan(0);
   });
 
   it("maps a newly created open gap onto an extracted tactic", async () => {

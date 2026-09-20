@@ -3,11 +3,12 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { GapBadge } from "@/components/iegp-badges";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { displayedGapStatus } from "@/lib/iegp/engine";
-import { loadState } from "@/lib/iegp/store";
+import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 
 export const dynamic = "force-dynamic";
 
 export default async function GapsPage() {
+  await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
   return (
     <AppShell active="gaps">

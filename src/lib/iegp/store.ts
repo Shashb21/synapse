@@ -295,6 +295,192 @@ function nextId(prefix: string, existing: string[]) {
   return `${prefix}-${String(n).padStart(3, "0")}`;
 }
 
+const PLAN_ENTRY_SOURCE_ID = "SRC-PLAN-ENTRY";
+
+function findMatchingLiveGap(
+  state: IegpState,
+  text: string,
+): IegpState["gaps"][0] | undefined {
+  const hay = text.trim();
+  if (!hay) return undefined;
+  return state.gaps.find(
+    (g) =>
+      isLiveGap(g) &&
+      (similarRecord(g.statement, hay) || similarRecord(g.name, hay)),
+  );
+}
+
+function gapHasNeedFromSource(state: IegpState, gapId: string, sourceId: string): boolean {
+  const needIds = new Set(
+    state.need_gap_links.filter((l) => l.gap_id === gapId).map((l) => l.need_id),
+  );
+  return state.needs.some((n) => needIds.has(n.id) && n.source_id === sourceId);
+}
+
+function primaryRoleForGap(state: IegpState, gapId: string): "primary" | "supporting" {
+  return state.need_gap_links.some((l) => l.gap_id === gapId && l.role === "primary")
+    ? "supporting"
+    : "primary";
+}
+
+async function ensurePlanEntrySource(): Promise<string> {
+  const state = await loadState();
+  if (state.sources.some((s) => s.id === PLAN_ENTRY_SOURCE_ID)) return PLAN_ENTRY_SOURCE_ID;
+  await db().insert(t.sources).values({
+    id: PLAN_ENTRY_SOURCE_ID,
+    filename: "gaps-entry.txt",
+    title: "Recorded on Gaps",
+    source_type: "other_internal",
+    stakeholder_function: "evidence_lead",
+    ingested_at: now(),
+    full_text: "Gaps created or repaired on the Gaps workbench without an ingest source.",
+  });
+  return PLAN_ENTRY_SOURCE_ID;
+}
+
+async function copyNeedGapLinks(fromGapId: string, toGapId: string) {
+  const state = await loadState();
+  const links = state.need_gap_links.filter((l) => l.gap_id === fromGapId);
+  for (const link of links) {
+    await db()
+      .insert(t.needGapLinks)
+      .values({ need_id: link.need_id, gap_id: toGapId, role: link.role })
+      .onConflictDoNothing();
+  }
+}
+
+async function linkNeedOntoGap(
+  needId: string,
+  gapId: string,
+  role: "primary" | "supporting",
+) {
+  await db()
+    .insert(t.needGapLinks)
+    .values({ need_id: needId, gap_id: gapId, role })
+    .onConflictDoNothing();
+}
+
+async function insertLiveOpenGap(args: {
+  name: string;
+  statement: string;
+  domain: EvidenceDomain;
+  objectiveId: string;
+}): Promise<string> {
+  const live = await loadState();
+  const gapId = nextId(
+    "GAP",
+    live.gaps.map((g) => g.id),
+  );
+  await db().insert(t.gaps).values({
+    id: gapId,
+    name: args.name,
+    statement: args.statement,
+    domain: args.domain,
+    objective_id: args.objectiveId,
+    status: "validated_open",
+    exclusion_reason: null,
+    exclusion_note: null,
+    lock: unlocked(),
+    parent_gap_id: null,
+    computed_status: "validated_open",
+    status_override: null,
+    retired: false,
+    human_validated: false,
+  });
+  return gapId;
+}
+
+async function attachExistingSimilarNeed(gapId: string): Promise<boolean> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === gapId);
+  if (!gap) return false;
+  const linkedNeedIds = new Set(
+    state.need_gap_links.filter((l) => l.gap_id === gapId).map((l) => l.need_id),
+  );
+  const similarNeed = state.needs.find(
+    (n) =>
+      !linkedNeedIds.has(n.id) &&
+      (similarRecord(n.statement, gap.statement, 0.62) || similarRecord(n.statement, gap.name, 0.62)),
+  );
+  if (!similarNeed) return false;
+  await linkNeedOntoGap(similarNeed.id, gapId, primaryRoleForGap(state, gapId));
+  return true;
+}
+
+async function insertNeedForGap(args: {
+  gapId: string;
+  sourceId: string;
+  statement: string;
+  sourceQuote: string;
+  role: "primary" | "supporting";
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gapId);
+  const obj = state.objectives[0];
+  if (!obj) throw new Error("No strategic objective to attach this need to.");
+  const statement = args.statement.trim();
+  if (!statement) return;
+  const needId = nextId(
+    "NEED",
+    state.needs.map((n) => n.id),
+  );
+  await db().insert(t.needs).values({
+    id: needId,
+    statement,
+    domain: gap?.domain ?? "unmet_need",
+    stakeholder: args.actor_function,
+    objective_id: obj.id,
+    decision_supported: obj.key_decision,
+    geography: state.asset.geography,
+    population: "To be specified",
+    intervention: "Velmara",
+    comparator: "To be specified",
+    outcome: "To be specified",
+    timing: "To be specified",
+    source_id: args.sourceId,
+    source_quote: args.sourceQuote.trim().slice(0, 280) || statement.slice(0, 280),
+    confidence: 0.5,
+    status: "candidate",
+    lock: unlocked(),
+  });
+  await db()
+    .insert(t.needGapLinks)
+    .values({ need_id: needId, gap_id: args.gapId, role: args.role })
+    .onConflictDoNothing();
+}
+
+export async function ensureGapHasConstituentNeed(gapId: string) {
+  let state = await loadState();
+  const gap = state.gaps.find((g) => g.id === gapId);
+  if (!gap) return;
+  if (state.need_gap_links.some((l) => l.gap_id === gapId)) return;
+  if (gap.parent_gap_id) {
+    await ensureGapHasConstituentNeed(gap.parent_gap_id);
+    await copyNeedGapLinks(gap.parent_gap_id, gapId);
+    state = await loadState();
+    if (state.need_gap_links.some((l) => l.gap_id === gapId)) return;
+  }
+  if (await attachExistingSimilarNeed(gapId)) return;
+  const sourceId = await ensurePlanEntrySource();
+  const actor = (gap.status_lock.actor_function as ActorFunction | null) || "evidence_lead";
+  await insertNeedForGap({
+    gapId,
+    sourceId,
+    statement: gap.statement,
+    sourceQuote: gap.statement,
+    role: "primary",
+    actor_function: actor,
+  });
+}
+
+export async function ensureAllLiveGapsHaveNeeds() {
+  const state = await loadState();
+  for (const gap of state.gaps.filter(isLiveGap)) {
+    await ensureGapHasConstituentNeed(gap.id);
+  }
+}
+
 export async function appendAudit(
   actor_name: string,
   actor_function: ActorFunction,
@@ -1538,6 +1724,7 @@ export async function createGap(args: {
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   await syncComputedGapStatuses(id);
   if (args.parent_gap_id) await syncComputedGapStatuses(args.parent_gap_id);
+  await ensureGapHasConstituentNeed(id);
   return id;
 }
 
@@ -1702,7 +1889,6 @@ export async function ingestNeedFromText(args: {
   const needRows = extractedNeeds.length ? extractedNeeds : fallbackSentences;
   const obj = state.objectives[0]!;
   const needIds = [...state.needs.map((n) => n.id)];
-  const gapIds = [...state.gaps.map((g) => g.id)];
   const tacticIds = [...state.tactics.map((x) => x.id)];
   const createdGapIds: string[] = [];
   const createdNeedIds: string[] = [];
@@ -1743,41 +1929,65 @@ export async function ingestNeedFromText(args: {
     });
   }
 
-  for (const [index, gapRow] of gapPool.entries()) {
-    const existing = state.gaps.find(
-      (g) =>
-        g.status !== "excluded" &&
-        (similarRecord(g.statement, gapRow.statement) || similarRecord(g.name, gapRow.name)),
+  const attachSourceNeedToGap = async (gapId: string, preferredStatement: string, quote: string) => {
+    const live = await loadState();
+    if (gapHasNeedFromSource(live, gapId, sourceId)) return;
+    const fromThisSource = live.needs.find(
+      (n) =>
+        n.source_id === sourceId &&
+        (similarRecord(n.statement, preferredStatement) || similarRecord(n.statement, quote)),
     );
-    const linkedNeedId = createdNeedIds[Math.min(index, createdNeedIds.length - 1)];
+    const role = primaryRoleForGap(live, gapId);
+    if (fromThisSource) {
+      await linkNeedOntoGap(fromThisSource.id, gapId, role);
+      return;
+    }
+    await insertNeedForGap({
+      gapId,
+      sourceId,
+      statement: preferredStatement,
+      sourceQuote: quote,
+      role,
+      actor_function: args.stakeholder_function,
+    });
+  };
+
+  for (const gapRow of gapPool) {
+    const live = await loadState();
+    const existing =
+      findMatchingLiveGap(live, gapRow.statement) ?? findMatchingLiveGap(live, gapRow.name);
     if (existing) {
+      await attachSourceNeedToGap(existing.id, gapRow.statement, gapRow.source_quote);
       continue;
     }
-    const gapId = nextId("GAP", gapIds);
-    gapIds.push(gapId);
-    createdGapIds.push(gapId);
-    await db().insert(t.gaps).values({
-      id: gapId,
+    const gapId = await insertLiveOpenGap({
       name: gapRow.name,
       statement: gapRow.statement,
       domain: gapRow.domain,
-      objective_id: obj.id,
-      status: "validated_open",
-      exclusion_reason: null,
-      exclusion_note: null,
-      lock: unlocked(),
-      parent_gap_id: null,
-      computed_status: "validated_open",
-      status_override: null,
-      retired: false,
-      human_validated: false,
+      objectiveId: obj.id,
     });
-    if (linkedNeedId) {
-      await db()
-        .insert(t.needGapLinks)
-        .values({ need_id: linkedNeedId, gap_id: gapId, role: "primary" })
-        .onConflictDoNothing();
+    createdGapIds.push(gapId);
+    await attachSourceNeedToGap(gapId, gapRow.statement, gapRow.source_quote);
+  }
+
+  for (const needId of createdNeedIds) {
+    const live = await loadState();
+    const need = live.needs.find((n) => n.id === needId);
+    if (!need) continue;
+    if (live.need_gap_links.some((l) => l.need_id === needId)) continue;
+    const match = findMatchingLiveGap(live, need.statement);
+    if (match) {
+      await linkNeedOntoGap(needId, match.id, primaryRoleForGap(live, match.id));
+      continue;
     }
+    const gapId = await insertLiveOpenGap({
+      name: gapNameFromStatement(need.statement),
+      statement: need.statement,
+      domain: "unmet_need",
+      objectiveId: obj.id,
+    });
+    createdGapIds.push(gapId);
+    await linkNeedOntoGap(needId, gapId, "primary");
   }
 
   let tacticCount = 0;
@@ -2128,17 +2338,6 @@ function uniqueIds(ids?: (string | undefined | null)[] | null): string[] {
   return [...new Set((ids ?? []).map((id) => (id ?? "").trim()).filter(Boolean))];
 }
 
-async function copyNeedGapLinks(fromGapId: string, toGapId: string) {
-  const state = await loadState();
-  const links = state.need_gap_links.filter((l) => l.gap_id === fromGapId);
-  for (const link of links) {
-    await db()
-      .insert(t.needGapLinks)
-      .values({ need_id: link.need_id, gap_id: toGapId, role: link.role })
-      .onConflictDoNothing();
-  }
-}
-
 export async function splitPartialGap(args: {
   parent_gap_id: string;
   addressed_name: string;
@@ -2193,6 +2392,8 @@ export async function splitPartialGap(args: {
   });
   await copyNeedGapLinks(parent.id, addressedId);
   await copyNeedGapLinks(parent.id, openId);
+  await ensureGapHasConstituentNeed(addressedId);
+  await ensureGapHasConstituentNeed(openId);
   for (const tacticId of addressedTacticIds) {
     await insertClosingCoverage({
       gap_id: addressedId,
@@ -2298,6 +2499,7 @@ export async function rewritePartialGap(args: {
     parent_gap_id: original.id,
   });
   await copyNeedGapLinks(original.id, liveId);
+  await ensureGapHasConstituentNeed(liveId);
   if (args.status === "validated_addressed") {
     for (const tacticId of tacticIds) {
       await insertClosingCoverage({

@@ -11,7 +11,7 @@ Demo asset: fictional **Velmara / velmaratinib**, 2L EGFR-mutant NSCLC, US + EU5
 | Strategic objective | Decision the organisation must make, with date and importance. |
 | Source | Interview, TLR, CDP, HEOR/RWE/medical internal material. |
 | Evidence need | Atomic sourced statement. Starts as **candidate**. Never auto-promoted to a gap. |
-| Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). Ingest writes live gaps (not a candidate accept/reject inbox). |
+| Evidence gap | Named decision object. Many needs join onto one gap (`need_gap_links`). Every live gap has at least one constituent need — the source it was identified from. If the same gap is raised in several documents or interviews, each source joins as its own need (primary or supporting). Ingest writes live gaps (not a candidate accept/reject inbox). |
 | Tactic | Structured generating or disseminating activity. Extracted tactics land as accepted inventory. Status completed / ongoing / planned / proposed / cancelled. |
 | Gap–tactic coverage | Many-to-many. Ten dimensions + overall Full / Partial / Limited / Not relevant. Ingest auto-joins scored mappings onto the Gaps workbench. |
 | Gap version | Snapshot of a retired original after split or rewrite. Children find the original from `gap_versions`. |
@@ -75,7 +75,7 @@ Gold: candidate needs from seed sources, and gap–tactic overall coverage. The 
 `/` is a left sidebar: **Upload**, **Gaps**, **Prioritize**, **Tactics**. First visit is Upload. Gaps unlocks after ingest. Prioritize unlocks when every live gap is validated and none remain Partially Addressed. Tactics unlocks after Prioritize.
 
 1. **Ingest** extracts gaps and tactics, applies scored mappings, computes status. No accept/reject inbox.
-2. **Gaps** shows every live gap as a card (id, title, status, mapped tactics). **View constituent needs** opens the sources the gap was extracted from. Humans confirm Open and Addressed. **Map existing tactic** or **Record missed tactic** (catch-up, never `proposed`). Partial must **split** or **rewrite**. Coverage dimensions live on the gap detail page, not the card.
+2. **Gaps** shows every live gap as a card (id, title, status, mapped tactics). **View constituent needs** lists every source the gap was identified from — including when several documents or interviews raised the same gap. Humans confirm Open and Addressed. **Map existing tactic** or **Record missed tactic** (catch-up, never `proposed`). Partial must **split** or **rewrite**. Coverage dimensions live on the gap detail page, not the card.
 3. **Prioritize** High / Medium / Low on Open gaps.
 4. **Tactics** ideate proposed tactics for Open gaps after Prioritize.
 

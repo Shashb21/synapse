@@ -18,7 +18,7 @@ import {
   GAP_STATUS_LABELS,
   OVERALL_COVERAGE,
 } from "@/lib/iegp/enums";
-import { loadState } from "@/lib/iegp/store";
+import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
 import {
   buildTacticLibrary,
   computeGapStatus,
@@ -38,6 +38,7 @@ export default async function GapDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await ensureGapHasConstituentNeed(id);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === id);
   if (!gap) notFound();
@@ -111,7 +112,8 @@ export default async function GapDetailPage({
         <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
           Where this gap comes from. Constituent needs are the sourced statements extracted from
-          documents or interviews. Role is primary or supporting. Many needs can join one gap.
+          documents or interviews. If the same gap was identified in several sources, every source
+          is listed. Role is primary or supporting.
         </p>
         <div className="grid gap-2">
           {needs.length === 0 ? (

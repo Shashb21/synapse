@@ -19,6 +19,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).not.toContain("{card.statement}</p>");
     expect(src).toContain("View constituent needs");
     expect(src).toContain("Where this gap comes from");
+    expect(src).toContain("If several sources identified the same gap");
     expect(src).not.toContain("CoverageDimensionsMenu");
     expect(src).not.toContain("Needs validation");
     expect(src).not.toContain('label="Add tactic"');

@@ -676,6 +676,9 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(elderly?.statement.length).toBeGreaterThan(20);
     expect(elderly?.need_count).toBeGreaterThan(0);
     expect(elderly?.needs.some((n) => n.role === "primary" && n.statement.length > 0)).toBe(true);
+    const pfs = workspace.review.find((c) => c.gap_id === "GAP-PFS-TRIAL");
+    expect(pfs?.need_count).toBeGreaterThan(0);
+    expect(pfs?.needs.some((n) => n.source_title === "Clinical development plan")).toBe(true);
     expect(workspace.review[0]?.gap_status).toBe("validated_partial");
   });
 

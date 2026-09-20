@@ -693,6 +693,23 @@ export function buildSeed(): IegpState {
         status: "candidate",
         who: null,
       }),
+      need("NEED-022", {
+        statement: "Need pivotal comparative PFS versus osimertinib in 2L EGFR-mutant NSCLC.",
+        domain: "efficacy",
+        stakeholder: "clinical_development",
+        objective_id: "OBJ-DIFF",
+        decision_supported: "Label and value story",
+        geography: "Global",
+        population: "2L EGFR-mutant NSCLC",
+        intervention: "Velmara",
+        comparator: "Osimertinib",
+        outcome: "PFS",
+        timing: "2026",
+        source_id: "SRC-CDP-001",
+        source_quote: "VEL-301 Phase III versus osimertinib addresses PFS in 2L EGFR-mutant NSCLC.",
+        status: "accepted",
+        who: lead,
+      }),
     ],
     gaps: [
       {
@@ -874,6 +891,7 @@ export function buildSeed(): IegpState {
       { need_id: "NEED-017", gap_id: "GAP-CONGRESS", role: "primary" },
       { need_id: "NEED-020", gap_id: "GAP-RECUR-ECON", role: "supporting" },
       { need_id: "NEED-021", gap_id: "GAP-ILD", role: "primary" },
+      { need_id: "NEED-022", gap_id: "GAP-PFS-TRIAL", role: "primary" },
     ],
     tactics: [
       tactic("TAC-VEL-301", {

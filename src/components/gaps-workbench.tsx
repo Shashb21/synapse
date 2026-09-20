@@ -124,7 +124,8 @@ function ConstituentNeedsButton({ card }: { card: ReviewGapCard }) {
           <DialogTitle>Where this gap comes from</DialogTitle>
           <DialogDescription>
             Constituent needs are the sourced statements this gap stands for — the document or
-            interview it was extracted from. Many needs can join one gap.
+            interview it was extracted from. If several sources identified the same gap, every
+            source is listed. Many needs can join one gap.
           </DialogDescription>
         </DialogHeader>
         {card.needs.length === 0 ? (

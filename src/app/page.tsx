@@ -6,7 +6,7 @@ import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
 import { TacticsPlace } from "@/components/tactics-place";
-import { loadState } from "@/lib/iegp/store";
+import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
   defaultPlanPlace,
@@ -84,6 +84,7 @@ export default async function HomePage({
 }: {
   searchParams: Promise<{ place?: string }>;
 }) {
+  await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);

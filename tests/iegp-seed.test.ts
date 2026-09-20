@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSeed } from "@/lib/iegp/seed";
+import { isLiveGap } from "@/lib/iegp/engine";
 
 describe("Velmara IEGP seed", () => {
   const state = buildSeed();
@@ -37,6 +38,18 @@ describe("Velmara IEGP seed", () => {
   it("joins many needs onto the elderly comparative-effectiveness gap", () => {
     const links = state.need_gap_links.filter((l) => l.gap_id === "GAP-ELDERLY-CE");
     expect(links.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("joins at least one constituent need onto every live gap", () => {
+    for (const gap of state.gaps.filter(isLiveGap)) {
+      expect(
+        state.need_gap_links.some((l) => l.gap_id === gap.id),
+        `${gap.id} has no constituent need`,
+      ).toBe(true);
+    }
+    expect(
+      state.need_gap_links.some((l) => l.gap_id === "GAP-PFS-TRIAL" && l.need_id === "NEED-022"),
+    ).toBe(true);
   });
 
   it("maps one registry tactic onto several gaps", () => {
