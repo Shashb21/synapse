@@ -667,8 +667,17 @@ function RoutingAndCosts({
 
   if (!draft || !catalog) {
     return (
-      <section className="border border-border bg-card p-4 text-[12px] text-muted-foreground">
-        Loading routing and cost config…
+      <section className="grid gap-4">
+        <div className="border border-border bg-card p-4">
+          <h2 className="text-[13px] font-medium">Module routing</h2>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Loading routing and cost config…
+          </p>
+        </div>
+        <div className="border border-border bg-card p-4">
+          <h2 className="text-[13px] font-medium">Cost rates (USD / million tokens)</h2>
+          <p className="mt-1 text-[12px] text-muted-foreground">Loading cost rates…</p>
+        </div>
       </section>
     );
   }
