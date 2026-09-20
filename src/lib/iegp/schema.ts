@@ -300,6 +300,22 @@ export const extractSettings = pgTable("extract_settings", {
   last_error: text("last_error"),
 });
 
+export const llmCalls = pgTable("llm_calls", {
+  id: text("id").primaryKey(),
+  at: text("at").notNull(),
+  auth_mode: text("auth_mode").notNull(),
+  model: text("model").notNull(),
+  purpose: text("purpose").notNull(),
+  ok: boolean("ok").notNull(),
+  http_status: integer("http_status"),
+  latency_ms: integer("latency_ms").notNull(),
+  input_tokens: integer("input_tokens"),
+  output_tokens: integer("output_tokens"),
+  error: text("error"),
+  reauth: text("reauth"),
+  request_id: text("request_id"),
+});
+
 export const extractPromptVersions = pgTable("extract_prompt_versions", {
   version: text("version").primaryKey(),
   title: text("title").notNull(),

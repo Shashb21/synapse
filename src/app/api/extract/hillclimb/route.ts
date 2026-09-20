@@ -20,7 +20,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Hill-climb failed";
-    const status = /ANTHROPIC_API_KEY|ANTHROPIC_WORKSPACE_ID/i.test(message) ? 503 : 400;
+    const status = /OAuth|CLAUDE_CODE|ANTHROPIC_API_KEY|ANTHROPIC_WORKSPACE_ID/i.test(message)
+      ? 503
+      : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }

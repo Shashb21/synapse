@@ -8,6 +8,7 @@
     "start": "next start --hostname :: --port 43217",
     "lint": "eslint",
     "test": "vitest run",
+    "test:agentic": "vitest run tests/llm-agentic-oauth.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

@@ -165,6 +165,13 @@ CREATE TABLE IF NOT EXISTS extract_prompt_versions (
   system_prompt text NOT NULL, parent_version text, prompt_patch text,
   origin text NOT NULL, created_at text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS llm_calls (
+  id text PRIMARY KEY, at text NOT NULL, auth_mode text NOT NULL,
+  model text NOT NULL, purpose text NOT NULL, ok boolean NOT NULL,
+  http_status integer, latency_ms integer NOT NULL,
+  input_tokens integer, output_tokens integer,
+  error text, reauth text, request_id text
+);
 `;
 
 export async function ensureSchema() {

@@ -151,17 +151,37 @@ describe("gap extract agents", () => {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       ANTHROPIC_KEY: process.env.ANTHROPIC_KEY,
       CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      CLAUDE_CODE_ACCESS_TOKEN: process.env.CLAUDE_CODE_ACCESS_TOKEN,
+      CLAUDE_CODE_REFRESH_TOKEN: process.env.CLAUDE_CODE_REFRESH_TOKEN,
+      CLAUDE_CODE_CREDENTIALS_PATH: process.env.CLAUDE_CODE_CREDENTIALS_PATH,
     };
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_KEY;
     delete process.env.CLAUDE_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_ACCESS_TOKEN;
+    delete process.env.CLAUDE_CODE_REFRESH_TOKEN;
+    process.env.CLAUDE_CODE_CREDENTIALS_PATH = "/tmp/synapse-missing-claude-credentials.json";
     setGapExtractCompleter(null);
     try {
-      expect(() => assertGapExtractLlmReady()).toThrow(/ANTHROPIC_API_KEY/);
+      expect(() => assertGapExtractLlmReady()).toThrow(/OAuth|ANTHROPIC_API_KEY|CLAUDE_CODE/);
     } finally {
       if (prev.ANTHROPIC_API_KEY !== undefined) process.env.ANTHROPIC_API_KEY = prev.ANTHROPIC_API_KEY;
       if (prev.ANTHROPIC_KEY !== undefined) process.env.ANTHROPIC_KEY = prev.ANTHROPIC_KEY;
       if (prev.CLAUDE_API_KEY !== undefined) process.env.CLAUDE_API_KEY = prev.CLAUDE_API_KEY;
+      if (prev.CLAUDE_CODE_OAUTH_TOKEN !== undefined) {
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = prev.CLAUDE_CODE_OAUTH_TOKEN;
+      } else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      if (prev.CLAUDE_CODE_ACCESS_TOKEN !== undefined) {
+        process.env.CLAUDE_CODE_ACCESS_TOKEN = prev.CLAUDE_CODE_ACCESS_TOKEN;
+      } else delete process.env.CLAUDE_CODE_ACCESS_TOKEN;
+      if (prev.CLAUDE_CODE_REFRESH_TOKEN !== undefined) {
+        process.env.CLAUDE_CODE_REFRESH_TOKEN = prev.CLAUDE_CODE_REFRESH_TOKEN;
+      } else delete process.env.CLAUDE_CODE_REFRESH_TOKEN;
+      if (prev.CLAUDE_CODE_CREDENTIALS_PATH !== undefined) {
+        process.env.CLAUDE_CODE_CREDENTIALS_PATH = prev.CLAUDE_CODE_CREDENTIALS_PATH;
+      } else delete process.env.CLAUDE_CODE_CREDENTIALS_PATH;
     }
   });
 

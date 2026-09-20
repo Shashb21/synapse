@@ -1,6 +1,6 @@
 import { assignThemes } from "@/lib/cluster/cluster";
 import { proposeCatalogChanges } from "@/lib/cluster/catalog-evolution";
-import { hasAnthropicKey } from "@/lib/config";
+import { hasAgenticLlm } from "@/lib/config";
 import { critiqueInsights, scoreMetrics } from "@/lib/eval/critique";
 import { judgeCandidate, pickChampion, proposeImprovement } from "@/lib/eval/judge";
 import { proposeWithClaude } from "@/lib/extract/claude-proposer";
@@ -49,7 +49,7 @@ export async function extractAndClusterLive(
   theme_links: EngineState["theme_links"];
   extractor: "claude" | "local";
 }> {
-  if (hasAnthropicKey()) {
+  if (hasAgenticLlm()) {
     try {
       const raw = await proposeWithClaude(documents);
       if (raw.length > 0) {

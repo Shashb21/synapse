@@ -81,6 +81,7 @@ export async function proposeWithClaude(
 
 Charts and graphics: if a block kind is chart or a table of series/values, treat visible numbers, axis labels, and legends as source text. Do not interpolate missing years or unlabelled bars.`,
       user: packDocument(doc),
+      purpose: "insight_extract",
     });
     const parsed = payloadSchema.parse(json);
     for (const row of parsed.insights) {
