@@ -41,6 +41,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
   const [markdown, setMarkdown] = useState(DEMO_PACK[0]?.text ?? "");
   const [jsonText, setJsonText] = useState("{\n  \"blocks\": []\n}");
   const [sourceKey, setSourceKey] = useState(DEMO_PACK[0]?.id ?? "heor-interview");
+  const [selectedJsonId, setSelectedJsonId] = useState<string | null>(DEMO_JSON_PACK[0]?.id ?? null);
   const [persist, setPersist] = useState(false);
   const [scoreGold, setScoreGold] = useState(true);
   const [sourceType, setSourceType] = useState<(typeof SOURCE_TYPES)[number]>("stakeholder_interview");
@@ -65,6 +66,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
     setSourceType(file.source_type);
     setActorFunction(file.stakeholder_function);
     setSourceKey(file.id);
+    setSelectedJsonId(null);
   }
 
   async function applyJsonDemo(file: DemoJsonFixtureMeta) {
@@ -77,6 +79,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
     setSourceType(file.source_type);
     setActorFunction(file.stakeholder_function);
     setSourceKey(file.source_key);
+    setSelectedJsonId(file.id);
   }
 
   useEffect(() => {
@@ -182,7 +185,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
                 <Button
                   type="button"
                   size="sm"
-                  variant={sourceKey === file.source_key && format === "json" ? "default" : "outline"}
+                  variant={selectedJsonId === file.id ? "default" : "outline"}
                   onClick={() => {
                     void applyJsonDemo(file).catch((err) =>
                       setError(err instanceof Error ? err.message : "Could not load JSON demo"),
