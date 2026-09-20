@@ -16,12 +16,15 @@ type Status = {
   llm_ready: boolean;
   anthropic: boolean;
   anthropic_model: string | null;
-  anthropic_workspace: boolean;
+  auth_mode?: "oauth" | "none";
+  oauth?: boolean;
+  reauth_needed?: boolean;
   champion_version: string | null;
   last_hillclimb_at: string | null;
   last_error: string | null;
   gold_gap_count: number;
   key_hint: string | null;
+  llm_calls?: { total: number; ok: number; failed: number; oauth: number };
 };
 
 type RunListItem = {
@@ -159,16 +162,29 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
         <p className="text-[12px] text-muted-foreground">
           JSON blocks (LlamaParse items / ParsedDocument) are the preferred input. Markdown is the
           fallback. Live extract is a 3-round proposer → critic debate, then a judge. Gold scoring
-          is opt-in here, not mixed into ingest. Missing ANTHROPIC_API_KEY throws. Ready-made JSON
+          is opt-in here, not mixed into ingest. Live extract uses Claude Code OAuth only
+          (`claude /login` or CLAUDE_CODE_OAUTH_TOKEN). Ready-made JSON
           fixtures live in{" "}
           <code className="text-foreground">/demo-sources/json/</code>.
         </p>
         <div className="mt-3 grid gap-1 text-[12px] text-muted-foreground sm:grid-cols-2">
           <p>LLM ready: {status ? String(status.llm_ready) : "…"}</p>
           <p>Champion: {status?.champion_version ?? "…"}</p>
+          <p>Auth: {status?.auth_mode ?? "…"}</p>
+          <p>OAuth: {status ? String(Boolean(status.oauth)) : "…"}</p>
           <p>Model: {status?.anthropic_model ?? "not set"}</p>
-          <p>Workspace header: {status ? String(status.anthropic_workspace) : "…"}</p>
+          <p>
+            LLM calls:{" "}
+            {status?.llm_calls
+              ? `${status.llm_calls.ok}/${status.llm_calls.total} ok`
+              : "…"}
+          </p>
           <p>Gold gaps: {status?.gold_gap_count ?? "…"}</p>
+          <p>
+            <a className="text-foreground underline" href="/observability">
+              Observability dashboard
+            </a>
+          </p>
         </div>
         {status?.last_error ? (
           <p className="mt-2 text-[12px] text-destructive">{status.last_error}</p>

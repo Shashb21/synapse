@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  Activity,
   Columns3,
   FileText,
   FlaskConical,
@@ -34,7 +35,8 @@ export type ShellId =
   | "sources"
   | "evals"
   | "sdlc"
-  | "extract-runs";
+  | "extract-runs"
+  | "observability";
 
 export type PlanNavModel = {
   gapsCount: number;
@@ -55,7 +57,7 @@ type PlaceItem = {
 };
 
 type SecondaryItem = {
-  id: "evals" | "sdlc" | "extract-runs";
+  id: "evals" | "sdlc" | "extract-runs" | "observability";
   href: string;
   label: string;
   icon: typeof FlaskConical;
@@ -63,6 +65,7 @@ type SecondaryItem = {
 
 const SECONDARY: SecondaryItem[] = [
   { id: "extract-runs", href: "/extract-runs", label: "Extract", icon: Sparkles },
+  { id: "observability", href: "/observability", label: "Observe", icon: Activity },
   { id: "evals", href: "/evals", label: "Eval", icon: FlaskConical },
   { id: "sdlc", href: "/sdlc", label: "Spec", icon: FileText },
 ];

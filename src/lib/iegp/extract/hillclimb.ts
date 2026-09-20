@@ -161,6 +161,7 @@ export async function runGapPromptHillclimb(args: {
         const json = await completeExtractJson({
           system: prompt.system_prompt,
           user: `${packed}\n\nHill-climb proposer-only pass. Human few-shots:\n${JSON.stringify(fewShots)}`,
+          purpose: "proposer",
         });
         const parsed = proposerPayloadSchema.parse(json);
         for (const gap of parsed.gaps) {
@@ -207,6 +208,7 @@ export async function runGapPromptHillclimb(args: {
         fewShots,
         trigger: args.trigger,
       }),
+      purpose: "improver",
     });
     const improver = improverPayloadSchema.parse(improverRaw);
     await addRunStep({

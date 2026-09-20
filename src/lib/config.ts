@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadClaudeCodeCredential } from "@/lib/llm/agentic/oauth";
+import { hasAgenticLlm as routedHasAgenticLlm } from "@/lib/llm/ready";
 
 const ANTHROPIC_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_KEY", "CLAUDE_API_KEY"] as const;
 
@@ -48,6 +50,15 @@ export function hasAnthropicKey(): boolean {
   return Boolean(anthropicApiKey());
 }
 
+export function hasClaudeCodeOAuth(): boolean {
+  return Boolean(loadClaudeCodeCredential());
+}
+
+/** Live LLM is available when any routed provider is authenticated. */
+export function hasAgenticLlm(): boolean {
+  return routedHasAgenticLlm();
+}
+
 /** Identity-linked Anthropic keys need this on every request (`anthropic-workspace-id`). */
 export function anthropicWorkspaceId(): string | undefined {
   const value = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
@@ -67,12 +78,15 @@ export function llamaParseTier(): "cost_effective" | "agentic" | "agentic_plus" 
 }
 
 export function providerStatus() {
+  const oauth = hasClaudeCodeOAuth();
   return {
     llama_cloud: hasLlamaCloudKey(),
-    anthropic: hasAnthropicKey(),
-    anthropic_model: hasAnthropicKey() ? anthropicModel() : null,
+    anthropic: oauth,
+    anthropic_model: oauth ? anthropicModel() : null,
     llama_tier: hasLlamaCloudKey() ? llamaParseTier() : null,
-    live_extractor: hasAnthropicKey() ? "claude" : "local",
+    live_extractor: oauth ? "claude" : "local",
     live_parser: hasLlamaCloudKey() ? "llamaparse" : "local",
+    auth_mode: oauth ? "oauth" : "none",
+    oauth,
   };
 }

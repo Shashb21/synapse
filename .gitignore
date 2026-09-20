@@ -38,6 +38,8 @@ yarn-error.log*
 
 # runtime engine state
 /data/runtime/
+.claude/
+**/.credentials.json
 /public/fixtures/
 
 # vercel

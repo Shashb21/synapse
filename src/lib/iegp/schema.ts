@@ -300,6 +300,46 @@ export const extractSettings = pgTable("extract_settings", {
   last_error: text("last_error"),
 });
 
+export const llmCalls = pgTable("llm_calls", {
+  id: text("id").primaryKey(),
+  at: text("at").notNull(),
+  auth_mode: text("auth_mode").notNull(),
+  provider: text("provider"),
+  module: text("module"),
+  model: text("model").notNull(),
+  purpose: text("purpose").notNull(),
+  ok: boolean("ok").notNull(),
+  http_status: integer("http_status"),
+  latency_ms: integer("latency_ms").notNull(),
+  input_tokens: integer("input_tokens"),
+  output_tokens: integer("output_tokens"),
+  cost_usd: real("cost_usd"),
+  error: text("error"),
+  reauth: text("reauth"),
+  request_id: text("request_id"),
+  session_id: text("session_id"),
+  oauth_source: text("oauth_source"),
+  system_chars: integer("system_chars"),
+  user_chars: integer("user_chars"),
+  system_preview: text("system_preview"),
+  user_preview: text("user_preview"),
+});
+
+export const llmSettings = pgTable("llm_settings", {
+  id: text("id").primaryKey(),
+  updated_at: text("updated_at").notNull(),
+  config: jsonb("config").notNull(),
+});
+
+export const llmReauthEvents = pgTable("llm_reauth_events", {
+  id: text("id").primaryKey(),
+  at: text("at").notNull(),
+  type: text("type").notNull(),
+  error: text("error"),
+  expires_at: text("expires_at"),
+  request_id: text("request_id"),
+});
+
 export const extractPromptVersions = pgTable("extract_prompt_versions", {
   version: text("version").primaryKey(),
   title: text("title").notNull(),

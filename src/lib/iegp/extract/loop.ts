@@ -60,6 +60,7 @@ async function timedJson(args: {
   system: string;
   user: string;
   maxTokens?: number;
+  purpose?: "proposer" | "critic" | "judge";
 }): Promise<{ json: unknown; ms: number }> {
   const started = Date.now();
   const json = await completeExtractJson(args);
@@ -102,6 +103,7 @@ ${previousBundle(rounds)}`;
     const proposed = await timedJson({
       system: prompt.system_prompt,
       user: proposerUser,
+      purpose: "proposer",
     });
     const proposer = parseProposer(proposed.json);
 
@@ -112,6 +114,7 @@ ${JSON.stringify({ gaps: proposer.gaps, needs: proposer.needs }, null, 2)}`;
     const critiqued = await timedJson({
       system: CRITIC_SYSTEM_PROMPT,
       user: criticUser,
+      purpose: "critic",
     });
     const critic: CriticPayload = criticPayloadSchema.parse(critiqued.json);
     rounds.push({
@@ -136,6 +139,7 @@ ${JSON.stringify({ gaps: last.proposer.gaps, needs: last.proposer.needs }, null,
 
 Critic findings from all ${GAP_EXTRACT_ROUNDS} rounds:
 ${JSON.stringify(allFindings, null, 2)}`,
+    purpose: "judge",
   });
   const judge: JudgePayload = judgePayloadSchema.parse(judged.json);
   const gaps: ExtractGap[] = (judge.gaps.length ? judge.gaps : last.proposer.gaps).slice(
