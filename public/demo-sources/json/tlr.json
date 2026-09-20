@@ -1,0 +1,24 @@
+{
+  "id": "tlr",
+  "source_key": "tlr",
+  "filename": "tlr.json",
+  "title": "Targeted literature review excerpt",
+  "source_type": "targeted_literature_review",
+  "stakeholder_function": "heor",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "Targeted literature review excerpt"
+      },
+      "heading": "Note",
+      "text": "Targeted literature review — recurrence HCRU, elderly RWE, PRO.\n\nStudy A reports hospitalisations after EGFR TKI recurrence. Limited evidence remains on emergency-department use and outpatient burden in the same cohorts.\n\nStudy B is a single-arm chart review of patients aged ≥65 treated with an EGFR TKI. No comparative arm versus regional standard of care. Evidence gap on comparative effectiveness in the elderly is not closed.\n\nStudy C measures EORTC QLQ-C30 in a mixed-age trial population. Insufficient evidence on caregiver burden and on PRO in frail patients.",
+      "kind": "title"
+    }
+  ],
+  "fullText": "Targeted literature review — recurrence HCRU, elderly RWE, PRO.\n\nStudy A reports hospitalisations after EGFR TKI recurrence. Limited evidence remains on emergency-department use and outpatient burden in the same cohorts.\n\nStudy B is a single-arm chart review of patients aged ≥65 treated with an EGFR TKI. No comparative arm versus regional standard of care. Evidence gap on comparative effectiveness in the elderly is not closed.\n\nStudy C measures EORTC QLQ-C30 in a mixed-age trial population. Insufficient evidence on caregiver burden and on PRO in frail patients."
+}

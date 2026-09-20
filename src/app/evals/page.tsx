@@ -33,9 +33,9 @@ export default async function EvalsPage() {
     <AppShell active="evals">
       <PageIntro kicker="View-only tape" title="Eval tape">
         Gold scores candidate-need recovery from sources and gap–tactic overall coverage.
-        Gap status is computed by the engine (Open / Partially Addressed / Addressed). Human
-        override requires a reason and is marked stale on ingest or coverage refresh — never
-        silent-clobbered.
+        Live agent extract + prompt hill-climb is on Extract. Gap status is computed by the engine
+        (Open / Partially Addressed / Addressed). Human override requires a reason and is marked
+        stale on ingest or coverage refresh — never silent-clobbered.
       </PageIntro>
       {state.sources.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">

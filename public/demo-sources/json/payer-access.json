@@ -1,0 +1,44 @@
+{
+  "id": "payer-access",
+  "source_key": "payer-access",
+  "filename": "payer-access.json",
+  "title": "US payer and access interviews",
+  "source_type": "advisory_board",
+  "stakeholder_function": "market_access",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "US payer and access interviews"
+      },
+      "heading": "Note",
+      "text": "US national payer advisory — Aetna and UnitedHealthcare.",
+      "kind": "title"
+    },
+    {
+      "id": "B02",
+      "location": {
+        "kind": "section",
+        "ref": "Persistence"
+      },
+      "heading": "Persistence",
+      "text": "Aetna and UnitedHealthcare need to understand 6-month discontinuation in routine care. Limited evidence on persistence is blocking formulary.",
+      "kind": "paragraph"
+    },
+    {
+      "id": "B03",
+      "location": {
+        "kind": "section",
+        "ref": "IRA"
+      },
+      "heading": "IRA",
+      "text": "We need to quantify IRA net-price exposure for Velmara. Unknown whether the current budget-impact model reflects the negotiated-price scenario.\n\nA claims study for 6-month discontinuation is proposed but has not started.",
+      "kind": "paragraph"
+    }
+  ],
+  "fullText": "US national payer advisory — Aetna and UnitedHealthcare.\n\nPersistence\nAetna and UnitedHealthcare need to understand 6-month discontinuation in routine care. Limited evidence on persistence is blocking formulary.\n\nIRA\nWe need to quantify IRA net-price exposure for Velmara. Unknown whether the current budget-impact model reflects the negotiated-price scenario.\n\nA claims study for 6-month discontinuation is proposed but has not started."
+}

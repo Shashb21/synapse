@@ -1,0 +1,24 @@
+{
+  "id": "medical-plan",
+  "source_key": "medical-plan",
+  "filename": "medical-plan.json",
+  "title": "Medical action plan",
+  "source_type": "medical_strategy",
+  "stakeholder_function": "medical_affairs",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "Medical action plan"
+      },
+      "heading": "Note",
+      "text": "Medical action plan 2027.\n\nMedical affairs wants a bigger congress presence in 2027. This is a dissemination preference, not an evidence need.\n\nWe need to understand ILD and QT incidence in routine care. Limited evidence characterises monitoring protocols outside academic centres.\n\nA publication of the VEL-301 primary manuscript is planned as a dissemination tactic.",
+      "kind": "title"
+    }
+  ],
+  "fullText": "Medical action plan 2027.\n\nMedical affairs wants a bigger congress presence in 2027. This is a dissemination preference, not an evidence need.\n\nWe need to understand ILD and QT incidence in routine care. Limited evidence characterises monitoring protocols outside academic centres.\n\nA publication of the VEL-301 primary manuscript is planned as a dissemination tactic."
+}

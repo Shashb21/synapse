@@ -67,6 +67,8 @@ npm test          # engine, seed invariants, postgres store
 npm run test:e2e  # Playwright against port 43217
 ```
 
+Gap extraction (proposer / critic / judge) lives at `/extract-runs` and `POST /api/extract/gaps`. It consumes already-parsed markdown or JSON (JSON blocks preferred). Ready-made JSON test docs are in `public/demo-sources/json/` (`manifest.json` lists them). Dry-run is the default. Human wording edits and Exclude on Gaps feed gold and hill-climb the prompts. Live extract requires `ANTHROPIC_API_KEY`.
+
 ## Documentation
 
 | Doc | What |

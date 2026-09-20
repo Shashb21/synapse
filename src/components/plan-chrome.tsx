@@ -10,6 +10,7 @@ import {
   ListChecks,
   Lock,
   Menu,
+  Sparkles,
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,8 @@ export type ShellId =
   | "roadmap"
   | "sources"
   | "evals"
-  | "sdlc";
+  | "sdlc"
+  | "extract-runs";
 
 export type PlanNavModel = {
   gapsCount: number;
@@ -53,13 +55,14 @@ type PlaceItem = {
 };
 
 type SecondaryItem = {
-  id: "evals" | "sdlc";
+  id: "evals" | "sdlc" | "extract-runs";
   href: string;
   label: string;
   icon: typeof FlaskConical;
 };
 
 const SECONDARY: SecondaryItem[] = [
+  { id: "extract-runs", href: "/extract-runs", label: "Extract", icon: Sparkles },
   { id: "evals", href: "/evals", label: "Eval", icon: FlaskConical },
   { id: "sdlc", href: "/sdlc", label: "Spec", icon: FileText },
 ];

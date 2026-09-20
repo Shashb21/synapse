@@ -1,0 +1,106 @@
+{
+  "format": "iegp-extract-test-docs",
+  "preferred_input": "json",
+  "endpoint": "POST /api/extract/gaps?wait=1",
+  "gold_source_keys": [
+    "heor-interview",
+    "medical-kol",
+    "payer-access",
+    "tlr",
+    "cdp",
+    "rwe-strategy",
+    "medical-plan"
+  ],
+  "docs": [
+    {
+      "id": "heor-interview",
+      "source_key": "heor-interview",
+      "filename": "heor-interview.json",
+      "href": "/demo-sources/json/heor-interview.json",
+      "title": "HEOR stakeholder interviews",
+      "source_type": "stakeholder_interview",
+      "stakeholder_function": "heor",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "medical-kol",
+      "source_key": "medical-kol",
+      "filename": "medical-kol.json",
+      "href": "/demo-sources/json/medical-kol.json",
+      "title": "Medical affairs KOL interviews",
+      "source_type": "stakeholder_interview",
+      "stakeholder_function": "medical_affairs",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "payer-access",
+      "source_key": "payer-access",
+      "filename": "payer-access.json",
+      "href": "/demo-sources/json/payer-access.json",
+      "title": "US payer and access interviews",
+      "source_type": "advisory_board",
+      "stakeholder_function": "market_access",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "tlr",
+      "source_key": "tlr",
+      "filename": "tlr.json",
+      "href": "/demo-sources/json/tlr.json",
+      "title": "Targeted literature review excerpt",
+      "source_type": "targeted_literature_review",
+      "stakeholder_function": "heor",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "cdp",
+      "source_key": "cdp",
+      "filename": "cdp.json",
+      "href": "/demo-sources/json/cdp.json",
+      "title": "Clinical development plan excerpt",
+      "source_type": "clinical_development_plan",
+      "stakeholder_function": "clinical_development",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "rwe-strategy",
+      "source_key": "rwe-strategy",
+      "filename": "rwe-strategy.json",
+      "href": "/demo-sources/json/rwe-strategy.json",
+      "title": "RWE / epidemiology strategy",
+      "source_type": "rwe_strategy",
+      "stakeholder_function": "rwe",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "medical-plan",
+      "source_key": "medical-plan",
+      "filename": "medical-plan.json",
+      "href": "/demo-sources/json/medical-plan.json",
+      "title": "Medical action plan",
+      "source_type": "medical_strategy",
+      "stakeholder_function": "medical_affairs",
+      "flavor": "parsed_document"
+    },
+    {
+      "id": "medical-kol-llamaparse",
+      "source_key": "medical-kol",
+      "filename": "medical-kol.llamaparse.json",
+      "href": "/demo-sources/json/medical-kol.llamaparse.json",
+      "title": "Medical affairs KOL interviews (LlamaParse deck)",
+      "source_type": "stakeholder_interview",
+      "stakeholder_function": "medical_affairs",
+      "flavor": "llamaparse"
+    },
+    {
+      "id": "payer-access-llamaparse",
+      "source_key": "payer-access",
+      "filename": "payer-access.llamaparse.json",
+      "href": "/demo-sources/json/payer-access.llamaparse.json",
+      "title": "US payer and access interviews (LlamaParse deck)",
+      "source_type": "advisory_board",
+      "stakeholder_function": "market_access",
+      "flavor": "llamaparse"
+    }
+  ]
+}

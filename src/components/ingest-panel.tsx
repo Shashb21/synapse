@@ -25,7 +25,16 @@ export function IngestPanel({
           Demo source files
         </h2>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Nothing is ingested until you do it. Each file extracts candidate gaps and tactics.
+          Nothing is ingested until you do it. Cue-based ingest stays here for demo files. Live
+          agent extract (proposer / critic / judge) is on{" "}
+          <a href="/extract-runs" className="text-foreground">
+            Extract
+          </a>
+          , with JSON test docs at{" "}
+          <a href="/demo-sources/json/manifest.json" className="text-foreground">
+            /demo-sources/json/
+          </a>
+          .
         </p>
         <div className="grid gap-3">
           {DEMO_PACK.map((file) => {

@@ -1,0 +1,73 @@
+{
+  "id": "medical-kol-llamaparse",
+  "source_key": "medical-kol",
+  "filename": "medical-kol.llamaparse.json",
+  "title": "Medical affairs KOL interviews",
+  "source_type": "stakeholder_interview",
+  "stakeholder_function": "medical_affairs",
+  "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "parser": "llamaparse",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "markdown_full": "Medical affairs KOL interviews — CNS and sequencing.\n\nCNS\nKOLs need to know intracranial outcomes. Limited evidence on CNS response and duration in patients with brain metastases remains an open question for medical affairs.\n\nSequencing\nWe need to characterise real-world treatment sequencing after osimertinib failure. Insufficient data on where Velmara sits versus NX-441.\n\nA congress abstract on sequencing is planned for 2027, but that is dissemination, not new evidence generation.",
+  "items": {
+    "pages": [
+      {
+        "page": 1,
+        "markdown": "# CNS\n\nKOLs need to know intracranial outcomes. Limited evidence on CNS response and duration in patients with brain metastases remains an open question for medical affairs.",
+        "items": [
+          {
+            "type": "heading",
+            "heading": "CNS",
+            "md": "KOLs need to know intracranial outcomes."
+          },
+          {
+            "type": "chart",
+            "heading": "CNS response",
+            "value": "Intracranial ORR and duration not characterised in brain metastases.",
+            "rows": [
+              [
+                "Endpoint",
+                "Evidence"
+              ],
+              [
+                "Intracranial ORR",
+                "Limited evidence"
+              ],
+              [
+                "Duration of CNS response",
+                "Open question"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "page": 2,
+        "markdown": "# Sequencing\n\nWe need to characterise real-world treatment sequencing after osimertinib failure. Insufficient data on where Velmara sits versus NX-441.\n\nA congress abstract on sequencing is planned for 2027, but that is dissemination, not new evidence generation.",
+        "items": [
+          {
+            "type": "bullet",
+            "heading": "Sequencing",
+            "md": "We need to characterise real-world treatment sequencing after osimertinib failure. Insufficient data on where Velmara sits versus NX-441."
+          },
+          {
+            "type": "table",
+            "heading": "Planned dissemination",
+            "rows": [
+              [
+                "Tactic",
+                "Year",
+                "Evidence?"
+              ],
+              [
+                "Congress abstract on sequencing",
+                "2027",
+                "No — dissemination"
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

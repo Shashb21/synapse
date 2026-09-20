@@ -128,12 +128,54 @@ export default async function GapDetailPage({
                   </span>
                   <br />
                   {need.statement}
+                  {need.source_quote ? (
+                    <span className="mt-1 block text-[11px] italic text-muted-foreground">
+                      “{need.source_quote}”
+                    </span>
+                  ) : null}
                 </p>
               );
             })
           )}
         </div>
+        <div className="mt-3">
+          <LockForm
+            label="Edit wording"
+            action="modify_gap"
+            extra={{ gap_id: gap.id }}
+            confirmLabel="Save wording"
+            description="Rewrites train the gap extractor. The next hill-climb uses this as gold."
+          >
+            <label className="grid gap-1 text-[12px] text-muted-foreground">
+              Title
+              <input
+                name="name"
+                required
+                defaultValue={gap.name}
+                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+              />
+            </label>
+            <label className="grid gap-1 text-[12px] text-muted-foreground">
+              Statement
+              <textarea
+                name="statement"
+                required
+                defaultValue={gap.statement}
+                className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+              />
+            </label>
+          </LockForm>
+        </div>
       </section>
+
+      {gap.metadata && Object.keys(gap.metadata).length > 0 ? (
+        <section className="mb-8">
+          <h2 className="mb-2 text-[13px] text-muted-foreground">Extracted metadata</h2>
+          <pre className="overflow-auto border border-border bg-card p-3 text-[11px] leading-4 text-muted-foreground">
+            {JSON.stringify(gap.metadata, null, 2)}
+          </pre>
+        </section>
+      ) : null}
 
       <section className="mb-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">
@@ -357,6 +399,7 @@ export default async function GapDetailPage({
           action="lock_gap"
           extra={{ gap_id: gap.id, status: "excluded" }}
           confirmLabel="Exclude"
+          description="Exclude trains the extractor: this wording is not an evidence gap."
         >
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Exclusion reason

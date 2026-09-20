@@ -4,6 +4,8 @@ import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
+import type { ExtractGap, ExtractNeed } from "./extract/contracts";
+import { coerceEvidenceDomain } from "./extract/contracts";
 import type {
   ActorFunction,
   CatchUpReason,
@@ -138,6 +140,7 @@ async function readState(): Promise<IegpState> {
       stakeholder: n.stakeholder as ActorFunction,
       status: n.status as IegpState["needs"][0]["status"],
       status_lock: asLock(n.lock),
+      metadata: (n.metadata as Record<string, unknown> | null) ?? {},
     })),
     gaps: gaps.map((g) => ({
       ...g,
@@ -150,6 +153,7 @@ async function readState(): Promise<IegpState> {
       status_override: asStatusOverride(g.status_override),
       retired: Boolean(g.retired),
       human_validated: Boolean(g.human_validated),
+      metadata: (g.metadata as Record<string, unknown> | null) ?? {},
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -236,7 +240,7 @@ export async function persistState(state: IegpState) {
     await d.insert(t.needs).values(
       state.needs.map((n) => {
         const { status_lock, ...rest } = n;
-        return { ...rest, lock: status_lock };
+        return { ...rest, lock: status_lock, metadata: n.metadata ?? {} };
       }),
     );
   }
@@ -251,6 +255,7 @@ export async function persistState(state: IegpState) {
           status_override: g.status_override ?? null,
           retired: g.retired ?? false,
           human_validated: g.human_validated ?? false,
+          metadata: g.metadata ?? {},
         };
       }),
     );
@@ -285,6 +290,32 @@ export async function resetWorkedExample() {
 
 function now() {
   return new Date().toISOString();
+}
+
+async function notifyGapExtractFeedback(args: {
+  gap_id: string;
+  kind: "wording" | "not_a_gap" | "is_a_gap" | "missed";
+  before: { name?: string; statement?: string; domain?: string };
+  after: { name?: string; statement?: string; domain?: string };
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  try {
+    const state = await loadState();
+    const need = state.need_gap_links
+      .filter((l) => l.gap_id === args.gap_id)
+      .map((l) => state.needs.find((n) => n.id === l.need_id))
+      .find(Boolean);
+    const { recordHumanGapFeedback } = await import("./extract/feedback");
+    await recordHumanGapFeedback({
+      ...args,
+      source_key: need?.source_id,
+      source_quote: need?.source_quote,
+    });
+  } catch {
+    // Human locks must not fail because the extractor is unconfigured.
+  }
 }
 
 function nextId(prefix: string, existing: string[]) {
@@ -365,6 +396,7 @@ async function insertLiveOpenGap(args: {
   statement: string;
   domain: EvidenceDomain;
   objectiveId: string;
+  metadata?: Record<string, unknown>;
 }): Promise<string> {
   const live = await loadState();
   const gapId = nextId(
@@ -386,6 +418,7 @@ async function insertLiveOpenGap(args: {
     status_override: null,
     retired: false,
     human_validated: false,
+    metadata: args.metadata ?? {},
   });
   return gapId;
 }
@@ -414,6 +447,17 @@ async function insertNeedForGap(args: {
   sourceQuote: string;
   role: "primary" | "supporting";
   actor_function: ActorFunction;
+  domain?: EvidenceDomain;
+  pico?: {
+    population?: string;
+    intervention?: string;
+    comparator?: string;
+    outcome?: string;
+    geography?: string;
+    timing?: string;
+    decision_supported?: string;
+  };
+  metadata?: Record<string, unknown>;
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gapId);
@@ -428,21 +472,22 @@ async function insertNeedForGap(args: {
   await db().insert(t.needs).values({
     id: needId,
     statement,
-    domain: gap?.domain ?? "unmet_need",
+    domain: args.domain ?? gap?.domain ?? "unmet_need",
     stakeholder: args.actor_function,
     objective_id: obj.id,
-    decision_supported: obj.key_decision,
-    geography: state.asset.geography,
-    population: "To be specified",
-    intervention: "Velmara",
-    comparator: "To be specified",
-    outcome: "To be specified",
-    timing: "To be specified",
+    decision_supported: args.pico?.decision_supported ?? obj.key_decision,
+    geography: args.pico?.geography ?? state.asset.geography,
+    population: args.pico?.population ?? "To be specified",
+    intervention: args.pico?.intervention ?? "Velmara",
+    comparator: args.pico?.comparator ?? "To be specified",
+    outcome: args.pico?.outcome ?? "To be specified",
+    timing: args.pico?.timing ?? "To be specified",
     source_id: args.sourceId,
-    source_quote: args.sourceQuote.trim().slice(0, 280) || statement.slice(0, 280),
+    source_quote: args.sourceQuote.trim().slice(0, 500) || statement.slice(0, 500),
     confidence: 0.5,
     status: "candidate",
     lock: unlocked(),
+    metadata: args.metadata ?? {},
   });
   await db()
     .insert(t.needGapLinks)
@@ -699,7 +744,6 @@ export async function lockGapStatus(args: {
   const lk = makeLock(args.actor_name, args.actor_function, args.note);
   const mapped =
     args.status === "validated_open" ||
-    args.status === "validated_partial" ||
     args.status === "validated_addressed";
   const wasMapped =
     gap.status === "validated_open" ||
@@ -739,6 +783,17 @@ export async function lockGapStatus(args: {
     "lock_status",
     `${gap.status} → ${args.status}`,
   );
+  if (args.status === "excluded") {
+    await notifyGapExtractFeedback({
+      gap_id: args.gap_id,
+      kind: "not_a_gap",
+      before: { name: gap.name, statement: gap.statement, domain: gap.domain },
+      after: { name: gap.name, statement: gap.statement, domain: gap.domain },
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: args.exclusion_note || args.note,
+    });
+  }
   if (mapped) {
     await syncComputedGapStatuses(args.gap_id);
   }
@@ -1720,11 +1775,23 @@ export async function createGap(args: {
     status_override: null,
     retired: false,
     human_validated: false,
+    metadata: {},
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   await syncComputedGapStatuses(id);
   if (args.parent_gap_id) await syncComputedGapStatuses(args.parent_gap_id);
   await ensureGapHasConstituentNeed(id);
+  if (!args.parent_gap_id) {
+    await notifyGapExtractFeedback({
+      gap_id: id,
+      kind: "missed",
+      before: {},
+      after: { name, statement, domain },
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: args.note,
+    });
+  }
   return id;
 }
 
@@ -1751,6 +1818,15 @@ export async function modifyGap(args: {
     "modify",
     args.note || `${gap.name} → ${args.name}`,
   );
+  await notifyGapExtractFeedback({
+    gap_id: args.gap_id,
+    kind: "wording",
+    before: { name: gap.name, statement: gap.statement, domain: gap.domain },
+    after: { name: args.name, statement: args.statement, domain: gap.domain },
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note,
+  });
 }
 
 export async function lockTactic(args: {
@@ -1926,6 +2002,7 @@ export async function ingestNeedFromText(args: {
       confidence: 0.5,
       status: "candidate",
       lock: unlocked(),
+      metadata: {},
     });
   }
 
@@ -2083,6 +2160,243 @@ export async function ingestDemoSource(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+}
+
+export async function ingestJudgedExtraction(args: {
+  title: string;
+  filename?: string;
+  source_type: IegpState["sources"][0]["source_type"];
+  stakeholder_function: ActorFunction;
+  text: string;
+  blocks: { heading: string; text: string; location: string; kind?: string }[];
+  gaps: ExtractGap[];
+  needs: ExtractNeed[];
+  actor_name: string;
+  actor_function: ActorFunction;
+  extract_run_id?: string;
+  prompt_version?: string;
+  source_key?: string;
+}): Promise<{ sourceId: string; createdGapIds: string[]; mergedGapIds: string[] }> {
+  const state = await loadState();
+  const sourceId = nextId("SRC", state.sources.map((s) => s.id));
+  const ingested_at = now();
+  await db().insert(t.sources).values({
+    id: sourceId,
+    filename: args.filename ?? args.title.replaceAll(" ", "_") + ".txt",
+    title: args.title,
+    source_type: args.source_type,
+    stakeholder_function: args.stakeholder_function,
+    ingested_at,
+    full_text: args.text,
+  });
+  const blocks = args.blocks.map((section, i) => ({
+    id: `${sourceId}-B${String(i + 1).padStart(2, "0")}`,
+    source_id: sourceId,
+    heading: section.heading,
+    text: section.text,
+    location: section.location || section.heading,
+  }));
+  if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
+
+  const obj = state.objectives[0]!;
+  const createdGapIds: string[] = [];
+  const mergedGapIds: string[] = [];
+  const sourceKey = args.source_key || sourceId;
+
+  const attachNeed = async (
+    gapId: string,
+    row: {
+      statement: string;
+      source_quote: string;
+      pico?: ExtractGap["pico"];
+      domain?: EvidenceDomain;
+      extra?: Record<string, string>;
+    },
+  ) => {
+    const live = await loadState();
+    if (gapHasNeedFromSource(live, gapId, sourceId)) {
+      const existingNeed = live.needs.find(
+        (n) =>
+          n.source_id === sourceId &&
+          live.need_gap_links.some((l) => l.gap_id === gapId && l.need_id === n.id),
+      );
+      if (existingNeed) return;
+    }
+    await insertNeedForGap({
+      gapId,
+      sourceId,
+      statement: row.statement,
+      sourceQuote: row.source_quote,
+      role: primaryRoleForGap(await loadState(), gapId),
+      actor_function: args.stakeholder_function,
+      domain: row.domain,
+      pico: row.pico,
+      metadata: {
+        extra: row.extra ?? {},
+        extract_run_id: args.extract_run_id,
+      },
+    });
+  };
+
+  const recordObservation = async (
+    gapId: string,
+    gapRow: ExtractGap,
+    merged: boolean,
+  ) => {
+    const live = await loadState();
+    const gap = live.gaps.find((g) => g.id === gapId);
+    if (!gap) return;
+    const prev = (gap.metadata ?? {}) as Record<string, unknown>;
+    const observed = Array.isArray(prev.observed_in)
+      ? [...(prev.observed_in as Record<string, string>[])]
+      : [];
+    observed.push({
+      source_id: sourceId,
+      source_title: args.title,
+      source_key: sourceKey,
+      quote: gapRow.source_quote,
+    });
+    await db()
+      .update(t.gaps)
+      .set({
+        metadata: {
+          ...prev,
+          observed_in: observed,
+          extract_run_id: args.extract_run_id,
+          prompt_version: args.prompt_version,
+          domain_label: gapRow.domain,
+          domain_rationale: gapRow.domain_rationale,
+          pico: gapRow.pico ?? prev.pico,
+          extra: { ...(prev.extra as object | undefined), ...(gapRow.extra ?? {}) },
+          merged,
+        },
+      })
+      .where(eq(t.gaps.id, gapId));
+  };
+
+  for (const gapRow of args.gaps) {
+    const domain = coerceEvidenceDomain(gapRow.domain);
+    const live = await loadState();
+    const existing =
+      findMatchingLiveGap(live, gapRow.statement) ?? findMatchingLiveGap(live, gapRow.name);
+    if (existing) {
+      mergedGapIds.push(existing.id);
+      const constituent =
+        gapRow.needs.length > 0
+          ? gapRow.needs
+          : [{ statement: gapRow.statement, source_quote: gapRow.source_quote }];
+      for (const need of constituent) {
+        await attachNeed(existing.id, {
+          statement: need.statement,
+          source_quote: need.source_quote,
+          pico: gapRow.pico,
+          domain,
+          extra: gapRow.extra,
+        });
+      }
+      await recordObservation(existing.id, gapRow, true);
+      continue;
+    }
+    const gapId = await insertLiveOpenGap({
+      name: gapRow.name,
+      statement: gapRow.statement,
+      domain,
+      objectiveId: obj.id,
+      metadata: {
+        pico: gapRow.pico ?? {},
+        extra: gapRow.extra ?? {},
+        domain_label: gapRow.domain,
+        domain_rationale: gapRow.domain_rationale,
+        extract_run_id: args.extract_run_id,
+        prompt_version: args.prompt_version,
+        observed_in: [
+          {
+            source_id: sourceId,
+            source_title: args.title,
+            source_key: sourceKey,
+            quote: gapRow.source_quote,
+          },
+        ],
+      },
+    });
+    createdGapIds.push(gapId);
+    const constituent =
+      gapRow.needs.length > 0
+        ? gapRow.needs
+        : [{ statement: gapRow.statement, source_quote: gapRow.source_quote }];
+    for (const need of constituent) {
+      await attachNeed(gapId, {
+        statement: need.statement,
+        source_quote: need.source_quote,
+        pico: gapRow.pico,
+        domain,
+        extra: gapRow.extra,
+      });
+    }
+  }
+
+  for (const orphan of args.needs.filter((n) => n.is_gap === false || !n.is_gap)) {
+    const live = await loadState();
+    const match = findMatchingLiveGap(live, orphan.statement);
+    if (!match) continue;
+    if (gapHasNeedFromSource(live, match.id, sourceId)) continue;
+    await attachNeed(match.id, {
+      statement: orphan.statement,
+      source_quote: orphan.source_quote,
+    });
+  }
+
+  const extractedTactics = extractCandidateTactics(blocks);
+  const tacticIds = [...state.tactics.map((x) => x.id)];
+  let tacticCount = 0;
+  for (const tac of extractedTactics) {
+    const dup = (await loadState()).tactics.find(
+      (existing) =>
+        similarRecord(existing.name, tac.name) ||
+        similarRecord(existing.evidence_question, tac.evidence_question, 0.45),
+    );
+    if (dup) continue;
+    const tacticId = nextId("TAC", tacticIds);
+    tacticIds.push(tacticId);
+    tacticCount += 1;
+    await db().insert(t.tactics).values({
+      id: tacticId,
+      name: tac.name,
+      type: tac.type,
+      description: `Extracted from ${args.title}. Human must assign this tactic to a prioritized gap. Not ideation — inventory from the source.`,
+      evidence_question: tac.evidence_question,
+      population: "To be specified",
+      intervention: "Velmara",
+      comparator: "To be specified",
+      outcomes: "To be specified",
+      geography: state.asset.geography,
+      data_source: args.title,
+      study_design: "Extracted — not yet designed",
+      lifecycle_stage: "extracted",
+      status: tac.status ?? "proposed",
+      review_status: "accepted",
+      start_date: null,
+      evidence_available: null,
+      owner: args.actor_name,
+      function: args.actor_function,
+      budget: null,
+      intended_use: `Extracted from ${sourceId}`,
+      lock: unlocked(),
+    });
+  }
+
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "source",
+    sourceId,
+    "extract_ingest",
+    `Agent extract ${args.title}; ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined, ${tacticCount} tactic(s).`,
+  );
+  await autoJoinMappings(args.actor_name, args.actor_function);
+  await persistEligibleResidualDrafts();
+  await syncComputedGapStatuses();
+  return { sourceId, createdGapIds, mergedGapIds };
 }
 
 export async function lockTacticReview(args: {
@@ -2308,6 +2622,15 @@ export async function validateGap(args: {
     "validate",
     args.note || `Validated ${shown}`,
   );
+  await notifyGapExtractFeedback({
+    gap_id: args.gap_id,
+    kind: "is_a_gap",
+    before: { name: gap.name, statement: gap.statement, domain: gap.domain },
+    after: { name: gap.name, statement: gap.statement, domain: gap.domain },
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: args.note,
+  });
 }
 
 async function ensurePriorityResidual(

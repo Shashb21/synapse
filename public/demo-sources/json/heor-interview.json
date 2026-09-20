@@ -1,0 +1,44 @@
+{
+  "id": "heor-interview",
+  "source_key": "heor-interview",
+  "filename": "heor-interview.json",
+  "title": "HEOR stakeholder interviews",
+  "source_type": "stakeholder_interview",
+  "stakeholder_function": "heor",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "HEOR stakeholder interviews"
+      },
+      "heading": "Note",
+      "text": "HEOR stakeholder interviews — Velmara / velmaratinib, 2L EGFR-mutant NSCLC, Q3 2026.",
+      "kind": "title"
+    },
+    {
+      "id": "B02",
+      "location": {
+        "kind": "section",
+        "ref": "Burden"
+      },
+      "heading": "Burden",
+      "text": "We need to understand the economic burden associated with recurrence after velmaratinib. Limited evidence characterises direct costs of repeat procedures in routine practice.",
+      "kind": "paragraph"
+    },
+    {
+      "id": "B03",
+      "location": {
+        "kind": "section",
+        "ref": "Elderly"
+      },
+      "heading": "Elderly",
+      "text": "We need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients. Insufficient evidence in patients aged 65 and over remains an open question for HTA.\n\nA single-arm chart review in patients aged ≥65 is already underway in two EU5 centres. It has no comparative arm versus chemotherapy SoC.",
+      "kind": "paragraph"
+    }
+  ],
+  "fullText": "HEOR stakeholder interviews — Velmara / velmaratinib, 2L EGFR-mutant NSCLC, Q3 2026.\n\nBurden\nWe need to understand the economic burden associated with recurrence after velmaratinib. Limited evidence characterises direct costs of repeat procedures in routine practice.\n\nElderly\nWe need to understand comparative effectiveness of Velmara versus regional standard of care in elderly patients. Insufficient evidence in patients aged 65 and over remains an open question for HTA.\n\nA single-arm chart review in patients aged ≥65 is already underway in two EU5 centres. It has no comparative arm versus chemotherapy SoC."
+}
