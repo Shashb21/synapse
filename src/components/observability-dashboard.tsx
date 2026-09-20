@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import type { AgenticAuthStatus, AgenticCallRecord, ReauthEvent } from "@/lib/llm/agentic";
 
 type ExtractStep = {
@@ -84,6 +85,184 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+function OauthLoginCard({
+  auth,
+  onChanged,
+}: {
+  auth: AgenticAuthStatus | undefined;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
+  const [paste, setPaste] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
+  const [credentialsJson, setCredentialsJson] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function post(action: string, extra: Record<string, string> = {}) {
+    setBusy(action);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/llm/oauth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        authorize_url?: string;
+        instructions?: string;
+        json?: unknown;
+      };
+      if (!res.ok) throw new Error(json.error ?? "OAuth action failed");
+      if (json.authorize_url) {
+        setAuthorizeUrl(json.authorize_url);
+        window.open(json.authorize_url, "_blank", "noopener,noreferrer");
+        setMessage(json.instructions ?? "Approve in the new tab, then paste code#state here.");
+      } else if (action === "ping") {
+        setMessage(`Test call ok: ${JSON.stringify(json.json)}`);
+      } else if (action === "logout") {
+        setPaste("");
+        setAccessToken("");
+        setRefreshToken("");
+        setCredentialsJson("");
+        setAuthorizeUrl(null);
+        setMessage("Claude Code session cleared on this pod.");
+      } else {
+        setMessage("Claude Code OAuth is saved on this pod.");
+        setPaste("");
+        setAccessToken("");
+        setRefreshToken("");
+        setCredentialsJson("");
+      }
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "OAuth action failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="border border-border bg-card p-4">
+      <h2 className="text-[13px] font-medium">Claude Code login</h2>
+      <p className="mt-1 text-[12px] text-muted-foreground">
+        Connect this pod with your Claude Code account. Browser login pastes a{" "}
+        <code className="text-foreground">code#state</code> string. You can also paste an OAuth
+        access token from <code className="text-foreground">claude setup-token</code> or a{" "}
+        <code className="text-foreground">.credentials.json</code> blob. Tokens stay on this
+        machine and are not shown back.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" disabled={Boolean(busy)} onClick={() => void post("start")}>
+          {busy === "start" ? "Starting…" : "Start Claude login"}
+        </Button>
+        {auth?.ready ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={Boolean(busy) || !auth.has_refresh_token}
+              onClick={() => void post("refresh")}
+            >
+              {busy === "refresh" ? "Refreshing…" : "Refresh session"}
+            </Button>
+            <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => void post("ping")}>
+              {busy === "ping" ? "Pinging…" : "Test call"}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={Boolean(busy)}
+              onClick={() => void post("logout")}
+            >
+              Disconnect
+            </Button>
+          </>
+        ) : null}
+      </div>
+      {authorizeUrl ? (
+        <p className="mt-2 break-all text-[11px] text-muted-foreground">
+          If the tab did not open:{" "}
+          <a className="text-foreground underline" href={authorizeUrl} target="_blank" rel="noreferrer">
+            {authorizeUrl}
+          </a>
+        </p>
+      ) : null}
+      <label className="mt-3 grid gap-1 text-[11px] text-muted-foreground">
+        Paste callback <code className="text-foreground">code#state</code>
+        <textarea
+          className="min-h-16 border border-border bg-background px-2 py-1 font-mono text-[12px] text-foreground"
+          value={paste}
+          onChange={(e) => setPaste(e.target.value)}
+          placeholder="AbCdEf#1234abcd…"
+        />
+      </label>
+      <Button
+        className="mt-2"
+        size="sm"
+        variant="outline"
+        disabled={Boolean(busy) || !paste.trim()}
+        onClick={() => void post("complete", { code: paste })}
+      >
+        {busy === "complete" ? "Exchanging…" : "Finish login"}
+      </Button>
+      <p className="mt-4 text-[11px] text-muted-foreground">Or paste tokens / credentials JSON</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <label className="grid gap-1 text-[11px] text-muted-foreground">
+          Access token
+          <input
+            className="h-8 border border-border bg-background px-2 font-mono text-[12px] text-foreground"
+            value={accessToken}
+            onChange={(e) => setAccessToken(e.target.value)}
+            placeholder="sk-ant-oat…"
+            autoComplete="off"
+          />
+        </label>
+        <label className="grid gap-1 text-[11px] text-muted-foreground">
+          Refresh token (optional)
+          <input
+            className="h-8 border border-border bg-background px-2 font-mono text-[12px] text-foreground"
+            value={refreshToken}
+            onChange={(e) => setRefreshToken(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+      </div>
+      <label className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+        credentials.json
+        <textarea
+          className="min-h-20 border border-border bg-background px-2 py-1 font-mono text-[12px] text-foreground"
+          value={credentialsJson}
+          onChange={(e) => setCredentialsJson(e.target.value)}
+          placeholder='{"claudeAiOauth":{"accessToken":"sk-ant-oat…","refreshToken":"…"}}'
+        />
+      </label>
+      <Button
+        className="mt-2"
+        size="sm"
+        variant="outline"
+        disabled={Boolean(busy) || (!accessToken.trim() && !credentialsJson.trim())}
+        onClick={() =>
+          void post("save", {
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            credentials_json: credentialsJson,
+          })
+        }
+      >
+        {busy === "save" ? "Saving…" : "Save OAuth session"}
+      </Button>
+      {message ? <p className="mt-2 text-[12px] text-foreground">{message}</p> : null}
+      {error ? <p className="mt-2 text-[12px] text-destructive">{error}</p> : null}
+    </section>
+  );
+}
+
 export function ObservabilityDashboard() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +321,7 @@ export function ObservabilityDashboard() {
       {data?.auth.hint ? (
         <p className="border border-destructive/40 bg-card p-3 text-[12px] text-destructive">{data.auth.hint}</p>
       ) : null}
+      <OauthLoginCard auth={data?.auth} onChanged={load} />
       {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

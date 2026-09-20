@@ -7,8 +7,8 @@ export default function ObservabilityPage() {
   return (
     <AppShell active="observability">
       <PageIntro kicker="Live tape" title="Agentic observability">
-        Every Claude Code OAuth call, refresh, and extract step. Tokens are redacted; prompt
-        previews and judge JSON stay here so you can see what the agents did.
+        Connect Claude Code on this page, then inspect every OAuth call, refresh, and extract step.
+        Tokens are redacted in the tape.
       </PageIntro>
       <ObservabilityDashboard />
     </AppShell>

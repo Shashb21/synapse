@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -180,6 +180,19 @@ export function persistClaudeCodeCredential(
   if (credential.refreshToken) env.CLAUDE_CODE_REFRESH_TOKEN = credential.refreshToken;
   if (credential.expiresAt != null) env.CLAUDE_CODE_OAUTH_EXPIRES_AT = String(credential.expiresAt);
   return path;
+}
+
+export function clearClaudeCodeCredential(env: NodeJS.ProcessEnv = process.env): void {
+  const path = credentialsPath(env);
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    // best-effort
+  }
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  delete env.CLAUDE_CODE_ACCESS_TOKEN;
+  delete env.CLAUDE_CODE_REFRESH_TOKEN;
+  delete env.CLAUDE_CODE_OAUTH_EXPIRES_AT;
 }
 
 export function oauthRequestHeaders(accessToken: string, requestId: string, sessionId: string): Record<string, string> {

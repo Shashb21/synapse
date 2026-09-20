@@ -11,6 +11,7 @@ export {
 } from "./types";
 export {
   attributionBlockText,
+  clearClaudeCodeCredential,
   computeFingerprint,
   credentialsPath,
   credentialExpiring,
@@ -20,6 +21,14 @@ export {
   persistClaudeCodeCredential,
   refreshClaudeCodeCredential,
 } from "./oauth";
+export {
+  buildAuthorizeUrl,
+  completeClaudeCodeLogin,
+  logoutClaudeCodeSession,
+  parseAuthorizationPaste,
+  savePastedClaudeCodeSession,
+  startClaudeCodeLogin,
+} from "./login";
 export { AgenticGateway, agenticAuthStatus, agenticGateway, completeJson, hasAgenticLlm, hasClaudeCodeOAuth } from "./gateway";
 export { registerReauthHook, clearReauthHooks, clearReauthHistory, reauthHistory, emitReauth } from "./reauth";
 export { assembleObservability } from "./observe";

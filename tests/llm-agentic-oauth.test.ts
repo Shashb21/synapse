@@ -16,8 +16,13 @@ import {
   oauthSystemBlocks,
   persistClaudeCodeCredential,
   previewText,
+  parseAuthorizationPaste,
   registerReauthHook,
   reauthHistory,
+  savePastedClaudeCodeSession,
+  startClaudeCodeLogin,
+  completeClaudeCodeLogin,
+  logoutClaudeCodeSession,
 } from "@/lib/llm/agentic";
 import { extractJsonObject } from "@/lib/llm/json";
 import { FINGERPRINT_SALT } from "@/lib/llm/agentic/types";
@@ -46,6 +51,7 @@ afterEach(() => {
   delete process.env.CLAUDE_CODE_REFRESH_TOKEN;
   delete process.env.CLAUDE_CODE_OAUTH_EXPIRES_AT;
   delete process.env.CLAUDE_CODE_CREDENTIALS_PATH;
+  delete process.env.CLAUDE_CODE_PKCE_PATH;
   process.env.AGENTIC_TRACKING = "memory";
 });
 
@@ -259,6 +265,58 @@ describe("claude code oauth subsystem (standalone)", () => {
 
   it("extracts JSON objects from fenced Claude replies", () => {
     expect(extractJsonObject('noise\n```json\n{"a":1}\n```\n')).toEqual({ a: 1 });
+  });
+
+  it("builds a Claude login URL and parses the callback paste", () => {
+    process.env.CLAUDE_CODE_PKCE_PATH = join(tmpdir(), `pkce-${Date.now()}.json`);
+    const started = startClaudeCodeLogin();
+    expect(started.authorize_url).toContain("claude.ai/oauth/authorize");
+    expect(started.authorize_url).toContain("code=true");
+    expect(started.authorize_url).toContain("code_challenge_method=S256");
+    expect(parseAuthorizationPaste(`abcXYZ#${started.state}`)).toEqual({
+      code: "abcXYZ",
+      state: started.state,
+    });
+  });
+
+  it("exchanges a pasted callback and persists the OAuth session", async () => {
+    process.env.CLAUDE_CODE_CREDENTIALS_PATH = tempCredPath();
+    process.env.CLAUDE_CODE_PKCE_PATH = join(tmpdir(), `pkce-${Date.now()}.json`);
+    const started = startClaudeCodeLogin();
+    const result = await completeClaudeCodeLogin(`${"authcode"}#${started.state}`, async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        grant_type: string;
+        code: string;
+        state: string;
+        code_verifier: string;
+      };
+      expect(body.grant_type).toBe("authorization_code");
+      expect(body.code).toBe("authcode");
+      expect(body.state).toBe(started.state);
+      expect(body.code_verifier.length).toBeGreaterThan(10);
+      return jsonResponse(200, {
+        access_token: "sk-ant-oat01-exchanged",
+        refresh_token: "rt-exchanged",
+        expires_in: 3600,
+      });
+    });
+    expect(result.auth.ready).toBe(true);
+    expect(result.auth.has_refresh_token).toBe(true);
+    expect(loadClaudeCodeCredential()?.accessToken).toBe("sk-ant-oat01-exchanged");
+    logoutClaudeCodeSession();
+    expect(loadClaudeCodeCredential()).toBeNull();
+  });
+
+  it("saves a pasted access token from the dashboard", () => {
+    process.env.CLAUDE_CODE_CREDENTIALS_PATH = tempCredPath();
+    const result = savePastedClaudeCodeSession({
+      access_token: "sk-ant-oat01-paste",
+      refresh_token: "rt-paste",
+    });
+    expect(result.auth.ready).toBe(true);
+    expect(result.auth.token_hint).toContain("sk-ant-oat01");
+    expect(loadClaudeCodeCredential()?.refreshToken).toBe("rt-paste");
+    logoutClaudeCodeSession();
   });
 
   it("redacts secrets in observability previews", () => {
