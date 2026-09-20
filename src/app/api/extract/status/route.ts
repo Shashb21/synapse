@@ -16,5 +16,8 @@ export async function GET() {
     last_hillclimb_at: settings?.last_hillclimb_at ?? null,
     last_error: settings?.last_error ?? null,
     gold_gap_count: gold.length,
+    key_hint: hasAnthropicKey()
+      ? null
+      : "Set ANTHROPIC_API_KEY on the Cloud environment (or .env.local). Secrets inject at boot; start a new agent after attaching the key.",
   });
 }

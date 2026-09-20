@@ -1,0 +1,24 @@
+{
+  "id": "cdp",
+  "source_key": "cdp",
+  "filename": "cdp.json",
+  "title": "Clinical development plan excerpt",
+  "source_type": "clinical_development_plan",
+  "stakeholder_function": "clinical_development",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "Clinical development plan excerpt"
+      },
+      "heading": "Note",
+      "text": "VEL-301 CDP §4.\n\nVEL-301 Phase III versus osimertinib addresses PFS in 2L EGFR-mutant NSCLC. Subgroup analysis in elderly is planned but not a powered comparative effectiveness question versus chemotherapy SoC.\n\nWe need to understand overall survival beyond the primary PFS analysis. Limited evidence will be available for the 2026 value story; long-term follow-up is planned.",
+      "kind": "title"
+    }
+  ],
+  "fullText": "VEL-301 CDP §4.\n\nVEL-301 Phase III versus osimertinib addresses PFS in 2L EGFR-mutant NSCLC. Subgroup analysis in elderly is planned but not a powered comparative effectiveness question versus chemotherapy SoC.\n\nWe need to understand overall survival beyond the primary PFS analysis. Limited evidence will be available for the 2026 value story; long-term follow-up is planned."
+}

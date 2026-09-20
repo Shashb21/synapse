@@ -19,10 +19,20 @@ export async function POST(request: Request) {
     body.wait === true ||
     body.wait === "1";
   try {
+    const json = body.json ?? body.document;
+    const jsonRec =
+      json && typeof json === "object" && !Array.isArray(json)
+        ? (json as Record<string, unknown>)
+        : null;
+    const source_key =
+      (typeof body.source_key === "string" && body.source_key.trim()) ||
+      (typeof jsonRec?.source_key === "string" && jsonRec.source_key.trim()) ||
+      (typeof jsonRec?.id === "string" && jsonRec.id.trim()) ||
+      undefined;
     const result = await startGapExtraction({
       format: body.format === "json" ? "json" : body.format === "markdown" ? "markdown" : undefined,
       markdown: typeof body.markdown === "string" ? body.markdown : typeof body.text === "string" ? body.text : undefined,
-      json: body.json ?? body.document,
+      json,
       title: typeof body.title === "string" ? body.title : undefined,
       filename: typeof body.filename === "string" ? body.filename : undefined,
       source_type: body.source_type as SourceType | undefined,
@@ -30,7 +40,7 @@ export async function POST(request: Request) {
       persist: Boolean(body.persist),
       wait,
       score_vs_gold: Boolean(body.score_vs_gold),
-      source_key: typeof body.source_key === "string" ? body.source_key : undefined,
+      source_key,
       actor_name,
       actor_function,
       prompt_version: typeof body.prompt_version === "string" ? body.prompt_version : undefined,

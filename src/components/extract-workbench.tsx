@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DEMO_PACK } from "@/lib/iegp/demo-pack";
+import { DEMO_JSON_PACK, DEMO_PACK, type DemoJsonFixtureMeta } from "@/lib/iegp/demo-pack";
 import {
   ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
@@ -20,6 +20,7 @@ type Status = {
   last_hillclimb_at: string | null;
   last_error: string | null;
   gold_gap_count: number;
+  key_hint: string | null;
 };
 
 type RunListItem = {
@@ -35,10 +36,11 @@ type RunListItem = {
 
 export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [format, setFormat] = useState<"markdown" | "json">("markdown");
+  const [format, setFormat] = useState<"markdown" | "json">("json");
   const [title, setTitle] = useState("HEOR stakeholder interviews");
   const [markdown, setMarkdown] = useState(DEMO_PACK[0]?.text ?? "");
   const [jsonText, setJsonText] = useState("{\n  \"blocks\": []\n}");
+  const [sourceKey, setSourceKey] = useState(DEMO_PACK[0]?.id ?? "heor-interview");
   const [persist, setPersist] = useState(false);
   const [scoreGold, setScoreGold] = useState(true);
   const [sourceType, setSourceType] = useState<(typeof SOURCE_TYPES)[number]>("stakeholder_interview");
@@ -55,6 +57,33 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
       .then(setStatus)
       .catch(() => undefined);
   }, [result]);
+
+  function applyMarkdownDemo(file: (typeof DEMO_PACK)[number]) {
+    setFormat("markdown");
+    setTitle(file.title);
+    setMarkdown(file.text);
+    setSourceType(file.source_type);
+    setActorFunction(file.stakeholder_function);
+    setSourceKey(file.id);
+  }
+
+  async function applyJsonDemo(file: DemoJsonFixtureMeta) {
+    const res = await fetch(file.href);
+    if (!res.ok) throw new Error(`Could not load ${file.filename}`);
+    const json = (await res.json()) as Record<string, unknown>;
+    setFormat("json");
+    setTitle(file.title);
+    setJsonText(JSON.stringify(json, null, 2));
+    setSourceType(file.source_type);
+    setActorFunction(file.stakeholder_function);
+    setSourceKey(file.source_key);
+  }
+
+  useEffect(() => {
+    const first = DEMO_JSON_PACK[0];
+    if (!first) return;
+    void applyJsonDemo(first).catch(() => undefined);
+  }, []);
 
   async function refreshRuns() {
     const res = await fetch("/api/extract/runs");
@@ -76,6 +105,7 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
         actor_name: actorName,
         actor_function: actorFunction,
         wait: true,
+        source_key: sourceKey,
       };
       if (format === "markdown") payload.markdown = markdown;
       else payload.json = JSON.parse(jsonText);
@@ -125,7 +155,9 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
         <p className="text-[12px] text-muted-foreground">
           JSON blocks (LlamaParse items / ParsedDocument) are the preferred input. Markdown is the
           fallback. Live extract is a 3-round proposer → critic debate, then a judge. Gold scoring
-          is opt-in here, not mixed into ingest. Missing ANTHROPIC_API_KEY throws.
+          is opt-in here, not mixed into ingest. Missing ANTHROPIC_API_KEY throws. Ready-made JSON
+          fixtures live in{" "}
+          <code className="text-foreground">/demo-sources/json/</code>.
         </p>
         <div className="mt-3 grid gap-1 text-[12px] text-muted-foreground sm:grid-cols-2">
           <p>LLM ready: {status ? String(status.llm_ready) : "…"}</p>
@@ -136,36 +168,72 @@ export function ExtractWorkbench({ initialRuns }: { initialRuns: RunListItem[] }
         {status?.last_error ? (
           <p className="mt-2 text-[12px] text-destructive">{status.last_error}</p>
         ) : null}
+        {!status?.llm_ready && status?.key_hint ? (
+          <p className="mt-2 text-[12px] text-destructive">{status.key_hint}</p>
+        ) : null}
       </section>
 
       <section className="grid gap-3 border border-border bg-card p-4">
-        <div className="flex flex-wrap gap-2">
-          {DEMO_PACK.map((file) => (
-            <Button
-              key={file.id}
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setFormat("markdown");
-                setTitle(file.title);
-                setMarkdown(file.text);
-                setSourceType(file.source_type);
-                setActorFunction(file.stakeholder_function);
-              }}
-            >
-              {file.filename}
-            </Button>
-          ))}
+        <div className="grid gap-2">
+          <p className="text-[11px] text-muted-foreground">JSON test docs (preferred)</p>
+          <div className="flex flex-wrap gap-2">
+            {DEMO_JSON_PACK.map((file) => (
+              <span key={file.id} className="inline-flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={sourceKey === file.source_key && format === "json" ? "default" : "outline"}
+                  onClick={() => {
+                    void applyJsonDemo(file).catch((err) =>
+                      setError(err instanceof Error ? err.message : "Could not load JSON demo"),
+                    );
+                  }}
+                >
+                  {file.filename}
+                </Button>
+                <a
+                  href={file.href}
+                  download={file.filename}
+                  className="text-[11px] text-muted-foreground"
+                >
+                  Download
+                </a>
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">Markdown fallback</p>
+          <div className="flex flex-wrap gap-2">
+            {DEMO_PACK.map((file) => (
+              <Button
+                key={file.id}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => applyMarkdownDemo(file)}
+              >
+                {file.filename}
+              </Button>
+            ))}
+          </div>
         </div>
-        <label className="grid gap-1 text-[12px] text-muted-foreground">
-          Title
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-          />
-        </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Title
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+            />
+          </label>
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Gold source_key
+            <input
+              value={sourceKey}
+              onChange={(e) => setSourceKey(e.target.value)}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+            />
+          </label>
+        </div>
         <div className="flex flex-wrap gap-3 text-[12px]">
           <label className="flex items-center gap-2">
             <input

@@ -1,9 +1,51 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const ANTHROPIC_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_KEY", "CLAUDE_API_KEY"] as const;
+
+function readDotenvValue(file: string, names: readonly string[]): string | undefined {
+  try {
+    const path = join(process.cwd(), file);
+    if (!existsSync(path)) return undefined;
+    const text = readFileSync(path, "utf8");
+    for (const name of names) {
+      const match = text.match(new RegExp(`^${name}=(.*)$`, "m"));
+      const raw = match?.[1]?.trim().replace(/^['"]|['"]$/g, "");
+      if (raw) return raw;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/** Canonical Anthropic key. Accepts aliases already used in this environment and gitignored `.env.local`. */
+export function anthropicApiKey(): string | undefined {
+  for (const name of ANTHROPIC_KEY_NAMES) {
+    const value = process.env[name]?.trim();
+    if (value) {
+      if (!process.env.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = value;
+      return value;
+    }
+  }
+  const fromFile =
+    process.env.VITEST
+      ? undefined
+      : (readDotenvValue(".env.local", ANTHROPIC_KEY_NAMES) ??
+        readDotenvValue(".env", ANTHROPIC_KEY_NAMES));
+  if (fromFile) {
+    process.env.ANTHROPIC_API_KEY = fromFile;
+    return fromFile;
+  }
+  return undefined;
+}
+
 export function hasLlamaCloudKey(): boolean {
   return Boolean(process.env.LLAMA_CLOUD_API_KEY?.trim());
 }
 
 export function hasAnthropicKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  return Boolean(anthropicApiKey());
 }
 
 export function anthropicModel(): string {

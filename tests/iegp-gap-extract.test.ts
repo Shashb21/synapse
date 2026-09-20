@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { normalizeExtractInput } from "@/lib/iegp/extract/normalize";
 import { runGapExtractionLoop } from "@/lib/iegp/extract/loop";
 import { setGapExtractCompleter, assertGapExtractLlmReady } from "@/lib/iegp/extract/client";
+import { hasAnthropicKey } from "@/lib/config";
+import { DEMO_JSON_PACK, DEMO_PACK } from "@/lib/iegp/demo-pack";
+import { allExtractTestDocuments, extractTestManifest } from "@/lib/iegp/demo-json";
 import { startGapExtraction } from "@/lib/iegp/extract/orchestrate";
 import { recordHumanGapFeedback } from "@/lib/iegp/extract/feedback";
 import { runGapPromptHillclimb } from "@/lib/iegp/extract/hillclimb";
@@ -11,7 +16,6 @@ import {
   championPromptVersion,
 } from "@/lib/iegp/extract/store";
 import { resetSeed, ingestJudgedExtraction, loadState } from "@/lib/iegp/store";
-import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { GAP_EXTRACT_ROUNDS } from "@/lib/iegp/extract/contracts";
 
 const heorGap = {
@@ -108,6 +112,27 @@ describe("gap extract normalize", () => {
     expect(md.blocks.length).toBeGreaterThan(0);
   });
 
+  it("normalizes every shipped JSON extract fixture with gold source_key", () => {
+    const dir = join(process.cwd(), "public/demo-sources/json");
+    const generated = allExtractTestDocuments();
+    expect(generated.length).toBeGreaterThanOrEqual(8);
+    for (const doc of generated) {
+      const onDisk = JSON.parse(readFileSync(join(dir, doc.filename), "utf8")) as typeof doc;
+      expect(onDisk).toEqual(doc);
+      const source = normalizeExtractInput({ format: "json", json: onDisk, title: doc.title });
+      expect(source.blocks.length).toBeGreaterThan(0);
+      expect(onDisk.source_key).toBeTruthy();
+    }
+    const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as {
+      docs: { filename: string }[];
+    };
+    expect(manifest.docs).toHaveLength(DEMO_JSON_PACK.length);
+    expect(extractTestManifest().docs.map((d) => d.filename)).toEqual(
+      manifest.docs.map((d) => d.filename),
+    );
+    expect(readdirSync(dir).filter((f) => f.endsWith(".json")).length).toBeGreaterThanOrEqual(9);
+  });
+
   it("reads LlamaParse-shaped JSON including chart-like items", () => {
     const source = normalizeExtractInput({
       json: {
@@ -122,13 +147,35 @@ describe("gap extract normalize", () => {
 
 describe("gap extract agents", () => {
   it("throws when the LLM key is missing and no completer is injected", () => {
-    const prev = process.env.ANTHROPIC_API_KEY;
+    const prev = {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_KEY: process.env.ANTHROPIC_KEY,
+      CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
+    };
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_KEY;
+    delete process.env.CLAUDE_API_KEY;
     setGapExtractCompleter(null);
     try {
       expect(() => assertGapExtractLlmReady()).toThrow(/ANTHROPIC_API_KEY/);
     } finally {
-      if (prev !== undefined) process.env.ANTHROPIC_API_KEY = prev;
+      if (prev.ANTHROPIC_API_KEY !== undefined) process.env.ANTHROPIC_API_KEY = prev.ANTHROPIC_API_KEY;
+      if (prev.ANTHROPIC_KEY !== undefined) process.env.ANTHROPIC_KEY = prev.ANTHROPIC_KEY;
+      if (prev.CLAUDE_API_KEY !== undefined) process.env.CLAUDE_API_KEY = prev.CLAUDE_API_KEY;
+    }
+  });
+
+  it("accepts ANTHROPIC_KEY as the same live extract key", () => {
+    const prevA = process.env.ANTHROPIC_API_KEY;
+    const prevB = process.env.ANTHROPIC_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_KEY = "test-not-a-real-key";
+    try {
+      expect(hasAnthropicKey()).toBe(true);
+    } finally {
+      delete process.env.ANTHROPIC_KEY;
+      if (prevA !== undefined) process.env.ANTHROPIC_API_KEY = prevA;
+      if (prevB !== undefined) process.env.ANTHROPIC_KEY = prevB;
     }
   });
 

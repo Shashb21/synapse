@@ -1,0 +1,66 @@
+{
+  "id": "payer-access-llamaparse",
+  "source_key": "payer-access",
+  "filename": "payer-access.llamaparse.json",
+  "title": "US payer and access interviews",
+  "source_type": "advisory_board",
+  "stakeholder_function": "market_access",
+  "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "parser": "llamaparse",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "markdown_full": "US national payer advisory — Aetna and UnitedHealthcare.\n\nPersistence\nAetna and UnitedHealthcare need to understand 6-month discontinuation in routine care. Limited evidence on persistence is blocking formulary.\n\nIRA\nWe need to quantify IRA net-price exposure for Velmara. Unknown whether the current budget-impact model reflects the negotiated-price scenario.\n\nA claims study for 6-month discontinuation is proposed but has not started.",
+  "items": {
+    "pages": [
+      {
+        "page": 1,
+        "markdown": "# Persistence\n\nAetna and UnitedHealthcare need to understand 6-month discontinuation in routine care. Limited evidence on persistence is blocking formulary.",
+        "items": [
+          {
+            "type": "chart",
+            "heading": "6-month discontinuation",
+            "value": "Limited evidence on persistence is blocking formulary.",
+            "rows": [
+              [
+                "Payer",
+                "Need"
+              ],
+              [
+                "Aetna",
+                "6-month discontinuation in routine care"
+              ],
+              [
+                "UnitedHealthcare",
+                "6-month discontinuation in routine care"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "page": 2,
+        "markdown": "# IRA\n\nWe need to quantify IRA net-price exposure for Velmara. Unknown whether the current budget-impact model reflects the negotiated-price scenario.\n\nA claims study for 6-month discontinuation is proposed but has not started.",
+        "items": [
+          {
+            "type": "bullet",
+            "heading": "IRA",
+            "md": "We need to quantify IRA net-price exposure for Velmara. Unknown whether the current budget-impact model reflects the negotiated-price scenario."
+          },
+          {
+            "type": "table",
+            "heading": "Proposed claims study",
+            "rows": [
+              [
+                "Study",
+                "Status"
+              ],
+              [
+                "6-month discontinuation claims",
+                "Proposed — not started"
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

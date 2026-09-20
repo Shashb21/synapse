@@ -1,4 +1,4 @@
-import { anthropicModel, hasAnthropicKey } from "@/lib/config";
+import { anthropicApiKey, anthropicModel } from "@/lib/config";
 
 type AnthropicMessage = {
   content?: { type: string; text?: string }[];
@@ -22,14 +22,15 @@ export async function completeJson(args: {
   user: string;
   maxTokens?: number;
 }): Promise<unknown> {
-  if (!hasAnthropicKey()) {
+  const apiKey = anthropicApiKey();
+  if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set");
   }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY!,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({

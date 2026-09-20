@@ -30,6 +30,10 @@ export function IngestPanel({
           <a href="/extract-runs" className="text-foreground">
             Extract
           </a>
+          , with JSON test docs at{" "}
+          <a href="/demo-sources/json/manifest.json" className="text-foreground">
+            /demo-sources/json/
+          </a>
           .
         </p>
         <div className="grid gap-3">

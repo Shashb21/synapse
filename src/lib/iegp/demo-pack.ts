@@ -115,3 +115,48 @@ A publication of the VEL-301 primary manuscript is planned as a dissemination ta
 export function demoSourceById(id: string): DemoSourceFile | undefined {
   return DEMO_PACK.find((file) => file.id === id);
 }
+
+export type DemoJsonFixtureMeta = {
+  id: string;
+  source_key: string;
+  filename: string;
+  href: string;
+  title: string;
+  source_type: SourceType;
+  stakeholder_function: ActorFunction;
+  flavor: "parsed_document" | "llamaparse";
+};
+
+/** Static JSON extract fixtures in `public/demo-sources/json/`. Gold `source_key` matches `id` for ParsedDocument files. */
+export const DEMO_JSON_PACK: DemoJsonFixtureMeta[] = [
+  ...DEMO_PACK.map((file) => ({
+    id: file.id,
+    source_key: file.id,
+    filename: `${file.id}.json`,
+    href: `/demo-sources/json/${file.id}.json`,
+    title: file.title,
+    source_type: file.source_type,
+    stakeholder_function: file.stakeholder_function,
+    flavor: "parsed_document" as const,
+  })),
+  {
+    id: "medical-kol-llamaparse",
+    source_key: "medical-kol",
+    filename: "medical-kol.llamaparse.json",
+    href: "/demo-sources/json/medical-kol.llamaparse.json",
+    title: "Medical affairs KOL interviews (LlamaParse deck)",
+    source_type: "stakeholder_interview",
+    stakeholder_function: "medical_affairs",
+    flavor: "llamaparse",
+  },
+  {
+    id: "payer-access-llamaparse",
+    source_key: "payer-access",
+    filename: "payer-access.llamaparse.json",
+    href: "/demo-sources/json/payer-access.llamaparse.json",
+    title: "US payer and access interviews (LlamaParse deck)",
+    source_type: "advisory_board",
+    stakeholder_function: "market_access",
+    flavor: "llamaparse",
+  },
+];

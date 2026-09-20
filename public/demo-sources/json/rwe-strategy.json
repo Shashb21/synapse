@@ -1,0 +1,24 @@
+{
+  "id": "rwe-strategy",
+  "source_key": "rwe-strategy",
+  "filename": "rwe-strategy.json",
+  "title": "RWE / epidemiology strategy",
+  "source_type": "rwe_strategy",
+  "stakeholder_function": "rwe",
+  "mime": "application/json",
+  "parser": "local",
+  "ingested_at": "2026-09-20T00:00:00.000Z",
+  "blocks": [
+    {
+      "id": "B01",
+      "location": {
+        "kind": "section",
+        "ref": "RWE / epidemiology strategy"
+      },
+      "heading": "Note",
+      "text": "RWE strategy — prospective registry.\n\nThe prospective Velmara registry will collect treatment, progression, survival, hospitalisations, sequencing and PROs. It does not include a concurrent SoC comparator in elderly patients.\n\nLimited evidence remains on comparative effectiveness versus regional standard of care in the elderly because the registry is single-arm.",
+      "kind": "title"
+    }
+  ],
+  "fullText": "RWE strategy — prospective registry.\n\nThe prospective Velmara registry will collect treatment, progression, survival, hospitalisations, sequencing and PROs. It does not include a concurrent SoC comparator in elderly patients.\n\nLimited evidence remains on comparative effectiveness versus regional standard of care in the elderly because the registry is single-arm."
+}
