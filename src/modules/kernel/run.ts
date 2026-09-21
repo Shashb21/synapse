@@ -47,28 +47,30 @@ export async function runStage<O = unknown>(args: {
   workspace_id?: string;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
-  const module = await activeModule(args.stage);
-  await ensurePlatformSchema(module.migrations ?? []);
-
-  const parsedInput = module.inputSchema.safeParse(args.input);
-  if (!parsedInput.success) {
-    throw new Error(
-      `${module.manifest.id} rejected its input: ${parsedInput.error.issues
-        .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
-        .join("; ")}`,
-    );
-  }
+  const implementation = await activeModule(args.stage);
+  await ensurePlatformSchema(implementation.migrations ?? []);
 
   const workspace_id = args.workspace_id ?? DEFAULT_WORKSPACE;
   const recorder = new RunRecorder({
     workspace_id,
     stage: args.stage,
-    module_id: module.manifest.id,
-    module_version: module.manifest.version,
+    module_id: implementation.manifest.id,
+    module_version: implementation.manifest.version,
     actor: args.actor,
-    input: parsedInput.data,
+    input: args.input,
   });
   await openRun(recorder);
+
+  // A contract violation is itself observable, so the run is already open here.
+  const parsedInput = implementation.inputSchema.safeParse(args.input);
+  if (!parsedInput.success) {
+    const message = `${implementation.manifest.id} rejected its input: ${parsedInput.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
+      .join("; ")}`;
+    await closeRun({ recorder, status: "error", error: message });
+    throw new Error(message);
+  }
+  recorder.note("input:accepted", parsedInput.data);
 
   const route = await resolveRoute(args.stage);
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
@@ -83,11 +85,11 @@ export async function runStage<O = unknown>(args: {
   };
 
   try {
-    const result = await module.run(parsedInput.data as never, ctx);
-    const parsedOutput = module.outputSchema.safeParse(result.output);
+    const result = await implementation.run(parsedInput.data as never, ctx);
+    const parsedOutput = implementation.outputSchema.safeParse(result.output);
     if (!parsedOutput.success) {
       throw new Error(
-        `${module.manifest.id} produced output outside its contract: ${parsedOutput.error.issues
+        `${implementation.manifest.id} produced output outside its contract: ${parsedOutput.error.issues
           .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
           .join("; ")}`,
       );
@@ -104,8 +106,8 @@ export async function runStage<O = unknown>(args: {
     if (evals.length > 0) {
       await recordEvalRun({
         stage: args.stage,
-        module_id: module.manifest.id,
-        module_version: module.manifest.version,
+        module_id: implementation.manifest.id,
+        module_version: implementation.manifest.version,
         run_id: recorder.id,
         metrics: evals,
         note: result.summary,
@@ -118,8 +120,8 @@ export async function runStage<O = unknown>(args: {
     return {
       run_id: recorder.id,
       stage: args.stage,
-      module_id: module.manifest.id,
-      module_version: module.manifest.version,
+      module_id: implementation.manifest.id,
+      module_version: implementation.manifest.version,
       mode: modeStep ? "llm" : "deterministic",
       summary: result.summary,
       output: parsedOutput.data as O,

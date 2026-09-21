@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { nowIso } from "./ids";

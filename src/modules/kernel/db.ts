@@ -108,8 +108,9 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
   }
 }
 
-/** Test helper: drops all rows from platform tables. */
-export async function wipePlatform() {
+/** Test helper: drops all rows from platform and module-owned tables. */
+export async function wipePlatform(moduleTables: string[] = []) {
+  await ensurePlatformSchema();
   const d = db();
   const tables = [
     "module_runs",
@@ -125,8 +126,9 @@ export async function wipePlatform() {
     "ideation_proposals",
     "timeline_activities",
     "iegp_plans",
+    ...moduleTables,
   ];
   for (const table of tables) {
-    await d.execute(sql.raw(`DELETE FROM ${table}`));
+    await d.execute(sql.raw(`DELETE FROM ${table} WHERE true`)).catch(() => undefined);
   }
 }

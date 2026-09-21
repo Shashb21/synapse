@@ -65,6 +65,26 @@ export type SourceFileRecord = {
   note: string | null;
 };
 
+/** File metadata without the stored bytes, which no caller outside S1 needs. */
+function withoutContent(row: typeof sourceFiles.$inferSelect): SourceFileRecord {
+  return {
+    id: row.id,
+    filename: row.filename,
+    title: row.title,
+    source_type: row.source_type,
+    stakeholder_function: row.stakeholder_function,
+    mime: row.mime,
+    bytes: row.bytes,
+    checksum: row.checksum,
+    status: row.status,
+    uploaded_by: row.uploaded_by,
+    uploaded_at: row.uploaded_at,
+    parsed_at: row.parsed_at,
+    source_id: row.source_id,
+    note: row.note,
+  };
+}
+
 function checksumOf(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex").slice(0, 32);
 }
@@ -175,7 +195,7 @@ registerModule(uploadModule);
 export async function listSourceFiles(): Promise<SourceFileRecord[]> {
   await ensurePlatformSchema([SOURCE_FILES_DDL]);
   const rows = await db().select().from(sourceFiles).orderBy(desc(sourceFiles.uploaded_at));
-  return rows.map(({ content_base64: _content, workspace_id: _workspace, ...rest }) => rest);
+  return rows.map(withoutContent);
 }
 
 export async function sourceFileContent(id: string): Promise<{ record: SourceFileRecord; buffer: Buffer } | null> {
@@ -183,8 +203,7 @@ export async function sourceFileContent(id: string): Promise<{ record: SourceFil
   const rows = await db().select().from(sourceFiles).where(eq(sourceFiles.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
-  const { content_base64, workspace_id: _workspace, ...rest } = row;
-  return { record: rest, buffer: Buffer.from(content_base64, "base64") };
+  return { record: withoutContent(row), buffer: Buffer.from(row.content_base64, "base64") };
 }
 
 export async function markFileParsed(args: { id: string; source_id: string; note?: string }) {
@@ -207,7 +226,7 @@ export async function unparsedFileIds(): Promise<string[]> {
 export async function filesByIds(ids: string[]): Promise<SourceFileRecord[]> {
   if (ids.length === 0) return [];
   const rows = await db().select().from(sourceFiles).where(inArray(sourceFiles.id, ids));
-  return rows.map(({ content_base64: _content, workspace_id: _workspace, ...rest }) => rest);
+  return rows.map(withoutContent);
 }
 
 export const DEMO_FILE_OPTIONS = DEMO_PACK.map((file) => ({

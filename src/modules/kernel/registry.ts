@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { nowIso } from "./ids";
@@ -14,21 +13,22 @@ type Registered = SynapseModule<unknown, unknown>;
 
 const registry = new Map<string, Registered>();
 
-export function registerModule<I, O>(module: SynapseModule<I, O>): SynapseModule<I, O> {
-  if (module.manifest.contract !== KERNEL_CONTRACT) {
+export function registerModule<I, O>(implementation: SynapseModule<I, O>): SynapseModule<I, O> {
+  const { manifest } = implementation;
+  if (manifest.contract !== KERNEL_CONTRACT) {
     throw new Error(
-      `${module.manifest.id} speaks contract ${module.manifest.contract}; kernel speaks ${KERNEL_CONTRACT}`,
+      `${manifest.id} speaks contract ${manifest.contract}; kernel speaks ${KERNEL_CONTRACT}`,
     );
   }
-  if (registry.has(module.manifest.id)) {
-    const existing = registry.get(module.manifest.id)!;
-    if (existing.manifest.version !== module.manifest.version) {
-      throw new Error(`${module.manifest.id} is already registered at ${existing.manifest.version}`);
+  const existing = registry.get(manifest.id);
+  if (existing) {
+    if (existing.manifest.version !== manifest.version) {
+      throw new Error(`${manifest.id} is already registered at ${existing.manifest.version}`);
     }
-    return module;
+    return implementation;
   }
-  registry.set(module.manifest.id, module as unknown as Registered);
-  return module;
+  registry.set(manifest.id, implementation as unknown as Registered);
+  return implementation;
 }
 
 export function allModules(): Registered[] {
@@ -36,7 +36,7 @@ export function allModules(): Registered[] {
 }
 
 export function modulesForStage(stage: StageId): Registered[] {
-  return allModules().filter((module) => module.manifest.stage === stage);
+  return allModules().filter((candidate) => candidate.manifest.stage === stage);
 }
 
 export function moduleById(id: string): Registered | undefined {
@@ -44,7 +44,7 @@ export function moduleById(id: string): Registered | undefined {
 }
 
 export function manifests(): ModuleManifest[] {
-  return allModules().map((module) => module.manifest);
+  return allModules().map((candidate) => candidate.manifest);
 }
 
 async function activationRows() {
@@ -63,8 +63,8 @@ export async function activeModule(stage: StageId): Promise<Registered> {
   const rows = await activationRows();
   const chosen = rows.find((row) => row.stage === stage);
   if (chosen) {
-    const module = candidates.find((candidate) => candidate.manifest.id === chosen.module_id);
-    if (module) return module;
+    const wired = candidates.find((candidate) => candidate.manifest.id === chosen.module_id);
+    if (wired) return wired;
   }
   return [...candidates].sort((a, b) =>
     b.manifest.version.localeCompare(a.manifest.version, undefined, { numeric: true }),
@@ -76,10 +76,12 @@ export async function activateModule(args: {
   module_id: string;
   actor_name: string;
 }) {
-  const module = moduleById(args.module_id);
-  if (!module) throw new Error(`Unknown module ${args.module_id}`);
-  if (module.manifest.stage !== args.stage) {
-    throw new Error(`${args.module_id} implements ${module.manifest.stage}, not ${args.stage}`);
+  const implementation = moduleById(args.module_id);
+  if (!implementation) throw new Error(`Unknown module ${args.module_id}`);
+  if (implementation.manifest.stage !== args.stage) {
+    throw new Error(
+      `${args.module_id} implements ${implementation.manifest.stage}, not ${args.stage}`,
+    );
   }
   const values = {
     stage: args.stage,
@@ -105,7 +107,7 @@ export async function stageWiring(): Promise<StageWiring[]> {
   const rows = await activationRows();
   const out: StageWiring[] = [];
   for (const stage of STAGE_IDS) {
-    const available = modulesForStage(stage).map((module) => module.manifest);
+    const available = modulesForStage(stage).map((candidate) => candidate.manifest);
     const row = rows.find((candidate) => candidate.stage === stage);
     let active: ModuleManifest | null = null;
     if (available.length > 0) active = (await activeModule(stage)).manifest;
