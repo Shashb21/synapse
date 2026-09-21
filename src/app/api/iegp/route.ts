@@ -35,6 +35,8 @@ import {
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import type { CoverageDimension } from "@/lib/iegp/enums";
+import { recordEdit, type EditAction } from "@/modules/kernel/edit-records";
+import type { StageId } from "@/modules/kernel/contracts";
 
 export const runtime = "nodejs";
 
@@ -47,6 +49,49 @@ function idList(...values: (string | undefined)[]): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+/**
+ * Gate actions on the legacy workbench that carry a user judgement. When the
+ * user gave a reason, it is filed as an edit record so the same rationale reaches
+ * hillclimb from this surface too.
+ */
+const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string; action: EditAction }> = {
+  classify_gap: { stage: "S5", entity: "gap", field: "computed_status", action: "override" },
+  override_gap_status: { stage: "S5", entity: "gap", field: "computed_status", action: "override" },
+  clear_gap_status_override: { stage: "S5", entity: "gap", field: "computed_status", action: "edit" },
+  validate_gap: { stage: "S5", entity: "gap", field: "human_validated", action: "validate" },
+  modify_gap: { stage: "S5", entity: "gap", field: "statement", action: "edit" },
+  assign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
+  accept_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
+  reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
+  lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
+  lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
+  split_partial_gap: { stage: "S6", entity: "gap", field: "split", action: "split" },
+  rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
+  lock_priority: { stage: "S8", entity: "residual", field: "priority_band", action: "edit" },
+  create_tactic: { stage: "S9", entity: "tactic", field: "created", action: "add" },
+  record_missed_tactic: { stage: "S5", entity: "tactic", field: "created", action: "add" },
+};
+
+async function fileGateEdit(body: Record<string, string>, actor_name: string, actor_function: ActorFunction) {
+  const mapping = GATE_EDITS[body.action ?? ""];
+  if (!mapping) return;
+  const rationale = (body.rationale || body.reason || body.note || body.override_reason || "").trim();
+  if (rationale.length < 3) return;
+  const entity_id =
+    body.gap_id || body.parent_gap_id || body.coverage_id || body.tactic_id || body.residual_id || "—";
+  await recordEdit({
+    stage: mapping.stage,
+    entity_type: mapping.entity,
+    entity_id,
+    field: mapping.field,
+    action: mapping.action,
+    before: null,
+    after: body.status || body.band || body.value || body.overall || null,
+    rationale,
+    actor: { name: actor_name, function: actor_function },
+  });
 }
 
 export async function POST(request: Request) {
@@ -406,6 +451,7 @@ export async function POST(request: Request) {
       default:
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
+    await fileGateEdit(body, actor_name, actor_function);
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed";
