@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useMemo, type RefObject } from "react";
 import type { TimelineActivity, TimelineBand, TimelineModel } from "@/modules/stages/s10-timeline/build";
 import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 
@@ -50,18 +50,19 @@ const TOKENS: Record<keyof Palette, string> = {
   muted: "--muted-foreground",
 };
 
-function usePalette(): Palette {
-  const [palette, setPalette] = useState<Palette>(FALLBACK);
-  useEffect(() => {
-    const computed = getComputedStyle(document.documentElement);
-    const next = { ...FALLBACK };
-    for (const key of Object.keys(TOKENS) as (keyof Palette)[]) {
-      const value = computed.getPropertyValue(TOKENS[key]).trim();
-      if (value) next[key] = value;
-    }
-    setPalette(next);
-  }, []);
-  return palette;
+/**
+ * Read once at render. The fallbacks mirror the token values in `globals.css`, so
+ * the server and client agree; a retheme only changes what the browser paints.
+ */
+function readPalette(): Palette {
+  if (typeof document === "undefined") return FALLBACK;
+  const computed = getComputedStyle(document.documentElement);
+  const next = { ...FALLBACK };
+  for (const key of Object.keys(TOKENS) as (keyof Palette)[]) {
+    const value = computed.getPropertyValue(TOKENS[key]).trim();
+    if (value) next[key] = value;
+  }
+  return next;
 }
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -155,7 +156,7 @@ export function GanttChart({
   onSelect: (activity: TimelineActivity) => void;
   svgRef: RefObject<SVGSVGElement | null>;
 }) {
-  const palette = usePalette();
+  const palette = useMemo(() => readPalette(), []);
   const origin = model.window.start;
   const months = Math.max(1, model.window.months);
   const monthWidth = monthWidthFor(months);
