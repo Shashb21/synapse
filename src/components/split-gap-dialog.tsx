@@ -104,6 +104,9 @@ export function SplitGapDialog({
   const defaultAddressed = countingIds.length > 0 ? countingIds : tactics.slice(0, 1).map((t) => t.id);
   const [addressedTacticIds, setAddressedTacticIds] = useState<string[]>(defaultAddressed);
   const [openTacticIds, setOpenTacticIds] = useState<string[]>([]);
+  const [rationale, setRationale] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposalNote, setProposalNote] = useState<string | null>(null);
   const leftoverTactics = useMemo(
     () => tactics.filter((t) => !addressedTacticIds.includes(t.id)),
     [tactics, addressedTacticIds],
@@ -124,6 +127,62 @@ export function SplitGapDialog({
     setRewriteStatus("validated_open");
     setAddressedTacticIds(defaultAddressed);
     setOpenTacticIds([]);
+    setRationale("");
+    setProposalNote(null);
+    setProposing(false);
+  }
+
+  /** S6 proposes the split; the user still validates every field before it applies. */
+  async function proposeSplit() {
+    setProposing(true);
+    setError(null);
+    setProposalNote(null);
+    const res = await fetch("/api/modules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stage: "S6",
+        input: { gap_id: gapId },
+        actor_name: actorName.trim() || "Unsigned",
+        actor_function: actorFunction,
+      }),
+    });
+    const json = (await res.json()) as {
+      error?: string;
+      summary?: string;
+      output?: {
+        proposal: {
+          addressed_name: string;
+          addressed_statement: string;
+          open_name: string;
+          open_statement: string;
+          addressed_tactic_ids: string[];
+          confidence: number;
+          rationale: string[];
+        } | null;
+      };
+    };
+    setProposing(false);
+    if (!res.ok) {
+      setError(json.error ?? "Could not propose a split.");
+      return;
+    }
+    const proposal = json.output?.proposal;
+    if (!proposal) {
+      setProposalNote("The stage returned no usable proposal. Fill the split in yourself.");
+      return;
+    }
+    setMode("split");
+    setAddressedName(proposal.addressed_name);
+    setAddressedStatement(proposal.addressed_statement);
+    setOpenName(proposal.open_name);
+    setOpenStatement(proposal.open_statement);
+    if (proposal.addressed_tactic_ids.length > 0) {
+      setAddressedTacticIds(proposal.addressed_tactic_ids);
+    }
+    setProposalNote(
+      `Proposed with confidence ${proposal.confidence}. ${proposal.rationale.slice(0, 2).join(" ")}`,
+    );
   }
 
   async function onSubmit() {
@@ -156,6 +215,10 @@ export function SplitGapDialog({
         return;
       }
     }
+    if (rationale.trim().length < 3) {
+      setError("A short rationale is required. It is stored with the edit and feeds hillclimb.");
+      return;
+    }
     setPending(true);
     setError(null);
     const payload =
@@ -169,6 +232,7 @@ export function SplitGapDialog({
             open_statement: openStatement,
             tactic_ids: addressedTacticIds.join(","),
             open_tactic_ids: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)).join(","),
+            note: rationale.trim(),
             actor_name: name,
             actor_function: actorFunction,
           }
@@ -179,6 +243,7 @@ export function SplitGapDialog({
             statement: rewriteStatement,
             status: rewriteStatus,
             tactic_ids: rewriteStatus === "validated_addressed" ? addressedTacticIds.join(",") : "",
+            note: rationale.trim(),
             actor_name: name,
             actor_function: actorFunction,
           };
@@ -243,7 +308,19 @@ export function SplitGapDialog({
           >
             Rewrite original
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={proposing}
+            onClick={() => void proposeSplit()}
+          >
+            {proposing ? "Proposing…" : "Suggest a split"}
+          </Button>
         </div>
+        {proposalNote ? (
+          <p className="text-[11px] text-muted-foreground">{proposalNote}</p>
+        ) : null}
         {mode === "split" ? (
           <div className="grid gap-4 md:grid-cols-2">
             <section className="border border-border bg-card/40 p-3">
@@ -358,6 +435,18 @@ export function SplitGapDialog({
           </div>
         )}
         <div className="grid gap-2">
+          <label className="grid gap-1 text-[12px] text-muted-foreground">
+            Rationale (required)
+            <Textarea
+              value={rationale}
+              rows={2}
+              placeholder="Why this split or rewrite, in one line"
+              onChange={(e) => setRationale(e.target.value)}
+            />
+            <span className="text-[11px] text-muted-foreground/80">
+              Stored on the edit record and replayed as a hillclimb signal for the split stage.
+            </span>
+          </label>
           <label htmlFor={nameId} className="text-[12px] text-muted-foreground">
             Name
           </label>
