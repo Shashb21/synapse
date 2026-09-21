@@ -3,14 +3,20 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  Activity,
+  ChartGantt,
   Columns3,
   FileText,
   FlaskConical,
+  Grid2x2,
   Inbox,
+  Lightbulb,
   ListChecks,
   Lock,
   Menu,
+  SlidersHorizontal,
   Upload,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +37,12 @@ export type ShellId =
   | "residuals"
   | "roadmap"
   | "sources"
+  | "matrix"
+  | "ideation"
+  | "timeline"
+  | "pipeline"
+  | "runs"
+  | "control"
   | "evals"
   | "sdlc";
 
@@ -52,14 +64,33 @@ type PlaceItem = {
   unlocked: boolean;
 };
 
+type SecondaryId =
+  | "matrix"
+  | "ideation"
+  | "timeline"
+  | "pipeline"
+  | "runs"
+  | "control"
+  | "evals"
+  | "sdlc";
+
 type SecondaryItem = {
-  id: "evals" | "sdlc";
+  id: SecondaryId;
   href: string;
   label: string;
   icon: typeof FlaskConical;
 };
 
+const PLAN_SURFACES: SecondaryItem[] = [
+  { id: "matrix", href: "/matrix", label: "Matrix", icon: Grid2x2 },
+  { id: "ideation", href: "/ideation", label: "Ideation", icon: Lightbulb },
+  { id: "timeline", href: "/timeline", label: "IEGP timeline", icon: ChartGantt },
+];
+
 const SECONDARY: SecondaryItem[] = [
+  { id: "pipeline", href: "/pipeline", label: "Pipeline", icon: Workflow },
+  { id: "runs", href: "/runs", label: "Runs", icon: Activity },
+  { id: "control", href: "/control", label: "Control panel", icon: SlidersHorizontal },
   { id: "evals", href: "/evals", label: "Eval", icon: FlaskConical },
   { id: "sdlc", href: "/sdlc", label: "Spec", icon: FileText },
 ];
@@ -183,6 +214,15 @@ function NavLists({
           <NavButton key={item.id} item={item} active={active} dense={dense} />
         ))}
       </nav>
+      <div
+        className="mt-3 grid gap-0.5 border-t border-sidebar-border pt-3"
+        role="navigation"
+        aria-label="Plan surfaces"
+      >
+        {PLAN_SURFACES.map((item) => (
+          <NavButton key={item.id} item={item} active={active} dense={dense} />
+        ))}
+      </div>
       <div className="mt-auto grid gap-0.5 border-t border-sidebar-border pt-3" role="navigation" aria-label={dense ? "Tapes" : "All tapes"}>
         {SECONDARY.map((item) => (
           <NavButton key={item.id} item={item} active={active} dense={dense} />
@@ -205,7 +245,7 @@ export function PlanChrome({
   const places = placesOf(nav);
   const current =
     places.find((p) => p.id === active)?.label ??
-    SECONDARY.find((s) => s.id === active)?.label ??
+    [...PLAN_SURFACES, ...SECONDARY].find((s) => s.id === active)?.label ??
     "Synapse IEGP";
 
   return (

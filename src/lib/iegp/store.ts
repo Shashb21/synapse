@@ -4,6 +4,7 @@ import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
+import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
   ActorFunction,
   CatchUpReason,
@@ -697,10 +698,8 @@ export async function lockGapStatus(args: {
     }
   }
   const lk = makeLock(args.actor_name, args.actor_function, args.note);
-  const mapped =
-    args.status === "validated_open" ||
-    args.status === "validated_partial" ||
-    args.status === "validated_addressed";
+  // Partial was already rejected above, so only Open and Addressed remain mapped.
+  const mapped = args.status === "validated_open" || args.status === "validated_addressed";
   const wasMapped =
     gap.status === "validated_open" ||
     gap.status === "validated_partial" ||
@@ -1843,25 +1842,26 @@ export async function lockRoadmapItem(args: {
   );
 }
 
-export async function ingestNeedFromText(args: {
+/**
+ * S1 output: the domain source document and its blocks, with no extraction. The
+ * modular parse stage stops here; extraction stages commit against `source_id`.
+ */
+export async function persistSourceAndBlocks(args: {
   title: string;
   source_type: IegpState["sources"][0]["source_type"];
   stakeholder_function: ActorFunction;
   text: string;
   filename?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
+}): Promise<{ source_id: string; blocks: IegpState["blocks"] }> {
   const state = await loadState();
   const sourceId = nextId("SRC", state.sources.map((s) => s.id));
-  const ingested_at = now();
   await db().insert(t.sources).values({
     id: sourceId,
     filename: args.filename ?? args.title.replaceAll(" ", "_") + ".txt",
     title: args.title,
     source_type: args.source_type,
     stakeholder_function: args.stakeholder_function,
-    ingested_at,
+    ingested_at: now(),
     full_text: args.text,
   });
   const sections = splitSourceIntoBlocks(args.text, args.title);
@@ -1873,20 +1873,37 @@ export async function ingestNeedFromText(args: {
     location: section.heading === "Note" ? "Uploaded note" : section.heading,
   }));
   if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
-  const extractedNeeds = extractCandidateNeeds(blocks);
-  const extractedGaps = extractCandidateGaps(blocks);
-  const extractedTactics = extractCandidateTactics(blocks);
-  const fallbackSentences = args.text
-    .split(/(?<=[.?!])\s+/)
-    .filter((s) => s.trim().length > 20)
-    .slice(0, 3)
-    .map((s, idx) => ({
-      id: `tmp-${idx}`,
-      statement: s,
-      source_id: sourceId,
-      source_quote: s,
-    }));
-  const needRows = extractedNeeds.length ? extractedNeeds : fallbackSentences;
+  return { source_id: sourceId, blocks };
+}
+
+export type CandidateNeedRow = {
+  id: string;
+  statement: string;
+  source_quote: string;
+};
+
+/**
+ * Commits an accepted candidate set against an existing source. Callers decide
+ * what the candidate set is: the ingest monolith uses the local extractors, the
+ * S2/S3 modules use their judged output.
+ */
+export async function commitExtractedRecords(args: {
+  source_id: string;
+  title: string;
+  stakeholder_function: ActorFunction;
+  actor_name: string;
+  actor_function: ActorFunction;
+  needs: CandidateNeedRow[];
+  gaps: ExtractedGap[];
+  tactics: ExtractedTactic[];
+  /** Skip to run mapping as its own stage. */
+  apply_mappings?: boolean;
+}): Promise<{ need_ids: string[]; gap_ids: string[]; tactic_ids: string[] }> {
+  const state = await loadState();
+  const sourceId = args.source_id;
+  const needRows = args.needs;
+  const extractedGaps = args.gaps;
+  const extractedTactics = args.tactics;
   const obj = state.objectives[0]!;
   const needIds = [...state.needs.map((n) => n.id)];
   const tacticIds = [...state.tactics.map((x) => x.id)];
@@ -1990,7 +2007,7 @@ export async function ingestNeedFromText(args: {
     await linkNeedOntoGap(needId, gapId, "primary");
   }
 
-  let tacticCount = 0;
+  const createdTacticIds: string[] = [];
   for (const tac of extractedTactics) {
     const dup = state.tactics.find(
       (existing) =>
@@ -2000,7 +2017,7 @@ export async function ingestNeedFromText(args: {
     if (dup) continue;
     const tacticId = nextId("TAC", tacticIds);
     tacticIds.push(tacticId);
-    tacticCount += 1;
+    createdTacticIds.push(tacticId);
     await db().insert(t.tactics).values({
       id: tacticId,
       name: tac.name,
@@ -2033,15 +2050,62 @@ export async function ingestNeedFromText(args: {
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${tacticCount} tactic(s); mappings applied.`,
+    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${createdTacticIds.length} tactic(s); mappings applied.`,
   );
-  await autoJoinMappings(args.actor_name, args.actor_function);
+  if (args.apply_mappings !== false) {
+    await applyEngineMappings(args.actor_name, args.actor_function);
+  }
   await persistEligibleResidualDrafts();
   await syncComputedGapStatuses();
-  return sourceId;
+  return {
+    need_ids: createdNeedIds,
+    gap_ids: createdGapIds,
+    tactic_ids: createdTacticIds,
+  };
 }
 
-async function autoJoinMappings(actor_name: string, actor_function: ActorFunction) {
+/** S0–S4 in one call: the original ingest path, kept as the monolith implementation. */
+export async function ingestNeedFromText(args: {
+  title: string;
+  source_type: IegpState["sources"][0]["source_type"];
+  stakeholder_function: ActorFunction;
+  text: string;
+  filename?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const { source_id, blocks } = await persistSourceAndBlocks({
+    title: args.title,
+    source_type: args.source_type,
+    stakeholder_function: args.stakeholder_function,
+    text: args.text,
+    filename: args.filename,
+  });
+  const extractedNeeds = extractCandidateNeeds(blocks);
+  const fallbackSentences = args.text
+    .split(/(?<=[.?!])\s+/)
+    .filter((s) => s.trim().length > 20)
+    .slice(0, 3)
+    .map((s, idx) => ({
+      id: `tmp-${idx}`,
+      statement: s,
+      source_quote: s,
+    }));
+  await commitExtractedRecords({
+    source_id,
+    title: args.title,
+    stakeholder_function: args.stakeholder_function,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    needs: extractedNeeds.length ? extractedNeeds : fallbackSentences,
+    gaps: extractCandidateGaps(blocks),
+    tactics: extractCandidateTactics(blocks),
+  });
+  return source_id;
+}
+
+/** S4 commit: applies engine-ranked gap ↔ tactic mappings that are not yet joined. */
+export async function applyEngineMappings(actor_name: string, actor_function: ActorFunction) {
   const suggestions = rankMappingSuggestions(await loadState());
   for (const item of suggestions) {
     const current = await loadState();
