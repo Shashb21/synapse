@@ -35,6 +35,7 @@ import {
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import type { CoverageDimension } from "@/lib/iegp/enums";
+import { resetWorkspaceModules } from "@/modules/kernel/db";
 import { recordEdit, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
 
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
     switch (body.action) {
       case "reset":
         await resetSeed();
+        await resetWorkspaceModules();
         break;
       case "lock_need":
         await lockNeed({

@@ -108,6 +108,32 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
   }
 }
 
+/**
+ * Workspace-scoped module tables. Resetting the workspace must clear these too,
+ * or a stage would read artifacts pointing at domain records that no longer
+ * exist. Routing, provider logins, module activation, run history and hillclimb
+ * signals are configuration or learning, so they survive a reset.
+ */
+const WORKSPACE_TABLES = [
+  "source_files",
+  "parsed_documents",
+  "gap_candidates",
+  "tactic_candidates",
+  "mapping_candidates",
+  "priority_placements",
+  "ideation_proposals",
+  "timeline_activities",
+  "iegp_plans",
+];
+
+export async function resetWorkspaceModules() {
+  await ensurePlatformSchema();
+  const d = db();
+  for (const table of WORKSPACE_TABLES) {
+    await d.execute(sql.raw(`DELETE FROM ${table} WHERE true`)).catch(() => undefined);
+  }
+}
+
 /** Test helper: drops all rows from platform and module-owned tables. */
 export async function wipePlatform(moduleTables: string[] = []) {
   await ensurePlatformSchema();
