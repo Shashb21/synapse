@@ -57,11 +57,20 @@ test.describe("platform surfaces", () => {
     const traced = runs.find((run) => run.stage === "S2" && run.status === "ok")!;
     await page.goto(`/runs/${traced.id}`);
     await expect(page.getByRole("heading", { name: /^steps$/i })).toBeVisible();
-    for (const step of ["input:accepted", "proposer:local", "critic", "judge"]) {
+    for (const step of ["input:accepted", "round1:proposer", "judge"]) {
       await expect(page.getByRole("heading", { name: step, exact: true })).toBeVisible();
     }
     await expect(page.getByText(/accept_rate/).first()).toBeVisible();
     await expect(page.getByText("Deterministic (no LLM)").first()).toBeVisible();
+
+    // Locked: three proposer↔critic exchanges, all of them in the trace.
+    await expect(page.getByRole("heading", { name: /proposer ↔ critic exchanges/i })).toBeVisible();
+    for (const round of ["Round 1", "Round 2", "Round 3"]) {
+      await expect(page.getByRole("cell", { name: round, exact: true })).toBeVisible();
+    }
+    for (const step of ["round1:critic", "round2:proposer-revise", "round3:critic"]) {
+      await expect(page.getByRole("heading", { name: step, exact: true })).toBeVisible();
+    }
   });
 
   test("control panel offers OAuth login per provider with Grok as the default route", async ({ page }) => {

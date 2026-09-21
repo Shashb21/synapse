@@ -21,7 +21,7 @@ plan the team keeps outside this repo. This file describes what the code does.
 | `edit-records.ts` | Every user edit with its mandatory rationale. |
 | `hillclimb.ts` | Signals derived from edits, evals and parse quality, plus the digest each agentic stage reads before it proposes. |
 | `evals.ts` | Per-stage eval runs and the harness runner. |
-| `agentic.ts` | The shared proposer → critic → judge loop, with the LLM path and the local path. |
+| `agentic.ts` | The shared loop: propose → critique → revise, three exchanges, then judge. Both the LLM path and the local path. |
 | `db.ts` / `schema.ts` | Platform tables. Module-owned DDL is applied by the kernel on first run. |
 
 A module declares its own tables. `source_files`, `parsed_documents`,
@@ -29,6 +29,35 @@ A module declares its own tables. `source_files`, `parsed_documents`,
 stage directories; the plan-side tables (`priority_axes`, `priority_placements`,
 `ideation_proposals`, `timeline_activities`, `iegp_plans`) are platform tables
 because several surfaces read them.
+
+## The agentic loop
+
+Locked: every agentic stage runs **three proposer↔critic exchanges before the judge**. One exchange is
+one critic response plus the revision the proposer makes in answer to it, so the judge only ever sees
+the third revision.
+
+```
+propose → critique → revise   (exchange 1)
+        → critique → revise   (exchange 2)
+        → critique → revise   (exchange 3)
+                    → judge
+```
+
+`runAgenticCycle` owns the loop. A stage supplies three things: a proposer that handles both the first
+proposal and later revisions (it receives the round number, the previous candidates and the critiques),
+a critic that scores candidates and tags machine-readable `issues`, and a judge. Candidate identity is
+stable across revisions, so critiques, the judge and the trace all line up.
+
+Revision is not cosmetic. Each stage repairs what its critic can name: S2 trims a bundled statement and
+re-derives a generic domain, S3 fattens a thin evidence question from its source quote, S4 gives up a
+gap's weakest edge when it is over budget, S6 renames a leftover that restates its parent, S8 fills
+missing axis scores and re-derives the band, S9 specifies a missing comparator or outcome. Anything the
+critic drops is conceded.
+
+The trace records `round1:proposer`, then `roundN:critic` and `roundN:proposer-revise` for each
+exchange, then `judge`, plus an `exchanges` summary that the run page renders as a table. Loop quality
+is scored on every run: `exchanges`, `dialogue_retention`, `critic_score_gain`, `accept_rate` and
+`judge_confidence`.
 
 ## Stages
 

@@ -4,7 +4,12 @@ import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { runAgenticCycle } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
@@ -176,12 +181,56 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         };
       });
 
+    /**
+     * A gap cannot be dropped from prioritization, so the proposer repairs: fill
+     * the axes it left blank from the heuristic, then re-derive score and band so
+     * the suggestion follows its own numbers.
+     */
+    const revisePlacements = (args: { previous: Placement[]; critiques: Critique[] }): Placement[] =>
+      args.previous.map((placement) => {
+        const critique = args.critiques.find((item) => item.subject === placement.gap_id);
+        const gap = openGaps.find((row) => row.id === placement.gap_id);
+        let axis_scores = placement.axis_scores;
+        if (hasIssue(critique, "missing_scores") && gap) {
+          const fallback = heuristicScores({
+            gap: { name: gap.name, statement: gap.statement, domain: gap.domain },
+            axes: axesConfig.axes,
+            importance,
+          }).scores;
+          axis_scores = { ...fallback, ...axis_scores };
+        }
+        const score = weightedScore(axis_scores, axesConfig.axes);
+        const rationale = placement.rationale.trim()
+          ? placement.rationale
+          : `Scored from the axis cues in the gap text; no model rationale was returned.`;
+        return {
+          ...placement,
+          axis_scores,
+          score,
+          suggested_band: bandFor(score, axesConfig.bands),
+          rationale,
+        };
+      });
+
     const outcome = await runAgenticCycle<Placement>(ctx, "S8", {
       subjectOf: (placement) => placement.gap_id,
       proposer: {
-        local,
+        local: ({ round, previous, critiques }) =>
+          round === 1 ? local() : revisePlacements({ previous, critiques }),
         llm: canPrompt(ctx.route)
-          ? async ({ hints }) => {
+          ? async ({ hints, round, critiques, previous }) => {
+              const brief =
+                round === 1
+                  ? hints
+                  : [
+                      hints,
+                      `Exchange ${round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected: ${critiques
+                        .filter((critique) => critique.verdict !== "keep")
+                        .map((critique) => `${critique.subject} — ${critique.note}`)
+                        .join("; ")}. Re-score the gaps it named.`,
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n");
               const remote = await llmScores(ctx, {
                 gaps: openGaps.map((gap) => ({
                   id: gap.id,
@@ -192,9 +241,10 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
                 axes: axesConfig.axes,
                 context: input.context,
                 asset: state.asset,
-                hints,
+                hints: brief,
               });
-              return local().map((placement) => {
+              const basis = round === 1 ? local() : previous;
+              return basis.map((placement) => {
                 const suggestion = remote.get(placement.gap_id);
                 if (!suggestion) return placement;
                 const merged = { ...placement.axis_scores, ...suggestion.scores };
@@ -213,6 +263,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
       critic: (placements) =>
         placements.map((placement) => {
           const notes: string[] = [];
+          const issues: string[] = [];
           let score = 70;
           const missing = axesConfig.axes.filter(
             (axis) => typeof placement.axis_scores[axis.id] !== "number",
@@ -220,20 +271,29 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
           if (missing.length > 0) {
             score -= 15 * missing.length;
             notes.push(`missing scores for ${missing.map((axis) => axis.label).join(", ")}`);
+            issues.push("missing_scores");
           }
           if (!placement.rationale.trim()) {
             score -= 20;
             notes.push("no rationale for the suggestion");
+            issues.push("no_rationale");
           }
-          if (placement.suggested_band === "high" && placement.score < axesConfig.bands.high) {
+          if (bandFor(placement.score, axesConfig.bands) !== placement.suggested_band) {
             score -= 25;
             notes.push("band does not follow from the axis scores");
+            issues.push("band_mismatch");
+          }
+          if (placement.score !== weightedScore(placement.axis_scores, axesConfig.axes)) {
+            score -= 15;
+            notes.push("weighted score is stale against the axis scores");
+            issues.push("stale_score");
           }
           return {
             subject: placement.gap_id,
             verdict: score >= 60 ? ("keep" as const) : score >= 35 ? ("revise" as const) : ("drop" as const),
             note: notes.length ? notes.join("; ") : "axis scores and band are consistent",
             score: Math.max(0, Math.min(100, score)),
+            issues,
           };
         }),
       judge: ({ candidates, critiques }) =>

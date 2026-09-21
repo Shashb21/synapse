@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { registerModule } from "@/modules/kernel/registry";
 import { recordEdit } from "@/modules/kernel/edit-records";
-import { runAgenticCycle } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { loadState, splitPartialGap } from "@/lib/iegp/store";
@@ -140,15 +145,54 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
       rationale: leftover.reasons,
     };
 
+    /**
+     * A split always has to yield one proposal, so the proposer repairs rather
+     * than withdraws: the leftover is renamed off the parent's words and the
+     * addressed slice is spelled out.
+     */
+    const reviseProposal = (args: { previous: Proposal[]; critiques: Critique[] }): Proposal[] => {
+      const current = args.previous[0] ?? base;
+      const critique = args.critiques.find(
+        (item) => item.subject === `${current.parent_gap_id}:${current.open_name}`,
+      );
+      let open_name = current.open_name;
+      if (hasIssue(critique, "restates_parent")) {
+        const dimensions = missing.slice(0, 3).map((dimension) => dimension.replaceAll("_", " "));
+        open_name = gapNameFromStatement(
+          dimensions.length
+            ? `Leftover after mapped tactics: ${dimensions.join(", ")}`
+            : "Leftover evidence need after mapped tactics",
+        );
+      }
+      const addressed_statement = hasIssue(critique, "thin_addressed_slice")
+        ? `The slice of "${gap.statement}" that ${
+            mapped.length > 0 ? mapped.map((tactic) => tactic.name).join(", ") : "existing evidence"
+          } already answers.`
+        : current.addressed_statement;
+      return [
+        {
+          ...current,
+          open_name,
+          open_statement: open_name === current.open_name ? current.open_statement : open_name,
+          addressed_statement,
+          confidence: Math.min(100, current.confidence + (critique && critique.verdict !== "keep" ? 8 : 0)),
+          rationale: critique
+            ? [...current.rationale, `Exchange answer: ${critique.note}`].slice(0, 6)
+            : current.rationale,
+        },
+      ];
+    };
+
     const outcome = await runAgenticCycle<Proposal>(ctx, "S6", {
       subjectOf: (proposal) => `${proposal.parent_gap_id}:${proposal.open_name}`,
       proposer: {
-        local: () => [base],
+        local: ({ round, previous, critiques }) =>
+          round === 1 ? [base] : reviseProposal({ previous, critiques }),
         llm: canPrompt(ctx.route)
-          ? ({ hints }) =>
+          ? ({ hints, round, critiques, previous }) =>
               llmProposal(
                 ctx,
-                base,
+                previous[0] ?? base,
                 {
                   statement: gap.statement,
                   tactics: mapped.map((tactic) => ({
@@ -157,31 +201,53 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
                     question: tactic.evidence_question,
                   })),
                 },
-                hints,
+                round === 1
+                  ? hints
+                  : [
+                      hints,
+                      `Exchange ${round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic said: ${critiques
+                        .map((critique) => critique.note)
+                        .join("; ")}. Answer it.`,
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n"),
               )
           : undefined,
       },
       critic: (proposals) =>
         proposals.map((proposal) => {
           const notes: string[] = [];
+          const issues: string[] = [];
           let score = proposal.confidence;
           if (proposal.addressed_tactic_ids.length === 0) {
             score -= 20;
             notes.push("no counting tactic to justify an addressed slice");
+            issues.push("no_counting_tactic");
           }
-          if (proposal.open_name.toLowerCase() === gap.statement.toLowerCase()) {
+          if (
+            proposal.open_name.toLowerCase() === gap.statement.toLowerCase() ||
+            proposal.open_name.toLowerCase() === gap.name.toLowerCase()
+          ) {
             score -= 30;
             notes.push("open child restates the parent");
+            issues.push("restates_parent");
+          }
+          if (proposal.addressed_statement.length < 20) {
+            score -= 10;
+            notes.push("addressed slice is not described");
+            issues.push("thin_addressed_slice");
           }
           if (missing.length === 0) {
             score -= 10;
             notes.push("no uncovered dimensions recorded");
+            issues.push("no_uncovered_dimensions");
           }
           return {
             subject: `${proposal.parent_gap_id}:${proposal.open_name}`,
             verdict: score >= 55 ? ("keep" as const) : score >= 35 ? ("revise" as const) : ("drop" as const),
             note: notes.length ? notes.join("; ") : "addressed slice and leftover are distinct",
             score: Math.max(0, Math.min(100, score)),
+            issues,
           };
         }),
       judge: ({ candidates, critiques }) =>

@@ -3,7 +3,12 @@ import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { runAgenticCycle, type Critique } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
@@ -81,6 +86,20 @@ function localProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
   );
 }
 
+/** Turns the critic's objections into the brief the proposer answers next round. */
+function revisionBrief(args: { round: number; critiques: Critique[] }): string {
+  const objections = args.critiques.filter((critique) => critique.verdict !== "keep");
+  if (objections.length === 0) {
+    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: the critic kept every candidate. Tighten wording only.`;
+  }
+  return [
+    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected to these candidates. Revise them, keeping each id you retain, and drop the ones you cannot defend:`,
+    ...objections.map(
+      (critique) => `- ${critique.subject} (${critique.verdict}, ${critique.score}/100): ${critique.note}`,
+    ),
+  ].join("\n");
+}
+
 async function llmProposals(
   ctx: ModuleContext,
   documents: ParsedDocumentRecord[],
@@ -121,40 +140,48 @@ function heuristicCritique(args: {
   candidate: GapCandidate;
   liveStatements: string[];
   siblings: GapCandidate[];
-}): { score: number; note: string } {
+}): { score: number; note: string; issues: string[] } {
   const { candidate } = args;
   let score = 62;
   const notes: string[] = [];
+  const issues: string[] = [];
   const words = candidate.statement.split(/\s+/).length;
   if (words < 6) {
     score -= 25;
     notes.push("statement too short to be actionable");
+    issues.push("too_short");
   }
   if (words > 60) {
     score -= 10;
     notes.push("statement bundles several questions");
+    issues.push("too_long");
   }
   if (TACTIC_SHAPED.test(candidate.statement)) {
     score -= 30;
     notes.push("reads as a tactic already in flight, not a gap");
+    issues.push("tactic_shaped");
   }
   if (VAGUE.test(candidate.statement)) {
     score -= 20;
     notes.push("too vague to decide against");
+    issues.push("vague");
   }
   if (candidate.domain === "unmet_need") {
     score -= 5;
     notes.push("domain not specific");
+    issues.push("domain_generic");
   } else {
     score += 8;
   }
   if (!candidate.source_quote.trim()) {
     score -= 15;
     notes.push("no source quote");
+    issues.push("no_quote");
   }
   if (args.liveStatements.some((statement) => similarRecord(statement, candidate.statement))) {
     score -= 18;
     notes.push("duplicates a gap already in the plan");
+    issues.push("duplicate_of_plan");
   }
   const duplicateSibling = args.siblings.find(
     (sibling) => sibling.id !== candidate.id && similarRecord(sibling.statement, candidate.statement, 0.72),
@@ -162,11 +189,47 @@ function heuristicCritique(args: {
   if (duplicateSibling) {
     score -= 12;
     notes.push(`overlaps candidate ${duplicateSibling.id}`);
+    issues.push("overlaps_sibling");
   }
   return {
     score: Math.max(0, Math.min(100, score)),
     note: notes.length ? notes.join("; ") : "atomic, decision-relevant, traceable to a quote",
+    issues,
   };
+}
+
+/**
+ * The proposer answering the critic without a model: concede the drops, repair
+ * what is repairable, and leave the rest for the next exchange.
+ */
+function reviseGapCandidates(args: {
+  previous: GapCandidate[];
+  critiques: Critique[];
+}): GapCandidate[] {
+  const out: GapCandidate[] = [];
+  for (const candidate of args.previous) {
+    const critique = args.critiques.find((item) => item.subject === candidate.id);
+    if (critique?.verdict === "drop") continue;
+    if (hasIssue(critique, "no_quote") || hasIssue(critique, "duplicate_of_plan")) continue;
+    if (hasIssue(critique, "overlaps_sibling") && out.some((kept) => similarRecord(kept.statement, candidate.statement, 0.72))) {
+      continue;
+    }
+    let statement = candidate.statement;
+    if (hasIssue(critique, "too_long")) {
+      // Split the bundle: keep the first question, which is the atomic one.
+      statement = statement.split(/(?<=[.?!])\s+/)[0]!.trim() || statement;
+    }
+    const domain = hasIssue(critique, "domain_generic")
+      ? asDomain(guessDomain(`${candidate.name} ${statement}`), statement)
+      : candidate.domain;
+    out.push({
+      ...candidate,
+      statement,
+      domain,
+      name: statement === candidate.statement ? candidate.name : gapNameFromStatement(statement),
+    });
+  }
+  return out;
 }
 
 async function llmCritique(
@@ -237,9 +300,15 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     const outcome = await runAgenticCycle<GapCandidate>(ctx, "S2", {
       subjectOf: (candidate) => candidate.id,
       proposer: {
-        local: () => localProposals(documents),
+        local: ({ round, previous, critiques }) =>
+          round === 1 ? localProposals(documents) : reviseGapCandidates({ previous, critiques }),
         llm: canPrompt(ctx.route)
-          ? ({ hints }) => llmProposals(ctx, documents, hints)
+          ? ({ hints, round, critiques }) =>
+              llmProposals(
+                ctx,
+                documents,
+                round === 1 ? hints : [hints, revisionBrief({ round, critiques })].filter(Boolean).join("\n\n"),
+              )
           : undefined,
       },
       critic: async (candidates) => {
@@ -258,7 +327,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           const note = remote ? `${remote.note} | local: ${local.note}` : local.note;
           const verdict: Critique["verdict"] =
             remote?.verdict === "drop" || score < 35 ? "drop" : score >= 60 ? "keep" : "revise";
-          return { subject: candidate.id, verdict, note, score };
+          return { subject: candidate.id, verdict, note, score, issues: local.issues };
         });
       },
       judge: ({ candidates, critiques }) => {

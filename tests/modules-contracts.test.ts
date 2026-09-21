@@ -3,6 +3,13 @@ import { z } from "zod";
 import "@/modules";
 import { KERNEL_CONTRACT, STAGES, STAGE_IDS, type SynapseModule } from "@/modules/kernel/contracts";
 import { manifests, modulesForStage, registerModule } from "@/modules/kernel/registry";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  thresholdJudge,
+} from "@/modules/kernel/agentic";
+import { RunRecorder } from "@/modules/kernel/observability";
 import { canPrompt, defaultRoute, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID } from "@/modules/kernel/routing";
 import { digestAsPrompt } from "@/modules/kernel/hillclimb";
 import { scoresPassed } from "@/modules/kernel/evals";
@@ -64,6 +71,148 @@ describe("module contracts", () => {
       },
     } as unknown as SynapseModule<unknown, unknown>;
     expect(() => registerModule(stray)).toThrow(/contract/i);
+  });
+});
+
+describe("the locked agentic loop", () => {
+  type Candidate = { id: string; text: string };
+
+  function fakeContext(run: RunRecorder) {
+    return {
+      workspace_id: "test",
+      actor: { name: "Loop Test", function: "medical_affairs" as const },
+      role: "medical_affairs",
+      run,
+      route: defaultRoute("S2"),
+      complete: async () => {
+        throw new Error("the deterministic route does not prompt");
+      },
+    };
+  }
+
+  it("runs three proposer↔critic exchanges before the judge, and traces every round", async () => {
+    const recorder = new RunRecorder({
+      workspace_id: "test",
+      stage: "S2",
+      module_id: "loop.test",
+      module_version: "1.0.0",
+      actor: { name: "Loop Test", function: "medical_affairs" },
+      input: {},
+    });
+    const proposerCalls: number[] = [];
+    const criticRounds: number[] = [];
+
+    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder), "S2", {
+      subjectOf: (candidate) => candidate.id,
+      proposer: {
+        local: ({ round, previous, critiques }) => {
+          proposerCalls.push(round);
+          if (round === 1) {
+            return [
+              { id: "a", text: "keep me" },
+              { id: "b", text: "drop me" },
+              { id: "c", text: "fix me" },
+            ];
+          }
+          // Concede the drops, repair what the critic asked for.
+          return previous
+            .filter(
+              (candidate) =>
+                critiques.find((critique) => critique.subject === candidate.id)?.verdict !== "drop",
+            )
+            .map((candidate) =>
+              hasIssue(
+                critiques.find((critique) => critique.subject === candidate.id),
+                "needs_fix",
+              )
+                ? { ...candidate, text: "fixed" }
+                : candidate,
+            );
+        },
+      },
+      critic: (candidates, round) => {
+        criticRounds.push(round);
+        return candidates.map((candidate) => {
+          if (candidate.id === "b") {
+            return { subject: candidate.id, verdict: "drop" as const, note: "not a gap", score: 10 };
+          }
+          if (candidate.text === "fix me") {
+            return {
+              subject: candidate.id,
+              verdict: "revise" as const,
+              note: "needs a fix",
+              score: 45,
+              issues: ["needs_fix"],
+            };
+          }
+          return { subject: candidate.id, verdict: "keep" as const, note: "fine", score: 80 };
+        });
+      },
+      judge: thresholdJudge<Candidate>((candidate) => candidate.id, 50),
+    });
+
+    expect(criticRounds).toEqual([1, 2, 3]);
+    // One initial proposal plus one revision per exchange.
+    expect(proposerCalls).toEqual([1, 2, 3, 4]);
+    expect(outcome.rounds).toHaveLength(PROPOSER_CRITIC_EXCHANGES);
+    expect(outcome.rounds[0]!.in).toBe(3);
+    expect(outcome.rounds[0]!.dropped).toBe(1);
+    expect(outcome.rounds[0]!.out).toBe(2);
+    expect(outcome.rounds[2]!.in).toBe(2);
+
+    // The dialogue repaired "fix me" and withdrew "drop me" before the judge saw anything.
+    expect(outcome.judged.map((item) => item.subject).sort()).toEqual(["a", "c"]);
+    expect(outcome.accepted.find((candidate) => candidate.id === "c")?.text).toBe("fixed");
+    expect(outcome.rounds[2]!.avg_score).toBeGreaterThan(outcome.rounds[0]!.avg_score);
+
+    const stepNames = recorder.steps().map((step) => step.name);
+    expect(stepNames).toEqual([
+      "hillclimb:hints",
+      "round1:proposer",
+      "round1:critic",
+      "round1:proposer-revise",
+      "round2:critic",
+      "round2:proposer-revise",
+      "round3:critic",
+      "round3:proposer-revise",
+      "judge",
+      "exchanges",
+    ]);
+
+    const metricNames = outcome.metrics.map((metric) => metric.name);
+    expect(metricNames).toContain("exchanges");
+    expect(metricNames).toContain("dialogue_retention");
+    expect(metricNames).toContain("critic_score_gain");
+    expect(outcome.metrics.find((metric) => metric.name === "exchanges")!.value).toBe(
+      PROPOSER_CRITIC_EXCHANGES,
+    );
+    expect(outcome.metrics.find((metric) => metric.name === "critic_score_gain")!.value).toBeGreaterThan(0);
+  });
+
+  it("keeps running the exchanges when the proposer has nothing left to concede", async () => {
+    const recorder = new RunRecorder({
+      workspace_id: "test",
+      stage: "S4",
+      module_id: "loop.test",
+      module_version: "1.0.0",
+      actor: { name: "Loop Test", function: "medical_affairs" },
+      input: {},
+    });
+    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder), "S4", {
+      subjectOf: (candidate) => candidate.id,
+      proposer: { local: ({ round }) => (round === 1 ? [{ id: "only", text: "one" }] : []) },
+      critic: (candidates) =>
+        candidates.map((candidate) => ({
+          subject: candidate.id,
+          verdict: "drop" as const,
+          note: "no",
+          score: 5,
+        })),
+      judge: thresholdJudge<Candidate>((candidate) => candidate.id),
+    });
+    expect(outcome.rounds).toHaveLength(PROPOSER_CRITIC_EXCHANGES);
+    expect(outcome.judged).toHaveLength(0);
+    expect(outcome.metrics.find((metric) => metric.name === "dialogue_retention")!.value).toBe(0);
   });
 });
 

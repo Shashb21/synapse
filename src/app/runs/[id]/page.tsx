@@ -5,6 +5,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
 import { getRun } from "@/modules/kernel/observability";
+import type { AgenticRound } from "@/modules/kernel/agentic";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const run = await getRun(id);
   if (!run) notFound();
+  const exchanges =
+    (run.steps.find((step) => step.name === "exchanges")?.data as AgenticRound[] | undefined) ?? [];
 
   return (
     <AppShell active="runs">
@@ -105,6 +108,50 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           ) : null}
         </article>
       </section>
+
+      {exchanges.length > 0 ? (
+        <section className="mt-6 grid gap-2">
+          <h2 className="text-[15px] font-medium text-foreground">
+            Proposer ↔ critic exchanges
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            Locked: three exchanges before the judge sees anything. Each row is one critic response and
+            the revision the proposer made in answer to it.
+          </p>
+          <div className="overflow-x-auto border border-border bg-card/40">
+            <table className="w-full text-[11px]">
+              <thead className="text-muted-foreground">
+                <tr className="border-b border-border">
+                  <th className="px-2 py-1.5 text-left font-normal">Exchange</th>
+                  <th className="px-2 py-1.5 text-left font-normal">Proposer</th>
+                  <th className="px-2 py-1.5 text-right font-normal">In</th>
+                  <th className="px-2 py-1.5 text-right font-normal">Keep</th>
+                  <th className="px-2 py-1.5 text-right font-normal">Revise</th>
+                  <th className="px-2 py-1.5 text-right font-normal">Drop</th>
+                  <th className="px-2 py-1.5 text-right font-normal">Out</th>
+                  <th className="px-2 py-1.5 text-right font-normal">Avg critic score</th>
+                </tr>
+              </thead>
+              <tbody className="text-foreground">
+                {exchanges.map((round) => (
+                  <tr key={round.round} className="border-b border-border/60 last:border-0">
+                    <td className="px-2 py-1.5">Round {round.round}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">
+                      {round.proposer === "llm" ? "model" : "deterministic"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">{round.in}</td>
+                    <td className="px-2 py-1.5 text-right">{round.kept}</td>
+                    <td className="px-2 py-1.5 text-right">{round.to_revise}</td>
+                    <td className="px-2 py-1.5 text-right">{round.dropped}</td>
+                    <td className="px-2 py-1.5 text-right">{round.out}</td>
+                    <td className="px-2 py-1.5 text-right">{round.avg_score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-6 grid gap-2">
         <h2 className="text-[15px] font-medium text-foreground">Steps</h2>

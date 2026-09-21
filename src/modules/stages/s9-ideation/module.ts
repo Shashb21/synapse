@@ -4,7 +4,12 @@ import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { runAgenticCycle } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
@@ -334,18 +339,62 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       };
     }
 
+    /** The proposer answering the critic: withdraw duplicates, specify what was vague. */
+    const reviseProposals = (args: { previous: Proposal[]; critiques: Critique[] }): Proposal[] => {
+      const out: Proposal[] = [];
+      for (const proposal of args.previous) {
+        const critique = args.critiques.find((item) => item.subject === proposal.id);
+        if (critique?.verdict === "drop" || hasIssue(critique, "already_in_library")) continue;
+        const gap = gaps.find((item) => item.id === proposal.gap_id);
+        const design = { ...proposal.design };
+        if (hasIssue(critique, "missing_comparator")) {
+          design.comparator = "Regional standard of care for this line of therapy";
+        }
+        if (hasIssue(critique, "missing_outcomes") && gap) {
+          design.outcomes = `Outcomes named in the gap: ${gap.statement}`.slice(0, 160);
+        }
+        if (hasIssue(critique, "no_duration")) design.duration_months = 9;
+        out.push({
+          ...proposal,
+          design,
+          rationale: proposal.rationale.trim()
+            ? proposal.rationale
+            : `Answers ${proposal.gap_id} with ${design.study_design.toLowerCase()}.`,
+        });
+      }
+      return out;
+    };
+
     const outcome = await runAgenticCycle<Proposal>(ctx, "S9", {
       subjectOf: (proposal) => proposal.id,
       proposer: {
-        local: () => localProposals({ gaps, perGap: input.per_gap }),
+        local: ({ round, previous, critiques }) =>
+          round === 1 ? localProposals({ gaps, perGap: input.per_gap }) : reviseProposals({ previous, critiques }),
         llm: canPrompt(ctx.route)
-          ? ({ hints }) => llmProposals(ctx, { gaps, perGap: input.per_gap, hints })
+          ? ({ hints, round, critiques }) =>
+              llmProposals(ctx, {
+                gaps,
+                perGap: input.per_gap,
+                hints:
+                  round === 1
+                    ? hints
+                    : [
+                        hints,
+                        `Exchange ${round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected: ${critiques
+                          .filter((critique) => critique.verdict !== "keep")
+                          .map((critique) => `${critique.subject} — ${critique.note}`)
+                          .join("; ")}. Revise those designs and keep their ids.`,
+                      ]
+                        .filter(Boolean)
+                        .join("\n\n"),
+              })
           : undefined,
       },
       critic: (proposals) =>
         proposals.map((proposal) => {
           const gap = gaps.find((item) => item.id === proposal.gap_id);
           const notes: string[] = [];
+          const issues: string[] = [];
           let score = 68;
           if (
             state.tactics.some(
@@ -356,24 +405,34 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           ) {
             score -= 30;
             notes.push("a library tactic already covers this");
+            issues.push("already_in_library");
           }
           if (gap?.domain === "comparative_effectiveness" && /to be specified/i.test(proposal.design.comparator)) {
             score -= 20;
             notes.push("comparative gap with no comparator specified");
+            issues.push("missing_comparator");
+          }
+          if (/to be specified/i.test(proposal.design.outcomes)) {
+            score -= 10;
+            notes.push("outcomes not named");
+            issues.push("missing_outcomes");
           }
           if (proposal.design.duration_months <= 0) {
             score -= 15;
             notes.push("no credible duration");
+            issues.push("no_duration");
           }
           if (!proposal.rationale.trim()) {
             score -= 10;
             notes.push("no rationale");
+            issues.push("no_rationale");
           }
           return {
             subject: proposal.id,
             verdict: score >= 60 ? ("keep" as const) : score >= 35 ? ("revise" as const) : ("drop" as const),
             note: notes.length ? notes.join("; ") : "runnable design that answers the gap",
             score: Math.max(0, Math.min(100, score)),
+            issues,
           };
         }),
       judge: ({ candidates, critiques }) => {

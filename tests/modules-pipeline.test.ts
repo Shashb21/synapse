@@ -275,13 +275,46 @@ describe("modular pipeline, S0 to S10", () => {
     }
     const extract = runs.find((record) => record.stage === "S2")!;
     const detail = await getRun(extract.id);
-    expect(detail?.steps.some((step) => step.name === "proposer:local")).toBe(true);
-    expect(detail?.steps.some((step) => step.name === "critic")).toBe(true);
+    expect(detail?.steps.some((step) => step.name === "round1:proposer")).toBe(true);
+    expect(detail?.steps.some((step) => step.name === "round1:critic")).toBe(true);
     expect(detail?.steps.some((step) => step.name === "judge")).toBe(true);
     expect(detail?.route?.provider_id).toBe("deterministic-local");
     expect(detail?.evals.some((score) => score.name === "accept_rate")).toBe(true);
     const evalRuns = await listEvalRuns({ stage: "S2" });
     expect(evalRuns.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("gives every agentic stage three proposer↔critic exchanges before its judge", async () => {
+    const runs = await listRuns({ limit: 200 });
+    for (const stage of ["S2", "S3", "S4", "S8", "S9"] as const) {
+      const record = runs.find((candidate) => candidate.stage === stage && candidate.status === "ok");
+      expect(record, `no successful ${stage} run`).toBeTruthy();
+      const detail = await getRun(record!.id);
+      const names = detail!.steps.map((step) => step.name);
+      for (const round of [1, 2, 3]) {
+        expect(names, `${stage} round ${round} critic`).toContain(`round${round}:critic`);
+        expect(names, `${stage} round ${round} revision`).toContain(`round${round}:proposer-revise`);
+      }
+      // The judge comes last, after the third exchange.
+      expect(names.indexOf("judge")).toBeGreaterThan(names.indexOf("round3:critic"));
+      const exchanges = detail!.steps.find((step) => step.name === "exchanges");
+      expect((exchanges?.data as unknown[] | undefined)?.length).toBe(3);
+      expect(detail!.evals.find((score) => score.name === "exchanges")?.value).toBe(3);
+      expect(detail!.evals.some((score) => score.name === "dialogue_retention")).toBe(true);
+      expect(detail!.evals.some((score) => score.name === "critic_score_gain")).toBe(true);
+    }
+  }, 60_000);
+
+  it("runs the split proposal through the same three exchanges", async () => {
+    const consolidated = await run<ConsolidationOutput>("S7", {});
+    const partial = consolidated.output.unresolved_partials[0];
+    if (!partial) return;
+    const result = await runStage({ stage: "S6", input: { gap_id: partial.gap_id }, ...LEAD });
+    const detail = await getRun(result.run_id);
+    const names = detail!.steps.map((step) => step.name);
+    expect(names).toContain("round3:critic");
+    expect(names.indexOf("judge")).toBeGreaterThan(names.indexOf("round3:critic"));
+    expect((result.output as { proposal: unknown }).proposal).toBeTruthy();
   }, 60_000);
 
   it("rejects input that breaks a module's contract and records the failed run", async () => {

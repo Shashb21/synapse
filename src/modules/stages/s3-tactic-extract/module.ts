@@ -3,7 +3,13 @@ import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { runAgenticCycle, scoreCritic } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  scoreCritic,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import {
@@ -137,6 +143,39 @@ async function llmProposals(
   return out;
 }
 
+/** The proposer answering the critic: concede drops, fatten a thin question from its quote. */
+function reviseTacticCandidates(args: {
+  previous: TacticCandidate[];
+  critiques: Critique[];
+}): TacticCandidate[] {
+  const out: TacticCandidate[] = [];
+  for (const candidate of args.previous) {
+    const critique = args.critiques.find((item) => item.subject === candidate.id);
+    if (critique?.verdict === "drop") continue;
+    if (hasIssue(critique, "already_in_library") || hasIssue(critique, "no_quote")) continue;
+    let evidence_question = candidate.evidence_question;
+    if (hasIssue(critique, "thin_question") && candidate.source_quote.trim().length > evidence_question.length) {
+      evidence_question = candidate.source_quote.trim();
+    }
+    if (evidence_question.split(/\s+/).length < 5) continue;
+    out.push({ ...candidate, evidence_question });
+  }
+  return out;
+}
+
+function tacticRevisionBrief(args: { round: number; critiques: Critique[] }): string {
+  const objections = args.critiques.filter((critique) => critique.verdict !== "keep");
+  if (objections.length === 0) {
+    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: nothing was objected to. Sharpen wording only.`;
+  }
+  return [
+    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. Answer the critic, keeping the id of anything you retain:`,
+    ...objections.map(
+      (critique) => `- ${critique.subject} (${critique.verdict}, ${critique.score}/100): ${critique.note}`,
+    ),
+  ].join("\n");
+}
+
 export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtractOutput> = {
   manifest: {
     id: "s3-tactic-extract.pcj",
@@ -169,21 +208,34 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     const outcome = await runAgenticCycle<TacticCandidate>(ctx, "S3", {
       subjectOf: (candidate) => candidate.id,
       proposer: {
-        local: () => localProposals(documents),
-        llm: canPrompt(ctx.route) ? ({ hints }) => llmProposals(ctx, documents, hints) : undefined,
+        local: ({ round, previous, critiques }) =>
+          round === 1 ? localProposals(documents) : reviseTacticCandidates({ previous, critiques }),
+        llm: canPrompt(ctx.route)
+          ? ({ hints, round, critiques }) =>
+              llmProposals(
+                ctx,
+                documents,
+                round === 1
+                  ? hints
+                  : [hints, tacticRevisionBrief({ round, critiques })].filter(Boolean).join("\n\n"),
+              )
+          : undefined,
       },
       critic: scoreCritic<TacticCandidate>(
         (candidate) => candidate.id,
         (candidate) => {
           let score = 65;
           const notes: string[] = [];
+          const issues: string[] = [];
           if (candidate.evidence_question.split(/\s+/).length < 5) {
             score -= 25;
             notes.push("evidence question too thin");
+            issues.push("thin_question");
           }
           if (candidate.status === "proposed") {
             score -= 8;
             notes.push("status only proposed — does not close a gap");
+            issues.push("status_proposed");
           }
           if (
             library.some(
@@ -194,14 +246,17 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
           ) {
             score -= 30;
             notes.push("already in the tactic library");
+            issues.push("already_in_library");
           }
           if (!candidate.source_quote.trim()) {
             score -= 15;
             notes.push("no source quote");
+            issues.push("no_quote");
           }
           return {
             score: Math.max(0, Math.min(100, score)),
             note: notes.length ? notes.join("; ") : "real inventory item with a clear question",
+            issues,
           };
         },
       ),

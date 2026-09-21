@@ -3,7 +3,12 @@ import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { runAgenticCycle } from "@/modules/kernel/agentic";
+import {
+  PROPOSER_CRITIC_EXCHANGES,
+  hasIssue,
+  runAgenticCycle,
+  type Critique,
+} from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { assignTacticToGap, loadState } from "@/lib/iegp/store";
@@ -169,6 +174,44 @@ async function llmProposals(
   return out;
 }
 
+/**
+ * The proposer answering the critic: concede dropped edges, and where a gap is
+ * still over its edge budget, give up its weakest edge rather than argue for it.
+ */
+function reviseEdges(args: {
+  previous: Edge[];
+  critiques: Critique[];
+  maxPerGap: number;
+}): Edge[] {
+  const kept = args.previous.filter((edge) => {
+    const critique = args.critiques.find((item) => item.subject === key(edge));
+    if (critique?.verdict === "drop") return false;
+    if (hasIssue(critique, "below_floor")) return false;
+    if (hasIssue(critique, "no_rationale")) return false;
+    return true;
+  });
+  const perGap = new Map<string, Edge[]>();
+  for (const edge of [...kept].sort((a, b) => b.confidence - a.confidence || b.score - a.score)) {
+    const list = perGap.get(edge.gap_id) ?? [];
+    if (list.length < args.maxPerGap) list.push(edge);
+    perGap.set(edge.gap_id, list);
+  }
+  return [...perGap.values()].flat();
+}
+
+function mappingRevisionBrief(args: { round: number; critiques: Critique[] }): string {
+  const objections = args.critiques.filter((critique) => critique.verdict !== "keep");
+  if (objections.length === 0) {
+    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: every edge was kept. Sharpen rationales only.`;
+  }
+  return [
+    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected to these edges. Withdraw the ones you cannot justify and restate the rationale for the rest:`,
+    ...objections.map(
+      (critique) => `- ${critique.subject} (${critique.verdict}, ${critique.score}/100): ${critique.note}`,
+    ),
+  ].join("\n");
+}
+
 export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
@@ -191,21 +234,45 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     const outcome = await runAgenticCycle<Edge>(ctx, "S4", {
       subjectOf: (edge) => key(edge),
       proposer: {
-        local: () => localProposals(state, input),
-        llm: canPrompt(ctx.route) ? ({ hints }) => llmProposals(ctx, state, input, hints) : undefined,
+        local: ({ round, previous, critiques }) =>
+          round === 1
+            ? localProposals(state, input)
+            : reviseEdges({ previous, critiques, maxPerGap: input.max_per_gap }),
+        llm: canPrompt(ctx.route)
+          ? ({ hints, round, critiques }) =>
+              llmProposals(
+                ctx,
+                state,
+                input,
+                round === 1
+                  ? hints
+                  : [hints, mappingRevisionBrief({ round, critiques })].filter(Boolean).join("\n\n"),
+              )
+          : undefined,
       },
       critic: (edges) =>
         edges.map((edge) => {
           const blended = Math.round((edge.score + edge.confidence) / 2);
           const notes: string[] = [];
-          if (edge.score < MAPPING_SCORE_FLOOR) notes.push("below the dimension-score floor");
-          if (edge.confidence < 40) notes.push("low model confidence");
-          if (edge.rationale.length === 0) notes.push("no rationale");
+          const issues: string[] = [];
+          if (edge.score < MAPPING_SCORE_FLOOR) {
+            notes.push("below the dimension-score floor");
+            issues.push("below_floor");
+          }
+          if (edge.confidence < 40) {
+            notes.push("low model confidence");
+            issues.push("low_confidence");
+          }
+          if (edge.rationale.length === 0) {
+            notes.push("no rationale");
+            issues.push("no_rationale");
+          }
           return {
             subject: key(edge),
             verdict: blended >= 60 ? ("keep" as const) : blended >= 40 ? ("revise" as const) : ("drop" as const),
             note: notes.length ? notes.join("; ") : edge.rationale.slice(0, 2).join("; "),
             score: blended,
+            issues,
           };
         }),
       judge: ({ candidates, critiques }) => {
