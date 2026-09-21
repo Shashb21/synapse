@@ -81,6 +81,26 @@ test.describe("platform surfaces", () => {
     await expect(page.getByRole("heading", { name: /S2 · Evidence gap extraction/ })).toBeVisible();
   });
 
+  test("saving the IEGP as final versions it and repaints in place", async ({ page }) => {
+    await runStage(page, "S3");
+    await runStage(page, "S4");
+    await runStage(page, "S8");
+    await runStage(page, "S10", { persist: true });
+
+    await page.goto("/timeline");
+    await expect(page.getByRole("heading", { name: /^iegp timeline$/i })).toBeVisible();
+    await expect(page.locator("svg[role='img']")).toBeVisible();
+
+    await page.getByRole("button", { name: /save as final/i }).click();
+    await page.getByPlaceholder(/why this decision/i).fill("Signed off in the e2e review");
+    await page.getByRole("textbox", { name: /^name$/i }).fill("E2E Platform");
+    await page.getByRole("button", { name: /^save$/i }).click();
+
+    // No reload: the server component repaints with the new version.
+    await expect(page.getByText(/Signed off in the e2e review/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/^Saved v\d+ ·/)).toContainText(/final/i);
+  });
+
   test("an edit rationale from a gate reaches the hillclimb feed", async ({ page }) => {
     const state = await page.request.get("/api/plan");
     expect(state.ok()).toBeTruthy();

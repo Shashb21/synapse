@@ -271,10 +271,10 @@ export function GanttChart({
               <rect x={0} y={row.y} width={width} height={row.height} fill={palette.card} />
               <rect x={0} y={row.y} width={3} height={row.height} fill={bandColour(row.lane)} />
               <text x={10} y={row.y + 16} fill={palette.foreground} fontSize={11} letterSpacing={0.3}>
-                {row.label.toUpperCase()}
+                {truncate(row.label.toUpperCase(), 20)}
               </text>
-              <text x={LABEL_W - 12} y={row.y + 16} fill={palette.muted} fontSize={10} textAnchor="end">
-                {row.count === 1 ? "1 activity" : `${row.count} activities`}
+              <text x={LABEL_W - 10} y={row.y + 16} fill={palette.muted} fontSize={10} textAnchor="end">
+                {row.count}
               </text>
             </g>
           );
