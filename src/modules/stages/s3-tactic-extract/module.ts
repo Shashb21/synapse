@@ -307,6 +307,46 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       evals: outcome.metrics,
     };
   },
+  evals: {
+    async cases() {
+      const documents = await listParsedDocuments();
+      return documents.slice(0, 3).map((document) => ({
+        name: document.source_id,
+        input: { document_ids: [document.id], dry_run: true },
+      }));
+    },
+    score({ output }) {
+      const accepted = output.accepted;
+      const real = accepted.filter((candidate) => candidate.status !== "proposed").length;
+      // Nothing accepted means the library already covers the document, which is
+      // not a quality failure, so those cases carry no target.
+      if (accepted.length === 0) {
+        return [
+          { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
+          { name: "real_inventory_share", value: 0, unit: "ratio", detail: "no new candidates" },
+        ];
+      }
+      return [
+        {
+          name: "accepted_with_quote",
+          value:
+            accepted.length === 0
+              ? 0
+              : Number(
+                  (accepted.filter((candidate) => candidate.source_quote.trim().length > 0).length /
+                    accepted.length).toFixed(3),
+                ),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "real_inventory_share",
+          value: accepted.length === 0 ? 0 : Number((real / accepted.length).toFixed(3)),
+          unit: "ratio",
+        },
+      ];
+    },
+  },
 };
 
 registerModule(tacticExtractModule);

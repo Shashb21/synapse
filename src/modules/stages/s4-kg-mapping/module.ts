@@ -331,6 +331,33 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
       ],
     };
   },
+  evals: {
+    async cases() {
+      return [{ name: "workspace", input: { max_per_gap: 6, dry_run: true } }];
+    },
+    score({ output }) {
+      const judged = output.accepted.length + output.rejected.length;
+      const withRationale = output.accepted.filter((edge) => edge.rationale.length > 0).length;
+      return [
+        {
+          name: "edges_with_rationale",
+          value: output.accepted.length === 0 ? 0 : Number((withRationale / output.accepted.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "selectivity",
+          value: judged === 0 ? 0 : Number((output.accepted.length / judged).toFixed(3)),
+          unit: "ratio",
+        },
+        {
+          name: "gaps_left_unmapped",
+          value: output.graph.gaps_with_no_edge,
+          unit: "count",
+        },
+      ];
+    },
+  },
 };
 
 registerModule(kgMappingModule);

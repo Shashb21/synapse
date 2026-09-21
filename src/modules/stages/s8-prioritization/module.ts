@@ -302,6 +302,37 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
       ],
     };
   },
+  evals: {
+    async cases() {
+      return [{ name: "open-list", input: { dry_run: true } }];
+    },
+    score({ output }) {
+      const placements = output.placements;
+      const complete = placements.filter(
+        (placement) => output.axes.every((axis) => typeof placement.axis_scores[axis.id] === "number"),
+      ).length;
+      const explained = placements.filter((placement) => placement.rationale.trim().length > 0).length;
+      return [
+        {
+          name: "axis_scores_complete",
+          value: placements.length === 0 ? 0 : Number((complete / placements.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "suggestions_explained",
+          value: placements.length === 0 ? 0 : Number((explained / placements.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "band_spread",
+          value: new Set(placements.map((placement) => placement.suggested_band)).size,
+          unit: "count",
+        },
+      ];
+    },
+  },
 };
 
 registerModule(prioritizationModule);

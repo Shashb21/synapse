@@ -379,6 +379,12 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     score({ output }) {
       const accepted = output.accepted.length;
       const total = accepted + output.rejected.length;
+      if (accepted === 0) {
+        return [
+          { name: "gold_accept_rate", value: 0, unit: "ratio", detail: "no new candidates" },
+          { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
+        ];
+      }
       return [
         { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio", target: 0.3 },
         { name: "accepted_with_quote", value: accepted === 0 ? 0 : Number((output.accepted.filter((c) => c.source_quote.trim().length > 0).length / accepted).toFixed(3)), unit: "ratio", target: 1 },
