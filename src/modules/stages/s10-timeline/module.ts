@@ -4,7 +4,7 @@ import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
-import { recordEdit } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, SynapseModule } from "@/modules/kernel/contracts";
 import { loadState } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -160,6 +160,61 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   },
 };
 
+timelineModule.evals = {
+  async cases() {
+    // End-to-end gold case: the timeline the validated state currently implies.
+    return [{ name: "validated-state", input: { persist: false, anchor: "2026-01-01" } }];
+  },
+  score({ output }) {
+    const activities = output.activities;
+    const scheduled = activities.length;
+    const unscheduled = output.unscheduled.length;
+    const dated = activities.filter((activity) => activity.end_date >= activity.start_date).length;
+    const gated = activities
+      .filter((activity) => activity.depends_on.length > 0)
+      .filter((activity) =>
+        activity.depends_on.every((upstreamId) => {
+          const upstream = activities.find((candidate) => candidate.id === upstreamId);
+          if (!upstream) return false;
+          return activity.start_date >= (upstream.readout_date ?? upstream.end_date);
+        }),
+      ).length;
+    const withDependencies = activities.filter((activity) => activity.depends_on.length > 0).length;
+    return [
+      {
+        name: "open_gaps_scheduled",
+        value:
+          scheduled + unscheduled === 0 ? 0 : Number((scheduled / (scheduled + unscheduled)).toFixed(3)),
+        unit: "ratio",
+        target: 0.8,
+      },
+      {
+        name: "dates_coherent",
+        value: scheduled === 0 ? 0 : Number((dated / scheduled).toFixed(3)),
+        unit: "ratio",
+        target: 1,
+      },
+      {
+        name: "dependencies_respect_readouts",
+        value: withDependencies === 0 ? 1 : Number((gated / withDependencies).toFixed(3)),
+        unit: "ratio",
+        target: 1,
+      },
+      {
+        name: "every_activity_carries_a_gap",
+        value:
+          scheduled === 0
+            ? 0
+            : Number(
+                (activities.filter((activity) => activity.gap_ids.length > 0).length / scheduled).toFixed(3),
+              ),
+        unit: "ratio",
+        target: 1,
+      },
+    ];
+  },
+};
+
 registerModule(timelineModule);
 
 /** A user moving an activity is an edit, so it needs a rationale like any other. */
@@ -174,6 +229,7 @@ export async function updateTimelineActivity(args: {
   workspace_id?: string;
 }) {
   await ensurePlatformSchema();
+  const rationale = requireRationale(args.rationale);
   const rows = await db()
     .select()
     .from(t.timelineActivities)
@@ -200,7 +256,7 @@ export async function updateTimelineActivity(args: {
     action: "edit",
     before: `${current.start_date} → ${current.end_date} (readout ${current.readout_date ?? "—"})`,
     after: `${next.start_date} → ${next.end_date} (readout ${next.readout_date ?? "—"})`,
-    rationale: args.rationale,
+    rationale,
     actor: args.actor,
   });
   return next;
@@ -259,6 +315,7 @@ export async function savePlan(args: {
   actor: Actor;
   workspace_id?: string;
 }): Promise<IegpPlanRecord> {
+  const note = requireRationale(args.note);
   const [model, state] = await Promise.all([timelineModel(), loadState()]);
   const previous = await latestPlan();
   const version = (previous?.version ?? 0) + 1;
@@ -279,7 +336,7 @@ export async function savePlan(args: {
     version,
     status: args.status,
     snapshot,
-    note: args.note.trim() || null,
+    note,
     saved_by: args.actor.name,
     saved_function: args.actor.function,
     saved_at: nowIso(),
@@ -294,7 +351,7 @@ export async function savePlan(args: {
     action: "validate",
     before: previous ? `v${previous.version} ${previous.status}` : "none",
     after: `v${version} ${args.status}`,
-    rationale: args.note,
+    rationale: note,
     actor: args.actor,
   });
   return {

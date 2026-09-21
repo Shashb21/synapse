@@ -11,7 +11,7 @@ import {
   type Critique,
 } from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
-import { recordEdit } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { loadState, lockPriority } from "@/lib/iegp/store";
@@ -440,6 +440,8 @@ export async function validatePlacement(args: {
   workspace_id?: string;
 }): Promise<PlacementRecord> {
   await ensurePlatformSchema();
+  // Rationale first: a band must not move before the reason for it is known good.
+  const rationale = requireRationale(args.rationale);
   const rows = await db()
     .select()
     .from(t.priorityPlacements)
@@ -450,7 +452,7 @@ export async function validatePlacement(args: {
   const values = {
     band: args.band,
     validated: true,
-    rationale: args.rationale.trim(),
+    rationale,
     actor_name: args.actor.name,
     actor_function: args.actor.function,
     at: nowIso(),
@@ -465,7 +467,7 @@ export async function validatePlacement(args: {
     action: current.suggested_band === args.band ? "accept" : "edit",
     before: current.suggested_band,
     after: args.band,
-    rationale: args.rationale,
+    rationale,
     actor: args.actor,
   });
   // Keep the legacy residual-keyed board in step when the gap has a residual.
@@ -476,7 +478,7 @@ export async function validatePlacement(args: {
       await lockPriority({
         residual_id: residual.id,
         band: args.band,
-        override_reason: args.rationale,
+        override_reason: rationale,
         actor_name: args.actor.name,
         actor_function: args.actor.function,
       });

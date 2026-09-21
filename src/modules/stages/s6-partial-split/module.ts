@@ -12,6 +12,7 @@ import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { loadState, splitPartialGap } from "@/lib/iegp/store";
 import {
   countingCoverages,
+  displayedGapStatus,
   draftResidualGapSuggestion,
   gapNameFromStatement,
   uncoveredDimensions,
@@ -310,6 +311,37 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
         : `Proposed a split for ${gap.id}`,
       evals: outcome.metrics,
     };
+  },
+};
+
+partialSplitModule.evals = {
+  async cases() {
+    // Gold cases are the partially addressed gaps in the workspace. Proposing is
+    // read-only, so scoring never applies a split.
+    const state = await loadState();
+    return state.gaps
+      .filter((gap) => !gap.retired && displayedGapStatus(gap) === "validated_partial")
+      .slice(0, 4)
+      .map((gap) => ({ name: gap.id, input: { gap_id: gap.id } }));
+  },
+  score({ case: testCase, output }) {
+    const proposal = output.proposal;
+    return [
+      { name: "proposal_returned", value: proposal ? 1 : 0, unit: "ratio", target: 1 },
+      {
+        name: "leftover_is_new_text",
+        value: proposal && proposal.open_name.trim() && proposal.open_name !== proposal.addressed_name ? 1 : 0,
+        unit: "ratio",
+        target: 1,
+        detail: testCase.name,
+      },
+      {
+        name: "addressed_slice_has_a_tactic",
+        value: proposal && proposal.addressed_tactic_ids.length > 0 ? 1 : 0,
+        unit: "ratio",
+        target: 1,
+      },
+    ];
   },
 };
 

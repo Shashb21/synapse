@@ -11,7 +11,7 @@ import {
   type Critique,
 } from "@/modules/kernel/agentic";
 import { canPrompt } from "@/modules/kernel/routing";
-import { recordEdit } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import {
   TACTIC_TYPES,
@@ -506,6 +506,57 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   },
 };
 
+ideationModule.evals = {
+  async cases() {
+    return [{ name: "high-priority-open-gaps", input: { per_gap: 2, dry_run: true } }];
+  },
+  score({ output }) {
+    const proposals = output.proposals;
+    // Nothing left to propose (every High gap already has its tactics) is not a
+    // quality failure, so that case carries no target.
+    if (proposals.length === 0) {
+      return [
+        { name: "gaps_covered", value: 0, unit: "ratio", detail: "no proposals" },
+        { name: "designs_specified", value: 0, unit: "ratio", detail: "no proposals" },
+        { name: "designs_runnable", value: 0, unit: "ratio", detail: "no proposals" },
+      ];
+    }
+    const specified = proposals.filter(
+      (proposal) =>
+        !/to be specified/i.test(proposal.design.comparator) &&
+        !/to be specified/i.test(proposal.design.outcomes),
+    ).length;
+    const runnable = proposals.filter(
+      (proposal) => proposal.design.duration_months > 0 && proposal.design.study_design.trim().length > 0,
+    ).length;
+    return [
+      {
+        name: "gaps_covered",
+        value:
+          output.gaps_considered === 0
+            ? 0
+            : Number(
+                (new Set(proposals.map((proposal) => proposal.gap_id)).size / output.gaps_considered).toFixed(3),
+              ),
+        unit: "ratio",
+        target: 1,
+      },
+      {
+        name: "designs_specified",
+        value: proposals.length === 0 ? 0 : Number((specified / proposals.length).toFixed(3)),
+        unit: "ratio",
+        target: 0.8,
+      },
+      {
+        name: "designs_runnable",
+        value: proposals.length === 0 ? 0 : Number((runnable / proposals.length).toFixed(3)),
+        unit: "ratio",
+        target: 1,
+      },
+    ];
+  },
+};
+
 registerModule(ideationModule);
 
 export type IdeationProposalRecord = {
@@ -555,6 +606,9 @@ export async function decideIdeationProposal(args: {
   workspace_id?: string;
 }): Promise<{ tactic_id: string | null }> {
   await ensurePlatformSchema();
+  // The rationale is a precondition, not an afterthought: check it before anything
+  // is created or a status moves.
+  const rationale = requireRationale(args.rationale);
   const rows = await db()
     .select()
     .from(t.ideationProposals)
@@ -595,7 +649,7 @@ export async function decideIdeationProposal(args: {
           tactic_id,
           actor_name: args.actor.name,
           actor_function: args.actor.function,
-          note: `Accepted ideation proposal — ${args.rationale}`,
+          note: `Accepted ideation proposal — ${rationale}`,
         });
       } catch {
         // createProposedTactic may already have joined the pair.
@@ -609,7 +663,7 @@ export async function decideIdeationProposal(args: {
       status: args.decision === "accept" ? "accepted" : "rejected",
       decided_by: args.actor.name,
       decided_at: nowIso(),
-      decision_rationale: args.rationale.trim(),
+      decision_rationale: rationale,
       tactic_id,
     })
     .where(eq(t.ideationProposals.id, args.id));
@@ -623,7 +677,7 @@ export async function decideIdeationProposal(args: {
     action: args.decision,
     before: "proposed",
     after: args.decision === "accept" ? "accepted" : "rejected",
-    rationale: args.rationale,
+    rationale,
     actor: args.actor,
   });
 

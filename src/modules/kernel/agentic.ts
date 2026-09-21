@@ -79,6 +79,12 @@ export type AgenticOutcome<C> = {
   rounds: AgenticRound[];
   /** Critiques from the last exchange, the ones the judge saw. */
   critiques: Critique[];
+  /**
+   * Candidates the proposer withdrew during the dialogue, with the last critique
+   * against them. They never reach the judge, so without this they would vanish
+   * from the record.
+   */
+  withdrawn: { subject: string; note: string; score: number; issues?: string[] }[];
   judged: JudgedCandidate<C>[];
   accepted: C[];
   rejected: JudgedCandidate<C>[];
@@ -129,6 +135,7 @@ export async function runAgenticCycle<C>(
   let critiques: Critique[] = [];
   const rounds: AgenticRound[] = [];
   const firstRoundScores: number[] = [];
+  const lastCritiqueBySubject = new Map<string, Critique>();
 
   for (let round = 1; round <= PROPOSER_CRITIC_EXCHANGES; round += 1) {
     const incoming = candidates.length;
@@ -139,6 +146,7 @@ export async function runAgenticCycle<C>(
     );
     const scores = critiques.map((critique) => critique.score);
     if (round === 1) firstRoundScores.push(...scores);
+    for (const critique of critiques) lastCritiqueBySubject.set(critique.subject, critique);
 
     // The proposer answers this critique. On the last exchange its answer is what
     // the judge sees, scored by the critique that produced it.
@@ -165,6 +173,17 @@ export async function runAgenticCycle<C>(
 
   const surviving = new Set(candidates.map((candidate) => cycle.subjectOf(candidate)));
   const judgeCritiques = critiques.filter((critique) => surviving.has(critique.subject));
+  const withdrawn = [...lastCritiqueBySubject.values()]
+    .filter((critique) => !surviving.has(critique.subject))
+    .map((critique) => ({
+      subject: critique.subject,
+      note: critique.note,
+      score: critique.score,
+      issues: critique.issues,
+    }));
+  if (withdrawn.length > 0) {
+    ctx.run.note("withdrawn-in-dialogue", withdrawn, `${withdrawn.length} candidate(s) never reached the judge`);
+  }
   const judged = await ctx.run.step(
     "judge",
     () => cycle.judge({ candidates, critiques: judgeCritiques }),
@@ -194,6 +213,7 @@ export async function runAgenticCycle<C>(
       unit: "ratio",
       detail: `round 1 ${Math.round(firstAvg)} → round ${rounds.length} ${lastAvg}`,
     },
+    { name: "withdrawn_in_dialogue", value: withdrawn.length, unit: "count" },
     { name: "accept_rate", value: Number(acceptRate.toFixed(3)), unit: "ratio", target: 0.3 },
     { name: "judge_confidence", value: Number(judgeConfidence.toFixed(3)), unit: "ratio", target: 0.5 },
   ];
@@ -205,6 +225,7 @@ export async function runAgenticCycle<C>(
     proposed,
     rounds,
     critiques,
+    withdrawn,
     judged,
     accepted,
     rejected,

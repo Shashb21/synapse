@@ -108,6 +108,40 @@ through the same domain code.
 | `/ideation` | S9 proposal review |
 | `/timeline` | S10 Gantt: the final IEGP, saved as final and exportable |
 
+## Testing
+
+| Command | What it runs |
+| --- | --- |
+| `npm test` | Vitest: kernel contracts, the three-exchange loop, per-stage pure logic, and an S0→S10 pipeline suite against Postgres. |
+| `npm run test:e2e` | Every Playwright spec. |
+| `npm run test:e2e:features` | Feature-by-feature end-to-end specs under `e2e/features/`, one file per locked feature. |
+| `npm run test:evals` | Only the gold-case harness tests, one per stage that ships one. |
+| `npm run test:e2e:feature -- "S8 prioritization"` | One feature, by name. |
+
+`e2e/features/` holds one spec per locked feature, so a feature fails on its own:
+
+| Spec | Feature |
+| --- | --- |
+| `s0-upload.spec.ts` | Upload, checksum, dedupe, no extraction |
+| `s1-parse.spec.ts` | Parse to blocks, quality signals, per-file failure |
+| `s2-gap-extract.spec.ts` | Gap extraction, three exchanges, provenance on every gap |
+| `s3-tactic-extract.spec.ts` | Tactic extraction, library dedupe via mid-dialogue withdrawal |
+| `s4-kg-mapping.spec.ts` | Many-to-many edges, rationale per edge, per-gap budget |
+| `s5-validation.spec.ts` | Classification, validation, rationale mandatory, override needs a reason |
+| `s6-partial-split.spec.ts` | Split proposal, dialog fill, apply only what the user validates |
+| `s7-consolidation.spec.ts` | Open/addressed lists, disjointness, consistency flags |
+| `s8-prioritization.spec.ts` | Configurable axes, matrix cards, band validation, re-run safety |
+| `s9-ideation.spec.ts` | High-only ideation, runnable designs, accept/reject with rationale |
+| `s10-timeline.spec.ts` | Gantt render, activity detail, PNG export, save as final, dependency gating |
+| `control-panel-oauth.spec.ts` | Five OAuth providers, Grok default, Claude one-click, no API-key field |
+| `observability-trace.spec.ts` | Run traces, all three rounds on the page, failed runs kept |
+| `hillclimb-rationale.spec.ts` | Edit rationale → signal → next proposer brief |
+
+Specs seed their own state through the module API (`e2e/support/synapse.ts`) and assert on the run
+ledger rather than page text, so a click that lands before hydration cannot produce a false pass. With
+no OAuth client configured the specs assert that the trace says the route degraded to
+`deterministic-local`, rather than skipping the feature.
+
 ## Adding or upgrading a module
 
 1. Create `src/modules/stages/<stage>-<slug>/module.ts` exporting a

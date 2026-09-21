@@ -51,11 +51,17 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
-    await expect(page.getByText(/A gap is the decision object/i)).toBeVisible();
+    await expect(
+      page.getByText(/Every extracted gap is shown with its mapped tactics and computed status/i),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
     await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /validate status|split or rewrite/i }).first()).toBeVisible();
+    await expect(
+      page
+        .getByRole("button", { name: /confirm status|resolve this partially addressed gap/i })
+        .first(),
+    ).toBeVisible();
   });
 
   test("tactics place URLs explain the lock instead of 404", async ({ page }) => {

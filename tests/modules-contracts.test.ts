@@ -175,9 +175,14 @@ describe("the locked agentic loop", () => {
       "round2:proposer-revise",
       "round3:critic",
       "round3:proposer-revise",
+      "withdrawn-in-dialogue",
       "judge",
       "exchanges",
     ]);
+    // A candidate conceded mid-dialogue is still in the record, with the last word against it.
+    expect(outcome.withdrawn.map((item) => item.subject)).toEqual(["b"]);
+    expect(outcome.withdrawn[0]!.note).toBe("not a gap");
+    expect(outcome.metrics.find((metric) => metric.name === "withdrawn_in_dialogue")!.value).toBe(1);
 
     const metricNames = outcome.metrics.map((metric) => metric.name);
     expect(metricNames).toContain("exchanges");

@@ -405,6 +405,15 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     score({ output }) {
       const judged = output.accepted.length + output.rejected.length;
       const withRationale = output.accepted.filter((edge) => edge.rationale.length > 0).length;
+      // Nothing left to propose means the graph is already joined, which is not a
+      // quality failure, so those cases carry no target.
+      if (output.accepted.length === 0) {
+        return [
+          { name: "edges_with_rationale", value: 0, unit: "ratio", detail: "no new edges" },
+          { name: "selectivity", value: 0, unit: "ratio", detail: "no new edges" },
+          { name: "gaps_left_unmapped", value: output.graph.gaps_with_no_edge, unit: "count" },
+        ];
+      }
       return [
         {
           name: "edges_with_rationale",

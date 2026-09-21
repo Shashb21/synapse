@@ -5,10 +5,15 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
-import { extractCandidateGaps, extractCandidateTactics } from "@/lib/iegp/engine";
+import {
+  extractCandidateGaps,
+  extractCandidateTactics,
+  splitSourceIntoBlocks,
+} from "@/lib/iegp/engine";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
 import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
 import {
+  listSourceFiles,
   markFileFailed,
   markFileParsed,
   sourceFileContent,
@@ -24,6 +29,8 @@ import {
 const inputSchema = z.object({
   /** Defaults to every uploaded file that has not been parsed yet. */
   file_ids: z.array(z.string()).optional(),
+  /** Parse and score quality without writing the domain source. Used by evals. */
+  dry_run: z.boolean().default(false),
 });
 
 const outputSchema = z.object({
@@ -88,7 +95,11 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   outputSchema,
   migrations: [PARSED_DOCUMENTS_DDL],
   async run(input, ctx) {
-    const ids = input.file_ids?.length ? input.file_ids : await unparsedFileIds();
+    const ids = input.file_ids?.length
+      ? input.file_ids
+      : input.dry_run
+        ? (await listSourceFiles()).map((file) => file.id)
+        : await unparsedFileIds();
     const documents: ParseOutput["documents"] = [];
     const failures: ParseOutput["failures"] = [];
 
@@ -116,6 +127,29 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           },
           record.mime,
         );
+        if (input.dry_run) {
+          // Score the parse without touching the domain store.
+          const sections = splitSourceIntoBlocks(text, record.title);
+          const quality = qualityOf(
+            sections.map((section, index) => ({
+              id: `dry-${index}`,
+              source_id: "dry-run",
+              heading: section.heading,
+              text: section.text,
+              location: section.heading,
+            })),
+          );
+          documents.push({
+            id: `dry-${file_id}`,
+            file_id,
+            source_id: "dry-run",
+            parser: "local",
+            blocks: sections.length,
+            quality,
+          });
+          ctx.run.note(`dry-parsed:${file_id}`, quality, `${sections.length} block(s), not persisted`);
+          continue;
+        }
         const { source_id, blocks } = await persistSourceAndBlocks({
           title: record.title,
           source_type: record.source_type as SourceType,
@@ -175,6 +209,41 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           payload: doc.quality,
         })),
     };
+  },
+  evals: {
+    async cases() {
+      const files = await listSourceFiles();
+      return files.slice(0, 4).map((file) => ({
+        name: file.filename,
+        input: { file_ids: [file.id], dry_run: true },
+      }));
+    },
+    score({ output }) {
+      const documents = output.documents;
+      const recovered = documents.filter((doc) => doc.quality.blocks > 0 && doc.quality.characters > 200);
+      const withNeeds = documents.filter((doc) => doc.quality.need_cue_blocks > 0);
+      const clean = documents.filter((doc) => doc.quality.warnings.length === 0);
+      return [
+        {
+          name: "text_recovered",
+          value: documents.length === 0 ? 0 : Number((recovered.length / documents.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "need_language_found",
+          value: documents.length === 0 ? 0 : Number((withNeeds.length / documents.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+        {
+          name: "warning_free",
+          value: documents.length === 0 ? 0 : Number((clean.length / documents.length).toFixed(3)),
+          unit: "ratio",
+          target: 1,
+        },
+      ];
+    },
   },
 };
 

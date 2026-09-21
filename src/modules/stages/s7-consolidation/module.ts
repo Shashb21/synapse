@@ -147,4 +147,39 @@ export const consolidationModule: SynapseModule<ConsolidationInput, Consolidatio
   },
 };
 
+consolidationModule.evals = {
+  async cases() {
+    return [{ name: "workspace", input: {} }];
+  },
+  score({ output }) {
+    const lists = [...output.open, ...output.addressed];
+    const withProvenance = lists.filter((item) => item.need_count > 0).length;
+    const flaggedPartials = output.unresolved_partials.filter((partial) =>
+      output.flags.some((flag) => flag.code === "partial_unresolved" && flag.gap_id === partial.gap_id),
+    ).length;
+    const addressedWithoutEvidence = output.flags.filter(
+      (flag) => flag.code === "addressed_without_evidence",
+    ).length;
+    return [
+      {
+        name: "provenance_on_every_listed_gap",
+        value: lists.length === 0 ? 0 : Number((withProvenance / lists.length).toFixed(3)),
+        unit: "ratio",
+        target: 1,
+      },
+      {
+        name: "partials_all_flagged",
+        value:
+          output.unresolved_partials.length === 0
+            ? 1
+            : Number((flaggedPartials / output.unresolved_partials.length).toFixed(3)),
+        unit: "ratio",
+        target: 1,
+      },
+      { name: "addressed_without_evidence", value: addressedWithoutEvidence, unit: "count" },
+      { name: "lists_disjoint", value: output.open.some((gap) => output.addressed.some((other) => other.gap_id === gap.gap_id)) ? 0 : 1, unit: "ratio", target: 1 },
+    ];
+  },
+};
+
 registerModule(consolidationModule);
