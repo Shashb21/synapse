@@ -698,10 +698,8 @@ export async function lockGapStatus(args: {
     }
   }
   const lk = makeLock(args.actor_name, args.actor_function, args.note);
-  const mapped =
-    args.status === "validated_open" ||
-    args.status === "validated_partial" ||
-    args.status === "validated_addressed";
+  // Partial was already rejected above, so only Open and Addressed remain mapped.
+  const mapped = args.status === "validated_open" || args.status === "validated_addressed";
   const wasMapped =
     gap.status === "validated_open" ||
     gap.status === "validated_partial" ||
