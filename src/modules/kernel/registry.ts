@@ -101,6 +101,8 @@ export type StageWiring = {
   available: ModuleManifest[];
   activated_by: string | null;
   activated_at: string | null;
+  /** True when the active module ships its own gold cases and scorer. */
+  has_evals: boolean;
 };
 
 export async function stageWiring(): Promise<StageWiring[]> {
@@ -110,13 +112,19 @@ export async function stageWiring(): Promise<StageWiring[]> {
     const available = modulesForStage(stage).map((candidate) => candidate.manifest);
     const row = rows.find((candidate) => candidate.stage === stage);
     let active: ModuleManifest | null = null;
-    if (available.length > 0) active = (await activeModule(stage)).manifest;
+    let has_evals = false;
+    if (available.length > 0) {
+      const wired = await activeModule(stage);
+      active = wired.manifest;
+      has_evals = Boolean(wired.evals);
+    }
     out.push({
       stage,
       active,
       available,
       activated_by: row?.activated_by ?? null,
       activated_at: row?.activated_at ?? null,
+      has_evals,
     });
   }
   return out;

@@ -3,6 +3,7 @@ import "@/modules";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { RunStageButton } from "@/components/platform/run-stage-button";
+import { RunEvalsButton } from "@/components/platform/run-evals-button";
 import { ChainRunner, ModularUploadForm } from "@/components/platform/pipeline-runner";
 import { STAGES, STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
@@ -161,6 +162,7 @@ export default async function PipelinePage() {
                     Runs from the {stage === "S5" ? "Gaps workbench" : "split dialog"}, per gap.
                   </span>
                 )}
+                {wired.has_evals ? <RunEvalsButton stage={stage} identity={actionIdentity} /> : null}
                 {lastRun ? (
                   <Link href={`/runs/${lastRun.id}`} className="text-[11px] text-muted-foreground no-underline hover:text-foreground">
                     View trace
