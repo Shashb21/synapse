@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
@@ -98,6 +99,44 @@ export async function loadAxes(): Promise<StoredAxes> {
   };
 }
 
+/** Shape of a saved axis configuration. Semantic rules live in `validateAxes`. */
+export const axesConfigSchema = z.object({
+  axes: z
+    .array(
+      z.object({
+        id: z
+          .string()
+          .min(1)
+          .regex(/^[a-z0-9_]+$/, "axis ids use lowercase letters, digits and underscores"),
+        label: z.string().min(1),
+        description: z.string().default(""),
+        weight: z.number().min(0).max(5),
+        low_label: z.string().min(1),
+        high_label: z.string().min(1),
+        cues: z.array(z.string()).default([]),
+      }),
+    )
+    .min(2),
+  x_axis: z.string().min(1),
+  y_axis: z.string().min(1),
+  bands: z.object({
+    high: z.number().min(1).max(100),
+    medium: z.number().min(0).max(99),
+  }),
+});
+
+export function parseAxesConfig(value: unknown): AxesConfig {
+  const parsed = axesConfigSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `The axis configuration is malformed: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+  return parsed.data;
+}
+
 export function validateAxes(config: AxesConfig): AxesConfig {
   if (config.axes.length < 2) throw new Error("At least two axes are required.");
   const ids = new Set(config.axes.map((axis) => axis.id));
@@ -112,9 +151,9 @@ export function validateAxes(config: AxesConfig): AxesConfig {
   return config;
 }
 
-export async function saveAxes(args: { config: AxesConfig; actor_name: string }): Promise<StoredAxes> {
+export async function saveAxes(args: { config: unknown; actor_name: string }): Promise<StoredAxes> {
   await ensurePlatformSchema();
-  const config = validateAxes(args.config);
+  const config = validateAxes(parseAxesConfig(args.config));
   const values = {
     id: ROW_ID,
     config,

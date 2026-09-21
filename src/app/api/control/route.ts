@@ -12,7 +12,7 @@ import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
 import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
-import { loadAxes, saveAxes, type AxesConfig } from "@/modules/stages/s8-prioritization/axes";
+import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
       case "save_axes": {
         assertCan(identity.role, "prioritize");
         const axes = await saveAxes({
-          config: body.config as AxesConfig,
+          config: body.config,
           actor_name: identity.actor.name,
         });
         return NextResponse.json({ ok: true, axes });

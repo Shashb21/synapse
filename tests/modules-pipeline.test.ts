@@ -191,6 +191,9 @@ describe("modular pipeline, S0 to S10", () => {
     const after = placements.find((row) => row.gap_id === target.gap_id)!;
     expect(after.validated).toBe(true);
     expect(after.band).toBe("high");
+    // The suggestion the human judged survives a re-run, so the delta stays readable.
+    expect(after.suggested_band).toBe(validated.suggested_band);
+    expect(after.suggested_rationale).toBe(validated.suggested_rationale);
 
     const edits = await listEdits({ stage: "S8" });
     expect(edits[0]!.rationale).toMatch(/reimbursement/);

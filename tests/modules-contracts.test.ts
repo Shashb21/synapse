@@ -18,6 +18,7 @@ import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
 import {
   DEFAULT_AXES,
   bandFor,
+  parseAxesConfig,
   validateAxes,
   weightedScore,
 } from "@/modules/stages/s8-prioritization/axes";
@@ -162,6 +163,25 @@ describe("prioritization axes", () => {
     expect(bandFor(score, DEFAULT_AXES.bands)).toBe("medium");
     expect(bandFor(90, DEFAULT_AXES.bands)).toBe("high");
     expect(bandFor(10, DEFAULT_AXES.bands)).toBe("low");
+  });
+
+  it("rejects a malformed axis configuration before it is stored", () => {
+    expect(() => parseAxesConfig({ axes: [], x_axis: "a", y_axis: "b", bands: { high: 60, medium: 40 } })).toThrow(
+      /malformed/i,
+    );
+    expect(() =>
+      parseAxesConfig({
+        ...DEFAULT_AXES,
+        axes: [{ ...DEFAULT_AXES.axes[0]!, weight: 99 }, DEFAULT_AXES.axes[1]!],
+      }),
+    ).toThrow(/weight/i);
+    expect(() =>
+      parseAxesConfig({
+        ...DEFAULT_AXES,
+        axes: [{ ...DEFAULT_AXES.axes[0]!, id: "Decision Impact" }, DEFAULT_AXES.axes[1]!],
+      }),
+    ).toThrow(/lowercase/i);
+    expect(parseAxesConfig(DEFAULT_AXES).axes.length).toBe(DEFAULT_AXES.axes.length);
   });
 
   it("rejects configurations the matrix cannot draw", () => {

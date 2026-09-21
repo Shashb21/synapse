@@ -307,10 +307,10 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   outputSchema,
   async run(input, ctx) {
     const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+    // Ideation is for high-priority open gaps, and only after a human validated the band.
     const highGapIds = new Set(
       placements
-        .filter((placement) => placement.validated && (placement.band === "high" || placement.band === "medium"))
-        .filter((placement) => placement.band === "high")
+        .filter((placement) => placement.validated && placement.band === "high")
         .map((placement) => placement.gap_id),
     );
     const gaps = state.gaps

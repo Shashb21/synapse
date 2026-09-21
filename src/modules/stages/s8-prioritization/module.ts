@@ -254,17 +254,20 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
       const existing = await db().select().from(t.priorityPlacements);
       for (const placement of outcome.accepted) {
         const current = existing.find((row) => row.gap_id === placement.gap_id);
+        const locked = current?.validated ?? false;
         const values = {
           gap_id: placement.gap_id,
           axis_scores: placement.axis_scores,
-          suggested_band: placement.suggested_band,
-          suggested_rationale: placement.rationale,
-          // A validated band is never overwritten by a re-suggestion.
-          band: current?.validated ? current.band : null,
-          validated: current?.validated ?? false,
-          rationale: current?.validated ? current.rationale : null,
-          actor_name: current?.validated ? current.actor_name : null,
-          actor_function: current?.validated ? current.actor_function : null,
+          // Once a human has validated a band, the suggestion they judged is kept:
+          // losing it would erase the suggestion-versus-validation delta. The new
+          // suggestion is still in this run's output and trace.
+          suggested_band: locked ? current!.suggested_band : placement.suggested_band,
+          suggested_rationale: locked ? current!.suggested_rationale : placement.rationale,
+          band: locked ? current!.band : null,
+          validated: locked,
+          rationale: locked ? current!.rationale : null,
+          actor_name: locked ? current!.actor_name : null,
+          actor_function: locked ? current!.actor_function : null,
           at: nowIso(),
         };
         await db()

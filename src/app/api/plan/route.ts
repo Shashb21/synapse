@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import "@/modules";
 import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
@@ -28,6 +29,21 @@ export async function GET() {
   return NextResponse.json({ placements, axes, proposals, timeline, plan, history });
 }
 
+const bandSchema = z.enum(["high", "medium", "low"]);
+const decisionSchema = z.enum(["accept", "reject"]);
+const planStatusSchema = z.enum(["draft", "final"]);
+const laneSchema = z.enum(["high", "medium", "low", "addressed"]);
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+
+/** Rejects an unknown value with the field name, so the dialog can show why. */
+function field<T>(schema: z.ZodType<T>, value: unknown, name: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`${name}: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+  }
+  return parsed.data;
+}
+
 export async function POST(request: Request) {
   const body = (await request.json()) as Record<string, unknown>;
   const action = String(body.action ?? "");
@@ -40,7 +56,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
           gap_id: String(body.gap_id ?? ""),
-          band: body.band as "high" | "medium" | "low",
+          band: field(bandSchema, body.band, "band"),
           rationale,
           actor: identity.actor,
         });
@@ -50,7 +66,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const result = await decideIdeationProposal({
           id: String(body.id ?? ""),
-          decision: body.decision === "reject" ? "reject" : "accept",
+          decision: field(decisionSchema, body.decision, "decision"),
           rationale,
           actor: identity.actor,
         });
@@ -60,18 +76,22 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const next = await updateTimelineActivity({
           id: String(body.id ?? ""),
-          start_date: body.start_date ? String(body.start_date) : undefined,
-          end_date: body.end_date ? String(body.end_date) : undefined,
+          start_date: body.start_date ? field(dateSchema, body.start_date, "start_date") : undefined,
+          end_date: body.end_date ? field(dateSchema, body.end_date, "end_date") : undefined,
           readout_date:
-            body.readout_date === undefined ? undefined : body.readout_date ? String(body.readout_date) : null,
-          lane: body.lane ? String(body.lane) : undefined,
+            body.readout_date === undefined
+              ? undefined
+              : body.readout_date
+                ? field(dateSchema, body.readout_date, "readout_date")
+                : null,
+          lane: body.lane ? field(laneSchema, body.lane, "lane") : undefined,
           rationale,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, activity: next });
       }
       case "save_plan": {
-        const status = body.status === "final" ? "final" : "draft";
+        const status = field(planStatusSchema, body.status ?? "draft", "status");
         assertCan(identity.role, status === "final" ? "save_final" : "export");
         const plan = await savePlan({ status, note: rationale, actor: identity.actor });
         return NextResponse.json({ ok: true, plan });
