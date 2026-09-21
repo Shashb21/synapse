@@ -5,9 +5,18 @@ import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
 import { accessToken, connectionStatus } from "@/modules/llm/oauth";
-import { NoRouteError, findProvider, providerConfigured } from "@/modules/llm/provider";
+import {
+  ALTERNATE_ROUTE_PROVIDER,
+  DEFAULT_ROUTE_PROVIDER,
+  NoRouteError,
+  OFFLINE_PROVIDER,
+  findProvider,
+  providerConfigured,
+} from "@/modules/llm/provider";
 
-export const DEFAULT_PROVIDER_ID = "deterministic-local";
+/** Locked default: Grok. Claude is the standing alternate, then the offline route. */
+export const DEFAULT_PROVIDER_ID = DEFAULT_ROUTE_PROVIDER;
+export const DEFAULT_FALLBACKS = [ALTERNATE_ROUTE_PROVIDER, OFFLINE_PROVIDER];
 
 export type RouteConfig = {
   stage: StageId;
@@ -23,10 +32,10 @@ function defaultConfig(stage: StageId): RouteConfig {
   return {
     stage,
     provider_id: DEFAULT_PROVIDER_ID,
-    model: "local-heuristic",
+    model: findProvider(DEFAULT_PROVIDER_ID)?.default_model ?? "grok-4",
     params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: [DEFAULT_PROVIDER_ID],
-    updated_by: "default",
+    fallbacks: DEFAULT_FALLBACKS,
+    updated_by: "default (locked: Grok)",
     updated_at: "—",
   };
 }
@@ -42,7 +51,7 @@ export async function routeConfigs(): Promise<RouteConfig[]> {
       provider_id: row.provider_id,
       model: row.model,
       params: row.params as RouteConfig["params"],
-      fallbacks: (row.fallbacks as string[]) ?? [DEFAULT_PROVIDER_ID],
+      fallbacks: (row.fallbacks as string[]) ?? DEFAULT_FALLBACKS,
       updated_by: row.updated_by,
       updated_at: row.updated_at,
     };
@@ -77,7 +86,7 @@ export async function setRouteConfig(args: {
       temperature: args.temperature ?? 0,
       max_tokens: args.max_tokens ?? 8192,
     },
-    fallbacks: args.fallbacks?.length ? args.fallbacks : [DEFAULT_PROVIDER_ID],
+    fallbacks: args.fallbacks?.length ? args.fallbacks : DEFAULT_FALLBACKS,
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
@@ -95,7 +104,7 @@ export async function setRouteConfig(args: {
  */
 export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
   const config = await routeConfig(stage);
-  const candidates = [config.provider_id, ...config.fallbacks, DEFAULT_PROVIDER_ID];
+  const candidates = [config.provider_id, ...config.fallbacks, OFFLINE_PROVIDER];
   const reasons: string[] = [];
   for (const [index, id] of candidates.entries()) {
     const provider = findProvider(id);
@@ -149,16 +158,47 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
 export function defaultRoute(stage: StageId): ResolvedRoute {
   return {
     stage,
-    provider_id: DEFAULT_PROVIDER_ID,
+    provider_id: OFFLINE_PROVIDER,
     provider_label: "Deterministic (no LLM)",
     model: "local-heuristic",
     auth: "none",
     connected: false,
     params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: [DEFAULT_PROVIDER_ID],
+    fallbacks: DEFAULT_FALLBACKS,
     degraded: false,
     reason: null,
   };
+}
+
+/**
+ * The locked one-click switch: point every stage at Grok or at Claude in a single
+ * action, keeping the other as the first fallback.
+ */
+export async function setDefaultProvider(args: {
+  provider_id: string;
+  actor_name: string;
+  model?: string;
+}): Promise<RouteConfig[]> {
+  const provider = findProvider(args.provider_id);
+  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  const alternate =
+    args.provider_id === DEFAULT_ROUTE_PROVIDER ? ALTERNATE_ROUTE_PROVIDER : DEFAULT_ROUTE_PROVIDER;
+  const fallbacks = [...new Set([alternate, OFFLINE_PROVIDER])].filter(
+    (id) => id !== args.provider_id,
+  );
+  const out: RouteConfig[] = [];
+  for (const stage of STAGE_IDS) {
+    out.push(
+      await setRouteConfig({
+        stage,
+        provider_id: args.provider_id,
+        model: args.model ?? provider.default_model,
+        fallbacks,
+        actor_name: args.actor_name,
+      }),
+    );
+  }
+  return out;
 }
 
 /** True when a stage may prompt a model on this route. */

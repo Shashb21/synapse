@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activateModule, stageWiring } from "@/modules/kernel/registry";
-import { routeConfigs, setRouteConfig } from "@/modules/kernel/routing";
-import { PROVIDERS } from "@/modules/llm/provider";
+import { routeConfigs, setDefaultProvider, setRouteConfig } from "@/modules/kernel/routing";
+import {
+  ALTERNATE_ROUTE_PROVIDER,
+  DEFAULT_ROUTE_PROVIDER,
+  PROVIDERS,
+} from "@/modules/llm/provider";
 import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
 import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
@@ -28,9 +32,13 @@ export async function GET() {
     providers: PROVIDERS.map((provider) => ({
       id: provider.id,
       label: provider.label,
+      summary: provider.summary,
+      tier: provider.tier ?? null,
       auth: provider.auth,
       models: provider.models,
+      default_model: provider.default_model,
     })),
+    defaults: { primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER },
     login: loginOptions(),
   });
 }
@@ -62,6 +70,15 @@ export async function POST(request: Request) {
           actor_name: identity.actor.name,
         });
         return NextResponse.json({ ok: true, config });
+      }
+      case "set_default_provider": {
+        assertCan(identity.role, "configure_routing");
+        const configs = await setDefaultProvider({
+          provider_id: String(body.provider_id ?? ""),
+          model: body.model ? String(body.model) : undefined,
+          actor_name: identity.actor.name,
+        });
+        return NextResponse.json({ ok: true, stages: configs.length });
       }
       case "activate_module": {
         assertCan(identity.role, "activate_module");

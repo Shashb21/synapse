@@ -67,7 +67,7 @@ export function ActionDialog({
   variant?: "default" | "outline" | "ghost" | "secondary";
   size?: "sm" | "default" | "icon-sm";
   className?: string;
-  trigger?: React.ReactNode;
+  trigger?: React.ReactElement;
 }) {
   const router = useRouter();
   const formId = useId();

@@ -10,6 +10,8 @@ export type ConnectionStatus = "disconnected" | "pending" | "connected" | "error
 export type ProviderConnection = {
   provider_id: string;
   label: string;
+  summary: string;
+  tier: LlmProvider["tier"];
   auth: LlmProvider["auth"];
   configured: boolean;
   status: ConnectionStatus;
@@ -57,6 +59,8 @@ export async function listConnections(): Promise<ProviderConnection[]> {
     return {
       provider_id: provider.id,
       label: provider.label,
+      summary: provider.summary,
+      tier: provider.tier,
       auth: provider.auth,
       configured: providerConfigured(provider),
       status,
@@ -100,7 +104,7 @@ export async function beginOauth(args: {
   const provider = findProvider(args.provider_id);
   if (!provider?.oauth) throw new Error(`${args.provider_id} does not use OAuth`);
   const clientId = process.env[provider.oauth.client_id_env]?.trim();
-  if (!clientId) {
+  if (!clientId && !provider.oauth.client_id_optional) {
     throw new Error(
       `${provider.label} needs ${provider.oauth.client_id_env} in the environment before it can be connected.`,
     );
@@ -121,10 +125,12 @@ export async function beginOauth(args: {
     detail: JSON.stringify(detail),
   });
   const url = new URL(provider.oauth.authorize_url);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", args.redirect_uri);
-  url.searchParams.set("scope", provider.oauth.scopes.join(" "));
+  if (!provider.oauth.omit_response_type) url.searchParams.set("response_type", "code");
+  if (!provider.oauth.omit_client_id && clientId) url.searchParams.set("client_id", clientId);
+  url.searchParams.set(provider.oauth.redirect_param ?? "redirect_uri", args.redirect_uri);
+  if (!provider.oauth.omit_scope && provider.oauth.scopes.length > 0) {
+    url.searchParams.set("scope", provider.oauth.scopes.join(" "));
+  }
   url.searchParams.set("state", state);
   if (provider.oauth.pkce) {
     url.searchParams.set("code_challenge", challenge);
@@ -133,22 +139,41 @@ export async function beginOauth(args: {
   return { authorize_url: url.toString() };
 }
 
-async function exchange(provider: LlmProvider, body: URLSearchParams) {
+type TokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+  error_description?: string;
+};
+
+/**
+ * Token exchange. Most providers speak form-encoded OAuth 2.0; OpenRouter posts
+ * JSON and returns the credential under its own field name.
+ */
+async function exchange(provider: LlmProvider, params: Record<string, string>) {
   if (!provider.oauth) throw new Error("provider has no OAuth descriptor");
+  const json = provider.oauth.token_style === "json";
   const res = await fetch(provider.oauth.token_url, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
+    headers: {
+      "content-type": json ? "application/json" : "application/x-www-form-urlencoded",
+      accept: "application/json",
+    },
+    body: json ? JSON.stringify(params) : new URLSearchParams(params),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`token endpoint HTTP ${res.status}: ${text.slice(0, 300)}`);
-  return JSON.parse(text) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    error?: string;
-    error_description?: string;
-  };
+  const payload = JSON.parse(text) as Record<string, unknown>;
+  const field = provider.oauth.token_field ?? "access_token";
+  return {
+    access_token: typeof payload[field] === "string" ? (payload[field] as string) : undefined,
+    refresh_token: typeof payload.refresh_token === "string" ? payload.refresh_token : undefined,
+    expires_in: typeof payload.expires_in === "number" ? payload.expires_in : undefined,
+    error: typeof payload.error === "string" ? payload.error : undefined,
+    error_description:
+      typeof payload.error_description === "string" ? payload.error_description : undefined,
+  } satisfies TokenResponse;
 }
 
 export async function completeOauth(args: {
@@ -163,19 +188,19 @@ export async function completeOauth(args: {
   if (!pending || pending.state !== args.state) {
     throw new Error("OAuth state does not match a pending authorization");
   }
-  const clientId = process.env[provider.oauth.client_id_env]!.trim();
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
+  const clientId = process.env[provider.oauth.client_id_env]?.trim();
+  const params: Record<string, string> = {
     code: args.code,
-    client_id: clientId,
-    redirect_uri: pending.redirect_uri,
     code_verifier: pending.code_verifier,
-  });
+  };
+  if (!provider.oauth.omit_response_type) params.grant_type = "authorization_code";
+  if (!provider.oauth.omit_client_id && clientId) params.client_id = clientId;
+  if (!provider.oauth.redirect_param) params.redirect_uri = pending.redirect_uri;
   const secret = provider.oauth.client_secret_env
     ? process.env[provider.oauth.client_secret_env]?.trim()
     : undefined;
-  if (secret) body.set("client_secret", secret);
-  const token = await exchange(provider, body);
+  if (secret) params.client_secret = secret;
+  const token = await exchange(provider, params);
   if (!token.access_token) {
     throw new Error(token.error_description ?? token.error ?? "token endpoint returned no token");
   }
@@ -183,9 +208,7 @@ export async function completeOauth(args: {
     provider_id: provider.id,
     status: "connected",
     scopes: provider.oauth.scopes,
-    account_label: pending.redirect_uri.includes("://")
-      ? new URL(provider.oauth.token_url).host
-      : null,
+    account_label: new URL(provider.oauth.authorize_url).host,
     access_token: token.access_token,
     refresh_token: token.refresh_token ?? null,
     expires_at: token.expires_in
@@ -229,17 +252,17 @@ export async function accessToken(provider_id: string): Promise<string | null> {
     return null;
   }
   const clientId = process.env[provider.oauth.client_id_env]?.trim();
-  if (!clientId) return null;
-  const body = new URLSearchParams({
+  if (!clientId && !provider.oauth.client_id_optional) return null;
+  const params: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: stored.refresh_token,
-    client_id: clientId,
-  });
+  };
+  if (clientId) params.client_id = clientId;
   const secret = provider.oauth.client_secret_env
     ? process.env[provider.oauth.client_secret_env]?.trim()
     : undefined;
-  if (secret) body.set("client_secret", secret);
-  const token = await exchange(provider, body);
+  if (secret) params.client_secret = secret;
+  const token = await exchange(provider, params);
   if (!token.access_token) return null;
   await upsert({
     provider_id,
