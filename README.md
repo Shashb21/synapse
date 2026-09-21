@@ -44,8 +44,27 @@ Gap status after mapping (not the Plan High / Medium / Low bands):
 | Route | What |
 | --- | --- |
 | `/` | Sidebar places: Upload → Gaps → Prioritize → Tactics. Query `?place=` |
+| `/matrix` | Prioritization matrix on configurable axes (S8) |
+| `/ideation` | Tactic proposals for high-priority open gaps (S9) |
+| `/timeline` | The final IEGP as an interactive Gantt: detail on click, image export, save as final (S10) |
+| `/pipeline` | Run any stage or the chain; module, route and last run per stage |
+| `/runs` | Observability: run traces, edit rationales, hillclimb signals, eval runs |
+| `/control` | Control panel: session and role, per-provider OAuth login, per-stage routing |
 | `/evals` | View-only gold tape (needs + coverage; engine computes Addressed when evidence closes) |
 | `/sdlc` | Spec tape |
+
+## Modular stack
+
+Every pipeline stage (S0 upload → S10 Gantt) is an independent module behind a
+versioned contract, with its own observability, evals and hillclimb loop. See
+[`docs/modules.md`](docs/modules.md) for the boundaries and the upgrade steps.
+
+LLM access is **OAuth only** — no API-key path for an end user. Providers: xAI
+Grok (default route), Anthropic Claude (one-click alternate), OpenAI, Google
+Gemini, OpenRouter, each logged in from the control panel. With nothing connected
+the stages run their deterministic proposer/critic/judge, so the pipeline still
+works end to end. Copy `.env.example` to `.env.local` and fill in the OAuth client
+ids you want available; never commit a credential.
 
 No login. Locks record a typed name and function.
 
