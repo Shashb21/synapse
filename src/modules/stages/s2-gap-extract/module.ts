@@ -22,6 +22,9 @@ import {
 } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
+import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
+import { curatedS2Cases } from "@/modules/eval-gold";
+import { scoreMustMatch } from "@/modules/eval-gold/types";
 import { GAP_CRITIC_SYSTEM, GAP_PROPOSER_SYSTEM, gapProposerUser } from "./prompts";
 
 const inputSchema = z.object({
@@ -108,7 +111,7 @@ async function llmProposals(
   const out: GapCandidate[] = [];
   for (const document of documents) {
     const payload = (await ctx.complete({
-      system: GAP_PROPOSER_SYSTEM,
+      system: augmentSystemPrompt(GAP_PROPOSER_SYSTEM),
       user: gapProposerUser({
         title: document.blocks[0]?.heading ?? document.source_id,
         blocks: document.blocks,
@@ -439,22 +442,28 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   },
   evals: {
     async cases() {
+      const curated = await curatedS2Cases();
+      if (curated.length > 0) return curated;
       const documents = await listParsedDocuments();
       return documents.slice(0, 3).map((document) => ({
         name: document.source_id,
         input: { document_ids: [document.id], dry_run: true },
       }));
     },
-    score({ output }) {
+    score({ case: testCase, output }) {
       const accepted = output.accepted.length;
       const total = accepted + output.rejected.length;
+      const statements = output.accepted.map((row) => row.statement);
+      const curated = scoreMustMatch(statements, testCase.gold?.must_match);
       if (accepted === 0) {
         return [
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
           { name: "gold_accept_rate", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.5 : undefined, detail: curated.detail },
         { name: "gold_accept_rate", value: total === 0 ? 0 : Number((accepted / total).toFixed(3)), unit: "ratio", target: 0.3 },
         { name: "accepted_with_quote", value: accepted === 0 ? 0 : Number((output.accepted.filter((c) => c.source_quote.trim().length > 0).length / accepted).toFixed(3)), unit: "ratio", target: 1 },
       ];

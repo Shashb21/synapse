@@ -10,6 +10,9 @@ import {
   scoreCritic,
   type Critique,
 } from "@/modules/kernel/agentic";
+import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
+import { curatedS3Cases } from "@/modules/eval-gold";
+import { scoreMustMatch } from "@/modules/eval-gold/types";
 import { canPrompt } from "@/modules/kernel/routing";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import {
@@ -103,7 +106,7 @@ async function llmProposals(
   const out: TacticCandidate[] = [];
   for (const document of documents) {
     const payload = (await ctx.complete({
-      system: TACTIC_PROPOSER_SYSTEM,
+      system: augmentSystemPrompt(TACTIC_PROPOSER_SYSTEM),
       user: [
         hints,
         `Source: ${document.source_id}`,
@@ -364,24 +367,32 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   },
   evals: {
     async cases() {
+      const curated = await curatedS3Cases();
+      if (curated.length > 0) return curated;
       const documents = await listParsedDocuments();
       return documents.slice(0, 3).map((document) => ({
         name: document.source_id,
         input: { document_ids: [document.id], dry_run: true },
       }));
     },
-    score({ output }) {
+    score({ case: testCase, output }) {
       const accepted = output.accepted;
       const real = accepted.filter((candidate) => candidate.status !== "proposed").length;
       // Nothing accepted means the library already covers the document, which is
       // not a quality failure, so those cases carry no target.
+      const curated = scoreMustMatch(
+        accepted.map((row) => row.evidence_question),
+        testCase.gold?.must_match,
+      );
       if (accepted.length === 0) {
         return [
+          { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
           { name: "accepted_with_quote", value: 0, unit: "ratio", detail: "no new candidates" },
           { name: "real_inventory_share", value: 0, unit: "ratio", detail: "no new candidates" },
         ];
       }
       return [
+        { name: "curated_must_match", value: curated.value, unit: "ratio", target: testCase.gold?.must_match ? 0.3 : undefined, detail: curated.detail },
         {
           name: "accepted_with_quote",
           value:

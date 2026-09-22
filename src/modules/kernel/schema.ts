@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, text } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
 
 /**
  * Platform tables owned by the kernel and the cross-cutting modules. The IEGP
@@ -65,6 +65,24 @@ export const evalRuns = pgTable("eval_runs", {
   metrics: jsonb("metrics").notNull(),
   note: text("note"),
 });
+
+export const promptBaselines = pgTable(
+  "prompt_baselines",
+  {
+    id: text("id").primaryKey(),
+    stage: text("stage").notNull(),
+    prompt_version: text("prompt_version").notNull(),
+    module_id: text("module_id").notNull(),
+    module_version: text("module_version").notNull(),
+    metrics: jsonb("metrics").notNull(),
+    composite: numeric("composite").notNull(),
+    recorded_at: text("recorded_at").notNull(),
+    note: text("note"),
+  },
+  (table) => ({
+    stageVersion: unique().on(table.stage, table.prompt_version),
+  }),
+);
 
 export const routingConfig = pgTable("routing_config", {
   stage: text("stage").primaryKey(),

@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   module_id text NOT NULL, module_version text NOT NULL, run_id text,
   passed boolean NOT NULL DEFAULT true, metrics jsonb NOT NULL, note text
 );
+CREATE TABLE IF NOT EXISTS prompt_baselines (
+  id text PRIMARY KEY, stage text NOT NULL, prompt_version text NOT NULL,
+  module_id text NOT NULL, module_version text NOT NULL,
+  metrics jsonb NOT NULL, composite numeric NOT NULL,
+  recorded_at text NOT NULL, note text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS prompt_baselines_stage_version
+  ON prompt_baselines(stage, prompt_version);
 CREATE TABLE IF NOT EXISTS routing_config (
   stage text PRIMARY KEY, provider_id text NOT NULL, model text NOT NULL,
   params jsonb NOT NULL, fallbacks jsonb NOT NULL,
