@@ -1378,6 +1378,54 @@ export async function acceptMapping(args: {
   );
 }
 
+export async function saveMappingTableRow(args: {
+  gap_id: string;
+  tactic_ids: string[];
+  mapping_status: "open" | "addressed" | "partially_addressed";
+  actor_name: string;
+  actor_function: ActorFunction;
+  rationale: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (!gapEligibleForMapping(gap.status)) {
+    throw new Error("Only live gaps eligible for mapping can be edited here.");
+  }
+  const uniqueIds = [...new Set(args.tactic_ids.filter(Boolean))];
+  if (args.mapping_status !== "open" && uniqueIds.length === 0) {
+    throw new Error("Addressed or partially addressed rows need at least one tactic.");
+  }
+  for (const tactic_id of uniqueIds) {
+    const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === tactic_id);
+    if (!covered) {
+      await assignTacticToGap({
+        gap_id: args.gap_id,
+        tactic_id,
+        actor_name: args.actor_name,
+        actor_function: args.actor_function,
+        note: args.rationale,
+      });
+    }
+    await upsertMappingSuggestion({
+      gap_id: args.gap_id,
+      tactic_id,
+      status: "accepted",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: args.rationale,
+    });
+  }
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "mapping",
+    args.gap_id,
+    "save_mapping_row",
+    `${args.mapping_status} · ${uniqueIds.join(", ") || "none"}`,
+  );
+}
+
 export async function rejectMapping(args: {
   gap_id: string;
   tactic_id: string;

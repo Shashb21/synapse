@@ -28,6 +28,7 @@ import {
   rejectMapping,
   rejectResidualGap,
   resetSeed,
+  saveMappingTableRow,
   overrideGapStatus,
   rewritePartialGap,
   splitPartialGap,
@@ -67,6 +68,7 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   assign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   accept_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
+  save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
   lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
   split_partial_gap: { stage: "S6", entity: "gap", field: "split", action: "split" },
@@ -282,6 +284,26 @@ export async function POST(request: Request) {
           note: body.note,
         });
         break;
+      case "save_mapping_row": {
+        const rationale = (body.rationale || body.note || "").trim();
+        if (rationale.length < 3) {
+          return NextResponse.json({ error: "A short rationale is required for every edit." }, { status: 400 });
+        }
+        const tactic_ids = (body.tactic_ids || "")
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean);
+        const mapping_status = body.mapping_status as "open" | "addressed" | "partially_addressed";
+        await saveMappingTableRow({
+          gap_id: body.gap_id,
+          tactic_ids,
+          mapping_status,
+          actor_name,
+          actor_function,
+          rationale,
+        });
+        break;
+      }
       case "accept_residual_gap":
         await acceptResidualGap({
           parent_gap_id: body.parent_gap_id,

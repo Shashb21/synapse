@@ -42,8 +42,8 @@ const JOURNEY = [
   },
   {
     stage: "S4",
-    title: "Knowledge graph",
-    detail: "Map gaps to tactics on configurable dimensions — not a spreadsheet dump.",
+    title: "Mapping table",
+    detail: "LLM proposes one row per gap (tactics + status); you accept or edit with rationale.",
     icon: Grid2x2,
     tone: "var(--chart-3)",
   },

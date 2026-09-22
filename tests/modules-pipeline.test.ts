@@ -105,20 +105,19 @@ describe("modular pipeline, S0 to S10", () => {
     expect(state.tactics.length).toBe(result.output.committed_tactic_ids.length);
   }, 120_000);
 
-  it("maps gaps to tactics many-to-many and joins the accepted edges", async () => {
+  it("maps gaps to tactics via the mapping table and joins accepted rows", async () => {
     const result = await run<MappingOutput>("S4", {});
     expect(result.output.proposed).toBeGreaterThan(0);
+    expect(result.output.rows.length).toBeGreaterThan(0);
     expect(result.output.committed.length).toBeGreaterThan(0);
     const candidates = await listMappingCandidates();
     expect(candidates.length).toBeGreaterThan(0);
 
     const state = await loadState();
-    expect(state.coverages.length).toBeGreaterThanOrEqual(result.output.committed.length);
-    const perTactic = new Map<string, number>();
-    for (const coverage of state.coverages) {
-      perTactic.set(coverage.tactic_id, (perTactic.get(coverage.tactic_id) ?? 0) + 1);
-    }
-    expect([...perTactic.values()].some((count) => count > 1)).toBe(true);
+    const joinedTactics = result.output.committed.flatMap((row) => row.tactic_ids);
+    expect(joinedTactics.length).toBeGreaterThan(0);
+    expect(state.coverages.length).toBeGreaterThanOrEqual(joinedTactics.length);
+    expect(result.output.accepted.some((row) => row.rationale.length > 0)).toBe(true);
   }, 120_000);
 
   it("records a rationale and a hillclimb signal for every validation gate edit", async () => {

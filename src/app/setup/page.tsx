@@ -1,10 +1,12 @@
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { SetupWizard } from "@/components/setup/setup-wizard";
+import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { parsePlanningContext, type PlanningContext } from "@/lib/iegp/planning-context";
 import { loadState } from "@/lib/iegp/store";
-import { sessionContext } from "@/modules/auth/session";
+import { sessionContext, type SessionContext } from "@/modules/auth/session";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function initialFromAsset(state: Awaited<ReturnType<typeof loadState>>): PlanningContext {
   const parsed = parsePlanningContext(state.asset.planning_context);
@@ -23,8 +25,30 @@ function initialFromAsset(state: Awaited<ReturnType<typeof loadState>>): Plannin
   };
 }
 
+async function loadSetupState() {
+  try {
+    return await loadState();
+  } catch {
+    return buildBlankWorkspace();
+  }
+}
+
+async function loadSetupIdentity(): Promise<SessionContext> {
+  try {
+    return await sessionContext();
+  } catch {
+    return {
+      session: null,
+      actor: { name: "Unsigned (demo)", function: "medical_affairs" },
+      role: "medical_affairs",
+      demo: true,
+      signed_in: false,
+    };
+  }
+}
+
 export default async function SetupPage() {
-  const [state, identity] = await Promise.all([loadState(), sessionContext()]);
+  const [state, identity] = await Promise.all([loadSetupState(), loadSetupIdentity()]);
   const initial = initialFromAsset(state);
 
   return (
