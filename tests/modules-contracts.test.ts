@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import "@/modules";
-import { KERNEL_CONTRACT, STAGES, STAGE_IDS, type SynapseModule } from "@/modules/kernel/contracts";
+import {
+  KERNEL_CONTRACT,
+  STAGES,
+  STAGE_IDS,
+  type ModuleContext,
+  type StageId,
+  type SynapseModule,
+} from "@/modules/kernel/contracts";
 import { manifests, modulesForStage, registerModule } from "@/modules/kernel/registry";
 import {
   PROPOSER_CRITIC_EXCHANGES,
@@ -10,7 +17,7 @@ import {
   thresholdJudge,
 } from "@/modules/kernel/agentic";
 import { RunRecorder } from "@/modules/kernel/observability";
-import { canPrompt, defaultRoute, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID } from "@/modules/kernel/routing";
+import { canPrompt, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID, resolveRoute } from "@/modules/kernel/routing";
 import { digestAsPrompt } from "@/modules/kernel/hillclimb";
 import { compositeScore } from "@/modules/kernel/baselines";
 import { promptVersionsFor } from "@/modules/kernel/prompt-versions";
@@ -80,15 +87,26 @@ describe("module contracts", () => {
 describe("the locked agentic loop", () => {
   type Candidate = { id: string; text: string };
 
-  function fakeContext(run: RunRecorder) {
+  function fakeContext(run: RunRecorder, stage: StageId = "S2"): ModuleContext {
     return {
       workspace_id: "test",
       actor: { name: "Loop Test", function: "medical_affairs" as const },
       role: "medical_affairs",
       run,
-      route: defaultRoute("S2"),
+      route: {
+        stage,
+        provider_id: "xai-grok",
+        provider_label: "xAI · Grok",
+        model: "grok-4",
+        auth: "oauth",
+        connected: false,
+        params: { temperature: 0, max_tokens: 8192 },
+        fallbacks: DEFAULT_FALLBACKS,
+        degraded: true,
+        reason: "test fixture",
+      },
       complete: async () => {
-        throw new Error("the deterministic route does not prompt");
+        throw new Error("test fixture does not prompt");
       },
     };
   }
@@ -206,7 +224,7 @@ describe("the locked agentic loop", () => {
       actor: { name: "Loop Test", function: "medical_affairs" },
       input: {},
     });
-    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder), "S4", {
+    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder, "S4"), "S4", {
       subjectOf: (candidate) => candidate.id,
       proposer: { local: ({ round }) => (round === 1 ? [{ id: "only", text: "one" }] : []) },
       critic: (candidates) =>
@@ -230,10 +248,10 @@ describe("routing defaults", () => {
     expect(DEFAULT_ROUTE_PROVIDER).toBe("xai-grok");
     expect(ALTERNATE_ROUTE_PROVIDER).toBe("anthropic-claude");
     expect(DEFAULT_FALLBACKS[0]).toBe("anthropic-claude");
-    expect(DEFAULT_FALLBACKS.at(-1)).toBe("deterministic-local");
+    expect(DEFAULT_FALLBACKS).toEqual(["anthropic-claude"]);
   });
 
-  it("ships the five locked OAuth providers plus the offline route", () => {
+  it("ships the five locked OAuth providers", () => {
     const ids = PROVIDERS.map((provider) => provider.id);
     expect(ids).toEqual([
       "xai-grok",
@@ -241,29 +259,50 @@ describe("routing defaults", () => {
       "openai",
       "google-gemini",
       "openrouter",
-      "deterministic-local",
     ]);
     for (const provider of PROVIDERS) {
-      if (provider.id === "deterministic-local") {
-        expect(provider.auth).toBe("none");
-        continue;
-      }
       expect(provider.auth).toBe("oauth");
       expect(provider.oauth?.authorize_url).toMatch(/^https:\/\//);
       expect(provider.oauth?.token_url).toMatch(/^https:\/\//);
     }
   });
 
-  it("treats OpenRouter as configured because its PKCE flow needs no client id", () => {
-    expect(providerConfigured(findProvider("openrouter")!)).toBe(true);
-    expect(providerConfigured(findProvider("deterministic-local")!)).toBe(true);
+  it("treats every MVP provider as OAuth-ready without operator client env vars", () => {
+    for (const provider of PROVIDERS) {
+      expect(providerConfigured(provider)).toBe(true);
+    }
   });
 
-  it("will not prompt a model on the offline route", () => {
-    const route = defaultRoute("S2");
-    expect(route.provider_id).toBe("deterministic-local");
-    expect(canPrompt(route)).toBe(false);
-    expect(canPrompt({ ...route, auth: "oauth", connected: true })).toBe(true);
+  it("blocks agentic routing when no provider is connected", async () => {
+    await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+    expect(
+      canPrompt({
+        stage: "S2",
+        provider_id: "xai-grok",
+        provider_label: "xAI · Grok",
+        model: "grok-4",
+        auth: "oauth",
+        connected: false,
+        params: { temperature: 0, max_tokens: 8192 },
+        fallbacks: DEFAULT_FALLBACKS,
+        degraded: true,
+        reason: "disconnected",
+      }),
+    ).toBe(false);
+    expect(
+      canPrompt({
+        stage: "S2",
+        provider_id: "xai-grok",
+        provider_label: "xAI · Grok",
+        model: "grok-4",
+        auth: "oauth",
+        connected: true,
+        params: { temperature: 0, max_tokens: 8192 },
+        fallbacks: DEFAULT_FALLBACKS,
+        degraded: false,
+        reason: null,
+      }),
+    ).toBe(true);
   });
 });
 

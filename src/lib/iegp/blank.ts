@@ -13,6 +13,8 @@ export function buildBlankWorkspace(): IegpState {
       geography: "US + EU5",
       wizard_complete: false,
       tactics_unlocked: false,
+      setup_complete: false,
+      planning_context: {},
     },
     objectives: [
       {

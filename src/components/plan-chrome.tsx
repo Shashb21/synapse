@@ -14,6 +14,7 @@ import {
   ListChecks,
   Lock,
   Menu,
+  Rocket,
   SlidersHorizontal,
   Upload,
   Workflow,
@@ -44,7 +45,8 @@ export type ShellId =
   | "runs"
   | "control"
   | "evals"
-  | "sdlc";
+  | "sdlc"
+  | "setup";
 
 export type PlanNavModel = {
   gapsCount: number;
@@ -52,6 +54,7 @@ export type PlanNavModel = {
   gapsUnlocked: boolean;
   planUnlocked: boolean;
   tacticsUnlocked: boolean;
+  setupComplete: boolean;
 };
 
 type PlaceItem = {
@@ -72,7 +75,8 @@ type SecondaryId =
   | "runs"
   | "control"
   | "evals"
-  | "sdlc";
+  | "sdlc"
+  | "setup";
 
 type SecondaryItem = {
   id: SecondaryId;
@@ -88,6 +92,7 @@ const PLAN_SURFACES: SecondaryItem[] = [
 ];
 
 const SECONDARY: SecondaryItem[] = [
+  { id: "setup", href: "/setup", label: "Get started", icon: Rocket },
   { id: "pipeline", href: "/pipeline", label: "Pipeline", icon: Workflow },
   { id: "runs", href: "/runs", label: "Runs", icon: Activity },
   { id: "control", href: "/control", label: "Control panel", icon: SlidersHorizontal },

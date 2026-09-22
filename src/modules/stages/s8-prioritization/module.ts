@@ -14,6 +14,7 @@ import { canPrompt } from "@/modules/kernel/routing";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { loadState, lockPriority } from "@/lib/iegp/store";
 import type { IegpState } from "@/lib/iegp/types";
 import { bandFor, loadAxes, weightedScore, type PriorityAxis, type StoredAxes } from "./axes";
@@ -26,6 +27,10 @@ const inputSchema = z.object({
       key_decision: z.string().optional(),
       decision_date: z.string().optional(),
       competitor_pressure: z.string().optional(),
+      launch_timeline: z.string().optional(),
+      company_situation: z.string().optional(),
+      lifecycle_stage: z.string().optional(),
+      strategic_importance: z.number().min(1).max(5).optional(),
     })
     .optional(),
   dry_run: z.boolean().default(false),
@@ -86,7 +91,12 @@ async function llmScores(
   args: {
     gaps: { id: string; name: string; statement: string; domain: string }[];
     axes: PriorityAxis[];
-    context: PrioritizationInput["context"];
+    context: PrioritizationInput["context"] & {
+      launch_timeline?: string;
+      company_situation?: string;
+      lifecycle_stage?: string;
+      strategic_importance?: number;
+    };
     asset: IegpState["asset"];
     hints: string;
   },
@@ -144,7 +154,9 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   outputSchema,
   async run(input, ctx) {
     const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]);
-    const importance = state.objectives[0]?.strategic_importance ?? 3;
+    const planningContext = { ...prioritizationContextFromState(state), ...input.context };
+    const importance =
+      planningContext.strategic_importance ?? state.objectives[0]?.strategic_importance ?? 3;
     const openGaps = state.gaps.filter(
       (gap) =>
         isLiveGap(gap) &&
@@ -239,7 +251,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
                   domain: gap.domain,
                 })),
                 axes: axesConfig.axes,
-                context: input.context,
+                context: planningContext,
                 asset: state.asset,
                 hints: brief,
               });

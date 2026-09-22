@@ -52,8 +52,8 @@ export function RoutingPanel({
           Per-stage routing
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          Each stage resolves its own provider, model and parameters. If the preferred provider is not
-          logged in, the run degrades along the fallbacks and says so in the trace.
+          Each stage resolves its own provider, model and parameters. Agentic stages require a
+          connected LLM — log in on this page first, or the run blocks with a link back here.
         </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">

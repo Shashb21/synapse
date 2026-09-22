@@ -7,9 +7,10 @@ import { RunEvalsButton } from "@/components/platform/run-evals-button";
 import { ChainRunner, ModularUploadForm } from "@/components/platform/pipeline-runner";
 import { STAGES, STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
-import { resolveRoute } from "@/modules/kernel/routing";
+import { previewRoute } from "@/modules/kernel/routing";
 import { listRuns } from "@/modules/kernel/observability";
 import { sessionContext } from "@/modules/auth/session";
+import { loadState } from "@/lib/iegp/store";
 import { DEMO_FILE_OPTIONS, listSourceFiles } from "@/modules/stages/s0-upload/module";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 
@@ -31,14 +32,15 @@ const STAGE_INPUT: Partial<Record<StageId, Record<string, unknown>>> = {
 const DIRECT_RUN: StageId[] = ["S1", "S2", "S3", "S4", "S7", "S8", "S9", "S10"];
 
 export default async function PipelinePage() {
-  const [wiring, runs, identity, files, documents] = await Promise.all([
+  const [wiring, runs, identity, files, documents, iegp] = await Promise.all([
     stageWiring(),
     listRuns({ limit: 200 }),
     sessionContext(),
     listSourceFiles(),
     listParsedDocuments(),
+    loadState(),
   ]);
-  const routes = await Promise.all(STAGE_IDS.map((stage) => resolveRoute(stage)));
+  const routes = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
   const actionIdentity = {
     signed_in: identity.signed_in,
     actor_name: identity.actor.name,
@@ -51,6 +53,16 @@ export default async function PipelinePage() {
         Each stage is its own module behind a versioned contract. Run one stage, or run the chain. Every
         run is traced, scored and attributed.
       </PageIntro>
+
+      {!iegp.asset.setup_complete ? (
+        <p className="mb-6 border border-[var(--chart-1)]/30 bg-[var(--chart-1)]/5 px-3 py-2 text-[12px] text-muted-foreground">
+          New here?{" "}
+          <Link href="/setup" className="font-medium text-foreground underline-offset-2 hover:underline">
+            Complete the setup wizard
+          </Link>{" "}
+          to capture asset context and walk the pipeline before your first run.
+        </p>
+      ) : null}
 
       <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="border border-border bg-card/40 p-3" aria-labelledby="ingest">

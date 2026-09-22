@@ -8,6 +8,7 @@ const EMPTY_NAV: PlanNavModel = {
   gapsUnlocked: false,
   planUnlocked: false,
   tacticsUnlocked: false,
+  setupComplete: true,
 };
 
 /**
@@ -33,6 +34,7 @@ export async function PlatformAppShell({
       gapsUnlocked: gates.gapsUnlocked,
       planUnlocked: gates.planUnlocked,
       tacticsUnlocked: gates.tacticsUnlocked,
+      setupComplete: state.asset.setup_complete,
     };
   } catch {
     // Control panel must load even before DATABASE_URL is configured.

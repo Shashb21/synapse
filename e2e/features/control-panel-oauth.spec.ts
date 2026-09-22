@@ -3,7 +3,7 @@ import {
   controlAction,
   controlActionExpectingError,
   controlState,
-  runStage,
+  runStageExpectingError,
   seedParsed,
 } from "../support/synapse";
 
@@ -68,7 +68,8 @@ test.describe("Control panel OAuth routing", () => {
       .toBe(true);
     const grok = await controlState(request);
     expect(grok.routes[0]!.fallbacks).toContain("anthropic-claude");
-    expect(grok.routes[0]!.fallbacks).toContain("deterministic-local");
+    expect(grok.routes[0]!.fallbacks).not.toContain("deterministic-local");
+    expect(grok.routes[0]!.fallbacks).toContain("anthropic-claude");
   });
 
   test("routes one stage on its own without touching its neighbours", async ({ request }) => {
@@ -93,30 +94,24 @@ test.describe("Control panel OAuth routing", () => {
     expect(badModel.error).toMatch(/does not serve/i);
   });
 
-  test("a provider with no OAuth client cannot be connected, and says why", async ({ request }) => {
-    const failed = await controlActionExpectingError(request, {
+  test("starts OAuth for Grok without operator client env vars", async ({ request }) => {
+    const started = await controlAction(request, {
       action: "connect_provider",
       provider_id: "xai-grok",
     });
-    expect(failed.status).toBe(400);
-    expect(failed.error).toMatch(/XAI_OAUTH_CLIENT_ID/);
+    expect(started.authorize_url).toMatch(/^https:\/\/auth\.x\.ai\//);
+    expect(started.authorize_url).toContain("client_id=");
+    expect(started.authorize_url).toContain("code_challenge=");
   });
 
-  test("an unconnected route degrades to the deterministic path and records the reason", async ({ request }) => {
+  test("an unconnected agentic stage is blocked with a control-panel prompt", async ({ request }) => {
     await controlAction(request, {
       action: "set_default_provider",
       provider_id: "xai-grok",
     });
     await seedParsed(request);
-    const extract = await runStage(request, "S2", { dry_run: true });
-    const response = await request.get(`/api/runs/${extract.run_id}`);
-    const { run } = (await response.json()) as {
-      run: { route: { provider_id: string; degraded: boolean; reason: string | null } };
-    };
-    expect(run.route.provider_id).toBe("deterministic-local");
-    expect(run.route.degraded).toBe(true);
-    expect(run.route.reason).toMatch(/OAuth client not configured/);
-    // The stage still ran its three exchanges on the offline route.
-    expect(extract.mode).toBe("deterministic");
+    const failed = await runStageExpectingError(request, "S2", { dry_run: true });
+    expect(failed.status).toBe(400);
+    expect(failed.error).toMatch(/control panel|\/control/i);
   });
 });

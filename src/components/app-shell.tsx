@@ -21,6 +21,7 @@ export async function AppShell({
     gapsUnlocked: gates.gapsUnlocked,
     planUnlocked: gates.planUnlocked,
     tacticsUnlocked: gates.tacticsUnlocked,
+    setupComplete: state.asset.setup_complete,
   };
   return (
     <PlanChrome active={active} nav={nav}>

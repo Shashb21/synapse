@@ -1,3 +1,5 @@
+import { resolveOAuthClientId } from "./oauth-clients";
+
 /**
  * LLM provider contract. Every cloud provider authenticates by OAuth login in
  * the control panel — API keys are not part of the product path. Adding a
@@ -11,7 +13,7 @@ export type OauthDescriptor = {
   authorize_url: string;
   token_url: string;
   scopes: string[];
-  /** Env var holding the OAuth client id. Secrets never live in the repo. */
+  /** Optional env override for the OAuth client id (built-in public ids ship by default). */
   client_id_env: string;
   client_secret_env?: string;
   pkce: boolean;
@@ -161,9 +163,14 @@ export const xaiGrok: LlmProvider = {
   models: models("XAI_MODELS", ["grok-4", "grok-4-fast", "grok-3"]),
   default_model: models("XAI_MODELS", ["grok-4"])[0]!,
   oauth: {
-    authorize_url: env("XAI_OAUTH_AUTHORIZE_URL", "https://accounts.x.ai/oauth/authorize"),
-    token_url: env("XAI_OAUTH_TOKEN_URL", "https://api.x.ai/oauth/token"),
-    scopes: env("XAI_OAUTH_SCOPES", "api offline_access").split(" ").filter(Boolean),
+    authorize_url: env("XAI_OAUTH_AUTHORIZE_URL", "https://auth.x.ai/oauth2/authorize"),
+    token_url: env("XAI_OAUTH_TOKEN_URL", "https://auth.x.ai/oauth2/token"),
+    scopes: env(
+      "XAI_OAUTH_SCOPES",
+      "openid profile email offline_access grok-cli:access api:access",
+    )
+      .split(" ")
+      .filter(Boolean),
     client_id_env: "XAI_OAUTH_CLIENT_ID",
     client_secret_env: "XAI_OAUTH_CLIENT_SECRET",
     pkce: true,
@@ -326,46 +333,20 @@ export const openRouter: LlmProvider = {
   },
 };
 
-/**
- * No-network route. Selecting it tells agentic stages to use their deterministic
- * proposer, so the pipeline is end-to-end before any provider is connected.
- */
-export const deterministicProvider: LlmProvider = {
-  id: "deterministic-local",
-  label: "Deterministic (no LLM)",
-  summary: "Runs each agentic stage's local proposer, critic and judge. No login, no network.",
-  auth: "none",
-  models: ["local-heuristic"],
-  default_model: "local-heuristic",
-  async complete() {
-    throw new NoRouteError(
-      "deterministic-local does not call an LLM; the stage must use its local proposer",
-    );
-  },
-};
-
-export const PROVIDERS: LlmProvider[] = [
-  xaiGrok,
-  anthropicClaude,
-  openAi,
-  googleGemini,
-  openRouter,
-  deterministicProvider,
-];
+export const PROVIDERS: LlmProvider[] = [xaiGrok, anthropicClaude, openAi, googleGemini, openRouter];
 
 /** Locked: Grok is the default route, Claude the one-click alternate. */
 export const DEFAULT_ROUTE_PROVIDER = xaiGrok.id;
 export const ALTERNATE_ROUTE_PROVIDER = anthropicClaude.id;
-export const OFFLINE_PROVIDER = deterministicProvider.id;
 
 export function findProvider(id: string): LlmProvider | undefined {
   return PROVIDERS.find((provider) => provider.id === id);
 }
 
-/** True when the deployment has the OAuth client configuration this provider needs. */
+/** True when this provider can start OAuth (built-in public client or env override). */
 export function providerConfigured(provider: LlmProvider): boolean {
   if (provider.auth === "none") return true;
   if (!provider.oauth) return false;
   if (provider.oauth.client_id_optional) return true;
-  return Boolean(process.env[provider.oauth.client_id_env]?.trim());
+  return Boolean(resolveOAuthClientId(provider));
 }

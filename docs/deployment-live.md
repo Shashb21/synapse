@@ -1,6 +1,6 @@
 # Live OAuth and Grok routing
 
-Synapse never exposes API-key fields in the UI. Users connect each LLM provider from the **control panel**; operators only set **OAuth client** credentials in the deployment environment (used for the authorization redirect — not shown to end users as keys).
+Synapse never exposes API-key fields in the UI. Users connect each LLM provider from the **control panel** via OAuth (PKCE). The app ships **public OAuth client ids** for Grok, Claude, OpenAI, Gemini, and OpenRouter so **Log in** works without setting `*_OAUTH_CLIENT_ID` env vars. Operators may still override those ids (and secrets where required) in the deployment environment.
 
 ## Grok (default route) — UI path
 
@@ -21,7 +21,7 @@ Register an OAuth application with xAI (or your IdP console) and set redirect UR
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `XAI_OAUTH_CLIENT_ID` | **Yes** (for Grok login button to work) | OAuth client id for the PKCE flow |
+| `XAI_OAUTH_CLIENT_ID` | No (built-in public client) | Optional override for the PKCE flow |
 | `XAI_OAUTH_CLIENT_SECRET` | If xAI issues one | Token exchange |
 | `XAI_OAUTH_AUTHORIZE_URL` | No | Default `https://accounts.x.ai/oauth/authorize` |
 | `XAI_OAUTH_TOKEN_URL` | No | Default `https://api.x.ai/oauth/token` |
@@ -29,9 +29,9 @@ Register an OAuth application with xAI (or your IdP console) and set redirect UR
 | `XAI_BASE_URL` | No | Default `https://api.x.ai/v1` |
 | `XAI_MODELS` | No | Comma-separated allowlist for the control panel |
 
-Without `XAI_OAUTH_CLIENT_ID`, **Log in with xAI** returns a clear error; stages fall back to `deterministic-local` while keeping Grok-first routing in the panel.
+Agentic stages **require** a connected LLM. If nothing is logged in on `/control`, runs block with a message to connect a provider (there is no deterministic / offline LLM fallback).
 
-Other MVP LLM providers (Claude, OpenAI, Gemini, OpenRouter) use their own `*_OAUTH_CLIENT_ID` variables — see `.env.example`.
+Optional `*_OAUTH_CLIENT_ID` overrides are documented in `.env.example`.
 
 ## Identity (app sign-in)
 

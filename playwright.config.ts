@@ -15,6 +15,10 @@ export default defineConfig({
     url: "http://127.0.0.1:43217",
     reuseExistingServer: true,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      SYNAPSE_TEST_STUB_LLM: "1",
+    },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

@@ -16,6 +16,8 @@ export const assets = pgTable("assets", {
   geography: text("geography").notNull(),
   wizard_complete: boolean("wizard_complete").notNull().default(false),
   tactics_unlocked: boolean("tactics_unlocked").notNull().default(false),
+  setup_complete: boolean("setup_complete").notNull().default(false),
+  planning_context: jsonb("planning_context").notNull().default({}),
 });
 
 export const objectives = pgTable("objectives", {

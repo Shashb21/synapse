@@ -1,5 +1,6 @@
 import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
+import { NoRouteError } from "@/modules/llm/provider";
 import { digestAsPrompt, hillclimbDigest } from "./hillclimb";
 
 /**
@@ -111,17 +112,20 @@ export async function runAgenticCycle<C>(
   ctx.run.note("hillclimb:hints", { open: digest.open, corrections: digest.corrections });
 
   const propose = async (args: ProposerArgs<C>): Promise<{ candidates: C[]; via: "llm" | "local" }> => {
-    if (cycle.proposer.llm && canPrompt(ctx.route)) {
-      try {
-        const candidates = await cycle.proposer.llm(args);
-        if (candidates.length > 0) return { candidates, via: "llm" };
-      } catch (error) {
-        ctx.run.note(`round${args.round}:proposer_llm_failed`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+    if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+      return { candidates: await cycle.proposer.local(args), via: "local" };
     }
-    return { candidates: await cycle.proposer.local(args), via: "local" };
+    if (!canPrompt(ctx.route)) {
+      throw new NoRouteError(
+        ctx.route.reason ??
+          "No LLM provider is connected. Log in at /control (Grok, Claude, or another provider) before running this stage.",
+      );
+    }
+    if (!cycle.proposer.llm) {
+      throw new NoRouteError("This stage has no LLM proposer configured.");
+    }
+    const candidates = await cycle.proposer.llm(args);
+    return { candidates, via: "llm" };
   };
 
   const first = await ctx.run.step(
