@@ -155,7 +155,7 @@ async function chatCompletions(args: {
 export const xaiGrok: LlmProvider = {
   id: "xai-grok",
   label: "xAI · Grok",
-  summary: "Default route. Grok models on api.x.ai, authorized by xAI OAuth login.",
+  summary: "Default route. Grok models on api.x.ai, authorized by xAI OAuth login in the control panel.",
   auth: "oauth",
   tier: "default",
   models: models("XAI_MODELS", ["grok-4", "grok-4-fast", "grok-3"]),

@@ -7,6 +7,8 @@ import { listRuns, stageHealth } from "@/modules/kernel/observability";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { listSignals } from "@/modules/kernel/hillclimb";
 import { listEvalRuns } from "@/modules/kernel/evals";
+import { HillclimbSweepButton } from "@/components/platform/hillclimb-sweep-button";
+import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
 
 export const dynamic = "force-dynamic";
 
@@ -146,6 +148,21 @@ export default async function RunsPage() {
               ))}
             </ul>
           )}
+        </section>
+
+        <section className="grid gap-2" aria-labelledby="hillclimb-loop">
+          <h2 id="hillclimb-loop" className="text-[15px] font-medium text-foreground">
+            Hillclimb loop
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            Score registered prompt variants against curated gold, store per-version baselines, and promote
+            the winning variant when it beats its baseline.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {HILLCLIMB_STAGES.map((stage) => (
+              <HillclimbSweepButton key={stage} stage={stage} />
+            ))}
+          </div>
         </section>
 
         <section className="grid gap-2" aria-labelledby="signals">

@@ -20,6 +20,9 @@ plan the team keeps outside this repo. This file describes what the code does.
 | `observability.ts` | Run records: input, output, steps with payloads, route, timings, errors, eval scores. Stage health. |
 | `edit-records.ts` | Every user edit with its mandatory rationale. |
 | `hillclimb.ts` | Signals derived from edits, evals and parse quality, plus the digest each agentic stage reads before it proposes. |
+| `hillclimb-loop.ts` | Prompt-variant sweep: score variants against curated gold, update baselines, file promotion signals. |
+| `baselines.ts` | Per-stage, per-prompt-version metric baselines (`prompt_baselines`). |
+| `prompt-versions.ts` / `prompt-variant.ts` | Registered variants and `AsyncLocalStorage` scope for hillclimb evals. |
 | `evals.ts` | Per-stage eval runs and the harness runner. |
 | `agentic.ts` | The shared loop: propose → critique → revise, three exchanges, then judge. Both the LLM path and the local path. |
 | `db.ts` / `schema.ts` | Platform tables. Module-owned DDL is applied by the kernel on first run. |
@@ -84,7 +87,9 @@ through the same domain code.
 
 - **LLM routing** — `src/modules/llm/`. Five OAuth providers: xAI Grok (default
   route), Anthropic Claude (one-click alternate), OpenAI, Google Gemini,
-  OpenRouter. There is no API-key path for an end user. `deterministic-local` is
+  OpenRouter. There is no API-key path for an end user. Operators set OAuth
+  client ids in env (see `docs/deployment-live.md`); users log in per provider on
+  `/control`. `deterministic-local` is
   the offline route: agentic stages fall back to their local proposer, critic and
   judge, so the pipeline is end-to-end before anyone logs in.
 - **Identity and roles** — `src/modules/auth/`. OAuth sign-in (Google, Microsoft

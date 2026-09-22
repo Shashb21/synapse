@@ -2,6 +2,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { curatedS1Cases } from "@/modules/eval-gold";
 import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
@@ -212,18 +213,36 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   },
   evals: {
     async cases() {
+      const curated = await curatedS1Cases();
+      if (curated.length > 0) return curated;
       const files = await listSourceFiles();
       return files.slice(0, 4).map((file) => ({
         name: file.filename,
         input: { file_ids: [file.id], dry_run: true },
       }));
     },
-    score({ output }) {
+    score({ case: testCase, output }) {
       const documents = output.documents;
       const recovered = documents.filter((doc) => doc.quality.blocks > 0 && doc.quality.characters > 200);
       const withNeeds = documents.filter((doc) => doc.quality.need_cue_blocks > 0);
       const clean = documents.filter((doc) => doc.quality.warnings.length === 0);
+      const doc = documents[0];
+      const blocksOk =
+        testCase.gold?.parse_min_blocks && doc
+          ? doc.quality.blocks >= testCase.gold.parse_min_blocks
+          : true;
+      const cuesOk =
+        testCase.gold?.parse_min_need_cues && doc
+          ? doc.quality.need_cue_blocks >= testCase.gold.parse_min_need_cues
+          : true;
       return [
+        {
+          name: "curated_parse_quality",
+          value: blocksOk && cuesOk ? 1 : 0,
+          unit: "ratio",
+          target: testCase.gold?.parse_min_blocks ? 1 : undefined,
+          detail: testCase.gold?.source_id ?? "workspace",
+        },
         {
           name: "text_recovered",
           value: documents.length === 0 ? 0 : Number((recovered.length / documents.length).toFixed(3)),

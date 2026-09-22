@@ -171,7 +171,8 @@ export type HillclimbSignalKind =
   | "user_rejected_proposal"
   | "user_accepted_proposal"
   | "eval_regression"
-  | "parse_quality";
+  | "parse_quality"
+  | "hillclimb_promotion";
 
 export type HillclimbSignalDraft = {
   stage: StageId;
@@ -225,6 +226,14 @@ export type ModuleResult<O> = {
 export type EvalCase<I> = {
   name: string;
   input: I;
+  /** Curated gold metadata (not passed to the module input schema). */
+  gold?: {
+    pack: string;
+    source_id: string;
+    must_match?: string[];
+    parse_min_blocks?: number;
+    parse_min_need_cues?: number;
+  };
 };
 
 export type EvalHarness<I, O> = {

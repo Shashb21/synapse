@@ -12,6 +12,9 @@ import {
 import { RunRecorder } from "@/modules/kernel/observability";
 import { canPrompt, defaultRoute, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID } from "@/modules/kernel/routing";
 import { digestAsPrompt } from "@/modules/kernel/hillclimb";
+import { compositeScore } from "@/modules/kernel/baselines";
+import { promptVersionsFor } from "@/modules/kernel/prompt-versions";
+import { scoreMustMatch } from "@/modules/eval-gold/types";
 import { scoresPassed } from "@/modules/kernel/evals";
 import { requireRationale, RATIONALE_REQUIRED } from "@/modules/kernel/edit-records";
 import {
@@ -261,6 +264,27 @@ describe("routing defaults", () => {
     expect(route.provider_id).toBe("deterministic-local");
     expect(canPrompt(route)).toBe(false);
     expect(canPrompt({ ...route, auth: "oauth", connected: true })).toBe(true);
+  });
+});
+
+describe("curated eval gold", () => {
+  it("scores must-match needles against accepted statements", () => {
+    const hit = scoreMustMatch(["intracranial outcomes in brain metastases"], ["intracranial", "sequencing"]);
+    expect(hit.value).toBeGreaterThan(0);
+    expect(hit.detail).toContain("1/2");
+  });
+});
+
+describe("hillclimb prompt variants", () => {
+  it("registers multiple versions for agentic stages", () => {
+    expect(promptVersionsFor("S2").length).toBeGreaterThan(1);
+    expect(promptVersionsFor("S0")).toEqual(["v1.0-baseline"]);
+  });
+
+  it("composites targeted metrics for baseline comparison", () => {
+    const high = compositeScore([{ name: "a", value: 0.9, target: 0.8 }]);
+    const low = compositeScore([{ name: "a", value: 0.4, target: 0.8 }]);
+    expect(high).toBeGreaterThan(low);
   });
 });
 
