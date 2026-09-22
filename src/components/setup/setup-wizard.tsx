@@ -18,7 +18,7 @@ import {
   Upload,
   Workflow,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { PlanningContext } from "@/lib/iegp/planning-context";
@@ -353,12 +353,12 @@ export function SetupWizard({
             after ingest. Revisit this wizard anytime from <strong>Get started</strong> in the sidebar.
           </p>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button asChild>
-              <Link href="/pipeline">Open pipeline</Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/control">Control panel</Link>
-            </Button>
+            <Link href="/pipeline" className={buttonVariants()}>
+              Open pipeline
+            </Link>
+            <Link href="/control" className={buttonVariants({ variant: "outline" })}>
+              Control panel
+            </Link>
           </div>
         </section>
       ) : null}

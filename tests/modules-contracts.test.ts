@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import "@/modules";
-import { KERNEL_CONTRACT, STAGES, STAGE_IDS, type SynapseModule } from "@/modules/kernel/contracts";
+import {
+  KERNEL_CONTRACT,
+  STAGES,
+  STAGE_IDS,
+  type ModuleContext,
+  type StageId,
+  type SynapseModule,
+} from "@/modules/kernel/contracts";
 import { manifests, modulesForStage, registerModule } from "@/modules/kernel/registry";
 import {
   PROPOSER_CRITIC_EXCHANGES,
@@ -80,14 +87,14 @@ describe("module contracts", () => {
 describe("the locked agentic loop", () => {
   type Candidate = { id: string; text: string };
 
-  function fakeContext(run: RunRecorder) {
+  function fakeContext(run: RunRecorder, stage: StageId = "S2"): ModuleContext {
     return {
       workspace_id: "test",
       actor: { name: "Loop Test", function: "medical_affairs" as const },
       role: "medical_affairs",
       run,
       route: {
-        stage: "S2",
+        stage,
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
@@ -217,7 +224,7 @@ describe("the locked agentic loop", () => {
       actor: { name: "Loop Test", function: "medical_affairs" },
       input: {},
     });
-    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder), "S4", {
+    const outcome = await runAgenticCycle<Candidate>(fakeContext(recorder, "S4"), "S4", {
       subjectOf: (candidate) => candidate.id,
       proposer: { local: ({ round }) => (round === 1 ? [{ id: "only", text: "one" }] : []) },
       critic: (candidates) =>

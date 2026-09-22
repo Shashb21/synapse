@@ -363,7 +363,7 @@ export async function POST(request: Request) {
           context: context as never,
           actor_name,
           actor_function,
-          mark_complete: body.mark_complete === "true" || body.mark_complete === true,
+          mark_complete: body.mark_complete === "true",
         });
         break;
       }
