@@ -14,7 +14,17 @@ const globalForDb = globalThis as unknown as {
 
 function client() {
   if (!globalForDb.pg) {
-    globalForDb.pg = postgres(DEFAULT_URL, { max: 8 });
+    let host = "127.0.0.1";
+    try {
+      host = new URL(DEFAULT_URL.replace(/^postgres:\/\//, "http://")).hostname;
+    } catch {
+      // keep localhost default
+    }
+    const remote = host !== "127.0.0.1" && host !== "localhost";
+    globalForDb.pg = postgres(DEFAULT_URL, {
+      max: process.env.VERCEL ? 1 : 8,
+      ssl: remote ? "require" : undefined,
+    });
   }
   return globalForDb.pg;
 }
