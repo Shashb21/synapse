@@ -185,6 +185,20 @@ export function buildSeed(): IegpState {
       geography: "US + EU5",
       wizard_complete: true,
       tactics_unlocked: true,
+      setup_complete: true,
+      planning_context: {
+        asset_name: "Velmara",
+        inn: "velmaratinib",
+        indication: "2L EGFR-mutant NSCLC",
+        geography: "US + EU5",
+        lifecycle_stage: "peri-launch",
+        launch_timeline: "US launch targeted 2027-H1; EU5 staggered through 2027",
+        competitor_positioning: "Differentiate versus osimertinib and NX-441 on CNS and elderly subgroups",
+        key_decision: "US national payer P&T and EU5 HTA filings",
+        decision_date: "2027-03-31",
+        company_situation: "Peri-launch evidence plan; HEOR and medical aligned on payer-critical gaps",
+        strategic_importance: 5,
+      },
     },
     objectives: [
       {

@@ -220,3 +220,27 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
 export function stageLabel(stage: StageId): string {
   return STAGES[stage].title;
 }
+
+/** UI preview when no provider is connected yet (does not throw). */
+export async function previewRoute(stage: StageId): Promise<ResolvedRoute> {
+  try {
+    return await resolveRoute(stage);
+  } catch (error) {
+    const config = await routeConfig(stage);
+    const provider =
+      findProvider(config.provider_id) ?? findProvider(DEFAULT_PROVIDER_ID)!;
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      stage,
+      provider_id: provider.id,
+      provider_label: provider.label,
+      model: config.model || provider.default_model,
+      auth: "oauth",
+      connected: false,
+      params: config.params,
+      fallbacks: config.fallbacks,
+      degraded: true,
+      reason: message,
+    };
+  }
+}

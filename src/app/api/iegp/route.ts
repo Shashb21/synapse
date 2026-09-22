@@ -5,6 +5,7 @@ import {
   assignTacticToGap,
   clearGapStatusOverride,
   completeWizard,
+  saveProductSetup,
   createAddressedGap,
   createGap,
   createProposedTactic,
@@ -353,6 +354,19 @@ export async function POST(request: Request) {
           note: body.note,
         });
         break;
+      case "save_product_setup": {
+        const context = body.context;
+        if (!context || typeof context !== "object") {
+          return NextResponse.json({ error: "context is required" }, { status: 400 });
+        }
+        await saveProductSetup({
+          context: context as never,
+          actor_name,
+          actor_function,
+          mark_complete: body.mark_complete === "true" || body.mark_complete === true,
+        });
+        break;
+      }
       case "unlock_tactics":
         await unlockTacticsStage({
           actor_name,

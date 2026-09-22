@@ -43,6 +43,9 @@ export type Asset = {
   geography: string;
   wizard_complete: boolean;
   tactics_unlocked: boolean;
+  /** Product setup wizard (asset questionnaire + journey) finished. */
+  setup_complete: boolean;
+  planning_context: unknown;
 };
 
 export type StrategicObjective = {

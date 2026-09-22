@@ -3,6 +3,8 @@ import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
+import type { PlanningContext } from "./planning-context";
+import { parsePlanningContext } from "./planning-context";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
@@ -125,6 +127,8 @@ async function readState(): Promise<IegpState> {
       ...asset,
       wizard_complete: Boolean(asset.wizard_complete),
       tactics_unlocked: Boolean(asset.tactics_unlocked),
+      setup_complete: Boolean(asset.setup_complete),
+      planning_context: asset.planning_context ?? {},
     },
     objectives,
     sources: sources.map((s) => ({
@@ -2204,6 +2208,50 @@ export async function modifyTactic(args: {
     args.tactic_id,
     "modify",
     args.note || `${tactic.name} → ${args.name}`,
+  );
+}
+
+export async function saveProductSetup(args: {
+  context: PlanningContext;
+  actor_name: string;
+  actor_function: ActorFunction;
+  mark_complete?: boolean;
+}) {
+  const state = await loadState();
+  const ctx = parsePlanningContext(args.context);
+  await db()
+    .update(t.assets)
+    .set({
+      name: ctx.asset_name || state.asset.name,
+      inn: ctx.inn || state.asset.inn,
+      indication: ctx.indication || state.asset.indication,
+      geography: ctx.geography || state.asset.geography,
+      planning_context: ctx,
+      setup_complete: args.mark_complete ?? false,
+    })
+    .where(eq(t.assets.id, state.asset.id));
+  if (state.objectives[0]) {
+    await db()
+      .update(t.objectives)
+      .set({
+        indication: ctx.indication || state.objectives[0].indication,
+        geography: ctx.geography || state.objectives[0].geography,
+        lifecycle_stage: ctx.lifecycle_stage || state.objectives[0].lifecycle_stage,
+        strategic_importance: ctx.strategic_importance,
+        key_decision: ctx.key_decision || state.objectives[0].key_decision,
+        decision_date: ctx.decision_date || state.objectives[0].decision_date,
+      })
+      .where(eq(t.objectives.id, state.objectives[0].id));
+  }
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "plan",
+    state.asset.id,
+    args.mark_complete ? "complete_setup" : "save_setup",
+    args.mark_complete
+      ? "Product setup wizard complete."
+      : "Saved asset and planning context from setup wizard.",
   );
 }
 

@@ -202,6 +202,16 @@ export async function ensureSchema() {
       "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
     ),
   );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
+    ),
+  );
+  await d.execute(
+    sql.raw(
+      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
+    ),
+  );
 }
 
 export async function wipeIegp() {
