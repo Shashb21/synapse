@@ -8,14 +8,16 @@ import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
-  OFFLINE_PROVIDER,
   findProvider,
   providerConfigured,
 } from "@/modules/llm/provider";
 
-/** Locked default: Grok. Claude is the standing alternate, then the offline route. */
+/** Removed from the product; strip from stored fallbacks when resolving routes. */
+const LEGACY_OFFLINE_PROVIDER = "deterministic-local";
+
+/** Locked default: Grok. Claude is the standing alternate. */
 export const DEFAULT_PROVIDER_ID = DEFAULT_ROUTE_PROVIDER;
-export const DEFAULT_FALLBACKS = [ALTERNATE_ROUTE_PROVIDER, OFFLINE_PROVIDER];
+export const DEFAULT_FALLBACKS = [ALTERNATE_ROUTE_PROVIDER];
 
 export type RouteConfig = {
   stage: StageId;
@@ -26,6 +28,10 @@ export type RouteConfig = {
   updated_by: string;
   updated_at: string;
 };
+
+function scrubFallbacks(ids: string[]): string[] {
+  return ids.filter((id) => id !== LEGACY_OFFLINE_PROVIDER);
+}
 
 function defaultConfig(stage: StageId): RouteConfig {
   return {
@@ -47,10 +53,10 @@ export async function routeConfigs(): Promise<RouteConfig[]> {
     if (!row) return defaultConfig(stage);
     return {
       stage,
-      provider_id: row.provider_id,
+      provider_id: row.provider_id === LEGACY_OFFLINE_PROVIDER ? DEFAULT_PROVIDER_ID : row.provider_id,
       model: row.model,
       params: row.params as RouteConfig["params"],
-      fallbacks: (row.fallbacks as string[]) ?? DEFAULT_FALLBACKS,
+      fallbacks: scrubFallbacks((row.fallbacks as string[]) ?? DEFAULT_FALLBACKS),
       updated_by: row.updated_by,
       updated_at: row.updated_at,
     };
@@ -72,6 +78,9 @@ export async function setRouteConfig(args: {
   actor_name: string;
 }): Promise<RouteConfig> {
   await ensurePlatformSchema();
+  if (args.provider_id === LEGACY_OFFLINE_PROVIDER) {
+    throw new Error("Deterministic / no-LLM routing was removed. Pick a cloud provider.");
+  }
   const provider = findProvider(args.provider_id);
   if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
   if (args.model && provider.models.length > 0 && !provider.models.includes(args.model)) {
@@ -85,7 +94,7 @@ export async function setRouteConfig(args: {
       temperature: args.temperature ?? 0,
       max_tokens: args.max_tokens ?? 8192,
     },
-    fallbacks: args.fallbacks?.length ? args.fallbacks : DEFAULT_FALLBACKS,
+    fallbacks: scrubFallbacks(args.fallbacks?.length ? args.fallbacks : DEFAULT_FALLBACKS),
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
@@ -96,14 +105,16 @@ export async function setRouteConfig(args: {
   return { ...values, stage: args.stage, params: values.params as RouteConfig["params"] };
 }
 
+const CONNECT_PROMPT =
+  "Connect an LLM provider in the control panel (/control) — log in with Grok, Claude, or another provider — then retry.";
+
 /**
  * Turns the control-panel configuration into the route a run will actually use.
- * An unreachable preferred provider degrades along the configured fallbacks and
- * finally to the deterministic route, and says so.
+ * Every resolved route is a connected OAuth LLM; there is no offline fallback.
  */
 export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
   const config = await routeConfig(stage);
-  const candidates = [config.provider_id, ...config.fallbacks, OFFLINE_PROVIDER];
+  const candidates = scrubFallbacks([config.provider_id, ...config.fallbacks]);
   const reasons: string[] = [];
   for (const [index, id] of candidates.entries()) {
     const provider = findProvider(id);
@@ -112,21 +123,11 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
       continue;
     }
     if (provider.auth === "none") {
-      return {
-        stage,
-        provider_id: provider.id,
-        provider_label: provider.label,
-        model: index === 0 ? config.model : provider.default_model,
-        auth: "none",
-        connected: false,
-        params: config.params,
-        fallbacks: config.fallbacks,
-        degraded: index > 0,
-        reason: reasons.length ? reasons.join("; ") : null,
-      };
+      reasons.push(`${provider.label}: not an LLM provider`);
+      continue;
     }
     if (!providerConfigured(provider)) {
-      reasons.push(`${provider.label}: OAuth client not configured`);
+      reasons.push(`${provider.label}: OAuth client not available`);
       continue;
     }
     const status = await connectionStatus(provider.id);
@@ -147,26 +148,9 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
       reason: reasons.length ? reasons.join("; ") : null,
     };
   }
-  return {
-    ...defaultRoute(stage),
-    reason: reasons.join("; ") || "no provider available",
-    degraded: true,
-  };
-}
-
-export function defaultRoute(stage: StageId): ResolvedRoute {
-  return {
-    stage,
-    provider_id: OFFLINE_PROVIDER,
-    provider_label: "Deterministic (no LLM)",
-    model: "local-heuristic",
-    auth: "none",
-    connected: false,
-    params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: DEFAULT_FALLBACKS,
-    degraded: false,
-    reason: null,
-  };
+  throw new NoRouteError(
+    reasons.length ? `${reasons.join("; ")}. ${CONNECT_PROMPT}` : CONNECT_PROMPT,
+  );
 }
 
 /**
@@ -182,9 +166,7 @@ export async function setDefaultProvider(args: {
   if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
   const alternate =
     args.provider_id === DEFAULT_ROUTE_PROVIDER ? ALTERNATE_ROUTE_PROVIDER : DEFAULT_ROUTE_PROVIDER;
-  const fallbacks = [...new Set([alternate, OFFLINE_PROVIDER])].filter(
-    (id) => id !== args.provider_id,
-  );
+  const fallbacks = [alternate].filter((id) => id !== args.provider_id);
   const out: RouteConfig[] = [];
   for (const stage of STAGE_IDS) {
     out.push(

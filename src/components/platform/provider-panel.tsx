@@ -169,7 +169,7 @@ export function ProviderPanel({
                   <div className="flex justify-between gap-2">
                     <dt>OAuth client</dt>
                     <dd className={connection.configured ? "text-foreground" : "text-[var(--unknown)]"}>
-                      {connection.configured ? "configured" : "not configured"}
+                      {connection.configured ? "built-in (PKCE)" : "unavailable"}
                     </dd>
                   </div>
                 ) : null}
@@ -217,11 +217,7 @@ export function ProviderPanel({
                     </Button>
                   ) : null}
                 </div>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Always available. Stages fall back here so the pipeline runs before any login.
-                </p>
-              )}
+              ) : null}
             </article>
           );
         })}

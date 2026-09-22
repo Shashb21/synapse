@@ -313,19 +313,12 @@ export async function expectThreeExchanges(request: APIRequestContext, runId: st
   return { run, rounds };
 }
 
-/**
- * With no OAuth client configured the route must degrade to the deterministic
- * path and say why. The feature is still exercised, not skipped.
- */
+/** Agentic runs must use a connected LLM route; mechanical runs may note degradation. */
 export function expectRouteIsHonest(run: RunRecord) {
   expect(run.route, `${run.stage} should record its route`).toBeTruthy();
-  if (run.route!.auth === "none") {
-    expect(run.route!.provider_id).toBe("deterministic-local");
-    expect(
-      run.route!.reason ?? "",
-      "the trace must say why it fell back to the deterministic route",
-    ).toMatch(/not configured|disconnected|pending|no provider/i);
-  } else {
+  const agentic = ["S2", "S3", "S4", "S6", "S8", "S9"].includes(run.stage);
+  if (agentic) {
+    expect(run.route!.auth).toBe("oauth");
     expect(run.route!.connected).toBeTruthy();
   }
 }

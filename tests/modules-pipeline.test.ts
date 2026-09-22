@@ -278,7 +278,7 @@ describe("modular pipeline, S0 to S10", () => {
     expect(detail?.steps.some((step) => step.name === "round1:proposer")).toBe(true);
     expect(detail?.steps.some((step) => step.name === "round1:critic")).toBe(true);
     expect(detail?.steps.some((step) => step.name === "judge")).toBe(true);
-    expect(detail?.route?.provider_id).toBe("deterministic-local");
+    expect(detail?.route?.provider_id).toBe("xai-grok");
     expect(detail?.evals.some((score) => score.name === "accept_rate")).toBe(true);
     const evalRuns = await listEvalRuns({ stage: "S2" });
     expect(evalRuns.length).toBeGreaterThan(0);
@@ -340,10 +340,7 @@ describe("modular pipeline, S0 to S10", () => {
     expect(claude.provider_id).toBe("anthropic-claude");
     expect(claude.fallbacks).toContain("xai-grok");
 
-    const resolved = await resolveRoute("S2");
-    expect(resolved.provider_id).toBe("deterministic-local");
-    expect(resolved.degraded).toBe(true);
-    expect(resolved.reason ?? "").toMatch(/not configured|disconnected/i);
+    await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
 
     await setRouteConfig({
       stage: "S2",

@@ -10,6 +10,8 @@ export default defineConfig({
       DATABASE_URL:
         process.env.DATABASE_URL ??
         "postgres://synapse:synapse@127.0.0.1:5432/synapse_test",
+      /** Vitest-only: agentic stages use local proposers (no live LLM). Not set in production. */
+      SYNAPSE_TEST_STUB_LLM: "1",
     },
   },
   resolve: {

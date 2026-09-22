@@ -91,9 +91,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
         />
 
         <ProviderPanel
-          connections={connections
-            .filter((connection) => connection.provider_id !== "deterministic-local")
-            .map((connection) => ({
+          connections={connections.map((connection) => ({
               provider_id: connection.provider_id,
               label: connection.label,
               summary: connection.summary,
@@ -115,8 +113,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
 
         <RoutingPanel
           routes={routes}
-          providers={PROVIDERS.filter((provider) => provider.id !== "deterministic-local").map(
-            (provider) => ({
+          providers={PROVIDERS.map((provider) => ({
               id: provider.id,
               label: provider.label,
               models: provider.models,

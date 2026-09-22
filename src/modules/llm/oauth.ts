@@ -3,6 +3,11 @@ import { eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
+import {
+  publicOAuthClient,
+  resolveOAuthClientId,
+  resolveOAuthClientSecret,
+} from "./oauth-clients";
 import { PROVIDERS, findProvider, providerConfigured, type LlmProvider } from "./provider";
 
 export type ConnectionStatus = "disconnected" | "pending" | "connected" | "error";
@@ -103,11 +108,9 @@ export async function beginOauth(args: {
 }): Promise<{ authorize_url: string }> {
   const provider = findProvider(args.provider_id);
   if (!provider?.oauth) throw new Error(`${args.provider_id} does not use OAuth`);
-  const clientId = process.env[provider.oauth.client_id_env]?.trim();
+  const clientId = resolveOAuthClientId(provider);
   if (!clientId && !provider.oauth.client_id_optional) {
-    throw new Error(
-      `${provider.label} needs ${provider.oauth.client_id_env} in the environment before it can be connected.`,
-    );
+    throw new Error(`${provider.label} does not have an OAuth client id configured.`);
   }
   const { verifier, challenge } = createPkcePair();
   const state = base64Url(randomBytes(16));
@@ -135,6 +138,12 @@ export async function beginOauth(args: {
   if (provider.oauth.pkce) {
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "S256");
+  }
+  const extras = publicOAuthClient(provider.id)?.authorize_params;
+  if (extras) {
+    for (const [key, value] of Object.entries(extras)) {
+      url.searchParams.set(key, value);
+    }
   }
   return { authorize_url: url.toString() };
 }
@@ -188,7 +197,7 @@ export async function completeOauth(args: {
   if (!pending || pending.state !== args.state) {
     throw new Error("OAuth state does not match a pending authorization");
   }
-  const clientId = process.env[provider.oauth.client_id_env]?.trim();
+  const clientId = resolveOAuthClientId(provider);
   const params: Record<string, string> = {
     code: args.code,
     code_verifier: pending.code_verifier,
@@ -196,10 +205,10 @@ export async function completeOauth(args: {
   if (!provider.oauth.omit_response_type) params.grant_type = "authorization_code";
   if (!provider.oauth.omit_client_id && clientId) params.client_id = clientId;
   if (!provider.oauth.redirect_param) params.redirect_uri = pending.redirect_uri;
-  const secret = provider.oauth.client_secret_env
-    ? process.env[provider.oauth.client_secret_env]?.trim()
-    : undefined;
+  const secret = resolveOAuthClientSecret(provider);
   if (secret) params.client_secret = secret;
+  const tokenExtras = publicOAuthClient(provider.id)?.token_params;
+  if (tokenExtras) Object.assign(params, tokenExtras);
   const token = await exchange(provider, params);
   if (!token.access_token) {
     throw new Error(token.error_description ?? token.error ?? "token endpoint returned no token");
@@ -251,16 +260,14 @@ export async function accessToken(provider_id: string): Promise<string | null> {
     });
     return null;
   }
-  const clientId = process.env[provider.oauth.client_id_env]?.trim();
+  const clientId = resolveOAuthClientId(provider);
   if (!clientId && !provider.oauth.client_id_optional) return null;
   const params: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: stored.refresh_token,
   };
   if (clientId) params.client_id = clientId;
-  const secret = provider.oauth.client_secret_env
-    ? process.env[provider.oauth.client_secret_env]?.trim()
-    : undefined;
+  const secret = resolveOAuthClientSecret(provider);
   if (secret) params.client_secret = secret;
   const token = await exchange(provider, params);
   if (!token.access_token) return null;

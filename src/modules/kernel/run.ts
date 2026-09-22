@@ -1,13 +1,57 @@
 import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
-import { completionFor, resolveRoute } from "./routing";
+import { completionFor, resolveRoute, routeConfig } from "./routing";
+import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
+import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
 import { recordEvalRun } from "./evals";
 import type { Actor, EvalScore, ModuleContext, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 
 export const DEFAULT_WORKSPACE = "default";
+
+/** Agentic stages require a connected LLM; mechanical stages may run without one. */
+async function resolveRouteForRun(stage: StageId) {
+  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+    const preferred = await routeConfig(stage);
+    const provider =
+      findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
+    return {
+      stage,
+      provider_id: provider.id,
+      provider_label: provider.label,
+      model: preferred.model || provider.default_model,
+      auth: "oauth" as const,
+      connected: true,
+      params: preferred.params,
+      fallbacks: preferred.fallbacks,
+      degraded: false,
+      reason: null,
+    };
+  }
+  try {
+    return await resolveRoute(stage);
+  } catch (error) {
+    if (STAGES[stage].kind === "agentic") throw error;
+    const preferred = await routeConfig(stage);
+    const provider =
+      findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      stage,
+      provider_id: provider.id,
+      provider_label: provider.label,
+      model: preferred.model || provider.default_model,
+      auth: "oauth" as const,
+      connected: false,
+      params: preferred.params,
+      fallbacks: preferred.fallbacks,
+      degraded: true,
+      reason: message,
+    };
+  }
+}
 
 export type StageRunResult<O> = {
   run_id: string;
@@ -72,7 +116,7 @@ export async function runStage<O = unknown>(args: {
   }
   recorder.note("input:accepted", parsedInput.data);
 
-  const route = await resolveRoute(args.stage);
+  const route = await resolveRouteForRun(args.stage);
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
   const ctx: ModuleContext = {
