@@ -3,10 +3,6 @@ import { eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
-import {
-  CURSOR_SUBSCRIPTION_TOKEN,
-  cursorSubscriptionConfigured,
-} from "./cursor-subscription";
 import { PROVIDERS, findProvider, providerConfigured, type LlmProvider } from "./provider";
 
 export type ConnectionStatus = "disconnected" | "pending" | "connected" | "error";
@@ -56,19 +52,10 @@ export async function listConnections(): Promise<ProviderConnection[]> {
   const rows = await db().select().from(t.oauthConnections);
   return PROVIDERS.map((provider) => {
     const stored = rows.find((candidate) => candidate.provider_id === provider.id);
-    let status: ConnectionStatus =
+    const status: ConnectionStatus =
       provider.auth === "none"
         ? "connected"
         : ((stored?.status as ConnectionStatus | undefined) ?? "disconnected");
-    if (
-      provider.id === "xai-grok" &&
-      cursorSubscriptionConfigured() &&
-      status !== "connected"
-    ) {
-      status = "connected";
-    }
-    const cursorBridge =
-      provider.id === "xai-grok" && cursorSubscriptionConfigured() && !stored?.access_token;
     return {
       provider_id: provider.id,
       label: provider.label,
@@ -77,10 +64,7 @@ export async function listConnections(): Promise<ProviderConnection[]> {
       auth: provider.auth,
       configured: providerConfigured(provider),
       status,
-      account_label:
-        cursorBridge
-          ? "Cursor subscription (deployment)"
-          : (stored?.account_label ?? null),
+      account_label: stored?.account_label ?? null,
       scopes: (stored?.scopes as string[] | undefined) ?? provider.oauth?.scopes ?? [],
       expires_at: stored?.expires_at ?? null,
       connected_by: stored?.connected_by ?? null,
@@ -97,11 +81,7 @@ export async function connectionStatus(provider_id: string): Promise<ConnectionS
   if (!provider) return "error";
   if (provider.auth === "none") return "connected";
   const stored = await row(provider_id);
-  const status = (stored?.status as ConnectionStatus | undefined) ?? "disconnected";
-  if (provider_id === "xai-grok" && cursorSubscriptionConfigured() && status !== "connected") {
-    return "connected";
-  }
-  return status;
+  return (stored?.status as ConnectionStatus | undefined) ?? "disconnected";
 }
 
 async function upsert(values: typeof t.oauthConnections.$inferInsert) {
@@ -252,12 +232,6 @@ export async function accessToken(provider_id: string): Promise<string | null> {
   const provider = findProvider(provider_id);
   if (!provider?.oauth) return null;
   const stored = await row(provider_id);
-  if (provider_id === "xai-grok" && cursorSubscriptionConfigured()) {
-    if (stored?.access_token && stored.status === "connected") {
-      return stored.access_token;
-    }
-    return CURSOR_SUBSCRIPTION_TOKEN;
-  }
   if (!stored?.access_token) return null;
   const expiresAt = stored.expires_at ? Date.parse(stored.expires_at) : null;
   const stale = expiresAt !== null && expiresAt - Date.now() < 60_000;

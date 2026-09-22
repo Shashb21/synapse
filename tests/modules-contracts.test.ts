@@ -15,7 +15,6 @@ import { digestAsPrompt } from "@/modules/kernel/hillclimb";
 import { compositeScore } from "@/modules/kernel/baselines";
 import { promptVersionsFor } from "@/modules/kernel/prompt-versions";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
-import { cursorSubscriptionConfigured } from "@/modules/llm/cursor-subscription";
 import { scoresPassed } from "@/modules/kernel/evals";
 import { requireRationale, RATIONALE_REQUIRED } from "@/modules/kernel/edit-records";
 import {
@@ -265,12 +264,6 @@ describe("routing defaults", () => {
     expect(route.provider_id).toBe("deterministic-local");
     expect(canPrompt(route)).toBe(false);
     expect(canPrompt({ ...route, auth: "oauth", connected: true })).toBe(true);
-  });
-});
-
-describe("live routing helpers", () => {
-  it("reports whether Cursor subscription Grok is configured in this deployment", () => {
-    expect(typeof cursorSubscriptionConfigured()).toBe("boolean");
   });
 });
 

@@ -87,9 +87,9 @@ through the same domain code.
 
 - **LLM routing** — `src/modules/llm/`. Five OAuth providers: xAI Grok (default
   route), Anthropic Claude (one-click alternate), OpenAI, Google Gemini,
-  OpenRouter. There is no API-key path for an end user. Deployments may set
-  `CURSOR_API_KEY` so Grok runs on the operator’s Cursor subscription without
-  `XAI_OAUTH_CLIENT_ID` (see `docs/deployment-live.md`). `deterministic-local` is
+  OpenRouter. There is no API-key path for an end user. Operators set OAuth
+  client ids in env (see `docs/deployment-live.md`); users log in per provider on
+  `/control`. `deterministic-local` is
   the offline route: agentic stages fall back to their local proposer, critic and
   judge, so the pipeline is end-to-end before anyone logs in.
 - **Identity and roles** — `src/modules/auth/`. OAuth sign-in (Google, Microsoft

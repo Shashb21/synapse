@@ -7,12 +7,6 @@
  * alternate), OpenAI, Google (Gemini), OpenRouter.
  */
 
-import {
-  CURSOR_SUBSCRIPTION_TOKEN,
-  completeViaCursorSubscription,
-  cursorSubscriptionConfigured,
-} from "./cursor-subscription";
-
 export type OauthDescriptor = {
   authorize_url: string;
   token_url: string;
@@ -161,8 +155,7 @@ async function chatCompletions(args: {
 export const xaiGrok: LlmProvider = {
   id: "xai-grok",
   label: "xAI · Grok",
-  summary:
-    "Default route. Grok on api.x.ai via xAI OAuth, or via Cursor subscription when the deployment sets CURSOR_API_KEY (no end-user API key).",
+  summary: "Default route. Grok models on api.x.ai, authorized by xAI OAuth login in the control panel.",
   auth: "oauth",
   tier: "default",
   models: models("XAI_MODELS", ["grok-4", "grok-4-fast", "grok-3"]),
@@ -178,9 +171,6 @@ export const xaiGrok: LlmProvider = {
   },
   async complete(request, auth) {
     if (!auth) throw new NoRouteError("xai-grok is not connected");
-    if (auth.access_token === CURSOR_SUBSCRIPTION_TOKEN) {
-      return completeViaCursorSubscription(request, request.model);
-    }
     return chatCompletions({
       base: env("XAI_BASE_URL", "https://api.x.ai/v1"),
       request,
@@ -375,7 +365,6 @@ export function findProvider(id: string): LlmProvider | undefined {
 /** True when the deployment has the OAuth client configuration this provider needs. */
 export function providerConfigured(provider: LlmProvider): boolean {
   if (provider.auth === "none") return true;
-  if (provider.id === xaiGrok.id && cursorSubscriptionConfigured()) return true;
   if (!provider.oauth) return false;
   if (provider.oauth.client_id_optional) return true;
   return Boolean(process.env[provider.oauth.client_id_env]?.trim());
