@@ -16,7 +16,10 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain("Confirm status");
     expect(src).toContain("Unconfirmed");
     expect(src).toContain("No tactics mapped");
-    expect(src).not.toContain("{card.statement}</p>");
+    // The compact list row stays statement-free; the full statement is one click away in the detail pane.
+    const listRowSrc = src.slice(src.indexOf("function GapListRow"), src.indexOf("function GapDetailPane"));
+    expect(listRowSrc).not.toContain("card.statement");
+    expect(src).toContain("{card.statement}");
     expect(src).toContain("View constituent needs");
     expect(src).toContain("Where this gap comes from");
     expect(src).toContain("If several sources identified the same gap");
@@ -95,7 +98,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(dialog).toContain("Addressed");
     expect(dialog).toContain("Open");
     expect(dialog).toContain("Partial cannot stay");
-    expect(dialog).toContain("Split or rewrite");
+    expect(dialog).toContain("Resolve — split or rewrite");
     expect(dialog).toContain("tactic_ids");
     expect(dialog).toContain("addressed_name");
     expect(dialog).not.toContain("addressed_statement");

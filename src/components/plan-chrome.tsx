@@ -5,12 +5,10 @@ import { useState } from "react";
 import {
   Activity,
   ChartGantt,
+  ClipboardList,
   Columns3,
   FileText,
   FlaskConical,
-  Grid2x2,
-  Inbox,
-  Lightbulb,
   ListChecks,
   Lock,
   Menu,
@@ -52,14 +50,18 @@ export type ShellId =
 export type PlanNavModel = {
   gapsCount: number;
   unvalidatedCount: number;
+  partialCount: number;
   gapsUnlocked: boolean;
   planUnlocked: boolean;
   tacticsUnlocked: boolean;
   setupComplete: boolean;
+  readyForPrioritize: boolean;
 };
 
+type PlaceId = PlanPlace | "timeline";
+
 type PlaceItem = {
-  id: PlanPlace;
+  id: PlaceId;
   href: string;
   label: string;
   hint: string;
@@ -69,9 +71,6 @@ type PlaceItem = {
 };
 
 type SecondaryId =
-  | "matrix"
-  | "ideation"
-  | "timeline"
   | "mappings"
   | "pipeline"
   | "runs"
@@ -87,11 +86,11 @@ type SecondaryItem = {
   icon: typeof FlaskConical;
 };
 
-const PLAN_SURFACES: SecondaryItem[] = [
-  { id: "matrix", href: "/matrix", label: "Matrix", icon: Grid2x2 },
-  { id: "ideation", href: "/ideation", label: "Ideation", icon: Lightbulb },
-  { id: "timeline", href: "/timeline", label: "IEGP timeline", icon: ChartGantt },
-];
+/** Not in any nav list any more (demoted to inline tool links), but still valid `active` ids. */
+const TOOL_LABELS: Partial<Record<ShellId, string>> = {
+  matrix: "Matrix",
+  ideation: "Ideation",
+};
 
 const SECONDARY: SecondaryItem[] = [
   { id: "setup", href: "/setup", label: "Get started", icon: Rocket },
@@ -118,7 +117,7 @@ function placesOf(nav: PlanNavModel): PlaceItem[] {
       href: "/?place=gaps",
       label: "Gaps",
       hint: nav.gapsUnlocked ? "Mapped gaps with computed status" : "Ingest a source first",
-      icon: Inbox,
+      icon: ClipboardList,
       count: nav.unvalidatedCount || nav.gapsCount,
       unlocked: nav.gapsUnlocked,
     },
@@ -137,6 +136,14 @@ function placesOf(nav: PlanNavModel): PlaceItem[] {
       hint: nav.tacticsUnlocked ? "Create and assign tactics for open gaps" : "Prioritize first",
       icon: ListChecks,
       unlocked: nav.tacticsUnlocked,
+    },
+    {
+      id: "timeline",
+      href: "/timeline",
+      label: "Timeline",
+      hint: "The living IEGP as an interactive Gantt",
+      icon: ChartGantt,
+      unlocked: true,
     },
   ];
 }
@@ -203,6 +210,31 @@ function NavButton({
   );
 }
 
+/** Deep-links to the existing accuracy-workshop facilitation surface. Zero new backend — see docs/consultant-ux-spec.md §10. */
+function PrepRoomToggle({ dense }: { dense?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-2 gap-0.5 rounded-md bg-sidebar-accent/40 p-0.5 text-[11px]",
+        dense ? "mb-3" : "mb-3",
+      )}
+      role="group"
+      aria-label="Prep or Room mode"
+    >
+      <span className="flex h-6 items-center justify-center rounded bg-sidebar-accent text-sidebar-accent-foreground">
+        Prep
+      </span>
+      <Link
+        href="/accuracy/workshop"
+        className="flex h-6 items-center justify-center rounded text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
+        title="Facilitate in the room — deep-links to the workshop surface"
+      >
+        Room
+      </Link>
+    </div>
+  );
+}
+
 function NavLists({
   nav,
   active,
@@ -217,25 +249,28 @@ function NavLists({
   const places = placesOf(nav);
   return (
     <>
+      <PrepRoomToggle dense={dense} />
       <nav aria-label={label} className="grid gap-0.5">
         {places.map((item) => (
           <NavButton key={item.id} item={item} active={active} dense={dense} />
         ))}
       </nav>
-      <div
-        className="mt-3 grid gap-0.5 border-t border-sidebar-border pt-3"
-        role="navigation"
-        aria-label="Plan surfaces"
-      >
-        {PLAN_SURFACES.map((item) => (
-          <NavButton key={item.id} item={item} active={active} dense={dense} />
-        ))}
-      </div>
-      <div className="mt-auto grid gap-0.5 border-t border-sidebar-border pt-3" role="navigation" aria-label={dense ? "Tapes" : "All tapes"}>
-        {SECONDARY.map((item) => (
-          <NavButton key={item.id} item={item} active={active} dense={dense} />
-        ))}
-      </div>
+      <details className="mt-auto border-t border-sidebar-border pt-3" aria-label={dense ? "Lab" : "Lab tools"}>
+        <summary
+          className={cn(
+            "cursor-pointer list-none text-[11px] text-sidebar-foreground/60 marker:content-none",
+            dense ? "text-center md:text-left" : "",
+          )}
+        >
+          <span className={dense ? "hidden md:inline" : undefined}>Lab</span>
+          <span className={dense ? "md:hidden" : "hidden"}>···</span>
+        </summary>
+        <div className="mt-1 grid gap-0.5" role="navigation" aria-label={dense ? "Tapes" : "All tapes"}>
+          {SECONDARY.map((item) => (
+            <NavButton key={item.id} item={item} active={active} dense={dense} />
+          ))}
+        </div>
+      </details>
     </>
   );
 }
@@ -253,8 +288,10 @@ export function PlanChrome({
   const places = placesOf(nav);
   const current =
     places.find((p) => p.id === active)?.label ??
-    [...PLAN_SURFACES, ...SECONDARY].find((s) => s.id === active)?.label ??
+    SECONDARY.find((s) => s.id === active)?.label ??
+    TOOL_LABELS[active] ??
     "Synapse IEGP";
+  const showReadiness = nav.gapsCount > 0 || nav.gapsUnlocked;
 
   return (
     <div className="flex min-h-full bg-background">
@@ -297,8 +334,44 @@ export function PlanChrome({
           </Sheet>
           <p className="text-[13px] font-medium text-foreground">{current}</p>
         </header>
+        {showReadiness ? <ReadinessStrip nav={nav} /> : null}
         <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-5 sm:px-6">{children}</main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Always-visible strip so the facilitator can answer "can we start the workshop?"
+ * in a glance. Partial/Unconfirmed link straight into Gaps with the matching
+ * filter chip selected. See docs/consultant-ux-spec.md §5.
+ */
+function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
+  const blocked = nav.partialCount > 0 || nav.unvalidatedCount > 0;
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5 text-[11px] sm:px-6",
+        blocked ? "bg-amber-500/10 text-amber-200" : "bg-emerald-500/10 text-emerald-200",
+      )}
+      role="status"
+      aria-label="Prep readiness"
+    >
+      <Link href="/?place=gaps" className="text-inherit no-underline hover:underline">
+        Gaps {nav.gapsCount}
+      </Link>
+      <Link href="/?place=gaps&gap_filter=partial" className="text-inherit no-underline hover:underline">
+        Partial {nav.partialCount}
+      </Link>
+      <Link
+        href="/?place=gaps&gap_filter=needs_validation"
+        className="text-inherit no-underline hover:underline"
+      >
+        Unconfirmed {nav.unvalidatedCount}
+      </Link>
+      <span className="font-medium">
+        {nav.readyForPrioritize ? "Ready for Prioritize" : "Not ready for Prioritize"}
+      </span>
     </div>
   );
 }

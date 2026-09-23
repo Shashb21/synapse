@@ -268,12 +268,12 @@ export function SplitGapDialog({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="default"
             aria-label="Resolve this Partially Addressed gap by splitting or rewriting"
           />
         }
       >
-        Split or rewrite
+        Resolve — split or rewrite
       </DialogTrigger>
       <DialogContent className="z-[60] max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>

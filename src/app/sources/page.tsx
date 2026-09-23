@@ -10,8 +10,8 @@ export default async function SourcesPage() {
   return (
     <AppShell active="sources">
       <PageIntro kicker="Deep link — ingest also lives on the plan" title="Sources">
-        First visit uses the stepper on the plan. After that, new files drop into the inbox on
-        the same page. This list is the same demo pack.
+        First visit uses the stepper on the plan. After that, new files ingest on the Upload
+        place. This list is the same demo pack.
       </PageIntro>
       <IngestPanel sources={state.sources} />
     </AppShell>

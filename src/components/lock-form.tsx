@@ -44,6 +44,7 @@ export function LockForm({
   children,
   confirmLabel,
   description,
+  variant = "outline",
 }: {
   label: string;
   action: string;
@@ -51,6 +52,8 @@ export function LockForm({
   children?: React.ReactNode;
   confirmLabel?: string;
   description?: string;
+  /** Visual weight of the trigger button. Defaults to secondary ("outline"); pass "default" for a hero/primary action. */
+  variant?: "default" | "outline";
 }) {
   const router = useRouter();
   const nameId = useId();
@@ -120,7 +123,7 @@ export function LockForm({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
+      <DialogTrigger render={<Button size="sm" variant={variant} />}>
         {label}
       </DialogTrigger>
       <DialogContent className="z-[60] sm:max-w-md" initialFocus={nameRef}>

@@ -1184,6 +1184,7 @@ export type ReviewGapCard = {
   gap_id: string;
   gap_name: string;
   statement: string;
+  domain: EvidenceDomain;
   tactics: PlanTactic[];
   computed_status: MappedGapStatus;
   gap_status: GapStatus;
@@ -1209,6 +1210,8 @@ export type OpenGapCard = {
   tactics: PlanTactic[];
   parent_gap_id: string | null;
   residual: ResidualGapSuggestion | null;
+  /** Locked priority band, when one has been set on Prioritize. Null before that gate. */
+  band: PriorityBand | null;
 };
 
 export type ReviewTacticCard = {
@@ -1393,6 +1396,7 @@ export function buildPlanWorkspace(state: IegpState): {
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
+      domain: gap.domain,
       tactics: mappedTactics(state, gap.id),
       computed_status: computedForGap(state, gap, children),
       gap_status: shown,
@@ -1416,6 +1420,7 @@ export function buildPlanWorkspace(state: IegpState): {
     const residual = state.residuals.find((r) => r.gap_id === gap.id);
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const computed = computedForGap(state, gap, children);
+    const priority = residual ? state.priorities.find((p) => p.residual_id === residual.id) : undefined;
     openGaps.push({
       gap_id: gap.id,
       gap_name: gap.name,
@@ -1428,6 +1433,7 @@ export function buildPlanWorkspace(state: IegpState): {
       tactics: mappedTactics(state, gap.id, residual?.id),
       parent_gap_id: gap.parent_gap_id,
       residual: residualByParent.get(gap.id) ?? null,
+      band: priority?.lock.locked ? priority.band : null,
     });
   }
 

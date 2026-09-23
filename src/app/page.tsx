@@ -7,6 +7,7 @@ import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
 import { TacticsPlace } from "@/components/tactics-place";
+import Link from "next/link";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
@@ -14,8 +15,11 @@ import {
   gapsReadyForPrioritize,
   isPlanPlace,
   planGates,
+  reviewGapFilterCounts,
+  REVIEW_GAP_FILTERS,
   type PlanColumn,
   type PlanPlace,
+  type ReviewGapFilter,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +87,7 @@ function LockedPlace({ title, body }: { title: string; body: string }) {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ place?: string }>;
+  searchParams: Promise<{ place?: string; gap_filter?: string }>;
 }) {
   await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
@@ -96,16 +100,40 @@ export default async function HomePage({
   const fallback = defaultPlanPlace(state, workspace);
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);
+  const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")
+    ? (params.gap_filter as ReviewGapFilter)
+    : undefined;
 
   let pane: ReactNode;
   if (place === "upload") {
-    pane = <IngestPanel sources={state.sources} />;
+    const readiness = reviewGapFilterCounts(workspace.review);
+    pane = (
+      <>
+        <IngestPanel sources={state.sources} />
+        {workspace.review.length > 0 ? (
+          <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
+            <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
+              Prep readiness
+            </h2>
+            <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
+              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} mapped</li>
+              <li>{readiness.partial} partial — must resolve before Prioritize</li>
+              <li>{readiness.needs_validation} unconfirmed</li>
+            </ul>
+            <p className="mt-2 text-[12px] text-foreground">
+              {ready ? "Ready for Prioritize." : "Not ready for Prioritize yet — resolve Partial and confirm every gap on Gaps."}
+            </p>
+          </section>
+        ) : null}
+      </>
+    );
   } else if (place === "gaps") {
     pane = gates.gapsUnlocked ? (
       <GapsWorkbench
         cards={workspace.review}
         availableTactics={workspace.availableTactics}
         readyForPrioritize={ready}
+        initialFilter={gapFilter}
       />
     ) : (
       <LockedPlace title="Gaps is locked" body="Ingest at least one source on Upload." />
@@ -142,16 +170,28 @@ export default async function HomePage({
           />
         </section>
 
-        <h2 className="mb-3 text-[15px] font-medium text-foreground">Prioritized plan</h2>
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-[15px] font-medium text-foreground">Prioritized plan</h2>
+          <Link href="/matrix" className="text-[12px] text-muted-foreground no-underline hover:underline">
+            Open matrix →
+          </Link>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr_1fr]">
           {COLUMNS.map((col) => (
             <section
               key={col.id}
-              className="border border-border bg-card/40 p-3"
+              className={
+                col.id === "high"
+                  ? "border-2 border-foreground/25 bg-card/40 p-3"
+                  : "border border-border bg-card/40 p-3"
+              }
               aria-labelledby={`plan-${col.id}`}
             >
               <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2 id={`plan-${col.id}`} className="text-[15px] font-medium text-foreground">
+                <h2
+                  id={`plan-${col.id}`}
+                  className={col.id === "high" ? "text-[16px] font-semibold text-foreground" : "text-[15px] font-medium text-foreground"}
+                >
                   {col.title}
                 </h2>
                 <span className="text-[11px] text-muted-foreground">
@@ -176,10 +216,18 @@ export default async function HomePage({
           ))}
         </div>
 
-        <section className="mt-10" aria-labelledby="addressed-gaps">
-          <h2 id="addressed-gaps" className="text-[15px] font-medium text-foreground">
-            Addressed
-          </h2>
+        <details className="mt-10 group" aria-labelledby="addressed-gaps">
+          <summary
+            id="addressed-gaps"
+            className="cursor-pointer list-none text-[15px] font-medium text-foreground marker:content-none"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              Addressed
+              <span className="text-[11px] font-normal text-muted-foreground">
+                ({workspace.addressed.length}) · click to expand
+              </span>
+            </span>
+          </summary>
           {workspace.addressed.length === 0 ? (
             <p className="mt-2 text-[12px] text-muted-foreground">No addressed gaps yet.</p>
           ) : (
@@ -193,7 +241,7 @@ export default async function HomePage({
               ))}
             </div>
           )}
-        </section>
+        </details>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">
           {!state.asset.tactics_unlocked ? (

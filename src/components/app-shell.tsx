@@ -1,16 +1,24 @@
 import { PlanChrome, type PlanNavModel, type ShellId } from "@/components/plan-chrome";
 import { loadState } from "@/lib/iegp/store";
-import { buildPlanWorkspace, planGates, planNavCounts } from "@/lib/iegp/engine";
+import {
+  buildPlanWorkspace,
+  gapsReadyForPrioritize,
+  planGates,
+  planNavCounts,
+  reviewGapFilterCounts,
+} from "@/lib/iegp/engine";
 
 export type { ShellId };
 
 const EMPTY_NAV: PlanNavModel = {
   gapsCount: 0,
   unvalidatedCount: 0,
+  partialCount: 0,
   gapsUnlocked: false,
   planUnlocked: false,
   tacticsUnlocked: false,
   setupComplete: false,
+  readyForPrioritize: false,
 };
 
 export async function AppShell({
@@ -26,13 +34,16 @@ export async function AppShell({
     const workspace = buildPlanWorkspace(state);
     const gates = planGates(state);
     const counts = planNavCounts(workspace);
+    const filterCounts = reviewGapFilterCounts(workspace.review);
     nav = {
       gapsCount: counts.gaps,
       unvalidatedCount: counts.unvalidated,
+      partialCount: filterCounts.partial,
       gapsUnlocked: gates.gapsUnlocked,
       planUnlocked: gates.planUnlocked,
       tacticsUnlocked: gates.tacticsUnlocked,
       setupComplete: state.asset.setup_complete,
+      readyForPrioritize: gapsReadyForPrioritize(state),
     };
   } catch {
     // Setup and other shells must render before Postgres is configured.

@@ -94,4 +94,6 @@ npm run test:e2e  # Playwright against port 43217
 | --- | --- |
 | [problem-and-solution.md](docs/problem-and-solution.md) | Problem statement and proposed IEGP |
 | [iegp-model.md](docs/iegp-model.md) | Locked objects, gates, priority, refresh |
+| [consultant-ux-spec.md](docs/consultant-ux-spec.md) | Consultant UX: nav IA, readiness strip, Gaps workbench, Prep \| Room |
+| [presentation-and-breakouts.md](docs/presentation-and-breakouts.md) | Presentation view + multi-window breakout groups |
 | [docs/sdlc/](docs/sdlc/) | Historical CIR/theme SDLC (lineage, not live SoR) |

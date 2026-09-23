@@ -1,14 +1,22 @@
 import { PlanChrome, type PlanNavModel, type ShellId } from "@/components/plan-chrome";
-import { buildPlanWorkspace, planGates, planNavCounts } from "@/lib/iegp/engine";
+import {
+  buildPlanWorkspace,
+  gapsReadyForPrioritize,
+  planGates,
+  planNavCounts,
+  reviewGapFilterCounts,
+} from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
 
 const EMPTY_NAV: PlanNavModel = {
   gapsCount: 0,
   unvalidatedCount: 0,
+  partialCount: 0,
   gapsUnlocked: false,
   planUnlocked: false,
   tacticsUnlocked: false,
   setupComplete: false,
+  readyForPrioritize: false,
 };
 
 /**
@@ -28,13 +36,16 @@ export async function PlatformAppShell({
     const workspace = buildPlanWorkspace(state);
     const gates = planGates(state);
     const counts = planNavCounts(workspace);
+    const filterCounts = reviewGapFilterCounts(workspace.review);
     nav = {
       gapsCount: counts.gaps,
       unvalidatedCount: counts.unvalidated,
+      partialCount: filterCounts.partial,
       gapsUnlocked: gates.gapsUnlocked,
       planUnlocked: gates.planUnlocked,
       tacticsUnlocked: gates.tacticsUnlocked,
       setupComplete: state.asset.setup_complete,
+      readyForPrioritize: gapsReadyForPrioritize(state),
     };
   } catch {
     // Control panel must load even before DATABASE_URL is configured.
