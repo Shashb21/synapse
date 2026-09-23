@@ -1,4 +1,13 @@
 import { z } from "zod";
+import { hasLlamaCloudKey } from "@/lib/config";
+import { isLlamaParseSource } from "@/lib/ingest/llama-gate";
+
+export {
+  LLAMA_PARSE_KEY_CODE,
+  LLAMA_PARSE_KEY_REQUIRED,
+  assertLlamaParseConfigured,
+  isLlamaParseSource,
+} from "@/lib/ingest/llama-gate";
 
 export const parsePolicyInputSchema = z.object({
   filename: z.string(),
@@ -10,13 +19,9 @@ export type ParsePolicyInput = z.infer<typeof parsePolicyInputSchema>;
 export type ParsePolicy = {
   parser: "llamaparse" | "local_structured" | "local_llm_assist";
   reason: string;
+  /** True when PDF/PPTX is selected but LLAMA_CLOUD_API_KEY is missing. */
+  missing_key?: boolean;
 };
-
-const LLAMAPARSE_MIMES = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-powerpoint",
-]);
 
 const LOCAL_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -27,22 +32,22 @@ const LOCAL_MIMES = new Set([
 
 /**
  * Product lock: LlamaParse for PDF and PPTX.
- * With LLAMA_CLOUD_API_KEY, ingest uses cloud parse; without it, policy still selects
- * llamaparse and ingest falls back to local structured so uploads are not blocked.
+ * With LLAMA_CLOUD_API_KEY, ingest uses cloud parse. Without it, policy still
+ * selects llamaparse and ingest/upload are gated (no silent local fallback).
  */
 export function resolveParsePolicy(input: ParsePolicyInput): ParsePolicy {
+  const hasLlama = hasLlamaCloudKey();
+  if (isLlamaParseSource(input.filename, input.mime)) {
+    const kind =
+      input.filename.toLowerCase().endsWith(".pdf") || input.mime === "application/pdf"
+        ? "pdf"
+        : "pptx";
+    if (hasLlama) {
+      return { parser: "llamaparse", reason: `${kind}_with_llama_key` };
+    }
+    return { parser: "llamaparse", reason: `${kind}_needs_llama`, missing_key: true };
+  }
   const lower = input.filename.toLowerCase();
-  const hasLlama = Boolean(process.env.LLAMA_CLOUD_API_KEY?.trim());
-  if (lower.endsWith(".pdf") || input.mime === "application/pdf") {
-    return hasLlama
-      ? { parser: "llamaparse", reason: "pdf_with_llama_key" }
-      : { parser: "llamaparse", reason: "pdf_needs_llama" };
-  }
-  if (lower.endsWith(".pptx") || lower.endsWith(".ppt") || LLAMAPARSE_MIMES.has(input.mime)) {
-    return hasLlama
-      ? { parser: "llamaparse", reason: "pptx_with_llama_key" }
-      : { parser: "llamaparse", reason: "pptx_needs_llama" };
-  }
   if (
     lower.endsWith(".docx") ||
     lower.endsWith(".txt") ||

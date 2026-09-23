@@ -3,6 +3,10 @@ import {
   llamaParseTier,
 } from "@/lib/config";
 import {
+  assertLlamaParseConfigured,
+  isLlamaParseSource,
+} from "@/lib/ingest/llama-gate";
+import {
   blocksFromLlamaResult,
   LLAMA_CHART_PROMPT,
   type LlamaParseResult,
@@ -116,6 +120,9 @@ export async function ingestBuffer(args: {
   llamaError?: string;
 }> {
   const key = process.env.LLAMA_CLOUD_API_KEY?.trim();
+  if (isLlamaParseSource(args.filename, args.mime)) {
+    assertLlamaParseConfigured();
+  }
   if (hasLlamaCloudKey() && key) {
     try {
       const document = await llamaParseV2(args.filename, args.buffer, key);

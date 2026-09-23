@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
-import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
+import {
+  LLAMA_PARSE_KEY_CODE,
+  LLAMA_PARSE_KEY_REQUIRED,
+  resolveParsePolicy,
+} from "@/accuracy/modules/parse/parse-policy";
 import { ingestFile } from "@/accuracy/modules/parse/ingest-file";
 import {
   blocksFromParsedDocument,
@@ -54,6 +58,18 @@ export async function POST(req: Request) {
 
     const filename = file.name || "upload.bin";
     const mime = file.type || mimeForFilename(filename);
+    const policy = resolveParsePolicy({ filename, mime });
+    if (policy.missing_key) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: LLAMA_PARSE_KEY_REQUIRED,
+          code: LLAMA_PARSE_KEY_CODE,
+        },
+        { status: 400 },
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const checksum = createHash("sha256").update(buffer).digest("hex");
 
@@ -66,7 +82,6 @@ export async function POST(req: Request) {
       doc_role,
     });
 
-    const policy = resolveParsePolicy({ filename, mime });
     let block_count = 0;
     let parser = policy.parser;
     let parse_error: string | null = null;
