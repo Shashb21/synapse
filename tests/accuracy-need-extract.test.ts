@@ -58,6 +58,45 @@ describe("need extract module", () => {
     expect(result.summary).toContain("SYNAPSE_TEST_STUB_LLM");
   });
 
+  it("calls the connected OAuth LLM when stub is off", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      const ctx = stubCtx();
+      ctx.complete = async () => ({
+        raw: JSON.stringify({
+          gaps: [
+            {
+              statement: "Need OS evidence in EGFR NSCLC",
+              external_id: "NSCLC_CE_01",
+              provenance: [
+                {
+                  source_file_id: "src-1",
+                  block_id: "blk-1",
+                  quote: "Need OS evidence",
+                },
+              ],
+            },
+          ],
+        }),
+        usage: { prompt_tokens: 4, completion_tokens: 6, total_tokens: 10 },
+      });
+      const result = await needExtractModule.run(
+        {
+          workspace_id: "ws-test",
+          source_file_id: "src-1",
+          block_ids: ["blk-1"],
+        },
+        ctx,
+      );
+      expect(result.output.gaps).toHaveLength(1);
+      expect(result.output.gaps[0]?.statement).toMatch(/OS evidence/);
+      expect(result.summary).toMatch(/1 gap/);
+    } finally {
+      process.env.SYNAPSE_TEST_STUB_LLM = prev;
+    }
+  });
+
   it("requires provenance spans; allows optional external_id", () => {
     const ok = needGapSchema.safeParse({
       id: "gap-1",

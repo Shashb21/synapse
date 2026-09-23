@@ -142,7 +142,7 @@ export async function runAccuracyModule<O = unknown>(args: {
           throw new Error(
             process.env.SYNAPSE_TEST_STUB_LLM === "1"
               ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
-              : "LLM not available — connect OAuth or set a provider API key",
+              : "LLM not available — connect Grok or Claude in /control",
           );
         },
     noteCost: (cost) => {

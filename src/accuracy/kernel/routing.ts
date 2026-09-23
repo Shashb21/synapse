@@ -23,6 +23,21 @@ import {
 } from "@/modules/llm/provider";
 import { estimateCostUsd, usageFromMessages } from "./cost";
 
+/** Live LLM may use OAuth always, or an env API key except Claude without a workspace id. */
+export function anthropicWorkspaceConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_WORKSPACE_ID?.trim());
+}
+
+export function accuracyAuthAllowsLive(
+  provider_id: string,
+  auth: "oauth" | "api_key" | "none",
+): boolean {
+  if (auth === "oauth") return true;
+  if (auth !== "api_key") return false;
+  if (provider_id === "anthropic-claude") return anthropicWorkspaceConfigured();
+  return true;
+}
+
 export type AccuracyRouteConfig = {
   call_kind: CallKind;
   agent_role: AgentRole | "none";
@@ -149,6 +164,14 @@ export async function resolveAccuracyRoute(args: {
       continue;
     }
     const authKind = (await authKindFor(provider.id)) ?? (keyReady ? "api_key" : "oauth");
+    if (!accuracyAuthAllowsLive(provider.id, authKind)) {
+      reasons.push(
+        provider.id === "anthropic-claude"
+          ? `${provider.label}: org API key needs ANTHROPIC_WORKSPACE_ID — connect Grok OAuth in /control`
+          : `${provider.label}: not usable for live LLM`,
+      );
+      continue;
+    }
     return {
       call_kind: args.call_kind,
       role: args.agent_role === "none" ? "proposer" : args.agent_role,

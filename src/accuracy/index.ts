@@ -48,7 +48,13 @@ export {
   setAccuracyRouteConfig,
   setAccuracyDefaultProvider,
   allRoutableRoles,
+  accuracyAuthAllowsLive,
 } from "./kernel/routing";
+export {
+  inspectLiveExtractGate,
+  EXTRACT_CONNECT_PATH,
+  EXTRACT_OAUTH_GATE_MESSAGE,
+} from "./kernel/extract-gate";
 export {
   listAccuracyRuns,
   sweepStaleAccuracyRuns,
