@@ -210,16 +210,14 @@ export const anthropicClaude: LlmProvider = {
   },
   async complete(request, auth) {
     if (!auth) throw new NoRouteError("anthropic-claude is not connected");
-    const headers =
-      auth.kind === "api_key"
-        ? {
-            "x-api-key": auth.access_token,
-            "anthropic-version": "2023-06-01",
-          }
-        : {
-            authorization: `Bearer ${auth.access_token}`,
-            "anthropic-version": "2023-06-01",
-          };
+    const headers: Record<string, string> = {
+      "anthropic-version": "2023-06-01",
+    };
+    if (auth.kind === "api_key") {
+      headers["x-api-key"] = auth.access_token;
+    } else {
+      headers.authorization = `Bearer ${auth.access_token}`;
+    }
     const payload = await postJson(
       `${env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")}/v1/messages`,
       headers,
