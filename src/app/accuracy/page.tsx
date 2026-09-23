@@ -103,6 +103,12 @@ export default async function AccuracyWorkspacesPage({
                     Coverage
                   </Link>
                   <Link
+                    href={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Workshop
+                  </Link>
+                  <Link
                     href={`/accuracy/plan?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >

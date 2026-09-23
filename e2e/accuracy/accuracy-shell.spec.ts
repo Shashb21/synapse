@@ -11,6 +11,7 @@ const SHELL_NAV = [
   { href: "/accuracy/review", label: "Review" },
   { href: "/accuracy/ledger", label: "Ledger" },
   { href: "/accuracy/coverage", label: "Coverage" },
+  { href: "/accuracy/workshop", label: "Workshop" },
   { href: "/accuracy/plan", label: "Plan" },
   { href: "/accuracy/timeline", label: "Timeline" },
   { href: "/accuracy/audit", label: "Audit" },
@@ -81,6 +82,10 @@ test.describe("accuracy shell", () => {
       "href",
       "/accuracy/plan?workspace_id=ws-demo-preserve",
     );
+    await expect(nav.getByRole("link", { name: "Workshop" })).toHaveAttribute(
+      "href",
+      "/accuracy/workshop?workspace_id=ws-demo-preserve",
+    );
     await expect(nav.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", "/accuracy");
   });
 
@@ -94,6 +99,13 @@ test.describe("accuracy shell", () => {
   test("plan page renders shell nav", async ({ page }) => {
     await page.goto("/accuracy/plan");
     await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("workshop page renders shell nav and empty state", async ({ page }) => {
+    await page.goto("/accuracy/workshop");
+    await expect(page.getByRole("heading", { name: /^workshop$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /choose a workspace/i })).toBeVisible();
     await expectAccuracyShell(page);
   });
 

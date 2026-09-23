@@ -153,6 +153,19 @@ export const accuracyPlans = pgTable("accuracy_plans", {
   saved_at: text("saved_at").notNull(),
 });
 
+/** Workspace-scoped workshop freeze: inventory + facilitator tags + overlays. */
+export const accuracyWorkshopSnapshots = pgTable("accuracy_workshop_snapshots", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  version: integer("version").notNull(),
+  scene: text("scene").notNull(),
+  payload: jsonb("payload").notNull(),
+  note: text("note"),
+  saved_by: text("saved_by").notNull(),
+  saved_function: text("saved_function").notNull(),
+  saved_at: text("saved_at").notNull(),
+});
+
 export const ACCURACY_DDL = [
   `CREATE TABLE IF NOT EXISTS accuracy_organizations (
     id text PRIMARY KEY,
@@ -280,6 +293,17 @@ export const ACCURACY_DDL = [
     version integer NOT NULL,
     status text NOT NULL,
     snapshot jsonb NOT NULL,
+    note text,
+    saved_by text NOT NULL,
+    saved_function text NOT NULL,
+    saved_at text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    version integer NOT NULL,
+    scene text NOT NULL,
+    payload jsonb NOT NULL,
     note text,
     saved_by text NOT NULL,
     saved_function text NOT NULL,

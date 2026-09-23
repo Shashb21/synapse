@@ -12,6 +12,7 @@ import {
   Flag,
   GitCompareArrows,
   Menu,
+  Presentation,
   ScrollText,
   SlidersHorizontal,
   Target,
@@ -32,6 +33,7 @@ export type AccuracyShellId =
   | "review"
   | "ledger"
   | "coverage"
+  | "workshop"
   | "plan"
   | "timeline"
   | "audit"
@@ -51,6 +53,7 @@ const NAV: NavItem[] = [
   { id: "review", href: "/accuracy/review", label: "Review", icon: Flag },
   { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
   { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
+  { id: "workshop", href: "/accuracy/workshop", label: "Workshop", icon: Presentation },
   { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },
   { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
   { id: "audit", href: "/accuracy/audit", label: "Audit", icon: ScrollText },
