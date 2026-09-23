@@ -100,6 +100,7 @@ describe("accuracy extract API", () => {
       tactics_inserted?: number;
       stub?: boolean;
       block_count?: number;
+      blocks_used?: number;
       runs?: Array<{ call_kind: string }>;
     };
     expect(json.ok).toBe(true);
