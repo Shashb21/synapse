@@ -2,15 +2,308 @@
   "source_pack_id": "beone-bgb-58067-prmt5i",
   "source_filename": "BeOne_BGB-58067 PRMT5i IEP Report_v1.0 Final_vMarkup.pptx",
   "must_find_gap_ids": [
-    "NSCLC_AD_01", "NSCLC_AD_02", "NSCLC_AD_03", "NSCLC_AD_04", "NSCLC_AD_05",
-    "NSCLC_AD_06", "NSCLC_AD_07", "NSCLC_AD_08", "NSCLC_AD_09", "NSCLC_AD_10",
-    "NSCLC_CE_01", "NSCLC_CE_02", "NSCLC_CE_03", "NSCLC_CE_04", "NSCLC_CE_05",
-    "NSCLC_GA_01", "NSCLC_GA_02", "NSCLC_GA_03", "NSCLC_GA_04", "NSCLC_GA_05",
-    "NSCLC_GA_06", "NSCLC_GA_07", "NSCLC_GA_08", "NSCLC_GA_09", "NSCLC_GA_10",
-    "NSCLC_GA_11", "NSCLC_GA_12", "NSCLC_GA_13",
-    "NSCLC_HI_01", "NSCLC_HI_02", "NSCLC_HI_03", "NSCLC_HI_04", "NSCLC_HI_05",
-    "NSCLC_HI_06", "NSCLC_HI_07", "NSCLC_HI_08", "NSCLC_HI_09", "NSCLC_HI_10",
-    "NSCLC_HI_11", "NSCLC_HI_12", "NSCLC_HI_13", "NSCLC_HI_14", "NSCLC_HI_15"
+    "NSCLC_AD_01",
+    "NSCLC_AD_02",
+    "NSCLC_AD_03",
+    "NSCLC_AD_04",
+    "NSCLC_AD_05",
+    "NSCLC_AD_06",
+    "NSCLC_AD_07",
+    "NSCLC_AD_08",
+    "NSCLC_AD_09",
+    "NSCLC_AD_10",
+    "NSCLC_CE_01",
+    "NSCLC_CE_02",
+    "NSCLC_CE_03",
+    "NSCLC_CE_04",
+    "NSCLC_CE_05",
+    "NSCLC_GA_01",
+    "NSCLC_GA_02",
+    "NSCLC_GA_03",
+    "NSCLC_GA_04",
+    "NSCLC_GA_05",
+    "NSCLC_GA_06",
+    "NSCLC_GA_07",
+    "NSCLC_GA_08",
+    "NSCLC_GA_09",
+    "NSCLC_GA_10",
+    "NSCLC_GA_11",
+    "NSCLC_GA_12",
+    "NSCLC_GA_13",
+    "NSCLC_HI_01",
+    "NSCLC_HI_02",
+    "NSCLC_HI_03",
+    "NSCLC_HI_04",
+    "NSCLC_HI_05",
+    "NSCLC_HI_06",
+    "NSCLC_HI_07",
+    "NSCLC_HI_08",
+    "NSCLC_HI_09",
+    "NSCLC_HI_10",
+    "NSCLC_HI_11",
+    "NSCLC_HI_12",
+    "NSCLC_HI_13",
+    "NSCLC_HI_14",
+    "NSCLC_HI_15"
   ],
-  "gaps": []
+  "gaps": [
+    {
+      "id": "NSCLC_AD_01",
+      "statement": "(1L/ 2L+) Quantifying incidence of CNS metastases in MTAP-deleted nonsquamous vs. squamous histologies",
+      "priority": "addressed",
+      "slide_cue": "slide 53"
+    },
+    {
+      "id": "NSCLC_AD_02",
+      "statement": "(1L and 2L+) BGB-58067 LT PROs vs. SoC beyond specific PRO measures included in the CDP (e.g., symptom burden and planned safety follow-up) PRO-CTCAE and additional PRO measures are embedded within Phase 2/3 studies and collected through safety follow-up to characterize treatment-related burden, symptom burden, and patient experience Longitudinal PRO collection is designed to support regulatory and HTA expectations for mature patient-reported outcome data at launch Phase 2/3 and pivotal study DRO Additional analyses: Safety follow-up and long-term PRO analyses as data mature",
+      "priority": "addressed",
+      "slide_cue": "slide 54"
+    },
+    {
+      "id": "NSCLC_AD_03",
+      "statement": "MTAP-deletion prevalence rates and clinical characteristics in NSCLC patients with vs. without CNS metastases",
+      "priority": "addressed",
+      "slide_cue": "slide 53"
+    },
+    {
+      "id": "NSCLC_AD_04",
+      "statement": "MTAP-deletion and co-mutation prevalence patterns across squamous vs. non-squamous histology",
+      "priority": "addressed",
+      "slide_cue": "slide 53"
+    },
+    {
+      "id": "NSCLC_AD_05",
+      "statement": "Characterization of BGB-58067 outcomes in patients with alternative mechanisms of MTAP downregulation",
+      "priority": "addressed",
+      "slide_cue": "slide 53"
+    },
+    {
+      "id": "NSCLC_AD_06",
+      "statement": "BGB-58067 efficacy across IHC, NGS, and ctDNA methodologies and correlation with MTAP detection accuracy Efficacy correlation has been analyzed for NGS and IHC for ORR and",
+      "priority": "addressed",
+      "slide_cue": "slide 54"
+    },
+    {
+      "id": "NSCLC_AD_07",
+      "statement": "CDx concordance data across tissue NGS, blood NGS, and IHC NSCLC_HI_02: Cost effectiveness of MTAP testing strategies across NGS and IHC modalities IHC and NGS concordance data available, ongoing work for ctDNA by",
+      "priority": "addressed",
+      "slide_cue": "slide 54"
+    },
+    {
+      "id": "NSCLC_AD_08",
+      "statement": "Predictive biomarkers of response, non-response, and safety risk",
+      "priority": "addressed",
+      "slide_cue": "slide 55"
+    },
+    {
+      "id": "NSCLC_AD_09",
+      "statement": "BGB-58067's impact on biomarker\u2011driven endpoints (e.g., ctDNA, MTA accumulation, SDMA, EGFR clearance) and their correlation to efficacy outcomes",
+      "priority": "addressed",
+      "slide_cue": "slide 55"
+    },
+    {
+      "id": "NSCLC_AD_10",
+      "statement": "(1L, 2L+) MTAP deletion prevalence rates with expression of co-mutations (EGFR, ALK, KRAS, etc.)",
+      "priority": "addressed",
+      "slide_cue": "slide 53"
+    },
+    {
+      "id": "NSCLC_CE_01",
+      "statement": "BGB-58067's long-term data on efficacy, quality-adjusted survival outcomes, safety and tolerability profile patterns",
+      "priority": "critical",
+      "slide_cue": "slide 22"
+    },
+    {
+      "id": "NSCLC_CE_02",
+      "statement": "BGB-58067's efficacy and safety in MTAP-del tumor types beyond those investigated in the CDP (e.g., mesothelioma, GBM, CCA, HNSCC, rare tumors)",
+      "priority": "critical",
+      "slide_cue": "slide 22"
+    },
+    {
+      "id": "NSCLC_CE_03",
+      "statement": "Contribution of effect (COE) of BGB-58067 beyond PD-1 backbone therapy in 1L treatment",
+      "priority": "critical",
+      "slide_cue": "slide 22"
+    },
+    {
+      "id": "NSCLC_CE_04",
+      "statement": "BGB-58067's impact on CNS metastases relative to control arm (1L and 2L+) and competitor PRMT5i in MTAP-deleted NSCLC or other tumors",
+      "priority": "critical",
+      "slide_cue": "slide 23"
+    },
+    {
+      "id": "NSCLC_CE_05",
+      "statement": "BGB-58067's efficacy, safety, and tolerability with concurrent versus sequential administration in standard-of-care combinations",
+      "priority": "critical",
+      "slide_cue": "slide 28"
+    },
+    {
+      "id": "NSCLC_GA_01",
+      "statement": "BGB-58067's intracranial efficacy vs. SoC, including intracranial objective response rate, progression-free survival, duration of response, and PRO (e.g., neurocognitive function) compared to SoC in patients with brain metastases",
+      "priority": "gated",
+      "slide_cue": "slide 47"
+    },
+    {
+      "id": "NSCLC_GA_02",
+      "statement": "BGB-58067's efficacy outcomes in treatment-naive vs. Tx-experienced CNS metastases populations",
+      "priority": "gated",
+      "slide_cue": "slide 47"
+    },
+    {
+      "id": "NSCLC_GA_03",
+      "statement": "(1L and 2L+) Safety management and dose optimization for PRMT5i class-related toxicities in routine clinical practice",
+      "priority": "gated",
+      "slide_cue": "slide 19"
+    },
+    {
+      "id": "NSCLC_GA_04",
+      "statement": "BGB-58067's long-term data on treatment compliance patterns",
+      "priority": "gated",
+      "slide_cue": "slide 48"
+    },
+    {
+      "id": "NSCLC_GA_05",
+      "statement": "Clinical predictive value of genomic MTAP deletion versus MTAP protein loss for BGB-58067 response",
+      "priority": "gated",
+      "slide_cue": "slide 49"
+    },
+    {
+      "id": "NSCLC_GA_06",
+      "statement": "Comparative efficacy and safety of BGB-58067 vs. KRAS G12C inhibitors (Lumakras and Krazati) in MTAP-deleted NSCLC with KRAS co-mutations",
+      "priority": "gated",
+      "slide_cue": "slide 49"
+    },
+    {
+      "id": "NSCLC_GA_07",
+      "statement": "Variability in MTAP testing (e.g., NGS/ IHC) infastructure , access, and interpretation across real world settings (i.e., new markets, community vs. academic settings)",
+      "priority": "gated",
+      "slide_cue": "slide 49"
+    },
+    {
+      "id": "NSCLC_GA_08",
+      "statement": "Impact of 1L BGB-58067-based triplet therapy on subsequent response to KRAS-targeted therapies (e.g., Lumakras and Krazati) in 2L NSCLC",
+      "priority": "gated",
+      "slide_cue": "slide 50"
+    },
+    {
+      "id": "NSCLC_GA_09",
+      "statement": "BGB-58067 efficacy and safety in combination with alternative PD-1/PD-L1 inhibitors across priority geographies",
+      "priority": "gated",
+      "slide_cue": "slide 50"
+    },
+    {
+      "id": "NSCLC_GA_10",
+      "statement": "Efficacy and safety of BGB-58067 in combination with anti-EGFR TKIs compared to anti-EGFR TKI SoC monotherapy across lines of therapy in EGFRm patients",
+      "priority": "gated",
+      "slide_cue": "slide 50"
+    },
+    {
+      "id": "NSCLC_GA_11",
+      "statement": "Mechanisms of primary and acquired resistance to BGB-58067",
+      "priority": "gated",
+      "slide_cue": "slide 51"
+    },
+    {
+      "id": "NSCLC_GA_12",
+      "statement": "BGB-58067's effect on PRMT5i resistance upon continuous administration of triplet therapy through a maintenance phase vs. induction of triplet therapy followed by de-escalation",
+      "priority": "gated",
+      "slide_cue": "slide 51"
+    },
+    {
+      "id": "NSCLC_GA_13",
+      "statement": "BGB-58067's clinical efficacy in patients with acquired resistance to IO and targeted therapies (e.g. anti-PD-1-resistance, osimertinib-resistance in EGFRm co-mutations, and crizotinib-resistance in ALK translocation co-mutations) compared to SoC",
+      "priority": "gated",
+      "slide_cue": "slide 51"
+    },
+    {
+      "id": "NSCLC_HI_01",
+      "statement": "Characterization of the natural history, prognosis, and treatment outcomes of MTAP-deleted NSCLC across LoTs",
+      "priority": "high",
+      "slide_cue": "slide 23"
+    },
+    {
+      "id": "NSCLC_HI_02",
+      "statement": "Cost effectiveness of MTAP testing strategies across NGS and IHC modalities",
+      "priority": "high",
+      "slide_cue": "slide 23"
+    },
+    {
+      "id": "NSCLC_HI_03",
+      "statement": "BGB-58067's efficacy and safety interaction profile when combined with SoC regimens",
+      "priority": "high",
+      "slide_cue": "slide 24"
+    },
+    {
+      "id": "NSCLC_HI_04",
+      "statement": "BGB-58067's clinical efficacy and safety across prespecified subgroups (i.e., patient race/ ethnicity (White, Black, Asian), PD-L1, histology, and geographies (e.g., Japan), lines of therapy (2L+ only))",
+      "priority": "high",
+      "slide_cue": "slide 24"
+    },
+    {
+      "id": "NSCLC_HI_05",
+      "statement": "BGB-58067's efficacy and toxicity profile in MTAP-del population compared to emerging MTA-cooperative PRMT5i and other potential SoC",
+      "priority": "high",
+      "slide_cue": "slide 24"
+    },
+    {
+      "id": "NSCLC_HI_06",
+      "statement": "BGB-58067's blood-brain barrier penetration profile and CSF pharmacokinetics compared to existing PRMT5 inhibitors",
+      "priority": "high",
+      "slide_cue": "slide 25"
+    },
+    {
+      "id": "NSCLC_HI_07",
+      "statement": "Impact of BGB-58067 on healthcare resource utilization (HCRU) and cost vs. SoC",
+      "priority": "high",
+      "slide_cue": "slide 25"
+    },
+    {
+      "id": "NSCLC_HI_08",
+      "statement": "Impact of BGB-58067 on patient-reported HRQoL and treatment burden overall (e.g., time to deterioration) and in key subpopulations (e.g., elderly, ECOG \u22651, co-mutated, CNS involvement) versus standard of care",
+      "priority": "high",
+      "slide_cue": "slide 25"
+    },
+    {
+      "id": "NSCLC_HI_09",
+      "statement": "CTA turnaround time impact on BGB-58067 efficacy across testing methodologies (NGS and IHC)",
+      "priority": "high",
+      "slide_cue": "slide 26"
+    },
+    {
+      "id": "NSCLC_HI_10",
+      "statement": "BGB-58067's response rates across MTAP-deletion heterogeneity levels",
+      "priority": "high",
+      "slide_cue": "slide 26"
+    },
+    {
+      "id": "NSCLC_HI_11",
+      "statement": "(1L) Regulation of PD-L1 expression by BGB-58067 and associated efficacy across baseline PD-L1 subgroups",
+      "priority": "high",
+      "slide_cue": "slide 20"
+    },
+    {
+      "id": "NSCLC_HI_12",
+      "statement": "BGB-58067 clinical outcomes in MTAP-del NSCLC patient populations with co-occurring actionable genetic alterations (EGFR, ALK, KRAS) compared to single-mutation cohorts",
+      "priority": "high",
+      "slide_cue": "slide 27"
+    },
+    {
+      "id": "NSCLC_HI_13",
+      "statement": "BGB-58067\u2019s efficacy/safety in co-mutation-defined populations (STK11, KEAP1, TP53)",
+      "priority": "high",
+      "slide_cue": "slide 27"
+    },
+    {
+      "id": "NSCLC_HI_14",
+      "statement": "BGB-58067\u2019s efficacy and safety of triplet therapy across PD-L1 strata compared to standard doublet therapy and anti-PD-1 monotherapy*",
+      "priority": "high",
+      "slide_cue": "slide 28"
+    },
+    {
+      "id": "NSCLC_HI_15",
+      "statement": "BGB-58067's efficacy and safety profile in combination with targeted therapies (e.g., TKIs)",
+      "priority": "high",
+      "slide_cue": "slide 28"
+    }
+  ]
 }

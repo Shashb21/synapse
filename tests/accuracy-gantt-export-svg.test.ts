@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+import { activitiesToSvg } from "@/accuracy/modules/gantt-project/export-svg";
+import { activityIdForTactic } from "@/accuracy/modules/gantt-project/engine";
+
+describe("gantt SVG export", () => {
+  it("renders an empty placeholder when there are no activities", () => {
+    const svg = activitiesToSvg([]);
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("No activities");
+  });
+
+  it("renders bars for each activity with tactic labels", () => {
+    const svg = activitiesToSvg([
+      {
+        id: activityIdForTactic("T1"),
+        tactic_id: "T1",
+        start: "2026-01-01",
+        end: "2026-06-01",
+        depends_on: [],
+      },
+      {
+        id: activityIdForTactic("T2"),
+        tactic_id: "T2",
+        start: "2026-04-01",
+        end: "2026-12-01",
+        depends_on: ["T1"],
+      },
+    ]);
+    expect(svg).toContain("T1");
+    expect(svg).toContain("T2");
+    expect(svg).toContain("<rect");
+    expect(svg).toContain("2026-01-01");
+    expect(svg).toContain("2026-12-01");
+  });
+});

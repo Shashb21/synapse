@@ -68,4 +68,5 @@ export const ganttProjectModule = mechanicalModule({
   },
 });
 
-export { projectGanttFromTactics, activityIdForTactic } from "./engine";
+export { projectGanttFromTactics, activityIdForTactic, assertSaveFinalActivities } from "./engine";
+export { projectWorkspaceGantt, saveFinalGanttPlan, workspaceLatestPlan } from "./save-final";

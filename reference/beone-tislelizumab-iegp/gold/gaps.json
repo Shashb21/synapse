@@ -10,8 +10,188 @@
     "perioperative_nsclc"
   ],
   "must_find_tactic_identifiers": [
-    "G:1", "G:2", "G:3", "G:4", "G:5", "G:6", "G:7", "G:8", "G:9", "G:10",
-    "G:11", "G:12", "G:13", "G:14", "G:15", "G:16", "G:17", "G:18", "G:19", "G:20", "G:21"
+    "G:1",
+    "G:2",
+    "G:3",
+    "G:4",
+    "G:5",
+    "G:6",
+    "G:7",
+    "G:8",
+    "G:9",
+    "G:10",
+    "G:11",
+    "G:12",
+    "G:13",
+    "G:14",
+    "G:15",
+    "G:16",
+    "G:17",
+    "G:18",
+    "G:19",
+    "G:20",
+    "G:21"
   ],
-  "gaps": []
+  "gaps": [
+    {
+      "chapter": "transversal",
+      "statement": "Need for RWE on long term tislelizumab efficacy in Caucasian patients to support access and comparison",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 20"
+    },
+    {
+      "chapter": "transversal",
+      "statement": "RW data on comparative effectiveness data in Caucasian / non-Asian / local populations",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 20"
+    },
+    {
+      "chapter": "across_upper_gi",
+      "statement": "Need for data on optimal sequencing of IO and targeted therapies (i.e., tislelizumab in sequence vs combined with HER2 ADCs, FGFR inhibitors, etc.)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 26"
+    },
+    {
+      "chapter": "across_upper_gi",
+      "statement": "Need for combination data with CTx or targeted agents (such as CLDN18.2 inhibitors)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 26"
+    },
+    {
+      "chapter": "across_upper_gi",
+      "statement": "Need for tislelizumab efficacy data in patients who stop treatment at 24 months",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 26"
+    },
+    {
+      "chapter": "advanced_metastatic_escc",
+      "statement": "[1L]: Need for safety and efficacy data supporting tislelizumab (150mg Q2W and 300mg Q4W) + FOLFOX in a JP population greater than 5 pts",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 32"
+    },
+    {
+      "chapter": "advanced_metastatic_escc",
+      "statement": "Clinical evidence in patients with esophageal adenocarcinoma to supplement the current squamous-only study population",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 32"
+    },
+    {
+      "chapter": "advanced_metastatic_escc",
+      "statement": "[1L]: Need for exploratory biomarker data in patients with early and long-lasting response to tislelizumab",
+      "priority_band": "medium",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 32"
+    },
+    {
+      "chapter": "advanced_metastatic_gc_gej",
+      "statement": "[1L]: Need for safety and efficacy data supporting tislelizumab (200mg at Q2W) + SOX in a sizable JP population",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 40"
+    },
+    {
+      "chapter": "advanced_metastatic_gc_gej",
+      "statement": "Need for data on tislelizumab ability to prevent/delay peritoneal metastasis",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 40"
+    },
+    {
+      "chapter": "advanced_metastatic_gc_gej",
+      "statement": "Need for data at different PD-1 cut-offs (>10%)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 40"
+    },
+    {
+      "chapter": "advanced_metastatic_gc_gej",
+      "statement": "Need for data on intraperitoneal administration of PD-1 inhibitors (combination of PD-1 inhibitors with intraperitoneal chemo or targeted therapies)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 42"
+    },
+    {
+      "chapter": "advanced_metastatic_gc_gej",
+      "statement": "Need for evidence quantifying efficacy benefit (e.g., via OS2) in later lines of therapy (2L+) if tislelizumab used in earlier lines vs other PD-1",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 42"
+    },
+    {
+      "chapter": "across_lung",
+      "statement": "Need for comparative data (e.g., safety/tolerability data) against competitors PD-1/PD-L1 mAb and PD-1 x VEGF bispecifics (mNSCLC)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 51"
+    },
+    {
+      "chapter": "across_lung",
+      "statement": "Need for efficacy & outcomes data by CTx treatment (i.e., cisplatin vs carboplatin vs cisplatin \u2192 carboplatin switch due to AEs)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 51"
+    },
+    {
+      "chapter": "across_lung",
+      "statement": "Need for data that supports optimal treatment sequencing in different patient types (e.g., smokers vs non-smokers, brain / liver mets)",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 51"
+    },
+    {
+      "chapter": "perioperative_nsclc",
+      "statement": "[Pan-peri] Completion and adherence to adjuvant tislelizumab (vs control arm) as predictor of long-term response or outcome",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 59"
+    },
+    {
+      "chapter": "perioperative_nsclc",
+      "statement": "[Pan-peri] Need to understand the combination of patient characteristics that can influence treatment decision",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 59"
+    },
+    {
+      "chapter": "perioperative_nsclc",
+      "statement": "[Pan-peri] Need for median follow-up of at least 36 months",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 61"
+    },
+    {
+      "chapter": "perioperative_nsclc",
+      "statement": "[Neoadjuvant] Need for EFS data by surgically relevant subgroups",
+      "priority_band": "high",
+      "markets": [],
+      "status": "open",
+      "slide_cue": "slide 64"
+    }
+  ]
 }

@@ -1,0 +1,41 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { registerAccuracyStack } from "@/accuracy";
+import { listReferencePacks } from "@/accuracy/eval/reference-gold";
+import { seedWorkspaceFromGold } from "@/accuracy/store/seed-from-gold";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+registerAccuracyStack();
+
+const bodySchema = z.object({
+  pack_id: z.string().min(1),
+  workspace_name: z.string().min(2).max(120).optional(),
+  parse_source: z.boolean().optional(),
+});
+
+export async function GET() {
+  return NextResponse.json({
+    packs: listReferencePacks().map((p) => ({
+      id: p.id,
+      asset: p.asset,
+      source_file: p.source_file,
+    })),
+  });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = bodySchema.parse(await req.json());
+    const result = await seedWorkspaceFromGold({
+      packId: body.pack_id,
+      workspaceName: body.workspace_name,
+      parseSource: body.parse_source,
+    });
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Seed failed";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+  }
+}

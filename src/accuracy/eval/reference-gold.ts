@@ -1,6 +1,11 @@
-import manifest from "../../../reference/manifest.json";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import manifest from "../../../reference/manifest.json";
+import {
+  scoreRecallAgainstTargets,
+  type ExtractCandidates,
+  type PackRecallScore,
+} from "./pack-recall";
 
 export type ReferenceManifest = typeof manifest;
 export type ReferencePack = ReferenceManifest["packs"][number];
@@ -33,11 +38,22 @@ export type ReferenceMustFindTargets = {
   tactic_identifiers: string[];
 };
 
-export type ReferencePackEvalStub = {
+export type ReferencePackEvalResult = {
   packId: string;
-  status: "stub";
+  /** `targets_only` when no extract candidates were supplied; `scored` when recall was computed. */
+  status: "targets_only" | "scored";
   pack: ReferencePack;
   targets: ReferenceMustFindTargets;
+  recall?: PackRecallScore;
+};
+
+/** @deprecated Use ReferencePackEvalResult */
+export type ReferencePackEvalStub = ReferencePackEvalResult;
+
+export type AccuracyEvalReferencePackOptions = {
+  candidates?: ExtractCandidates;
+  /** When true and candidates omitted, score must_find IDs present in gold row payloads (oracle). */
+  oracleFromGold?: boolean;
 };
 
 export function loadReferenceManifest(): ReferenceManifest {
@@ -83,20 +99,59 @@ export function mustFindForPack(packId: string): ReferenceMustFindTargets {
 }
 
 /**
- * Eval runner entrypoint (stub): loads manifest + gold must_find targets for one pack.
- * Pipeline recall scoring is wired in later workstreams.
+ * Oracle candidates from filled gold rows — perfect recall when gaps/tactics arrays
+ * carry the must_find identifiers (eval harness / CI smoke, not live LLM extract).
+ */
+export function candidatesFromGold(packId: string): ExtractCandidates {
+  const { gaps, tactics } = loadReferenceGold(packId);
+  const gap_ids: string[] = [];
+  for (const row of gaps.gaps) {
+    if (row && typeof row === "object" && "id" in row && typeof (row as { id: unknown }).id === "string") {
+      gap_ids.push((row as { id: string }).id);
+    }
+  }
+  const tactic_numbers: number[] = [];
+  const tactic_identifiers: string[] = [];
+  for (const row of tactics.tactics) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as { number?: unknown; identifier?: unknown };
+    if (typeof rec.number === "number") tactic_numbers.push(rec.number);
+    if (typeof rec.identifier === "string") tactic_identifiers.push(rec.identifier);
+  }
+  return { gap_ids, tactic_numbers, tactic_identifiers };
+}
+
+/** Score extract candidates against a pack's must_find gold (packs never merged). */
+export function scorePackRecall(packId: string, candidates: ExtractCandidates = {}): PackRecallScore {
+  return scoreRecallAgainstTargets(mustFindForPack(packId), candidates);
+}
+
+/**
+ * Eval runner: loads pack gold must_find targets and optionally scores extract candidates.
+ * Packs are never merged — pass one packId at a time.
  */
 export async function accuracyEvalReferencePack(
   packId: string,
-): Promise<ReferencePackEvalStub> {
+  options: AccuracyEvalReferencePackOptions = {},
+): Promise<ReferencePackEvalResult> {
   const pack = getReferencePack(packId);
   if (!pack) {
     throw new Error(`Unknown reference pack: ${packId}`);
   }
+  const targets = mustFindForPack(packId);
+  const candidates =
+    options.candidates ?? (options.oracleFromGold ? candidatesFromGold(packId) : undefined);
+  if (!candidates) {
+    return { packId, status: "targets_only", pack, targets };
+  }
   return {
     packId,
-    status: "stub",
+    status: "scored",
     pack,
-    targets: mustFindForPack(packId),
+    targets,
+    recall: scorePackRecall(packId, candidates),
   };
 }
+
+export type { ExtractCandidates, PackRecallScore } from "./pack-recall";
+export { scoreRecallAgainstTargets } from "./pack-recall";

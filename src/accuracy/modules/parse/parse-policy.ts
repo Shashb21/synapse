@@ -25,14 +25,18 @@ const LOCAL_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-/** Locked product policy: PDF/PPTX → LlamaParse; DOCX/text/xlsx → local (+ optional LLM assist inside parse module). */
+/** Prefer LlamaParse for PDF/PPTX when keyed; otherwise local structured for PPTX/DOCX/text. */
 export function resolveParsePolicy(input: ParsePolicyInput): ParsePolicy {
   const lower = input.filename.toLowerCase();
-  if (lower.endsWith(".pdf") || lower.endsWith(".pptx") || lower.endsWith(".ppt")) {
-    return { parser: "llamaparse", reason: "pdf_or_pptx" };
+  const hasLlama = Boolean(process.env.LLAMA_CLOUD_API_KEY?.trim());
+  if (lower.endsWith(".pdf") || input.mime === "application/pdf") {
+    return hasLlama
+      ? { parser: "llamaparse", reason: "pdf_with_llama_key" }
+      : { parser: "llamaparse", reason: "pdf_needs_llama" };
   }
-  if (LLAMAPARSE_MIMES.has(input.mime)) {
-    return { parser: "llamaparse", reason: "mime_pdf_ppt" };
+  if (lower.endsWith(".pptx") || lower.endsWith(".ppt") || LLAMAPARSE_MIMES.has(input.mime)) {
+    if (hasLlama) return { parser: "llamaparse", reason: "pptx_with_llama_key" };
+    return { parser: "local_structured", reason: "pptx_local_without_llama_key" };
   }
   if (
     lower.endsWith(".docx") ||

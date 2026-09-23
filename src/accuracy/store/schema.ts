@@ -124,6 +124,19 @@ export const accuracyCallModules = pgTable("accuracy_call_modules", {
   activated_at: text("activated_at").notNull(),
 });
 
+/** Versioned save-final / draft snapshots of the Gantt projection for a workspace. */
+export const accuracyPlans = pgTable("accuracy_plans", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  version: integer("version").notNull(),
+  status: text("status").notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  note: text("note"),
+  saved_by: text("saved_by").notNull(),
+  saved_function: text("saved_function").notNull(),
+  saved_at: text("saved_at").notNull(),
+});
+
 export const ACCURACY_DDL = [
   `CREATE TABLE IF NOT EXISTS accuracy_organizations (
     id text PRIMARY KEY,
@@ -231,5 +244,16 @@ export const ACCURACY_DDL = [
     module_id text NOT NULL,
     activated_by text NOT NULL,
     activated_at text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_plans (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    version integer NOT NULL,
+    status text NOT NULL,
+    snapshot jsonb NOT NULL,
+    note text,
+    saved_by text NOT NULL,
+    saved_function text NOT NULL,
+    saved_at text NOT NULL
   )`,
 ];

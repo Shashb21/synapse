@@ -37,7 +37,7 @@ describe("reference gold packs", () => {
 
   it("accuracyEvalReferencePack stub returns gold targets for a pack", async () => {
     const result = await accuracyEvalReferencePack("beone-bgb-58067-prmt5i");
-    expect(result.status).toBe("stub");
+    expect(result.status).toBe("targets_only");
     expect(result.pack.asset).toContain("BGB-58067");
     expect(result.targets.gap_ids).toHaveLength(43);
   });

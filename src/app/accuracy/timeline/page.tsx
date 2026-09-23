@@ -1,0 +1,130 @@
+import Link from "next/link";
+import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { AccuracyGanttBoard } from "@/components/accuracy/accuracy-gantt-board";
+import { registerAccuracyStack } from "@/accuracy";
+import {
+  projectWorkspaceGantt,
+  workspaceLatestPlan,
+} from "@/accuracy/modules/gantt-project/save-final";
+import { listWorkspaces } from "@/accuracy/store/tenant";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+registerAccuracyStack();
+
+export default async function AccuracyTimelinePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ workspace_id?: string }>;
+}) {
+  const { workspace_id: workspaceId = "" } = await searchParams;
+
+  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let activities: Awaited<ReturnType<typeof projectWorkspaceGantt>>["activities"] = [];
+  let plan: Awaited<ReturnType<typeof workspaceLatestPlan>> = null;
+  let loadError: string | null = null;
+
+  try {
+    workspaces = await listWorkspaces();
+    if (workspaceId) {
+      const projected = await projectWorkspaceGantt(workspaceId);
+      activities = projected.activities;
+      plan = await workspaceLatestPlan(workspaceId);
+    }
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : "Could not load timeline";
+  }
+
+  const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+
+  return (
+    <AccuracyAppShell active="timeline">
+      <PageIntro kicker="Final truth · validated tactics only" title="Timeline">
+        Interactive Gantt projection from validated tactics. Save as final freezes a versioned
+        snapshot — no invented bars.
+      </PageIntro>
+
+      {loadError ? (
+        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+          {loadError}
+        </p>
+      ) : null}
+
+      {!workspaceId ? (
+        <section className="grid gap-2" aria-labelledby="timeline-empty">
+          <h2 id="timeline-empty" className="text-[15px] font-medium text-foreground">
+            Choose a workspace
+          </h2>
+          <p className="text-[12px] text-muted-foreground">
+            No workspace selected. Open a workspace from{" "}
+            <Link href="/accuracy" className="text-foreground underline-offset-2 hover:underline">
+              Workspaces
+            </Link>{" "}
+            or append <code className="text-[11px]">?workspace_id=</code> to this URL.
+          </p>
+          {workspaces.length > 0 ? (
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {workspaces.map((workspace) => (
+                <li key={workspace.id}>
+                  <Link
+                    href={`/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="inline-flex rounded-md border border-border px-2 py-1 text-[12px] text-muted-foreground no-underline hover:text-foreground"
+                  >
+                    {workspace.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : (
+        <>
+          <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
+            <h2 id="workspace-picker" className="text-[15px] font-medium text-foreground">
+              Workspace
+              {activeWorkspace ? (
+                <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                  · {activeWorkspace.name}
+                </span>
+              ) : null}
+            </h2>
+            <ul className="flex flex-wrap gap-2">
+              {workspaces.map((workspace) => (
+                <li key={workspace.id}>
+                  <Link
+                    href={`/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className={`inline-flex rounded-md border px-2 py-1 text-[12px] no-underline ${
+                      workspace.id === workspaceId
+                        ? "border-foreground bg-card text-foreground"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {workspace.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[12px] text-muted-foreground">
+              Review claims on the{" "}
+              <Link
+                href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                Ledger
+              </Link>
+              .
+            </p>
+          </section>
+
+          <AccuracyGanttBoard
+            workspaceId={workspaceId}
+            activities={activities}
+            planVersion={plan?.version ?? null}
+            planStatus={plan?.status ?? null}
+          />
+        </>
+      )}
+    </AccuracyAppShell>
+  );
+}

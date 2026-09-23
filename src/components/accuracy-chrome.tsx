@@ -2,7 +2,18 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Activity, Building2, Menu, SlidersHorizontal } from "lucide-react";
+import {
+  Activity,
+  BookMarked,
+  Building2,
+  ChartGantt,
+  FileStack,
+  GitCompareArrows,
+  Menu,
+  ScrollText,
+  SlidersHorizontal,
+  Target,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,7 +24,16 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-export type AccuracyShellId = "workspaces" | "control" | "runs";
+export type AccuracyShellId =
+  | "workspaces"
+  | "sources"
+  | "ledger"
+  | "coverage"
+  | "plan"
+  | "timeline"
+  | "audit"
+  | "control"
+  | "runs";
 
 type NavItem = {
   id: AccuracyShellId;
@@ -24,6 +44,12 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { id: "workspaces", href: "/accuracy", label: "Workspaces", icon: Building2 },
+  { id: "sources", href: "/accuracy/sources", label: "Sources", icon: FileStack },
+  { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
+  { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
+  { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },
+  { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
+  { id: "audit", href: "/accuracy/audit", label: "Audit", icon: ScrollText },
   { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
 ];
