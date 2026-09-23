@@ -15,6 +15,8 @@ export const accuracyWorkspaces = pgTable("accuracy_workspaces", {
   slug: text("slug").notNull(),
   planning_context: jsonb("planning_context"),
   created_at: text("created_at").notNull(),
+  /** Soft-hide: ISO timestamp when archived; null = active. */
+  archived_at: text("archived_at"),
 });
 
 export const accuracySourceFiles = pgTable("accuracy_source_files", {
@@ -163,8 +165,10 @@ export const ACCURACY_DDL = [
     name text NOT NULL,
     slug text NOT NULL,
     planning_context jsonb,
-    created_at text NOT NULL
+    created_at text NOT NULL,
+    archived_at text
   )`,
+  `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
   `CREATE TABLE IF NOT EXISTS accuracy_source_files (
     id text PRIMARY KEY,
     workspace_id text NOT NULL,

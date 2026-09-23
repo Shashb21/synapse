@@ -6,3 +6,5 @@ Start here:
 2. **[IEGP model](iegp-model.md)** — locked objects, gates, priority formula, refresh.
 
 The pack under [`sdlc/`](sdlc/) is historical lineage from the earlier insights-terminal slice (CIR / themes). It is not the live system of record.
+
+Deploy operators: **[Deploy / env checklist](deploy-env-checklist.md)** — `DATABASE_URL`, LlamaParse, Grok, Anthropic workspace id.

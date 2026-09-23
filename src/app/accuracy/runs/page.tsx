@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { Badge } from "@/components/ui/badge";
 import { listAccuracyRuns, registerAccuracyStack } from "@/accuracy";
+import { formatCostUsd, formatTokenUsage, sumRunCostsUsd } from "@/accuracy/kernel/cost";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,8 @@ export default async function AccuracyRunsPage({
   }
 
   const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+  const totalCost = formatCostUsd(sumRunCostsUsd(runs));
+  const runsWithCost = runs.filter((run) => formatCostUsd(run.cost_usd)).length;
 
   return (
     <AccuracyAppShell active="runs">
@@ -83,14 +86,27 @@ export default async function AccuracyRunsPage({
       </section>
 
       <section className="grid gap-2" aria-labelledby="recent-runs">
-        <h2 id="recent-runs" className="text-[15px] font-medium text-foreground">
-          Recent runs
-          {activeWorkspace ? (
-            <span className="ml-2 text-[12px] font-normal text-muted-foreground">
-              · {activeWorkspace.name}
-            </span>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="recent-runs" className="text-[15px] font-medium text-foreground">
+            Recent runs
+            {activeWorkspace ? (
+              <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                · {activeWorkspace.name}
+              </span>
+            ) : null}
+          </h2>
+          {workspaceId && totalCost ? (
+            <p className="text-[12px] text-muted-foreground" title="Sum of estimated costs on listed runs">
+              Listed cost · <span className="font-medium text-foreground">{totalCost}</span>
+              {runsWithCost < runs.length ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({runsWithCost}/{runs.length} with estimate)
+                </span>
+              ) : null}
+            </p>
           ) : null}
-        </h2>
+        </div>
         {!workspaceId ? (
           <p className="text-[12px] text-muted-foreground">Select a workspace to list runs.</p>
         ) : runs.length === 0 ? (
@@ -103,6 +119,8 @@ export default async function AccuracyRunsPage({
                   ? (run.route as { provider_label?: string; model?: string; degraded?: boolean })
                   : null;
               const evals = Array.isArray(run.evals) ? run.evals : [];
+              const costLabel = formatCostUsd(run.cost_usd);
+              const tokensLabel = formatTokenUsage(run.token_usage);
               return (
                 <li key={run.id} className="border border-border bg-card/40 p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -131,10 +149,18 @@ export default async function AccuracyRunsPage({
                         </span>
                       </>
                     ) : null}
-                    {run.cost_usd ? (
+                    {costLabel ? (
                       <>
                         <span>·</span>
-                        <span>${run.cost_usd}</span>
+                        <span className="text-foreground" title="Estimated from token usage × price table">
+                          {costLabel}
+                        </span>
+                      </>
+                    ) : null}
+                    {tokensLabel ? (
+                      <>
+                        <span>·</span>
+                        <span>{tokensLabel}</span>
                       </>
                     ) : null}
                     {evals.map((score, index) => {
