@@ -1,3 +1,4 @@
+import { desc } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -26,4 +27,13 @@ export async function createWorkspace(args: { org_id: string; name: string; slug
       created_at: nowIso(),
     });
   return id;
+}
+
+export async function listWorkspaces(limit = 50) {
+  await ensureAccuracySchema();
+  return accuracyDb()
+    .select()
+    .from(t.accuracyWorkspaces)
+    .orderBy(desc(t.accuracyWorkspaces.created_at))
+    .limit(limit);
 }
