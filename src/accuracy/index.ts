@@ -18,8 +18,8 @@ import { validationGateModule } from "./modules/validation-gate/module";
 import {
   partialSplitModule,
   prioritizeModule,
-  ideateModule,
 } from "./modules/partial-split/module";
+import { ideateModule } from "./modules/ideate/module";
 
 let registered = false;
 
@@ -53,4 +53,4 @@ export {
   allRoutableRoles,
 } from "./kernel/routing";
 export { listAccuracyRuns } from "./kernel/observability";
-export { listModelPrices, estimateCostUsd } from "./kernel/cost";
+export { gapsEligibleForIdeation, tacticAllowedOnGapInFinalPlan } from "./domain/iegp-semantics";
