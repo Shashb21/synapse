@@ -57,6 +57,49 @@ describe("inventory extract module", () => {
     expect(result.summary).toContain("SYNAPSE_TEST_STUB_LLM");
   });
 
+  it("calls the connected OAuth LLM when stub is off", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      const ctx = stubCtx();
+      ctx.complete = async () => ({
+        raw: JSON.stringify({
+          tactics: [
+            {
+              name: "Phase 3 registrational trial",
+              type: "phase3_trial",
+              status: "ongoing",
+              evidence_question: "Does the drug improve overall survival?",
+              origin: "inventory",
+              provenance: [
+                {
+                  source_file_id: "src-1",
+                  block_id: "blk-1",
+                  quote: "Phase 3 study ongoing in NSCLC",
+                },
+              ],
+            },
+          ],
+        }),
+        usage: { prompt_tokens: 4, completion_tokens: 6, total_tokens: 10 },
+      });
+      const result = await inventoryExtractModule.run(
+        {
+          workspace_id: "ws-test",
+          source_file_id: "src-1",
+          block_ids: ["blk-1"],
+        },
+        ctx,
+      );
+      expect(result.output.tactics).toHaveLength(1);
+      expect(result.output.tactics[0]?.name).toMatch(/Phase 3/);
+      expect(result.output.tactics[0]?.origin).toBe("inventory");
+      expect(result.summary).toMatch(/1 tactic/);
+    } finally {
+      process.env.SYNAPSE_TEST_STUB_LLM = prev;
+    }
+  });
+
   it("requires inventory origin and provenance spans on tactics", () => {
     const ok = inventoryTacticSchema.safeParse({
       id: "tac-1",

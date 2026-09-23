@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { ParseBlockPreview } from "@/components/accuracy/parse-block-preview";
-import { SourceExtractActions } from "@/components/accuracy/source-extract-actions";
+import { SourceExtractActions, ExtractOauthGateBanner } from "@/components/accuracy/source-extract-actions";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
-import { registerAccuracyStack } from "@/accuracy";
+import { registerAccuracyStack, inspectLiveExtractGate } from "@/accuracy";
 import { toParseBlockPreviews } from "@/accuracy/store/parse-preview";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
@@ -49,6 +49,7 @@ export default async function AccuracySourcesPage({
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
+  const extractGate = await inspectLiveExtractGate();
 
   return (
     <AccuracyAppShell active="sources">
@@ -56,7 +57,11 @@ export default async function AccuracySourcesPage({
         PDF and PPTX prefer LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set; without it they
         fall back to local structured parse. DOCX/XLSX/text stay local. After parse, preview
         verbatim parse blocks (quotes must be substrings of this text), then run need + inventory
-        extract to populate the ledger (requires a connected LLM or env API key).
+        extract to populate the ledger. Live extract uses a connected OAuth LLM from the{" "}
+        <Link href="/control" className="underline-offset-2 hover:underline">
+          control panel
+        </Link>{" "}
+        (Grok default, Claude one-click).
       </PageIntro>
 
       {loadError ? (
@@ -78,6 +83,7 @@ export default async function AccuracySourcesPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · <span className="text-foreground">{active?.name ?? workspaceId}</span>
           </p>
+          <ExtractOauthGateBanner gate={extractGate} />
           <SourceUploadForm workspaceId={workspaceId} />
           {sources.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
@@ -101,6 +107,7 @@ export default async function AccuracySourcesPage({
                     workspaceId={workspaceId}
                     sourceFileId={source.id}
                     blockCount={source.block_count}
+                    gate={extractGate}
                   />
                 </li>
               ))}

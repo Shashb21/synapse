@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import {
+  extractOauthGateJson,
+  inspectLiveExtractGate,
+} from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
@@ -9,6 +13,7 @@ import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { NoRouteError } from "@/modules/llm/provider";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +65,12 @@ export async function POST(req: Request) {
     const sorted = [...allBlocks].sort((a, b) => a.index - b.index);
     const blocks = sorted.slice(0, MAX_EXTRACT_BLOCKS);
     const block_ids = blocks.map((b) => b.id);
+
+    const gate = await inspectLiveExtractGate();
+    if (!gate.ready) {
+      return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+    }
+
     const actor = {
       name: body.actor_name?.trim() || "Accuracy extractor",
       function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
@@ -198,9 +209,18 @@ export async function POST(req: Request) {
       merge: mergeRun.output,
       statuses: statusRun.output,
       runs,
-      stub: process.env.SYNAPSE_TEST_STUB_LLM === "1",
+      stub: gate.stub,
+      provider_id: gate.stub ? null : gate.provider_id,
+      provider_label: gate.stub ? null : gate.provider_label,
+      auth: gate.stub ? null : gate.auth,
     });
   } catch (error) {
+    if (error instanceof NoRouteError) {
+      const gate = await inspectLiveExtractGate();
+      if (!gate.ready) {
+        return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+      }
+    }
     const message = error instanceof Error ? error.message : "Extract failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
