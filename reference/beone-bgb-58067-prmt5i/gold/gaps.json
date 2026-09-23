@@ -1,0 +1,16 @@
+{
+  "source_pack_id": "beone-bgb-58067-prmt5i",
+  "source_filename": "BeOne_BGB-58067 PRMT5i IEP Report_v1.0 Final_vMarkup.pptx",
+  "must_find_gap_ids": [
+    "NSCLC_AD_01", "NSCLC_AD_02", "NSCLC_AD_03", "NSCLC_AD_04", "NSCLC_AD_05",
+    "NSCLC_AD_06", "NSCLC_AD_07", "NSCLC_AD_08", "NSCLC_AD_09", "NSCLC_AD_10",
+    "NSCLC_CE_01", "NSCLC_CE_02", "NSCLC_CE_03", "NSCLC_CE_04", "NSCLC_CE_05",
+    "NSCLC_GA_01", "NSCLC_GA_02", "NSCLC_GA_03", "NSCLC_GA_04", "NSCLC_GA_05",
+    "NSCLC_GA_06", "NSCLC_GA_07", "NSCLC_GA_08", "NSCLC_GA_09", "NSCLC_GA_10",
+    "NSCLC_GA_11", "NSCLC_GA_12", "NSCLC_GA_13",
+    "NSCLC_HI_01", "NSCLC_HI_02", "NSCLC_HI_03", "NSCLC_HI_04", "NSCLC_HI_05",
+    "NSCLC_HI_06", "NSCLC_HI_07", "NSCLC_HI_08", "NSCLC_HI_09", "NSCLC_HI_10",
+    "NSCLC_HI_11", "NSCLC_HI_12", "NSCLC_HI_13", "NSCLC_HI_14", "NSCLC_HI_15"
+  ],
+  "gaps": []
+}

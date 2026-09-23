@@ -8,7 +8,7 @@ Branch: `cursor/accuracy-first-modular-b7b5`
 | --- | --- |
 | Integration | **A — strangle**: new `src/accuracy/*` stack; legacy S0–S10 remains until parity |
 | Visual reference | User uploads under `reference/`; final output = **interactive Gantt** |
-| Coverage decisions | Schema-locked LLM (**no Jev** for now) |
+| Coverage decisions | **Schema-locked OAuth LLMs** (no TypeSafe Jev) |
 | Tenancy | **Multi-tenant** (org → workspace; **one IEGP per workspace**) |
 | Routing | **Per call kind + per agent role** (proposer / critic / reviser / judge) |
 | Cost | **Live price table** + token estimates per LLM step; OAuth providers (no API-key billing API) |

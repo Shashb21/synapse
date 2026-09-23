@@ -1,34 +1,31 @@
 # IEGP reference materials
 
-Upload **source PPTXs/PDFs/DOCX** and **gold gap/tactic expectations** here for Synapse accuracy-first development.
+BeOne reference decks live in **`reference/manifest.json`**. Each pack is **one source file** — eval gold must not mix gaps/tactics across packs.
 
-## Layout (required for eval gold)
-
-Keep **each reference source in its own folder** so gaps and tactics are never mixed across files:
+## Layout
 
 ```text
 reference/
-  README.md
-  <asset-slug>/
-    sources/
-      stakeholder-interviews.pptx
-      medical-plan.pdf
-      ...
-    gold/
-      gaps.json          # gaps grounded in THIS source only
-      tactics.json       # tactics grounded in THIS source only
-      README.md          # how rows map to parse block cues
+  manifest.json
+  beone-bgb-58067-prmt5i/
+    sources/   … PRMT5i IEP Report.pptx
+    gold/      gaps.json, tactics.json (must_find scaffolds)
+  beone-tislelizumab-iegp/
+    sources/   … Tislelizumab IEGP VShare 3.0.pptx
+    gold/      gaps.json, tactics.json
 ```
 
-One **Synapse workspace** = one IEGP. Gold packs are keyed by `source_file_id` inside a workspace, not merged across unrelated reference folders until ingest merge rules run.
+One **Synapse workspace** = one IEGP (one pack when using reference gold).
 
-## Parsing policy (accuracy stack)
+## Analysis
+
+See [`docs/accuracy-reference-ux.md`](../docs/accuracy-reference-ux.md) for deck → digital UX recommendations and eval rules.
+
+## Parsing (accuracy stack)
 
 | Format | Parser |
 | --- | --- |
 | PDF, PPTX | LlamaParse (when `LLAMA_CLOUD_API_KEY` is set) |
-| DOCX, TXT, XLSX, etc. | Local / structured parsers; optional LLM assist for messy DOCX only inside the parse module |
+| DOCX, TXT, XLSX | Local structured parse |
 
-## Digital UX note
-
-Reference decks are slide-first. The product **final truth view** is an **interactive Gantt** plus card-based gap/tactic/coverage surfaces — not a slide clone. When reference files land here, run the reference analysis doc under `docs/accuracy-reference-ux.md` (generated after first upload).
+Coverage decisions: **schema-locked OAuth LLMs** — **not** TypeSafe Jev.

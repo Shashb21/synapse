@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "description": "Reference IEGP decks for Synapse accuracy evals. One pack = one source file; do not merge gold across packs.",
+  "packs": [
+    {
+      "id": "beone-bgb-58067-prmt5i",
+      "asset": "BGB-58067 (PRMT5i)",
+      "doc_type": "integrated_evidence_plan",
+      "source_file": "sources/BeOne_BGB-58067 PRMT5i IEP Report_v1.0 Final_vMarkup.pptx",
+      "gap_id_scheme": "NSCLC_{theme}_{nn} (43 IDs in deck)",
+      "tactic_id_scheme": "numbered tactics 1–36 on tactic/roadmap slides",
+      "slides": 57,
+      "gold": "gold/"
+    },
+    {
+      "id": "beone-tislelizumab-iegp",
+      "asset": "Tislelizumab",
+      "doc_type": "integrated_evidence_generation_plan",
+      "source_file": "sources/BeOne_Tislelizumab IEGP_VShare 3.0.pptx",
+      "gap_id_scheme": "narrative evidence-gap statements by chapter (Transversal, Upper GI, ESCC, GC/GEJ, Lung, perioperative NSCLC)",
+      "tactic_id_scheme": "G:{n} tactic identifiers + RN- trial post-hoc references",
+      "slides": 59,
+      "gold": "gold/"
+    }
+  ]
+}
