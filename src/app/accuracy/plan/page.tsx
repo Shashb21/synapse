@@ -34,8 +34,8 @@ export default async function AccuracyPlanPage({
   return (
     <AccuracyAppShell active="plan">
       <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
-        Set priority bands on evidence gaps. High-priority open gaps are the only ones eligible for
-        net-new ideation in the save-final IEGP.
+        Set priority bands on evidence gaps. Validated high-priority gaps unlock net-new tactic
+        ideation (mechanical stub until an LLM route is connected).
       </PageIntro>
 
       {loadError ? (
@@ -76,6 +76,7 @@ export default async function AccuracyPlanPage({
                     claimId={gap.id}
                     statement={gap.statement}
                     priority={priority}
+                    validated={gap.validated}
                   />
                 );
               })}
