@@ -2,16 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import type { GanttActivity } from "@/accuracy/modules/gantt-project/engine";
 import {
   ganttBarAriaLabel,
@@ -75,6 +68,15 @@ export function AccuracyGanttBoard({
   const detail = selected
     ? resolveActivityDetail({ activity: selected, activities, catalog })
     : null;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setSelectedId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
 
   const timeWindow = useMemo(() => {
     if (activities.length === 0) return null;
@@ -335,78 +337,79 @@ export function AccuracyGanttBoard({
         </ul>
       )}
 
-      <Sheet open={selected !== null} onOpenChange={(open) => (open ? null : setSelectedId(null))}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
-          {detail ? (
-            <>
-              <SheetHeader>
-                <SheetTitle className="text-[15px]">
-                  {detail.tactic?.statement ?? detail.activity.tactic_id}
-                </SheetTitle>
-                <SheetDescription className="text-[12px]">
-                  Tactic {detail.activity.tactic_id} · activity {detail.activity.id}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="grid gap-4 px-4 pb-6">
-                <section>
-                  <h3 className="text-[12px] font-medium text-foreground">Evidence gaps</h3>
-                  {detail.gaps.length === 0 ? (
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      No validated coverage joins on this bar.
-                    </p>
-                  ) : (
-                    <ul className="mt-1 grid gap-1">
-                      {detail.gaps.map((gap) => (
-                        <li key={gap.id} className="text-[12px] text-muted-foreground">
-                          <span className="text-foreground">{gap.statement}</span>{" "}
-                          <span className="text-muted-foreground/70">{gap.id}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-                <section>
-                  <h3 className="text-[12px] font-medium text-foreground">Interdependencies</h3>
-                  <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
-                    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-                      <dt>Start</dt>
-                      <dd className="text-foreground">{detail.activity.start.slice(0, 10)}</dd>
-                    </div>
-                    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-                      <dt>End</dt>
-                      <dd className="text-foreground">{detail.activity.end.slice(0, 10)}</dd>
-                    </div>
-                    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-                      <dt>Readout</dt>
-                      <dd className="text-foreground">
-                        {detail.activity.readout?.slice(0, 10) ?? "—"}
-                      </dd>
-                    </div>
-                  </dl>
-                  {detail.depends_on.length > 0 ? (
-                    <p className="mt-2 text-[12px] text-muted-foreground">
-                      Depends on{" "}
-                      {detail.depends_on
-                        .map((row) => `${row.statement} (${row.id})`)
-                        .join("; ")}
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-[12px] text-muted-foreground">No upstream waits.</p>
-                  )}
-                  {detail.dependents.length > 0 ? (
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      Unblocks{" "}
-                      {detail.dependents
-                        .map((row) => `${row.statement} (${row.id})`)
-                        .join("; ")}
-                    </p>
-                  ) : null}
-                </section>
-              </div>
-            </>
-          ) : null}
-        </SheetContent>
-      </Sheet>
+      {detail ? (
+        <section
+          className="border border-foreground/40 bg-card p-4"
+          aria-labelledby="activity-detail-title"
+          data-testid="gantt-activity-detail"
+        >
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 id="activity-detail-title" className="text-[15px] font-medium text-foreground">
+                {detail.tactic?.statement ?? detail.activity.tactic_id}
+              </h2>
+              <p className="text-[12px] text-muted-foreground">
+                Tactic {detail.activity.tactic_id} · activity {detail.activity.id}
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setSelectedId(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-[12px] font-medium text-foreground">Evidence gaps</h3>
+              {detail.gaps.length === 0 ? (
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  No validated coverage joins on this bar.
+                </p>
+              ) : (
+                <ul className="mt-1 grid gap-1">
+                  {detail.gaps.map((gap) => (
+                    <li key={gap.id} className="text-[12px] text-muted-foreground">
+                      <span className="text-foreground">{gap.statement}</span>{" "}
+                      <span className="text-muted-foreground/70">{gap.id}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="text-[12px] font-medium text-foreground">Interdependencies</h3>
+              <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
+                <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+                  <dt>Start</dt>
+                  <dd className="text-foreground">{detail.activity.start.slice(0, 10)}</dd>
+                </div>
+                <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+                  <dt>End</dt>
+                  <dd className="text-foreground">{detail.activity.end.slice(0, 10)}</dd>
+                </div>
+                <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+                  <dt>Readout</dt>
+                  <dd className="text-foreground">
+                    {detail.activity.readout?.slice(0, 10) ?? "—"}
+                  </dd>
+                </div>
+              </dl>
+              {detail.depends_on.length > 0 ? (
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  Depends on{" "}
+                  {detail.depends_on.map((row) => `${row.statement} (${row.id})`).join("; ")}
+                </p>
+              ) : (
+                <p className="mt-2 text-[12px] text-muted-foreground">No upstream waits.</p>
+              )}
+              {detail.dependents.length > 0 ? (
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  Unblocks{" "}
+                  {detail.dependents.map((row) => `${row.statement} (${row.id})`).join("; ")}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
