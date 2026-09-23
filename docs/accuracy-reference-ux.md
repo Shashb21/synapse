@@ -13,6 +13,22 @@ One **Synapse workspace = one IEGP** (one pack per workspace for eval; do not mi
 
 ---
 
+## Final plan semantics (from BeOne deck behavior)
+
+Reference IEGPs distinguish three tactic sources:
+
+| Source | Where it comes from | In Synapse |
+| --- | --- | --- |
+| **Inventory** | CDP, pivotal/post-hoc, publication/HEOR trackers, planned RWE/IIT already in materials | `inventory_extract` → validated tactics with provenance quotes |
+| **Coverage-only** | Existing tactic addresses gap (no new work) | Pairwise coverage joins; gap may become Addressed without ideation |
+| **Ideated** | **Created** for the plan — typically **not** verbatim in reference uploads | `ideate` → `origin: ideated`, `status: proposed` until human validates |
+
+**Only high-priority evidence gaps** receive **newly ideated and assigned** tactics in the **save-final** IEGP. Medium/low open gaps may remain without net-new tactics.
+
+Eval gold: do **not** require ideated tactic wording in source PPTX recall tests; score ideation against high-priority gap assignments separately. Code: `src/accuracy/domain/iegp-semantics.ts`.
+
+---
+
 ## What the decks do well (keep semantically)
 
 1. **Executive → context → gaps → tactics → roadmap** — clear mental model; map to app nav, not slide order.

@@ -30,13 +30,3 @@ export const prioritizeModule = agenticModule({
   }),
   run: async () => ({ output: { placements: [] }, summary: "Prioritize stub" }),
 });
-
-export const ideateModule = agenticModule({
-  id: "ideate.agent-v1",
-  call_kind: "ideate",
-  title: "Ideate",
-  summary: "Net-new tactics for high-priority open gaps.",
-  inputSchema: z.object({ workspace_id: z.string(), gap_ids: z.array(z.string()) }),
-  outputSchema: z.object({ proposals: z.array(z.record(z.string(), z.unknown())) }),
-  run: async () => ({ output: { proposals: [] }, summary: "Ideation stub" }),
-});

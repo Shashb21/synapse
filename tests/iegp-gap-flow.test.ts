@@ -16,6 +16,7 @@ import {
   confirmCoverageReview,
   recordMissedTactic,
   createTacticFromGaps,
+  syncComputedGapStatuses,
 } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
@@ -55,6 +56,8 @@ async function makePartialGap() {
     actor_name: "A. Rao",
     actor_function: "heor",
   });
+  // Belt-and-suspenders for CI: re-sync after planned lock so displayed status is Partial.
+  await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");
   return { gapId, tacticId };
