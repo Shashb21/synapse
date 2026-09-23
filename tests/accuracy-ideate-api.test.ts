@@ -104,7 +104,65 @@ describe("accuracy ideate API stub", () => {
     expect(created?.status).toBe("proposed");
     const meta = claimMetadata(created!);
     expect(meta.origin).toBe("ideated");
+    expect(meta.not_from_reference).toBe(true);
     expect(meta.gap_ids).toEqual(["G-HIGH-1"]);
     expect(meta.ideation_rationale).toMatch(/inventory/);
+  });
+
+  it("LLM run under stub inserts nothing and does not invent inventory tactics", async () => {
+    expect(process.env.SYNAPSE_TEST_STUB_LLM).toBe("1");
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("ideate-llm-stub");
+    const gap = await insertClaim({
+      workspace_id,
+      claim_type: "gap",
+      statement: "Need OS evidence in biomarker-high subgroup",
+      validated: true,
+      status: "open",
+      metadata: { priority: "high", external_id: "G-HIGH-1" },
+    });
+    await insertClaim({
+      workspace_id,
+      claim_type: "tactic",
+      statement: "Phase 3 registrational trial",
+      status: "ongoing",
+      metadata: { origin: "inventory", number: 1 },
+    });
+
+    const res = await postIdeate({ workspace_id, gap_id: gap.id });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok?: boolean;
+      stub?: boolean;
+      mode?: string;
+      tactics_inserted?: number;
+      tactic_ids?: string[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.stub).toBe(true);
+    expect(body.mode).toBe("stub");
+    expect(body.tactics_inserted).toBe(0);
+    expect(body.tactic_ids).toEqual([]);
+
+    const tactics = await listClaims(workspace_id, { claim_type: "tactic" });
+    expect(tactics).toHaveLength(1);
+    expect(claimMetadata(tactics[0]!).origin).toBe("inventory");
+  });
+
+  it("LLM run rejects medium-priority gaps without a title", async () => {
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("ideate-llm-med");
+    const gap = await insertClaim({
+      workspace_id,
+      claim_type: "gap",
+      statement: "Medium leftover",
+      validated: true,
+      status: "open",
+      metadata: { priority: "medium" },
+    });
+    const res = await postIdeate({ workspace_id, gap_id: gap.id });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toMatch(/high-priority/i);
   });
 });

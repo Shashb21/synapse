@@ -55,7 +55,13 @@ export {
   summarizeAccuracyRunCost,
   DEFAULT_STALE_RUN_MAX_AGE_MS,
 } from "./kernel/observability";
-export { gapsEligibleForIdeation, tacticAllowedOnGapInFinalPlan } from "./domain/iegp-semantics";
+export {
+  gapsEligibleForIdeation,
+  tacticAllowedOnGapInFinalPlan,
+  ideatedTacticExpectsNoSourceQuote,
+  includeTacticInSourceRecall,
+  filterInventoryForSourceRecall,
+} from "./domain/iegp-semantics";
 export { listModelPrices, estimateCostUsd } from "./kernel/cost";
 export { rollupAccuracyRunCost, formatUsd } from "./kernel/cost-rollup";
 export type { AccuracyCostRollup } from "./kernel/cost-rollup";
@@ -69,6 +75,6 @@ export {
   candidatesFromGold,
 } from "./eval/reference-gold";
 export { scoreGapIdRecall } from "./modules/need-extract/module";
-export { scoreRecallAgainstTargets } from "./eval/pack-recall";
+export { scoreRecallAgainstTargets, sourceRecallCandidatesFromTactics } from "./eval/pack-recall";
 export { mergeDedupeCandidates } from "./modules/merge-dedupe/engine";
 export { deriveGapStatus, deriveWorkspaceGapStatuses } from "./modules/status-derive/engine";

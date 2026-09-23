@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
-import { PlanPriorityCard } from "@/components/accuracy/plan-priority-card";
+import { PlanIdeateAllButton, PlanPriorityCard } from "@/components/accuracy/plan-priority-card";
 import { registerAccuracyStack } from "@/accuracy";
+import {
+  gapsEligibleForIdeation,
+  resolveGapStatus,
+  resolvePriorityBand,
+} from "@/accuracy/domain/iegp-semantics";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
@@ -30,12 +35,24 @@ export default async function AccuracyPlanPage({
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
+  const eligibleCount = gapsEligibleForIdeation(
+    gaps.map((gap) => {
+      const meta = claimMetadata(gap);
+      return {
+        id: gap.id,
+        priority_band: resolvePriorityBand(meta.priority ?? meta.priority_band),
+        status: resolveGapStatus(gap.status),
+        validated: gap.validated,
+      };
+    }),
+  ).length;
 
   return (
     <AccuracyAppShell active="plan">
       <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
-        Set priority bands on evidence gaps. Validated high-priority gaps unlock net-new tactic
-        ideation (mechanical stub until an LLM route is connected).
+        Set priority bands on evidence gaps. Validated high-priority open gaps can run live LLM
+        ideation — origin ideated, status proposed until you validate. Inventory tactics stay on
+        extract.
       </PageIntro>
 
       {loadError ? (
@@ -55,12 +72,14 @@ export default async function AccuracyPlanPage({
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s)
+            Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
+            open eligible for ideate
           </p>
           {gaps.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No gaps yet — seed gold or extract needs.</p>
           ) : (
             <div className="grid gap-2">
+              <PlanIdeateAllButton workspaceId={workspaceId} eligibleCount={eligibleCount} />
               {gaps.map((gap) => {
                 const meta = claimMetadata(gap);
                 const priority =
@@ -77,6 +96,7 @@ export default async function AccuracyPlanPage({
                     statement={gap.statement}
                     priority={priority}
                     validated={gap.validated}
+                    status={gap.status}
                   />
                 );
               })}

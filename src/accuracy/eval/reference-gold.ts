@@ -154,4 +154,4 @@ export async function accuracyEvalReferencePack(
 }
 
 export type { ExtractCandidates, PackRecallScore } from "./pack-recall";
-export { scoreRecallAgainstTargets } from "./pack-recall";
+export { scoreRecallAgainstTargets, sourceRecallCandidatesFromTactics } from "./pack-recall";
