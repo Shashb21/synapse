@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
-import { SourceExtractActions } from "@/components/accuracy/source-extract-actions";
+import {
+  SourcesWorkspace,
+  type SourceRowModel,
+} from "@/components/accuracy/sources-workspace";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack } from "@/accuracy";
+import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
@@ -18,8 +22,7 @@ export default async function AccuracySourcesPage({
 }) {
   const { workspace_id: workspaceId = "" } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
-  let sources: Array<Awaited<ReturnType<typeof listSourceFiles>>[number] & { block_count: number }> =
-    [];
+  let sources: SourceRowModel[] = [];
   let loadError: string | null = null;
 
   try {
@@ -27,10 +30,32 @@ export default async function AccuracySourcesPage({
     if (workspaceId) {
       const rows = await listSourceFiles(workspaceId);
       sources = await Promise.all(
-        rows.map(async (row) => ({
-          ...row,
-          block_count: await countParseBlocks(workspaceId, row.id),
-        })),
+        rows.map(async (row) => {
+          const [block_count, blockRows] = await Promise.all([
+            countParseBlocks(workspaceId, row.id),
+            readParseBlocks(workspaceId, row.id),
+          ]);
+          const blocks = [...blockRows]
+            .sort((a, b) => a.index - b.index)
+            .map((b) => ({
+              id: b.id,
+              index: b.index,
+              kind: b.kind,
+              heading: b.heading,
+              text: b.text,
+              parser: b.parser,
+            }));
+          return {
+            id: row.id,
+            filename: row.filename,
+            mime: row.mime,
+            doc_role: row.doc_role,
+            block_count,
+            reference_pack_id: row.reference_pack_id,
+            parser: blocks[0]?.parser ?? null,
+            blocks,
+          };
+        }),
       );
     }
   } catch (error) {
@@ -43,8 +68,9 @@ export default async function AccuracySourcesPage({
     <AccuracyAppShell active="sources">
       <PageIntro kicker="Ingest · parse · extract" title="Sources">
         PDF and PPTX prefer LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set; without it they
-        fall back to local structured parse. DOCX/XLSX/text stay local. After parse, run need +
-        inventory extract to populate the ledger (requires a connected LLM or env API key).
+        fall back to local structured parse. DOCX/XLSX/text stay local. After parse, preview blocks
+        for quote audit, then run need + inventory extract to populate the ledger (requires a
+        connected LLM or env API key).
       </PageIntro>
 
       {loadError ? (
@@ -68,45 +94,14 @@ export default async function AccuracySourcesPage({
           </p>
           <SourceUploadForm workspaceId={workspaceId} />
           {sources.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="mt-3 text-[12px] text-muted-foreground">
               No sources yet. Upload above or seed from gold on the Workspaces page.
             </p>
           ) : (
-            <ul className="grid gap-2">
-              {sources.map((source) => (
-                <li key={source.id} className="border border-border bg-card/40 p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[13px] font-medium text-foreground">{source.filename}</p>
-                    <span className="text-[11px] text-muted-foreground">{source.doc_role}</span>
-                  </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {source.block_count} parse block(s) · {source.mime}
-                    {source.reference_pack_id ? ` · pack ${source.reference_pack_id}` : ""}
-                  </p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">{source.id}</p>
-                  <SourceExtractActions
-                    workspaceId={workspaceId}
-                    sourceFileId={source.id}
-                    blockCount={source.block_count}
-                  />
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3">
+              <SourcesWorkspace workspaceId={workspaceId} sources={sources} />
+            </div>
           )}
-          <p className="mt-4 flex flex-wrap gap-3 text-[12px]">
-            <Link
-              href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
-              className="underline-offset-2 hover:underline"
-            >
-              Open ledger
-            </Link>
-            <Link
-              href={`/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`}
-              className="underline-offset-2 hover:underline"
-            >
-              Coverage queue
-            </Link>
-          </p>
         </>
       )}
     </AccuracyAppShell>

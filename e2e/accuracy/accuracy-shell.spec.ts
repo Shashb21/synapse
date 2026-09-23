@@ -52,6 +52,7 @@ test.describe("accuracy shell", () => {
   test("sources page renders shell nav", async ({ page }) => {
     await page.goto("/accuracy/sources");
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
+    await expect(page.getByText(/preview blocks/i)).toBeVisible();
     await expect(page.getByText(/need \+ inventory extract/i)).toBeVisible();
     await expectAccuracyShell(page);
   });
