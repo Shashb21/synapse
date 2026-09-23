@@ -16,6 +16,7 @@
 | W6-gantt | bc-dc2ce4ab | `gantt_project` (`gantt-project/`) | **Done** — 7 unit tests, validated tactics only |
 | W7-need | bc-75c52bec | `need_extract` | **Done** — schema, stub cycle, recall helper |
 | W8-e2e | bc-3acd373b | Playwright `e2e/accuracy/` | **Done** — shell nav + orchestration API smoke |
+| W9-ui | bc-4fa2de7b | Ledger + Timeline save-final | **Done** — claims validate, Gantt save-final, shell nav |
 
 ## Merge rules
 
@@ -26,7 +27,7 @@
 
 ## Human gates (not agent-automated)
 
-- Validate ledger, edit rationale, save-final Gantt.
+- Validate ledger, edit rationale, save-final Gantt. (**UI shipped in W9-ui**; human still performs the gate.)
 
 ## Status log
 
@@ -38,3 +39,6 @@
 | 2026-09-23 | **W6-gantt complete** — `src/accuracy/modules/gantt-project/`, 7 unit tests |
 | 2026-09-23 | **W1–W5 integrated** — parse ingest, `/accuracy` UI, inventory, coverage decide (36 accuracy tests) |
 | 2026-09-23 | **W7-need complete** — need_extract module, provenance gaps, `scoreGapIdRecall` |
+| 2026-09-23 | **W8-e2e complete** — Playwright accuracy shell smoke |
+| 2026-09-23 | **W9-ui complete** — `/accuracy/ledger`, `/accuracy/timeline`, validation-gate persistence, save-final Gantt APIs |
+| 2026-09-23 | **W9-gold-fill** — Populated BGB/Tisle gold statements (PR #10, separate branch) |
