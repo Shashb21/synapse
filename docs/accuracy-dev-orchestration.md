@@ -15,7 +15,7 @@
 | W5-coverage | bc-f773715f | `coverage_decide` + critic | **Done** — buildStateFromBlocks + 7 tests |
 | W6-gantt | bc-dc2ce4ab | `gantt_project` (`gantt-project/`) | **Done** — 7 unit tests, validated tactics only |
 | W7-need | bc-75c52bec | `need_extract` | **Done** — schema, stub cycle, recall helper |
-| W8-e2e | (next) | Playwright `e2e/accuracy/` | upload reference pack path |
+| W8-e2e | bc-3acd373b | Playwright `e2e/accuracy/` | **Done** — shell nav + orchestration API smoke |
 
 ## Merge rules
 
