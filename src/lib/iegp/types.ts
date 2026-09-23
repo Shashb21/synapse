@@ -154,6 +154,25 @@ export type NeedGapLink = {
   role: "primary" | "supporting";
 };
 
+/**
+ * A workshop-day organizational grouping of gaps (e.g. one per breakout theme).
+ * Not a locked evidence object — deleting one only ungroups its gaps, so there
+ * is no version history or audit ceremony around it beyond a plain audit line.
+ */
+export type BreakoutGroup = {
+  id: string;
+  name: string;
+  note: string | null;
+  created_at: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+};
+
+export type BreakoutGroupGap = {
+  group_id: string;
+  gap_id: string;
+};
+
 export type Tactic = {
   id: string;
   name: string;
@@ -285,4 +304,6 @@ export type IegpState = {
   gold_needs: GoldNeed[];
   gold_coverages: GoldCoverage[];
   gap_versions: GapVersion[];
+  breakout_groups: BreakoutGroup[];
+  breakout_group_gaps: BreakoutGroupGap[];
 };

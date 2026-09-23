@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
@@ -305,15 +305,12 @@ export function GapsWorkbench({
     () => sortReviewGapCards(filterReviewGapCards(cards, filter)),
     [cards, filter],
   );
-  const [selectedId, setSelectedId] = useState<string | null>(visible[0]?.gap_id ?? null);
-  // Keep a selection in view whenever the filter changes the visible set.
-  useEffect(() => {
-    if (!visible.some((card) => card.gap_id === selectedId)) {
-      setSelectedId(visible[0]?.gap_id ?? null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-  const selected = visible.find((card) => card.gap_id === selectedId) ?? null;
+  // Null means "no explicit choice yet" (or the user hit Back on mobile) — it is
+  // not synced via effect. Desktop always shows a detail (falls back to the first
+  // visible card); mobile shows the list until something is explicitly tapped.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const tapped = visible.find((card) => card.gap_id === selectedId) ?? null;
+  const selected = tapped ?? visible[0] ?? null;
   const partials = counts.partial;
   const unvalidated = counts.needs_validation;
 
@@ -350,17 +347,17 @@ export function GapsWorkbench({
           </div>
           {/* List | detail split — list stays full-width and detail replaces it below the fold on narrow screens. */}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
-            <div className={cn("grid gap-1.5", selected && "hidden lg:grid")}>
+            <div className={cn("grid gap-1.5", tapped && "hidden lg:grid")}>
               {visible.map((card) => (
                 <GapListRow
                   key={card.gap_id}
                   card={card}
-                  selected={card.gap_id === selectedId}
+                  selected={card.gap_id === selected?.gap_id}
                   onSelect={() => setSelectedId(card.gap_id)}
                 />
               ))}
             </div>
-            <div className={cn("lg:sticky lg:top-5", !selected && "hidden lg:block")}>
+            <div className={cn("lg:sticky lg:top-5", !tapped && "hidden lg:block")}>
               {selected ? (
                 <>
                   <Button

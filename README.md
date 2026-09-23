@@ -49,6 +49,8 @@ Gap status after mapping (not the Plan High / Medium / Low bands):
 | `/matrix` | Prioritization matrix on configurable axes (S8) |
 | `/ideation` | Tactic proposals for high-priority open gaps (S9) |
 | `/timeline` | The final IEGP as an interactive Gantt: detail on click, image export, save as final (S10) |
+| `/breakouts` | Create workshop breakout groups, assign gaps, open each group's room in its own window |
+| `/presentation` | Read-only chaptered walkthrough (context → gaps → tactics → timeline) with a .pptx leave-behind export |
 | `/pipeline` | Run any stage or the chain; module, route and last run per stage |
 | `/runs` | Observability: run traces, edit rationales, hillclimb signals, eval runs |
 | `/control` | Control panel: session and role, per-provider OAuth login, per-stage routing |

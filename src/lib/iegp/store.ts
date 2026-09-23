@@ -101,6 +101,8 @@ async function readState(): Promise<IegpState> {
     gold_needs,
     gold_coverages,
     gap_versions,
+    breakout_groups,
+    breakout_group_gaps,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -120,6 +122,8 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.goldNeeds),
     d.select().from(t.goldCoverages),
     d.select().from(t.gapVersions),
+    d.select().from(t.breakoutGroups),
+    d.select().from(t.breakoutGroupGaps),
   ]);
   const asset = assetRows[0]!;
   return {
@@ -226,6 +230,11 @@ async function readState(): Promise<IegpState> {
       event: row.event as IegpState["gap_versions"][0]["event"],
       actor_function: row.actor_function as ActorFunction,
     })),
+    breakout_groups: breakout_groups.map((row) => ({
+      ...row,
+      actor_function: row.actor_function as ActorFunction,
+    })),
+    breakout_group_gaps: breakout_group_gaps,
   };
 }
 
@@ -280,6 +289,10 @@ export async function persistState(state: IegpState) {
   if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
   if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
   if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
+  if (state.breakout_groups.length) await d.insert(t.breakoutGroups).values(state.breakout_groups);
+  if (state.breakout_group_gaps.length) {
+    await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
+  }
 }
 
 export async function resetSeed() {
@@ -2813,4 +2826,100 @@ export async function createAddressedGap(args: {
     })
     .where(eq(t.gaps.id, id));
   return id;
+}
+
+/**
+ * Breakout groups are a workshop-day organizational overlay, not a locked
+ * evidence object — no version history, just a plain audit line.
+ */
+export async function createBreakoutGroup(args: {
+  name: string;
+  note?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string> {
+  const name = args.name.trim();
+  if (!name) throw new Error("A breakout group needs a name.");
+  const state = await loadState();
+  const id = nextId(
+    "BRK",
+    state.breakout_groups.map((g) => g.id),
+  );
+  await db().insert(t.breakoutGroups).values({
+    id,
+    name,
+    note: args.note?.trim() || null,
+    created_at: now(),
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await appendAudit(args.actor_name, args.actor_function, "breakout_group", id, "create", name);
+  return id;
+}
+
+export async function deleteBreakoutGroup(args: {
+  group_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  await db().delete(t.breakoutGroupGaps).where(eq(t.breakoutGroupGaps.group_id, args.group_id));
+  await db().delete(t.breakoutGroups).where(eq(t.breakoutGroups.id, args.group_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "breakout_group",
+    args.group_id,
+    "delete",
+    group.name,
+  );
+}
+
+export async function assignGapToBreakoutGroup(args: {
+  group_id: string;
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  const existing = state.breakout_group_gaps.find(
+    (row) => row.group_id === args.group_id && row.gap_id === args.gap_id,
+  );
+  if (existing) return;
+  await db().insert(t.breakoutGroupGaps).values({ group_id: args.group_id, gap_id: args.gap_id });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "breakout_group",
+    args.group_id,
+    "assign_gap",
+    `${gap.name} → ${group.name}`,
+  );
+}
+
+export async function unassignGapFromBreakoutGroup(args: {
+  group_id: string;
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  await db()
+    .delete(t.breakoutGroupGaps)
+    .where(
+      and(eq(t.breakoutGroupGaps.group_id, args.group_id), eq(t.breakoutGroupGaps.gap_id, args.gap_id)),
+    );
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "breakout_group",
+    args.group_id,
+    "unassign_gap",
+    args.gap_id,
+  );
 }

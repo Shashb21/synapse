@@ -118,5 +118,7 @@ export function buildBlankWorkspace(): IegpState {
     gold_needs: [],
     gold_coverages: [],
     gap_versions: [],
+    breakout_groups: [],
+    breakout_group_gaps: [],
   };
 }

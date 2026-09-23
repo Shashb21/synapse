@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
@@ -507,5 +507,78 @@ describe("IEGP postgres store", () => {
     await expect(
       parkGap({ gap_id: gapId, reason: "x", actor_name: "A. Rao", actor_function: "heor" }),
     ).rejects.toThrow(/excluded gap cannot be parked/i);
+  });
+
+  it("creates a breakout group, assigns and unassigns gaps, and deletes cleanly", async () => {
+    await resetSeed();
+    const gapA = await createGap({
+      statement: "Elderly comparator gap",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const gapB = await createGap({
+      statement: "HCRU gap for the same theme",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+
+    const groupId = await createBreakoutGroup({
+      name: "Comparative effectiveness",
+      note: "Elderly + HCRU",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    let state = await loadState();
+    expect(state.breakout_groups.map((g) => g.id)).toContain(groupId);
+
+    await assignGapToBreakoutGroup({
+      group_id: groupId,
+      gap_id: gapA,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await assignGapToBreakoutGroup({
+      group_id: groupId,
+      gap_id: gapB,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    // Assigning the same gap twice is a no-op, not an error.
+    await assignGapToBreakoutGroup({
+      group_id: groupId,
+      gap_id: gapA,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    state = await loadState();
+    const linked = state.breakout_group_gaps.filter((row) => row.group_id === groupId);
+    expect(linked.map((row) => row.gap_id).sort()).toEqual([gapA, gapB].sort());
+
+    await unassignGapFromBreakoutGroup({
+      group_id: groupId,
+      gap_id: gapA,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    state = await loadState();
+    expect(
+      state.breakout_group_gaps.filter((row) => row.group_id === groupId).map((row) => row.gap_id),
+    ).toEqual([gapB]);
+
+    await deleteBreakoutGroup({ group_id: groupId, actor_name: "A. Rao", actor_function: "heor" });
+    state = await loadState();
+    expect(state.breakout_groups.find((g) => g.id === groupId)).toBeUndefined();
+    expect(state.breakout_group_gaps.some((row) => row.group_id === groupId)).toBe(false);
+    // Deleting a group never touches the gap itself.
+    expect(state.gaps.find((g) => g.id === gapB)).toBeTruthy();
+
+    await expect(
+      assignGapToBreakoutGroup({
+        group_id: groupId,
+        gap_id: gapB,
+        actor_name: "A. Rao",
+        actor_function: "heor",
+      }),
+    ).rejects.toThrow(/breakout group not found/i);
   });
 });

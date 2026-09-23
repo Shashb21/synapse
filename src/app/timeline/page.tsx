@@ -1,4 +1,5 @@
 import "@/modules";
+import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { TimelineBoard, type PlanView } from "@/components/timeline/timeline-board";
 import { loadState } from "@/lib/iegp/store";
@@ -37,11 +38,21 @@ export default async function TimelinePage() {
 
   return (
     <AppShell active="timeline">
-      <PageIntro kicker="S10 · the truth artifact" title="IEGP timeline">
-        The validated plan as one interactive Gantt. Each activity carries the gap it answers, the tactic
-        that answers it, and the readout its neighbours wait on. Click an activity for its full record,
-        export the chart as an image, and save the version you stand behind.
-      </PageIntro>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-2">
+        <PageIntro kicker="S10 · the truth artifact" title="IEGP timeline">
+          The validated plan as one interactive Gantt. Each activity carries the gap it answers, the tactic
+          that answers it, and the readout its neighbours wait on. Click an activity for its full record,
+          export the chart as an image, and save the version you stand behind.
+        </PageIntro>
+        <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
+          <Link href="/breakouts" className="no-underline hover:underline">
+            Open breakouts →
+          </Link>
+          <Link href="/presentation" className="no-underline hover:underline">
+            Present this plan →
+          </Link>
+        </div>
+      </div>
 
       <TimelineBoard
         model={model}

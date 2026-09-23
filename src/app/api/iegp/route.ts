@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import {
   acceptMapping,
   acceptResidualGap,
+  assignGapToBreakoutGroup,
   assignTacticToGap,
   clearGapStatusOverride,
   completeWizard,
   saveProductSetup,
   createAddressedGap,
+  createBreakoutGroup,
   createGap,
   createProposedTactic,
+  deleteBreakoutGroup,
   recordMissedTactic,
   ingestDemoSource,
   ingestNeedFromText,
@@ -34,6 +37,7 @@ import {
   overrideGapStatus,
   rewritePartialGap,
   splitPartialGap,
+  unassignGapFromBreakoutGroup,
   unlockTacticsStage,
   validateGap,
 } from "@/lib/iegp/store";
@@ -502,6 +506,37 @@ export async function POST(request: Request) {
       case "ingest_demo":
         await ingestDemoSource({
           demo_id: body.demo_id,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "create_breakout_group":
+        await createBreakoutGroup({
+          name: body.name,
+          note: body.note,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "delete_breakout_group":
+        await deleteBreakoutGroup({
+          group_id: body.group_id,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "assign_gap_to_breakout":
+        await assignGapToBreakoutGroup({
+          group_id: body.group_id,
+          gap_id: body.gap_id,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "unassign_gap_from_breakout":
+        await unassignGapFromBreakoutGroup({
+          group_id: body.group_id,
+          gap_id: body.gap_id,
           actor_name,
           actor_function,
         });

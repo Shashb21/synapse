@@ -114,6 +114,24 @@ export const needGapLinks = pgTable(
   (t) => [primaryKey({ columns: [t.need_id, t.gap_id] })],
 );
 
+export const breakoutGroups = pgTable("breakout_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  note: text("note"),
+  created_at: text("created_at").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+});
+
+export const breakoutGroupGaps = pgTable(
+  "breakout_group_gaps",
+  {
+    group_id: text("group_id").notNull(),
+    gap_id: text("gap_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.group_id, t.gap_id] })],
+);
+
 export const tactics = pgTable("tactics", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

@@ -45,6 +45,8 @@ export function LockForm({
   confirmLabel,
   description,
   variant = "outline",
+  defaultActorName,
+  defaultActorFunction,
 }: {
   label: string;
   action: string;
@@ -54,6 +56,9 @@ export function LockForm({
   description?: string;
   /** Visual weight of the trigger button. Defaults to secondary ("outline"); pass "default" for a hero/primary action. */
   variant?: "default" | "outline";
+  /** Pre-fills name/function from a signed-in session (e.g. in a breakout room). Still editable. */
+  defaultActorName?: string;
+  defaultActorFunction?: ActorFunction;
 }) {
   const router = useRouter();
   const nameId = useId();
@@ -63,16 +68,18 @@ export function LockForm({
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [actorName, setActorName] = useState("");
-  const [actorFunction, setActorFunction] = useState<ActorFunction>(DEFAULT_FUNCTION);
+  const [actorName, setActorName] = useState(defaultActorName ?? "");
+  const [actorFunction, setActorFunction] = useState<ActorFunction>(
+    defaultActorFunction ?? DEFAULT_FUNCTION,
+  );
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
       setError(null);
       setNameError(null);
-      setActorName("");
-      setActorFunction(DEFAULT_FUNCTION);
+      setActorName(defaultActorName ?? "");
+      setActorFunction(defaultActorFunction ?? DEFAULT_FUNCTION);
       setPending(false);
     }
   }

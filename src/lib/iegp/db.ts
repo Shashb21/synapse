@@ -140,6 +140,14 @@ CREATE TABLE IF NOT EXISTS gold_coverages (
   id text PRIMARY KEY, gap_id text NOT NULL, tactic_id text NOT NULL,
   overall text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS breakout_groups (
+  id text PRIMARY KEY, name text NOT NULL, note text,
+  created_at text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS breakout_group_gaps (
+  group_id text NOT NULL, gap_id text NOT NULL,
+  PRIMARY KEY (group_id, gap_id)
+);
 `;
 
 export async function ensureSchema() {
@@ -236,6 +244,8 @@ export async function wipeIegp() {
     "need_gap_links",
     "needs",
     "gap_versions",
+    "breakout_group_gaps",
+    "breakout_groups",
     "gaps",
     "tactics",
     "source_blocks",

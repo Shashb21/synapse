@@ -39,6 +39,8 @@ export type ShellId =
   | "matrix"
   | "ideation"
   | "timeline"
+  | "breakouts"
+  | "presentation"
   | "pipeline"
   | "runs"
   | "control"
@@ -90,6 +92,8 @@ type SecondaryItem = {
 const TOOL_LABELS: Partial<Record<ShellId, string>> = {
   matrix: "Matrix",
   ideation: "Ideation",
+  breakouts: "Breakout groups",
+  presentation: "Presentation",
 };
 
 const SECONDARY: SecondaryItem[] = [

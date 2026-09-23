@@ -1710,6 +1710,8 @@ export function buildSeed(): IegpState {
       { id: "GOLD-C-006", gap_id: "GAP-SEQ", tactic_id: "TAC-REG", overall: "partial" },
     ],
     gap_versions: [],
+    breakout_groups: [],
+    breakout_group_gaps: [],
   };
 
   return {
