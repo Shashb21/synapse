@@ -8,6 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 const SHELL_NAV = [
   { href: "/accuracy", label: "Workspaces" },
   { href: "/accuracy/sources", label: "Sources" },
+  { href: "/accuracy/review", label: "Review" },
   { href: "/accuracy/ledger", label: "Ledger" },
   { href: "/accuracy/coverage", label: "Coverage" },
   { href: "/accuracy/plan", label: "Plan" },
@@ -55,12 +56,24 @@ test.describe("accuracy shell", () => {
     await expectAccuracyShell(page);
   });
 
+  test("review page renders shell nav and empty state", async ({ page }) => {
+    await page.goto("/accuracy/review");
+    await expect(page.getByRole("heading", { name: /^review$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /choose a workspace/i })).toBeVisible();
+    await expect(page.getByText(/miss flags from parse blocks/i)).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
   test("shell nav preserves workspace_id query", async ({ page }) => {
     await page.goto("/accuracy/ledger?workspace_id=ws-demo-preserve");
     const nav = page.getByRole("navigation", { name: /^accuracy$/i });
     await expect(nav.getByRole("link", { name: "Sources" })).toHaveAttribute(
       "href",
       "/accuracy/sources?workspace_id=ws-demo-preserve",
+    );
+    await expect(nav.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "/accuracy/review?workspace_id=ws-demo-preserve",
     );
     await expect(nav.getByRole("link", { name: "Plan" })).toHaveAttribute(
       "href",

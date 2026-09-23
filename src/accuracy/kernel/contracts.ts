@@ -87,8 +87,8 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
     id: "completeness_audit",
     title: "Completeness audit",
     purpose: "Index vs inventory miss flags (recall gate).",
-    kind: "agentic",
-    llm_roles: ["proposer", "critic"],
+    kind: "mechanical",
+    llm_roles: [],
     upstream: ["merge_dedupe"],
   },
   pair_generate: {
