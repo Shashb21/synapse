@@ -26,7 +26,7 @@ async function postIdeate(body: Record<string, unknown>) {
   );
 }
 
-describe("accuracy ideate API stub", () => {
+describe("accuracy ideate API", () => {
   it("rejects medium-priority gaps", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("ideate-med");
@@ -73,7 +73,7 @@ describe("accuracy ideate API stub", () => {
     expect(body.error).toMatch(/validated/i);
   });
 
-  it("creates an ideated tactic for a validated high-priority gap", async () => {
+  it("creates an ideated tactic via mechanical stub for a validated high-priority gap", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("ideate-ok");
     const gap = await insertClaim({
@@ -94,8 +94,15 @@ describe("accuracy ideate API stub", () => {
       end: "2027-09-01",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; tactic_id: string };
+    const body = (await res.json()) as {
+      ok: boolean;
+      tactic_id: string;
+      mode: string;
+      stub: boolean;
+    };
     expect(body.ok).toBe(true);
+    expect(body.mode).toBe("stub");
+    expect(body.stub).toBe(true);
     expect(body.tactic_id).toMatch(/^tac_/);
 
     const tactics = await listClaims(workspace_id, { claim_type: "tactic" });
@@ -106,5 +113,29 @@ describe("accuracy ideate API stub", () => {
     expect(meta.origin).toBe("ideated");
     expect(meta.gap_ids).toEqual(["G-HIGH-1"]);
     expect(meta.ideation_rationale).toMatch(/inventory/);
+    expect(meta.ideation_mode).toBe("stub");
+  });
+
+  it("errors when stub has no title/rationale under SYNAPSE_TEST_STUB_LLM", async () => {
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("ideate-empty");
+    const gap = await insertClaim({
+      workspace_id,
+      claim_type: "gap",
+      statement: "Need comparative effectiveness in 2L",
+      validated: true,
+      status: "open",
+      metadata: { priority: "high" },
+    });
+
+    const res = await postIdeate({
+      workspace_id,
+      gap_id: gap.id,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string; mode?: string; stub?: boolean };
+    expect(body.mode).toBe("stub");
+    expect(body.stub).toBe(true);
+    expect(body.error).toMatch(/mechanical stub|No LLM route/i);
   });
 });

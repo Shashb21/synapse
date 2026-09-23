@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { registerAccuracyStack } from "@/accuracy";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import {
   gapsEligibleForIdeation,
   type PriorityBand,
 } from "@/accuracy/domain/iegp-semantics";
+import type { IdeateOutput } from "@/accuracy/modules/ideate/schema";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,12 +15,15 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 const bodySchema = z.object({
-  workspace_id: z.string(),
-  gap_id: z.string(),
-  title: z.string().min(8).max(280),
-  rationale: z.string().min(3),
+  workspace_id: z.string().min(1),
+  gap_id: z.string().min(1),
+  /** Required for mechanical stub; optional LLM hint when a route is connected. */
+  title: z.string().max(280).optional(),
+  rationale: z.string().max(2000).optional(),
   start: z.string().optional(),
   end: z.string().optional(),
+  actor_name: z.string().min(1).optional(),
+  actor_function: z.string().min(1).optional(),
 });
 
 function resolvePriorityBand(raw: unknown): PriorityBand | null {
@@ -38,12 +43,18 @@ function resolveGapStatus(status: string): "open" | "partial" | "addressed" {
 }
 
 /**
- * Mechanical ideation stub (no LLM): create a proposed tactic for a high-priority gap only.
- * Live LLM ideation remains behind OAuth routing when credentials exist.
+ * Ideate a net-new proposed tactic for one validated high-priority open gap.
+ * Live LLM when OAuth/api_key route is connected; otherwise mechanical stub
+ * (requires title + rationale).
  */
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) {
+      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+    }
+
     const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
     const gap = gaps.find((g) => g.id === body.gap_id);
     if (!gap) {
@@ -75,11 +86,64 @@ export async function POST(req: Request) {
       );
     }
 
+    const tactics = await listClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
+    const existing_tactic_names = tactics.map((t) => t.statement).filter(Boolean);
+
+    const actor = {
+      name: body.actor_name?.trim() || "Ideate",
+      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
+    };
+
+    const result = await runAccuracyModule<IdeateOutput>({
+      call_kind: "ideate",
+      agent_role: "proposer",
+      input: {
+        workspace_id: body.workspace_id,
+        gaps: [
+          {
+            id: gap.id,
+            statement: gap.statement,
+            status: resolveGapStatus(gap.status),
+            priority_band,
+          },
+        ],
+        existing_tactic_names,
+        focus_gap_id: gap.id,
+        mechanical: {
+          title: body.title?.trim() || undefined,
+          rationale: body.rationale?.trim() || undefined,
+        },
+      },
+      actor,
+      org_id,
+      workspace_id: body.workspace_id,
+    });
+
+    const proposal =
+      result.output.proposals.find((p) => p.gap_id === gap.id) ?? result.output.proposals[0];
+    if (!proposal) {
+      const titleLen = body.title?.trim().length ?? 0;
+      const rationaleLen = body.rationale?.trim().length ?? 0;
+      const needsMechanical =
+        result.output.mode === "stub" && (titleLen < 8 || rationaleLen < 3);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: needsMechanical
+            ? "No LLM route connected — provide title (min 8) and rationale (min 3) for the mechanical stub."
+            : "Ideation produced no proposal for this gap.",
+          mode: result.output.mode,
+          stub: result.output.mode === "stub",
+        },
+        { status: 400 },
+      );
+    }
+
     const external = typeof meta.external_id === "string" ? meta.external_id : gap.id;
     const tactic = await insertClaim({
       workspace_id: body.workspace_id,
       claim_type: "tactic",
-      statement: body.title.trim(),
+      statement: proposal.name,
       status: "proposed",
       validated: false,
       source_file_id: gap.source_file_id,
@@ -87,13 +151,28 @@ export async function POST(req: Request) {
         origin: "ideated",
         source_badge: "ideate",
         gap_ids: [external],
-        ideation_rationale: body.rationale.trim(),
+        ideation_rationale: proposal.rationale,
+        design_summary: proposal.design_summary,
+        tactic_type: proposal.type,
+        ideation_mode: result.output.mode,
         start: body.start ?? null,
         end: body.end ?? null,
       },
     });
 
-    return NextResponse.json({ ok: true, tactic_id: tactic.id });
+    return NextResponse.json({
+      ok: true,
+      tactic_id: tactic.id,
+      mode: result.output.mode,
+      stub: result.output.mode === "stub",
+      run_id: result.run_id,
+      proposal: {
+        name: proposal.name,
+        type: proposal.type,
+        rationale: proposal.rationale,
+        design_summary: proposal.design_summary,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Ideate failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });

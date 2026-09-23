@@ -35,7 +35,7 @@ export default async function AccuracyPlanPage({
     <AccuracyAppShell active="plan">
       <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
         Set priority bands on evidence gaps. Validated high-priority gaps unlock net-new tactic
-        ideation (mechanical stub until an LLM route is connected).
+        ideation — live LLM when a route is connected (OAuth / API key), otherwise a mechanical stub.
       </PageIntro>
 
       {loadError ? (

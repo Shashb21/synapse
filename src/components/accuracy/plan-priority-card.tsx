@@ -56,22 +56,35 @@ export function PlanPriorityCard({
     setError(null);
     setIdeateMsg(null);
     startTransition(async () => {
+      const payload: Record<string, string> = {
+        workspace_id: workspaceId,
+        gap_id: claimId,
+      };
+      const title = ideateTitle.trim();
+      const rationale = ideateRationale.trim();
+      if (title) payload.title = title;
+      if (rationale) payload.rationale = rationale;
+
       const res = await fetch("/api/accuracy/ideate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          gap_id: claimId,
-          title: ideateTitle.trim(),
-          rationale: ideateRationale.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string; tactic_id?: string };
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        tactic_id?: string;
+        mode?: string;
+        stub?: boolean;
+        proposal?: { name?: string };
+      };
       if (!res.ok || !body.ok) {
         setError(body.error ?? "Ideate failed");
         return;
       }
-      setIdeateMsg(`Proposed tactic ${body.tactic_id}`);
+      const modeLabel = body.mode === "llm" ? "LLM" : "stub";
+      const nameBit = body.proposal?.name ? ` · ${body.proposal.name}` : "";
+      setIdeateMsg(`Proposed tactic ${body.tactic_id} (${modeLabel})${nameBit}`);
       setIdeateTitle("");
       setIdeateRationale("");
       router.refresh();
@@ -108,22 +121,21 @@ export function PlanPriorityCard({
       {canIdeate ? (
         <form onSubmit={ideate} className="mt-3 grid gap-2 border-t border-border pt-3">
           <p className="text-[11px] text-muted-foreground">
-            High + validated — propose a net-new tactic (mechanical stub; LLM when routed).
+            High + validated — LLM invents a tactic when a route is connected (OAuth / API key);
+            otherwise enter title and rationale for the mechanical stub.
           </p>
           <input
             value={ideateTitle}
             onChange={(e) => setIdeateTitle(e.target.value)}
-            placeholder="Proposed tactic title (min 8 chars)"
-            minLength={8}
-            required
+            placeholder="Title (optional with LLM; required for stub, min 8)"
+            minLength={0}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <input
             value={ideateRationale}
             onChange={(e) => setIdeateRationale(e.target.value)}
-            placeholder="Why invent this (min 3 chars)"
-            minLength={3}
-            required
+            placeholder="Rationale / hint (optional with LLM; required for stub, min 3)"
+            minLength={0}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <button
