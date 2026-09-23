@@ -2,8 +2,196 @@
   "source_pack_id": "beone-tislelizumab-iegp",
   "source_filename": "BeOne_Tislelizumab IEGP_VShare 3.0.pptx",
   "must_find_tactic_identifiers": [
-    "G:1", "G:2", "G:3", "G:4", "G:5", "G:6", "G:7", "G:8", "G:9", "G:10",
-    "G:11", "G:12", "G:13", "G:14", "G:15", "G:16", "G:17", "G:18", "G:19", "G:20", "G:21"
+    "G:1",
+    "G:2",
+    "G:3",
+    "G:4",
+    "G:5",
+    "G:6",
+    "G:7",
+    "G:8",
+    "G:9",
+    "G:10",
+    "G:11",
+    "G:12",
+    "G:13",
+    "G:14",
+    "G:15",
+    "G:16",
+    "G:17",
+    "G:18",
+    "G:19",
+    "G:20",
+    "G:21"
   ],
-  "tactics": []
+  "tactics": [
+    {
+      "identifier": "G:1",
+      "title": "TIS Plus Chemo vs PBO Plus Chemo as 1L Treatment of Advanced GC/GEJC: HRQoL Outcomes in the RATIONALE-305 Study",
+      "tactic_type": "Primary ITT",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:2",
+      "title": "Characteristics and outcomes of long-term survivors (>24 months) from RATIONALE-305",
+      "tactic_type": "Primary ITT",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:3",
+      "title": "Characteristics and outcomes of patients with oligometastatic disease (<3 metastatic sites) from RATIONALE-305",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:4",
+      "title": "Characteristics and outcomes in patients who continued with tislelizumab only vs. tislelizumab + capecitabine in the RATIONALE-305 study",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:5",
+      "title": "Biomarker analysis from RATIONALE-305 (incl. Japanese subgroup analysis of PD-L1)",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:6",
+      "title": "Modeling impact of peritoneal metastases patients on RATIONALE-305 study outcomes",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:7",
+      "title": "Impact of tislelizumab + chemotherapy versus placebo + chemotherapy on patient-reported symptoms and disease progression by PD-L1 expression in gastroesophageal adenocarcinoma (RATIONALE-305)",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:8",
+      "title": "Tislelizumab First-Line GC/GEJ Adenocarcinoma Treatment Efficacy on PRO-Based Symptom Endpoints",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:9",
+      "title": "Tislelizumab (TIS) Plus Chemotherapy (Chemo) vs Placebo (PBO) Plus Chemo as First-Line (1L) Treatment of Advanced GC/GEJC: Patient-Reported Outcomes",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:10",
+      "title": "Recurrent PRO-Based Symptomatic Deterioration Predicts Progression-Free Survival (PFS)",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:11",
+      "title": "Recurrent PRO-Based Deterioration Predicts Overall Survival (OS) in Patients with Advanced Gastric Adenocarcinoma with PD-L1",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:12",
+      "title": "Translating Patient-Reported Outcomes into Clinically Actionable Signals: Modeling ECOG Performance Status Using PRO Data",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:13",
+      "title": "A Quality-Adjusted Time Without Symptoms or Toxicity (Q-TWiST) Analysis from RATIONALE-305",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:14",
+      "title": "Comparative efficacy and safety of tislelizumab vs other anti\u2013PD-1 treatments in 1L GC/GEJC: network meta-analysis (NMA)",
+      "tactic_type": "ITC",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:15",
+      "title": "Comparative efficacy and safety of tislelizumab + CAPOX vs tislelizumab + FOLFOX in 1L GC/GEJ",
+      "tactic_type": "ITC",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:16",
+      "title": "Systematic Literature Review of clinical Burden Related to 1L GC",
+      "tactic_type": "SLR",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:17",
+      "title": "Systematic Literature Review of Disease Burden Related to 1L Unresectable, Locally Advanced, or Metastatic GC and GEJ Adenocarcinoma",
+      "tactic_type": "SLR",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:18",
+      "title": "ITC by TAP high & low",
+      "tactic_type": "ITC",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:19",
+      "title": "The epidemiological trends and predictions of esophageal squamous cell carcinoma and gastroesophageal junction carcinoma: an Australian population-based study",
+      "tactic_type": "RWE",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:20",
+      "title": "Analysis of adverse event patterns and safety of tislelizumab \u2013 a pooled analysis of GC/GEJ and lung cancer patients",
+      "tactic_type": "Post-hoc",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    },
+    {
+      "identifier": "G:21",
+      "title": "Retrospective Data Analysis (Q2W, Q4W, Q5W dosing)",
+      "tactic_type": "Retrospective Data Analysis",
+      "origin": "inventory",
+      "slide_cue": "slide 84-85",
+      "chapter": "advanced_metastatic_gc_gej"
+    }
+  ]
 }

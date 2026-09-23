@@ -38,3 +38,4 @@
 | 2026-09-23 | **W6-gantt complete** — `src/accuracy/modules/gantt-project/`, 7 unit tests |
 | 2026-09-23 | **W1–W5 integrated** — parse ingest, `/accuracy` UI, inventory, coverage decide (36 accuracy tests) |
 | 2026-09-23 | **W7-need complete** — need_extract module, provenance gaps, `scoreGapIdRecall` |
+| 2026-09-23 | **W9-gold-fill** — Populated BGB 43 gaps + 36 tactics and Tisle chapter gaps + G:1–G:21 from PPTX text extract |

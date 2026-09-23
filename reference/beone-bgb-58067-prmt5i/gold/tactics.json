@@ -2,8 +2,406 @@
   "source_pack_id": "beone-bgb-58067-prmt5i",
   "source_filename": "BeOne_BGB-58067 PRMT5i IEP Report_v1.0 Final_vMarkup.pptx",
   "must_find_tactic_numbers": [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36
   ],
-  "tactics": []
+  "tactics": [
+    {
+      "number": 1,
+      "title": "Extended follow-up and planned long-term, post-hoc analyses within pivotal trials on key subgroups and long-term responder profiles",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_01"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 30"
+    },
+    {
+      "number": 2,
+      "title": "CNS-specific outcomes within pivotal trial (e.g., time to new CNS metastases vs. control arm)",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 30"
+    },
+    {
+      "number": 3,
+      "title": "Subgroup analyses of prognosis and outcomes using pivotal trial or RWD dataset",
+      "lead_function": "HEOR (incl. Regional teams)",
+      "gap_ids": [
+        "NSCLC_HI_01"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 30"
+    },
+    {
+      "number": 4,
+      "title": "Treatment effect across subgroups",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 31"
+    },
+    {
+      "number": 5,
+      "title": "Pre-approval post-hoc analyses of HCRU proxies, treatment burden, and AE burden within clinical trials",
+      "lead_function": "PRO/HEOR",
+      "gap_ids": [
+        "NSCLC_HI_07"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 31"
+    },
+    {
+      "number": 6,
+      "title": "Trial segmentation and subgroup analyses of PRO data",
+      "lead_function": "PRO",
+      "gap_ids": [
+        "NSCLC_HI_08"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 31"
+    },
+    {
+      "number": 7,
+      "title": "Efficacy/safety across baseline PD-L1 strata vs. doublet control",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_14"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 32"
+    },
+    {
+      "number": 8,
+      "title": "Natural history, prognosis, and treatment outcomes in MTAP-del NSCLC",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_01"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 33"
+    },
+    {
+      "number": 9,
+      "title": "Efficacy, safety, and QoL/value data of relevant SoC and emerging MTA-cooperative PRMT5i",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_05"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 33"
+    },
+    {
+      "number": 10,
+      "title": "MTAP Testing HE Model incl. TAT modeling",
+      "lead_function": "HEOR / Medical Support: Biomarker",
+      "gap_ids": [
+        "NSCLC_HI_02",
+        "NSCLC_HI_09"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 34"
+    },
+    {
+      "number": 11,
+      "title": "PD-L1 class-level ITC \u2014 compare BGB-58067 CoE across different anti-PD-1/PD-L1 agents (STC/MAIC)",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_CE_03"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 35"
+    },
+    {
+      "number": 12,
+      "title": "ITC of CNS outcomes vs. current US SoC and emerging PRMT5i",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_CE_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 35"
+    },
+    {
+      "number": 13,
+      "title": "ITC (MAIC/STC) vs. other therapies",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_05"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 36"
+    },
+    {
+      "number": 14,
+      "title": "ITC vs. anti-PD-1 monotherapy in PD-L1-high (\u226550%) non-squamous NSCLC patients",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_14"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 36"
+    },
+    {
+      "number": 15,
+      "title": "Multi-country, retrospective RWE on MTAP-del NSCLC Natural History and Epidemiology",
+      "lead_function": "HEOR (incl. Regional HEOR teams)",
+      "gap_ids": [
+        "NSCLC_HI_01"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 37"
+    },
+    {
+      "number": 16,
+      "title": "Retrospective RWE of MTAP Testing Workflows",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_02"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 37"
+    },
+    {
+      "number": 17,
+      "title": "Pre-launch retrospective study of new CNS metastasis rates in MTAP-del NSCLC under current SoC",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_CE_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 37"
+    },
+    {
+      "number": 18,
+      "title": "Retrospective RWE in Expanded Indications",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_CE_02"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 38"
+    },
+    {
+      "number": 19,
+      "title": "Comparative RWE on safety and effectiveness (prospective comparative registry) or post-marketing observational study",
+      "lead_function": "Regional MA / HEOR",
+      "gap_ids": [
+        "NSCLC_CE_01",
+        "NSCLC_HI_05"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 38"
+    },
+    {
+      "number": 20,
+      "title": "Post-approval retrospective comparative RWE of HCRU and costs vs. SoC",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_HI_07"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 39"
+    },
+    {
+      "number": 21,
+      "title": "Expanded tumor-types IIT",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_02"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 40"
+    },
+    {
+      "number": 22,
+      "title": "CNS outcomes in patients with untreated, symptomatic (active), stable/treated or asymptomatic brain mets at baseline",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 40"
+    },
+    {
+      "number": 23,
+      "title": "Combinations with targeted therapied beyond CDP",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_15"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 40"
+    },
+    {
+      "number": 24,
+      "title": "Efficacy / safety in priority co-mutation-defined MTAP-del populations",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_13"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 41"
+    },
+    {
+      "number": 25,
+      "title": "Efficacy /safety in priority co-mutation-defined MTAP-del populations beyond CDP",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_12"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 41"
+    },
+    {
+      "number": 26,
+      "title": "Comparative IIT exploring concurrent vs. sequential administration in SoC combinations",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_05"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 41"
+    },
+    {
+      "number": 27,
+      "title": "Combinations beyond CDP",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_03"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 42"
+    },
+    {
+      "number": 28,
+      "title": "Exploring CNS tumor populations with embedded PK sampling",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_06"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 42"
+    },
+    {
+      "number": 29,
+      "title": "Efficacy across MTAP-deletion heterogeneity levels and clonality",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_10"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 42"
+    },
+    {
+      "number": 30,
+      "title": "Demographic Subgroup IIT",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 43"
+    },
+    {
+      "number": 31,
+      "title": "Exploring efficacy in biomarker-enriched population (e.g., PD-L1 low/negative vs. high)",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_11"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 43"
+    },
+    {
+      "number": 32,
+      "title": "Exploring COE across metastatic and neoadjuvant settings",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_CE_03"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 43"
+    },
+    {
+      "number": 33,
+      "title": "Comparative IIT exploring safety / efficacy vs. emerging therapies",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_05"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 44"
+    },
+    {
+      "number": 34,
+      "title": "Bridging studies",
+      "lead_function": "Medical",
+      "gap_ids": [
+        "NSCLC_HI_04"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 44"
+    },
+    {
+      "number": 35,
+      "title": "Integrated Patient Survey",
+      "lead_function": "PRO / HEOR",
+      "gap_ids": [
+        "NSCLC_CE_01",
+        "NSCLC_HI_07"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 45"
+    },
+    {
+      "number": 36,
+      "title": "HCP and Caregiver Survey",
+      "lead_function": "HEOR",
+      "gap_ids": [
+        "NSCLC_CE_01"
+      ],
+      "origin": "inventory",
+      "slide_cue": "slide 45"
+    }
+  ]
 }
