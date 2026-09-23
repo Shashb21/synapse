@@ -5,6 +5,7 @@ import {
   mustFindForPack,
   scorePackRecall,
 } from "@/accuracy/eval/reference-gold";
+import { sourceRecallCandidatesFromTactics } from "@/accuracy/eval/pack-recall";
 import { scoreGapIdRecall } from "@/accuracy/modules/need-extract/module";
 
 describe("pack recall scoring", () => {
@@ -64,5 +65,25 @@ describe("pack recall scoring", () => {
     });
     expect(all.recall).toBe(1);
     expect(all.missing).toHaveLength(0);
+  });
+
+  it("excludes ideated tactics from source-recall candidates", () => {
+    const mixed = sourceRecallCandidatesFromTactics([
+      { origin: "inventory", number: 1, identifier: "G:1" },
+      { origin: "ideated", number: 1, identifier: "G:1" },
+      { origin: "ideated", number: 99, identifier: "G:99" },
+    ]);
+    expect(mixed.tactic_numbers).toEqual([1]);
+    expect(mixed.tactic_identifiers).toEqual(["G:1"]);
+
+    const inventoryOnly = scorePackRecall(
+      "beone-tislelizumab-iegp",
+      sourceRecallCandidatesFromTactics([
+        { origin: "inventory", identifier: "G:1" },
+        { origin: "ideated", identifier: "G:1" },
+      ]),
+    );
+    expect(inventoryOnly.tactic_identifiers.found).toEqual(["G:1"]);
+    expect(inventoryOnly.tactic_identifiers.found).toHaveLength(1);
   });
 });

@@ -2,6 +2,90 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
+
+type IdeateResponse = {
+  ok?: boolean;
+  error?: string;
+  mode?: string;
+  stub?: boolean;
+  tactic_id?: string;
+  tactic_ids?: string[];
+  tactics_inserted?: number;
+  summary?: string;
+};
+
+async function postIdeate(body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  status: number;
+  json: IdeateResponse;
+}> {
+  const res = await fetch("/api/accuracy/ideate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json()) as IdeateResponse;
+  return { ok: res.ok && Boolean(json.ok), status: res.status, json };
+}
+
+function outcomeMessage(json: IdeateResponse): string {
+  if (json.mode === "manual" && json.tactic_id) {
+    return `Proposed tactic ${json.tactic_id}`;
+  }
+  const inserted = json.tactics_inserted ?? json.tactic_ids?.length ?? 0;
+  const stubNote = json.stub
+    ? " (stub LLM — connect a provider or unset SYNAPSE_TEST_STUB_LLM for live ideate)"
+    : "";
+  if (inserted === 0) {
+    return `${json.summary ?? "No proposed tactics"}${stubNote}`;
+  }
+  return `Proposed ${inserted} tactic(s)${stubNote}`;
+}
+
+export function PlanIdeateAllButton({
+  workspaceId,
+  eligibleCount,
+}: {
+  workspaceId: string;
+  eligibleCount: number;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  if (eligibleCount < 1) return null;
+
+  function run() {
+    setError(null);
+    setMsg(null);
+    startTransition(async () => {
+      const { ok, json } = await postIdeate({ workspace_id: workspaceId });
+      if (!ok) {
+        setError(json.error ?? "Ideate failed");
+        return;
+      }
+      setMsg(outcomeMessage(json));
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="mb-3 grid gap-1">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={run}
+        className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+      >
+        {pending ? "Ideating…" : `Run LLM ideate (${eligibleCount} high open gap${eligibleCount === 1 ? "" : "s"})`}
+      </button>
+      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {msg ? <p className="text-[12px] text-muted-foreground">{msg}</p> : null}
+    </div>
+  );
+}
 
 export function PlanPriorityCard({
   workspaceId,
@@ -9,12 +93,14 @@ export function PlanPriorityCard({
   statement,
   priority,
   validated,
+  status,
 }: {
   workspaceId: string;
   claimId: string;
   statement: string;
   priority: string | null;
   validated: boolean;
+  status: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -24,8 +110,8 @@ export function PlanPriorityCard({
   const [ideateRationale, setIdeateRationale] = useState("");
   const [ideateMsg, setIdeateMsg] = useState<string | null>(null);
 
-  const canIdeate =
-    validated && (value === "high" || value === "critical" || priority === "high" || priority === "critical");
+  const band = resolvePriorityBand(value) ?? resolvePriorityBand(priority);
+  const canIdeate = validated && band === "high" && resolveGapStatus(status) === "open";
 
   function save(next: string) {
     setError(null);
@@ -51,27 +137,42 @@ export function PlanPriorityCard({
     });
   }
 
-  function ideate(event: React.FormEvent) {
+  function runLlm() {
+    setError(null);
+    setIdeateMsg(null);
+    startTransition(async () => {
+      const { ok, json } = await postIdeate({
+        workspace_id: workspaceId,
+        gap_id: claimId,
+        hints: [ideateTitle.trim(), ideateRationale.trim()].filter(Boolean).join(" — ") || undefined,
+      });
+      if (!ok) {
+        setError(json.error ?? "Ideate failed");
+        return;
+      }
+      setIdeateMsg(outcomeMessage(json));
+      setIdeateTitle("");
+      setIdeateRationale("");
+      router.refresh();
+    });
+  }
+
+  function ideateManual(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
     setIdeateMsg(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/ideate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          gap_id: claimId,
-          title: ideateTitle.trim(),
-          rationale: ideateRationale.trim(),
-        }),
+      const { ok, json } = await postIdeate({
+        workspace_id: workspaceId,
+        gap_id: claimId,
+        title: ideateTitle.trim(),
+        rationale: ideateRationale.trim(),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string; tactic_id?: string };
-      if (!res.ok || !body.ok) {
-        setError(body.error ?? "Ideate failed");
+      if (!ok) {
+        setError(json.error ?? "Ideate failed");
         return;
       }
-      setIdeateMsg(`Proposed tactic ${body.tactic_id}`);
+      setIdeateMsg(outcomeMessage(json));
       setIdeateTitle("");
       setIdeateRationale("");
       router.refresh();
@@ -88,55 +189,62 @@ export function PlanPriorityCard({
       </div>
       <p className="mt-1 font-mono text-[10px] text-muted-foreground">{claimId}</p>
       <div className="mt-2 flex flex-wrap gap-2">
-        {(["high", "medium", "low"] as const).map((band) => (
+        {(["high", "medium", "low"] as const).map((bandOption) => (
           <button
-            key={band}
+            key={bandOption}
             type="button"
             disabled={pending}
-            onClick={() => save(band)}
+            onClick={() => save(bandOption)}
             className={`border px-2 py-1 text-[11px] capitalize ${
-              value === band
+              value === bandOption
                 ? "border-foreground bg-foreground text-background"
                 : "border-border text-foreground hover:bg-muted/40"
             }`}
           >
-            {band}
+            {bandOption}
           </button>
         ))}
       </div>
 
       {canIdeate ? (
-        <form onSubmit={ideate} className="mt-3 grid gap-2 border-t border-border pt-3">
+        <form onSubmit={ideateManual} className="mt-3 grid gap-2 border-t border-border pt-3">
           <p className="text-[11px] text-muted-foreground">
-            High + validated — propose a net-new tactic (mechanical stub; LLM when routed).
+            High + validated + open — run live LLM ideation (origin: ideated, status: proposed until
+            you validate). Inventory tactics stay on extract.
           </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={runLlm}
+            className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+          >
+            {pending ? "Working…" : "Run LLM ideate"}
+          </button>
           <input
             value={ideateTitle}
             onChange={(e) => setIdeateTitle(e.target.value)}
-            placeholder="Proposed tactic title (min 8 chars)"
+            placeholder="Optional title hint, or submit as a manual proposal"
             minLength={8}
-            required
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <input
             value={ideateRationale}
             onChange={(e) => setIdeateRationale(e.target.value)}
-            placeholder="Why invent this (min 3 chars)"
+            placeholder="Optional rationale (required to save a manual proposal)"
             minLength={3}
-            required
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <button
             type="submit"
-            disabled={pending}
-            className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+            disabled={pending || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}
+            className="w-fit border border-border px-3 py-1.5 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
           >
-            {pending ? "Working…" : "Ideate tactic"}
+            {pending ? "Working…" : "Save manual proposal"}
           </button>
         </form>
       ) : (
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Ideation unlocks when this gap is validated and set to high.
+          Ideation unlocks when this gap is validated, open, and set to high.
         </p>
       )}
 

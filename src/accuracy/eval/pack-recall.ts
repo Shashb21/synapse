@@ -63,6 +63,24 @@ function scoreNumberTargets(targets: number[], foundSet: Set<number>): NumberRec
   return { targets: targets.length, found, missing, recall };
 }
 
+/**
+ * Source-recall candidates from extracted tactics. Ideated tactics are excluded so
+ * live ideation cannot pollute inventory must_find scoring.
+ */
+export function sourceRecallCandidatesFromTactics(
+  tactics: Array<{
+    origin?: string | null;
+    number?: number | null;
+    identifier?: string | null;
+  }>,
+): ExtractCandidates {
+  const inventory = tactics.filter((tactic) => tactic.origin !== "ideated");
+  return {
+    tactic_numbers: inventory.map((tactic) => tactic.number),
+    tactic_identifiers: inventory.map((tactic) => tactic.identifier),
+  };
+}
+
 /** Pure recall scoring — pass must_find targets explicitly (packs never merged upstream). */
 export function scoreRecallAgainstTargets(
   targets: PackRecallTargets,
