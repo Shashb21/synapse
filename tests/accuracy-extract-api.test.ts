@@ -105,6 +105,7 @@ describe("accuracy extract API", () => {
     expect(json.ok).toBe(true);
     expect(json.stub).toBe(true);
     expect(json.block_count).toBe(1);
+    expect(json.blocks_used).toBe(1);
     expect(json.gaps_inserted).toBe(0);
     expect(json.tactics_inserted).toBe(0);
     expect(json.runs?.map((r) => r.call_kind).sort()).toEqual([

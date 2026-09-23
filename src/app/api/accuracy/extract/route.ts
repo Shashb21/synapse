@@ -24,6 +24,8 @@ const bodySchema = z.object({
   actor_function: z.string().min(1).optional(),
 });
 
+const MAX_EXTRACT_BLOCKS = 80;
+
 /**
  * Run need_extract and/or inventory_extract for a source file's parse blocks,
  * then persist resulting claims to the workspace ledger.
@@ -42,8 +44,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Unknown source_file_id" }, { status: 404 });
     }
 
-    const blocks = await readParseBlocks(body.workspace_id, body.source_file_id);
-    if (blocks.length === 0) {
+    const allBlocks = await readParseBlocks(body.workspace_id, body.source_file_id);
+    if (allBlocks.length === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -53,6 +55,8 @@ export async function POST(req: Request) {
       );
     }
 
+    const sorted = [...allBlocks].sort((a, b) => a.index - b.index);
+    const blocks = sorted.slice(0, MAX_EXTRACT_BLOCKS);
     const block_ids = blocks.map((b) => b.id);
     const actor = {
       name: body.actor_name?.trim() || "Accuracy extractor",
@@ -152,7 +156,8 @@ export async function POST(req: Request) {
       ok: true,
       workspace_id: body.workspace_id,
       source_file_id: body.source_file_id,
-      block_count: blocks.length,
+      block_count: allBlocks.length,
+      blocks_used: blocks.length,
       gaps_inserted,
       tactics_inserted,
       runs,

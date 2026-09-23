@@ -97,8 +97,16 @@ export function SourceExtractActions({
           Ledger →
         </Link>
       </div>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
-      {summary ? <p className="text-[11px] text-muted-foreground">{summary}</p> : null}
+      {error ? (
+        <p className="text-[11px] text-destructive" data-testid="extract-outcome">
+          {error}
+        </p>
+      ) : null}
+      {summary ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
+          {summary}
+        </p>
+      ) : null}
     </div>
   );
 }
