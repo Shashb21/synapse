@@ -8,6 +8,7 @@ export function CreateWorkspaceForm() {
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [planLabel, setPlanLabel] = useState<"IEP" | "IEGP">("IEGP");
   const [error, setError] = useState<string | null>(null);
 
   function onNameChange(value: string) {
@@ -22,7 +23,7 @@ export function CreateWorkspaceForm() {
       const res = await fetch("/api/accuracy/workspaces", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, slug }),
+        body: JSON.stringify({ name, slug, plan_label: planLabel }),
       });
       const body = (await res.json()) as { ok?: boolean; workspace_id?: string; error?: string };
       if (!res.ok || !body.ok || !body.workspace_id) {
@@ -57,6 +58,17 @@ export function CreateWorkspaceForm() {
           required
           minLength={2}
         />
+      </label>
+      <label className="grid gap-1 text-[12px]">
+        <span className="text-muted-foreground">Plan label</span>
+        <select
+          className="border border-border bg-background px-2 py-1.5 text-[13px]"
+          value={planLabel}
+          onChange={(e) => setPlanLabel(e.target.value === "IEP" ? "IEP" : "IEGP")}
+        >
+          <option value="IEGP">IEGP</option>
+          <option value="IEP">IEP</option>
+        </select>
       </label>
       {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
       <button

@@ -15,6 +15,9 @@ export type LedgerClaimCardModel = {
   source_badge: string;
   validation_rationale: string | null;
   computed_status?: string | null;
+  external_id?: string | null;
+  chapter_label?: string | null;
+  si_label?: string | null;
 };
 
 function validationLabel(claim: LedgerClaimCardModel): string {
@@ -76,16 +79,33 @@ export function LedgerClaimCard({
   return (
     <li className="border border-border bg-card/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-[13px] text-foreground">{claim.statement}</p>
+        <p className="min-w-0 flex-1 text-[13px] text-foreground">
+          {claim.external_id ? (
+            <span className="mr-1.5 font-medium text-foreground">{claim.external_id}</span>
+          ) : null}
+          {claim.statement}
+        </p>
         <span className={`shrink-0 text-[11px] ${validationTone(claim)}`}>{validationLabel(claim)}</span>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="text-[10px]">
           {claim.source_badge}
         </Badge>
-        <Badge variant="secondary" className="text-[10px]">
-          {claim.claim_type}
-        </Badge>
+        {claim.chapter_label ? (
+          <Badge variant="secondary" className="text-[10px]">
+            {claim.chapter_label}
+          </Badge>
+        ) : null}
+        {claim.si_label ? (
+          <Badge variant="secondary" className="text-[10px]">
+            {claim.si_label}
+          </Badge>
+        ) : null}
+        {!claim.chapter_label && !claim.si_label ? (
+          <Badge variant="secondary" className="text-[10px]">
+            {claim.claim_type}
+          </Badge>
+        ) : null}
         {claim.claim_type === "gap" && claim.computed_status ? (
           <Badge variant="outline" className="text-[10px]">
             {claim.computed_status}

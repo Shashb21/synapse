@@ -1,8 +1,19 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { LedgerClaimCard, type LedgerClaimCardModel } from "@/components/accuracy/ledger-claim-card";
+import { LedgerFilterBar } from "@/components/accuracy/ledger-filter-bar";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
+import {
+  chapterLabel,
+  claimChapterSlug,
+  claimSiSlugs,
+  filterLedgerClaims,
+  ledgerFilterFacets,
+  parseLedgerFilters,
+  siThemeLabel,
+} from "@/accuracy/domain/ledger-filters";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
@@ -14,6 +25,8 @@ registerAccuracyStack();
 
 function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerClaimCardModel {
   const meta = claimMetadata(claim);
+  const chapter = claimChapterSlug({ metadata: meta });
+  const si = claimSiSlugs({ metadata: meta })[0] ?? null;
   return {
     id: claim.id,
     claim_type: claim.claim_type,
@@ -23,19 +36,25 @@ function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerCl
     source_badge: String(meta.source_badge ?? claim.source_file_id ?? "unspecified source"),
     validation_rationale: meta.validation?.rationale ?? null,
     computed_status: typeof meta.computed_status === "string" ? meta.computed_status : null,
+    external_id: typeof meta.external_id === "string" ? meta.external_id : null,
+    chapter_label: chapter ? chapterLabel(chapter) : null,
+    si_label: si ? siThemeLabel(si) : null,
   };
 }
 
 export default async function AccuracyLedgerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace_id?: string }>;
+  searchParams: Promise<{ workspace_id?: string; chapter?: string; si?: string }>;
 }) {
-  const { workspace_id: workspaceId = "" } = await searchParams;
+  const params = await searchParams;
+  const workspaceId = params.workspace_id ?? "";
+  const filters = parseLedgerFilters(params);
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let gaps: LedgerClaimCardModel[] = [];
   let tactics: LedgerClaimCardModel[] = [];
+  let facets = ledgerFilterFacets([]);
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
@@ -44,8 +63,14 @@ export default async function AccuracyLedgerPage({
     workspaces = await listWorkspaces();
     if (workspaceId) {
       const claims = await listClaims(workspaceId);
-      gaps = claims.filter((c) => c.claim_type === "gap" && c.status !== "merged").map(toCard);
-      tactics = claims.filter((c) => c.claim_type === "tactic" && c.status !== "merged").map(toCard);
+      const live = claims.filter((c) => c.status !== "merged");
+      facets = ledgerFilterFacets(live.map((c) => ({ metadata: claimMetadata(c) })));
+      const visible = filterLedgerClaims(
+        live.map((c) => ({ ...c, metadata: claimMetadata(c) })),
+        filters,
+      );
+      gaps = visible.filter((c) => c.claim_type === "gap").map(toCard);
+      tactics = visible.filter((c) => c.claim_type === "tactic").map(toCard);
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
@@ -55,12 +80,14 @@ export default async function AccuracyLedgerPage({
   }
 
   const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+  const planLabel = workspacePlanLabel(activeWorkspace);
+  const filtering = Boolean(filters.chapter || filters.si);
 
   return (
-    <AccuracyAppShell active="ledger">
+    <AccuracyAppShell active="ledger" planLabel={planLabel}>
       <PageIntro kicker="Human gate · gaps & tactics" title="Ledger">
-        Draft and validated claims for one workspace. Validate or reject with a rationale — every
-        decision feeds hillclimb.
+        Draft and validated claims for one workspace. Filter by chapter (Tisle) or SI (BGB). Validate
+        or reject with a rationale — every decision feeds hillclimb.
       </PageIntro>
 
       {loadError ? (
@@ -104,6 +131,7 @@ export default async function AccuracyLedgerPage({
               {activeWorkspace ? (
                 <span className="ml-2 text-[12px] font-normal text-muted-foreground">
                   · {activeWorkspace.name}
+                  {planLabel ? ` · ${planLabel}` : ""}
                 </span>
               ) : null}
             </h2>
@@ -135,12 +163,18 @@ export default async function AccuracyLedgerPage({
             />
           ) : null}
 
+          <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
+
           <section className="mb-8 grid gap-2" aria-labelledby="gaps-section">
             <h2 id="gaps-section" className="text-[15px] font-medium text-foreground">
               Gaps
             </h2>
             {gaps.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">No gap claims in this workspace yet.</p>
+              <p className="text-[12px] text-muted-foreground">
+                {filtering
+                  ? "No gap cards match these filters."
+                  : "No gap claims in this workspace yet."}
+              </p>
             ) : (
               <ul className="grid gap-2">
                 {gaps.map((claim) => (
@@ -156,7 +190,9 @@ export default async function AccuracyLedgerPage({
             </h2>
             {tactics.length === 0 ? (
               <p className="text-[12px] text-muted-foreground">
-                No tactic claims in this workspace yet.
+                {filtering
+                  ? "No tactic cards match these filters."
+                  : "No tactic claims in this workspace yet."}
               </p>
             ) : (
               <ul className="grid gap-2">

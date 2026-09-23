@@ -4,6 +4,7 @@ import { CreateWorkspaceForm } from "@/components/accuracy/create-workspace-form
 import { SeedFromGoldForm } from "@/components/accuracy/seed-from-gold-form";
 import { WorkspaceHygieneActions } from "@/components/accuracy/workspace-hygiene-actions";
 import { registerAccuracyStack } from "@/accuracy";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
 export const dynamic = "force-dynamic";
@@ -31,9 +32,9 @@ export default async function AccuracyWorkspacesPage({
   return (
     <AccuracyAppShell active="workspaces">
       <PageIntro kicker="Tenancy · org → workspace" title="Workspaces">
-        One workspace maps to one IEGP. Seed from BeOne gold for a full demo ledger, or create an empty
-        workspace and upload sources. Archive hides a workspace from pickers; delete removes its ledger
-        and run history.
+        One workspace maps to one IEP or IEGP. Seed from BeOne gold for a full demo ledger, or create
+        an empty workspace and upload sources. Archive hides a workspace from pickers; delete removes
+        its ledger and run history.
       </PageIntro>
 
       {loadError ? (
@@ -68,7 +69,14 @@ export default async function AccuracyWorkspacesPage({
             {workspaces.map((workspace) => (
               <li key={workspace.id} className="border border-border bg-card/40 p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[13px] font-medium text-foreground">{workspace.name}</p>
+                  <p className="text-[13px] font-medium text-foreground">
+                    {workspace.name}
+                    {workspacePlanLabel(workspace) ? (
+                      <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                        {workspacePlanLabel(workspace)}
+                      </span>
+                    ) : null}
+                  </p>
                   <span className="text-[11px] text-muted-foreground">
                     {workspace.slug}
                     {workspace.archived_at ? " · archived" : ""}

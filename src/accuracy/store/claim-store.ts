@@ -30,6 +30,8 @@ export type AccuracyClaimMetadata = {
   parent_gap_id?: string | null;
   validation?: ClaimValidationMeta | null;
   external_id?: string | null;
+  chapter?: string | null;
+  si_theme?: string | null;
   reference_pack_id?: string | null;
   tactic_status?: string | null;
   computed_status?: string | null;

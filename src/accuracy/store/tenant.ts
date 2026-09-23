@@ -3,6 +3,10 @@ import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { WORKSHOP_SNAPSHOT_DDL } from "./workshop-store";
+import {
+  planningContextWithPlanLabel,
+  type PlanLabel,
+} from "@/accuracy/domain/plan-label";
 
 export type WorkspaceDeleteCounts = {
   miss_flag_actions: number;
@@ -26,8 +30,14 @@ export async function createOrganization(name: string) {
   return id;
 }
 
-/** One workspace = one IEGP within an org. */
-export async function createWorkspace(args: { org_id: string; name: string; slug: string }) {
+/** One workspace = one IEGP (or IEP) within an org. */
+export async function createWorkspace(args: {
+  org_id: string;
+  name: string;
+  slug: string;
+  plan_label?: PlanLabel | string | null;
+  planning_context?: Record<string, unknown> | null;
+}) {
   await ensureAccuracySchema();
   const id = newId("ws");
   await accuracyDb()
@@ -37,11 +47,28 @@ export async function createWorkspace(args: { org_id: string; name: string; slug
       org_id: args.org_id,
       name: args.name,
       slug: args.slug,
-      planning_context: null,
+      planning_context: planningContextWithPlanLabel(
+        args.planning_context ?? null,
+        args.plan_label,
+      ),
       created_at: nowIso(),
       archived_at: null,
     });
   return id;
+}
+
+export async function updateWorkspacePlanLabel(
+  workspace_id: string,
+  plan_label: PlanLabel | string | null,
+) {
+  const workspace = await getWorkspace(workspace_id);
+  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  const planning_context = planningContextWithPlanLabel(workspace.planning_context, plan_label);
+  await accuracyDb()
+    .update(t.accuracyWorkspaces)
+    .set({ planning_context })
+    .where(eq(t.accuracyWorkspaces.id, workspace_id));
+  return { ...workspace, planning_context };
 }
 
 export async function listWorkspaces(limit = 50, opts?: { includeArchived?: boolean }) {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import {
   Activity,
   BookMarked,
@@ -26,6 +26,12 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import {
+  chromePlanLabelStatus,
+  chromeStackCaption,
+  normalizePlanLabel,
+  type PlanLabel,
+} from "@/accuracy/domain/plan-label";
 
 export type AccuracyShellId =
   | "workspaces"
@@ -103,14 +109,39 @@ function NavButton({
 function AccuracyChromeInner({
   children,
   active,
+  planLabel: planLabelProp = null,
 }: {
   children: React.ReactNode;
   active: AccuracyShellId;
+  planLabel?: PlanLabel | null;
 }) {
   const [open, setOpen] = useState(false);
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
   const current = NAV.find((item) => item.id === active)?.label ?? "Accuracy";
+  const [fetchedLabel, setFetchedLabel] = useState<PlanLabel | null>(null);
+  const planLabel = planLabelProp ?? fetchedLabel;
+  const planStatus = chromePlanLabelStatus(planLabel);
+
+  useEffect(() => {
+    if (planLabelProp || !workspaceId) {
+      setFetchedLabel(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/accuracy/workspaces?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { workspace?: { plan_label?: unknown } } | null) => {
+        if (cancelled) return;
+        setFetchedLabel(normalizePlanLabel(body?.workspace?.plan_label));
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedLabel(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, planLabelProp]);
 
   return (
     <div className="flex min-h-full bg-background">
@@ -121,8 +152,18 @@ function AccuracyChromeInner({
         >
           Synapse · Accuracy
         </Link>
+        {planStatus ? (
+          <p
+            className="mb-1 hidden px-2 text-[11px] font-medium text-sidebar-foreground md:block"
+            role="status"
+            aria-label={planStatus}
+            data-plan-label={planLabel}
+          >
+            {planLabel}
+          </p>
+        ) : null}
         <p className="mb-4 hidden px-2 text-[11px] text-muted-foreground md:block">
-          Multi-tenant IEGP stack
+          {chromeStackCaption(planLabel)}
         </p>
         <Link
           href="/accuracy"
@@ -178,6 +219,16 @@ function AccuracyChromeInner({
             </SheetContent>
           </Sheet>
           <p className="text-[13px] font-medium text-foreground">{current}</p>
+          {planStatus ? (
+            <span
+              className="ml-auto text-[11px] text-muted-foreground"
+              role="status"
+              aria-label={planStatus}
+              data-plan-label={planLabel}
+            >
+              {planLabel}
+            </span>
+          ) : null}
         </header>
         <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-5 sm:px-6">{children}</main>
       </div>
@@ -188,13 +239,17 @@ function AccuracyChromeInner({
 export function AccuracyChrome({
   children,
   active,
+  planLabel = null,
 }: {
   children: React.ReactNode;
   active: AccuracyShellId;
+  planLabel?: PlanLabel | null;
 }) {
   return (
     <Suspense fallback={<div className="min-h-full bg-background p-4 text-[12px] text-muted-foreground">Loading…</div>}>
-      <AccuracyChromeInner active={active}>{children}</AccuracyChromeInner>
+      <AccuracyChromeInner active={active} planLabel={planLabel}>
+        {children}
+      </AccuracyChromeInner>
     </Suspense>
   );
 }

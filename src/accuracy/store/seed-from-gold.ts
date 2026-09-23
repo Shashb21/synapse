@@ -7,6 +7,11 @@ import { insertSourceFile } from "./source-store";
 import { persistParseBlocks, blocksFromParsedDocument } from "./parse-store";
 import { loadReferenceGold, getReferencePack, referencePackDir } from "../eval/reference-gold";
 import { parseLocalDocument, mimeForFilename } from "@/lib/ingest/local-parse";
+import { planLabelFromPack } from "@/accuracy/domain/plan-label";
+import {
+  normalizeChapterSlug,
+  siThemeFromGapId,
+} from "@/accuracy/domain/ledger-filters";
 
 export type SeedFromGoldResult = {
   org_id: string;
@@ -37,11 +42,13 @@ export async function seedWorkspaceFromGold(args: {
   const gold = loadReferenceGold(args.packId);
   const sourceRel = pack.source_file?.replace(/^sources\//, "") ?? pack.source_file;
 
+  const plan_label = planLabelFromPack(pack);
   const org_id = await createOrganization(`${pack.asset} (eval)`);
   const workspace_id = await createWorkspace({
     org_id,
-    name: args.workspaceName ?? `${pack.asset} IEGP`,
+    name: args.workspaceName ?? `${pack.asset} ${plan_label}`,
     slug: `${slugify(args.packId)}-${Date.now().toString(36)}`,
+    plan_label,
   });
 
   const sourcePath = join(referencePackDir(args.packId), pack.source_file);
@@ -112,9 +119,11 @@ export async function seedWorkspaceFromGold(args: {
       priority?: string;
       priority_band?: string;
       chapter?: string;
+      si_theme?: string;
       slide_cue?: string;
     };
     if (!g.statement?.trim()) continue;
+    const si = siThemeFromGapId(g.id) ?? null;
     await insertClaim({
       workspace_id,
       claim_type: "gap",
@@ -125,7 +134,8 @@ export async function seedWorkspaceFromGold(args: {
         source_badge: pack.source_file,
         external_id: g.id ?? null,
         priority: g.priority ?? g.priority_band ?? null,
-        chapter: g.chapter ?? null,
+        chapter: normalizeChapterSlug(g.chapter) ?? g.chapter ?? null,
+        si_theme: g.si_theme ?? si?.slug ?? null,
         slide_cue: g.slide_cue ?? null,
         reference_pack_id: args.packId,
       },
@@ -145,11 +155,15 @@ export async function seedWorkspaceFromGold(args: {
       origin?: string;
       slide_cue?: string;
       tactic_type?: string;
+      chapter?: string;
     };
     const statement = tac.title?.trim();
     if (!statement) continue;
     const external =
       tac.identifier ?? (typeof tac.number === "number" ? String(tac.number) : null);
+    const linkedSi = (tac.gap_ids ?? [])
+      .map((id) => siThemeFromGapId(id)?.slug)
+      .find((slug): slug is string => Boolean(slug));
     await insertClaim({
       workspace_id,
       claim_type: "tactic",
@@ -163,6 +177,8 @@ export async function seedWorkspaceFromGold(args: {
         number: tac.number ?? null,
         lead_function: tac.lead_function ?? null,
         gap_ids: tac.gap_ids ?? [],
+        chapter: normalizeChapterSlug(tac.chapter) ?? tac.chapter ?? null,
+        si_theme: linkedSi ?? null,
         slide_cue: tac.slide_cue ?? null,
         tactic_type: tac.tactic_type ?? null,
         reference_pack_id: args.packId,
