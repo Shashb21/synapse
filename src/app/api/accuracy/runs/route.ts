@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { listAccuracyRuns, registerAccuracyStack } from "@/accuracy";
+import {
+  listAccuracyRuns,
+  registerAccuracyStack,
+  summarizeAccuracyRunCost,
+} from "@/accuracy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +17,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
   }
   const limit = Math.min(100, Math.max(1, Number(searchParams.get("limit") ?? 40)));
-  const runs = await listAccuracyRuns(workspace_id, limit);
-  return NextResponse.json({ runs });
+  const [runs, rollup] = await Promise.all([
+    listAccuracyRuns(workspace_id, limit),
+    summarizeAccuracyRunCost(workspace_id),
+  ]);
+  return NextResponse.json({ runs, rollup });
 }

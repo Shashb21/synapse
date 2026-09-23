@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
 
 registerAccuracyStack();
 
-export async function GET() {
-  const workspaces = await listWorkspaces();
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const includeArchived = searchParams.get("include_archived") === "1";
+  const workspaces = await listWorkspaces(50, { includeArchived });
   return NextResponse.json({ workspaces });
 }
 

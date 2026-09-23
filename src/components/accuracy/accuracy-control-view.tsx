@@ -2,7 +2,7 @@ import {
   AccuracyRoutingPanel,
   type AccuracyRouteView,
 } from "@/components/accuracy/accuracy-routing-panel";
-import { accuracyRouteConfigs, registerAccuracyStack } from "@/accuracy";
+import { accuracyRouteConfigs, listModelPrices, registerAccuracyStack } from "@/accuracy";
 import { CALL_KINDS_META } from "@/accuracy/kernel/contracts";
 import { PROVIDERS } from "@/modules/llm/provider";
 import { can } from "@/modules/auth/roles";
@@ -35,16 +35,51 @@ export async function AccuracyControlView() {
   );
 
   return (
-    <AccuracyRoutingPanel
-      routes={routes}
-      providers={PROVIDERS.map((provider) => ({
-        id: provider.id,
-        label: provider.label,
-        models: provider.models,
-        default_model: provider.default_model,
-        auth: provider.auth,
-      }))}
-      canRoute={can(identity.role, "configure_routing")}
-    />
+    <div className="grid gap-8">
+      <AccuracyRoutingPanel
+        routes={routes}
+        providers={PROVIDERS.map((provider) => ({
+          id: provider.id,
+          label: provider.label,
+          models: provider.models,
+          default_model: provider.default_model,
+          auth: provider.auth,
+        }))}
+        canRoute={can(identity.role, "configure_routing")}
+      />
+      <section className="grid gap-2" aria-labelledby="live-prices">
+        <h2 id="live-prices" className="text-[15px] font-medium text-foreground">
+          Live price table
+        </h2>
+        <p className="text-[12px] text-muted-foreground">
+          USD per 1M tokens used for run estimates. OAuth providers do not return billing; Audit shows
+          the rollup of these estimates.
+        </p>
+        <div className="overflow-x-auto border border-border">
+          <table className="w-full text-left text-[12px]">
+            <thead className="bg-card/60 text-muted-foreground">
+              <tr>
+                <th className="px-2 py-1.5 font-medium">Provider</th>
+                <th className="px-2 py-1.5 font-medium">Model</th>
+                <th className="px-2 py-1.5 font-medium">Input / 1M</th>
+                <th className="px-2 py-1.5 font-medium">Output / 1M</th>
+                <th className="px-2 py-1.5 font-medium">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {listModelPrices().map((row) => (
+                <tr key={`${row.provider_id}:${row.model}`} className="border-t border-border">
+                  <td className="px-2 py-1.5">{row.provider_id}</td>
+                  <td className="px-2 py-1.5 font-mono text-[11px]">{row.model}</td>
+                  <td className="px-2 py-1.5">${row.input_per_million.toFixed(2)}</td>
+                  <td className="px-2 py-1.5">${row.output_per_million.toFixed(2)}</td>
+                  <td className="px-2 py-1.5 text-muted-foreground">{row.updated_at}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }

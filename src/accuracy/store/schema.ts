@@ -15,6 +15,8 @@ export const accuracyWorkspaces = pgTable("accuracy_workspaces", {
   slug: text("slug").notNull(),
   planning_context: jsonb("planning_context"),
   created_at: text("created_at").notNull(),
+  /** Soft-hide from default workspace lists. Null = active. */
+  archived_at: text("archived_at"),
 });
 
 export const accuracySourceFiles = pgTable("accuracy_source_files", {
@@ -163,7 +165,8 @@ export const ACCURACY_DDL = [
     name text NOT NULL,
     slug text NOT NULL,
     planning_context jsonb,
-    created_at text NOT NULL
+    created_at text NOT NULL,
+    archived_at text
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_source_files (
     id text PRIMARY KEY,
@@ -282,4 +285,9 @@ export const ACCURACY_DDL = [
     saved_function text NOT NULL,
     saved_at text NOT NULL
   )`,
+];
+
+/** Additive ALTERs for already-created tables. Safe to re-run. */
+export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
 ];

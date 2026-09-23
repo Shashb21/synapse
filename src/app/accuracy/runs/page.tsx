@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { Badge } from "@/components/ui/badge";
-import { listAccuracyRuns, registerAccuracyStack } from "@/accuracy";
+import { CostRollupPanel } from "@/components/accuracy/cost-rollup-panel";
+import { SweepStaleRunsButton } from "@/components/accuracy/sweep-stale-runs-button";
+import {
+  listAccuracyRuns,
+  registerAccuracyStack,
+  summarizeAccuracyRunCost,
+} from "@/accuracy";
+import type { AccuracyCostRollup } from "@/accuracy/kernel/cost-rollup";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +18,7 @@ registerAccuracyStack();
 
 function statusTone(status: string): string {
   if (status === "ok") return "text-[var(--known)]";
-  if (status === "error") return "text-destructive";
+  if (status === "error" || status === "abandoned") return "text-destructive";
   return "text-[var(--unknown)]";
 }
 
@@ -24,12 +31,16 @@ export default async function AccuracyRunsPage({
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let runs: Awaited<ReturnType<typeof listAccuracyRuns>> = [];
+  let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
 
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
-      runs = await listAccuracyRuns(workspaceId, 40);
+      [runs, rollup] = await Promise.all([
+        listAccuracyRuns(workspaceId, 40),
+        summarizeAccuracyRunCost(workspaceId),
+      ]);
     }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load runs";
@@ -40,8 +51,8 @@ export default async function AccuracyRunsPage({
   return (
     <AccuracyAppShell active="runs">
       <PageIntro kicker="Observability · accuracy module runs" title="Runs">
-        Per-workspace module runs with timing, route, cost, and eval scores. Pick a workspace to load
-        recent activity.
+        Per-workspace module runs with timing, route, cost rollup, and eval scores. Stale{" "}
+        <code>running</code> rows older than 30 minutes are marked abandoned.
       </PageIntro>
 
       {loadError ? (
@@ -82,15 +93,22 @@ export default async function AccuracyRunsPage({
         )}
       </section>
 
+      {workspaceId && rollup ? (
+        <CostRollupPanel rollup={rollup} workspaceName={activeWorkspace?.name} />
+      ) : null}
+
       <section className="grid gap-2" aria-labelledby="recent-runs">
-        <h2 id="recent-runs" className="text-[15px] font-medium text-foreground">
-          Recent runs
-          {activeWorkspace ? (
-            <span className="ml-2 text-[12px] font-normal text-muted-foreground">
-              · {activeWorkspace.name}
-            </span>
-          ) : null}
-        </h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="recent-runs" className="text-[15px] font-medium text-foreground">
+            Recent runs
+            {activeWorkspace ? (
+              <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                · {activeWorkspace.name}
+              </span>
+            ) : null}
+          </h2>
+          {workspaceId ? <SweepStaleRunsButton workspaceId={workspaceId} /> : null}
+        </div>
         {!workspaceId ? (
           <p className="text-[12px] text-muted-foreground">Select a workspace to list runs.</p>
         ) : runs.length === 0 ? (

@@ -49,9 +49,16 @@ export {
   setAccuracyDefaultProvider,
   allRoutableRoles,
 } from "./kernel/routing";
-export { listAccuracyRuns } from "./kernel/observability";
+export {
+  listAccuracyRuns,
+  sweepStaleAccuracyRuns,
+  summarizeAccuracyRunCost,
+  DEFAULT_STALE_RUN_MAX_AGE_MS,
+} from "./kernel/observability";
 export { gapsEligibleForIdeation, tacticAllowedOnGapInFinalPlan } from "./domain/iegp-semantics";
 export { listModelPrices, estimateCostUsd } from "./kernel/cost";
+export { rollupAccuracyRunCost, formatUsd } from "./kernel/cost-rollup";
+export type { AccuracyCostRollup } from "./kernel/cost-rollup";
 export {
   listReferencePacks,
   loadReferenceGold,
