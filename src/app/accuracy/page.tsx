@@ -50,12 +50,24 @@ export default async function AccuracyWorkspacesPage() {
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {workspace.id} · org {workspace.org_id}
                 </p>
-                <p className="mt-2">
+                <p className="mt-2 flex flex-wrap gap-3">
                   <Link
                     href={`/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >
                     View runs
+                  </Link>
+                  <Link
+                    href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Ledger
+                  </Link>
+                  <Link
+                    href={`/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Timeline
                   </Link>
                 </p>
               </li>

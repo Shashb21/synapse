@@ -7,6 +7,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const SHELL_NAV = [
   { href: "/accuracy", label: "Workspaces" },
+  { href: "/accuracy/ledger", label: "Ledger" },
+  { href: "/accuracy/timeline", label: "Timeline" },
   { href: "/accuracy/control", label: "Routing" },
   { href: "/accuracy/runs", label: "Runs" },
 ] as const;
@@ -24,6 +26,21 @@ test.describe("accuracy shell", () => {
   test("workspaces page renders shell nav", async ({ page }) => {
     await page.goto("/accuracy");
     await expect(page.getByRole("heading", { name: /^workspaces$/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("ledger page renders shell nav and empty state", async ({ page }) => {
+    await page.goto("/accuracy/ledger");
+    await expect(page.getByRole("heading", { name: /^ledger$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /choose a workspace/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^workspaces$/i }).first()).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("timeline page renders shell nav and empty state", async ({ page }) => {
+    await page.goto("/accuracy/timeline");
+    await expect(page.getByRole("heading", { name: /^timeline$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /choose a workspace/i })).toBeVisible();
     await expectAccuracyShell(page);
   });
 
@@ -49,5 +66,6 @@ test.describe("accuracy shell", () => {
     expect(body.reference_packs).toContain("beone-bgb-58067-prmt5i");
     expect(body.modules.some((m) => m.call_kind === "need_extract")).toBe(true);
     expect(body.modules.some((m) => m.call_kind === "gantt_project")).toBe(true);
+    expect(body.modules.some((m) => m.call_kind === "validation_gate")).toBe(true);
   });
 });
