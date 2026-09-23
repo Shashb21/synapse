@@ -13,7 +13,7 @@
 | W3-gold | bc-3d8d3e46 | `eval/reference-gold.ts` | **Done** — must_find + `accuracyEvalReferencePack` stub |
 | W4-inventory | bc-68e82881 | `inventory_extract` prompts + schema | stub LLM test green |
 | W5-coverage | (next) | `coverage_decide` + critic | Zod decision + pair tests |
-| W6-gantt | (next) | `gantt_project` from validated tactics | no invented bars test |
+| W6-gantt | bc-dc2ce4ab | `gantt_project` (`gantt-project/`) | **Done** — 7 unit tests, validated tactics only |
 | W7-need | (next) | `need_extract` | per-source gap recall eval |
 | W8-e2e | (next) | Playwright `e2e/accuracy/` | upload reference pack path |
 
@@ -34,4 +34,5 @@
 | --- | --- |
 | 2026-09-23 | Four background agents launched (W1–W4) |
 | 2026-09-23 | Ideation vs inventory semantics landed (`iegp-semantics.ts`) |
-| 2026-09-23 | **W3-gold complete** ([Reference gold eval harness](bc-3d8d3e46-1846-51af-97ab-241685d52ed4)) — `reference-gold.ts`, `accuracyEvalReferencePack` stub, 3 tests |
+| 2026-09-23 | **W3-gold complete** — `reference-gold.ts`, `accuracyEvalReferencePack` stub, 3 tests |
+| 2026-09-23 | **W6-gantt complete** — `src/accuracy/modules/gantt-project/`, 7 unit tests |
