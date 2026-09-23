@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { ParseBlockPreview } from "@/components/accuracy/parse-block-preview";
 import { SourceExtractActions } from "@/components/accuracy/source-extract-actions";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack } from "@/accuracy";
-import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
+import { toParseBlockPreviews } from "@/accuracy/store/parse-preview";
+import { readParseBlocks } from "@/accuracy/store/parse-store";
+import { listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +21,12 @@ export default async function AccuracySourcesPage({
 }) {
   const { workspace_id: workspaceId = "" } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
-  let sources: Array<Awaited<ReturnType<typeof listSourceFiles>>[number] & { block_count: number }> =
-    [];
+  let sources: Array<
+    Awaited<ReturnType<typeof listSourceFiles>>[number] & {
+      block_count: number;
+      parse_blocks: ReturnType<typeof toParseBlockPreviews>;
+    }
+  > = [];
   let loadError: string | null = null;
 
   try {
@@ -27,10 +34,14 @@ export default async function AccuracySourcesPage({
     if (workspaceId) {
       const rows = await listSourceFiles(workspaceId);
       sources = await Promise.all(
-        rows.map(async (row) => ({
-          ...row,
-          block_count: await countParseBlocks(workspaceId, row.id),
-        })),
+        rows.map(async (row) => {
+          const parse_blocks = toParseBlockPreviews(await readParseBlocks(workspaceId, row.id));
+          return {
+            ...row,
+            block_count: parse_blocks.length,
+            parse_blocks,
+          };
+        }),
       );
     }
   } catch (error) {
@@ -43,8 +54,9 @@ export default async function AccuracySourcesPage({
     <AccuracyAppShell active="sources">
       <PageIntro kicker="Ingest · parse · extract" title="Sources">
         PDF and PPTX prefer LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set; without it they
-        fall back to local structured parse. DOCX/XLSX/text stay local. After parse, run need +
-        inventory extract to populate the ledger (requires a connected LLM or env API key).
+        fall back to local structured parse. DOCX/XLSX/text stay local. After parse, preview
+        verbatim parse blocks (quotes must be substrings of this text), then run need + inventory
+        extract to populate the ledger (requires a connected LLM or env API key).
       </PageIntro>
 
       {loadError ? (
@@ -84,6 +96,7 @@ export default async function AccuracySourcesPage({
                     {source.reference_pack_id ? ` · pack ${source.reference_pack_id}` : ""}
                   </p>
                   <p className="mt-1 font-mono text-[10px] text-muted-foreground">{source.id}</p>
+                  <ParseBlockPreview blocks={source.parse_blocks} />
                   <SourceExtractActions
                     workspaceId={workspaceId}
                     sourceFileId={source.id}
