@@ -56,6 +56,8 @@ export function mimeForFilename(filename: string): string {
   if (n.endsWith(".xlsx") || n.endsWith(".xls")) return XLSX_MIME;
   if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
   if (n.endsWith(".doc")) return "application/msword";
+  if (n.endsWith(".txt")) return "text/plain";
+  if (n.endsWith(".md")) return "text/markdown";
   return "application/octet-stream";
 }
 
@@ -149,6 +151,23 @@ export async function parseLocalDocument(args: {
     blocks = await parseDocx(args.buffer);
   } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || mime === XLSX_MIME) {
     blocks = parseXlsx(args.buffer);
+  } else if (
+    lower.endsWith(".txt") ||
+    lower.endsWith(".md") ||
+    mime === "text/plain" ||
+    mime === "text/markdown"
+  ) {
+    const paragraphs = args.buffer
+      .toString("utf8")
+      .split(/\n+/)
+      .map((p) => p.replace(/^#+\s*/, "").trim())
+      .filter(Boolean);
+    blocks = paragraphs.map((text, i) => ({
+      location: { kind: "page" as const, ref: `p.${Math.floor(i / 4) + 1}` },
+      heading: i === 0 ? "Title" : undefined,
+      text,
+      kind: i === 0 ? ("title" as const) : text.length > 140 ? ("paragraph" as const) : ("bullet" as const),
+    }));
   } else if (lower.endsWith(".pdf")) {
     throw new Error(
       "PDF ingest needs LlamaCloud (charts/OCR). Set LLAMA_CLOUD_API_KEY.",
