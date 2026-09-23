@@ -13,6 +13,7 @@ import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { NoRouteError } from "@/modules/llm/provider";
 
 export const runtime = "nodejs";
@@ -112,6 +113,7 @@ export async function POST(req: Request) {
             origin: "need_extract",
             source_badge: "extract",
             external_id: gap.external_id,
+            si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null,
             provenance: gap.provenance,
             reference_pack_id: source.reference_pack_id ?? null,
           },
