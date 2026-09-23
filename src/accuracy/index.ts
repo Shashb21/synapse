@@ -54,3 +54,5 @@ export {
 } from "./kernel/routing";
 export { listAccuracyRuns } from "./kernel/observability";
 export { gapsEligibleForIdeation, tacticAllowedOnGapInFinalPlan } from "./domain/iegp-semantics";
+export { listModelPrices, estimateCostUsd } from "./kernel/cost";
+export { listReferencePacks, loadReferenceGold, mustFindForPack } from "./eval/reference-gold";
