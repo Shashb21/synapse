@@ -25,7 +25,11 @@ const LOCAL_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-/** Prefer LlamaParse for PDF/PPTX when keyed; otherwise local structured for PPTX/DOCX/text. */
+/**
+ * Product lock: LlamaParse for PDF and PPTX.
+ * With LLAMA_CLOUD_API_KEY, ingest uses cloud parse; without it, policy still selects
+ * llamaparse and ingest falls back to local structured so uploads are not blocked.
+ */
 export function resolveParsePolicy(input: ParsePolicyInput): ParsePolicy {
   const lower = input.filename.toLowerCase();
   const hasLlama = Boolean(process.env.LLAMA_CLOUD_API_KEY?.trim());
@@ -35,8 +39,9 @@ export function resolveParsePolicy(input: ParsePolicyInput): ParsePolicy {
       : { parser: "llamaparse", reason: "pdf_needs_llama" };
   }
   if (lower.endsWith(".pptx") || lower.endsWith(".ppt") || LLAMAPARSE_MIMES.has(input.mime)) {
-    if (hasLlama) return { parser: "llamaparse", reason: "pptx_with_llama_key" };
-    return { parser: "local_structured", reason: "pptx_local_without_llama_key" };
+    return hasLlama
+      ? { parser: "llamaparse", reason: "pptx_with_llama_key" }
+      : { parser: "llamaparse", reason: "pptx_needs_llama" };
   }
   if (
     lower.endsWith(".docx") ||

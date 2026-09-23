@@ -189,7 +189,7 @@ export type ResolvedRoute = {
   provider_id: string;
   provider_label: string;
   model: string;
-  auth: "oauth" | "none";
+  auth: "oauth" | "api_key" | "none";
   connected: boolean;
   params: { temperature: number; max_tokens: number };
   fallbacks: string[];

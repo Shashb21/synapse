@@ -9,6 +9,7 @@ import {
   resolveOAuthClientSecret,
 } from "./oauth-clients";
 import { PROVIDERS, findProvider, providerConfigured, type LlmProvider } from "./provider";
+import { hasProviderApiKey, providerApiKey, providerApiKeyEnvName } from "./api-keys";
 
 export type ConnectionStatus = "disconnected" | "pending" | "connected" | "error";
 
@@ -57,24 +58,30 @@ export async function listConnections(): Promise<ProviderConnection[]> {
   const rows = await db().select().from(t.oauthConnections);
   return PROVIDERS.map((provider) => {
     const stored = rows.find((candidate) => candidate.provider_id === provider.id);
-    const status: ConnectionStatus =
+    const envKey = hasProviderApiKey(provider.id);
+    let status: ConnectionStatus =
       provider.auth === "none"
         ? "connected"
         : ((stored?.status as ConnectionStatus | undefined) ?? "disconnected");
+    let detail = stored?.detail ?? null;
+    if (status !== "connected" && envKey) {
+      status = "connected";
+      detail = `Using server ${providerApiKeyEnvName(provider.id)} (env)`;
+    }
     return {
       provider_id: provider.id,
       label: provider.label,
       summary: provider.summary,
       tier: provider.tier,
       auth: provider.auth,
-      configured: providerConfigured(provider),
+      configured: providerConfigured(provider) || envKey,
       status,
-      account_label: stored?.account_label ?? null,
+      account_label: stored?.account_label ?? (envKey ? "env API key" : null),
       scopes: (stored?.scopes as string[] | undefined) ?? provider.oauth?.scopes ?? [],
       expires_at: stored?.expires_at ?? null,
-      connected_by: stored?.connected_by ?? null,
+      connected_by: stored?.connected_by ?? (envKey ? "environment" : null),
       connected_at: stored?.connected_at ?? null,
-      detail: stored?.detail ?? null,
+      detail,
       models: provider.models,
       default_model: provider.default_model,
     };
@@ -86,7 +93,10 @@ export async function connectionStatus(provider_id: string): Promise<ConnectionS
   if (!provider) return "error";
   if (provider.auth === "none") return "connected";
   const stored = await row(provider_id);
-  return (stored?.status as ConnectionStatus | undefined) ?? "disconnected";
+  const status = (stored?.status as ConnectionStatus | undefined) ?? "disconnected";
+  if (status === "connected") return "connected";
+  if (hasProviderApiKey(provider_id)) return "connected";
+  return status;
 }
 
 async function upsert(values: typeof t.oauthConnections.$inferInsert) {
@@ -236,12 +246,17 @@ export async function disconnect(provider_id: string) {
   await db().delete(t.oauthConnections).where(eq(t.oauthConnections.provider_id, provider_id));
 }
 
-/** Returns a usable access token, refreshing first when it is close to expiry. */
+/** Returns a usable access token, refreshing first when it is close to expiry.
+ * Falls back to a server-side API key when OAuth is not connected. */
 export async function accessToken(provider_id: string): Promise<string | null> {
   const provider = findProvider(provider_id);
-  if (!provider?.oauth) return null;
+  if (!provider?.oauth) {
+    return providerApiKey(provider_id);
+  }
   const stored = await row(provider_id);
-  if (!stored?.access_token) return null;
+  if (!stored?.access_token) {
+    return providerApiKey(provider_id);
+  }
   const expiresAt = stored.expires_at ? Date.parse(stored.expires_at) : null;
   const stale = expiresAt !== null && expiresAt - Date.now() < 60_000;
   if (!stale) return stored.access_token;
@@ -258,10 +273,12 @@ export async function accessToken(provider_id: string): Promise<string | null> {
       connected_by: stored.connected_by,
       connected_at: stored.connected_at,
     });
-    return null;
+    return providerApiKey(provider_id);
   }
   const clientId = resolveOAuthClientId(provider);
-  if (!clientId && !provider.oauth.client_id_optional) return null;
+  if (!clientId && !provider.oauth.client_id_optional) {
+    return providerApiKey(provider_id);
+  }
   const params: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: stored.refresh_token,
@@ -270,7 +287,7 @@ export async function accessToken(provider_id: string): Promise<string | null> {
   const secret = resolveOAuthClientSecret(provider);
   if (secret) params.client_secret = secret;
   const token = await exchange(provider, params);
-  if (!token.access_token) return null;
+  if (!token.access_token) return providerApiKey(provider_id);
   await upsert({
     provider_id,
     status: "connected",
@@ -286,4 +303,17 @@ export async function accessToken(provider_id: string): Promise<string | null> {
     detail: null,
   });
   return token.access_token;
+}
+
+/** How credentials were obtained for a live completion. */
+export async function authKindFor(
+  provider_id: string,
+): Promise<"oauth" | "api_key" | null> {
+  const provider = findProvider(provider_id);
+  if (!provider) return null;
+  if (provider.auth === "none") return null;
+  const stored = await row(provider_id);
+  if (stored?.status === "connected" && stored.access_token) return "oauth";
+  if (hasProviderApiKey(provider_id)) return "api_key";
+  return null;
 }
