@@ -6,7 +6,6 @@ import { extractJsonObject } from "@/lib/llm/anthropic";
 import { accessToken, authKindFor, connectionStatus } from "@/modules/llm/oauth";
 import { hasProviderApiKey } from "@/modules/llm/api-keys";
 import {
-  ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
