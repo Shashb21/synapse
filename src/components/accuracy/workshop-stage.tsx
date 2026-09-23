@@ -44,6 +44,7 @@ export function WorkshopStage({
 }) {
   const [snapshot, setSnapshot] = useState(initial);
   const [boardIndex, setBoardIndex] = useState(0);
+  const [boardTouched, setBoardTouched] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menuKind, setMenuKind] = useState<MenuKind>("mark_addressed");
   const [rationale, setRationale] = useState("");
@@ -74,8 +75,13 @@ export function WorkshopStage({
   const splitHref = `/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`;
 
   useEffect(() => {
-    setBoardIndex((i) => Math.min(i, Math.max(boards.length - 1, 0)));
-  }, [boards.length]);
+    if (boardTouched) {
+      setBoardIndex((i) => Math.min(i, Math.max(boards.length - 1, 0)));
+      return;
+    }
+    const withGaps = boards.findIndex((board) => board.gaps.length > 0);
+    setBoardIndex(withGaps >= 0 ? withGaps : 0);
+  }, [boards, boardTouched]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -295,7 +301,10 @@ export function WorkshopStage({
           <button
             key={board.id}
             type="button"
-            onClick={() => setBoardIndex(index)}
+            onClick={() => {
+              setBoardTouched(true);
+              setBoardIndex(index);
+            }}
             className={`shrink-0 border px-4 py-2 text-left ${
               currentBoard?.id === board.id
                 ? "border-foreground bg-card text-foreground"
