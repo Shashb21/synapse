@@ -12,9 +12,10 @@ import {
   type RunHandle,
 } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
-import { accessToken, connectionStatus } from "@/modules/llm/oauth";
+import { accessToken, authKindFor, connectionStatus } from "@/modules/llm/oauth";
+import { hasProviderApiKey } from "@/modules/llm/api-keys";
 import {
-  ALTERNATE_ROUTE_PROVIDER,
+  DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
   findProvider,
@@ -41,8 +42,8 @@ function defaultConfig(call_kind: CallKind, agent_role: AgentRole | "none"): Acc
     provider_id: DEFAULT_ROUTE_PROVIDER,
     model: provider.default_model,
     params: { temperature: 0, max_tokens: 8192 },
-    fallbacks: [ALTERNATE_ROUTE_PROVIDER],
-    updated_by: "default (locked: Grok)",
+    fallbacks: [...DEFAULT_ROUTE_FALLBACKS],
+    updated_by: "default (Grok → Claude → OpenAI)",
     updated_at: "—",
   };
 }
@@ -96,7 +97,7 @@ export async function setAccuracyRouteConfig(args: {
       temperature: args.temperature ?? 0,
       max_tokens: args.max_tokens ?? 8192,
     },
-    fallbacks: args.fallbacks?.length ? args.fallbacks : [ALTERNATE_ROUTE_PROVIDER],
+    fallbacks: args.fallbacks?.length ? args.fallbacks : [...DEFAULT_ROUTE_FALLBACKS],
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
@@ -136,7 +137,9 @@ export async function resolveAccuracyRoute(args: {
   for (const [index, id] of candidates.entries()) {
     const provider = findProvider(id);
     if (!provider || provider.auth === "none") continue;
-    if (!providerConfigured(provider)) {
+    const oauthReady = providerConfigured(provider);
+    const keyReady = hasProviderApiKey(provider.id);
+    if (!oauthReady && !keyReady) {
       reasons.push(`${provider.label}: OAuth client not available`);
       continue;
     }
@@ -145,18 +148,23 @@ export async function resolveAccuracyRoute(args: {
       reasons.push(`${provider.label}: ${status}`);
       continue;
     }
+    const authKind = (await authKindFor(provider.id)) ?? (keyReady ? "api_key" : "oauth");
     return {
       call_kind: args.call_kind,
       role: args.agent_role === "none" ? "proposer" : args.agent_role,
       provider_id: provider.id,
       provider_label: provider.label,
       model: index === 0 ? config.model : provider.default_model,
-      auth: "oauth",
+      auth: authKind,
       connected: true,
       params: config.params,
       fallbacks: config.fallbacks,
       degraded: index > 0,
-      reason: reasons.length ? reasons.join("; ") : null,
+      reason: reasons.length
+        ? reasons.join("; ")
+        : authKind === "api_key"
+          ? "server API key"
+          : null,
     };
   }
   throw new NoRouteError(reasons.join("; ") || "Connect a provider in /control");
@@ -168,7 +176,7 @@ export function accuracyCompletionFor(args: {
   onUsage: (usage: ReturnType<typeof usageFromMessages>, cost_usd: number) => void;
 }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens }) => {
-    if (args.route.auth !== "oauth" || !args.route.connected) {
+    if ((args.route.auth !== "oauth" && args.route.auth !== "api_key") || !args.route.connected) {
       throw new NoRouteError(`No LLM route for ${purpose}`);
     }
     const provider = findProvider(args.route.provider_id)!;
@@ -185,7 +193,7 @@ export function accuracyCompletionFor(args: {
             temperature: args.route.params.temperature,
             max_tokens: maxTokens ?? args.route.params.max_tokens,
           },
-          { access_token: token },
+          { access_token: token, kind: args.route.auth === "api_key" ? "api_key" : "oauth" },
         ),
       `${args.route.provider_label} · ${args.route.model}`,
     );

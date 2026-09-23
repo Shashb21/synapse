@@ -41,8 +41,8 @@ export default async function AccuracySourcesPage({
   return (
     <AccuracyAppShell active="sources">
       <PageIntro kicker="Ingest · parse health" title="Sources">
-        Uploaded documents for one IEGP workspace. PPTX/DOCX parse locally without LlamaParse; PDF
-        still needs a LlamaCloud key.
+        PDF and PPTX prefer LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set; without it they
+        fall back to local structured parse. DOCX/XLSX/text stay local.
       </PageIntro>
 
       {loadError ? (

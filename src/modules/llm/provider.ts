@@ -1,4 +1,5 @@
 import { resolveOAuthClientId } from "./oauth-clients";
+import { hasProviderApiKey } from "./api-keys";
 
 /**
  * LLM provider contract. Every cloud provider authenticates by OAuth login in
@@ -39,7 +40,11 @@ export type LlmRequest = {
   max_tokens: number;
 };
 
-export type LlmAuth = { access_token: string };
+export type LlmAuth = {
+  access_token: string;
+  /** OAuth bearer by default; Anthropic API keys use `x-api-key` instead. */
+  kind?: "oauth" | "api_key";
+};
 
 export type LlmProvider = {
   id: string;
@@ -205,12 +210,17 @@ export const anthropicClaude: LlmProvider = {
   },
   async complete(request, auth) {
     if (!auth) throw new NoRouteError("anthropic-claude is not connected");
+    const headers: Record<string, string> = {
+      "anthropic-version": "2023-06-01",
+    };
+    if (auth.kind === "api_key") {
+      headers["x-api-key"] = auth.access_token;
+    } else {
+      headers.authorization = `Bearer ${auth.access_token}`;
+    }
     const payload = await postJson(
       `${env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")}/v1/messages`,
-      {
-        authorization: `Bearer ${auth.access_token}`,
-        "anthropic-version": "2023-06-01",
-      },
+      headers,
       {
         model: request.model,
         max_tokens: request.max_tokens,
@@ -338,6 +348,8 @@ export const PROVIDERS: LlmProvider[] = [xaiGrok, anthropicClaude, openAi, googl
 /** Locked: Grok is the default route, Claude the one-click alternate. */
 export const DEFAULT_ROUTE_PROVIDER = xaiGrok.id;
 export const ALTERNATE_ROUTE_PROVIDER = anthropicClaude.id;
+/** Standing fallbacks after the preferred provider (Claude, then OpenAI). */
+export const DEFAULT_ROUTE_FALLBACKS = [anthropicClaude.id, openAi.id] as const;
 
 export function findProvider(id: string): LlmProvider | undefined {
   return PROVIDERS.find((provider) => provider.id === id);
@@ -349,4 +361,11 @@ export function providerConfigured(provider: LlmProvider): boolean {
   if (!provider.oauth) return false;
   if (provider.oauth.client_id_optional) return true;
   return Boolean(resolveOAuthClientId(provider));
+}
+
+/** True when OAuth is ready or a server-side API key is injected for this provider. */
+export function providerRoutable(provider: LlmProvider): boolean {
+  if (provider.auth === "none") return true;
+  if (providerConfigured(provider)) return true;
+  return hasProviderApiKey(provider.id);
 }

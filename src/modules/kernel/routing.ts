@@ -3,9 +3,10 @@ import * as t from "./schema";
 import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
-import { accessToken, connectionStatus } from "@/modules/llm/oauth";
+import { accessToken, authKindFor, connectionStatus } from "@/modules/llm/oauth";
+import { hasProviderApiKey } from "@/modules/llm/api-keys";
 import {
-  ALTERNATE_ROUTE_PROVIDER,
+  DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
   findProvider,
@@ -15,9 +16,9 @@ import {
 /** Removed from the product; strip from stored fallbacks when resolving routes. */
 const LEGACY_OFFLINE_PROVIDER = "deterministic-local";
 
-/** Locked default: Grok. Claude is the standing alternate. */
+/** Locked default: Grok. Claude then OpenAI are the standing alternates. */
 export const DEFAULT_PROVIDER_ID = DEFAULT_ROUTE_PROVIDER;
-export const DEFAULT_FALLBACKS = [ALTERNATE_ROUTE_PROVIDER];
+export const DEFAULT_FALLBACKS = [...DEFAULT_ROUTE_FALLBACKS];
 
 export type RouteConfig = {
   stage: StageId;
@@ -126,7 +127,9 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
       reasons.push(`${provider.label}: not an LLM provider`);
       continue;
     }
-    if (!providerConfigured(provider)) {
+    const oauthReady = providerConfigured(provider);
+    const keyReady = hasProviderApiKey(provider.id);
+    if (!oauthReady && !keyReady) {
       reasons.push(`${provider.label}: OAuth client not available`);
       continue;
     }
@@ -135,17 +138,22 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
       reasons.push(`${provider.label}: ${status}`);
       continue;
     }
+    const authKind = (await authKindFor(provider.id)) ?? (keyReady ? "api_key" : "oauth");
     return {
       stage,
       provider_id: provider.id,
       provider_label: provider.label,
       model: index === 0 ? config.model : provider.default_model,
-      auth: "oauth",
+      auth: authKind,
       connected: true,
       params: config.params,
       fallbacks: config.fallbacks,
       degraded: index > 0,
-      reason: reasons.length ? reasons.join("; ") : null,
+      reason: reasons.length
+        ? reasons.join("; ")
+        : authKind === "api_key"
+          ? "server API key"
+          : null,
     };
   }
   throw new NoRouteError(
@@ -155,7 +163,7 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
 
 /**
  * The locked one-click switch: point every stage at Grok or at Claude in a single
- * action, keeping the other as the first fallback.
+ * action, keeping the standing fallback chain (Claude / OpenAI / Grok as needed).
  */
 export async function setDefaultProvider(args: {
   provider_id: string;
@@ -164,9 +172,8 @@ export async function setDefaultProvider(args: {
 }): Promise<RouteConfig[]> {
   const provider = findProvider(args.provider_id);
   if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
-  const alternate =
-    args.provider_id === DEFAULT_ROUTE_PROVIDER ? ALTERNATE_ROUTE_PROVIDER : DEFAULT_ROUTE_PROVIDER;
-  const fallbacks = [alternate].filter((id) => id !== args.provider_id);
+  const chain = [DEFAULT_ROUTE_PROVIDER, ...DEFAULT_ROUTE_FALLBACKS];
+  const fallbacks = chain.filter((id) => id !== args.provider_id);
   const out: RouteConfig[] = [];
   for (const stage of STAGE_IDS) {
     out.push(
@@ -184,7 +191,7 @@ export async function setDefaultProvider(args: {
 
 /** True when a stage may prompt a model on this route. */
 export function canPrompt(route: ResolvedRoute): boolean {
-  return route.auth === "oauth" && route.connected;
+  return (route.auth === "oauth" || route.auth === "api_key") && route.connected;
 }
 
 /** Builds the JSON completion the module receives, bound to route + run trace. */
@@ -209,7 +216,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
             temperature: route.params.temperature,
             max_tokens: maxTokens ?? route.params.max_tokens,
           },
-          { access_token: token },
+          { access_token: token, kind: route.auth === "api_key" ? "api_key" : "oauth" },
         ),
       `${route.provider_label} · ${route.model}`,
     );

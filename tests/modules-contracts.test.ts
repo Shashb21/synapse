@@ -248,7 +248,7 @@ describe("routing defaults", () => {
     expect(DEFAULT_ROUTE_PROVIDER).toBe("xai-grok");
     expect(ALTERNATE_ROUTE_PROVIDER).toBe("anthropic-claude");
     expect(DEFAULT_FALLBACKS[0]).toBe("anthropic-claude");
-    expect(DEFAULT_FALLBACKS).toEqual(["anthropic-claude"]);
+    expect(DEFAULT_FALLBACKS).toEqual(["anthropic-claude", "openai"]);
   });
 
   it("ships the five locked OAuth providers", () => {
@@ -274,7 +274,20 @@ describe("routing defaults", () => {
   });
 
   it("blocks agentic routing when no provider is connected", async () => {
-    await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+    const keyEnvs = ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"] as const;
+    const saved: Record<string, string | undefined> = {};
+    for (const name of keyEnvs) {
+      saved[name] = process.env[name];
+      delete process.env[name];
+    }
+    try {
+      await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+    } finally {
+      for (const name of keyEnvs) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+    }
     expect(
       canPrompt({
         stage: "S2",

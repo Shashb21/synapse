@@ -8,8 +8,10 @@ export default function AccuracyControlPage() {
   return (
     <AccuracyAppShell active="control">
       <PageIntro kicker="Routing · call kind × agent role" title="Accuracy routing">
-        Configure provider, model, and parameters for every LLM role on each agentic call kind. OAuth
-        providers connect on the legacy control panel until accuracy inherits that flow.
+        Default chain is Grok → Claude → OpenAI. Prefer OAuth on the legacy control panel; server
+        env keys (<code>XAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>,{" "}
+        <code>OPENAI_API_KEY</code>) also unlock those providers when present. Never paste secrets
+        in the UI.
       </PageIntro>
       <AccuracyControlView />
     </AccuracyAppShell>

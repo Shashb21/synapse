@@ -74,7 +74,8 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
     >
       <h3 className="text-[13px] font-medium text-foreground">Upload source</h3>
       <p className="text-[12px] text-muted-foreground">
-        PPTX/DOCX/XLSX parse locally. PDF needs <code>LLAMA_CLOUD_API_KEY</code>.
+        PDF/PPTX use LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set (else local fallback).
+        DOCX/XLSX stay local.
       </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Doc role</span>
