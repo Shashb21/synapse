@@ -8,6 +8,11 @@ export { coverageDecisionSchema, coverageCriticOutputSchema } from "./schema";
 export { buildStateFromBlocks } from "./build-state-from-blocks";
 export { deterministicCoverageDecision, runCoverageDecide } from "./decide";
 export { deterministicCriticAccept, runCoverageCritic } from "./critic";
+export {
+  coverageRouteAllowsLlm,
+  mapCoverageOverallToUi,
+  type CoverageUiOverall,
+} from "./overall-map";
 
 const coverageDecideInputSchema = z.object({
   workspace_id: z.string(),

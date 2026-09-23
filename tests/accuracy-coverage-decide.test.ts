@@ -77,6 +77,7 @@ describe("coverage_decide pair run", () => {
   });
 
   it("uses ctx.complete when LLM is connected and locks ids to the pair", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "");
     const ctx = mockCtx(true);
     ctx.complete = vi.fn(async () => ({
       raw: JSON.stringify({
@@ -107,6 +108,46 @@ describe("coverage_decide pair run", () => {
     expect(result.output.overall).toBe("partial");
     expect(result.output.quote_block_ids).toEqual(["B1"]);
     expect(ctx.complete).toHaveBeenCalledOnce();
+    vi.unstubAllEnvs();
+  });
+
+  it("uses ctx.complete when LLM is connected via api_key and locks ids to the pair", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "");
+    const ctx = mockCtx(true);
+    ctx.route = {
+      ...ctx.route,
+      auth: "api_key",
+      provider_id: "anthropic",
+      provider_label: "Claude",
+      model: "claude-sonnet",
+    };
+    ctx.complete = vi.fn(async () => ({
+      raw: JSON.stringify({
+        gap_id: "WRONG",
+        tactic_id: "WRONG",
+        overall: "full",
+        quote_block_ids: ["B1"],
+        confidence: 0.9,
+        rationale: "Strong overlap in B1.",
+      }),
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }));
+
+    const result = await runCoverageDecide(
+      {
+        workspace_id: "ws-1",
+        gap_id: "G1",
+        tactic_id: "T1",
+        block_bundle_ids: ["B1"],
+      },
+      ctx,
+      sampleBlocks,
+    );
+
+    expect(result.mode).toBe("llm");
+    expect(result.output.overall).toBe("full");
+    expect(ctx.complete).toHaveBeenCalledOnce();
+    vi.unstubAllEnvs();
   });
 
   it("module run wires decide helper", async () => {
