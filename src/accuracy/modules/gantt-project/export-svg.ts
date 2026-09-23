@@ -22,7 +22,7 @@ export function activitiesToSvg(activities: GanttActivity[]): string {
 </svg>`;
   }
   const starts = activities.map((a) => toDay(a.start));
-  const ends = activities.map((a) => toDay(a.end));
+  const ends = activities.flatMap((a) => [toDay(a.end), a.readout ? toDay(a.readout) : toDay(a.end)]);
   const min = Math.min(...starts);
   const max = Math.max(...ends);
   const span = Math.max(max - min, 1);
@@ -32,9 +32,10 @@ export function activitiesToSvg(activities: GanttActivity[]): string {
       const w = Math.max(((toDay(activity.end) - toDay(activity.start)) / span) * (width - 180), 8);
       const y = 28 + index * rowH;
       const label = escapeXml(activity.tactic_id);
+      const readout = activity.readout ? ` · readout ${activity.readout.slice(0, 10)}` : "";
       return `<text x="8" y="${y + 14}" font-size="11" fill="#111">${label}</text>
 <rect x="${x}" y="${y}" width="${w}" height="16" rx="2" fill="#333"/>
-<text x="${x + 4}" y="${y + 12}" font-size="9" fill="#fff">${activity.start.slice(0, 10)} → ${activity.end.slice(0, 10)}</text>`;
+<text x="${x + 4}" y="${y + 12}" font-size="9" fill="#fff">${activity.start.slice(0, 10)} → ${activity.end.slice(0, 10)}${readout}</text>`;
     })
     .join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>

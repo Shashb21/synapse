@@ -16,14 +16,18 @@ describe("gantt SVG export", () => {
         tactic_id: "T1",
         start: "2026-01-01",
         end: "2026-06-01",
+        readout: null,
         depends_on: [],
+        gap_ids: [],
       },
       {
         id: activityIdForTactic("T2"),
         tactic_id: "T2",
         start: "2026-04-01",
         end: "2026-12-01",
+        readout: "2027-01-15",
         depends_on: ["T1"],
+        gap_ids: ["G1"],
       },
     ]);
     expect(svg).toContain("T1");
@@ -31,5 +35,6 @@ describe("gantt SVG export", () => {
     expect(svg).toContain("<rect");
     expect(svg).toContain("2026-01-01");
     expect(svg).toContain("2026-12-01");
+    expect(svg).toContain("readout 2027-01-15");
   });
 });

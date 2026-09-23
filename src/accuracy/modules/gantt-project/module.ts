@@ -7,7 +7,10 @@ const tacticSchema = z.object({
   validated: z.boolean(),
   start: z.string().nullable().optional(),
   end: z.string().nullable().optional(),
+  readout: z.string().nullable().optional(),
   depends_on: z.array(z.string()).optional(),
+  tactic_type: z.string().nullable().optional(),
+  gap_ids: z.array(z.string()).optional(),
 });
 
 const activityOverrideSchema = z.object({
@@ -15,13 +18,29 @@ const activityOverrideSchema = z.object({
   tactic_id: z.string().min(1, "activity tactic_id is required"),
   start: z.string().optional(),
   end: z.string().optional(),
+  readout: z.string().nullable().optional(),
   depends_on: z.array(z.string()).optional(),
+});
+
+const coverageJoinSchema = z.object({
+  gap_id: z.string().min(1),
+  tactic_id: z.string().min(1),
+  overall: z.string(),
+  validated: z.boolean(),
+});
+
+const gapSchema = z.object({
+  id: z.string().min(1),
+  parent_gap_id: z.string().nullable().optional(),
+  validated: z.boolean().optional(),
 });
 
 const inputSchema = z.object({
   workspace_id: z.string(),
   tactics: z.array(tacticSchema),
   activities: z.array(activityOverrideSchema).optional(),
+  coverages: z.array(coverageJoinSchema).optional(),
+  gaps: z.array(gapSchema).optional(),
 });
 
 const outputSchema = z.object({
@@ -32,7 +51,9 @@ const outputSchema = z.object({
       tactic_id: z.string(),
       start: z.string(),
       end: z.string(),
+      readout: z.string().nullable(),
       depends_on: z.array(z.string()),
+      gap_ids: z.array(z.string()),
     }),
   ),
 });
@@ -41,7 +62,7 @@ export const ganttProjectModule = mechanicalModule({
   id: "gantt-project.engine-v1",
   call_kind: "gantt_project",
   title: "Gantt projection",
-  summary: "Deterministic timeline from validated tactics only — no invented bars.",
+  summary: "Deterministic timeline from validated tactics, coverage joins, and sourced dates — no invented bars.",
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
@@ -52,6 +73,8 @@ export const ganttProjectModule = mechanicalModule({
     const activities = projectGanttFromTactics({
       tactics: input.tactics,
       activities: input.activities,
+      coverages: input.coverages,
+      gaps: input.gaps,
     });
 
     const tacticIds = new Set(input.tactics.map((t) => t.id));
@@ -68,5 +91,12 @@ export const ganttProjectModule = mechanicalModule({
   },
 });
 
-export { projectGanttFromTactics, activityIdForTactic, assertSaveFinalActivities } from "./engine";
+export {
+  projectGanttFromTactics,
+  activityIdForTactic,
+  assertSaveFinalActivities,
+  dependenciesRespectReadouts,
+  activityGateDate,
+  coverageCountsTowardGantt,
+} from "./engine";
 export { projectWorkspaceGantt, saveFinalGanttPlan, workspaceLatestPlan } from "./save-final";

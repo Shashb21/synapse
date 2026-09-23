@@ -41,8 +41,8 @@ export default async function AccuracyTimelinePage({
   return (
     <AccuracyAppShell active="timeline">
       <PageIntro kicker="Final truth · validated tactics only" title="Timeline">
-        Interactive Gantt projection from validated tactics. Save as final freezes a versioned
-        snapshot — no invented bars.
+        Interactive Gantt projection from validated tactics. Bars and readouts stay continuous
+        with coverage joins and tactic dates — no invented studies.
       </PageIntro>
 
       {loadError ? (
