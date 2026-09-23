@@ -218,6 +218,11 @@ export const anthropicClaude: LlmProvider = {
     } else {
       headers.authorization = `Bearer ${auth.access_token}`;
     }
+    // Org-level API keys require an explicit Anthropic workspace (not Synapse workspace).
+    const anthropicWorkspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
+    if (anthropicWorkspaceId) {
+      headers["anthropic-workspace-id"] = anthropicWorkspaceId;
+    }
     const payload = await postJson(
       `${env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")}/v1/messages`,
       headers,

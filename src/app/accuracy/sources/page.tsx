@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { SourceExtractActions } from "@/components/accuracy/source-extract-actions";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack } from "@/accuracy";
 import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
@@ -40,9 +41,10 @@ export default async function AccuracySourcesPage({
 
   return (
     <AccuracyAppShell active="sources">
-      <PageIntro kicker="Ingest · parse health" title="Sources">
+      <PageIntro kicker="Ingest · parse · extract" title="Sources">
         PDF and PPTX prefer LlamaParse when <code>LLAMA_CLOUD_API_KEY</code> is set; without it they
-        fall back to local structured parse. DOCX/XLSX/text stay local.
+        fall back to local structured parse. DOCX/XLSX/text stay local. After parse, run need +
+        inventory extract to populate the ledger (requires a connected LLM or env API key).
       </PageIntro>
 
       {loadError ? (
@@ -82,6 +84,11 @@ export default async function AccuracySourcesPage({
                     {source.reference_pack_id ? ` · pack ${source.reference_pack_id}` : ""}
                   </p>
                   <p className="mt-1 font-mono text-[10px] text-muted-foreground">{source.id}</p>
+                  <SourceExtractActions
+                    workspaceId={workspaceId}
+                    sourceFileId={source.id}
+                    blockCount={source.block_count}
+                  />
                 </li>
               ))}
             </ul>

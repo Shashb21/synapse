@@ -51,7 +51,22 @@ test.describe("accuracy shell", () => {
   test("sources page renders shell nav", async ({ page }) => {
     await page.goto("/accuracy/sources");
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
+    await expect(page.getByText(/need \+ inventory extract/i)).toBeVisible();
     await expectAccuracyShell(page);
+  });
+
+  test("shell nav preserves workspace_id query", async ({ page }) => {
+    await page.goto("/accuracy/ledger?workspace_id=ws-demo-preserve");
+    const nav = page.getByRole("navigation", { name: /^accuracy$/i });
+    await expect(nav.getByRole("link", { name: "Sources" })).toHaveAttribute(
+      "href",
+      "/accuracy/sources?workspace_id=ws-demo-preserve",
+    );
+    await expect(nav.getByRole("link", { name: "Plan" })).toHaveAttribute(
+      "href",
+      "/accuracy/plan?workspace_id=ws-demo-preserve",
+    );
+    await expect(nav.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", "/accuracy");
   });
 
   test("coverage page renders shell nav", async ({ page }) => {
