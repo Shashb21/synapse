@@ -7,6 +7,7 @@ import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { NEED_PROPOSER_SYSTEM, needProposerUser } from "./prompts";
 import { scorePackRecall } from "../../eval/reference-gold";
+import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
 
 export const needGapSchema = z.object({
   id: z.string(),
@@ -89,6 +90,24 @@ function judgeDraft(draft: NeedDraft): NeedGap[] {
   return out;
 }
 
+async function loadBlocksForPrompt(input: {
+  workspace_id: string;
+  source_file_id: string;
+  block_ids: string[];
+}) {
+  const rows =
+    input.block_ids.length > 0
+      ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
+      : await readParseBlocks(input.workspace_id, input.source_file_id);
+  return rows
+    .filter((row) => row.source_file_id === input.source_file_id)
+    .map((row) => ({
+      id: row.id,
+      heading: row.heading,
+      text: row.text,
+    }));
+}
+
 async function proposeNeeds(
   ctx: AccuracyModuleContext,
   input: { workspace_id: string; source_file_id: string; block_ids: string[] },
@@ -99,13 +118,15 @@ async function proposeNeeds(
   if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
     return { gaps: [] };
   }
+  const blocks = await loadBlocksForPrompt(input);
+  const block_ids = input.block_ids.length > 0 ? input.block_ids : blocks.map((b) => b.id);
   const raw = await completeJson(ctx.complete, {
     system: NEED_PROPOSER_SYSTEM,
     user: needProposerUser({
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
-      block_ids: input.block_ids,
-      blocks: [],
+      block_ids,
+      blocks,
       critiques: round === 0 ? [] : critiques,
     }),
     purpose: `need_extract:proposer:r${round}`,

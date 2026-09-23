@@ -61,8 +61,30 @@ export async function runAccuracyModule<O = unknown>(args: {
 
   let route = null;
   try {
-    route = await resolveAccuracyRoute({ call_kind: args.call_kind, agent_role });
-    recorder.note("route", route);
+    if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+      // Vitest / Playwright: allow agentic modules without a live provider.
+      const stub = await resolveAccuracyRoute({
+        call_kind: args.call_kind,
+        agent_role: implementation.manifest.agentic ? agent_role : "none",
+      }).catch(() => null);
+      route = stub ?? {
+        call_kind: args.call_kind,
+        role: agent_role === "none" ? "proposer" : agent_role,
+        provider_id: "xai-grok",
+        provider_label: "Grok (stub)",
+        model: "stub",
+        auth: "none" as const,
+        connected: false,
+        params: { temperature: 0, max_tokens: 0 },
+        fallbacks: [],
+        degraded: true,
+        reason: "SYNAPSE_TEST_STUB_LLM",
+      };
+      recorder.note("route", route);
+    } else {
+      route = await resolveAccuracyRoute({ call_kind: args.call_kind, agent_role });
+      recorder.note("route", route);
+    }
   } catch (error) {
     if (implementation.manifest.agentic) {
       const message = error instanceof Error ? error.message : String(error);
@@ -72,6 +94,11 @@ export async function runAccuracyModule<O = unknown>(args: {
   }
 
   const costs: CostEstimate[] = [];
+  const llmReady =
+    route &&
+    route.connected &&
+    (route.auth === "oauth" || route.auth === "api_key") &&
+    process.env.SYNAPSE_TEST_STUB_LLM !== "1";
   const ctx: AccuracyModuleContext = {
     org_id: args.org_id,
     workspace_id: args.workspace_id,
@@ -91,30 +118,33 @@ export async function runAccuracyModule<O = unknown>(args: {
       degraded: false,
       reason: "mechanical",
     },
-    complete:
-      route && route.auth === "oauth"
-        ? accuracyCompletionFor({
-            route,
-            run: recorder,
-            onUsage: (usage, cost_usd) => {
-              const c: CostEstimate = {
+    complete: llmReady
+      ? accuracyCompletionFor({
+          route: route!,
+          run: recorder,
+          onUsage: (usage, cost_usd) => {
+            const c: CostEstimate = {
+              provider_id: route!.provider_id,
+              model: route!.model,
+              usage,
+              cost_usd,
+              price_source: estimateCostUsd({
                 provider_id: route!.provider_id,
                 model: route!.model,
                 usage,
-                cost_usd,
-                price_source: estimateCostUsd({
-                  provider_id: route!.provider_id,
-                  model: route!.model,
-                  usage,
-                }).price_source,
-              };
-              costs.push(c);
-              recorder.addCost(c);
-            },
-          })
-        : async () => {
-            throw new Error("LLM not available for mechanical module");
+              }).price_source,
+            };
+            costs.push(c);
+            recorder.addCost(c);
           },
+        })
+      : async () => {
+          throw new Error(
+            process.env.SYNAPSE_TEST_STUB_LLM === "1"
+              ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
+              : "LLM not available — connect OAuth or set a provider API key",
+          );
+        },
     noteCost: (cost) => {
       costs.push(cost);
       recorder.addCost(cost);

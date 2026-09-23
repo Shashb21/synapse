@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import {
   Activity,
   BookMarked,
@@ -54,19 +55,28 @@ const NAV: NavItem[] = [
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
 ];
 
+function withWorkspace(href: string, workspaceId: string | null): string {
+  if (!workspaceId || href === "/accuracy") return href;
+  const sep = href.includes("?") ? "&" : "?";
+  return `${href}${sep}workspace_id=${encodeURIComponent(workspaceId)}`;
+}
+
 function NavButton({
   item,
   active,
   dense,
+  workspaceId,
   onNavigate,
 }: {
   item: NavItem;
   active: AccuracyShellId;
   dense?: boolean;
+  workspaceId: string | null;
   onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   const isActive = active === item.id;
+  const href = withWorkspace(item.href, workspaceId);
   const className = cn(
     "flex w-full items-center gap-2 rounded-md px-2 text-left no-underline transition-colors",
     dense ? "h-9 justify-center md:justify-start md:h-8" : "h-8",
@@ -75,7 +85,7 @@ function NavButton({
       : "text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
   );
   return (
-    <Link href={item.href} className={className} onClick={onNavigate}>
+    <Link href={href} className={className} onClick={onNavigate}>
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className={cn("min-w-0 flex-1 truncate text-[13px]", dense && "hidden md:inline")}>
         {item.label}
@@ -84,7 +94,7 @@ function NavButton({
   );
 }
 
-export function AccuracyChrome({
+function AccuracyChromeInner({
   children,
   active,
 }: {
@@ -92,6 +102,8 @@ export function AccuracyChrome({
   active: AccuracyShellId;
 }) {
   const [open, setOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const workspaceId = searchParams.get("workspace_id");
   const current = NAV.find((item) => item.id === active)?.label ?? "Accuracy";
 
   return (
@@ -115,7 +127,13 @@ export function AccuracyChrome({
         </Link>
         <nav aria-label="Accuracy" className="flex min-h-0 flex-1 flex-col gap-0.5 px-1 md:px-0">
           {NAV.map((item) => (
-            <NavButton key={item.id} item={item} active={active} dense />
+            <NavButton
+              key={item.id}
+              item={item}
+              active={active}
+              dense
+              workspaceId={workspaceId}
+            />
           ))}
           <div className="mt-auto border-t border-sidebar-border pt-3">
             <Link
@@ -142,7 +160,13 @@ export function AccuracyChrome({
               </SheetHeader>
               <div className="grid gap-0.5" onClick={() => setOpen(false)}>
                 {NAV.map((item) => (
-                  <NavButton key={item.id} item={item} active={active} onNavigate={() => setOpen(false)} />
+                  <NavButton
+                    key={item.id}
+                    item={item}
+                    active={active}
+                    workspaceId={workspaceId}
+                    onNavigate={() => setOpen(false)}
+                  />
                 ))}
               </div>
             </SheetContent>
@@ -152,5 +176,19 @@ export function AccuracyChrome({
         <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-5 sm:px-6">{children}</main>
       </div>
     </div>
+  );
+}
+
+export function AccuracyChrome({
+  children,
+  active,
+}: {
+  children: React.ReactNode;
+  active: AccuracyShellId;
+}) {
+  return (
+    <Suspense fallback={<div className="min-h-full bg-background p-4 text-[12px] text-muted-foreground">Loading…</div>}>
+      <AccuracyChromeInner active={active}>{children}</AccuracyChromeInner>
+    </Suspense>
   );
 }

@@ -7,6 +7,7 @@ import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { INVENTORY_PROPOSER_SYSTEM, inventoryProposerUser } from "./prompts";
+import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
 
 const tacticStatusSchema = z.enum(TACTIC_STATUSES);
 const tacticTypeSchema = z.enum(TACTIC_TYPES);
@@ -111,6 +112,24 @@ function judgeDraft(draft: InventoryDraft): InventoryExtractOutput["tactics"] {
   return out;
 }
 
+async function loadBlocksForPrompt(input: {
+  workspace_id: string;
+  source_file_id: string;
+  block_ids: string[];
+}) {
+  const rows =
+    input.block_ids.length > 0
+      ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
+      : await readParseBlocks(input.workspace_id, input.source_file_id);
+  return rows
+    .filter((row) => row.source_file_id === input.source_file_id)
+    .map((row) => ({
+      id: row.id,
+      heading: row.heading,
+      text: row.text,
+    }));
+}
+
 async function proposeInventory(
   ctx: AccuracyModuleContext,
   input: { workspace_id: string; source_file_id: string; block_ids: string[] },
@@ -121,13 +140,15 @@ async function proposeInventory(
   if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
     return { tactics: [] };
   }
+  const blocks = await loadBlocksForPrompt(input);
+  const block_ids = input.block_ids.length > 0 ? input.block_ids : blocks.map((b) => b.id);
   const raw = await completeJson(ctx.complete, {
     system: INVENTORY_PROPOSER_SYSTEM,
     user: inventoryProposerUser({
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
-      block_ids: input.block_ids,
-      blocks: [],
+      block_ids,
+      blocks,
       hints: "",
       critiques: round === 0 ? [] : critiques,
     }),
