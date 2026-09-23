@@ -109,9 +109,11 @@ describe("accuracy extract API", () => {
     expect(json.blocks_used).toBe(1);
     expect(json.gaps_inserted).toBe(0);
     expect(json.tactics_inserted).toBe(0);
-    expect(json.runs?.map((r) => r.call_kind).sort()).toEqual([
-      "inventory_extract",
+    expect(json.runs?.map((r) => r.call_kind)).toEqual([
       "need_extract",
+      "inventory_extract",
+      "merge_dedupe",
+      "status_derive",
     ]);
 
     const claims = await listClaims(workspace_id);

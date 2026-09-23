@@ -2,7 +2,14 @@ import { and, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId } from "@/modules/kernel/ids";
-import { claimMetadata, listClaims, type AccuracyClaimRow } from "./claim-store";
+import {
+  claimMetadata,
+  isActiveLedgerClaim,
+  listClaims,
+  type AccuracyClaimRow,
+} from "./claim-store";
+
+export type CoverageJoinRow = typeof t.accuracyCoverageJoins.$inferSelect;
 
 export type CoveragePair = {
   id: string;
@@ -16,8 +23,8 @@ export type CoveragePair = {
 export async function listCoveragePairs(workspace_id: string): Promise<CoveragePair[]> {
   await ensureAccuracySchema();
   const claims = await listClaims(workspace_id, { limit: 500 });
-  const gaps = claims.filter((c) => c.claim_type === "gap");
-  const tactics = claims.filter((c) => c.claim_type === "tactic");
+  const gaps = claims.filter((c) => c.claim_type === "gap" && isActiveLedgerClaim(c));
+  const tactics = claims.filter((c) => c.claim_type === "tactic" && isActiveLedgerClaim(c));
   const joins = await accuracyDb()
     .select()
     .from(t.accuracyCoverageJoins)
@@ -93,4 +100,70 @@ export async function upsertCoverageDecision(args: {
     validated: true,
     rationale: args.rationale,
   });
+}
+
+export async function listCoverageJoins(workspace_id: string): Promise<CoverageJoinRow[]> {
+  await ensureAccuracySchema();
+  return accuracyDb()
+    .select()
+    .from(t.accuracyCoverageJoins)
+    .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
+}
+
+export async function insertCoverageJoin(args: {
+  workspace_id: string;
+  gap_id: string;
+  tactic_id: string;
+  overall: string;
+  validated?: boolean;
+  rationale?: string | null;
+}): Promise<CoverageJoinRow> {
+  await ensureAccuracySchema();
+  const row = {
+    id: newId("cov"),
+    workspace_id: args.workspace_id,
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    overall: args.overall,
+    dimensions: {} as Record<string, unknown>,
+    confidence: null,
+    validated: args.validated ?? true,
+    rationale: args.rationale ?? null,
+  };
+  await accuracyDb().insert(t.accuracyCoverageJoins).values(row);
+  return row as CoverageJoinRow;
+}
+
+/** After merge, point joins at the surviving claim id. */
+export async function reassignCoverageClaimId(args: {
+  workspace_id: string;
+  from_id: string;
+  to_id: string;
+  role: "gap" | "tactic";
+}): Promise<number> {
+  if (args.from_id === args.to_id) return 0;
+  const joins = await listCoverageJoins(args.workspace_id);
+  let updated = 0;
+  for (const join of joins) {
+    const fromGap = args.role === "gap" && join.gap_id === args.from_id;
+    const fromTactic = args.role === "tactic" && join.tactic_id === args.from_id;
+    if (!fromGap && !fromTactic) continue;
+    const nextGap = fromGap ? args.to_id : join.gap_id;
+    const nextTactic = fromTactic ? args.to_id : join.tactic_id;
+    const collision = joins.find(
+      (row) => row.id !== join.id && row.gap_id === nextGap && row.tactic_id === nextTactic,
+    );
+    if (collision) {
+      await accuracyDb()
+        .delete(t.accuracyCoverageJoins)
+        .where(eq(t.accuracyCoverageJoins.id, join.id));
+    } else {
+      await accuracyDb()
+        .update(t.accuracyCoverageJoins)
+        .set({ gap_id: nextGap, tactic_id: nextTactic })
+        .where(eq(t.accuracyCoverageJoins.id, join.id));
+    }
+    updated += 1;
+  }
+  return updated;
 }

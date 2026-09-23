@@ -63,3 +63,5 @@ export {
 } from "./eval/reference-gold";
 export { scoreGapIdRecall } from "./modules/need-extract/module";
 export { scoreRecallAgainstTargets } from "./eval/pack-recall";
+export { mergeDedupeCandidates } from "./modules/merge-dedupe/engine";
+export { deriveGapStatus, deriveWorkspaceGapStatuses } from "./modules/status-derive/engine";
