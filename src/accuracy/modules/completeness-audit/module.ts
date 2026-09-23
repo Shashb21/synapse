@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { mechanicalModule } from "../_factory";
 import {
-  auditCompleteness,
+  auditCompletenessDetailed,
   missFlagSchema,
   type AuditClaimLite,
 } from "./engine";
@@ -14,8 +14,14 @@ import {
 import { readAllParseBlocks } from "@/accuracy/store/parse-store";
 import { resolvedMissFlagBlockIds } from "@/accuracy/store/miss-flag-store";
 
-export { auditCompleteness, missFlagSchema } from "./engine";
-export type { MissFlag, MissFlagSuggested } from "./engine";
+export { auditCompleteness, auditCompletenessDetailed, missFlagSchema } from "./engine";
+export type { MissFlag, MissFlagSuggested, CompletenessAuditResult } from "./engine";
+export {
+  completenessSkipReason,
+  isHeadingOnlyNoise,
+  isChapterLabelNoise,
+  isSiLabelNoise,
+} from "./skip-rules";
 
 const inputSchema = z.object({
   workspace_id: z.string(),
@@ -27,6 +33,12 @@ const outputSchema = z.object({
   flags: z.array(missFlagSchema),
   scanned_blocks: z.number().int(),
   open_flags: z.number().int(),
+  skipped_noise: z.number().int(),
+  skipped_by_reason: z.object({
+    heading_only: z.number().int(),
+    chapter_label: z.number().int(),
+    si_label: z.number().int(),
+  }),
 });
 
 export type CompletenessAuditOutput = z.infer<typeof outputSchema>;
@@ -65,7 +77,7 @@ export const completenessAuditModule = mechanicalModule({
       listClaims(input.workspace_id, { limit: 500 }),
       resolvedMissFlagBlockIds(input.workspace_id),
     ]);
-    const flags = auditCompleteness({
+    const { flags, skipped_noise, skipped_by_reason } = auditCompletenessDetailed({
       blocks,
       claims: claimsForAudit(claims),
       resolved_block_ids: resolved,
@@ -75,6 +87,8 @@ export const completenessAuditModule = mechanicalModule({
     ctx.run.note("completeness:scanned", {
       scanned_blocks: blocks.length,
       open_flags: flags.length,
+      skipped_noise,
+      skipped_by_reason,
       returned: limited.length,
     });
     return {
@@ -82,8 +96,10 @@ export const completenessAuditModule = mechanicalModule({
         flags: limited,
         scanned_blocks: blocks.length,
         open_flags: flags.length,
+        skipped_noise,
+        skipped_by_reason,
       },
-      summary: `Completeness audit: ${flags.length} open miss flag(s) from ${blocks.length} block(s)`,
+      summary: `Completeness audit: ${flags.length} open miss flag(s) from ${blocks.length} block(s); ${skipped_noise} heading/chapter/SI skipped`,
     };
   },
 });

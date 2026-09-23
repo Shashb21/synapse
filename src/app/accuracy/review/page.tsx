@@ -22,6 +22,7 @@ export default async function AccuracyReviewPage({
   let flags: MissFlagCardModel[] = [];
   let scanned = 0;
   let openCount = 0;
+  let skippedNoise = 0;
   let loadError: string | null = null;
 
   try {
@@ -43,6 +44,7 @@ export default async function AccuracyReviewPage({
         const filenameById = new Map(sources.map((s) => [s.id, s.filename]));
         scanned = result.output.scanned_blocks;
         openCount = result.output.open_flags;
+        skippedNoise = result.output.skipped_noise;
         flags = result.output.flags.map((flag) => ({
           ...flag,
           source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,
@@ -58,7 +60,8 @@ export default async function AccuracyReviewPage({
   return (
     <AccuracyAppShell active="review">
       <PageIntro kicker="Recall gate · completeness audit" title="Review">
-        Miss flags from parse blocks that are not yet in the ledger. Promote to a draft gap or tactic,
+        Miss flags from parse blocks that are not yet in the ledger. Heading-only, chapter, and SI
+        chrome is skipped so Review stays usable on full PPTX gold. Promote to a draft gap or tactic,
         or dismiss with a rationale — every decision feeds hillclimb.
       </PageIntro>
 
@@ -100,6 +103,7 @@ export default async function AccuracyReviewPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {scanned} block(s) scanned · {openCount} open
             miss flag(s)
+            {skippedNoise > 0 ? ` · ${skippedNoise} heading/chapter/SI skipped` : ""}
           </p>
           {scanned === 0 ? (
             <p className="text-[12px] text-muted-foreground">

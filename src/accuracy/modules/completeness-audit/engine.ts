@@ -1,12 +1,23 @@
 import { z } from "zod";
+import {
+  collapseAuditText,
+  completenessSkipReason,
+  emptySkipCounts,
+  HEADING_BLOCK_KINDS,
+  type CompletenessSkipReason,
+} from "./skip-rules";
 
-/** Text + table kinds only — skip slide masters / icons / empty captions (reference UX). */
-export const AUDITABLE_BLOCK_KINDS = new Set([
-  "prose",
-  "table_row",
-  "list_item",
-  "heading",
-]);
+export {
+  completenessSkipReason,
+  collapseAuditText,
+  isHeadingOnlyNoise,
+  isChapterLabelNoise,
+  isSiLabelNoise,
+} from "./skip-rules";
+export type { CompletenessSkipReason, SkipRuleBlock } from "./skip-rules";
+
+/** Text + table kinds only — skip headings, slide masters, icons, empty captions (reference UX). */
+export const AUDITABLE_BLOCK_KINDS = new Set(["prose", "table_row", "list_item"]);
 
 export const missFlagSuggestedSchema = z.enum(["gap", "tactic"]);
 export type MissFlagSuggested = z.infer<typeof missFlagSuggestedSchema>;
@@ -101,18 +112,27 @@ function isCoveredByClaims(block: AuditBlockLite, claims: AuditClaimLite[], cite
   return claims.some((claim) => blockOverlapsStatement(block.text, claim.statement));
 }
 
+export type CompletenessAuditResult = {
+  flags: MissFlag[];
+  skipped_noise: number;
+  skipped_by_reason: Record<CompletenessSkipReason, number>;
+};
+
 /**
  * Deterministic completeness audit: index (parse blocks) vs inventory/needs (claims).
  * Flags auditable blocks that are neither provenance-cited nor lexically covered.
+ * Heading-only / chapter / SI chrome is skipped mechanically (no LLM).
  */
-export function auditCompleteness(args: {
+export function auditCompletenessDetailed(args: {
   blocks: AuditBlockLite[];
   claims: AuditClaimLite[];
   resolved_block_ids?: Iterable<string>;
-}): MissFlag[] {
+}): CompletenessAuditResult {
   const resolved = new Set(args.resolved_block_ids ?? []);
   const cited = citedBlockIds(args.claims);
   const flags: MissFlag[] = [];
+  const skipped_by_reason = emptySkipCounts();
+  let skipped_noise = 0;
 
   const sorted = [...args.blocks].sort((a, b) => {
     if (a.source_file_id !== b.source_file_id) {
@@ -123,9 +143,21 @@ export function auditCompleteness(args: {
 
   for (const block of sorted) {
     if (resolved.has(block.id)) continue;
-    if (!AUDITABLE_BLOCK_KINDS.has(block.kind)) continue;
-    const text = block.text.replace(/\s+/g, " ").trim();
+    if (!AUDITABLE_BLOCK_KINDS.has(block.kind)) {
+      if (HEADING_BLOCK_KINDS.has(block.kind)) {
+        skipped_noise += 1;
+        skipped_by_reason.heading_only += 1;
+      }
+      continue;
+    }
+    const text = collapseAuditText(block.text);
     if (text.length < MIN_BLOCK_CHARS) continue;
+    const skip = completenessSkipReason({ ...block, text });
+    if (skip) {
+      skipped_noise += 1;
+      skipped_by_reason[skip] += 1;
+      continue;
+    }
     if (isCoveredByClaims(block, args.claims, cited)) continue;
 
     const suggested = suggestClaimType(block);
@@ -143,5 +175,13 @@ export function auditCompleteness(args: {
     });
   }
 
-  return flags;
+  return { flags, skipped_noise, skipped_by_reason };
+}
+
+export function auditCompleteness(args: {
+  blocks: AuditBlockLite[];
+  claims: AuditClaimLite[];
+  resolved_block_ids?: Iterable<string>;
+}): MissFlag[] {
+  return auditCompletenessDetailed(args).flags;
 }

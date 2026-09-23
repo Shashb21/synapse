@@ -49,6 +49,8 @@ export async function GET(req: Request) {
       summary: result.summary,
       scanned_blocks: result.output.scanned_blocks,
       open_flags: result.output.open_flags,
+      skipped_noise: result.output.skipped_noise,
+      skipped_by_reason: result.output.skipped_by_reason,
       flags: result.output.flags.map((flag) => ({
         ...flag,
         source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,
