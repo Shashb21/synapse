@@ -23,6 +23,15 @@ export type AccuracyClaimMetadata = {
   end?: string | null;
   depends_on?: string[];
   validation?: ClaimValidationMeta | null;
+  external_id?: string | null;
+  reference_pack_id?: string | null;
+  tactic_status?: string | null;
+  computed_status?: string | null;
+  derived_at?: string | null;
+  merged_into?: string | null;
+  merged_from?: string[];
+  merge_reason?: string | null;
+  status_override?: { status: string; rationale: string } | null;
   [key: string]: unknown;
 };
 
@@ -201,6 +210,39 @@ export async function updateClaimMetadata(args: {
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
   return (claim.metadata ?? {}) as AccuracyClaimMetadata;
+}
+
+/** Active ledger rows — skip merged duplicates and rejected claims. */
+export function isActiveLedgerClaim(claim: Pick<AccuracyClaimRow, "status">): boolean {
+  return claim.status !== "merged" && claim.status !== "rejected";
+}
+
+export async function persistClaimPatch(args: {
+  workspace_id: string;
+  claim_id: string;
+  status?: string;
+  metadata?: AccuracyClaimMetadata;
+}): Promise<AccuracyClaimRow> {
+  await ensureAccuracySchema();
+  const existing = await getClaim(args.workspace_id, args.claim_id);
+  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  const now = nowIso();
+  const metadata = args.metadata ?? ((existing.metadata ?? {}) as AccuracyClaimMetadata);
+  const status = args.status ?? existing.status;
+  await accuracyDb()
+    .update(t.accuracyClaims)
+    .set({
+      status,
+      metadata: metadata as Record<string, unknown>,
+      updated_at: now,
+    })
+    .where(
+      and(
+        eq(t.accuracyClaims.id, args.claim_id),
+        eq(t.accuracyClaims.workspace_id, args.workspace_id),
+      ),
+    );
+  return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
 }
 
 /** Map tactic claims into inputs for `projectGanttFromTactics`. */

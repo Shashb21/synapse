@@ -20,6 +20,7 @@ function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerCl
     validated: claim.validated,
     source_badge: String(meta.source_badge ?? claim.source_file_id ?? "unspecified source"),
     validation_rationale: meta.validation?.rationale ?? null,
+    computed_status: typeof meta.computed_status === "string" ? meta.computed_status : null,
   };
 }
 
@@ -39,8 +40,8 @@ export default async function AccuracyLedgerPage({
     workspaces = await listWorkspaces();
     if (workspaceId) {
       const claims = await listClaims(workspaceId);
-      gaps = claims.filter((c) => c.claim_type === "gap").map(toCard);
-      tactics = claims.filter((c) => c.claim_type === "tactic").map(toCard);
+      gaps = claims.filter((c) => c.claim_type === "gap" && c.status !== "merged").map(toCard);
+      tactics = claims.filter((c) => c.claim_type === "tactic" && c.status !== "merged").map(toCard);
     }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load ledger";

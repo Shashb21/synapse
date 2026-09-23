@@ -5,7 +5,12 @@ import {
   missFlagSchema,
   type AuditClaimLite,
 } from "./engine";
-import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
+import {
+  claimMetadata,
+  isActiveLedgerClaim,
+  listClaims,
+  type AccuracyClaimRow,
+} from "@/accuracy/store/claim-store";
 import { readAllParseBlocks } from "@/accuracy/store/parse-store";
 import { resolvedMissFlagBlockIds } from "@/accuracy/store/miss-flag-store";
 
@@ -29,7 +34,7 @@ export type CompletenessAuditOutput = z.infer<typeof outputSchema>;
 function claimsForAudit(
   rows: Awaited<ReturnType<typeof listClaims>>,
 ): AuditClaimLite[] {
-  return rows.map((row) => {
+  return rows.filter(isActiveLedgerClaim).map((row: AccuracyClaimRow) => {
     const meta = claimMetadata(row);
     const provenance = Array.isArray(meta.provenance)
       ? (meta.provenance as Array<{ block_id?: string | null }>)

@@ -14,6 +14,7 @@ export type LedgerClaimCardModel = {
   validated: boolean;
   source_badge: string;
   validation_rationale: string | null;
+  computed_status?: string | null;
 };
 
 function validationLabel(claim: LedgerClaimCardModel): string {
@@ -85,6 +86,11 @@ export function LedgerClaimCard({
         <Badge variant="secondary" className="text-[10px]">
           {claim.claim_type}
         </Badge>
+        {claim.claim_type === "gap" && claim.computed_status ? (
+          <Badge variant="outline" className="text-[10px]">
+            {claim.computed_status}
+          </Badge>
+        ) : null}
         <span className="text-[11px] text-muted-foreground">{claim.id}</span>
       </div>
       {claim.validation_rationale ? (

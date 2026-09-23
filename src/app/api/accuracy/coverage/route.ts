@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { registerAccuracyStack } from "@/accuracy";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { listCoveragePairs, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,20 @@ export async function POST(req: Request) {
   try {
     const body = decideSchema.parse(await req.json());
     await upsertCoverageDecision(body);
-    return NextResponse.json({ ok: true });
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    let statuses: unknown = null;
+    if (org_id) {
+      const derived = await runAccuracyModule({
+        call_kind: "status_derive",
+        agent_role: "none",
+        input: { workspace_id: body.workspace_id, gap_ids: [body.gap_id] },
+        actor: { name: "Coverage decide", function: "medical_affairs" },
+        org_id,
+        workspace_id: body.workspace_id,
+      });
+      statuses = derived.output;
+    }
+    return NextResponse.json({ ok: true, statuses });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Coverage decide failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });

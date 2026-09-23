@@ -3,6 +3,8 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
+import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
+import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
@@ -28,7 +30,7 @@ const MAX_EXTRACT_BLOCKS = 80;
 
 /**
  * Run need_extract and/or inventory_extract for a source file's parse blocks,
- * then persist resulting claims to the workspace ledger.
+ * persist resulting claims, then merge/dedupe and derive Open/Partial/Addressed.
  */
 export async function POST(req: Request) {
   try {
@@ -100,6 +102,7 @@ export async function POST(req: Request) {
             source_badge: "extract",
             external_id: gap.external_id,
             provenance: gap.provenance,
+            reference_pack_id: source.reference_pack_id ?? null,
           },
         });
         gaps_inserted += 1;
@@ -140,6 +143,8 @@ export async function POST(req: Request) {
             type: tactic.type,
             evidence_question: tactic.evidence_question,
             provenance: tactic.provenance,
+            tactic_status: tactic.status,
+            reference_pack_id: source.reference_pack_id ?? null,
           },
         });
         tactics_inserted += 1;
@@ -152,6 +157,36 @@ export async function POST(req: Request) {
       });
     }
 
+    const mergeRun = await runAccuracyModule<MergeDedupeOutput>({
+      call_kind: "merge_dedupe",
+      agent_role: "none",
+      input: { workspace_id: body.workspace_id },
+      actor,
+      org_id,
+      workspace_id: body.workspace_id,
+    });
+    runs.push({
+      call_kind: "merge_dedupe",
+      run_id: mergeRun.run_id,
+      summary: mergeRun.summary,
+      count: mergeRun.output.merged,
+    });
+
+    const statusRun = await runAccuracyModule<StatusDeriveOutput>({
+      call_kind: "status_derive",
+      agent_role: "none",
+      input: { workspace_id: body.workspace_id },
+      actor,
+      org_id,
+      workspace_id: body.workspace_id,
+    });
+    runs.push({
+      call_kind: "status_derive",
+      run_id: statusRun.run_id,
+      summary: statusRun.summary,
+      count: statusRun.output.statuses.length,
+    });
+
     return NextResponse.json({
       ok: true,
       workspace_id: body.workspace_id,
@@ -160,6 +195,8 @@ export async function POST(req: Request) {
       blocks_used: blocks.length,
       gaps_inserted,
       tactics_inserted,
+      merge: mergeRun.output,
+      statuses: statusRun.output,
       runs,
       stub: process.env.SYNAPSE_TEST_STUB_LLM === "1",
     });
