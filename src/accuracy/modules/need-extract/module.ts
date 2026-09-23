@@ -6,7 +6,7 @@ import { provenanceSpanSchema } from "../../store/quote-validator";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { NEED_PROPOSER_SYSTEM, needProposerUser } from "./prompts";
-import { mustFindForPack } from "../../eval/reference-gold";
+import { scorePackRecall } from "../../eval/reference-gold";
 
 export const needGapSchema = z.object({
   id: z.string(),
@@ -121,14 +121,8 @@ export function scoreGapIdRecall(args: {
   packId: string;
   extractedExternalIds: (string | null | undefined)[];
 }): { found: string[]; missing: string[]; recall: number } {
-  const targets = mustFindForPack(args.packId).gap_ids;
-  const foundSet = new Set(
-    args.extractedExternalIds.filter((id): id is string => Boolean(id?.trim())),
-  );
-  const found = targets.filter((id) => foundSet.has(id));
-  const missing = targets.filter((id) => !foundSet.has(id));
-  const recall = targets.length === 0 ? 1 : found.length / targets.length;
-  return { found, missing, recall };
+  const slice = scorePackRecall(args.packId, { gap_ids: args.extractedExternalIds }).gap_ids;
+  return { found: slice.found, missing: slice.missing, recall: slice.recall };
 }
 
 export const needExtractModule = agenticModule({

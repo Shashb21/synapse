@@ -58,5 +58,8 @@ export {
   loadReferenceManifest,
   mustFindForPack,
   accuracyEvalReferencePack,
+  scorePackRecall,
+  candidatesFromGold,
 } from "./eval/reference-gold";
 export { scoreGapIdRecall } from "./modules/need-extract/module";
+export { scoreRecallAgainstTargets } from "./eval/pack-recall";

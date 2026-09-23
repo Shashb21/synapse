@@ -17,6 +17,7 @@
 | W7-need | bc-75c52bec | `need_extract` | **Done** — schema, stub cycle, recall helper |
 | W8-e2e | bc-3acd373b | Playwright `e2e/accuracy/` | **Done** — shell nav + orchestration API smoke |
 | W9-ui | bc-4fa2de7b | Ledger + Timeline save-final | **Done** — claims validate, Gantt save-final, shell nav |
+| W10-recall | bc-483e609a | gold pack recall scoring | **Done** — scorePackRecall + oracleFromGold |
 
 ## Merge rules
 
@@ -42,3 +43,4 @@
 | 2026-09-23 | **W8-e2e complete** — Playwright accuracy shell smoke |
 | 2026-09-23 | **W9-ui complete** — `/accuracy/ledger`, `/accuracy/timeline`, validation-gate persistence, save-final Gantt APIs |
 | 2026-09-23 | **W9-gold-fill** — Populated BGB 43 gaps + 36 tactics and Tisle G:1–G:21 from PPTX |
+| 2026-09-23 | **W10-recall** — Pack recall scoring (`scorePackRecall`, oracle-from-gold) |
