@@ -91,3 +91,30 @@ export function assertActivitiesHaveTacticId(
     }
   }
 }
+
+/**
+ * Save-final guard: every bar must bind to a validated tactic id.
+ * Rejects invented or draft-only bindings before a snapshot is persisted.
+ */
+export function assertSaveFinalActivities(
+  activities: GanttActivity[],
+  validatedTacticIds: Iterable<string>,
+): void {
+  const allowed = new Set(
+    [...validatedTacticIds].map((id) => id.trim()).filter(Boolean),
+  );
+  if (activities.length === 0) {
+    throw new Error("Cannot save final: no activities projected from validated tactics");
+  }
+  for (const [index, row] of activities.entries()) {
+    const tacticId = row.tactic_id?.trim();
+    if (!tacticId) {
+      throw new Error(`Activity at index ${index} is missing tactic_id`);
+    }
+    if (!allowed.has(tacticId)) {
+      throw new Error(
+        `Activity ${row.id} binds to tactic ${tacticId} which is not validated`,
+      );
+    }
+  }
+}

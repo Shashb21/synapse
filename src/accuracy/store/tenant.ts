@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -36,4 +36,19 @@ export async function listWorkspaces(limit = 50) {
     .from(t.accuracyWorkspaces)
     .orderBy(desc(t.accuracyWorkspaces.created_at))
     .limit(limit);
+}
+
+export async function getWorkspace(workspace_id: string) {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb()
+    .select()
+    .from(t.accuracyWorkspaces)
+    .where(eq(t.accuracyWorkspaces.id, workspace_id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getWorkspaceOrgId(workspace_id: string): Promise<string | null> {
+  const workspace = await getWorkspace(workspace_id);
+  return workspace?.org_id ?? null;
 }
