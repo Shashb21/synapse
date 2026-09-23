@@ -4,6 +4,7 @@ import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import type { ParseBlock } from "@/accuracy/store/quote-validator";
 import { buildStateFromBlocks } from "./build-state-from-blocks";
 import { COVERAGE_DECIDE_SYSTEM } from "./prompts";
+import { coverageRouteAllowsLlm } from "./overall-map";
 import { coverageDecisionSchema, type CoverageDecision } from "./schema";
 
 export type CoverageDecideInput = {
@@ -46,7 +47,7 @@ export async function runCoverageDecide(
   ctx: AccuracyModuleContext,
   blocks?: Pick<ParseBlock, "id" | "heading" | "text">[],
 ): Promise<{ output: CoverageDecision; summary: string; mode: "llm" | "stub" }> {
-  if (!ctx.route.connected || ctx.route.auth !== "oauth") {
+  if (process.env.SYNAPSE_TEST_STUB_LLM === "1" || !coverageRouteAllowsLlm(ctx.route)) {
     return {
       output: deterministicCoverageDecision(input),
       summary: "Coverage decision stub (no LLM)",

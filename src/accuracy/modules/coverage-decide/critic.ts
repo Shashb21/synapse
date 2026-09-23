@@ -6,6 +6,7 @@ import {
   type CoverageCriticOutput,
   type CoverageDecision,
 } from "./schema";
+import { coverageRouteAllowsLlm } from "./overall-map";
 import { COVERAGE_CRITIC_SYSTEM } from "./prompts";
 
 export function deterministicCriticAccept(): CoverageCriticOutput {
@@ -18,7 +19,7 @@ export async function runCoverageCritic(
 ): Promise<{ output: CoverageCriticOutput; summary: string; mode: "llm" | "stub" }> {
   const parsedDecision = coverageDecisionSchema.parse(decision);
 
-  if (!ctx.route.connected || ctx.route.auth !== "oauth") {
+  if (process.env.SYNAPSE_TEST_STUB_LLM === "1" || !coverageRouteAllowsLlm(ctx.route)) {
     return {
       output: deterministicCriticAccept(),
       summary: "Coverage critic skipped (no LLM)",

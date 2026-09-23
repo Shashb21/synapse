@@ -69,9 +69,10 @@ test.describe("accuracy shell", () => {
     await expect(nav.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", "/accuracy");
   });
 
-  test("coverage page renders shell nav", async ({ page }) => {
+  test("coverage page renders shell nav and one-pair queue copy", async ({ page }) => {
     await page.goto("/accuracy/coverage");
     await expect(page.getByRole("heading", { name: /^coverage$/i })).toBeVisible();
+    await expect(page.getByText(/one undecided gap/i)).toBeVisible();
     await expectAccuracyShell(page);
   });
 

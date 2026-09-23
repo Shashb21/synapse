@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
-import { CoveragePairCard } from "@/components/accuracy/coverage-pair-card";
+import { CoverageQueue } from "@/components/accuracy/coverage-queue";
 import { registerAccuracyStack } from "@/accuracy";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
+import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
 export const dynamic = "force-dynamic";
@@ -28,13 +29,13 @@ export default async function AccuracyCoveragePage({
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
-  const undecided = pairs.filter((p) => !p.validated).length;
+  const queue = buildCoverageQueue(pairs);
 
   return (
     <AccuracyAppShell active="coverage">
       <PageIntro kicker="Pairwise · one decision at a time" title="Coverage">
-        Decide whether each gap↔tactic pair covers, partially covers, or does not cover — with a
-        rationale. Linked inventory pairs are preferred.
+        Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and
+        rationale — you still confirm with a decide button. Linked inventory pairs are preferred.
       </PageIntro>
 
       {loadError ? (
@@ -54,32 +55,27 @@ export default async function AccuracyCoveragePage({
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {pairs.length} pair(s) · {undecided}{" "}
-            undecided
+            Workspace · {active?.name ?? workspaceId} · {queue.total_count} pair(s) ·{" "}
+            {queue.undecided_count} undecided
           </p>
           {pairs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No gap/tactic pairs yet. Seed gold or add claims on the Ledger.
             </p>
           ) : (
-            <div className="grid gap-3">
-              {pairs.slice(0, 20).map((pair) => (
-                <CoveragePairCard
-                  key={pair.id}
-                  workspaceId={workspaceId}
-                  pair={{
-                    id: pair.id,
-                    gap_id: pair.gap.id,
-                    gap_statement: pair.gap.statement,
-                    tactic_id: pair.tactic.id,
-                    tactic_statement: pair.tactic.statement,
-                    overall: pair.overall,
-                    rationale: pair.rationale,
-                    validated: pair.validated,
-                  }}
-                />
-              ))}
-            </div>
+            <CoverageQueue
+              workspaceId={workspaceId}
+              pairs={pairs.map((pair) => ({
+                id: pair.id,
+                gap_id: pair.gap.id,
+                gap_statement: pair.gap.statement,
+                tactic_id: pair.tactic.id,
+                tactic_statement: pair.tactic.statement,
+                overall: pair.overall,
+                rationale: pair.rationale,
+                validated: pair.validated,
+              }))}
+            />
           )}
         </>
       )}
