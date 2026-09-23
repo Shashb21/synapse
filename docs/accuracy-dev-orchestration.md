@@ -14,7 +14,7 @@
 | W4-inventory | bc-68e82881 | `inventory_extract` prompts + schema | **Done** — stub cycle + schema tests |
 | W5-coverage | bc-f773715f | `coverage_decide` + critic | **Done** — buildStateFromBlocks + 7 tests |
 | W6-gantt | bc-dc2ce4ab | `gantt_project` (`gantt-project/`) | **Done** — 7 unit tests, validated tactics only |
-| W7-need | (next) | `need_extract` | per-source gap recall eval |
+| W7-need | bc-75c52bec | `need_extract` | **Done** — schema, stub cycle, recall helper |
 | W8-e2e | (next) | Playwright `e2e/accuracy/` | upload reference pack path |
 
 ## Merge rules
@@ -37,3 +37,4 @@
 | 2026-09-23 | **W3-gold complete** — `reference-gold.ts`, `accuracyEvalReferencePack` stub, 3 tests |
 | 2026-09-23 | **W6-gantt complete** — `src/accuracy/modules/gantt-project/`, 7 unit tests |
 | 2026-09-23 | **W1–W5 integrated** — parse ingest, `/accuracy` UI, inventory, coverage decide (36 accuracy tests) |
+| 2026-09-23 | **W7-need complete** — need_extract module, provenance gaps, `scoreGapIdRecall` |

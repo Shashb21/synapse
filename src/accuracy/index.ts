@@ -59,3 +59,4 @@ export {
   mustFindForPack,
   accuracyEvalReferencePack,
 } from "./eval/reference-gold";
+export { scoreGapIdRecall } from "./modules/need-extract/module";
