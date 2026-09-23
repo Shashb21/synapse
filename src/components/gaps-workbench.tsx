@@ -279,9 +279,7 @@ export function GapsWorkbench({
                       <SplitGapDialog
                         gapId={card.gap_id}
                         gapName={card.gap_name}
-                        gapStatement={card.statement}
                         residualName={card.residual?.statement || card.gap_name}
-                        residualStatement={card.residual?.statement || card.statement}
                         tactics={card.tactics}
                       />
                     ) : null}

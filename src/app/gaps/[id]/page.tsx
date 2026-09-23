@@ -77,9 +77,7 @@ export default async function GapDetailPage({
             <SplitGapDialog
               gapId={gap.id}
               gapName={gap.name}
-              gapStatement={gap.statement}
               residualName={leftover?.statement || gap.name}
-              residualStatement={leftover?.statement || gap.statement}
               tactics={tactics}
             />
           </>

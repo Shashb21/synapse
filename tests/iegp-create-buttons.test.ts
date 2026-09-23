@@ -97,7 +97,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(dialog).toContain("Partial cannot stay");
     expect(dialog).toContain("Split or rewrite");
     expect(dialog).toContain("tactic_ids");
-    expect(dialog).toContain("addressed_statement");
+    expect(dialog).toContain("addressed_name");
+    expect(dialog).not.toContain("addressed_statement");
     expect(dialog).toContain("At least one tactic");
     expect(dialog).not.toContain("create_tactic");
     expect(dialog).not.toContain("record_missed_tactic");

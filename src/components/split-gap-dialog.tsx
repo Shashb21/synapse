@@ -70,16 +70,12 @@ function TacticChecklist({
 export function SplitGapDialog({
   gapId,
   gapName,
-  gapStatement,
   residualName,
-  residualStatement,
   tactics,
 }: {
   gapId: string;
   gapName: string;
-  gapStatement: string;
   residualName: string;
-  residualStatement: string;
   tactics: PlanTactic[];
 }) {
   const router = useRouter();
@@ -92,11 +88,8 @@ export function SplitGapDialog({
   const [actorName, setActorName] = useState("");
   const [actorFunction, setActorFunction] = useState<ActorFunction>(DEFAULT_FUNCTION);
   const [addressedName, setAddressedName] = useState(gapName);
-  const [addressedStatement, setAddressedStatement] = useState(gapStatement);
   const [openName, setOpenName] = useState(residualName);
-  const [openStatement, setOpenStatement] = useState(residualStatement);
   const [rewriteName, setRewriteName] = useState(gapName);
-  const [rewriteStatement, setRewriteStatement] = useState(gapStatement);
   const [rewriteStatus, setRewriteStatus] = useState<"validated_open" | "validated_addressed">(
     "validated_open",
   );
@@ -107,10 +100,17 @@ export function SplitGapDialog({
   const [rationale, setRationale] = useState("");
   const [proposing, setProposing] = useState(false);
   const [proposalNote, setProposalNote] = useState<string | null>(null);
+  /**
+   * Tracks whether the user edited the split themselves, as opposed to just
+   * accepting the suggested (default or proposed) split. A rationale is only
+   * required once they touch a name or tactic selection — see onSubmit.
+   */
+  const [touched, setTouched] = useState(false);
   const leftoverTactics = useMemo(
     () => tactics.filter((t) => !addressedTacticIds.includes(t.id)),
     [tactics, addressedTacticIds],
   );
+  const rationaleRequired = mode === "rewrite" || touched;
 
   function reset() {
     setError(null);
@@ -119,17 +119,15 @@ export function SplitGapDialog({
     setActorFunction(DEFAULT_FUNCTION);
     setMode("split");
     setAddressedName(gapName);
-    setAddressedStatement(gapStatement);
     setOpenName(residualName);
-    setOpenStatement(residualStatement);
     setRewriteName(gapName);
-    setRewriteStatement(gapStatement);
     setRewriteStatus("validated_open");
     setAddressedTacticIds(defaultAddressed);
     setOpenTacticIds([]);
     setRationale("");
     setProposalNote(null);
     setProposing(false);
+    setTouched(false);
   }
 
   /** S6 proposes the split; the user still validates every field before it applies. */
@@ -153,9 +151,7 @@ export function SplitGapDialog({
       output?: {
         proposal: {
           addressed_name: string;
-          addressed_statement: string;
           open_name: string;
-          open_statement: string;
           addressed_tactic_ids: string[];
           confidence: number;
           rationale: string[];
@@ -174,12 +170,12 @@ export function SplitGapDialog({
     }
     setMode("split");
     setAddressedName(proposal.addressed_name);
-    setAddressedStatement(proposal.addressed_statement);
     setOpenName(proposal.open_name);
-    setOpenStatement(proposal.open_statement);
     if (proposal.addressed_tactic_ids.length > 0) {
       setAddressedTacticIds(proposal.addressed_tactic_ids);
     }
+    // A suggestion, not a user edit — accepting it as-is still needs no rationale.
+    setTouched(false);
     setProposalNote(
       `Proposed with confidence ${proposal.confidence}. ${proposal.rationale.slice(0, 2).join(" ")}`,
     );
@@ -197,17 +193,13 @@ export function SplitGapDialog({
         setError("Both titles are required.");
         return;
       }
-      if (!addressedStatement.trim() || !openStatement.trim()) {
-        setError("Both statements are required.");
-        return;
-      }
       if (addressedTacticIds.length === 0) {
         setError("The Addressed slice needs at least one tactic.");
         return;
       }
     } else {
-      if (!rewriteName.trim() || !rewriteStatement.trim()) {
-        setError("Title and statement are required.");
+      if (!rewriteName.trim()) {
+        setError("Title is required.");
         return;
       }
       if (rewriteStatus === "validated_addressed" && addressedTacticIds.length === 0) {
@@ -215,8 +207,12 @@ export function SplitGapDialog({
         return;
       }
     }
-    if (rationale.trim().length < 3) {
-      setError("A short rationale is required. It is stored with the edit and feeds hillclimb.");
+    if (rationaleRequired && rationale.trim().length < 3) {
+      setError(
+        mode === "split"
+          ? "You changed the suggested split — a short rationale is required."
+          : "A short rationale is required. It is stored with the edit and feeds hillclimb.",
+      );
       return;
     }
     setPending(true);
@@ -227,9 +223,7 @@ export function SplitGapDialog({
             action: "split_partial_gap",
             parent_gap_id: gapId,
             addressed_name: addressedName,
-            addressed_statement: addressedStatement,
             open_name: openName,
-            open_statement: openStatement,
             tactic_ids: addressedTacticIds.join(","),
             open_tactic_ids: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)).join(","),
             note: rationale.trim(),
@@ -240,7 +234,6 @@ export function SplitGapDialog({
             action: "rewrite_partial_gap",
             gap_id: gapId,
             name: rewriteName,
-            statement: rewriteStatement,
             status: rewriteStatus,
             tactic_ids: rewriteStatus === "validated_addressed" ? addressedTacticIds.join(",") : "",
             note: rationale.trim(),
@@ -334,23 +327,20 @@ export function SplitGapDialog({
                   value={addressedName}
                   rows={2}
                   className="min-h-16 whitespace-normal"
-                  onChange={(e) => setAddressedName(e.target.value)}
-                />
-              </label>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
-                Statement
-                <Textarea
-                  value={addressedStatement}
-                  rows={3}
-                  className="min-h-20 whitespace-normal"
-                  onChange={(e) => setAddressedStatement(e.target.value)}
+                  onChange={(e) => {
+                    setAddressedName(e.target.value);
+                    setTouched(true);
+                  }}
                 />
               </label>
               <p className="mt-3 text-[12px] text-muted-foreground">Mapped tactics</p>
               <TacticChecklist
                 tactics={tactics}
                 selected={addressedTacticIds}
-                onToggle={(id) => setAddressedTacticIds((prev) => toggleId(prev, id))}
+                onToggle={(id) => {
+                  setAddressedTacticIds((prev) => toggleId(prev, id));
+                  setTouched(true);
+                }}
                 empty="No mapped tactics on this gap."
               />
             </section>
@@ -365,23 +355,20 @@ export function SplitGapDialog({
                   value={openName}
                   rows={2}
                   className="min-h-16 whitespace-normal"
-                  onChange={(e) => setOpenName(e.target.value)}
-                />
-              </label>
-              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
-                Statement
-                <Textarea
-                  value={openStatement}
-                  rows={3}
-                  className="min-h-20 whitespace-normal"
-                  onChange={(e) => setOpenStatement(e.target.value)}
+                  onChange={(e) => {
+                    setOpenName(e.target.value);
+                    setTouched(true);
+                  }}
                 />
               </label>
               <p className="mt-3 text-[12px] text-muted-foreground">Remaining tactics (optional)</p>
               <TacticChecklist
                 tactics={leftoverTactics}
                 selected={openTacticIds}
-                onToggle={(id) => setOpenTacticIds((prev) => toggleId(prev, id))}
+                onToggle={(id) => {
+                  setOpenTacticIds((prev) => toggleId(prev, id));
+                  setTouched(true);
+                }}
                 empty="No leftover tactics — usually none until Tactics."
               />
             </section>
@@ -395,15 +382,6 @@ export function SplitGapDialog({
                 rows={2}
                 className="min-h-16 whitespace-normal"
                 onChange={(e) => setRewriteName(e.target.value)}
-              />
-            </label>
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
-              Statement
-              <Textarea
-                value={rewriteStatement}
-                rows={3}
-                className="min-h-20 whitespace-normal"
-                onChange={(e) => setRewriteStatement(e.target.value)}
               />
             </label>
             <label className="grid gap-1 text-[12px] text-muted-foreground">
@@ -436,15 +414,19 @@ export function SplitGapDialog({
         )}
         <div className="grid gap-2">
           <label className="grid gap-1 text-[12px] text-muted-foreground">
-            Rationale (required)
+            {rationaleRequired ? "Rationale (required)" : "Rationale (optional — accepting the suggested split as-is)"}
             <Textarea
               value={rationale}
               rows={2}
-              placeholder="Why this split or rewrite, in one line"
+              placeholder={rationaleRequired ? "Why this split or rewrite, in one line" : "Optional — add a note if you'd like"}
               onChange={(e) => setRationale(e.target.value)}
             />
             <span className="text-[11px] text-muted-foreground/80">
-              Stored on the edit record and replayed as a hillclimb signal for the split stage.
+              {mode === "split"
+                ? touched
+                  ? "Required because you changed the suggested split. Stored on the edit record and replayed as a hillclimb signal."
+                  : "Accepting the split as suggested needs no rationale."
+                : "Stored on the edit record and replayed as a hillclimb signal for the split stage."}
             </span>
           </label>
           <label htmlFor={nameId} className="text-[12px] text-muted-foreground">

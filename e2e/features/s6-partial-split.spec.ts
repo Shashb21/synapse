@@ -82,8 +82,14 @@ test.describe("S6 partial gap split", () => {
     await dialog.getByRole("button", { name: /suggest a split/i }).click();
     await expect(dialog.getByText(/Proposed with confidence/)).toBeVisible({ timeout: 30_000 });
 
-    // The gate is still the user's: a split without a rationale is refused.
+    // Accepting the suggestion as-is needs no rationale.
     await dialog.getByRole("textbox", { name: /^name$/i }).fill("A. Rao");
+    await expect(dialog.getByText(/needs no rationale/i)).toBeVisible();
+
+    // Editing the suggested title is a change: the gate now requires a rationale.
+    const addressedTitle = dialog.getByRole("textbox", { name: /^title$/i }).first();
+    const suggestedTitle = await addressedTitle.inputValue();
+    await addressedTitle.fill(`${suggestedTitle} (elderly subgroup)`);
     await dialog.getByRole("button", { name: /accept split/i }).click();
     await expect(dialog.getByText(/short rationale is required/i)).toBeVisible();
 
