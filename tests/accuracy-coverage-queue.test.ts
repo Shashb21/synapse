@@ -30,6 +30,7 @@ function pair(
   tactic: AccuracyClaimRow,
   opts?: { validated?: boolean; overall?: string | null },
 ): CoveragePair {
+  const meta = (tactic.metadata ?? {}) as { start?: string; end?: string };
   return {
     id: `pair_${gap.id}_${tactic.id}`,
     gap,
@@ -37,6 +38,8 @@ function pair(
     overall: opts?.overall ?? null,
     rationale: null,
     validated: opts?.validated ?? false,
+    tactic_start: typeof meta.start === "string" ? meta.start : null,
+    tactic_end: typeof meta.end === "string" ? meta.end : null,
   };
 }
 

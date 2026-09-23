@@ -7,6 +7,7 @@ const tacticSchema = z.object({
   validated: z.boolean(),
   start: z.string().nullable().optional(),
   end: z.string().nullable().optional(),
+  timing: z.string().nullable().optional(),
   depends_on: z.array(z.string()).optional(),
 });
 

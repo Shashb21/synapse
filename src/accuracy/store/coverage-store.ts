@@ -2,7 +2,12 @@ import { and, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId } from "@/modules/kernel/ids";
-import { claimMetadata, listClaims, type AccuracyClaimRow } from "./claim-store";
+import {
+  claimMetadata,
+  listClaims,
+  setTacticTiming,
+  type AccuracyClaimRow,
+} from "./claim-store";
 
 export type CoveragePair = {
   id: string;
@@ -11,6 +16,8 @@ export type CoveragePair = {
   overall: string | null;
   rationale: string | null;
   validated: boolean;
+  tactic_start: string | null;
+  tactic_end: string | null;
 };
 
 export async function listCoveragePairs(workspace_id: string): Promise<CoveragePair[]> {
@@ -38,6 +45,7 @@ export async function listCoveragePairs(workspace_id: string): Promise<CoverageP
     const candidates = related.length > 0 ? related : tactics.slice(0, 3);
     for (const tactic of candidates) {
       const existing = joinKey.get(`${gap.id}::${tactic.id}`);
+      const meta = claimMetadata(tactic);
       pairs.push({
         id: existing?.id ?? `pair_${gap.id}_${tactic.id}`,
         gap,
@@ -45,6 +53,8 @@ export async function listCoveragePairs(workspace_id: string): Promise<CoverageP
         overall: existing?.overall ?? null,
         rationale: existing?.rationale ?? null,
         validated: existing?.validated ?? false,
+        tactic_start: typeof meta.start === "string" ? meta.start : null,
+        tactic_end: typeof meta.end === "string" ? meta.end : null,
       });
     }
   }
@@ -57,6 +67,9 @@ export async function upsertCoverageDecision(args: {
   tactic_id: string;
   overall: "covers" | "partial" | "none" | "unknown";
   rationale: string;
+  /** Optional ISO dates written onto the tactic so Gantt projection stays continuous. */
+  start?: string | null;
+  end?: string | null;
 }): Promise<void> {
   await ensureAccuracySchema();
   const existing = await accuracyDb()
@@ -80,17 +93,29 @@ export async function upsertCoverageDecision(args: {
         dimensions: {},
       })
       .where(eq(t.accuracyCoverageJoins.id, existing[0].id));
-    return;
+  } else {
+    await accuracyDb().insert(t.accuracyCoverageJoins).values({
+      id: newId("cov"),
+      workspace_id: args.workspace_id,
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      overall: args.overall,
+      dimensions: {},
+      confidence: null,
+      validated: true,
+      rationale: args.rationale,
+    });
   }
-  await accuracyDb().insert(t.accuracyCoverageJoins).values({
-    id: newId("cov"),
-    workspace_id: args.workspace_id,
-    gap_id: args.gap_id,
-    tactic_id: args.tactic_id,
-    overall: args.overall,
-    dimensions: {},
-    confidence: null,
-    validated: true,
-    rationale: args.rationale,
-  });
+
+  const start = args.start?.trim() ?? "";
+  const end = args.end?.trim() ?? "";
+  if (start && end) {
+    await setTacticTiming({
+      workspace_id: args.workspace_id,
+      claim_id: args.tactic_id,
+      start,
+      end,
+      rationale: `Coverage ${args.overall}: ${args.rationale}`,
+    });
+  }
 }

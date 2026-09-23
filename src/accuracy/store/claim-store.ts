@@ -3,6 +3,10 @@ import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
+import {
+  requireIsoDateRange,
+  resolveTacticDates,
+} from "@/accuracy/modules/gantt-project/dates";
 
 export type AccuracyClaimType = "gap" | "tactic";
 
@@ -21,6 +25,7 @@ export type AccuracyClaimMetadata = {
   origin?: string | null;
   start?: string | null;
   end?: string | null;
+  timing?: string | null;
   depends_on?: string[];
   validation?: ClaimValidationMeta | null;
   [key: string]: unknown;
@@ -209,12 +214,64 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
     .filter((row) => row.claim_type === "tactic")
     .map((row) => {
       const meta = claimMetadata(row);
+      const timing =
+        typeof meta.timing === "string"
+          ? meta.timing
+          : typeof meta.horizon === "string"
+            ? meta.horizon
+            : null;
+      const resolved = resolveTacticDates({
+        start: typeof meta.start === "string" ? meta.start : null,
+        end: typeof meta.end === "string" ? meta.end : null,
+        timing,
+      });
       return {
         id: row.id,
         validated: row.validated,
-        start: meta.start ?? null,
-        end: meta.end ?? null,
+        start: resolved?.start ?? null,
+        end: resolved?.end ?? null,
         depends_on: Array.isArray(meta.depends_on) ? meta.depends_on : [],
       };
     });
+}
+
+/**
+ * Persist start/end on a tactic claim so coverage/plan decisions continue into Gantt.
+ * Requires a short rationale (hillclimb). Does not invent dates.
+ */
+export async function setTacticTiming(args: {
+  workspace_id: string;
+  claim_id: string;
+  start: string;
+  end: string;
+  rationale: string;
+  actor?: Actor;
+}): Promise<AccuracyClaimRow> {
+  const rationale = requireValidationRationale(args.rationale);
+  const dates = requireIsoDateRange(args.start, args.end);
+  const existing = await getClaim(args.workspace_id, args.claim_id);
+  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  if (existing.claim_type !== "tactic") {
+    throw new Error("Timing can only be set on tactic claims.");
+  }
+  const prev = claimMetadata(existing);
+  const actor = args.actor ?? { name: "system", function: "accuracy" };
+  return updateClaimMetadata({
+    workspace_id: args.workspace_id,
+    claim_id: args.claim_id,
+    metadata: {
+      ...prev,
+      start: dates.start,
+      end: dates.end,
+      timing: undefined,
+      timing_edit: {
+        rationale,
+        at: nowIso(),
+        by: actor.name,
+        by_function: actor.function,
+        before: { start: prev.start ?? null, end: prev.end ?? null },
+        after: { start: dates.start, end: dates.end },
+      },
+    },
+  });
 }

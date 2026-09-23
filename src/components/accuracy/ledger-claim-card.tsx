@@ -14,6 +14,8 @@ export type LedgerClaimCardModel = {
   validated: boolean;
   source_badge: string;
   validation_rationale: string | null;
+  start?: string | null;
+  end?: string | null;
 };
 
 function validationLabel(claim: LedgerClaimCardModel): string {
@@ -37,8 +39,10 @@ export function LedgerClaimCard({
 }) {
   const router = useRouter();
   const [rationale, setRationale] = useState("");
-  const [pending, setPending] = useState<"validate" | "reject" | null>(null);
+  const [pending, setPending] = useState<"validate" | "reject" | "timing" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [start, setStart] = useState(claim.start ?? "");
+  const [end, setEnd] = useState(claim.end ?? "");
 
   async function act(action: "validate" | "reject") {
     setError(null);
@@ -72,6 +76,45 @@ export function LedgerClaimCard({
     }
   }
 
+  async function saveTiming() {
+    setError(null);
+    if (rationale.trim().length < 3) {
+      setError("A short rationale is required to set Gantt dates.");
+      return;
+    }
+    if (!start.trim() || !end.trim()) {
+      setError("Both start and end dates are required (YYYY-MM-DD).");
+      return;
+    }
+    setPending("timing");
+    try {
+      const res = await fetch("/api/accuracy/claims/timing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: workspaceId,
+          claim_id: claim.id,
+          start: start.trim(),
+          end: end.trim(),
+          rationale: rationale.trim(),
+        }),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.error ?? "Timing update failed");
+        return;
+      }
+      setRationale("");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Timing update failed");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  const isTactic = claim.claim_type === "tactic";
+
   return (
     <li className="border border-border bg-card/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -86,11 +129,51 @@ export function LedgerClaimCard({
           {claim.claim_type}
         </Badge>
         <span className="text-[11px] text-muted-foreground">{claim.id}</span>
+        {isTactic && (claim.start || claim.end) ? (
+          <span className="text-[11px] text-muted-foreground">
+            {claim.start ?? "—"} → {claim.end ?? "—"}
+          </span>
+        ) : null}
       </div>
       {claim.validation_rationale ? (
         <p className="mt-2 text-[11px] text-muted-foreground">
           Last rationale: {claim.validation_rationale}
         </p>
+      ) : null}
+      {isTactic ? (
+        <div className="mt-3 grid gap-2 border-t border-border pt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Gantt dates (required for Timeline bars once validated)
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Start
+              <input
+                type="date"
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              End
+              <input
+                type="date"
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              />
+            </label>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending !== null}
+            onClick={() => void saveTiming()}
+          >
+            {pending === "timing" ? "Saving dates…" : "Save Gantt dates"}
+          </Button>
+        </div>
       ) : null}
       {!claim.validated || claim.status === "rejected" ? (
         <div className="mt-3 grid gap-2">
@@ -132,7 +215,7 @@ export function LedgerClaimCard({
               value={rationale}
               onChange={(event) => setRationale(event.target.value)}
               rows={2}
-              placeholder="Why change this decision"
+              placeholder="Why change this decision or set dates"
               className="text-[12px]"
             />
           </label>

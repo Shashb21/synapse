@@ -22,6 +22,8 @@ export function PlanPriorityCard({
   const [error, setError] = useState<string | null>(null);
   const [ideateTitle, setIdeateTitle] = useState("");
   const [ideateRationale, setIdeateRationale] = useState("");
+  const [ideateStart, setIdeateStart] = useState("");
+  const [ideateEnd, setIdeateEnd] = useState("");
   const [ideateMsg, setIdeateMsg] = useState<string | null>(null);
 
   const canIdeate =
@@ -64,6 +66,9 @@ export function PlanPriorityCard({
           gap_id: claimId,
           title: ideateTitle.trim(),
           rationale: ideateRationale.trim(),
+          ...(ideateStart.trim() && ideateEnd.trim()
+            ? { start: ideateStart.trim(), end: ideateEnd.trim() }
+            : {}),
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string; tactic_id?: string };
@@ -74,6 +79,8 @@ export function PlanPriorityCard({
       setIdeateMsg(`Proposed tactic ${body.tactic_id}`);
       setIdeateTitle("");
       setIdeateRationale("");
+      setIdeateStart("");
+      setIdeateEnd("");
       router.refresh();
     });
   }
@@ -126,6 +133,26 @@ export function PlanPriorityCard({
             required
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Start (optional → Gantt)
+              <input
+                type="date"
+                value={ideateStart}
+                onChange={(e) => setIdeateStart(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              End (optional → Gantt)
+              <input
+                type="date"
+                value={ideateEnd}
+                onChange={(e) => setIdeateEnd(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              />
+            </label>
+          </div>
           <button
             type="submit"
             disabled={pending}

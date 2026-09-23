@@ -12,6 +12,8 @@ export type CoveragePairCardModel = {
   overall: string | null;
   rationale: string | null;
   validated: boolean;
+  tactic_start?: string | null;
+  tactic_end?: string | null;
 };
 
 export function CoveragePairCard({
@@ -25,10 +27,18 @@ export function CoveragePairCard({
   const [pending, startTransition] = useTransition();
   const [rationale, setRationale] = useState(pair.rationale ?? "");
   const [overall, setOverall] = useState(pair.overall ?? "unknown");
+  const [start, setStart] = useState(pair.tactic_start ?? "");
+  const [end, setEnd] = useState(pair.tactic_end ?? "");
   const [error, setError] = useState<string | null>(null);
 
   function submit(next: "covers" | "partial" | "none" | "unknown") {
     setError(null);
+    const startTrim = start.trim();
+    const endTrim = end.trim();
+    if ((startTrim && !endTrim) || (!startTrim && endTrim)) {
+      setError("Provide both start and end as YYYY-MM-DD, or leave both blank.");
+      return;
+    }
     startTransition(async () => {
       const res = await fetch("/api/accuracy/coverage", {
         method: "POST",
@@ -39,6 +49,7 @@ export function CoveragePairCard({
           tactic_id: pair.tactic_id,
           overall: next,
           rationale,
+          ...(startTrim && endTrim ? { start: startTrim, end: endTrim } : {}),
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
@@ -77,6 +88,29 @@ export function CoveragePairCard({
           placeholder="Why this coverage overall?"
         />
       </label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="grid gap-1 text-[12px]">
+          <span className="text-muted-foreground">Tactic start (Gantt)</span>
+          <input
+            type="date"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className="border border-border bg-background px-2 py-1.5 text-[12px]"
+          />
+        </label>
+        <label className="grid gap-1 text-[12px]">
+          <span className="text-muted-foreground">Tactic end (Gantt)</span>
+          <input
+            type="date"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            className="border border-border bg-background px-2 py-1.5 text-[12px]"
+          />
+        </label>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Dates are optional on decide; when set they write onto the tactic and project into Timeline.
+      </p>
       {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         {(["covers", "partial", "none", "unknown"] as const).map((value) => (

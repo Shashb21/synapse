@@ -24,9 +24,13 @@ export async function GET(req: Request) {
       overall: p.overall,
       rationale: p.rationale,
       validated: p.validated,
+      tactic_start: p.tactic_start,
+      tactic_end: p.tactic_end,
     })),
   });
 }
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
 
 const decideSchema = z.object({
   workspace_id: z.string(),
@@ -34,11 +38,19 @@ const decideSchema = z.object({
   tactic_id: z.string(),
   overall: z.enum(["covers", "partial", "none", "unknown"]),
   rationale: z.string().min(3),
+  start: isoDay.optional(),
+  end: isoDay.optional(),
 });
 
 export async function POST(req: Request) {
   try {
     const body = decideSchema.parse(await req.json());
+    if ((body.start && !body.end) || (!body.start && body.end)) {
+      return NextResponse.json(
+        { ok: false, error: "Provide both start and end as YYYY-MM-DD, or neither." },
+        { status: 400 },
+      );
+    }
     await upsertCoverageDecision(body);
     return NextResponse.json({ ok: true });
   } catch (error) {

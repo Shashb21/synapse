@@ -1,8 +1,12 @@
+import { resolveTacticDates } from "./dates";
+
 export type GanttTacticInput = {
   id: string;
   validated: boolean;
   start?: string | null;
   end?: string | null;
+  /** Loose timing when discrete start/end are absent. */
+  timing?: string | null;
   /** Other tactic ids this bar waits on. */
   depends_on?: string[];
 };
@@ -62,16 +66,19 @@ export function projectGanttFromTactics(args: {
     if (!tactic.validated) continue;
 
     const override = overrideByTactic.get(tactic.id);
-    const start = override?.start ?? tactic.start ?? null;
-    const end = override?.end ?? tactic.end ?? null;
-    if (!start || !end) continue;
+    const resolved = resolveTacticDates({
+      start: override?.start ?? tactic.start ?? null,
+      end: override?.end ?? tactic.end ?? null,
+      timing: override ? null : (tactic.timing ?? null),
+    });
+    if (!resolved) continue;
 
     const dependsSource = override?.depends_on ?? tactic.depends_on;
     projected.push({
       id: override?.id ?? activityIdForTactic(tactic.id),
       tactic_id: tactic.id,
-      start,
-      end,
+      start: resolved.start,
+      end: resolved.end,
       depends_on: normalizeDependsOn(dependsSource, tacticIds),
     });
   }

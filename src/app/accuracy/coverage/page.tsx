@@ -74,6 +74,8 @@ export default async function AccuracyCoveragePage({
                 overall: pair.overall,
                 rationale: pair.rationale,
                 validated: pair.validated,
+                tactic_start: pair.tactic_start,
+                tactic_end: pair.tactic_end,
               }))}
             />
           )}

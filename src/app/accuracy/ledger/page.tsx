@@ -20,6 +20,8 @@ function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerCl
     validated: claim.validated,
     source_badge: String(meta.source_badge ?? claim.source_file_id ?? "unspecified source"),
     validation_rationale: meta.validation?.rationale ?? null,
+    start: typeof meta.start === "string" ? meta.start : null,
+    end: typeof meta.end === "string" ? meta.end : null,
   };
 }
 
