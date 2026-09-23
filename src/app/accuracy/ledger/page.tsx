@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { LedgerClaimCard, type LedgerClaimCardModel } from "@/components/accuracy/ledger-claim-card";
+import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,6 +37,8 @@ export default async function AccuracyLedgerPage({
   let gaps: LedgerClaimCardModel[] = [];
   let tactics: LedgerClaimCardModel[] = [];
   let loadError: string | null = null;
+  let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
+  let hasSnapshot = false;
 
   try {
     workspaces = await listWorkspaces();
@@ -42,6 +46,9 @@ export default async function AccuracyLedgerPage({
       const claims = await listClaims(workspaceId);
       gaps = claims.filter((c) => c.claim_type === "gap" && c.status !== "merged").map(toCard);
       tactics = claims.filter((c) => c.claim_type === "tactic" && c.status !== "merged").map(toCard);
+      const workshop = await workshopReadiness(workspaceId);
+      ready = workshop.readiness;
+      hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load ledger";
@@ -117,6 +124,16 @@ export default async function AccuracyLedgerPage({
               ))}
             </ul>
           </section>
+
+          {ready ? (
+            <WorkshopSaveCta
+              workspaceId={workspaceId}
+              ready={ready.ready}
+              blockers={ready.blockers}
+              hasSnapshot={hasSnapshot}
+              workshopHref={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspaceId)}`}
+            />
+          ) : null}
 
           <section className="mb-8 grid gap-2" aria-labelledby="gaps-section">
             <h2 id="gaps-section" className="text-[15px] font-medium text-foreground">

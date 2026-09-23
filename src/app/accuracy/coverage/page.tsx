@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { CoverageQueue } from "@/components/accuracy/coverage-queue";
+import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,10 +22,17 @@ export default async function AccuracyCoveragePage({
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let pairs: Awaited<ReturnType<typeof listCoveragePairs>> = [];
   let loadError: string | null = null;
+  let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
+  let hasSnapshot = false;
 
   try {
     workspaces = await listWorkspaces();
-    if (workspaceId) pairs = await listCoveragePairs(workspaceId);
+    if (workspaceId) {
+      pairs = await listCoveragePairs(workspaceId);
+      const workshop = await workshopReadiness(workspaceId);
+      ready = workshop.readiness;
+      hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
+    }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load coverage";
   }
@@ -58,6 +67,15 @@ export default async function AccuracyCoveragePage({
             Workspace · {active?.name ?? workspaceId} · {queue.total_count} pair(s) ·{" "}
             {queue.undecided_count} undecided
           </p>
+          {ready ? (
+            <WorkshopSaveCta
+              workspaceId={workspaceId}
+              ready={ready.ready}
+              blockers={ready.blockers}
+              hasSnapshot={hasSnapshot}
+              workshopHref={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspaceId)}`}
+            />
+          ) : null}
           {pairs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No gap/tactic pairs yet. Seed gold or add claims on the Ledger.

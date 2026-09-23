@@ -117,5 +117,6 @@ Scaffold JSON under each pack’s `gold/` — populate statements from parse blo
 - Build plan: [`accuracy-first-build.md`](./accuracy-first-build.md)
 - UX spec (Project store): accuracy-v2-ux-spec.md
 - Architecture: Project store `accuracy-first-architecture.md`
+- Workshop v1: `/accuracy/workshop` (facilitator-tag boards + rationale-gated actions)
 
 *Analysis generated after reference upload — Sep 23, 2026.*

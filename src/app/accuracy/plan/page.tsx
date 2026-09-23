@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { PlanIdeateAllButton, PlanPriorityCard } from "@/components/accuracy/plan-priority-card";
+import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import {
   gapsEligibleForIdeation,
@@ -9,6 +10,7 @@ import {
 } from "@/accuracy/domain/iegp-semantics";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,11 +26,16 @@ export default async function AccuracyPlanPage({
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let gaps: Awaited<ReturnType<typeof listClaims>> = [];
   let loadError: string | null = null;
+  let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
+  let hasSnapshot = false;
 
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
       gaps = await listClaims(workspaceId, { claim_type: "gap", limit: 200 });
+      const workshop = await workshopReadiness(workspaceId);
+      ready = workshop.readiness;
+      hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load plan";
@@ -75,6 +82,15 @@ export default async function AccuracyPlanPage({
             Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
             open eligible for ideate
           </p>
+          {ready ? (
+            <WorkshopSaveCta
+              workspaceId={workspaceId}
+              ready={ready.ready}
+              blockers={ready.blockers}
+              hasSnapshot={hasSnapshot}
+              workshopHref={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspaceId)}`}
+            />
+          ) : null}
           {gaps.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No gaps yet — seed gold or extract needs.</p>
           ) : (

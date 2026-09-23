@@ -2,6 +2,7 @@ import { desc, eq, isNull } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { WORKSHOP_SNAPSHOT_DDL } from "./workshop-store";
 
 export type WorkspaceDeleteCounts = {
   miss_flag_actions: number;
@@ -12,6 +13,7 @@ export type WorkspaceDeleteCounts = {
   claims: number;
   runs: number;
   plans: number;
+  workshop_snapshots: number;
   workspace: number;
 };
 
@@ -66,6 +68,16 @@ export async function getWorkspaceOrgId(workspace_id: string): Promise<string | 
   return workspace?.org_id ?? null;
 }
 
+export async function getWorkspaceBySlug(slug: string) {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb()
+    .select()
+    .from(t.accuracyWorkspaces)
+    .where(eq(t.accuracyWorkspaces.slug, slug))
+    .orderBy(desc(t.accuracyWorkspaces.created_at));
+  return rows.find((row) => !row.archived_at) ?? rows[0] ?? null;
+}
+
 export async function archiveWorkspace(workspace_id: string) {
   const workspace = await getWorkspace(workspace_id);
   if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
@@ -101,6 +113,7 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
 }> {
   const workspace = await getWorkspace(workspace_id);
   if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+  await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
   const db = accuracyDb();
 
   const deleted: WorkspaceDeleteCounts = {
@@ -151,6 +164,12 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
         .delete(t.accuracyPlans)
         .where(eq(t.accuracyPlans.workspace_id, workspace_id))
         .returning({ id: t.accuracyPlans.id }),
+    ),
+    workshop_snapshots: await deletedCount(
+      await db
+        .delete(t.accuracyWorkshopSnapshots)
+        .where(eq(t.accuracyWorkshopSnapshots.workspace_id, workspace_id))
+        .returning({ id: t.accuracyWorkshopSnapshots.id }),
     ),
     workspace: 0,
   };
