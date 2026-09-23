@@ -38,4 +38,16 @@ test.describe("accuracy shell", () => {
     await expect(page.getByRole("heading", { name: /^runs$/i })).toBeVisible();
     await expectAccuracyShell(page);
   });
+
+  test("orchestration API exposes reference packs and modules", async ({ request }) => {
+    const res = await request.get("/api/accuracy/orchestration");
+    expect(res.ok()).toBeTruthy();
+    const body = (await res.json()) as {
+      reference_packs: string[];
+      modules: { call_kind: string }[];
+    };
+    expect(body.reference_packs).toContain("beone-bgb-58067-prmt5i");
+    expect(body.modules.some((m) => m.call_kind === "need_extract")).toBe(true);
+    expect(body.modules.some((m) => m.call_kind === "gantt_project")).toBe(true);
+  });
 });
