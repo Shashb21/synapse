@@ -72,7 +72,10 @@ export async function seedWorkspaceFromGold(args: {
       const blocks = blocksFromParsedDocument({
         workspace_id,
         source_file_id,
-        blocks: document.blocks,
+        blocks: document.blocks.map((b, index) => ({
+          ...b,
+          id: `${source_file_id}-B${String(index + 1).padStart(3, "0")}`,
+        })),
       });
       await persistParseBlocks({
         workspace_id,
@@ -83,16 +86,18 @@ export async function seedWorkspaceFromGold(args: {
       parse_blocks = blocks.length;
     }
   } catch (error) {
-    const source = await insertSourceFile({
-      workspace_id,
-      org_id,
-      filename: sourceRel || pack.source_file,
-      mime: mimeForFilename(sourceRel || pack.source_file),
-      checksum: `missing-${args.packId}`,
-      doc_role: "medical",
-      reference_pack_id: args.packId,
-    });
-    source_file_id = source.id;
+    if (!source_file_id) {
+      const source = await insertSourceFile({
+        workspace_id,
+        org_id,
+        filename: sourceRel || pack.source_file,
+        mime: mimeForFilename(sourceRel || pack.source_file),
+        checksum: `missing-${args.packId}`,
+        doc_role: "medical",
+        reference_pack_id: args.packId,
+      });
+      source_file_id = source.id;
+    }
     if (process.env.NODE_ENV !== "production") {
       console.warn("seed-from-gold: source parse skipped", error);
     }
@@ -111,7 +116,6 @@ export async function seedWorkspaceFromGold(args: {
     };
     if (!g.statement?.trim()) continue;
     await insertClaim({
-      id: g.id ? `gap_${g.id}` : undefined,
       workspace_id,
       claim_type: "gap",
       statement: g.statement.trim(),
@@ -147,7 +151,6 @@ export async function seedWorkspaceFromGold(args: {
     const external =
       tac.identifier ?? (typeof tac.number === "number" ? String(tac.number) : null);
     await insertClaim({
-      id: external ? `tac_${String(external).replace(/[^a-zA-Z0-9]+/g, "_")}` : undefined,
       workspace_id,
       claim_type: "tactic",
       statement,
