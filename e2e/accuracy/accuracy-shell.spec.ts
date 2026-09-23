@@ -7,7 +7,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 const SHELL_NAV = [
   { href: "/accuracy", label: "Workspaces" },
+  { href: "/accuracy/sources", label: "Sources" },
   { href: "/accuracy/ledger", label: "Ledger" },
+  { href: "/accuracy/coverage", label: "Coverage" },
+  { href: "/accuracy/plan", label: "Plan" },
   { href: "/accuracy/timeline", label: "Timeline" },
   { href: "/accuracy/control", label: "Routing" },
   { href: "/accuracy/runs", label: "Runs" },
@@ -41,6 +44,24 @@ test.describe("accuracy shell", () => {
     await page.goto("/accuracy/timeline");
     await expect(page.getByRole("heading", { name: /^timeline$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /choose a workspace/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("sources page renders shell nav", async ({ page }) => {
+    await page.goto("/accuracy/sources");
+    await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("coverage page renders shell nav", async ({ page }) => {
+    await page.goto("/accuracy/coverage");
+    await expect(page.getByRole("heading", { name: /^coverage$/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("plan page renders shell nav", async ({ page }) => {
+    await page.goto("/accuracy/plan");
+    await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
     await expectAccuracyShell(page);
   });
 

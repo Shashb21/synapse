@@ -7,8 +7,11 @@ import {
   BookMarked,
   Building2,
   ChartGantt,
+  FileStack,
+  GitCompareArrows,
   Menu,
   SlidersHorizontal,
+  Target,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,10 +25,13 @@ import { cn } from "@/lib/utils";
 
 export type AccuracyShellId =
   | "workspaces"
-  | "control"
-  | "runs"
+  | "sources"
   | "ledger"
-  | "timeline";
+  | "coverage"
+  | "plan"
+  | "timeline"
+  | "control"
+  | "runs";
 
 type NavItem = {
   id: AccuracyShellId;
@@ -36,7 +42,10 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { id: "workspaces", href: "/accuracy", label: "Workspaces", icon: Building2 },
+  { id: "sources", href: "/accuracy/sources", label: "Sources", icon: FileStack },
   { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
+  { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
+  { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },
   { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
   { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },

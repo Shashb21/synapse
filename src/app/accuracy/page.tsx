@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { CreateWorkspaceForm } from "@/components/accuracy/create-workspace-form";
+import { SeedFromGoldForm } from "@/components/accuracy/seed-from-gold-form";
 import { registerAccuracyStack } from "@/accuracy";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
@@ -20,8 +22,8 @@ export default async function AccuracyWorkspacesPage() {
   return (
     <AccuracyAppShell active="workspaces">
       <PageIntro kicker="Tenancy · org → workspace" title="Workspaces">
-        One workspace maps to one IEGP. Pipeline, uploads, and module runs are scoped by workspace.
-        This list is a placeholder until workspace creation ships in the UI.
+        One workspace maps to one IEGP. Seed from BeOne gold for a full demo ledger, or create an empty
+        workspace and upload sources.
       </PageIntro>
 
       {loadError ? (
@@ -30,14 +32,18 @@ export default async function AccuracyWorkspacesPage() {
         </p>
       ) : null}
 
+      <div className="mb-6 grid gap-4 md:grid-cols-2">
+        <SeedFromGoldForm />
+        <CreateWorkspaceForm />
+      </div>
+
       <section className="grid gap-2" aria-labelledby="workspace-list">
         <h2 id="workspace-list" className="text-[15px] font-medium text-foreground">
           Registered workspaces
         </h2>
         {workspaces.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">
-            No workspaces yet. Create one via the accuracy store API or seed scripts, then open runs for
-            that workspace.
+            No workspaces yet. Seed from gold or create one above.
           </p>
         ) : (
           <ul className="grid gap-2">
@@ -52,10 +58,10 @@ export default async function AccuracyWorkspacesPage() {
                 </p>
                 <p className="mt-2 flex flex-wrap gap-3">
                   <Link
-                    href={`/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    href={`/accuracy/sources?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >
-                    View runs
+                    Sources
                   </Link>
                   <Link
                     href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
@@ -64,10 +70,28 @@ export default async function AccuracyWorkspacesPage() {
                     Ledger
                   </Link>
                   <Link
+                    href={`/accuracy/coverage?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Coverage
+                  </Link>
+                  <Link
+                    href={`/accuracy/plan?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Plan
+                  </Link>
+                  <Link
                     href={`/accuracy/timeline?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >
                     Timeline
+                  </Link>
+                  <Link
+                    href={`/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Runs
                   </Link>
                 </p>
               </li>

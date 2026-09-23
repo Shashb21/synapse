@@ -170,6 +170,35 @@ export async function applyClaimValidation(args: {
   return { updated: updated.length, claims: updated };
 }
 
+export async function getClaim(
+  workspace_id: string,
+  claim_id: string,
+): Promise<AccuracyClaimRow | null> {
+  const rows = await getClaimsByIds(workspace_id, [claim_id]);
+  return rows[0] ?? null;
+}
+
+export async function updateClaimMetadata(args: {
+  workspace_id: string;
+  claim_id: string;
+  metadata: AccuracyClaimMetadata;
+}): Promise<AccuracyClaimRow> {
+  await ensureAccuracySchema();
+  const existing = await getClaim(args.workspace_id, args.claim_id);
+  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  const now = nowIso();
+  await accuracyDb()
+    .update(t.accuracyClaims)
+    .set({ metadata: args.metadata as Record<string, unknown>, updated_at: now })
+    .where(
+      and(
+        eq(t.accuracyClaims.id, args.claim_id),
+        eq(t.accuracyClaims.workspace_id, args.workspace_id),
+      ),
+    );
+  return { ...existing, metadata: args.metadata as Record<string, unknown>, updated_at: now };
+}
+
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
   return (claim.metadata ?? {}) as AccuracyClaimMetadata;
 }
