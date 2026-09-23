@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -31,11 +31,16 @@ export async function persistParseBlocks(args: {
 
 export async function readParseBlocks(workspace_id: string, source_file_id: string) {
   await ensureAccuracySchema();
-  const rows = await accuracyDb()
+  return accuracyDb()
     .select()
     .from(t.accuracyParseBlocks)
-    .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id));
-  return rows.filter((r) => r.source_file_id === source_file_id);
+    .where(
+      and(
+        eq(t.accuracyParseBlocks.workspace_id, workspace_id),
+        eq(t.accuracyParseBlocks.source_file_id, source_file_id),
+      ),
+    )
+    .orderBy(asc(t.accuracyParseBlocks.index));
 }
 
 /** All parse blocks for a workspace (completeness audit / review inbox). */

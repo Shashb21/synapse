@@ -43,6 +43,24 @@ export async function listSourceFiles(workspace_id: string, limit = 100): Promis
     .limit(limit);
 }
 
+export async function getSourceFile(
+  workspace_id: string,
+  source_file_id: string,
+): Promise<SourceFileRow | null> {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb()
+    .select()
+    .from(t.accuracySourceFiles)
+    .where(
+      and(
+        eq(t.accuracySourceFiles.workspace_id, workspace_id),
+        eq(t.accuracySourceFiles.id, source_file_id),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function countParseBlocks(workspace_id: string, source_file_id: string): Promise<number> {
   await ensureAccuracySchema();
   const rows = await accuracyDb()
