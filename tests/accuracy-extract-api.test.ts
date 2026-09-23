@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { POST as extractPost } from "@/app/api/accuracy/extract/route";
-import { registerAccuracyStack } from "@/accuracy";
-import { listClaims } from "@/accuracy/store/claim-store";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import { insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { blocksFromParsedDocument, persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
@@ -111,10 +111,60 @@ describe("accuracy extract API", () => {
     expect(json.tactics_inserted).toBe(0);
     expect(json.runs?.map((r) => r.call_kind).sort()).toEqual([
       "inventory_extract",
+      "merge_dedupe",
       "need_extract",
+      "status_derive",
     ]);
+    expect((json as { statuses_updated?: number }).statuses_updated).toBeDefined();
 
     const claims = await listClaims(workspace_id);
     expect(claims).toHaveLength(0);
+  });
+
+  it("merge_dedupe refuses to re-insert an existing external_id claim", async () => {
+    registerAccuracyStack();
+    const { org_id, workspace_id } = await freshWorkspace("extract-dedupe");
+    const existing = await insertClaim({
+      workspace_id,
+      claim_type: "gap",
+      statement: "Need clinical evidence in NSCLC",
+      status: "open",
+      metadata: { external_id: "NSCLC_CE_04", provenance: [] },
+    });
+
+    const merge = await runAccuracyModule<{
+      inserted: number;
+      merged: number;
+      decisions: Array<{ action: string; matched_id: string | null }>;
+    }>({
+      call_kind: "merge_dedupe",
+      input: {
+        workspace_id,
+        existing: [
+          {
+            id: existing.id,
+            claim_type: "gap",
+            statement: existing.statement,
+            external_id: "NSCLC_CE_04",
+          },
+        ],
+        incoming: [
+          {
+            id: "gap_dup",
+            claim_type: "gap",
+            statement: "Clinical evidence need NSCLC_CE_04",
+            external_id: "NSCLC_CE_04",
+            provenance: [{ block_id: "B1", quote: "NSCLC_CE_04" }],
+          },
+        ],
+      },
+      actor: { name: "test", function: "medical_affairs" },
+      org_id,
+      workspace_id,
+    });
+
+    expect(merge.output.inserted).toBe(0);
+    expect(merge.output.merged).toBe(1);
+    expect(merge.output.decisions[0]?.matched_id).toBe(existing.id);
   });
 });

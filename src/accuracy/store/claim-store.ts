@@ -22,6 +22,9 @@ export type AccuracyClaimMetadata = {
   start?: string | null;
   end?: string | null;
   depends_on?: string[];
+  provenance?: unknown[];
+  derived_status?: string | null;
+  derived_at?: string | null;
   validation?: ClaimValidationMeta | null;
   [key: string]: unknown;
 };
@@ -197,6 +200,39 @@ export async function updateClaimMetadata(args: {
       ),
     );
   return { ...existing, metadata: args.metadata as Record<string, unknown>, updated_at: now };
+}
+
+/** Update claim status and optional metadata (used by status-derive). */
+export async function updateClaimStatus(args: {
+  workspace_id: string;
+  claim_id: string;
+  status: string;
+  metadata?: AccuracyClaimMetadata;
+}): Promise<AccuracyClaimRow> {
+  await ensureAccuracySchema();
+  const existing = await getClaim(args.workspace_id, args.claim_id);
+  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  const now = nowIso();
+  const metadata = (args.metadata ?? claimMetadata(existing)) as Record<string, unknown>;
+  await accuracyDb()
+    .update(t.accuracyClaims)
+    .set({
+      status: args.status,
+      metadata,
+      updated_at: now,
+    })
+    .where(
+      and(
+        eq(t.accuracyClaims.id, args.claim_id),
+        eq(t.accuracyClaims.workspace_id, args.workspace_id),
+      ),
+    );
+  return {
+    ...existing,
+    status: args.status,
+    metadata,
+    updated_at: now,
+  };
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
