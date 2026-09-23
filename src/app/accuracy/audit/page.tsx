@@ -1,9 +1,11 @@
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { CostRollupPanel } from "@/components/accuracy/cost-rollup-panel";
 import { registerAccuracyStack } from "@/accuracy";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
-import { listAccuracyRuns } from "@/accuracy/kernel/observability";
+import { listAccuracyRuns, summarizeAccuracyRunCost } from "@/accuracy/kernel/observability";
+import type { AccuracyCostRollup } from "@/accuracy/kernel/cost-rollup";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +28,19 @@ export default async function AccuracyAuditPage({
   const { workspace_id: workspaceId = "" } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let rows: AuditRow[] = [];
+  let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
 
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
-      const [claims, pairs, runs] = await Promise.all([
+      const [claims, pairs, runs, cost] = await Promise.all([
         listClaims(workspaceId, { limit: 300 }),
         listCoveragePairs(workspaceId),
         listAccuracyRuns(workspaceId, 40),
+        summarizeAccuracyRunCost(workspaceId),
       ]);
+      rollup = cost;
 
       for (const claim of claims) {
         const meta = claimMetadata(claim);
@@ -75,10 +80,11 @@ export default async function AccuracyAuditPage({
       }
 
       for (const run of runs) {
+        const costLabel = run.cost_usd ? ` · $${run.cost_usd}` : "";
         rows.push({
           kind: "run",
           at: run.started_at,
-          title: `${run.call_kind} · ${run.status}`,
+          title: `${run.call_kind} · ${run.status}${costLabel}`,
           detail: run.summary ?? run.module_id,
         });
       }
@@ -94,8 +100,8 @@ export default async function AccuracyAuditPage({
   return (
     <AccuracyAppShell active="audit">
       <PageIntro kicker="Trace · rationales & runs" title="Audit">
-        Hillclimb trail: validation rationales, coverage decisions, priority changes, and module
-        runs for one workspace.
+        Hillclimb trail: validation rationales, coverage decisions, priority changes, module runs, and
+        estimated spend for one workspace.
       </PageIntro>
 
       {loadError ? (
@@ -117,6 +123,7 @@ export default async function AccuracyAuditPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {rows.length} event(s)
           </p>
+          {rollup ? <CostRollupPanel rollup={rollup} workspaceName={active?.name} /> : null}
           {rows.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No audit events yet. Validate claims, decide coverage, or run modules.

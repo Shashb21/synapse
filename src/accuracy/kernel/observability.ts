@@ -1,7 +1,8 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "../store/db";
 import * as t from "../store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { rollupAccuracyRunCost, type AccuracyCostRollup } from "./cost-rollup";
 import type {
   Actor,
   AgentRole,
@@ -14,6 +15,10 @@ import type {
   RunStep,
   TokenUsage,
 } from "./contracts";
+
+/** Runs still `running` after this age are marked abandoned (process crash / hung LLM). */
+export const DEFAULT_STALE_RUN_MAX_AGE_MS = 30 * 60 * 1000;
+export const STALE_RUN_ERROR = "abandoned: still running past max age";
 
 const MAX_STEP_BYTES = 40_000;
 
@@ -161,12 +166,80 @@ export async function closeAccuracyRun(args: {
     .where(eq(t.accuracyModuleRuns.id, args.recorder.id));
 }
 
+export async function sweepStaleAccuracyRuns(args?: {
+  workspace_id?: string;
+  maxAgeMs?: number;
+  now?: Date;
+}): Promise<{ abandoned_ids: string[]; cutoff: string }> {
+  await ensureAccuracySchema();
+  const now = args?.now ?? new Date();
+  const maxAgeMs = args?.maxAgeMs ?? DEFAULT_STALE_RUN_MAX_AGE_MS;
+  const cutoff = new Date(now.getTime() - maxAgeMs).toISOString();
+  const finishedAt = now.toISOString();
+
+  const filters = [
+    eq(t.accuracyModuleRuns.status, "running"),
+    lt(t.accuracyModuleRuns.started_at, cutoff),
+  ];
+  if (args?.workspace_id) {
+    filters.push(eq(t.accuracyModuleRuns.workspace_id, args.workspace_id));
+  }
+
+  const stale = await accuracyDb()
+    .select({
+      id: t.accuracyModuleRuns.id,
+      started_at: t.accuracyModuleRuns.started_at,
+    })
+    .from(t.accuracyModuleRuns)
+    .where(and(...filters));
+
+  if (stale.length === 0) return { abandoned_ids: [], cutoff };
+
+  for (const row of stale) {
+    const started = Date.parse(row.started_at);
+    const duration_ms = Number.isFinite(started) ? Math.max(0, now.getTime() - started) : null;
+    await accuracyDb()
+      .update(t.accuracyModuleRuns)
+      .set({
+        status: "abandoned",
+        finished_at: finishedAt,
+        duration_ms,
+        error: STALE_RUN_ERROR,
+        summary: "Marked abandoned by workspace hygiene (stale running run)",
+      })
+      .where(inArray(t.accuracyModuleRuns.id, [row.id]));
+  }
+
+  return { abandoned_ids: stale.map((row) => row.id), cutoff };
+}
+
 export async function listAccuracyRuns(workspace_id: string, limit = 40) {
   await ensureAccuracySchema();
+  await sweepStaleAccuracyRuns({ workspace_id });
   return accuracyDb()
     .select()
     .from(t.accuracyModuleRuns)
     .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
     .orderBy(desc(t.accuracyModuleRuns.started_at))
     .limit(limit);
+}
+
+export async function summarizeAccuracyRunCost(
+  workspace_id: string,
+  limit = 2000,
+): Promise<AccuracyCostRollup> {
+  await ensureAccuracySchema();
+  await sweepStaleAccuracyRuns({ workspace_id });
+  const runs = await accuracyDb()
+    .select({
+      call_kind: t.accuracyModuleRuns.call_kind,
+      status: t.accuracyModuleRuns.status,
+      cost_usd: t.accuracyModuleRuns.cost_usd,
+      token_usage: t.accuracyModuleRuns.token_usage,
+    })
+    .from(t.accuracyModuleRuns)
+    .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
+    .orderBy(desc(t.accuracyModuleRuns.started_at))
+    .limit(limit);
+  return rollupAccuracyRunCost(runs);
 }

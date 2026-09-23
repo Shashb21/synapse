@@ -177,7 +177,7 @@ export type RunStep = {
   data: unknown;
 };
 
-export type RunStatus = "running" | "ok" | "error";
+export type RunStatus = "running" | "ok" | "error" | "abandoned";
 
 export type TokenUsage = {
   prompt_tokens: number;

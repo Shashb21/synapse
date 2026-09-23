@@ -1,11 +1,13 @@
 # Deploy Synapse on Vercel
 
-Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is **OAuth-only** from `/control` — no API keys in the UI.
+Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is **OAuth-only** from `/control` — no API keys in the UI. Server env keys still unlock providers when no OAuth session is connected.
+
+**Operator checklist:** [`deploy-checklist.md`](./deploy-checklist.md) (env, smoke, post-deploy hygiene).
 
 ## Prerequisites
 
 - GitHub repo: [Shashb21/synapse](https://github.com/Shashb21/synapse)
-- Branch for this release: `cursor/mvp-gaps-live-routing-9593` (or `main` after merge)
+- Branch for production: `main`
 - xAI (and other) **OAuth apps** registered with production redirect URIs (client ids/secrets in Vercel env — never in git)
 
 ## 1. Postgres (required)
@@ -35,7 +37,7 @@ Schema is created on first request (`ensureSchema` / platform DDL).
 1. [https://vercel.com/new](https://vercel.com/new) → Import **Shashb21/synapse**.
 2. **Framework preset:** Next.js (auto-detected; `vercel.json` pins `npm run build`).
 3. **Root directory:** repository root.
-4. **Production branch:** `main` or `cursor/mvp-gaps-live-routing-9593` for a preview production cut.
+4. **Production branch:** `main`.
 5. Add `DATABASE_URL` (step 1) before the first deploy.
 6. Deploy.
 
@@ -45,7 +47,7 @@ Schema is created on first request (`ensureSchema` / platform DDL).
 npm i -g vercel@latest   # or: npx vercel@latest
 vercel login
 cd /path/to/synapse
-git checkout cursor/mvp-gaps-live-routing-9593
+git checkout main
 vercel link                  # pick team + create/link project
 vercel env add DATABASE_URL  # paste pooled Postgres URL (Production)
 # Optional OAuth client vars (see .env.example) — one at a time:
@@ -63,7 +65,11 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | **Yes** | Hosted Postgres (see §1) |
-| `XAI_OAUTH_CLIENT_ID` | Grok login | OAuth **client** id (operator) |
+| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field) |
+| `LLAMA_PARSE_TIER` | Optional | Default `agentic` |
+| `ANTHROPIC_WORKSPACE_ID` | Org-scoped Claude keys | Required when the Anthropic key is org-scoped |
+| `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Live extract without OAuth | Server-only; never shown in the UI |
+| `XAI_OAUTH_CLIENT_ID` | Grok login | OAuth **client** id (operator); public client ships if unset |
 | `XAI_OAUTH_CLIENT_SECRET` | Grok login | If xAI issues one |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | Claude login | One-click alternate |
 | `OPENAI_OAUTH_CLIENT_ID` | OpenAI login | |
@@ -108,6 +114,9 @@ Open:
 | --- | --- |
 | `/` | Upload / IEGP home |
 | `/control` | Control panel — five OAuth providers, Grok default, no API-key fields |
+| `/accuracy` | Workspaces (create, seed, archive, delete) |
+| `/accuracy/control` | Per call-kind routing + live price table |
+| `/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
 | `/timeline` | Gantt surface |
 | `/matrix` | Prioritization matrix |
 
@@ -118,3 +127,4 @@ Connect Grok on `/control` after `XAI_OAUTH_CLIENT_ID` is set and xAI redirect U
 - **Node:** CI uses 22; `package.json` `engines` requests Node ≥ 22.
 - **Port:** Vercel sets `PORT` automatically; local dev uses `43217` via `npm run dev` only.
 - **No custom server** — standard Next.js App Router output.
+- **Hygiene:** listing `/accuracy/runs` auto-abandons `running` rows older than 30 minutes; operators can also POST `/api/accuracy/hygiene` (`sweep_stale_runs`, `archive_workspace`, `delete_workspace`).
