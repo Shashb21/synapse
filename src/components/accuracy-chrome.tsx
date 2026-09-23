@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Activity, Building2, Menu, SlidersHorizontal } from "lucide-react";
+import {
+  Activity,
+  BookMarked,
+  Building2,
+  ChartGantt,
+  Menu,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,7 +20,12 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-export type AccuracyShellId = "workspaces" | "control" | "runs";
+export type AccuracyShellId =
+  | "workspaces"
+  | "control"
+  | "runs"
+  | "ledger"
+  | "timeline";
 
 type NavItem = {
   id: AccuracyShellId;
@@ -24,6 +36,8 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { id: "workspaces", href: "/accuracy", label: "Workspaces", icon: Building2 },
+  { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
+  { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
   { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
 ];
