@@ -12,6 +12,7 @@ const SHELL_NAV = [
   { href: "/accuracy/coverage", label: "Coverage" },
   { href: "/accuracy/plan", label: "Plan" },
   { href: "/accuracy/timeline", label: "Timeline" },
+  { href: "/accuracy/audit", label: "Audit" },
   { href: "/accuracy/control", label: "Routing" },
   { href: "/accuracy/runs", label: "Runs" },
 ] as const;
@@ -62,6 +63,12 @@ test.describe("accuracy shell", () => {
   test("plan page renders shell nav", async ({ page }) => {
     await page.goto("/accuracy/plan");
     await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
+    await expectAccuracyShell(page);
+  });
+
+  test("audit page renders shell nav", async ({ page }) => {
+    await page.goto("/accuracy/audit");
+    await expect(page.getByRole("heading", { name: /^audit$/i })).toBeVisible();
     await expectAccuracyShell(page);
   });
 

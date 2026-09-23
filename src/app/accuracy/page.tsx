@@ -88,6 +88,12 @@ export default async function AccuracyWorkspacesPage() {
                     Timeline
                   </Link>
                   <Link
+                    href={`/accuracy/audit?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Audit
+                  </Link>
+                  <Link
                     href={`/accuracy/runs?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >

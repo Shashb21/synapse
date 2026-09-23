@@ -5,9 +5,20 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { GanttActivity } from "@/accuracy/modules/gantt-project/engine";
+import { activitiesToSvg } from "@/accuracy/modules/gantt-project/export-svg";
 
 function toDay(iso: string): number {
   return Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
+}
+
+function downloadSvg(filename: string, svg: string) {
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function AccuracyGanttBoard({
@@ -75,6 +86,11 @@ export function AccuracyGanttBoard({
     }
   }
 
+  function exportSvg() {
+    if (activities.length === 0) return;
+    downloadSvg(`synapse-gantt-${workspaceId}.svg`, activitiesToSvg(activities));
+  }
+
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -87,13 +103,18 @@ export function AccuracyGanttBoard({
             </span>
           ) : null}
         </p>
-        <Button
-          size="sm"
-          disabled={pending || activities.length === 0}
-          onClick={() => void saveFinal()}
-        >
-          {pending ? "Saving…" : "Save as final"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={activities.length === 0} onClick={exportSvg}>
+            Export SVG
+          </Button>
+          <Button
+            size="sm"
+            disabled={pending || activities.length === 0}
+            onClick={() => void saveFinal()}
+          >
+            {pending ? "Saving…" : "Save as final"}
+          </Button>
+        </div>
       </div>
 
       <label className="grid gap-1 text-[11px] text-muted-foreground">

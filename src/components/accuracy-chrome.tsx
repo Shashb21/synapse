@@ -10,6 +10,7 @@ import {
   FileStack,
   GitCompareArrows,
   Menu,
+  ScrollText,
   SlidersHorizontal,
   Target,
 } from "lucide-react";
@@ -30,6 +31,7 @@ export type AccuracyShellId =
   | "coverage"
   | "plan"
   | "timeline"
+  | "audit"
   | "control"
   | "runs";
 
@@ -47,6 +49,7 @@ const NAV: NavItem[] = [
   { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
   { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },
   { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
+  { id: "audit", href: "/accuracy/audit", label: "Audit", icon: ScrollText },
   { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
 ];

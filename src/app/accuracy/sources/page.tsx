@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack } from "@/accuracy";
 import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
@@ -63,9 +64,10 @@ export default async function AccuracySourcesPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · <span className="text-foreground">{active?.name ?? workspaceId}</span>
           </p>
+          <SourceUploadForm workspaceId={workspaceId} />
           {sources.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              No sources yet. Seed from gold on the Workspaces page to attach the reference PPTX.
+              No sources yet. Upload above or seed from gold on the Workspaces page.
             </p>
           ) : (
             <ul className="grid gap-2">
