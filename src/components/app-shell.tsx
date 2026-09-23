@@ -4,6 +4,15 @@ import { buildPlanWorkspace, planGates, planNavCounts } from "@/lib/iegp/engine"
 
 export type { ShellId };
 
+const EMPTY_NAV: PlanNavModel = {
+  gapsCount: 0,
+  unvalidatedCount: 0,
+  gapsUnlocked: false,
+  planUnlocked: false,
+  tacticsUnlocked: false,
+  setupComplete: false,
+};
+
 export async function AppShell({
   children,
   active,
@@ -11,18 +20,23 @@ export async function AppShell({
   children: React.ReactNode;
   active: ShellId;
 }) {
-  const state = await loadState();
-  const workspace = buildPlanWorkspace(state);
-  const gates = planGates(state);
-  const counts = planNavCounts(workspace);
-  const nav: PlanNavModel = {
-    gapsCount: counts.gaps,
-    unvalidatedCount: counts.unvalidated,
-    gapsUnlocked: gates.gapsUnlocked,
-    planUnlocked: gates.planUnlocked,
-    tacticsUnlocked: gates.tacticsUnlocked,
-    setupComplete: state.asset.setup_complete,
-  };
+  let nav = EMPTY_NAV;
+  try {
+    const state = await loadState();
+    const workspace = buildPlanWorkspace(state);
+    const gates = planGates(state);
+    const counts = planNavCounts(workspace);
+    nav = {
+      gapsCount: counts.gaps,
+      unvalidatedCount: counts.unvalidated,
+      gapsUnlocked: gates.gapsUnlocked,
+      planUnlocked: gates.planUnlocked,
+      tacticsUnlocked: gates.tacticsUnlocked,
+      setupComplete: state.asset.setup_complete,
+    };
+  } catch {
+    // Setup and other shells must render before Postgres is configured.
+  }
   return (
     <PlanChrome active={active} nav={nav}>
       {children}

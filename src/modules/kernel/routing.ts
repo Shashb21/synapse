@@ -233,10 +233,15 @@ export async function previewRoute(stage: StageId): Promise<ResolvedRoute> {
   try {
     return await resolveRoute(stage);
   } catch (error) {
-    const config = await routeConfig(stage);
+    let config = defaultConfig(stage);
+    try {
+      config = await routeConfig(stage);
+    } catch {
+      // Postgres / platform schema may not be ready yet.
+    }
     const provider =
       findProvider(config.provider_id) ?? findProvider(DEFAULT_PROVIDER_ID)!;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : CONNECT_PROMPT;
     return {
       stage,
       provider_id: provider.id,

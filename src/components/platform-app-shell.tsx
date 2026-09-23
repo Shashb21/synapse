@@ -8,7 +8,7 @@ const EMPTY_NAV: PlanNavModel = {
   gapsUnlocked: false,
   planUnlocked: false,
   tacticsUnlocked: false,
-  setupComplete: true,
+  setupComplete: false,
 };
 
 /**

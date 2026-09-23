@@ -63,8 +63,8 @@ export const STAGES: Record<StageId, StageDescriptor> = {
   },
   S4: {
     id: "S4",
-    title: "Knowledge graph mapping",
-    purpose: "Propose many-to-many gap ↔ tactic mappings with confidence and rationale.",
+    title: "LLM mapping table",
+    purpose: "Propose a per-gap mapping table (tactic assignments + status) via LLM; user edits feed hillclimb.",
     kind: "agentic",
     upstream: ["S2", "S3"],
   },

@@ -46,7 +46,8 @@ export type ShellId =
   | "control"
   | "evals"
   | "sdlc"
-  | "setup";
+  | "setup"
+  | "mappings";
 
 export type PlanNavModel = {
   gapsCount: number;
@@ -71,6 +72,7 @@ type SecondaryId =
   | "matrix"
   | "ideation"
   | "timeline"
+  | "mappings"
   | "pipeline"
   | "runs"
   | "control"
@@ -93,6 +95,7 @@ const PLAN_SURFACES: SecondaryItem[] = [
 
 const SECONDARY: SecondaryItem[] = [
   { id: "setup", href: "/setup", label: "Get started", icon: Rocket },
+  { id: "mappings", href: "/mappings", label: "Mapping table", icon: Columns3 },
   { id: "pipeline", href: "/pipeline", label: "Pipeline", icon: Workflow },
   { id: "runs", href: "/runs", label: "Runs", icon: Activity },
   { id: "control", href: "/control", label: "Control panel", icon: SlidersHorizontal },

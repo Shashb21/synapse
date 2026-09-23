@@ -17,62 +17,68 @@ import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
 import type { IegpState } from "@/lib/iegp/types";
 import { MAPPING_CANDIDATES_DDL, mappingCandidates } from "./schema";
 
+const mappingStatusSchema = z.enum(["open", "addressed", "partially_addressed"]);
+
 const inputSchema = z.object({
   gap_ids: z.array(z.string()).optional(),
   tactic_ids: z.array(z.string()).optional(),
-  /** Maximum edges kept per gap so the graph stays readable. */
+  /** Maximum tactics assigned per gap row. */
   max_per_gap: z.number().int().min(1).max(20).default(6),
   dry_run: z.boolean().default(false),
 });
 
-const edgeSchema = z.object({
+const rowSchema = z.object({
   gap_id: z.string(),
   gap_name: z.string(),
-  tactic_id: z.string(),
-  tactic_name: z.string(),
-  score: z.number(),
+  tactic_ids: z.array(z.string()),
+  tactic_names: z.array(z.string()),
+  mapping_status: mappingStatusSchema,
   confidence: z.number(),
   rationale: z.array(z.string()),
-  verdict: z.string(),
+  verdict: z.string().optional(),
 });
 
 const outputSchema = z.object({
   mode: z.enum(["llm", "deterministic"]),
   proposed: z.number(),
-  accepted: z.array(edgeSchema),
-  rejected: z.array(edgeSchema),
-  committed: z.array(z.object({ gap_id: z.string(), tactic_id: z.string() })),
-  graph: z.object({
+  rows: z.array(rowSchema),
+  accepted: z.array(rowSchema),
+  rejected: z.array(rowSchema),
+  committed: z.array(z.object({ gap_id: z.string(), tactic_ids: z.array(z.string()) })),
+  table: z.object({
     gaps: z.number(),
     tactics: z.number(),
-    edges: z.number(),
-    gaps_with_no_edge: z.number(),
+    rows_accepted: z.number(),
+    gaps_still_open: z.number(),
   }),
 });
 
 export type MappingInput = z.infer<typeof inputSchema>;
 export type MappingOutput = z.infer<typeof outputSchema>;
+export type MappingTableRow = z.infer<typeof rowSchema>;
 
-type Edge = {
+type Row = {
   gap_id: string;
   gap_name: string;
-  tactic_id: string;
-  tactic_name: string;
-  score: number;
+  tactic_ids: string[];
+  tactic_names: string[];
+  mapping_status: z.infer<typeof mappingStatusSchema>;
   confidence: number;
   rationale: string[];
 };
 
-const MAPPING_PROPOSER_SYSTEM = `You map evidence gaps to tactics for an Integrated Evidence Generation Plan.
+const MAPPING_TABLE_PROPOSER_SYSTEM = `You produce a gap ↔ tactic mapping TABLE for an Integrated Evidence Generation Plan.
 
-A mapping means the tactic produces evidence that bears on the gap. Mapping is many-to-many: one tactic may bear on several gaps and one gap may need several tactics. Do not map a tactic that merely disseminates evidence unless the gap is about dissemination.
+After gap and tactic extraction, each TABLE ROW is one evidence gap with:
+- assigned tactic id(s) that bear on the gap (many-to-many across the table)
+- mapping_status: "open" (no tactics), "addressed" (tactics fully close the gap), or "partially_addressed" (tactics cover part of the gap)
 
-For each edge give confidence 0-100 and a one-sentence rationale naming what overlaps (population, comparator, outcome, timing).
+Do not map dissemination-only tactics unless the gap is about dissemination. Every row needs a one-sentence rationale naming what overlaps (population, comparator, outcome, timing). Confidence is 0-100.
 
-Return JSON only: {"edges":[{"gap_id":"","tactic_id":"","confidence":0,"rationale":""}]}`;
+Return JSON only: {"rows":[{"gap_id":"","tactic_ids":[],"mapping_status":"open|addressed|partially_addressed","confidence":0,"rationale":""}]}`;
 
-function key(edge: { gap_id: string; tactic_id: string }): string {
-  return `${edge.gap_id}::${edge.tactic_id}`;
+function subjectOf(row: Row): string {
+  return row.gap_id;
 }
 
 function candidateSets(state: IegpState, input: MappingInput) {
@@ -90,55 +96,55 @@ function candidateSets(state: IegpState, input: MappingInput) {
   return { gaps, tactics };
 }
 
-function localProposals(state: IegpState, input: MappingInput): Edge[] {
-  const { gaps, tactics } = candidateSets(state, input);
-  const rejected = new Set(
-    state.mapping_suggestions.filter((row) => row.status === "rejected").map(key),
-  );
-  const covered = new Set(state.coverages.map(key));
-  const needsByGap = new Map<string, IegpState["needs"]>();
-  for (const link of state.need_gap_links) {
-    const need = state.needs.find((row) => row.id === link.need_id);
-    if (!need) continue;
-    const list = needsByGap.get(link.gap_id) ?? [];
-    list.push(need);
-    needsByGap.set(link.gap_id, list);
-  }
-  const residualByGap = new Map(state.residuals.map((row) => [row.gap_id, row.statement]));
-  const out: Edge[] = [];
-  for (const gap of gaps) {
-    for (const tactic of tactics) {
-      const pair = { gap_id: gap.id, tactic_id: tactic.id };
-      if (rejected.has(key(pair)) || covered.has(key(pair))) continue;
-      const scored = scoreGapTacticMapping(gap, tactic, {
-        needs: needsByGap.get(gap.id),
-        residual_statement: residualByGap.get(gap.id),
-      });
-      if (scored.score < MAPPING_SCORE_FLOOR) continue;
-      out.push({
-        gap_id: gap.id,
-        gap_name: gap.name,
-        tactic_id: tactic.id,
-        tactic_name: tactic.name,
-        score: scored.score,
-        confidence: scored.score,
-        rationale: scored.reasons,
-      });
-    }
-  }
-  return out.sort((a, b) => b.score - a.score);
+function statusFromEdges(edgeCount: number, topScore: number): Row["mapping_status"] {
+  if (edgeCount === 0) return "open";
+  if (topScore >= 75) return "addressed";
+  return "partially_addressed";
 }
 
-async function llmProposals(
+/** Test-only stub when SYNAPSE_TEST_STUB_LLM=1; production runs use the LLM proposer only. */
+function localTableRows(state: IegpState, input: MappingInput): Row[] {
+  const { gaps, tactics } = candidateSets(state, input);
+  const covered = new Set(state.coverages.map((c) => `${c.gap_id}::${c.tactic_id}`));
+  const out: Row[] = [];
+  for (const gap of gaps) {
+    const scored = tactics
+      .map((tactic) => {
+        const pair = { gap_id: gap.id, tactic_id: tactic.id };
+        if (covered.has(`${pair.gap_id}::${pair.tactic_id}`)) return null;
+        const result = scoreGapTacticMapping(gap, tactic, {});
+        if (result.score < MAPPING_SCORE_FLOOR) return null;
+        return { tactic, score: result.score, reasons: result.reasons };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, input.max_per_gap);
+    const mapping_status = statusFromEdges(scored.length, scored[0]?.score ?? 0);
+    out.push({
+      gap_id: gap.id,
+      gap_name: gap.name,
+      tactic_ids: scored.map((item) => item.tactic.id),
+      tactic_names: scored.map((item) => item.tactic.name),
+      mapping_status,
+      confidence: scored.length ? Math.round(scored[0]!.score) : 0,
+      rationale: scored.length
+        ? scored.flatMap((item) => item.reasons).slice(0, 3)
+        : ["No tactic clears the mapping floor for this gap."],
+    });
+  }
+  return out;
+}
+
+async function llmTableRows(
   ctx: ModuleContext,
   state: IegpState,
   input: MappingInput,
   hints: string,
-): Promise<Edge[]> {
+): Promise<Row[]> {
   const { gaps, tactics } = candidateSets(state, input);
-  if (gaps.length === 0 || tactics.length === 0) return [];
+  if (gaps.length === 0) return [];
   const payload = (await ctx.complete({
-    system: MAPPING_PROPOSER_SYSTEM,
+    system: MAPPING_TABLE_PROPOSER_SYSTEM,
     user: JSON.stringify({
       hints: hints || undefined,
       gaps: gaps.map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement, domain: gap.domain })),
@@ -152,77 +158,111 @@ async function llmProposals(
         comparator: tactic.comparator,
         outcomes: tactic.outcomes,
       })),
+      max_tactics_per_gap: input.max_per_gap,
     }),
-    purpose: "kg-mapping-proposer",
-  })) as { edges?: { gap_id?: string; tactic_id?: string; confidence?: number; rationale?: string }[] };
-  const out: Edge[] = [];
-  for (const edge of payload.edges ?? []) {
-    const gap = gaps.find((candidate) => candidate.id === edge.gap_id);
-    const tactic = tactics.find((candidate) => candidate.id === edge.tactic_id);
-    if (!gap || !tactic) continue;
-    const scored = scoreGapTacticMapping(gap, tactic, {});
+    purpose: "mapping-table-proposer",
+  })) as {
+    rows?: {
+      gap_id?: string;
+      tactic_ids?: string[];
+      mapping_status?: string;
+      confidence?: number;
+      rationale?: string;
+    }[];
+  };
+  const out: Row[] = [];
+  for (const raw of payload.rows ?? []) {
+    const gap = gaps.find((candidate) => candidate.id === raw.gap_id);
+    if (!gap) continue;
+    const tactic_ids = (raw.tactic_ids ?? []).filter((id) => tactics.some((t) => t.id === id)).slice(0, input.max_per_gap);
+    const mapping_status = mappingStatusSchema.safeParse(raw.mapping_status).success
+      ? (raw.mapping_status as Row["mapping_status"])
+      : statusFromEdges(tactic_ids.length, raw.confidence ?? 50);
+    const tactic_names = tactic_ids.map((id) => tactics.find((t) => t.id === id)?.name ?? id);
     out.push({
       gap_id: gap.id,
       gap_name: gap.name,
-      tactic_id: tactic.id,
-      tactic_name: tactic.name,
-      score: scored.score,
-      confidence: Math.max(0, Math.min(100, Math.round(edge.confidence ?? 50))),
-      rationale: [(edge.rationale ?? "").trim() || "model proposed this edge", ...scored.reasons],
+      tactic_ids,
+      tactic_names,
+      mapping_status,
+      confidence: Math.max(0, Math.min(100, Math.round(raw.confidence ?? 50))),
+      rationale: [(raw.rationale ?? "").trim() || "Model proposed this row", ...tactic_names.map((n) => `Tactic: ${n}`)],
     });
+  }
+  for (const gap of gaps) {
+    if (!out.some((row) => row.gap_id === gap.id)) {
+      out.push({
+        gap_id: gap.id,
+        gap_name: gap.name,
+        tactic_ids: [],
+        tactic_names: [],
+        mapping_status: "open",
+        confidence: 0,
+        rationale: ["No row returned for this gap; treating as open."],
+      });
+    }
   }
   return out;
 }
 
-/**
- * The proposer answering the critic: concede dropped edges, and where a gap is
- * still over its edge budget, give up its weakest edge rather than argue for it.
- */
-function reviseEdges(args: {
-  previous: Edge[];
-  critiques: Critique[];
-  maxPerGap: number;
-}): Edge[] {
-  const kept = args.previous.filter((edge) => {
-    const critique = args.critiques.find((item) => item.subject === key(edge));
-    if (critique?.verdict === "drop") return false;
-    if (hasIssue(critique, "below_floor")) return false;
-    if (hasIssue(critique, "no_rationale")) return false;
-    return true;
-  });
-  const perGap = new Map<string, Edge[]>();
-  for (const edge of [...kept].sort((a, b) => b.confidence - a.confidence || b.score - a.score)) {
-    const list = perGap.get(edge.gap_id) ?? [];
-    if (list.length < args.maxPerGap) list.push(edge);
-    perGap.set(edge.gap_id, list);
-  }
-  return [...perGap.values()].flat();
+function reviseRows(args: { previous: Row[]; critiques: Critique[]; maxPerGap: number }): Row[] {
+  return args.previous
+    .filter((row) => {
+      const critique = args.critiques.find((item) => item.subject === subjectOf(row));
+      if (critique?.verdict === "drop") return false;
+      if (hasIssue(critique, "no_rationale")) return false;
+      if (hasIssue(critique, "status_mismatch")) return false;
+      return true;
+    })
+    .map((row) => {
+      const critique = args.critiques.find((item) => item.subject === subjectOf(row));
+      if (critique?.verdict !== "revise") return row;
+      const trimmed = row.tactic_ids.slice(0, args.maxPerGap);
+      return {
+        ...row,
+        tactic_ids: trimmed,
+        tactic_names: row.tactic_names.slice(0, trimmed.length),
+        mapping_status:
+          trimmed.length === 0
+            ? "open"
+            : row.mapping_status === "open" && trimmed.length > 0
+              ? "partially_addressed"
+              : row.mapping_status,
+        rationale: [...row.rationale, `Revised after critique: ${critique.note}`],
+      };
+    });
 }
 
 function mappingRevisionBrief(args: { round: number; critiques: Critique[] }): string {
   const objections = args.critiques.filter((critique) => critique.verdict !== "keep");
   if (objections.length === 0) {
-    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: every edge was kept. Sharpen rationales only.`;
+    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: every row was kept. Sharpen rationales only.`;
   }
   return [
-    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected to these edges. Withdraw the ones you cannot justify and restate the rationale for the rest:`,
+    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected to these rows. Fix status/tactic assignments or withdraw rows you cannot justify:`,
     ...objections.map(
       (critique) => `- ${critique.subject} (${critique.verdict}, ${critique.score}/100): ${critique.note}`,
     ),
   ].join("\n");
 }
 
+function statusMatchesTactics(row: Row): boolean {
+  if (row.tactic_ids.length === 0) return row.mapping_status === "open";
+  if (row.mapping_status === "open") return false;
+  return true;
+}
+
 export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
     stage: "S4",
-    version: "1.0.0",
-    title: "Knowledge-graph mapping (scored + judged)",
+    version: "2.0.0",
+    title: "LLM mapping table (proposer ↔ critic ×3 → judge)",
     summary:
-      "Proposes many-to-many gap ↔ tactic edges from the dimension scorer and the model, then judges which edges join.",
+      "Proposes one table row per gap with assigned tactics and mapping status; user accepts or edits rows with rationale for hillclimb.",
     contract: 1,
     agentic: true,
-    capabilities: ["many-to-many", "llm-proposer", "scored-proposer"],
+    capabilities: ["mapping-table", "llm-proposer", "hillclimb-hints"],
   },
   inputSchema,
   outputSchema,
@@ -231,16 +271,16 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     const state = await loadState();
     const { gaps, tactics } = candidateSets(state, input);
 
-    const outcome = await runAgenticCycle<Edge>(ctx, "S4", {
-      subjectOf: (edge) => key(edge),
+    const outcome = await runAgenticCycle<Row>(ctx, "S4", {
+      subjectOf,
       proposer: {
         local: ({ round, previous, critiques }) =>
           round === 1
-            ? localProposals(state, input)
-            : reviseEdges({ previous, critiques, maxPerGap: input.max_per_gap }),
+            ? localTableRows(state, input)
+            : reviseRows({ previous, critiques, maxPerGap: input.max_per_gap }),
         llm: canPrompt(ctx.route)
           ? ({ hints, round, critiques }) =>
-              llmProposals(
+              llmTableRows(
                 ctx,
                 state,
                 input,
@@ -250,70 +290,62 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
               )
           : undefined,
       },
-      critic: (edges) =>
-        edges.map((edge) => {
-          const blended = Math.round((edge.score + edge.confidence) / 2);
+      critic: (rows) =>
+        rows.map((row) => {
           const notes: string[] = [];
           const issues: string[] = [];
-          if (edge.score < MAPPING_SCORE_FLOOR) {
-            notes.push("below the dimension-score floor");
-            issues.push("below_floor");
-          }
-          if (edge.confidence < 40) {
-            notes.push("low model confidence");
-            issues.push("low_confidence");
-          }
-          if (edge.rationale.length === 0) {
+          if (row.rationale.length === 0 || !row.rationale[0]?.trim()) {
             notes.push("no rationale");
             issues.push("no_rationale");
           }
+          if (row.tactic_ids.length > input.max_per_gap) {
+            notes.push("too many tactics on this row");
+            issues.push("over_budget");
+          }
+          if (!statusMatchesTactics(row)) {
+            notes.push("mapping_status does not match tactic assignment");
+            issues.push("status_mismatch");
+          }
+          if (row.confidence < 35 && row.tactic_ids.length > 0) {
+            notes.push("low confidence");
+            issues.push("low_confidence");
+          }
+          const blended = row.confidence;
           return {
-            subject: key(edge),
-            verdict: blended >= 60 ? ("keep" as const) : blended >= 40 ? ("revise" as const) : ("drop" as const),
-            note: notes.length ? notes.join("; ") : edge.rationale.slice(0, 2).join("; "),
+            subject: subjectOf(row),
+            verdict: blended >= 60 && issues.length === 0 ? ("keep" as const) : blended >= 40 ? ("revise" as const) : ("drop" as const),
+            note: notes.length ? notes.join("; ") : row.rationale.slice(0, 2).join("; "),
             score: blended,
             issues,
           };
         }),
-      judge: ({ candidates, critiques }) => {
-        const perGap = new Map<string, number>();
-        const seen = new Set<string>();
-        return [...candidates]
-          .sort((a, b) => b.score - a.score)
-          .map((edge) => {
-            const critique = critiques.find((item) => item.subject === key(edge));
-            const score = critique?.score ?? 50;
-            const used = perGap.get(edge.gap_id) ?? 0;
-            const duplicate = seen.has(key(edge));
-            const accept =
-              !duplicate && critique?.verdict !== "drop" && score >= 45 && used < input.max_per_gap;
-            if (accept) {
-              perGap.set(edge.gap_id, used + 1);
-              seen.add(key(edge));
-            }
-            return {
-              candidate: edge,
-              subject: key(edge),
-              verdict: accept ? ("accept" as const) : ("reject" as const),
-              score,
-              note: duplicate
-                ? "Rejected: duplicate edge."
-                : used >= input.max_per_gap
-                  ? `Rejected: gap already has ${input.max_per_gap} edge(s) this run.`
-                  : (critique?.note ?? "no critique"),
-            };
-          });
-      },
+      judge: ({ candidates, critiques }) =>
+        candidates.map((row) => {
+          const critique = critiques.find((item) => item.subject === subjectOf(row));
+          const score = critique?.score ?? row.confidence;
+          const accept =
+            critique?.verdict !== "drop" &&
+            score >= 45 &&
+            !hasIssue(critique, "status_mismatch") &&
+            row.tactic_ids.length <= input.max_per_gap;
+          return {
+            candidate: row,
+            subject: subjectOf(row),
+            verdict: accept ? ("accept" as const) : ("reject" as const),
+            score,
+            note: critique?.note ?? "no critique",
+          };
+        }),
     });
 
     const rows = outcome.judged.map((item) => ({
       id: newId("mc"),
       run_id: ctx.run.id,
       gap_id: item.candidate.gap_id,
-      tactic_id: item.candidate.tactic_id,
-      score: item.candidate.score,
-      confidence: item.score,
-      rationale: item.candidate.rationale,
+      tactic_id: item.candidate.tactic_ids[0] ?? "",
+      score: item.score,
+      confidence: item.candidate.confidence,
+      rationale: [...item.candidate.rationale, `status:${item.candidate.mapping_status}`, `tactics:${item.candidate.tactic_ids.join(",")}`],
       verdict: item.verdict,
       committed: false,
       proposer: outcome.mode,
@@ -321,60 +353,68 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     }));
     if (rows.length > 0) await db().insert(mappingCandidates).values(rows);
 
-    const committed: { gap_id: string; tactic_id: string }[] = [];
+    const committed: { gap_id: string; tactic_ids: string[] }[] = [];
     if (!input.dry_run) {
-      for (const edge of outcome.accepted) {
-        try {
-          await assignTacticToGap({
-            gap_id: edge.gap_id,
-            tactic_id: edge.tactic_id,
-            actor_name: ctx.actor.name,
-            actor_function: ctx.actor.function,
-            note: `S4 mapping · confidence ${edge.confidence} · ${edge.rationale[0] ?? "scored edge"}`,
-          });
-          committed.push({ gap_id: edge.gap_id, tactic_id: edge.tactic_id });
-        } catch (error) {
-          ctx.run.note("commit:skipped", {
-            edge: key(edge),
-            reason: error instanceof Error ? error.message : String(error),
-          });
+      for (const row of outcome.accepted) {
+        const joined: string[] = [];
+        for (const tactic_id of row.tactic_ids) {
+          try {
+            await assignTacticToGap({
+              gap_id: row.gap_id,
+              tactic_id,
+              actor_name: ctx.actor.name,
+              actor_function: ctx.actor.function,
+              note: `S4 mapping table · ${row.mapping_status} · ${row.rationale[0] ?? "LLM row"}`,
+            });
+            joined.push(tactic_id);
+          } catch (error) {
+            ctx.run.note("commit:skipped", {
+              gap_id: row.gap_id,
+              tactic_id,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
+        if (joined.length > 0) committed.push({ gap_id: row.gap_id, tactic_ids: joined });
       }
     }
 
-    const toOut = (item: (typeof outcome.judged)[number]) => ({
+    const toOut = (item: (typeof outcome.judged)[number]): MappingTableRow => ({
       gap_id: item.candidate.gap_id,
       gap_name: item.candidate.gap_name,
-      tactic_id: item.candidate.tactic_id,
-      tactic_name: item.candidate.tactic_name,
-      score: item.candidate.score,
-      confidence: item.score,
+      tactic_ids: item.candidate.tactic_ids,
+      tactic_names: item.candidate.tactic_names,
+      mapping_status: item.candidate.mapping_status,
+      confidence: item.candidate.confidence,
       rationale: item.candidate.rationale,
       verdict: item.verdict,
     });
-    const gapsWithEdge = new Set(outcome.accepted.map((edge) => edge.gap_id));
-    const existingEdges = new Set(state.coverages.map(key));
+
+    const acceptedRows = outcome.judged.filter((item) => item.verdict === "accept").map(toOut);
+    const gapsWithTactics = new Set(
+      acceptedRows.filter((row) => row.tactic_ids.length > 0).map((row) => row.gap_id),
+    );
 
     return {
       output: {
         mode: outcome.mode,
         proposed: outcome.proposed.length,
-        accepted: outcome.judged.filter((item) => item.verdict === "accept").map(toOut),
+        rows: outcome.judged.map(toOut),
+        accepted: acceptedRows,
         rejected: outcome.rejected.map(toOut),
         committed,
-        graph: {
+        table: {
           gaps: gaps.length,
           tactics: tactics.length,
-          edges: existingEdges.size + committed.length,
-          gaps_with_no_edge: gaps.filter(
+          rows_accepted: acceptedRows.length,
+          gaps_still_open: gaps.filter(
             (gap) =>
-              !gapsWithEdge.has(gap.id) &&
-              !state.coverages.some((coverage) => coverage.gap_id === gap.id),
+              !gapsWithTactics.has(gap.id) && !state.coverages.some((coverage) => coverage.gap_id === gap.id),
           ).length,
         },
       },
-      summary: `${outcome.accepted.length} of ${outcome.proposed.length} edge(s) accepted${
-        input.dry_run ? " (dry run)" : `, ${committed.length} joined`
+      summary: `${acceptedRows.length} of ${outcome.proposed.length} mapping row(s) accepted${
+        input.dry_run ? " (dry run)" : `, ${committed.length} gap row(s) joined`
       }`,
       evals: [
         ...outcome.metrics,
@@ -387,7 +427,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
                   (
                     gaps.filter(
                       (gap) =>
-                        gapsWithEdge.has(gap.id) ||
+                        gapsWithTactics.has(gap.id) ||
                         state.coverages.some((coverage) => coverage.gap_id === gap.id),
                     ).length / gaps.length
                   ).toFixed(3),
@@ -403,21 +443,19 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
       return [{ name: "workspace", input: { max_per_gap: 6, dry_run: true } }];
     },
     score({ output }) {
-      const judged = output.accepted.length + output.rejected.length;
-      const withRationale = output.accepted.filter((edge) => edge.rationale.length > 0).length;
-      // Nothing left to propose means the graph is already joined, which is not a
-      // quality failure, so those cases carry no target.
+      const withRationale = output.accepted.filter((row) => row.rationale.length > 0).length;
       if (output.accepted.length === 0) {
         return [
-          { name: "edges_with_rationale", value: 0, unit: "ratio", detail: "no new edges" },
-          { name: "selectivity", value: 0, unit: "ratio", detail: "no new edges" },
-          { name: "gaps_left_unmapped", value: output.graph.gaps_with_no_edge, unit: "count" },
+          { name: "rows_with_rationale", value: 0, unit: "ratio", detail: "no new rows" },
+          { name: "selectivity", value: 0, unit: "ratio", detail: "no new rows" },
+          { name: "gaps_left_unmapped", value: output.table.gaps_still_open, unit: "count" },
         ];
       }
+      const judged = output.accepted.length + output.rejected.length;
       return [
         {
-          name: "edges_with_rationale",
-          value: output.accepted.length === 0 ? 0 : Number((withRationale / output.accepted.length).toFixed(3)),
+          name: "rows_with_rationale",
+          value: Number((withRationale / output.accepted.length).toFixed(3)),
           unit: "ratio",
           target: 1,
         },
@@ -428,7 +466,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
         },
         {
           name: "gaps_left_unmapped",
-          value: output.graph.gaps_with_no_edge,
+          value: output.table.gaps_still_open,
           unit: "count",
         },
       ];

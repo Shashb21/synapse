@@ -30,7 +30,7 @@ test.describe("platform surfaces", () => {
       "S0 · File upload",
       "S1 · File parse",
       "S2 · Evidence gap extraction",
-      "S4 · Knowledge graph mapping",
+      "S4 · Mapping table",
       "S8 · Prioritization",
       "S10 · Interactive Gantt timeline",
     ]) {

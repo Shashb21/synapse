@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
@@ -89,10 +90,9 @@ export default async function HomePage({
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
   const params = await searchParams;
+  if (params.place === "mappings") redirect("/mappings");
   const requested =
-    params.place === "review" || params.place === "mappings" || params.place === "library"
-      ? "gaps"
-      : params.place;
+    params.place === "review" || params.place === "library" ? "gaps" : params.place;
   const fallback = defaultPlanPlace(state, workspace);
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);

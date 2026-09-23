@@ -2,8 +2,8 @@ import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
 import { SessionPanel } from "@/components/platform/session-panel";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
-import { stageWiring } from "@/modules/kernel/registry";
-import { resolveRoute, routeConfigs } from "@/modules/kernel/routing";
+import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
+import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
 import { listConnections } from "@/modules/llm/oauth";
 import {
   ALTERNATE_ROUTE_PROVIDER,
@@ -22,13 +22,44 @@ export type ControlPanelSearchParams = {
 
 /** OAuth control panel: five LLM providers, Grok default, Claude one-click, no API-key fields. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
-  const [wiring, configs, connections, identity] = await Promise.all([
-    stageWiring(),
-    routeConfigs(),
-    listConnections(),
-    sessionContext(),
-  ]);
-  const resolved = await Promise.all(STAGE_IDS.map((stage) => resolveRoute(stage)));
+  let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
+    stage,
+    active: null,
+    available: [],
+    activated_by: null,
+    activated_at: null,
+    has_evals: false,
+  }));
+  let configs: RouteConfig[] = STAGE_IDS.map((stage) => ({
+    stage,
+    provider_id: DEFAULT_ROUTE_PROVIDER,
+    model: "grok-4",
+    params: { temperature: 0, max_tokens: 8192 },
+    fallbacks: [ALTERNATE_ROUTE_PROVIDER],
+    updated_by: "default (locked: Grok)",
+    updated_at: "—",
+  }));
+  let connections: Awaited<ReturnType<typeof listConnections>> = [];
+  let identity = await sessionContext().catch(() => ({
+    session: null,
+    actor: { name: "Unsigned (demo)", function: "medical_affairs" as const },
+    role: "medical_affairs" as const,
+    demo: true,
+    signed_in: false,
+  }));
+
+  try {
+    [wiring, configs, connections, identity] = await Promise.all([
+      stageWiring(),
+      routeConfigs(),
+      listConnections(),
+      sessionContext(),
+    ]);
+  } catch {
+    // Control panel must render before Postgres or OAuth connections exist.
+  }
+
+  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
 
   const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
     const config = configs.find((row) => row.stage === stage)!;

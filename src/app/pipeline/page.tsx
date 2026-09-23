@@ -90,7 +90,7 @@ export default async function PipelinePage() {
               { stage: "S1", label: "S1 Parse" },
               { stage: "S2", label: "S2 Gap extraction" },
               { stage: "S3", label: "S3 Tactic extraction" },
-              { stage: "S4", label: "S4 Knowledge graph" },
+              { stage: "S4", label: "S4 Mapping table" },
               { stage: "S7", label: "S7 Consolidation" },
             ]}
           />
