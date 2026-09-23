@@ -38,6 +38,15 @@ export async function readParseBlocks(workspace_id: string, source_file_id: stri
   return rows.filter((r) => r.source_file_id === source_file_id);
 }
 
+/** All parse blocks for a workspace (completeness audit / review inbox). */
+export async function readAllParseBlocks(workspace_id: string) {
+  await ensureAccuracySchema();
+  return accuracyDb()
+    .select()
+    .from(t.accuracyParseBlocks)
+    .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id));
+}
+
 /** Resolve parse blocks by id within a workspace (order follows block_ids). */
 export async function readParseBlocksByIds(workspace_id: string, block_ids: string[]) {
   if (block_ids.length === 0) return [];

@@ -64,6 +64,12 @@ export default async function AccuracyWorkspacesPage() {
                     Sources
                   </Link>
                   <Link
+                    href={`/accuracy/review?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    className="text-[12px] text-foreground underline-offset-2 hover:underline"
+                  >
+                    Review
+                  </Link>
+                  <Link
                     href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
                   >

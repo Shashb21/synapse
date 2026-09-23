@@ -9,6 +9,7 @@ import {
   Building2,
   ChartGantt,
   FileStack,
+  Flag,
   GitCompareArrows,
   Menu,
   ScrollText,
@@ -28,6 +29,7 @@ import { cn } from "@/lib/utils";
 export type AccuracyShellId =
   | "workspaces"
   | "sources"
+  | "review"
   | "ledger"
   | "coverage"
   | "plan"
@@ -46,6 +48,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { id: "workspaces", href: "/accuracy", label: "Workspaces", icon: Building2 },
   { id: "sources", href: "/accuracy/sources", label: "Sources", icon: FileStack },
+  { id: "review", href: "/accuracy/review", label: "Review", icon: Flag },
   { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
   { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
   { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },

@@ -63,6 +63,20 @@ export const accuracyProvenance = pgTable("accuracy_provenance", {
   quote: text("quote").notNull(),
 });
 
+/** Promote / dismiss actions for completeness-audit miss flags (hillclimb rationales). */
+export const accuracyMissFlagActions = pgTable("accuracy_miss_flag_actions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  block_id: text("block_id").notNull(),
+  action: text("action").notNull(),
+  suggested: text("suggested"),
+  claim_id: text("claim_id"),
+  rationale: text("rationale").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
 export const accuracyCoverageJoins = pgTable("accuracy_coverage_joins", {
   id: text("id").primaryKey(),
   workspace_id: text("workspace_id").notNull(),
@@ -192,6 +206,18 @@ export const ACCURACY_DDL = [
     source_file_id text NOT NULL,
     block_id text NOT NULL,
     quote text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_miss_flag_actions (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    block_id text NOT NULL,
+    action text NOT NULL,
+    suggested text,
+    claim_id text,
+    rationale text NOT NULL,
+    actor_name text NOT NULL,
+    actor_function text NOT NULL,
+    created_at text NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_coverage_joins (
     id text PRIMARY KEY,
