@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | W1-parse | bc-78d9b5d3 | `parse` → LlamaParse/local + `accuracy_parse_blocks` | Vitest + blocks persisted |
 | W2-ui | bc-23d9b506 | `/accuracy/*`, API runs + routing | typecheck + pages render |
-| W3-gold | bc-3d8d3e46 | `eval/reference-gold.ts` | must_find counts tested |
+| W3-gold | bc-3d8d3e46 | `eval/reference-gold.ts` | **Done** — must_find + `accuracyEvalReferencePack` stub |
 | W4-inventory | bc-68e82881 | `inventory_extract` prompts + schema | stub LLM test green |
 | W5-coverage | (next) | `coverage_decide` + critic | Zod decision + pair tests |
 | W6-gantt | (next) | `gantt_project` from validated tactics | no invented bars test |
@@ -34,3 +34,4 @@
 | --- | --- |
 | 2026-09-23 | Four background agents launched (W1–W4) |
 | 2026-09-23 | Ideation vs inventory semantics landed (`iegp-semantics.ts`) |
+| 2026-09-23 | **W3-gold complete** ([Reference gold eval harness](bc-3d8d3e46-1846-51af-97ab-241685d52ed4)) — `reference-gold.ts`, `accuracyEvalReferencePack` stub, 3 tests |

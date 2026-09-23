@@ -3,11 +3,8 @@ import { uploadModule } from "./modules/upload/module";
 import { parseModule } from "./modules/parse/module";
 import { inventoryExtractModule } from "./modules/inventory-extract/module";
 import { needExtractModule } from "./modules/need-extract/module";
-import {
-  mergeDedupeModule,
-  pairGenerateModule,
-  ganttProjectModule,
-} from "./modules/merge-dedupe/module";
+import { mergeDedupeModule, pairGenerateModule } from "./modules/merge-dedupe/module";
+import { ganttProjectModule } from "./modules/gantt-project/module";
 import { statusDeriveModule } from "./modules/status-derive/module";
 import { completenessAuditModule } from "./modules/completeness-audit/module";
 import {
@@ -55,4 +52,10 @@ export {
 export { listAccuracyRuns } from "./kernel/observability";
 export { gapsEligibleForIdeation, tacticAllowedOnGapInFinalPlan } from "./domain/iegp-semantics";
 export { listModelPrices, estimateCostUsd } from "./kernel/cost";
-export { listReferencePacks, loadReferenceGold, mustFindForPack } from "./eval/reference-gold";
+export {
+  listReferencePacks,
+  loadReferenceGold,
+  loadReferenceManifest,
+  mustFindForPack,
+  accuracyEvalReferencePack,
+} from "./eval/reference-gold";

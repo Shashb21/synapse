@@ -23,23 +23,3 @@ export const pairGenerateModule = mechanicalModule({
   outputSchema: z.object({ pairs: z.array(z.object({ gap_id: z.string(), tactic_id: z.string() })) }),
   run: async () => ({ output: { pairs: [] }, summary: "Pair generator stub" }),
 });
-
-export const ganttProjectModule = mechanicalModule({
-  id: "gantt-project.local-v1",
-  call_kind: "gantt_project",
-  title: "Gantt projection",
-  summary: "Deterministic timeline from validated tactics only.",
-  inputSchema: z.object({ workspace_id: z.string() }),
-  outputSchema: z.object({
-    activities: z.array(
-      z.object({
-        id: z.string(),
-        tactic_id: z.string(),
-        start: z.string(),
-        end: z.string(),
-        depends_on: z.array(z.string()),
-      }),
-    ),
-  }),
-  run: async () => ({ output: { activities: [] }, summary: "Gantt projection stub" }),
-});
