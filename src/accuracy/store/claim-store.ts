@@ -255,7 +255,7 @@ export async function setTacticTiming(args: {
     throw new Error("Timing can only be set on tactic claims.");
   }
   const prev = claimMetadata(existing);
-  const actor = args.actor ?? { name: "system", function: "accuracy" };
+  const actor = args.actor ?? { name: "system", function: "medical_affairs" };
   return updateClaimMetadata({
     workspace_id: args.workspace_id,
     claim_id: args.claim_id,

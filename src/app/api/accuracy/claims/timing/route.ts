@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       start: body.start,
       end: body.end,
       rationale: body.rationale,
-      actor: { name: "user", function: "accuracy" },
+      actor: { name: "user", function: "medical_affairs" },
     });
     return NextResponse.json({
       ok: true,
