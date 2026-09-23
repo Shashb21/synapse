@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { listReferencePacks } from "@/accuracy/eval/reference-gold";
+import {
+  accuracyEvalReferencePack,
+  listReferencePacks,
+} from "@/accuracy/eval/reference-gold";
 import { listAccuracyModules, activeAccuracyModuleId } from "@/accuracy/kernel/registry";
 import { CALL_KINDS } from "@/accuracy/kernel/contracts";
 import { registerAccuracyStack } from "@/accuracy";
@@ -17,9 +20,14 @@ export async function GET() {
     call_kind: k,
     module_id: activeAccuracyModuleId(k) ?? null,
   }));
+  const reference_packs = listReferencePacks().map((p) => p.id);
+  const reference_eval = await Promise.all(
+    reference_packs.map((id) => accuracyEvalReferencePack(id)),
+  );
   return NextResponse.json({
     branch: "cursor/accuracy-first-modular-b7b5",
-    reference_packs: listReferencePacks().map((p) => p.id),
+    reference_packs,
+    reference_eval,
     modules,
     active,
     orchestration_doc: "/docs/accuracy-dev-orchestration.md",

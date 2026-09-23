@@ -14,9 +14,10 @@ vi.mock("@/lib/ingest/local-parse", () => ({
   parseLocalDocument: (...args: unknown[]) => mockParseLocal(...args),
 }));
 
-function sampleDocument(parser: "llamaparse" | "local") {
+function sampleDocument(parser: "llamaparse" | "local", suffix = "test") {
+  const docId = `DOC-${suffix}`;
   return {
-    id: "DOC-test",
+    id: docId,
     filename: "plan.pdf",
     title: "Intro",
     stakeholder_function: "medical_affairs" as const,
@@ -25,13 +26,13 @@ function sampleDocument(parser: "llamaparse" | "local") {
     ingested_at: new Date().toISOString(),
     blocks: [
       {
-        id: "DOC-test-B01",
+        id: `${docId}-B01`,
         location: { kind: "page" as const, ref: "p.1" },
         text: "Evidence plan overview",
         kind: "title" as const,
       },
       {
-        id: "DOC-test-B02",
+        id: `${docId}-B02`,
         location: { kind: "page" as const, ref: "p.1" },
         text: "Registry gap for biomarker subgroup",
         kind: "paragraph" as const,
@@ -101,10 +102,9 @@ describe("accuracy parse module persistence", () => {
 
   it("persists blocks from mocked ingest", async () => {
     mockIngestBuffer.mockResolvedValue({
-      document: sampleDocument("llamaparse"),
+      document: sampleDocument("llamaparse", `parse-${Date.now()}`),
       parserUsed: "llamaparse",
     });
-
     registerAccuracyStack();
     const workspace_id = `ws-parse-${Date.now()}`;
     const source_file_id = `src-parse-${Date.now()}`;

@@ -14,9 +14,10 @@ vi.mock("@/lib/ingest/local-parse", () => ({
 describe("accuracy module run", () => {
   beforeEach(() => {
     mockIngestBuffer.mockReset();
+    const tag = `policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     mockIngestBuffer.mockResolvedValue({
       document: {
-        id: "DOC-policy",
+        id: `DOC-${tag}`,
         filename: "plan.pdf",
         title: "t",
         stakeholder_function: "medical_affairs",
@@ -25,7 +26,7 @@ describe("accuracy module run", () => {
         ingested_at: new Date().toISOString(),
         blocks: [
           {
-            id: "DOC-policy-B01",
+            id: `DOC-${tag}-B01`,
             location: { kind: "page", ref: "p.1" },
             text: "Policy check",
             kind: "title",
