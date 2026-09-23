@@ -48,7 +48,23 @@ describe("accuracy parse ingest", () => {
     mockParseLocal.mockReset();
   });
 
+  it("refuses llamaparse policy without LLAMA_CLOUD_API_KEY", async () => {
+    vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
+    await expect(
+      ingestFile({
+        policy: { parser: "llamaparse", reason: "pdf_needs_llama", missing_key: true },
+        filename: "plan.pdf",
+        mime: "application/pdf",
+        buffer: Buffer.from("fake-pdf"),
+      }),
+    ).rejects.toThrow(/LLAMA_CLOUD_API_KEY/);
+    expect(mockIngestBuffer).not.toHaveBeenCalled();
+    expect(mockParseLocal).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
   it("routes llamaparse policy through ingestBuffer", async () => {
+    vi.stubEnv("LLAMA_CLOUD_API_KEY", "test-key");
     mockIngestBuffer.mockResolvedValue({
       document: sampleDocument("llamaparse"),
       parserUsed: "llamaparse",
@@ -63,6 +79,7 @@ describe("accuracy parse ingest", () => {
     expect(mockParseLocal).not.toHaveBeenCalled();
     expect(result.effectiveParser).toBe("llamaparse");
     expect(result.document.blocks).toHaveLength(2);
+    vi.unstubAllEnvs();
   });
 
   it("routes docx policy through local parse only", async () => {
@@ -101,6 +118,7 @@ describe("accuracy parse module persistence", () => {
   });
 
   it("persists blocks from mocked ingest", async () => {
+    vi.stubEnv("LLAMA_CLOUD_API_KEY", "test-key");
     mockIngestBuffer.mockResolvedValue({
       document: sampleDocument("llamaparse", `parse-${Date.now()}`),
       parserUsed: "llamaparse",
@@ -128,5 +146,6 @@ describe("accuracy parse module persistence", () => {
     expect(stored).toHaveLength(2);
     expect(stored[0]!.parser).toBe("llamaparse");
     expect(stored[0]!.text).toContain("Evidence plan");
+    vi.unstubAllEnvs();
   });
 });

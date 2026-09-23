@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 
 const mockIngestBuffer = vi.fn();
@@ -13,6 +13,7 @@ vi.mock("@/lib/ingest/local-parse", () => ({
 
 describe("accuracy module run", () => {
   beforeEach(() => {
+    vi.stubEnv("LLAMA_CLOUD_API_KEY", "test-key");
     mockIngestBuffer.mockReset();
     const tag = `policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     mockIngestBuffer.mockResolvedValue({
@@ -36,6 +37,10 @@ describe("accuracy module run", () => {
       },
       parserUsed: "llamaparse",
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("runs mechanical parse module without LLM", async () => {

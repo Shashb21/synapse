@@ -2,7 +2,9 @@
 
 Practical operator list for shipping Synapse (legacy IEGP + `/accuracy` stack) to **Vercel + Postgres**. Details and OAuth redirect URIs live in [`deployment-vercel.md`](./deployment-vercel.md) and [`deployment-live.md`](./deployment-live.md). Copy env names from [`.env.example`](../.env.example) — never commit values.
 
-This is a checklist, not an in-app gate. Missing env does **not** add OAuth / LlamaParse UX blockers here.
+This is a checklist. Copy env names from [`.env.example`](../.env.example) — never commit values.
+
+PDF/PPTX uploads on `/accuracy/sources` are **gated in-app** until `LLAMA_CLOUD_API_KEY` is set (message in the Sources form; the key is never an end-user field). DOCX/text/XLSX still parse locally. Live extract OAuth is a separate gate.
 
 ## 1. Code and CI
 
@@ -24,7 +26,7 @@ Set in **Vercel → Project → Settings → Environment Variables**. Documented
 | Variable | When you need it |
 | --- | --- |
 | `DATABASE_URL` | **Always** |
-| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse via LlamaParse |
+| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse via LlamaParse. Missing → Sources upload gate |
 | `LLAMA_PARSE_TIER` | Optional; default `agentic` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Anthropic API keys (not workspace-scoped) |
 | `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Server-side fallback when no OAuth session is connected |
@@ -68,7 +70,7 @@ Local: `http://localhost:43217` with the same paths.
 | `/timeline` | Legacy Gantt |
 | `/accuracy/timeline?workspace_id=…` | Accuracy Gantt |
 
-Connect Grok on `/control` if you need a live extract. Confirm LlamaParse with a PDF/PPTX on `/accuracy/sources` when `LLAMA_CLOUD_API_KEY` is set.
+Connect Grok on `/control` if you need a live extract. Confirm LlamaParse with a PDF/PPTX on `/accuracy/sources` when `LLAMA_CLOUD_API_KEY` is set. Without the key, that page blocks PDF/PPTX and still accepts DOCX/text.
 
 ## 7. Post-deploy hygiene
 

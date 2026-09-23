@@ -65,7 +65,7 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | **Yes** | Hosted Postgres (see §1) |
-| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field) |
+| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field). Missing key gates PDF/PPTX on `/accuracy/sources`. |
 | `LLAMA_PARSE_TIER` | Optional | Default `agentic` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Claude keys | Required when the Anthropic key is org-scoped |
 | `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Live extract without OAuth | Server-only; never shown in the UI |

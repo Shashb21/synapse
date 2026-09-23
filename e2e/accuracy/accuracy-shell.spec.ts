@@ -53,6 +53,7 @@ test.describe("accuracy shell", () => {
     await page.goto("/accuracy/sources");
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
     await expect(page.getByText(/need \+ inventory extract/i)).toBeVisible();
+    await expect(page.getByText(/uploads are gated without it/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /control panel/i })).toBeVisible();
     await expectAccuracyShell(page);
   });

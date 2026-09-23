@@ -25,7 +25,7 @@ See [`docs/accuracy-reference-ux.md`](../docs/accuracy-reference-ux.md) for deck
 
 | Format | Parser |
 | --- | --- |
-| PDF, PPTX | LlamaParse (when `LLAMA_CLOUD_API_KEY` is set) |
+| PDF, PPTX | LlamaParse (`LLAMA_CLOUD_API_KEY` required; Sources upload is gated without it) |
 | DOCX, TXT, XLSX | Local structured parse |
 
 Coverage decisions: **schema-locked OAuth LLMs** — **not** TypeSafe Jev.

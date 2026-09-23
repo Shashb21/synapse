@@ -1,5 +1,6 @@
 import { ingestBuffer } from "@/lib/ingest/llamaparse";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
+import { assertLlamaParseConfigured } from "@/lib/ingest/llama-gate";
 import type { ParsedDocument } from "@/lib/schema";
 import type { ParsePolicy } from "./parse-policy";
 
@@ -19,6 +20,7 @@ export async function ingestFile(args: {
   const { policy, filename, mime, buffer } = args;
 
   if (policy.parser === "llamaparse") {
+    assertLlamaParseConfigured();
     const { document, parserUsed, llamaError } = await ingestBuffer({
       filename,
       buffer,
