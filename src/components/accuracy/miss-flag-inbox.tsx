@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,6 +34,12 @@ export function MissFlagInbox({
   const [suggested, setSuggested] = useState<"gap" | "tactic" | null>(null);
   const [pending, setPending] = useState<"promote" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIndex((i) => (flags.length === 0 ? 0 : Math.min(i, flags.length - 1)));
+    setSuggested(null);
+    setError(null);
+  }, [flags.length, workspaceId]);
 
   const current = flags[index] ?? null;
   const progress =
@@ -68,9 +74,7 @@ export function MissFlagInbox({
       }
       setRationale("");
       setSuggested(null);
-      if (index + 1 < flags.length) {
-        setIndex(index + 1);
-      }
+      // Keep index; after refresh the resolved flag drops out and the next slides into place.
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
