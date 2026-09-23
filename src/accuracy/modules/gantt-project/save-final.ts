@@ -1,4 +1,5 @@
-import { listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import {
   latestAccuracyPlan,
   saveAccuracyPlan,
@@ -18,9 +19,16 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   validated_tactic_count: number;
   tactic_count: number;
 }> {
-  const claims = await listClaims(workspace_id, { claim_type: "tactic" });
+  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
   const tactics = tacticsForGantt(claims);
-  const activities = projectGanttFromTactics({ tactics });
+  const gaps = gapsForGantt(claims);
+  const coverages = (await listCoverageJoins(workspace_id)).map((row) => ({
+    gap_id: row.gap_id,
+    tactic_id: row.tactic_id,
+    overall: row.overall,
+    validated: row.validated,
+  }));
+  const activities = projectGanttFromTactics({ tactics, gaps, coverages });
   return {
     workspace_id,
     activities,
@@ -43,7 +51,7 @@ export async function saveFinalGanttPlan(args: {
   const projected = await projectWorkspaceGantt(args.workspace_id);
   const validatedIds = new Set(
     (await listClaims(args.workspace_id, { claim_type: "tactic" }))
-      .filter((c) => c.validated)
+      .filter((c) => c.validated && isActiveLedgerClaim(c))
       .map((c) => c.id),
   );
   assertSaveFinalActivities(projected.activities, validatedIds);

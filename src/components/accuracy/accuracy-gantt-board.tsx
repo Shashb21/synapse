@@ -41,7 +41,7 @@ export function AccuracyGanttBoard({
   const timeWindow = useMemo(() => {
     if (activities.length === 0) return null;
     const starts = activities.map((a) => toDay(a.start));
-    const ends = activities.map((a) => toDay(a.end));
+    const ends = activities.flatMap((a) => [toDay(a.end), a.readout ? toDay(a.readout) : toDay(a.end)]);
     const min = Math.min(...starts);
     const max = Math.max(...ends);
     const span = Math.max(max - min, 1);
@@ -133,6 +133,7 @@ export function AccuracyGanttBoard({
       {activities.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
           No Gantt bars yet. Validate tactics with start and end dates in the ledger first.
+          Coverage joins and dependencies keep successor bars after upstream readouts.
         </p>
       ) : (
         <ul
@@ -149,21 +150,43 @@ export function AccuracyGanttBoard({
                   2,
                 )
               : 2;
+            const readoutLeft =
+              timeWindow && activity.readout
+                ? ((toDay(activity.readout) - timeWindow.min) / timeWindow.span) * 100
+                : null;
             return (
               <li key={activity.id} className="border border-border bg-card/40 p-3">
                 <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-[13px] text-foreground">{activity.tactic_id}</p>
                   <span className="text-[11px] text-muted-foreground">
                     {activity.start.slice(0, 10)} → {activity.end.slice(0, 10)}
+                    {activity.readout
+                      ? ` · readout ${activity.readout.slice(0, 10)}`
+                      : ""}
                   </span>
                 </div>
-                <div className="relative h-3 overflow-hidden rounded-sm bg-muted/40">
+                <div className="relative h-3 rounded-sm bg-muted/40">
                   <div
                     className="absolute inset-y-0 rounded-sm bg-foreground/70"
                     style={{ left: `${left}%`, width: `${width}%` }}
-                    title={`${activity.tactic_id}: ${activity.start} → ${activity.end}`}
+                    title={`${activity.tactic_id}: ${activity.start} → ${activity.end}${
+                      activity.readout ? ` · readout ${activity.readout}` : ""
+                    }`}
                   />
+                  {readoutLeft != null ? (
+                    <span
+                      aria-hidden
+                      className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-[var(--opportunity,#60a5fa)]"
+                      style={{ left: `${readoutLeft}%` }}
+                      title={`readout ${activity.readout}`}
+                    />
+                  ) : null}
                 </div>
+                {activity.gap_ids.length > 0 ? (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Covers {activity.gap_ids.join(", ")}
+                  </p>
+                ) : null}
                 {activity.depends_on.length > 0 ? (
                   <p className="mt-2 text-[11px] text-muted-foreground">
                     Depends on {activity.depends_on.join(", ")}

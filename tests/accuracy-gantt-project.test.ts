@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityIdForTactic,
   assertActivitiesHaveTacticId,
+  dependenciesRespectReadouts,
   projectGanttFromTactics,
 } from "@/accuracy/modules/gantt-project/engine";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -34,12 +35,17 @@ describe("gantt project engine", () => {
       tactic_id: "T-base",
       start: "2026-01-01",
       end: "2026-06-01",
+      readout: null,
       depends_on: [],
+      gap_ids: [],
     });
     expect(activities[1]).toMatchObject({
       tactic_id: "T-follow",
       depends_on: [activityIdForTactic("T-base")],
     });
+    expect(activities[1]?.start >= "2026-06-01").toBe(true);
+    expect(activities[1]?.readout).toBeNull();
+    expect(dependenciesRespectReadouts(activities)).toBe(true);
   });
 
   it("does not invent bars for tactics missing dates", () => {

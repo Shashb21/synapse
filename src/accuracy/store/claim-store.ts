@@ -21,7 +21,13 @@ export type AccuracyClaimMetadata = {
   origin?: string | null;
   start?: string | null;
   end?: string | null;
+  readout?: string | null;
+  readout_date?: string | null;
+  evidence_available?: string | null;
   depends_on?: string[];
+  tactic_type?: string | null;
+  gap_ids?: string[];
+  parent_gap_id?: string | null;
   validation?: ClaimValidationMeta | null;
   external_id?: string | null;
   reference_pack_id?: string | null;
@@ -245,6 +251,15 @@ export async function persistClaimPatch(args: {
   return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
 }
 
+function metaString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function metaStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 /** Map tactic claims into inputs for `projectGanttFromTactics`. */
 export function tacticsForGantt(claims: AccuracyClaimRow[]) {
   return claims
@@ -254,9 +269,29 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
       return {
         id: row.id,
         validated: row.validated,
-        start: meta.start ?? null,
-        end: meta.end ?? null,
-        depends_on: Array.isArray(meta.depends_on) ? meta.depends_on : [],
+        start: metaString(meta.start),
+        end: metaString(meta.end),
+        readout:
+          metaString(meta.readout) ??
+          metaString(meta.readout_date) ??
+          metaString(meta.evidence_available),
+        depends_on: metaStringList(meta.depends_on),
+        tactic_type: metaString(meta.tactic_type),
+        gap_ids: metaStringList(meta.gap_ids),
+      };
+    });
+}
+
+/** Map gap claims into parent links for Gantt coverage continuity. */
+export function gapsForGantt(claims: AccuracyClaimRow[]) {
+  return claims
+    .filter((row) => row.claim_type === "gap")
+    .map((row) => {
+      const meta = claimMetadata(row);
+      return {
+        id: row.id,
+        parent_gap_id: metaString(meta.parent_gap_id),
+        validated: row.validated,
       };
     });
 }
