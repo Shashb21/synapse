@@ -155,6 +155,8 @@ async function readState(): Promise<IegpState> {
       status_override: asStatusOverride(g.status_override),
       retired: Boolean(g.retired),
       human_validated: Boolean(g.human_validated),
+      parked_at: g.parked_at ?? null,
+      parked_reason: g.parked_reason ?? null,
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -256,6 +258,8 @@ export async function persistState(state: IegpState) {
           status_override: g.status_override ?? null,
           retired: g.retired ?? false,
           human_validated: g.human_validated ?? false,
+          parked_at: g.parked_at ?? null,
+          parked_reason: g.parked_reason ?? null,
         };
       }),
     );
@@ -391,6 +395,8 @@ async function insertLiveOpenGap(args: {
     status_override: null,
     retired: false,
     human_validated: false,
+    parked_at: null,
+    parked_reason: null,
   });
   return gapId;
 }
@@ -732,6 +738,7 @@ export async function lockGapStatus(args: {
       lock: lk,
       computed_status: mapped ? (gap.computed_status ?? args.status) : null,
       status_override: override,
+      ...(args.status === "excluded" ? { parked_at: null, parked_reason: null } : {}),
     })
     .where(eq(t.gaps.id, args.gap_id));
   await appendAudit(
@@ -829,6 +836,51 @@ export async function clearGapStatusOverride(args: {
     args.note || `Cleared override; engine computed ${gap.computed_status ?? "status"} applies.`,
   );
   await syncComputedGapStatuses(args.gap_id);
+}
+
+export async function parkGap(args: {
+  gap_id: string;
+  reason?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be parked.");
+  if (gap.status === "excluded") throw new Error("An excluded gap cannot be parked.");
+  if (gap.parked_at) throw new Error("This gap is already parked.");
+  const reason = (args.reason ?? "").trim();
+  if (!reason) throw new Error("A reason is required to park a gap.");
+  await db()
+    .update(t.gaps)
+    .set({ parked_at: now(), parked_reason: reason })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "park", reason);
+}
+
+export async function unparkGap(args: {
+  gap_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (!gap.parked_at) throw new Error("This gap is not parked.");
+  await db()
+    .update(t.gaps)
+    .set({ parked_at: null, parked_reason: null })
+    .where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "unpark",
+    args.note || "Brought back from parked.",
+  );
 }
 
 export async function classifyMappedGap(args: {
@@ -1771,6 +1823,8 @@ export async function createGap(args: {
     status_override: null,
     retired: false,
     human_validated: false,
+    parked_at: null,
+    parked_reason: null,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   await syncComputedGapStatuses(id);

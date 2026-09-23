@@ -55,6 +55,26 @@ export function GapBadge({ status }: { status: GapStatus }) {
   );
 }
 
+/**
+ * Parked: a human set this gap aside as not a real gap. Reversible — unlike
+ * Excluded, it can be unparked. Hidden from Prioritize and Tactics while parked.
+ */
+export function ParkedFlag({ reason }: { reason?: string | null }) {
+  return (
+    <BadgeHelp
+      help={
+        reason
+          ? `Parked: ${reason}`
+          : "Parked — set aside as not a real gap. Hidden from Prioritize and Tactics until unparked."
+      }
+    >
+      <Badge variant="outline" className="bg-fuchsia-500/15 text-fuchsia-300">
+        Parked
+      </Badge>
+    </BadgeHelp>
+  );
+}
+
 export function CoverageBadge({ overall }: { overall: OverallCoverage }) {
   return (
     <BadgeHelp help={OVERALL_COVERAGE_HELPERS[overall]}>

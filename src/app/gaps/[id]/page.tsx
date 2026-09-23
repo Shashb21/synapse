@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
+import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
@@ -92,6 +93,7 @@ export default async function GapDetailPage({
         ) : (
           <GapBadge status={shown} />
         )}
+        {gap.parked_at ? <ParkedFlag reason={gap.parked_reason} /> : null}
         {mapped && !gap.status_override ? (
           <span className="text-[11px] text-muted-foreground">
             Engine computed {GAP_STATUS_LABELS[computed]}
@@ -350,6 +352,45 @@ export default async function GapDetailPage({
           </ul>
         </section>
       ) : null}
+
+      {gap.retired || gap.status === "excluded" ? null : gap.parked_at ? (
+        <section className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-fuchsia-500/30 bg-fuchsia-500/10 p-4">
+          <div>
+            <p className="text-[12px] text-foreground">
+              Parked{gap.parked_reason ? `: ${gap.parked_reason}` : ""}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Hidden from Prioritize and Tactics mapping while parked. Unpark to bring it back.
+            </p>
+          </div>
+          <LockForm
+            label="Unpark gap"
+            action="unpark_gap"
+            extra={{ gap_id: gap.id }}
+            confirmLabel="Unpark"
+            description="This brings the gap back into Prioritize and Tactics mapping."
+          />
+        </section>
+      ) : (
+        <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4">
+          <p className="flex-1 text-[12px] text-muted-foreground">
+            Not sure this is a real gap yet? Park it instead of excluding it — parked gaps stay
+            listed but drop out of Prioritize and Tactics until you unpark them.
+          </p>
+          <LockForm
+            label="Park gap"
+            action="park_gap"
+            extra={{ gap_id: gap.id }}
+            confirmLabel="Park"
+            description="Set this gap aside if you don't think it's a real evidence gap. A reason is required. Parked gaps can be unparked later."
+          >
+            <label className="grid gap-1 text-[12px] text-muted-foreground">
+              Reason
+              <Textarea name="reason" rows={2} required />
+            </label>
+          </LockForm>
+        </section>
+      )}
 
       {shown === "excluded" ? null : shown === "candidate" ? null : (
         <LockForm

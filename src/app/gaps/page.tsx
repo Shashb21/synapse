@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { GapBadge } from "@/components/iegp-badges";
+import { GapBadge, ParkedFlag } from "@/components/iegp-badges";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { displayedGapStatus } from "@/lib/iegp/engine";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
@@ -16,6 +16,8 @@ export default async function GapsPage() {
         Gaps are named decision objects. Many candidate needs can join onto one gap.
         Status is computed Open / Partially Addressed / Addressed from joined tactics and published
         literature. Click Open or Addressed to override with a reason. Click Partial to split or rewrite.
+        Not sure something is a real gap? Park it from the gap page — parked gaps stay listed here but
+        drop out of Prioritize and Tactics until unparked.
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -34,6 +36,7 @@ export default async function GapsPage() {
             >
               <div className="flex flex-wrap items-center gap-2">
                 <GapBadge status={displayedGapStatus(g)} />
+                {g.parked_at ? <ParkedFlag reason={g.parked_reason} /> : null}
                 <span className="text-[12px] text-muted-foreground">
                   {DOMAIN_LABELS[g.domain]}
                 </span>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap } from "@/lib/iegp/store";
+import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -434,5 +435,77 @@ describe("IEGP postgres store", () => {
     expect(overridden.status_override?.reason).toMatch(/off-question/i);
     expect(overridden.status_override?.to).toBe("validated_open");
     expect(overridden.status_override?.actor_name).toBe("A. Rao");
+  });
+
+  it("parks a gap out of Prioritize/Tactics with a reason, and unparks it back in", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "Stakeholder mentioned this once; unclear it is a real gap",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+
+    await expect(
+      parkGap({ gap_id: gapId, reason: "", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/reason is required/i);
+
+    await parkGap({
+      gap_id: gapId,
+      reason: "Single mention, not decision-relevant.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    let gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(gap.parked_at).toBeTruthy();
+    expect(gap.parked_reason).toMatch(/not decision-relevant/i);
+    expect(gap.status).toBe("validated_open"); // status untouched — parked is a separate flag
+    expect(isLiveGap(gap)).toBe(false);
+
+    await expect(
+      parkGap({ gap_id: gapId, reason: "again", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/already parked/i);
+
+    const state = await loadState();
+    expect(gapsReadyForPrioritize(state)).toBe(false); // no other live gaps left after parking
+
+    await unparkGap({ gap_id: gapId, actor_name: "A. Rao", actor_function: "heor" });
+    gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(gap.parked_at).toBeNull();
+    expect(gap.parked_reason).toBeNull();
+    expect(isLiveGap(gap)).toBe(true);
+
+    await expect(
+      unparkGap({ gap_id: gapId, actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/not parked/i);
+  });
+
+  it("refuses to park an excluded or retired gap, and clears park on exclude", async () => {
+    await resetSeed();
+    const gapId = await createGap({
+      statement: "Communication issue, not an evidence gap",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    await parkGap({
+      gap_id: gapId,
+      reason: "Looks like noise, checking with the team.",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+
+    await lockGapStatus({
+      gap_id: gapId,
+      status: "excluded",
+      exclusion_reason: "communication_issue",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const excluded = (await loadState()).gaps.find((g) => g.id === gapId)!;
+    expect(excluded.status).toBe("excluded");
+    expect(excluded.parked_at).toBeNull();
+
+    await expect(
+      parkGap({ gap_id: gapId, reason: "x", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/excluded gap cannot be parked/i);
   });
 });

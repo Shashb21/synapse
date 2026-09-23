@@ -213,6 +213,12 @@ export async function ensureSchema() {
       "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
     ),
   );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_at text"),
+  );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_reason text"),
+  );
 }
 
 export async function wipeIegp() {

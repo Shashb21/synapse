@@ -25,6 +25,8 @@ import {
   modifyGap,
   modifyTactic,
   modifyResidualGap,
+  parkGap,
+  unparkGap,
   rejectMapping,
   rejectResidualGap,
   resetSeed,
@@ -73,6 +75,8 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
   split_partial_gap: { stage: "S6", entity: "gap", field: "split", action: "split" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
+  park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
+  unpark_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
   lock_priority: { stage: "S8", entity: "residual", field: "priority_band", action: "edit" },
   create_tactic: { stage: "S9", entity: "tactic", field: "created", action: "add" },
   record_missed_tactic: { stage: "S5", entity: "tactic", field: "created", action: "add" },
@@ -144,6 +148,22 @@ export async function POST(request: Request) {
         break;
       case "clear_gap_status_override":
         await clearGapStatusOverride({
+          gap_id: body.gap_id,
+          actor_name,
+          actor_function,
+          note: body.note,
+        });
+        break;
+      case "park_gap":
+        await parkGap({
+          gap_id: body.gap_id,
+          reason: body.reason || body.note,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "unpark_gap":
+        await unparkGap({
           gap_id: body.gap_id,
           actor_name,
           actor_function,

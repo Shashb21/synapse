@@ -23,6 +23,8 @@ import {
   requireOverrideReason,
   suggestGapStatus,
   gapsReadyForPrioritize,
+  isLiveGap,
+  isParked,
   displayedGapStatus,
   planNavCounts,
   suggestMappings,
@@ -699,5 +701,18 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const siblings = liveGapsMappedToTactic(seed, "TAC-REG", "GAP-HCRU");
     expect(siblings.map((g) => g.id).sort()).toEqual(["GAP-QOL", "GAP-SEQ"].sort());
     expect(siblings.some((g) => g.id === "GAP-HCRU")).toBe(false);
+  });
+
+  it("treats a parked gap as not live, like excluded or retired, but keeps it distinct from both", () => {
+    const live = { status: "validated_open" as const, retired: false, parked_at: null };
+    const parked = { status: "validated_open" as const, retired: false, parked_at: "2026-01-01T00:00:00.000Z" };
+    const excluded = { status: "excluded" as const, retired: false, parked_at: null };
+    const retired = { status: "validated_open" as const, retired: true, parked_at: null };
+    expect(isLiveGap(live)).toBe(true);
+    expect(isLiveGap(parked)).toBe(false);
+    expect(isLiveGap(excluded)).toBe(false);
+    expect(isLiveGap(retired)).toBe(false);
+    expect(isParked(live)).toBe(false);
+    expect(isParked(parked)).toBe(true);
   });
 });

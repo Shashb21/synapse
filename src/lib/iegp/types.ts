@@ -127,6 +127,9 @@ export type EvidenceGap = {
   status_override: GapStatusOverride | null;
   retired: boolean;
   human_validated: boolean;
+  /** Set aside by a human as not a real gap. Excludes from Prioritize and Tactics until unparked. */
+  parked_at: string | null;
+  parked_reason: string | null;
 };
 
 export type GapVersionEvent = "split" | "rewrite";

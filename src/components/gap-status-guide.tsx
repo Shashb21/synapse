@@ -37,6 +37,11 @@ export function GapStatusGuide({ compact = false }: { compact?: boolean }) {
           </div>
         ))}
       </dl>
+      <p className="mt-3 text-[12px] leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground">Parked</span> is a separate flag, not a
+        status — for a gap you don&apos;t think is real. Park it from the gap page with a reason;
+        it stays listed but drops out of Prioritize and Tactics until unparked.
+      </p>
     </section>
   );
 }

@@ -1058,8 +1058,15 @@ export function similarRecord(a: string, b: string, floor = 0.5): boolean {
   return statementSimilarity(a, b) >= floor;
 }
 
-export function isLiveGap(gap: Pick<EvidenceGap, "status" | "retired">): boolean {
-  return !gap.retired && gap.status !== "excluded";
+export function isLiveGap(
+  gap: Pick<EvidenceGap, "status" | "retired" | "parked_at">,
+): boolean {
+  return !gap.retired && gap.status !== "excluded" && !gap.parked_at;
+}
+
+/** Parked: a human set this aside as not a real gap. Reversible, unlike Excluded. */
+export function isParked(gap: Pick<EvidenceGap, "parked_at">): boolean {
+  return Boolean(gap.parked_at);
 }
 
 export function gapsReadyForPrioritize(state: IegpState): boolean {
