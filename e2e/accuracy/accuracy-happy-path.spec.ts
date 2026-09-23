@@ -74,9 +74,9 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
     await expect(page.getByText(/undecided/i).first()).toBeVisible();
     await expect(page.getByText(/Pair 1 of/i)).toBeVisible();
 
-    const card = page.locator("article").filter({ hasText: /^Gap$/i }).first();
-    await expect(card.getByText(/^Gap$/i)).toBeVisible();
-    await expect(card.getByText(/^Tactic$/i)).toBeVisible();
+    const card = page.locator("article").filter({ has: page.getByText("Gap", { exact: true }) }).first();
+    await expect(card.getByText("Gap", { exact: true })).toBeVisible();
+    await expect(card.getByText("Tactic", { exact: true })).toBeVisible();
     await expect(card.getByText(/Status: undecided/i)).toBeVisible();
 
     await page.getByRole("button", { name: /suggest with llm/i }).click();
