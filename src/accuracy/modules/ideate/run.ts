@@ -115,13 +115,13 @@ export async function runIdeate(
   const proposals: IdeationProposal[] = [];
 
   for (const gap of eligible) {
-    const gapRow = input.gaps.find((g) => g.id === gap.id) ?? gap;
+    const gapRow = input.gaps.find((g) => g.id === gap.id);
     const raw = await completeJson(ctx.complete, {
       system: IDEATE_PROPOSER_SYSTEM,
       user: ideateProposerUser({
         focus: {
           id: gap.id,
-          statement: "statement" in gapRow ? gapRow.statement : undefined,
+          statement: gapRow?.statement,
           status: gap.status,
           priority_band: gap.priority_band ?? null,
         },
