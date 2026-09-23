@@ -22,7 +22,8 @@ function client() {
     }
     const remote = host !== "127.0.0.1" && host !== "localhost";
     globalForDb.pg = postgres(DEFAULT_URL, {
-      max: process.env.VERCEL ? 1 : 8,
+      // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
+      max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
       ssl: remote ? "require" : undefined,
     });
   }

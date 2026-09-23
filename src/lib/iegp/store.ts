@@ -1775,15 +1775,20 @@ export async function lockTactic(args: {
     })
     .where(eq(t.tactics.id, args.tactic_id));
   if (prev !== args.status) {
-    const related = state.coverages.filter((c) => c.tactic_id === args.tactic_id);
+    // Reload after the status write so sync sees planned/ongoing/completed on this connection.
+    const fresh = await loadState();
+    const related = fresh.coverages.filter((c) => c.tactic_id === args.tactic_id);
     for (const c of related) {
-      const residuals = state.residuals.filter((r) => r.gap_id === c.gap_id);
+      const residuals = fresh.residuals.filter((r) => r.gap_id === c.gap_id);
       for (const r of residuals) {
         await db()
           .update(t.residuals)
           .set({ lock: unlocked() })
           .where(eq(t.residuals.id, r.id));
       }
+    }
+    for (const c of related) {
+      await syncComputedGapStatuses(c.gap_id);
     }
   }
   await appendAudit(
@@ -1794,12 +1799,6 @@ export async function lockTactic(args: {
     "lock_status",
     `${prev} → ${args.status}`,
   );
-  if (prev !== args.status) {
-    const related = state.coverages.filter((c) => c.tactic_id === args.tactic_id);
-    for (const c of related) {
-      await syncComputedGapStatuses(c.gap_id);
-    }
-  }
 }
 
 export async function lockRoadmapItem(args: {
