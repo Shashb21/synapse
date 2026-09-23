@@ -4,6 +4,7 @@ import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import type { GanttActivity } from "@/accuracy/modules/gantt-project/engine";
+import type { GanttCatalogEntry } from "@/accuracy/modules/gantt-project/snapshot-hash";
 import { requireValidationRationale } from "./claim-store";
 
 export type AccuracyPlanStatus = "draft" | "final";
@@ -12,6 +13,10 @@ export type AccuracyPlanSnapshot = {
   activities: GanttActivity[];
   tactic_ids: string[];
   counts: { activities: number; validated_tactics: number };
+  /** Gap/tactic statements frozen with the bars. */
+  labels?: GanttCatalogEntry[];
+  /** SHA-256 of the canonical snapshot payload (excludes this field). */
+  snapshot_hash?: string;
 };
 
 export type AccuracyPlanRecord = {

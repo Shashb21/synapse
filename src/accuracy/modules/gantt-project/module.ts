@@ -100,3 +100,11 @@ export {
   coverageCountsTowardGantt,
 } from "./engine";
 export { projectWorkspaceGantt, saveFinalGanttPlan, workspaceLatestPlan } from "./save-final";
+export {
+  hashGanttSnapshot,
+  canonicalizeGanttSnapshot,
+  auditBundleHref,
+  auditBundleForPlan,
+} from "./snapshot-hash";
+export { ganttBarAriaLabel, resolveActivityDetail } from "./activity-detail";
+export { ganttExportFileName } from "./export-svg";

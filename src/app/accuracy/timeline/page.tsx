@@ -3,7 +3,9 @@ import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { AccuracyGanttBoard } from "@/components/accuracy/accuracy-gantt-board";
 import { registerAccuracyStack } from "@/accuracy";
 import {
+  auditBundleFromPlan,
   projectWorkspaceGantt,
+  snapshotHashForPlan,
   workspaceLatestPlan,
 } from "@/accuracy/modules/gantt-project/save-final";
 import { listWorkspaces } from "@/accuracy/store/tenant";
@@ -22,6 +24,7 @@ export default async function AccuracyTimelinePage({
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let activities: Awaited<ReturnType<typeof projectWorkspaceGantt>>["activities"] = [];
+  let catalog: Awaited<ReturnType<typeof projectWorkspaceGantt>>["catalog"] = [];
   let plan: Awaited<ReturnType<typeof workspaceLatestPlan>> = null;
   let loadError: string | null = null;
 
@@ -30,6 +33,7 @@ export default async function AccuracyTimelinePage({
     if (workspaceId) {
       const projected = await projectWorkspaceGantt(workspaceId);
       activities = projected.activities;
+      catalog = projected.catalog;
       plan = await workspaceLatestPlan(workspaceId);
     }
   } catch (error) {
@@ -41,8 +45,9 @@ export default async function AccuracyTimelinePage({
   return (
     <AccuracyAppShell active="timeline">
       <PageIntro kicker="Final truth · validated tactics only" title="Timeline">
-        Interactive Gantt projection from validated tactics. Bars and readouts stay continuous
-        with coverage joins and tactic dates — no invented studies.
+        Interactive Gantt projection from validated tactics. Click a bar for gap, tactic, and
+        interdependencies. Export PNG or save as final to freeze a snapshot hash with an audit
+        bundle link — no invented studies.
       </PageIntro>
 
       {loadError ? (
@@ -120,8 +125,12 @@ export default async function AccuracyTimelinePage({
           <AccuracyGanttBoard
             workspaceId={workspaceId}
             activities={activities}
+            catalog={catalog}
             planVersion={plan?.version ?? null}
             planStatus={plan?.status ?? null}
+            planId={plan?.id ?? null}
+            snapshotHash={plan ? snapshotHashForPlan(plan) : null}
+            auditBundleHref={plan ? auditBundleFromPlan(plan).href : null}
           />
         </>
       )}

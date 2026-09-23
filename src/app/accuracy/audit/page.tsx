@@ -3,8 +3,10 @@ import { CostRollupPanel } from "@/components/accuracy/cost-rollup-panel";
 import { registerAccuracyStack } from "@/accuracy";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
+import { getAccuracyPlanById, type AccuracyPlanRecord } from "@/accuracy/store/plan-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 import { listAccuracyRuns, summarizeAccuracyRunCost } from "@/accuracy/kernel/observability";
+import { snapshotHashForPlan } from "@/accuracy/modules/gantt-project/save-final";
 import type { AccuracyCostRollup } from "@/accuracy/kernel/cost-rollup";
 import Link from "next/link";
 
@@ -23,24 +25,31 @@ type AuditRow = {
 export default async function AccuracyAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace_id?: string }>;
+  searchParams: Promise<{ workspace_id?: string; plan_id?: string; snapshot_hash?: string }>;
 }) {
-  const { workspace_id: workspaceId = "" } = await searchParams;
+  const {
+    workspace_id: workspaceId = "",
+    plan_id: planId = "",
+    snapshot_hash: queryHash = "",
+  } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let rows: AuditRow[] = [];
   let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
+  let plan: AccuracyPlanRecord | null = null;
 
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
-      const [claims, pairs, runs, cost] = await Promise.all([
+      const [claims, pairs, runs, cost, savedPlan] = await Promise.all([
         listClaims(workspaceId, { limit: 300 }),
         listCoveragePairs(workspaceId),
         listAccuracyRuns(workspaceId, 40),
         summarizeAccuracyRunCost(workspaceId),
+        planId ? getAccuracyPlanById(workspaceId, planId) : Promise.resolve(null),
       ]);
       rollup = cost;
+      plan = savedPlan;
 
       for (const claim of claims) {
         const meta = claimMetadata(claim);
@@ -123,6 +132,49 @@ export default async function AccuracyAuditPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {rows.length} event(s)
           </p>
+          {planId && !plan ? (
+            <p className="mb-3 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+              Save-final plan {planId} was not found in this workspace.
+            </p>
+          ) : null}
+          {plan ? (
+            <section
+              className="mb-4 border border-border bg-card/40 p-3"
+              data-testid="gantt-audit-bundle"
+              aria-labelledby="save-final-bundle"
+            >
+              <h2 id="save-final-bundle" className="text-[13px] font-medium text-foreground">
+                Save-final Gantt snapshot
+              </h2>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                v{plan.version} · {plan.status} · {plan.saved_by} ·{" "}
+                {plan.saved_at.slice(0, 16).replace("T", " ")} · {plan.snapshot.counts.activities}{" "}
+                bar(s)
+              </p>
+              {plan.note ? (
+                <p className="mt-1 text-[12px] text-muted-foreground">“{plan.note}”</p>
+              ) : null}
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Snapshot hash{" "}
+                <code className="break-all font-mono text-[11px] text-foreground" data-testid="audit-snapshot-hash">
+                  {snapshotHashForPlan(plan)}
+                </code>
+              </p>
+              {queryHash && queryHash !== snapshotHashForPlan(plan) ? (
+                <p className="mt-1 text-[11px] text-destructive">
+                  Linked hash does not match the stored snapshot.
+                </p>
+              ) : null}
+              <p className="mt-2 text-[12px]">
+                <Link
+                  href={`/accuracy/timeline?workspace_id=${encodeURIComponent(workspaceId)}`}
+                  className="text-foreground underline-offset-2 hover:underline"
+                >
+                  Open timeline
+                </Link>
+              </p>
+            </section>
+          ) : null}
           {rollup ? <CostRollupPanel rollup={rollup} workspaceName={active?.name} /> : null}
           {rows.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
