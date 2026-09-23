@@ -1,5 +1,28 @@
 import type { GanttActivity } from "./engine";
 
+export function ganttExportFileName(args: {
+  workspace_id: string;
+  version?: number | null;
+  ext: "svg" | "png";
+}): string {
+  const ver = args.version != null ? `v${args.version}` : "draft";
+  return `synapse-gantt-${args.workspace_id}-${ver}.${args.ext}`;
+}
+
+export function svgViewport(svg: string): { width: number; height: number } {
+  const widthMatch = /width="(\d+(?:\.\d+)?)"/.exec(svg);
+  const heightMatch = /height="(\d+(?:\.\d+)?)"/.exec(svg);
+  return {
+    width: Number(widthMatch?.[1] ?? 960),
+    height: Number(heightMatch?.[1] ?? 80),
+  };
+}
+
+/** PNG rasterization paints this markup; strip the XML declaration for Image(). */
+export function svgMarkupForRaster(svg: string): string {
+  return svg.replace(/^\s*<\?xml[^>]*>\s*/i, "");
+}
+
 function toDay(iso: string): number {
   return Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
 }

@@ -34,7 +34,13 @@ export async function POST(request: Request) {
         function: (body.actor_function?.trim() || "medical_affairs") as ActorFunction,
       },
     });
-    return NextResponse.json({ ok: true, plan: result.plan, activities: result.activities });
+    return NextResponse.json({
+      ok: true,
+      plan: result.plan,
+      activities: result.activities,
+      snapshot_hash: result.snapshot_hash,
+      audit_bundle: result.audit_bundle,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Save final failed";
     return NextResponse.json({ error: message }, { status: 400 });

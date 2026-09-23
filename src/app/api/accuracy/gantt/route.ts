@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
-import { projectWorkspaceGantt, workspaceLatestPlan } from "@/accuracy/modules/gantt-project/save-final";
+import {
+  auditBundleFromPlan,
+  projectWorkspaceGantt,
+  snapshotHashForPlan,
+  workspaceLatestPlan,
+} from "@/accuracy/modules/gantt-project/save-final";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +23,12 @@ export async function GET(request: Request) {
       projectWorkspaceGantt(workspace_id),
       workspaceLatestPlan(workspace_id),
     ]);
-    return NextResponse.json({ ...projection, plan });
+    return NextResponse.json({
+      ...projection,
+      plan,
+      snapshot_hash: plan ? snapshotHashForPlan(plan) : null,
+      audit_bundle: plan ? auditBundleFromPlan(plan) : null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gantt projection failed";
     return NextResponse.json({ error: message }, { status: 400 });
