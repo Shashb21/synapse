@@ -78,17 +78,17 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
   merge_dedupe: {
     id: "merge_dedupe",
     title: "Merge & dedupe",
-    purpose: "Unify candidates on study IDs and provenance overlap.",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Unify candidates on shared study IDs / identical statements; an LLM judge decides same-block candidates.",
+    kind: "agentic",
+    llm_roles: ["judge"],
     upstream: ["inventory_extract", "need_extract"],
   },
   completeness_audit: {
     id: "completeness_audit",
     title: "Completeness audit",
-    purpose: "Index vs inventory miss flags (recall gate).",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Index vs ledger miss flags (recall gate); an LLM critic judges uncited blocks.",
+    kind: "agentic",
+    llm_roles: ["critic"],
     upstream: ["merge_dedupe"],
   },
   pair_generate: {

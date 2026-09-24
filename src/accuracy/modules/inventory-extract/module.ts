@@ -2,6 +2,7 @@ import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import { completeJson } from "../../kernel/routing";
+import { isTestStub } from "@/modules/kernel/llm";
 import { provenanceSpanSchema } from "../../store/quote-validator";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { newId } from "@/modules/kernel/ids";
@@ -137,7 +138,7 @@ async function proposeInventory(
   prior: InventoryDraft | null,
   critiques: string[],
 ): Promise<InventoryDraft> {
-  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+  if (isTestStub()) {
     return { tactics: [] };
   }
   const blocks = await loadBlocksForPrompt(input);
@@ -172,7 +173,7 @@ export const inventoryExtractModule = agenticModule({
   }),
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
-    const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const stub = isTestStub();
 
     const cycle = await runShallowAgenticCycle<InventoryDraft>({
       proposer: (round, prior, critiques) =>

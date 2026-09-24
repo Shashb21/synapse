@@ -1,11 +1,15 @@
 import { z } from "zod";
-import { mechanicalModule } from "../_factory";
+import { agenticModule, mechanicalModule } from "../_factory";
 import {
   asTacticLifecycle,
+  equivalenceQuestions,
   mergeDedupeCandidates,
+  type EquivalentPair,
   type MergeCandidate,
   type MergeProvenance,
 } from "./engine";
+import { judgeEquivalence } from "./judge";
+import { isTestStub } from "@/modules/kernel/llm";
 import {
   claimMetadata,
   isActiveLedgerClaim,
@@ -19,10 +23,12 @@ import { listSourceFiles } from "@/accuracy/store/source-store";
 
 export {
   mergeDedupeCandidates,
+  equivalenceQuestions,
   identityKeys,
   packsMayMerge,
   extractDeterministicIds,
 } from "./engine";
+export { judgeEquivalence } from "./judge";
 
 function provenanceFromMeta(meta: AccuracyClaimMetadata): MergeProvenance[] {
   if (!Array.isArray(meta.provenance)) return [];
@@ -101,12 +107,17 @@ const contradictionSchema = z.object({
 const mergeRowSchema = z.object({
   survivor_id: z.string(),
   duplicate_id: z.string(),
-  reason: z.enum(["identity", "statement", "block_overlap"]),
+  reason: z.enum(["identity", "statement", "model_equivalence", "transitive"]),
   keys: z.array(z.string()),
+  rationale: z.string().nullable().optional(),
 });
 
 export const mergeDedupeOutputSchema = z.object({
   workspace_id: z.string(),
+  /** `stub`: test stub, same-block pairs were not put to a model. */
+  mode: z.enum(["llm", "stub"]),
+  /** Same-block pairs put to the equivalence judge (or left unjudged under the stub). */
+  judged_pairs: z.number().int(),
   merged: z.number().int(),
   survivors: z.number().int(),
   contradictions: z.number().int(),
@@ -116,11 +127,17 @@ export const mergeDedupeOutputSchema = z.object({
 
 export type MergeDedupeOutput = z.infer<typeof mergeDedupeOutputSchema>;
 
-export const mergeDedupeModule = mechanicalModule({
-  id: "merge-dedupe.local-v1",
+/**
+ * Merge / dedupe. Shared study IDs and identical statements merge as facts;
+ * differently worded candidates citing the same block are merged only when the
+ * LLM equivalence judge says they are the same item. No LLM, no judgement:
+ * the run throws when there is a pair to decide and no model to ask.
+ */
+export const mergeDedupeModule = agenticModule({
+  id: "merge-dedupe.judge-v1",
   call_kind: "merge_dedupe",
   title: "Merge dedupe",
-  summary: "Study-ID aware merge of inventory + need candidates.",
+  summary: "Study-ID aware merge; LLM judge decides same-block equivalence.",
   inputSchema: z.object({ workspace_id: z.string() }),
   outputSchema: mergeDedupeOutputSchema,
   run: async (input, ctx) => {
@@ -133,7 +150,16 @@ export const mergeDedupeModule = mechanicalModule({
     );
     const active = claims.filter(isActiveLedgerClaim);
     const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
-    const result = mergeDedupeCandidates(candidates);
+    const questions = equivalenceQuestions(candidates);
+    const stub = isTestStub();
+    let equivalent: EquivalentPair[] = [];
+    if (stub) {
+      // Test stub only: same-block pairs stay separate and are reported unjudged.
+      ctx.run.note("merge:test-stub", { unjudged_pairs: questions.length });
+    } else {
+      equivalent = await judgeEquivalence({ ctx, questions, candidates });
+    }
+    const result = mergeDedupeCandidates(candidates, { equivalent });
     const byId = new Map(active.map((row) => [row.id, row]));
 
     for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
@@ -148,7 +174,8 @@ export const mergeDedupeModule = mechanicalModule({
         metadata: {
           ...meta,
           merged_into: survivorId,
-          merge_reason: mergeRow?.reason ?? "identity",
+          merge_reason: mergeRow?.reason ?? "transitive",
+          merge_rationale: mergeRow?.rationale ?? null,
         },
       });
       const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
@@ -190,6 +217,8 @@ export const mergeDedupeModule = mechanicalModule({
 
     const output: MergeDedupeOutput = {
       workspace_id: input.workspace_id,
+      mode: stub ? "stub" : "llm",
+      judged_pairs: questions.length,
       merged: Object.keys(result.absorbed).length,
       survivors: result.survivors.length,
       contradictions: result.contradictions.length,
@@ -204,10 +233,17 @@ export const mergeDedupeModule = mechanicalModule({
     });
     return {
       output,
-      summary:
+      summary: `${
         output.merged === 0
           ? `Merge dedupe — ${output.survivors} survivor(s), no duplicates`
-          : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`,
+          : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`
+      }${
+        stub && questions.length > 0
+          ? ` · test stub (SYNAPSE_TEST_STUB_LLM): ${questions.length} same-block pair(s) not judged`
+          : questions.length > 0
+            ? ` · judge decided ${questions.length} same-block pair(s)`
+            : ""
+      }`,
     };
   },
 });

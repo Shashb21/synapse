@@ -1,5 +1,6 @@
 import { NoRouteError } from "@/modules/llm/provider";
 import { accuracyAuthAllowsLive, resolveAccuracyRoute } from "./routing";
+import { isTestStub } from "@/modules/kernel/llm";
 
 export const EXTRACT_CONNECT_PATH = "/control";
 export const EXTRACT_OAUTH_GATE_CODE = "oauth_required" as const;
@@ -44,7 +45,7 @@ function notReady(reason: string): Extract<LiveExtractGate, { ready: false }> {
 }
 
 export function isExtractStubLlm(): boolean {
-  return process.env.SYNAPSE_TEST_STUB_LLM === "1";
+  return isTestStub();
 }
 
 /** Whether inventory/need extract can run (stub tests or a connected OAuth/key route). */

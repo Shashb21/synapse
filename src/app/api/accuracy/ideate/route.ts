@@ -15,6 +15,7 @@ import {
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { isTestStub } from "@/modules/kernel/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -131,7 +132,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         mode: "manual",
-        stub: process.env.SYNAPSE_TEST_STUB_LLM === "1",
+        stub: isTestStub(),
         tactic_id: tactic.id,
         tactic_ids: [tactic.id],
         tactics_inserted: 1,
@@ -211,7 +212,7 @@ export async function POST(req: Request) {
       tactic_ids.push(inserted.id);
     }
 
-    const stub = result.output.mode === "stub" || process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const stub = result.output.mode === "stub" || isTestStub();
     return NextResponse.json({
       ok: true,
       mode: result.output.mode,

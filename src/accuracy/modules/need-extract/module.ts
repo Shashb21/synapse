@@ -2,6 +2,7 @@ import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import { completeJson } from "../../kernel/routing";
+import { isTestStub } from "@/modules/kernel/llm";
 import { provenanceSpanSchema } from "../../store/quote-validator";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
@@ -115,7 +116,7 @@ async function proposeNeeds(
   prior: NeedDraft | null,
   critiques: string[],
 ): Promise<NeedDraft> {
-  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+  if (isTestStub()) {
     return { gaps: [] };
   }
   const blocks = await loadBlocksForPrompt(input);
@@ -158,7 +159,7 @@ export const needExtractModule = agenticModule({
   }),
   outputSchema: needExtractOutputSchema,
   run: async (input, ctx) => {
-    const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const stub = isTestStub();
 
     const cycle = await runShallowAgenticCycle<NeedDraft>({
       proposer: (round, prior, critiques) => proposeNeeds(ctx, input, round, prior, critiques),

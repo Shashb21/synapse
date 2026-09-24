@@ -14,6 +14,7 @@ import type {
   Actor,
 } from "./contracts";
 import { estimateCostUsd } from "./cost";
+import { isTestStub } from "@/modules/kernel/llm";
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -61,7 +62,7 @@ export async function runAccuracyModule<O = unknown>(args: {
 
   let route = null;
   try {
-    if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+    if (isTestStub()) {
       // Vitest / Playwright: allow agentic modules without a live provider.
       const stub = await resolveAccuracyRoute({
         call_kind: args.call_kind,
@@ -98,7 +99,7 @@ export async function runAccuracyModule<O = unknown>(args: {
     route &&
     route.connected &&
     (route.auth === "oauth" || route.auth === "api_key") &&
-    process.env.SYNAPSE_TEST_STUB_LLM !== "1";
+    !isTestStub();
   const ctx: AccuracyModuleContext = {
     org_id: args.org_id,
     workspace_id: args.workspace_id,
@@ -140,7 +141,7 @@ export async function runAccuracyModule<O = unknown>(args: {
         })
       : async () => {
           throw new Error(
-            process.env.SYNAPSE_TEST_STUB_LLM === "1"
+            isTestStub()
               ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
               : "LLM not available — connect Grok or Claude in /control",
           );
