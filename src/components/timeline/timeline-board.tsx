@@ -145,6 +145,19 @@ export function TimelineBoard({
         </div>
       )}
 
+      {model.pending.length > 0 ? (
+        <section className="border border-[var(--unknown)]/40 bg-card/40 p-3">
+          <h2 className="text-[13px] font-medium text-foreground">Not dated yet</h2>
+          <ul className="mt-2 grid gap-1">
+            {model.pending.map((row) => (
+              <li key={row.activity_id} className="text-[11px] text-muted-foreground">
+                <span className="text-foreground">{row.tactic_name}</span> — {row.reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {model.unscheduled.length > 0 && model.activities.length > 0 ? (
         <section className="border border-[var(--unknown)]/40 bg-card/40 p-3">
           <h2 className="text-[13px] font-medium text-foreground">Not on the timeline yet</h2>
@@ -172,7 +185,11 @@ export function TimelineBoard({
               <div className="grid gap-4 px-4 pb-6">
                 <div className="flex flex-wrap gap-1">
                   <Badge variant="outline" className="text-[10px]">
-                    {selected.band === "addressed" ? "Addressed evidence" : `${selected.band} priority`}
+                    {selected.band === "addressed"
+                      ? "Addressed evidence"
+                      : selected.band === "unprioritized"
+                        ? "not yet prioritized"
+                        : `${selected.band} priority`}
                   </Badge>
                   {selected.meta.counts_toward_addressing ? (
                     <Badge variant="secondary" className="text-[10px]">
@@ -208,6 +225,11 @@ export function TimelineBoard({
                   </dl>
                   {selected.meta.dependency_note ? (
                     <p className="mt-1 text-[11px] text-[var(--opportunity)]">{selected.meta.dependency_note}</p>
+                  ) : null}
+                  {selected.meta.schedule_rationale ? (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Why these dates: {selected.meta.schedule_rationale}
+                    </p>
                   ) : null}
                 </section>
 
