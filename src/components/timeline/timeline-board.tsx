@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/sheet";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { RunStageButton } from "@/components/platform/run-stage-button";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import { ExportImageButton } from "@/components/timeline/export-image-button";
 import { DependencyDialog } from "@/components/timeline/dependency-dialog";
 import { GanttChart } from "@/components/timeline/gantt-chart";
@@ -42,6 +43,22 @@ export type PlanView = {
 };
 
 /**
+ * What a pending activity still needs. With AI off nothing will estimate it,
+ * so the build's "or rebuild to have the model estimate" remedy is replaced.
+ */
+export function pendingReason(reason: string, ai: boolean): string {
+  if (ai) return reason;
+  const missing = reason.split(". ")[0]?.trim() ?? "";
+  return /^No .+ yet$/.test(missing) ? `${missing}. Date it by hand or remove it.` : "Date it by hand or remove it.";
+}
+
+/** S10 lays out dates with or without AI; only the label and copy change. */
+export function layoutLabel(ai: boolean, empty: boolean): string {
+  if (!ai) return "Lay out dates";
+  return empty ? "Rebuild timeline" : "Rebuild from validated state";
+}
+
+/**
  * The saved-final IEGP: the Gantt, one activity's full record on click, and the
  * two actions that make it the truth artifact — save as final, export as an image.
  */
@@ -68,6 +85,7 @@ export function TimelineBoard({
   addable?: { tactic_id: string; name: string }[];
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const ai = useAiEnabled();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Read from the live model, so an edit shows as soon as the page refreshes.
   const selected = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
@@ -105,7 +123,7 @@ export function TimelineBoard({
           <RunStageButton
             stage="S10"
             input={{ persist: true }}
-            label="Rebuild from validated state"
+            label={layoutLabel(ai, false)}
             identity={identity}
           />
           {canReschedule && addable.length > 0 ? (
@@ -121,6 +139,14 @@ export function TimelineBoard({
             fileName={`synapse-iegp-v${plan?.version ?? "draft"}.png`}
             disabledReason={model.activities.length === 0 ? "Nothing to export yet." : undefined}
           />
+          {canSaveFinal && model.pending.length > 0 ? (
+            <p className="max-w-56 text-[11px] text-muted-foreground">
+              {model.pending.length} activity(ies) not dated yet.{" "}
+              {ai
+                ? "Date them by hand or rebuild before saving as final."
+                : "Date them by hand or remove them before saving as final."}
+            </p>
+          ) : null}
           {canSaveFinal ? (
             <ActionDialog
               endpoint="/api/plan"
@@ -154,7 +180,7 @@ export function TimelineBoard({
       </section>
 
       {model.activities.length === 0 ? (
-        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} />
+        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} />
       ) : (
         <div className="overflow-x-auto border border-border bg-background">
           <GanttChart
@@ -174,7 +200,7 @@ export function TimelineBoard({
             {model.pending.map((row) => (
               <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
                 <span className="min-w-0 text-[11px] text-muted-foreground">
-                  <span className="text-foreground">{row.tactic_name}</span> — {row.reason}
+                  <span className="text-foreground">{row.tactic_name}</span> — {pendingReason(row.reason, ai)}
                 </span>
                 {canReschedule ? (
                   <span className="flex flex-wrap gap-2">
@@ -482,17 +508,19 @@ function Row({ label, value }: { label: string; value: string }) {
 function EmptyTimeline({
   identity,
   unscheduled,
+  ai,
 }: {
   identity: ActionIdentity;
   unscheduled: TimelineModel["unscheduled"];
+  ai: boolean;
 }) {
   return (
     <section className="border border-border bg-card/40 p-4">
       <h2 className="text-[13px] font-medium text-foreground">No activities to plot yet</h2>
       <p className="mt-1 text-[12px] text-muted-foreground">
-        The timeline is built from validated state: gaps mapped to tactics, with priority bands. Run the
-        chain on the Pipeline page — upload and parse, extract gaps and tactics, map them, then
-        prioritize — and rebuild here.
+        {ai
+          ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Run the chain on the Pipeline page — upload and parse, extract gaps and tactics, map them, then prioritize — and rebuild here."
+          : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. AI is off: add gaps and tactics by hand, map them on Gaps, validate their bands on Prioritize, then lay out dates here or add an activity by hand."}
       </p>
       {unscheduled.length > 0 ? (
         <p className="mt-2 text-[12px] text-muted-foreground">
@@ -500,7 +528,7 @@ function EmptyTimeline({
         </p>
       ) : null}
       <div className="mt-3">
-        <RunStageButton stage="S10" input={{ persist: true }} label="Rebuild timeline" identity={identity} />
+        <RunStageButton stage="S10" input={{ persist: true }} label={layoutLabel(ai, true)} identity={identity} />
       </div>
     </section>
   );

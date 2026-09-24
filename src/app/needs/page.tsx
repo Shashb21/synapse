@@ -8,14 +8,16 @@ import { DOMAIN_LABELS, EVIDENCE_DOMAINS, FUNCTION_LABELS } from "@/lib/iegp/enu
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
 import { listRejectedGapCandidates } from "@/app/api/iegp/promote-candidates";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function NeedsPage() {
-  const [state, session, rejected] = await Promise.all([
+  const [state, session, rejected, ai] = await Promise.all([
     loadState(),
     sessionContext(),
     listRejectedGapCandidates(),
+    aiEnabled().catch(() => true),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
@@ -48,7 +50,9 @@ export default async function NeedsPage() {
               {rows.length === 0 ? (
                 <p className="mb-4 text-[12px] text-muted-foreground">
                   {status === "candidate"
-                    ? "Empty. Ingest a demo source to extract candidate needs, or add one by hand on a gap."
+                    ? ai
+                      ? "Empty. Ingest a demo source to extract candidate needs, or add one by hand on a gap."
+                      : "Empty. AI is off: add a need by hand on a gap."
                     : "None."}
                 </p>
               ) : (
@@ -173,6 +177,8 @@ export default async function NeedsPage() {
             </section>
           );
         })}
+        {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
+        {ai || rejected.length > 0 ? (
         <section>
           <h2 className="mb-2 text-[13px] text-muted-foreground">
             Rejected by the AI ({pendingRejected.length})
@@ -237,6 +243,7 @@ export default async function NeedsPage() {
             </p>
           ) : null}
         </section>
+        ) : null}
       </div>
     </AppShell>
   );

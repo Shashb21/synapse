@@ -3,6 +3,7 @@
 import { useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -135,6 +136,7 @@ export function SplitGapDialog({
   const [openTacticIds, setOpenTacticIds] = useState<string[]>([]);
   const [rationale, setRationale] = useState("");
   const [proposing, setProposing] = useState(false);
+  const ai = useAiEnabled();
   const [proposalNote, setProposalNote] = useState<string | null>(null);
   /**
    * Tracks whether the user edited the split themselves, as opposed to just
@@ -350,15 +352,21 @@ export function SplitGapDialog({
           >
             Rewrite original
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={proposing}
-            onClick={() => void proposeSplit()}
-          >
-            {proposing ? "Proposing…" : "Suggest a split"}
-          </Button>
+          {ai ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={proposing}
+              onClick={() => void proposeSplit()}
+            >
+              {proposing ? "Proposing…" : "Suggest a split"}
+            </Button>
+          ) : (
+            <span className="self-center text-[11px] text-muted-foreground">
+              AI is off: fill the split in yourself.
+            </span>
+          )}
         </div>
         {proposalNote ? (
           <p className="text-[11px] text-muted-foreground">{proposalNote}</p>

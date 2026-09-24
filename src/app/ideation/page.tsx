@@ -14,15 +14,17 @@ import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function IdeationPage() {
-  const [state, placements, proposals, session] = await Promise.all([
+  const [state, placements, proposals, session, ai] = await Promise.all([
     loadState(),
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
+    aiEnabled().catch(() => true),
   ]);
 
   const identity = {
@@ -103,10 +105,9 @@ export default async function IdeationPage() {
   return (
     <AppShell active="ideation">
       <PageIntro kicker="S9 · Tactics ideation" title="Tactics ideation review">
-        S9 designs candidate tactics for open gaps whose band was validated as High, critiques them
-        against the tactic library and keeps the best per gap. Accepting a proposal creates a
-        proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea
-        before deciding it, or write your own — a re-run adds ideas and never rewrites yours.
+        {ai
+          ? "S9 designs candidate tactics for open gaps whose band was validated as High, critiques them against the tactic library and keeps the best per gap. Accepting a proposal creates a proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea before deciding it, or write your own — a re-run adds ideas and never rewrites yours."
+          : "AI is off, so no ideas are generated. Write ideas by hand for open gaps whose band was validated as High. Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
       </PageIntro>
 
       <div className="grid gap-4">
@@ -128,13 +129,17 @@ export default async function IdeationPage() {
               <span className="text-foreground">{validatedHighCount}</span> gap(s) validated High
             </li>
           </ul>
-          <RunStageButton
-            stage="S9"
-            input={{}}
-            label={total === 0 ? "Run S9 ideation" : "Re-run S9"}
-            identity={identity}
-            variant={total === 0 ? "default" : "outline"}
-          />
+          {ai ? (
+            <RunStageButton
+              stage="S9"
+              input={{}}
+              label={total === 0 ? "Run S9 ideation" : "Re-run S9"}
+              identity={identity}
+              variant={total === 0 ? "default" : "outline"}
+            />
+          ) : (
+            <p className="text-[11px] text-muted-foreground">AI is off: add ideas by hand.</p>
+          )}
         </div>
 
         {highWithoutProposal.length > 0 ? (
@@ -143,8 +148,9 @@ export default async function IdeationPage() {
               High priority with no proposal ({highWithoutProposal.length})
             </h2>
             <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">
-              These open gaps have a validated High band but no ideated tactic yet. Run S9 to design
-              candidates for them, or add an idea by hand.
+              {ai
+                ? "These open gaps have a validated High band but no ideated tactic yet. Run S9 to design candidates for them, or add an idea by hand."
+                : "These open gaps have a validated High band but no ideated tactic yet. Add an idea by hand."}
             </p>
             <ul className="flex flex-wrap gap-2">
               {highWithoutProposal.map((gap) => (
@@ -164,15 +170,17 @@ export default async function IdeationPage() {
                 </li>
               ))}
             </ul>
-            <div>
-              <RunStageButton
-                stage="S9"
-                input={{}}
-                label="Run S9 for these gaps"
-                identity={identity}
-                variant="default"
-              />
-            </div>
+            {ai ? (
+              <div>
+                <RunStageButton
+                  stage="S9"
+                  input={{}}
+                  label="Run S9 for these gaps"
+                  identity={identity}
+                  variant="default"
+                />
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -180,22 +188,24 @@ export default async function IdeationPage() {
           <section className="grid gap-3 rounded-md border border-border bg-card/40 p-4">
             <h2 className="text-[13px] text-foreground">No proposal to review yet</h2>
             <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
-              S9 only runs for open gaps whose priority band has been validated as High. Validate a
-              band on the{" "}
+              {ai ? "S9 only runs" : "Ideas are added"} for open gaps whose priority band has been
+              validated as High. Validate a band on the{" "}
               <Link href="/?place=plan" className="text-foreground no-underline hover:underline">
                 prioritization matrix
               </Link>{" "}
-              first (by hand or with the model), then run S9 here or add ideas by hand.
+              first{ai ? " (by hand or with the model), then run S9 here or add ideas by hand." : ", then add ideas by hand here."}
             </p>
-            <div>
-              <RunStageButton
-                stage="S9"
-                input={{}}
-                label="Run S9 ideation"
-                identity={identity}
-                variant="default"
-              />
-            </div>
+            {ai ? (
+              <div>
+                <RunStageButton
+                  stage="S9"
+                  input={{}}
+                  label="Run S9 ideation"
+                  identity={identity}
+                  variant="default"
+                />
+              </div>
+            ) : null}
           </section>
         ) : (
           <div className="grid gap-4">

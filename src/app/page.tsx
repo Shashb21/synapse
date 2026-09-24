@@ -6,6 +6,8 @@ import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
+import { ManualStart } from "@/components/plan-cards";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
@@ -26,10 +28,20 @@ export const dynamic = "force-dynamic";
 function PlaceIntro({
   place,
   wizardComplete,
+  ai,
 }: {
   place: PlanPlace;
   wizardComplete: boolean;
+  ai: boolean;
 }) {
+  if (place === "upload" && !ai) {
+    return (
+      <PageIntro kicker="AI is off · manual plan" title="Start">
+        Nothing is uploaded or parsed while AI is off. Add your gaps and the tactics you already
+        have by hand, then map, prioritize and date them yourself.
+      </PageIntro>
+    );
+  }
   if (place === "upload") {
     return (
       <PageIntro
@@ -62,8 +74,9 @@ function PlaceIntro({
   }
   return (
     <PageIntro kicker={wizardComplete ? "Living plan" : "Open gaps"} title="Prioritize">
-      Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set
-      their priority, then validate each one.
+      {ai
+        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set their priority, then validate each one."
+        : "Pick a setting and two axes, then place each Open gap by hand — type its scores or band, or drop it on the matrix — and validate each one."}
     </PageIntro>
   );
 }
@@ -86,11 +99,17 @@ export default async function HomePage({
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
+  const ai = await aiEnabled().catch(() => true);
+  // With AI off nothing is ingested, so Gaps never waits for a source.
+  const gapsUnlocked = gates.gapsUnlocked || !ai;
   const params = await searchParams;
   if (params.place === "mappings") redirect("/mappings");
   const requested =
     params.place === "review" || params.place === "library" ? "gaps" : params.place;
-  const fallback = defaultPlanPlace(state, workspace);
+  const suggested = defaultPlanPlace(state, workspace);
+  // With AI off the first screen is Start (Add gaps / Add tactics) until there are gaps.
+  const fallback: PlanPlace =
+    !ai && suggested === "upload" && workspace.review.length > 0 ? "gaps" : suggested;
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);
   const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")
@@ -102,7 +121,14 @@ export default async function HomePage({
     const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
-        <IngestPanel sources={state.sources} />
+        {ai ? (
+          <IngestPanel sources={state.sources} />
+        ) : (
+          <ManualStart
+            gapCount={workspace.review.length}
+            tacticCount={workspace.availableTactics.length}
+          />
+        )}
         {workspace.review.length > 0 ? (
           <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
             <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
@@ -121,7 +147,7 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
-    pane = gates.gapsUnlocked ? (
+    pane = gapsUnlocked ? (
       <GapsWorkbench
         cards={workspace.review}
         availableTactics={workspace.availableTactics}
@@ -166,7 +192,7 @@ export default async function HomePage({
 
   return (
     <AppShell active={place}>
-      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} />
+      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} ai={ai} />
       {pane}
       {place === "upload" ? (
         <div className="mt-8">
