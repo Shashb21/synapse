@@ -2,6 +2,8 @@
 
 import { LockForm } from "@/components/lock-form";
 import {
+  ACTOR_FUNCTIONS,
+  FUNCTION_LABELS,
   CATCH_UP_REASON_LABELS,
   CATCH_UP_REASONS,
   CATCH_UP_TACTIC_STATUSES,
@@ -92,6 +94,65 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
   );
 }
 
+const DETAIL_FIELDS: { name: string; label: string; placeholder: string }[] = [
+  { name: "population", label: "Population", placeholder: "e.g. adults with EGFR+ NSCLC after 1L" },
+  { name: "intervention", label: "Intervention", placeholder: "e.g. the asset, dose or regimen" },
+  { name: "comparator", label: "Comparator", placeholder: "e.g. standard of care" },
+  { name: "outcomes", label: "Outcomes", placeholder: "e.g. OS, PFS, HCRU" },
+  { name: "study_design", label: "Study design", placeholder: "e.g. retrospective cohort" },
+  { name: "data_source", label: "Data source", placeholder: "e.g. Flatiron EHR, sponsor registry" },
+  { name: "geography", label: "Geography", placeholder: "e.g. US, EU5" },
+  { name: "owner", label: "Owner", placeholder: "Blank: you" },
+];
+
+/**
+ * The tactic's descriptive fields, all optional and empty until a person fills
+ * them. Nothing is prefilled: a blank field is stored blank.
+ */
+export function TacticDetailFields() {
+  return (
+    <details className="grid gap-2">
+      <summary className="cursor-pointer text-[12px] text-muted-foreground">
+        Details (optional — population, design, data source, geography, owner)
+      </summary>
+      <div className="mt-2 grid gap-2">
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Description
+          <textarea
+            name="description"
+            placeholder="Blank: the name is used"
+            className="min-h-14 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+          />
+        </label>
+        {DETAIL_FIELDS.map((field) => (
+          <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+            {field.label}
+            <input
+              name={field.name}
+              placeholder={field.placeholder}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+            />
+          </label>
+        ))}
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Owner function
+          <select
+            name="function"
+            defaultValue="evidence_lead"
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          >
+            {ACTOR_FUNCTIONS.map((fn) => (
+              <option key={fn} value={fn}>
+                {FUNCTION_LABELS[fn]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </details>
+  );
+}
+
 export function MapExistingTactic({
   gapId,
   availableTactics,
@@ -139,14 +200,7 @@ export function RecordMissedTactic({ gapId }: { gapId: string }) {
       description="Catch-up only. Record a real study ingest missed, a source not yet uploaded, or one you remember. Do not invent new studies here."
     >
       <RecordMissedFields />
-      <input type="hidden" name="description" value="Recorded as catch-up from Gaps. Not ideation." />
-      <input type="hidden" name="population" value="To be specified" />
-      <input type="hidden" name="intervention" value="Velmara" />
-      <input type="hidden" name="comparator" value="To be specified" />
-      <input type="hidden" name="outcomes" value="To be specified" />
-      <input type="hidden" name="geography" value="US + EU5" />
-      <input type="hidden" name="owner" value="" />
-      <input type="hidden" name="function" value="evidence_lead" />
+      <TacticDetailFields />
     </LockForm>
   );
 }

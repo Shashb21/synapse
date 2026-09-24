@@ -230,6 +230,10 @@ export async function ensureSchema() {
   await d.execute(
     sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb"),
   );
+  // The source sentence S3 extracted a tactic from; empty for hand-created rows.
+  await d.execute(
+    sql.raw("ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''"),
+  );
   // Need confidence is null until a model or a human scores it.
   await d.execute(sql.raw("ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL"));
 }

@@ -76,7 +76,15 @@ type GapCandidate = {
   duplicate_of: string | null;
 };
 
-type PlanGap = { id: string; name: string; statement: string };
+/**
+ * A gap already in the plan. `set_aside` marks one a person excluded or parked:
+ * it is still shown to the critic and judge so a repeat maps onto it
+ * (duplicate_of) instead of re-creating a gap the person set aside.
+ */
+type PlanGap = { id: string; name: string; statement: string; set_aside?: "excluded" | "parked" };
+
+const SET_ASIDE_NOTE =
+  "plan_gaps marked set_aside were excluded or parked by a person. A candidate asking the same question is still a duplicate: set duplicate_of to that gap's id. It joins as provenance and the gap stays set aside.";
 
 type RawGap = {
   id?: unknown;
@@ -301,6 +309,7 @@ async function reviewWithModel(
           reviewer_corrections: args.hints || undefined,
           note: attempt > 1 ? "An earlier answer left these candidates unreviewed. Review each." : undefined,
           plan_gaps: args.planGaps,
+          plan_gaps_note: args.planGaps.some((gap) => gap.set_aside) ? SET_ASIDE_NOTE : undefined,
           candidates: missing.map((id) => {
             const candidate = byId.get(id)!;
             const document = args.documents.get(candidate.document_id);
@@ -363,6 +372,7 @@ async function judgeWithModel(
               ? "An earlier answer left these candidates undecided or its decision was invalid. Decide each."
               : undefined,
           plan_gaps: args.planGaps,
+          plan_gaps_note: args.planGaps.some((gap) => gap.set_aside) ? SET_ASIDE_NOTE : undefined,
           // Every candidate is listed so a sibling duplicate can name the one it matches.
           candidates: args.candidates.map((candidate) => {
             const critique = args.critiques.find((item) => item.subject === candidate.id);
@@ -465,9 +475,18 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       };
     }
     const state = await loadState();
+    // Excluded and parked gaps are listed too (marked set_aside) so the judge maps
+    // a repeat onto them; commit then leaves them excluded or parked.
     const planGaps: PlanGap[] = state.gaps
-      .filter(isLiveGap)
-      .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement }));
+      .filter((gap) => !gap.retired)
+      .map((gap) => ({
+        id: gap.id,
+        name: gap.name,
+        statement: gap.statement,
+        ...(isLiveGap(gap)
+          ? {}
+          : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
+      }));
     const documentById = new Map(documents.map((document) => [document.id, document]));
     // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
     let reviewerHints = "";

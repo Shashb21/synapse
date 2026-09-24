@@ -202,6 +202,8 @@ export type Tactic = {
   budget: string | null;
   intended_use: string;
   lock: Lock;
+  /** The source sentence S3 extracted this tactic from. Empty for hand-created tactics. */
+  source_quote?: string;
 };
 
 export type GapTacticCoverage = {
