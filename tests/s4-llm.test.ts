@@ -294,4 +294,24 @@ describe("S4 on the model path", () => {
       expect(row.confidence).toBeUndefined();
     }
   });
+  it("stores the model's coverage verdict and dimensions when a run commits", async () => {
+    const [a] = gapIds as [string, string];
+    const [t1] = tacticIds as [string, string];
+    const { ctx } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map((id) => (id === a ? mapped(id, t1, "partial") : unmapped(id))) };
+    });
+
+    await kgMappingModule.run(
+      kgMappingModule.inputSchema.parse({ gap_ids: gapIds, tactic_ids: tacticIds, dry_run: false }),
+      ctx,
+    );
+
+    const coverage = (await loadState()).coverages.find((row) => row.gap_id === a && row.tactic_id === t1)!;
+    expect(coverage.overall).toBe("partial");
+    for (const [dimension, value] of Object.entries(dims)) {
+      expect(coverage.dimensions[dimension as keyof typeof coverage.dimensions].value).toBe(value);
+    }
+  });
 });

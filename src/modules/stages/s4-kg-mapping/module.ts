@@ -630,6 +630,9 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
               actor_name: ctx.actor.name,
               actor_function: ctx.actor.function,
               note: `S4 mapping table · ${row.mapping_status} · ${mapping.coverage} · ${mapping.rationale}`,
+              // The model's verdict is the coverage; the store no longer invents one.
+              coverage: mapping.coverage,
+              dimensions: mapping.dimensions,
             });
             joined.push(mapping.tactic_id);
           } catch (error) {

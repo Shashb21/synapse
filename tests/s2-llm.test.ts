@@ -143,6 +143,8 @@ describe("S2 on the model path", () => {
       need_ids: ["NEED-X"],
       gap_ids: ["G-NEW"],
       tactic_ids: [],
+      merged_gap_ids: [],
+      skipped_tactic_ids: [],
     }));
     const { ctx, calls } = context((call) => {
       if (call.purpose.startsWith("gap-proposer:")) {
