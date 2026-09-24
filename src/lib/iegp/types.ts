@@ -130,6 +130,11 @@ export type EvidenceGap = {
   /** Set aside by a human as not a real gap. Excludes from Prioritize and Tactics until unparked. */
   parked_at: string | null;
   parked_reason: string | null;
+  /**
+   * Treatment settings the gap belongs to (e.g. "1L", "Perioperative"). Free
+   * tags a human adds; a gap can carry several. Prioritize scopes on them.
+   */
+  settings: string[];
 };
 
 export type GapVersionEvent = "split" | "rewrite";

@@ -3,8 +3,13 @@ import { z } from "zod";
 import "@/modules";
 import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
-import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
-import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
+import {
+  listPlacements,
+  movePlacement,
+  validatePlacement,
+} from "@/modules/stages/s8-prioritization/module";
+import { loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes";
+import { setGapSettings } from "@/lib/iegp/store";
 import { decideIdeationProposal, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
   latestPlan,
@@ -61,6 +66,38 @@ export async function POST(request: Request) {
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, placement });
+      }
+      case "move_placement": {
+        assertCan(identity.role, "prioritize");
+        const placement = await movePlacement({
+          gap_id: String(body.gap_id ?? ""),
+          x_axis: String(body.x_axis ?? ""),
+          y_axis: String(body.y_axis ?? ""),
+          x: Number(body.x),
+          y: Number(body.y),
+          actor: identity.actor,
+        });
+        return NextResponse.json({ ok: true, placement });
+      }
+      case "save_scope_axes": {
+        assertCan(identity.role, "prioritize");
+        const axes = await saveScopeAxes({
+          scope: String(body.scope ?? "").trim() || "all",
+          x_axis: String(body.x_axis ?? ""),
+          y_axis: String(body.y_axis ?? ""),
+          actor_name: identity.actor.name,
+        });
+        return NextResponse.json({ ok: true, axes });
+      }
+      case "set_gap_settings": {
+        assertCan(identity.role, "validate");
+        const settings = await setGapSettings({
+          gap_id: String(body.gap_id ?? ""),
+          settings: Array.isArray(body.settings) ? body.settings.map(String) : [],
+          actor_name: identity.actor.name,
+          actor_function: identity.actor.function,
+        });
+        return NextResponse.json({ ok: true, settings });
       }
       case "decide_proposal": {
         assertCan(identity.role, "ideate");

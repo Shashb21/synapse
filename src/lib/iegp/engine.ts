@@ -1196,12 +1196,14 @@ export type ReviewGapCard = {
   need_count: number;
   needs: ReviewNeedSnippet[];
   needs_review: boolean;
+  settings: string[];
 };
 
 export type OpenGapCard = {
   gap_id: string;
   gap_name: string;
   statement: string;
+  settings: string[];
   gap_status: GapStatus;
   computed_status: MappedGapStatus;
   suggested_status: GapStatus;
@@ -1408,6 +1410,7 @@ export function buildPlanWorkspace(state: IegpState): {
       need_count: linkedNeeds.length,
       needs: linkedNeeds,
       needs_review: coverages.some((c) => c.needs_review),
+      settings: gap.settings ?? [],
     });
   }
   review.sort(compareReviewGapCards);
@@ -1425,6 +1428,7 @@ export function buildPlanWorkspace(state: IegpState): {
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
+      settings: gap.settings ?? [],
       gap_status: shown,
       computed_status: computed,
       suggested_status: computed,
@@ -1644,4 +1648,24 @@ export function liveGapsMappedToTactic(
     .map((id) => state.gaps.find((g) => g.id === id))
     .filter((g): g is NonNullable<typeof g> => Boolean(g))
     .map((g) => ({ id: g.id, name: g.name }));
+}
+
+/** Every setting tag in use on live gaps, first spelling wins, sorted for pickers. */
+export function settingOptions(state: Pick<IegpState, "gaps">): string[] {
+  const seen = new Map<string, string>();
+  for (const gap of state.gaps) {
+    if (!isLiveGap(gap)) continue;
+    for (const tag of gap.settings ?? []) {
+      const key = tag.toLowerCase();
+      if (!seen.has(key)) seen.set(key, tag);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/** Whether a gap is in a Prioritize scope: a setting tag, or "all". */
+export function gapInSetting(gap: Pick<EvidenceGap, "settings">, scope: string): boolean {
+  if (scope === "all") return true;
+  const key = scope.toLowerCase();
+  return (gap.settings ?? []).some((tag) => tag.toLowerCase() === key);
 }

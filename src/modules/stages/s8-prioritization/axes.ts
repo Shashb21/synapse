@@ -3,18 +3,18 @@ import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
+import type { PriorityAxis } from "./axis-math";
 
-export type PriorityAxis = {
-  id: string;
-  label: string;
-  description: string;
-  /** Relative contribution to the suggested band. 0 keeps an axis visible but non-scoring. */
-  weight: number;
-  low_label: string;
-  high_label: string;
-  /** Phrases that raise this axis for a gap. Editable by the user. */
-  cues: string[];
-};
+export {
+  favourability,
+  favourableLabel,
+  quadrantBand,
+  quadrantScore,
+  scoreFromFavourability,
+  unfavourableLabel,
+} from "./axis-math";
+
+export type { PriorityAxis };
 
 export type AxesConfig = {
   axes: PriorityAxis[];
@@ -73,6 +73,52 @@ export const DEFAULT_AXES: AxesConfig = {
       high_label: "Readily runnable",
       cues: ["registry", "chart review", "claims", "secondary analysis", "existing data", "survey"],
     },
+    {
+      id: "effort_cost",
+      label: "Effort & cost",
+      description: "How much time, budget and operational effort closing the gap would take.",
+      weight: 0,
+      low_label: "Low effort",
+      high_label: "High effort",
+      higher_is_priority: false,
+      cues: [
+        "prospective",
+        "randomised",
+        "randomized",
+        "rct",
+        "head-to-head",
+        "multi-country",
+        "long-term",
+        "phase",
+      ],
+    },
+    {
+      id: "patient_impact",
+      label: "Patient impact",
+      description: "How much closing the gap could change outcomes or care for patients.",
+      weight: 0,
+      low_label: "Marginal",
+      high_label: "Changes patient care",
+      cues: ["survival", "mortality", "quality of life", "qol", "toxicity", "safety", "adherence", "burden"],
+    },
+    {
+      id: "payer_value",
+      label: "Payer / HTA relevance",
+      description: "How directly the gap bears on access, reimbursement and value arguments.",
+      weight: 0,
+      low_label: "Not access-relevant",
+      high_label: "Core to access",
+      cues: ["hta", "nice", "g-ba", "cost-effectiveness", "budget impact", "reimbursement", "payer", "icer"],
+    },
+    {
+      id: "strategic_fit",
+      label: "Strategic fit",
+      description: "How central the gap is to the brand strategy and lifecycle plan.",
+      weight: 0,
+      low_label: "Peripheral",
+      high_label: "Core to strategy",
+      cues: ["launch", "label", "positioning", "differentiation", "indication", "lifecycle", "expansion"],
+    },
   ],
   x_axis: "decision_impact",
   y_axis: "time_pressure",
@@ -80,6 +126,16 @@ export const DEFAULT_AXES: AxesConfig = {
 };
 
 const ROW_ID = "default";
+
+/**
+ * A saved axis configuration predates axes added to the catalog later, so any
+ * default axis it lacks is appended; saved edits to existing axes win.
+ */
+function withCatalogDefaults(saved: PriorityAxis[] | undefined): PriorityAxis[] {
+  if (!saved?.length) return DEFAULT_AXES.axes;
+  const ids = new Set(saved.map((axis) => axis.id));
+  return [...saved, ...DEFAULT_AXES.axes.filter((axis) => !ids.has(axis.id))];
+}
 
 export type StoredAxes = AxesConfig & { updated_by: string; updated_at: string };
 
@@ -90,7 +146,7 @@ export async function loadAxes(): Promise<StoredAxes> {
   if (!row) return { ...DEFAULT_AXES, updated_by: "default", updated_at: "—" };
   const config = row.config as AxesConfig;
   return {
-    axes: config.axes?.length ? config.axes : DEFAULT_AXES.axes,
+    axes: withCatalogDefaults(config.axes),
     x_axis: config.x_axis ?? DEFAULT_AXES.x_axis,
     y_axis: config.y_axis ?? DEFAULT_AXES.y_axis,
     bands: config.bands ?? DEFAULT_AXES.bands,
@@ -114,6 +170,7 @@ export const axesConfigSchema = z.object({
         low_label: z.string().min(1),
         high_label: z.string().min(1),
         cues: z.array(z.string()).default([]),
+        higher_is_priority: z.boolean().optional(),
       }),
     )
     .min(2),
@@ -178,4 +235,60 @@ export function weightedScore(scores: Record<string, number>, axes: PriorityAxis
   if (totalWeight === 0) return 0;
   const sum = axes.reduce((acc, axis) => acc + (scores[axis.id] ?? 0) * axis.weight, 0);
   return Math.round(sum / totalWeight);
+}
+
+/**
+ * Prioritize is scoped: one treatment setting at a time, or every Open gap.
+ * Each scope remembers the two axes it was prioritized on.
+ */
+export const ALL_SETTINGS_SCOPE = "all";
+
+export type ScopeAxes = { x_axis: string; y_axis: string; updated_by: string; updated_at: string };
+
+function scopeRowId(scope: string): string {
+  return `scope:${scope.trim().toLowerCase()}`;
+}
+
+export async function loadScopeAxes(scope: string): Promise<ScopeAxes | null> {
+  await ensurePlatformSchema();
+  const rows = await db()
+    .select()
+    .from(t.priorityAxes)
+    .where(eq(t.priorityAxes.id, scopeRowId(scope)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const config = row.config as { x_axis?: string; y_axis?: string };
+  if (!config.x_axis || !config.y_axis) return null;
+  return {
+    x_axis: config.x_axis,
+    y_axis: config.y_axis,
+    updated_by: row.updated_by,
+    updated_at: row.updated_at,
+  };
+}
+
+export async function saveScopeAxes(args: {
+  scope: string;
+  x_axis: string;
+  y_axis: string;
+  actor_name: string;
+}): Promise<ScopeAxes> {
+  const catalog = await loadAxes();
+  const ids = new Set(catalog.axes.map((axis) => axis.id));
+  if (!ids.has(args.x_axis) || !ids.has(args.y_axis)) {
+    throw new Error("Pick both axes from the list.");
+  }
+  if (args.x_axis === args.y_axis) throw new Error("Pick two different axes for the matrix.");
+  const values = {
+    id: scopeRowId(args.scope),
+    config: { x_axis: args.x_axis, y_axis: args.y_axis },
+    updated_by: args.actor_name,
+    updated_at: nowIso(),
+  };
+  await db()
+    .insert(t.priorityAxes)
+    .values(values)
+    .onConflictDoUpdate({ target: t.priorityAxes.id, set: values });
+  return { x_axis: args.x_axis, y_axis: args.y_axis, updated_by: args.actor_name, updated_at: values.updated_at };
 }

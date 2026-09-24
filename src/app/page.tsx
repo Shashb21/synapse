@@ -3,12 +3,11 @@ import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
-import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
-import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
+import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
-import Link from "next/link";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
   defaultPlanPlace,
@@ -17,18 +16,12 @@ import {
   planGates,
   reviewGapFilterCounts,
   REVIEW_GAP_FILTERS,
-  type PlanColumn,
+  settingOptions,
   type PlanPlace,
   type ReviewGapFilter,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
-
-const COLUMNS: { id: PlanColumn; title: string; hint: string }[] = [
-  { id: "high", title: "High", hint: "Critical and high — staff these first" },
-  { id: "medium", title: "Medium", hint: "Decision-relevant, not this cycle's blocker" },
-  { id: "low", title: "Low", hint: "Keep on the inventory; do not staff first" },
-];
 
 function PlaceIntro({
   place,
@@ -69,8 +62,8 @@ function PlaceIntro({
   }
   return (
     <PageIntro kicker={wizardComplete ? "Living plan" : "Open gaps"} title="Prioritize">
-      High / Medium / Low are priority bands on Open gaps. Addressed gaps sit in their own bucket.
-      Continue to Tactics when bands are set.
+      Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set
+      their priority, then validate each one.
     </PageIntro>
   );
 }
@@ -87,7 +80,7 @@ function LockedPlace({ title, body }: { title: string; body: string }) {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ place?: string; gap_filter?: string }>;
+  searchParams: Promise<{ place?: string; gap_filter?: string; setting?: string }>;
 }) {
   await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
@@ -134,15 +127,22 @@ export default async function HomePage({
         availableTactics={workspace.availableTactics}
         readyForPrioritize={ready}
         initialFilter={gapFilter}
+        settingOptions={settingOptions(state)}
       />
     ) : (
       <LockedPlace title="Gaps is locked" body="Ingest at least one source on Upload." />
     );
   } else if (place === "tactics") {
+    // The validated matrix band is the gap's priority.
+    const placements = new Map((await listPlacements()).map((row) => [row.gap_id, row]));
+    const openGaps = workspace.openGaps.map((card) => {
+      const placement = placements.get(card.gap_id);
+      return placement?.validated && placement.band ? { ...card, band: placement.band } : card;
+    });
     pane = (
       <TacticsPlace
         unlocked={gates.tacticsUnlocked}
-        openGaps={workspace.openGaps}
+        openGaps={openGaps}
         availableTactics={workspace.availableTactics}
       />
     );
@@ -155,105 +155,12 @@ export default async function HomePage({
     );
   } else {
     pane = (
-      <>
-        <GapStatusGuide />
-        <section className="mb-10" aria-labelledby="prioritize-gaps">
-          <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">
-            Prioritize open gaps
-          </h2>
-          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            You lock High, Medium, or Low — the engine does not assign a band.
-          </p>
-          <PrioritizeQueue
-            cards={workspace.unprioritized}
-            availableTactics={workspace.availableTactics}
-          />
-        </section>
-
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[15px] font-medium text-foreground">Prioritized plan</h2>
-          <Link href="/matrix" className="text-[12px] text-muted-foreground no-underline hover:underline">
-            Open matrix →
-          </Link>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr_1fr]">
-          {COLUMNS.map((col) => (
-            <section
-              key={col.id}
-              className={
-                col.id === "high"
-                  ? "border-2 border-foreground/25 bg-card/40 p-3"
-                  : "border border-border bg-card/40 p-3"
-              }
-              aria-labelledby={`plan-${col.id}`}
-            >
-              <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2
-                  id={`plan-${col.id}`}
-                  className={col.id === "high" ? "text-[16px] font-semibold text-foreground" : "text-[15px] font-medium text-foreground"}
-                >
-                  {col.title}
-                </h2>
-                <span className="text-[11px] text-muted-foreground">
-                  {workspace.board[col.id].length}
-                </span>
-              </div>
-              <p className="mb-3 text-[11px] text-muted-foreground">{col.hint}</p>
-              <div className="grid gap-3">
-                {workspace.board[col.id].length === 0 ? (
-                  <p className="text-[12px] text-muted-foreground">No gaps in this band.</p>
-                ) : (
-                  workspace.board[col.id].map((card) => (
-                    <GapPlanCard
-                      key={card.gap_id}
-                      card={card}
-                      availableTactics={workspace.availableTactics}
-                    />
-                  ))
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <details className="mt-10 group" aria-labelledby="addressed-gaps">
-          <summary
-            id="addressed-gaps"
-            className="cursor-pointer list-none text-[15px] font-medium text-foreground marker:content-none"
-          >
-            <span className="inline-flex items-center gap-1.5">
-              Addressed
-              <span className="text-[11px] font-normal text-muted-foreground">
-                ({workspace.addressed.length}) · click to expand
-              </span>
-            </span>
-          </summary>
-          {workspace.addressed.length === 0 ? (
-            <p className="mt-2 text-[12px] text-muted-foreground">No addressed gaps yet.</p>
-          ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {workspace.addressed.map((card) => (
-                <GapPlanCard
-                  key={card.gap_id}
-                  card={card}
-                  availableTactics={workspace.availableTactics}
-                />
-              ))}
-            </div>
-          )}
-        </details>
-
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          {!state.asset.tactics_unlocked ? (
-            <LockForm
-              label="Continue to tactics"
-              action="unlock_tactics"
-              confirmLabel="Go to tactics"
-            />
-          ) : null}
-          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
-        </div>
-      </>
+      <PrioritizePlace
+        state={state}
+        setting={params.setting}
+        addressed={workspace.addressed}
+        availableTactics={workspace.availableTactics}
+      />
     );
   }
 
