@@ -5,27 +5,29 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
 import {
   PROPOSER_CRITIC_EXCHANGES,
-  hasIssue,
   runAgenticCycle,
   type Critique,
+  type JudgedCandidate,
 } from "@/modules/kernel/agentic";
-import { canPrompt } from "@/modules/kernel/routing";
+import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
+import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
-import {
-  extractCandidateGaps,
-  gapNameFromStatement,
-  guessDomain,
-  isLiveGap,
-  similarRecord,
-} from "@/lib/iegp/engine";
+import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
 import { augmentSystemPrompt } from "@/modules/kernel/prompt-variant";
 import { curatedS2Cases } from "@/modules/eval-gold";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
-import { GAP_CRITIC_SYSTEM, GAP_PROPOSER_SYSTEM, gapProposerUser } from "./prompts";
+import {
+  GAP_CRITIC_SYSTEM,
+  GAP_JUDGE_SYSTEM,
+  GAP_PROPOSER_SYSTEM,
+  GAP_REVISER_SYSTEM,
+  documentBody,
+  gapProposerUser,
+} from "./prompts";
 
 const inputSchema = z.object({
   /** Defaults to every parsed document. */
@@ -42,9 +44,12 @@ const candidateSchema = z.object({
   statement: z.string(),
   domain: z.string(),
   source_quote: z.string(),
+  /** The judge's confidence in its verdict, 0–100, as the model gave it. */
   score: z.number(),
   verdict: z.string(),
   critic_note: z.string(),
+  /** Existing live plan gap the judge found this candidate to be the same as. */
+  duplicate_of: z.string().nullable(),
 });
 
 const outputSchema = z.object({
@@ -67,15 +72,76 @@ type GapCandidate = {
   statement: string;
   domain: EvidenceDomain;
   source_quote: string;
+  /** Set only by the model judge. Null until then, and for a new gap. */
+  duplicate_of: string | null;
 };
 
-function asDomain(value: string, fallback: string): EvidenceDomain {
-  return EVIDENCE_DOMAINS.includes(value as EvidenceDomain)
-    ? (value as EvidenceDomain)
-    : guessDomain(fallback);
+type PlanGap = { id: string; name: string; statement: string };
+
+type RawGap = {
+  id?: unknown;
+  withdraw?: unknown;
+  reason?: unknown;
+  name?: unknown;
+  statement?: unknown;
+  domain?: unknown;
+  source_quote?: unknown;
+};
+
+type JudgeDecision = {
+  verdict: "accept" | "reject";
+  confidence: number;
+  reason: string;
+  duplicate_of: string | null;
+  same_as_candidate: string | null;
+};
+
+const REMEDY = "run gap extraction again or switch the S2 route in /control.";
+
+const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+/**
+ * Schema check on one proposed gap. A row with any problem is not used as is:
+ * the proposer is asked to fix it or withdraw it. Nothing is filled in here.
+ */
+function gapProblems(raw: RawGap): string[] {
+  const problems: string[] = [];
+  if (!text(raw.name)) problems.push("name is missing");
+  if (!text(raw.statement)) problems.push("statement is missing");
+  const domain = text(raw.domain);
+  if (!EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
+    problems.push(
+      domain
+        ? `domain "${domain}" is not one of: ${EVIDENCE_DOMAINS.join(", ")}`
+        : `domain is missing; use one of: ${EVIDENCE_DOMAINS.join(", ")}`,
+    );
+  }
+  if (!text(raw.source_quote)) problems.push("source_quote is missing; quote the document verbatim or withdraw the gap");
+  return problems;
 }
 
-function localProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
+function toCandidate(id: string, document: ParsedDocumentRecord, raw: RawGap): GapCandidate {
+  return {
+    id,
+    document_id: document.id,
+    source_id: document.source_id,
+    name: text(raw.name),
+    statement: text(raw.statement),
+    domain: text(raw.domain) as EvidenceDomain,
+    source_quote: text(raw.source_quote),
+    duplicate_of: null,
+  };
+}
+
+const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
+
+/**
+ * Test stub only: the kernel calls this when SYNAPSE_TEST_STUB_LLM is set and
+ * never otherwise. Rule-based extraction stands in for the model so the rest of
+ * the pipeline has rows to work with; it is labelled test output, not judgement.
+ */
+function stubProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
+  if (!isTestStub()) throw new NoRouteError("Gap extraction has no rule-based fallback.");
   return documents.flatMap((document) =>
     extractCandidateGaps(document.blocks).map((gap, index) => ({
       id: `${document.id}-G${String(index + 1).padStart(3, "0")}`,
@@ -85,186 +151,286 @@ function localProposals(documents: ParsedDocumentRecord[]): GapCandidate[] {
       statement: gap.statement,
       domain: gap.domain,
       source_quote: gap.source_quote,
+      duplicate_of: null,
     })),
   );
 }
 
-/** Turns the critic's objections into the brief the proposer answers next round. */
-function revisionBrief(args: { round: number; critiques: Critique[] }): string {
-  const objections = args.critiques.filter((critique) => critique.verdict !== "keep");
-  if (objections.length === 0) {
-    return `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}: the critic kept every candidate. Tighten wording only.`;
-  }
-  return [
-    `Exchange ${args.round} of ${PROPOSER_CRITIC_EXCHANGES}. The critic objected to these candidates. Revise them, keeping each id you retain, and drop the ones you cannot defend:`,
-    ...objections.map(
-      (critique) => `- ${critique.subject} (${critique.verdict}, ${critique.score}/100): ${critique.note}`,
-    ),
-  ].join("\n");
-}
-
-async function llmProposals(
-  ctx: ModuleContext,
-  documents: ParsedDocumentRecord[],
-  hints: string,
-): Promise<GapCandidate[]> {
-  const out: GapCandidate[] = [];
-  for (const document of documents) {
-    const payload = (await ctx.complete({
-      system: augmentSystemPrompt(GAP_PROPOSER_SYSTEM),
-      user: gapProposerUser({
-        title: document.blocks[0]?.heading ?? document.source_id,
-        blocks: document.blocks,
-        hints,
-      }),
-      purpose: `gap-proposer:${document.id}`,
-    })) as { gaps?: { name?: string; statement?: string; domain?: string; source_quote?: string }[] };
-    for (const [index, gap] of (payload.gaps ?? []).entries()) {
-      const statement = (gap.statement ?? "").trim();
-      if (!statement) continue;
-      out.push({
-        id: `${document.id}-L${String(index + 1).padStart(3, "0")}`,
-        document_id: document.id,
-        source_id: document.source_id,
-        name: (gap.name ?? "").trim() || gapNameFromStatement(statement),
-        statement,
-        domain: asDomain(gap.domain ?? "", statement),
-        source_quote: (gap.source_quote ?? statement).slice(0, 280),
-      });
-    }
-  }
-  return out;
-}
-
-const TACTIC_SHAPED = /\b(we will (run|conduct)|is (underway|ongoing|planned)|protocol|registry study|manuscript|abstract)\b/i;
-const VAGUE = /^(more data|further research|additional evidence)/i;
-
-function heuristicCritique(args: {
-  candidate: GapCandidate;
-  liveStatements: string[];
-  siblings: GapCandidate[];
-}): { score: number; note: string; issues: string[] } {
-  const { candidate } = args;
-  let score = 62;
-  const notes: string[] = [];
-  const issues: string[] = [];
-  const words = candidate.statement.split(/\s+/).length;
-  if (words < 6) {
-    score -= 25;
-    notes.push("statement too short to be actionable");
-    issues.push("too_short");
-  }
-  if (words > 60) {
-    score -= 10;
-    notes.push("statement bundles several questions");
-    issues.push("too_long");
-  }
-  if (TACTIC_SHAPED.test(candidate.statement)) {
-    score -= 30;
-    notes.push("reads as a tactic already in flight, not a gap");
-    issues.push("tactic_shaped");
-  }
-  if (VAGUE.test(candidate.statement)) {
-    score -= 20;
-    notes.push("too vague to decide against");
-    issues.push("vague");
-  }
-  if (candidate.domain === "unmet_need") {
-    score -= 5;
-    notes.push("domain not specific");
-    issues.push("domain_generic");
-  } else {
-    score += 8;
-  }
-  if (!candidate.source_quote.trim()) {
-    score -= 15;
-    notes.push("no source quote");
-    issues.push("no_quote");
-  }
-  if (args.liveStatements.some((statement) => similarRecord(statement, candidate.statement))) {
-    score -= 18;
-    notes.push("duplicates a gap already in the plan");
-    issues.push("duplicate_of_plan");
-  }
-  const duplicateSibling = args.siblings.find(
-    (sibling) => sibling.id !== candidate.id && similarRecord(sibling.statement, candidate.statement, 0.72),
-  );
-  if (duplicateSibling) {
-    score -= 12;
-    notes.push(`overlaps candidate ${duplicateSibling.id}`);
-    issues.push("overlaps_sibling");
-  }
-  return {
-    score: Math.max(0, Math.min(100, score)),
-    note: notes.length ? notes.join("; ") : "atomic, decision-relevant, traceable to a quote",
-    issues,
-  };
-}
+type RevisionItem = {
+  candidate: Pick<GapCandidate, "id"> & Partial<Omit<GapCandidate, "id">>;
+  /** The critic's objection this revision answers. */
+  objection?: string;
+  /** What made the candidate incomplete or invalid. */
+  problems?: string[];
+};
 
 /**
- * The proposer answering the critic without a model: concede the drops, repair
- * what is repairable, and leave the rest for the next exchange.
+ * The proposer model answers each item: a complete, valid revision or a
+ * withdrawal with a reason. An item it never answers fails the run.
  */
-function reviseGapCandidates(args: {
-  previous: GapCandidate[];
-  critiques: Critique[];
-}): GapCandidate[] {
-  const out: GapCandidate[] = [];
-  for (const candidate of args.previous) {
-    const critique = args.critiques.find((item) => item.subject === candidate.id);
-    if (critique?.verdict === "drop") continue;
-    if (hasIssue(critique, "no_quote") || hasIssue(critique, "duplicate_of_plan")) continue;
-    if (hasIssue(critique, "overlaps_sibling") && out.some((kept) => similarRecord(kept.statement, candidate.statement, 0.72))) {
-      continue;
-    }
-    let statement = candidate.statement;
-    if (hasIssue(critique, "too_long")) {
-      // Split the bundle: keep the first question, which is the atomic one.
-      statement = statement.split(/(?<=[.?!])\s+/)[0]!.trim() || statement;
-    }
-    const domain = hasIssue(critique, "domain_generic")
-      ? asDomain(guessDomain(`${candidate.name} ${statement}`), statement)
-      : candidate.domain;
-    out.push({
-      ...candidate,
-      statement,
-      domain,
-      name: statement === candidate.statement ? candidate.name : gapNameFromStatement(statement),
-    });
-  }
-  return out;
+async function reviseWithModel(
+  ctx: ModuleContext,
+  args: { document: ParsedDocumentRecord; hints: string; exchange: string; items: RevisionItem[] },
+): Promise<Map<string, GapCandidate | null>> {
+  const byId = new Map(args.items.map((item) => [item.candidate.id, item]));
+  const lastProblems = new Map<string, string[]>();
+  const answers = await completeAll<GapCandidate | null>({
+    ids: args.items.map((item) => item.candidate.id),
+    what: "gap revision",
+    remedy: REMEDY,
+    ask: async (missing, attempt) => {
+      const payload = (await ctx.complete({
+        system: augmentSystemPrompt(GAP_REVISER_SYSTEM),
+        user: JSON.stringify({
+          source_document: titleOf(args.document),
+          exchange: args.exchange,
+          reviewer_corrections: args.hints || undefined,
+          note:
+            attempt > 1
+              ? "An earlier answer left these candidates unanswered, incomplete or invalid. Revise each completely or withdraw it with a reason."
+              : undefined,
+          candidates: missing.map((id) => {
+            const item = byId.get(id)!;
+            return {
+              id,
+              name: item.candidate.name,
+              statement: item.candidate.statement,
+              domain: item.candidate.domain,
+              source_quote: item.candidate.source_quote,
+              objection: item.objection,
+              problems: lastProblems.get(id) ?? item.problems,
+            };
+          }),
+          document: documentBody(args.document.blocks),
+        }),
+        purpose: `gap-reviser:${args.document.id}`,
+      })) as { gaps?: RawGap[] } | null;
+      const map = new Map<string, GapCandidate | null>();
+      for (const row of payload?.gaps ?? []) {
+        const id = text(row.id);
+        if (!missing.includes(id) || map.has(id)) continue;
+        if (row.withdraw === true) {
+          const reason = text(row.reason);
+          if (reason) {
+            ctx.run.note("proposer:withdrew", { id, reason });
+            map.set(id, null);
+          } else {
+            lastProblems.set(id, ["a withdrawal needs a reason"]);
+          }
+          continue;
+        }
+        const problems = gapProblems(row);
+        if (problems.length > 0) {
+          lastProblems.set(id, problems);
+          continue;
+        }
+        map.set(id, toCandidate(id, args.document, row));
+      }
+      return map;
+    },
+  });
+  return answers;
 }
 
-async function llmCritique(
+/** First proposal for one document; incomplete rows go back to the model. */
+async function proposeFromDocument(
   ctx: ModuleContext,
-  candidates: GapCandidate[],
-): Promise<Map<string, { score: number; note: string; verdict: Critique["verdict"] }>> {
+  document: ParsedDocumentRecord,
+  hints: string,
+): Promise<GapCandidate[]> {
   const payload = (await ctx.complete({
-    system: GAP_CRITIC_SYSTEM,
-    user: JSON.stringify(
-      candidates.map((candidate) => ({
-        subject: candidate.id,
-        statement: candidate.statement,
-        domain: candidate.domain,
-        source_quote: candidate.source_quote,
-      })),
-    ),
-    purpose: "gap-critic",
-  })) as {
-    critiques?: { subject?: string; verdict?: string; score?: number; note?: string }[];
-  };
-  const map = new Map<string, { score: number; note: string; verdict: Critique["verdict"] }>();
-  for (const critique of payload.critiques ?? []) {
-    if (!critique.subject) continue;
-    const verdict: Critique["verdict"] =
-      critique.verdict === "drop" ? "drop" : critique.verdict === "revise" ? "revise" : "keep";
-    map.set(critique.subject, {
-      score: Math.max(0, Math.min(100, Math.round(critique.score ?? 50))),
-      note: (critique.note ?? "").trim() || "no note",
-      verdict,
-    });
-  }
-  return map;
+    system: augmentSystemPrompt(GAP_PROPOSER_SYSTEM),
+    user: gapProposerUser({ title: titleOf(document), blocks: document.blocks, hints }),
+    purpose: `gap-proposer:${document.id}`,
+  })) as { gaps?: RawGap[] } | null;
+  const drafts = (payload?.gaps ?? [])
+    .filter((gap) => gap && typeof gap === "object")
+    .filter((gap) => [gap.name, gap.statement, gap.domain, gap.source_quote].some((field) => text(field)))
+    .map((gap, index) => ({ id: `${document.id}-L${String(index + 1).padStart(3, "0")}`, raw: gap }));
+  const incomplete = drafts
+    .map((draft) => ({ ...draft, problems: gapProblems(draft.raw) }))
+    .filter((draft) => draft.problems.length > 0);
+  const repaired =
+    incomplete.length === 0
+      ? new Map<string, GapCandidate | null>()
+      : await reviseWithModel(ctx, {
+          document,
+          hints,
+          exchange: "initial proposal",
+          items: incomplete.map((draft) => ({
+            candidate: {
+              id: draft.id,
+              name: text(draft.raw.name),
+              statement: text(draft.raw.statement),
+              domain: text(draft.raw.domain) as EvidenceDomain,
+              source_quote: text(draft.raw.source_quote),
+            },
+            problems: draft.problems,
+          })),
+        });
+  return drafts.flatMap((draft) => {
+    if (!repaired.has(draft.id)) return [toCandidate(draft.id, document, draft.raw)];
+    const fixed = repaired.get(draft.id);
+    return fixed ? [fixed] : [];
+  });
+}
+
+type Review = { verdict: Critique["verdict"]; confidence: number; note: string; issues?: string[] };
+
+async function reviewWithModel(
+  ctx: ModuleContext,
+  args: {
+    candidates: GapCandidate[];
+    documents: Map<string, ParsedDocumentRecord>;
+    planGaps: PlanGap[];
+    hints: string;
+    round: number;
+  },
+): Promise<Map<string, Review>> {
+  const byId = new Map(args.candidates.map((candidate) => [candidate.id, candidate]));
+  return completeAll<Review>({
+    ids: args.candidates.map((candidate) => candidate.id),
+    what: "review",
+    describe: (id) => byId.get(id)?.name || id,
+    remedy: REMEDY,
+    ask: async (missing, attempt) => {
+      const payload = (await ctx.complete({
+        system: GAP_CRITIC_SYSTEM,
+        user: JSON.stringify({
+          exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
+          reviewer_corrections: args.hints || undefined,
+          note: attempt > 1 ? "An earlier answer left these candidates unreviewed. Review each." : undefined,
+          plan_gaps: args.planGaps,
+          candidates: missing.map((id) => {
+            const candidate = byId.get(id)!;
+            const document = args.documents.get(candidate.document_id);
+            return {
+              subject: id,
+              source_document: document ? titleOf(document) : candidate.source_id,
+              name: candidate.name,
+              statement: candidate.statement,
+              domain: candidate.domain,
+              source_quote: candidate.source_quote,
+            };
+          }),
+        }),
+        purpose: "gap-critic",
+      })) as {
+        critiques?: { subject?: unknown; verdict?: unknown; confidence?: unknown; note?: unknown; issues?: unknown }[];
+      } | null;
+      const map = new Map<string, Review>();
+      for (const row of payload?.critiques ?? []) {
+        const subject = text(row.subject);
+        if (!missing.includes(subject)) continue;
+        if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") continue;
+        if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) continue;
+        const note = text(row.note);
+        if (!note) continue;
+        const issues = Array.isArray(row.issues)
+          ? row.issues.filter((issue): issue is string => typeof issue === "string" && issue.trim().length > 0)
+          : undefined;
+        map.set(subject, {
+          verdict: row.verdict,
+          confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
+          note,
+          issues: issues?.length ? issues : undefined,
+        });
+      }
+      return map;
+    },
+  });
+}
+
+async function judgeWithModel(
+  ctx: ModuleContext,
+  args: { candidates: GapCandidate[]; critiques: Critique[]; planGaps: PlanGap[]; hints: string },
+): Promise<Map<string, JudgeDecision>> {
+  const byId = new Map(args.candidates.map((candidate) => [candidate.id, candidate]));
+  const planIds = new Set(args.planGaps.map((gap) => gap.id));
+  const lastProblems = new Map<string, string[]>();
+  return completeAll<JudgeDecision>({
+    ids: args.candidates.map((candidate) => candidate.id),
+    what: "judge decision",
+    describe: (id) => byId.get(id)?.name || id,
+    remedy: REMEDY,
+    ask: async (missing, attempt) => {
+      const payload = (await ctx.complete({
+        system: GAP_JUDGE_SYSTEM,
+        user: JSON.stringify({
+          reviewer_corrections: args.hints || undefined,
+          note:
+            attempt > 1
+              ? "An earlier answer left these candidates undecided or its decision was invalid. Decide each."
+              : undefined,
+          plan_gaps: args.planGaps,
+          // Every candidate is listed so a sibling duplicate can name the one it matches.
+          candidates: args.candidates.map((candidate) => {
+            const critique = args.critiques.find((item) => item.subject === candidate.id);
+            return {
+              subject: candidate.id,
+              decide: missing.includes(candidate.id),
+              name: candidate.name,
+              statement: candidate.statement,
+              domain: candidate.domain,
+              source_quote: candidate.source_quote,
+              critic: critique
+                ? { verdict: critique.verdict, confidence: critique.score, note: critique.note }
+                : undefined,
+              problems: lastProblems.get(candidate.id),
+            };
+          }),
+        }),
+        purpose: "gap-judge",
+      })) as {
+        decisions?: {
+          subject?: unknown;
+          verdict?: unknown;
+          confidence?: unknown;
+          reason?: unknown;
+          duplicate_of?: unknown;
+          same_as_candidate?: unknown;
+        }[];
+      } | null;
+      const map = new Map<string, JudgeDecision>();
+      for (const row of payload?.decisions ?? []) {
+        const subject = text(row.subject);
+        if (!missing.includes(subject) || map.has(subject)) continue;
+        const problems: string[] = [];
+        const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
+        if (!verdict) problems.push('verdict must be "accept" or "reject"');
+        const confidence =
+          typeof row.confidence === "number" && Number.isFinite(row.confidence)
+            ? Math.max(0, Math.min(100, Math.round(row.confidence)))
+            : null;
+        if (confidence === null) problems.push("confidence must be a number from 0 to 100");
+        const reason = text(row.reason);
+        if (!reason) problems.push("reason is missing");
+        const duplicateOf = text(row.duplicate_of) || null;
+        if (duplicateOf && !planIds.has(duplicateOf)) {
+          problems.push(`duplicate_of "${duplicateOf}" is not a plan gap id`);
+        }
+        const sameAs = text(row.same_as_candidate) || null;
+        if (sameAs && (sameAs === subject || !byId.has(sameAs))) {
+          problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
+        }
+        if (sameAs && verdict === "accept") {
+          problems.push("a candidate that repeats another candidate must be rejected");
+        }
+        if (problems.length > 0) {
+          lastProblems.set(subject, problems);
+          continue;
+        }
+        map.set(subject, {
+          verdict: verdict!,
+          confidence: confidence!,
+          reason,
+          duplicate_of: duplicateOf,
+          same_as_candidate: sameAs,
+        });
+      }
+      return map;
+    },
+  });
 }
 
 export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> = {
@@ -274,83 +440,152 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     version: "1.0.0",
     title: "Gap extraction (proposer → critic → judge)",
     summary:
-      "Proposes evidence gaps per parsed document, critiques them for atomicity and decision relevance, judges what commits.",
+      "A model proposes evidence gaps per parsed document, a model critic challenges them over three exchanges, and a model judge decides what commits and which plan gaps they duplicate. Needs a connected LLM.",
     contract: 1,
     agentic: true,
-    capabilities: ["llm-proposer", "local-proposer", "hillclimb-hints"],
+    capabilities: ["llm-proposer", "llm-critic", "llm-judge", "hillclimb-hints"],
   },
   inputSchema,
   outputSchema,
   migrations: [GAP_CANDIDATES_DDL],
   async run(input, ctx) {
+    requireLlm(ctx, "Gap extraction");
     const documents = await listParsedDocuments(input.document_ids);
     if (documents.length === 0) {
       return {
         output: {
-          mode: "deterministic",
+          mode: isTestStub() ? "deterministic" : "llm",
           proposed: 0,
           accepted: [],
           rejected: [],
           committed_gap_ids: [],
           committed_need_ids: [],
         },
-        summary: "No parsed documents to extract from",
+        summary: "No parsed documents to extract from; no model was called",
       };
     }
     const state = await loadState();
-    const liveStatements = state.gaps.filter(isLiveGap).flatMap((gap) => [gap.statement, gap.name]);
+    const planGaps: PlanGap[] = state.gaps
+      .filter(isLiveGap)
+      .map((gap) => ({ id: gap.id, name: gap.name, statement: gap.statement }));
+    const documentById = new Map(documents.map((document) => [document.id, document]));
+    // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
+    let reviewerHints = "";
+    // The model judge runs as soon as the proposer's last revision is in; the
+    // kernel's synchronous judge step then reports its decisions.
+    let decisions: Map<string, JudgeDecision> | null = null;
 
     const outcome = await runAgenticCycle<GapCandidate>(ctx, "S2", {
       subjectOf: (candidate) => candidate.id,
       proposer: {
-        local: ({ round, previous, critiques }) =>
-          round === 1 ? localProposals(documents) : reviseGapCandidates({ previous, critiques }),
-        llm: canPrompt(ctx.route)
-          ? ({ hints, round, critiques }) =>
-              llmProposals(
-                ctx,
-                documents,
-                round === 1 ? hints : [hints, revisionBrief({ round, critiques })].filter(Boolean).join("\n\n"),
-              )
-          : undefined,
-      },
-      critic: async (candidates) => {
-        const llm = canPrompt(ctx.route)
-          ? await llmCritique(ctx, candidates).catch((error) => {
-              ctx.run.note("critic:llm_failed", {
-                error: error instanceof Error ? error.message : String(error),
+        local: ({ round, previous }) => {
+          if (!isTestStub()) throw new NoRouteError("Gap extraction has no rule-based fallback.");
+          return round === 1 ? stubProposals(documents) : previous;
+        },
+        llm: async ({ hints, round, critiques, previous }) => {
+          reviewerHints = hints;
+          let candidates: GapCandidate[];
+          if (round === 1) {
+            candidates = [];
+            for (const document of documents) {
+              candidates.push(...(await proposeFromDocument(ctx, document, hints)));
+            }
+          } else {
+            // Revisions answer only what the critic objected to.
+            const objections = new Map(
+              critiques
+                .filter((critique) => critique.verdict !== "keep")
+                .map((critique) => [critique.subject, `${critique.verdict}: ${critique.note}`]),
+            );
+            const revised = new Map<string, GapCandidate | null>();
+            for (const document of documents) {
+              const items = previous
+                .filter((candidate) => candidate.document_id === document.id && objections.has(candidate.id))
+                .map((candidate) => ({ candidate, objection: objections.get(candidate.id) }));
+              if (items.length === 0) continue;
+              const answers = await reviseWithModel(ctx, {
+                document,
+                hints,
+                exchange: `revision after critique ${round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
+                items,
               });
-              return new Map<string, { score: number; note: string; verdict: Critique["verdict"] }>();
-            })
-          : new Map<string, { score: number; note: string; verdict: Critique["verdict"] }>();
+              for (const [id, answer] of answers) revised.set(id, answer);
+            }
+            candidates = previous.flatMap((candidate) => {
+              if (!revised.has(candidate.id)) return [candidate];
+              const answer = revised.get(candidate.id);
+              return answer ? [answer] : [];
+            });
+          }
+          if (round === PROPOSER_CRITIC_EXCHANGES + 1) {
+            decisions =
+              candidates.length === 0
+                ? new Map()
+                : await ctx.run.step(
+                    "judge:model",
+                    () => judgeWithModel(ctx, { candidates, critiques, planGaps, hints }),
+                    `${candidates.length} candidate(s) for the model judge`,
+                  );
+          }
+          return candidates;
+        },
+      },
+      critic: async (candidates, round) => {
+        if (isTestStub()) {
+          return candidates.map((candidate) => ({
+            subject: candidate.id,
+            verdict: "keep" as const,
+            note: "Test stub: no model critic was called.",
+            score: 50,
+          }));
+        }
+        if (candidates.length === 0) return [];
+        const reviews = await reviewWithModel(ctx, {
+          candidates,
+          documents: documentById,
+          planGaps,
+          hints: reviewerHints,
+          round,
+        });
         return candidates.map((candidate) => {
-          const local = heuristicCritique({ candidate, liveStatements, siblings: candidates });
-          const remote = llm.get(candidate.id);
-          const score = remote ? Math.round((local.score + remote.score) / 2) : local.score;
-          const note = remote ? `${remote.note} | local: ${local.note}` : local.note;
-          const verdict: Critique["verdict"] =
-            remote?.verdict === "drop" || score < 35 ? "drop" : score >= 60 ? "keep" : "revise";
-          return { subject: candidate.id, verdict, note, score, issues: local.issues };
+          const review = reviews.get(candidate.id)!;
+          return {
+            subject: candidate.id,
+            verdict: review.verdict,
+            note: review.note,
+            score: review.confidence,
+            issues: review.issues,
+          };
         });
       },
-      judge: ({ candidates, critiques }) => {
-        const kept: GapCandidate[] = [];
-        return candidates.map((candidate) => {
-          const critique = critiques.find((item) => item.subject === candidate.id);
-          const score = critique?.score ?? 50;
-          const duplicateOfKept = kept.some((other) =>
-            similarRecord(other.statement, candidate.statement, 0.72),
-          );
-          const accept = critique?.verdict !== "drop" && score >= 45 && !duplicateOfKept;
-          if (accept) kept.push(candidate);
-          return {
+      judge: ({ candidates, critiques }): JudgedCandidate<GapCandidate>[] => {
+        if (isTestStub()) {
+          return candidates.map((candidate) => ({
             candidate,
             subject: candidate.id,
-            verdict: accept ? ("accept" as const) : ("reject" as const),
-            score,
-            note: duplicateOfKept
-              ? "Rejected: duplicate of a gap already accepted in this run."
-              : (critique?.note ?? "no critique"),
+            verdict: "accept" as const,
+            score: critiques.find((item) => item.subject === candidate.id)?.score ?? 50,
+            note: "Test stub: no model judge was called.",
+          }));
+        }
+        const decided = decisions;
+        if (!decided) throw new Error("The model judge did not run. Nothing was saved; " + REMEDY);
+        return candidates.map((candidate) => {
+          const decision = decided.get(candidate.id);
+          if (!decision) {
+            throw new Error(`The model judge did not decide ${candidate.name || candidate.id}. Nothing was saved; ${REMEDY}`);
+          }
+          const note = decision.same_as_candidate
+            ? `${decision.reason} (same as candidate ${decision.same_as_candidate})`
+            : decision.duplicate_of
+              ? `${decision.reason} (same as plan gap ${decision.duplicate_of})`
+              : decision.reason;
+          return {
+            candidate: { ...candidate, duplicate_of: decision.duplicate_of },
+            subject: candidate.id,
+            verdict: decision.verdict,
+            score: decision.confidence,
+            note,
           };
         });
       },
@@ -402,6 +637,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               domain: candidate.domain,
               source_id: candidate.source_id,
               source_quote: candidate.source_quote,
+              // The model judge's call; commit merges only when it is set.
+              duplicate_of: candidate.duplicate_of,
             })),
             tactics: [],
             apply_mappings: false,
@@ -423,6 +660,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       score: item.score,
       verdict: item.verdict,
       critic_note: item.note,
+      duplicate_of: item.candidate.duplicate_of,
     });
 
     return {
