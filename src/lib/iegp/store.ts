@@ -8,7 +8,6 @@ import type { PlanningContext } from "./planning-context";
 import { parsePlanningContext } from "./planning-context";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
-import { requireRationale } from "@/modules/kernel/edit-records";
 import type {
   ActorFunction,
   CatchUpReason,

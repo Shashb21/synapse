@@ -718,11 +718,6 @@ export async function POST(request: Request) {
   }
 }
 
-/** The reason a person typed, from whichever field the form used. */
-function rationaleOf(body: Record<string, string>): string {
-  return (body.rationale || body.note || "").trim();
-}
-
 /** Tactic fields present in the body; a field absent from the form is left unchanged. */
 function tacticFieldsOf(body: Record<string, string>) {
   const fields: Partial<Record<(typeof TACTIC_EDIT_FIELDS)[number], string>> = {};
