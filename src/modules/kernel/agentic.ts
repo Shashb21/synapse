@@ -238,24 +238,6 @@ export async function runAgenticCycle<C>(
   };
 }
 
-/** Critic default: scores every candidate with a stage-supplied scorer. */
-export function scoreCritic<C>(
-  subjectOf: (candidate: C) => string,
-  score: (candidate: C, round: number) => { score: number; note: string; issues?: string[] },
-) {
-  return (candidates: C[], round: number): Critique[] =>
-    candidates.map((candidate) => {
-      const { score: value, note, issues } = score(candidate, round);
-      return {
-        subject: subjectOf(candidate),
-        verdict: value >= 60 ? "keep" : value >= 35 ? "revise" : "drop",
-        note,
-        score: value,
-        issues,
-      };
-    });
-}
-
 /**
  * Reviser default: the proposer concedes every drop and keeps the rest. Stages
  * that can actually repair a candidate pass their own reviser instead.
@@ -266,24 +248,6 @@ export function concedeDrops<C>(subjectOf: (candidate: C) => string) {
       (candidate) =>
         critiques.find((critique) => critique.subject === subjectOf(candidate))?.verdict !== "drop",
     );
-}
-
-/** Judge default: accept anything the critic did not drop and that clears the floor. */
-export function thresholdJudge<C>(subjectOf: (candidate: C) => string, floor = 40) {
-  return ({ candidates, critiques }: { candidates: C[]; critiques: Critique[] }): JudgedCandidate<C>[] =>
-    candidates.map((candidate) => {
-      const subject = subjectOf(candidate);
-      const critique = critiques.find((item) => item.subject === subject);
-      const score = critique?.score ?? 50;
-      const accept = critique?.verdict !== "drop" && score >= floor;
-      return {
-        candidate,
-        subject,
-        verdict: accept ? "accept" : "reject",
-        score,
-        note: critique?.note ?? "No critique recorded; judged on default confidence.",
-      };
-    });
 }
 
 /** True when a critique flagged this defect. */

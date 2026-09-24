@@ -14,7 +14,8 @@ import {
   PROPOSER_CRITIC_EXCHANGES,
   hasIssue,
   runAgenticCycle,
-  thresholdJudge,
+  type Critique,
+  type JudgedCandidate,
 } from "@/modules/kernel/agentic";
 import { RunRecorder } from "@/modules/kernel/observability";
 import { canPrompt, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID, resolveRoute } from "@/modules/kernel/routing";
@@ -36,6 +37,24 @@ import { DEFAULT_AXES, parseAxesConfig, validateAxes } from "@/modules/stages/s8
 import { addMonths, buildTimeline, monthsBetween, timelineCandidates } from "@/modules/stages/s10-timeline/build";
 import { buildSeed } from "@/lib/iegp/seed";
 import { displayedGapStatus } from "@/lib/iegp/engine";
+
+
+/** Test-only judge for exercising the kernel loop: accepts what the critic kept above a floor. */
+function testJudge<C>(subjectOf: (candidate: C) => string, floor = 40) {
+  return ({ candidates, critiques }: { candidates: C[]; critiques: Critique[] }): JudgedCandidate<C>[] =>
+    candidates.map((candidate) => {
+      const subject = subjectOf(candidate);
+      const critique = critiques.find((item) => item.subject === subject);
+      const score = critique?.score ?? 50;
+      return {
+        candidate,
+        subject,
+        verdict: critique?.verdict !== "drop" && score >= floor ? ("accept" as const) : ("reject" as const),
+        score,
+        note: critique?.note ?? "no critique",
+      };
+    });
+}
 
 describe("module contracts", () => {
   it("registers exactly one implementation per stage, all on the kernel contract", () => {
@@ -164,7 +183,7 @@ describe("the locked agentic loop", () => {
           return { subject: candidate.id, verdict: "keep" as const, note: "fine", score: 80 };
         });
       },
-      judge: thresholdJudge<Candidate>((candidate) => candidate.id, 50),
+      judge: testJudge<Candidate>((candidate) => candidate.id, 50),
     });
 
     expect(criticRounds).toEqual([1, 2, 3]);
@@ -229,7 +248,7 @@ describe("the locked agentic loop", () => {
           note: "no",
           score: 5,
         })),
-      judge: thresholdJudge<Candidate>((candidate) => candidate.id),
+      judge: testJudge<Candidate>((candidate) => candidate.id),
     });
     expect(outcome.rounds).toHaveLength(PROPOSER_CRITIC_EXCHANGES);
     expect(outcome.judged).toHaveLength(0);
