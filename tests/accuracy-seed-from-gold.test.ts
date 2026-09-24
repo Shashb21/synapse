@@ -4,7 +4,7 @@ import { listClaims } from "@/accuracy/store/claim-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 
 describe("seed workspace from gold", () => {
-  it("creates workspace with BGB gold gaps and tactics and parses pptx locally", async () => {
+  it("creates workspace with BGB gold gaps and tactics and parses the pptx on the parse route", async () => {
     const result = await seedWorkspaceFromGold({
       packId: "beone-bgb-58067-prmt5i",
       workspaceName: "Seed test BGB",

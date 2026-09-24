@@ -12,6 +12,8 @@ import {
   splitSourceIntoBlocks,
 } from "@/lib/iegp/engine";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
+import { parseWithLlm } from "@/lib/ingest/llm-structure";
+import { isTestStub, requireLlm } from "@/modules/kernel/llm";
 import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
 import {
   listSourceFiles,
@@ -59,7 +61,7 @@ const outputSchema = z.object({
 export type ParseInput = z.infer<typeof inputSchema>;
 export type ParseOutput = z.infer<typeof outputSchema>;
 
-const PARSER_VERSION = "1.0.0";
+const PARSER_VERSION = "2.0.0";
 
 function qualityOf(blocks: ParsedDocumentBlock[]): ParseQuality {
   const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
@@ -82,20 +84,21 @@ function qualityOf(blocks: ParsedDocumentBlock[]): ParseQuality {
 
 export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   manifest: {
-    id: "s1-parse.local",
+    id: "s1-parse.llm",
     stage: "S1",
-    version: "1.0.0",
-    title: "Local document parser",
+    version: "2.0.0",
+    title: "LLM document parser",
     summary:
-      "Parses text, DOCX, PPTX and XLSX into headed blocks, writes the domain source, and scores parse quality.",
+      "Extracts the text of PDF, PPTX, DOCX, XLSX and text files, then the chosen LLM decides the blocks, their kinds and headings. LlamaParse is disabled.",
     contract: 1,
-    agentic: false,
-    capabilities: ["text", "docx", "pptx", "xlsx"],
+    agentic: true,
+    capabilities: ["pdf", "text", "docx", "pptx", "xlsx", "llm-structure"],
   },
   inputSchema,
   outputSchema,
   migrations: [PARSED_DOCUMENTS_DDL],
   async run(input, ctx) {
+    requireLlm(ctx, "Parsing");
     const ids = input.file_ids?.length
       ? input.file_ids
       : input.dry_run
@@ -113,38 +116,58 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
       const began = Date.now();
       try {
         const { record, buffer } = loaded;
-        const text = await ctx.run.step(
-          `extract-text:${file_id}`,
+        // The model decides the structure; only the test stub splits text by rule.
+        const parsed = await ctx.run.step(
+          `parse:${file_id}`,
           async () => {
-            if (record.mime.startsWith("text/") || record.filename.endsWith(".txt")) {
-              return buffer.toString("utf8");
+            if (isTestStub()) {
+              const text =
+                record.mime.startsWith("text/") || record.filename.endsWith(".txt")
+                  ? buffer.toString("utf8")
+                  : (await parseLocalDocument({ filename: record.filename, buffer, mime: record.mime })).blocks
+                      .map((block) => block.text)
+                      .join("\n\n");
+              return { text, sections: undefined, parser: "local" as const };
             }
-            const parsed = await parseLocalDocument({
+            const { document, dropped } = await parseWithLlm({
               filename: record.filename,
               buffer,
               mime: record.mime,
+              ask: ctx.complete,
             });
-            return parsed.blocks.map((block) => block.text).join("\n\n");
+            if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
+            return {
+              text: document.blocks.map((block) => block.text).join("\n\n"),
+              sections: document.blocks.map((block) => ({
+                heading: block.heading ?? block.location.ref,
+                text: block.text,
+                location: block.location.ref,
+              })),
+              parser: "llm" as const,
+            };
           },
           record.mime,
         );
+        const sectionsFor = () =>
+          parsed.sections ??
+          splitSourceIntoBlocks(parsed.text, record.title).map((section) => ({ ...section, location: section.heading }));
         if (input.dry_run) {
           // Score the parse without touching the domain store.
-          const sections = splitSourceIntoBlocks(text, record.title);
+          const sections = sectionsFor();
           const quality = qualityOf(
             sections.map((section, index) => ({
               id: `dry-${index}`,
               source_id: "dry-run",
               heading: section.heading,
               text: section.text,
-              location: section.heading,
+              location: section.location,
             })),
           );
           documents.push({
             id: `dry-${file_id}`,
             file_id,
             source_id: "dry-run",
-            parser: "local",
+            parser: parsed.parser,
             blocks: sections.length,
             quality,
           });
@@ -155,8 +178,9 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           title: record.title,
           source_type: record.source_type as SourceType,
           stakeholder_function: record.stakeholder_function as ActorFunction,
-          text,
+          text: parsed.text,
           filename: record.filename,
+          sections: parsed.sections,
         });
         const quality = qualityOf(blocks);
         const id = newId("DOC");
@@ -164,7 +188,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           id,
           file_id,
           source_id,
-          parser: "local",
+          parser: parsed.parser,
           parser_version: PARSER_VERSION,
           blocks,
           quality,
@@ -172,7 +196,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           duration_ms: Date.now() - began,
         });
         await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
-        documents.push({ id, file_id, source_id, parser: "local", blocks: blocks.length, quality });
+        documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
         ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

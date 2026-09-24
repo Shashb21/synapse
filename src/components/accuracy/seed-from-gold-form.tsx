@@ -49,8 +49,8 @@ export function SeedFromGoldForm() {
     <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card/40 p-3">
       <h3 className="text-[13px] font-medium text-foreground">Seed from BeOne reference gold</h3>
       <p className="text-[12px] text-muted-foreground">
-        Creates a workspace, loads gold gap/tactic statements, and locally parses the PPTX when
-        present (no LlamaParse key required for PPTX).
+        Creates a workspace, loads gold gap/tactic statements, and has the parse route&apos;s LLM
+        parse the reference source when present.
       </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Reference pack</span>

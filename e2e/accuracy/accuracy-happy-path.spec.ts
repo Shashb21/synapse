@@ -8,7 +8,7 @@ import {
 /**
  * Coherent accuracy happy path beyond shell smoke:
  * seed (gold + local PPTX) → Sources → Ledger → Coverage → Plan.
- * No LlamaParse / live LLM — Playwright sets SYNAPSE_TEST_STUB_LLM=1.
+ * No live LLM — Playwright sets SYNAPSE_TEST_STUB_LLM=1.
  */
 
 test.describe.configure({ mode: "serial" });

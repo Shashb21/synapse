@@ -1,6 +1,6 @@
 import { expect, type APIRequestContext } from "@playwright/test";
 
-/** BGB pack: local PPTX parse, no LlamaParse / live LLM required. */
+/** BGB pack: parsed on the parse route (test stub in Playwright). */
 export const HAPPY_PATH_PACK_ID = "beone-bgb-58067-prmt5i";
 
 export type SeedFromGoldResult = {

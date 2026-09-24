@@ -8,7 +8,6 @@ import { toParseBlockPreviews } from "@/accuracy/store/parse-preview";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
-import { hasLlamaCloudKey } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -50,15 +49,13 @@ export default async function AccuracySourcesPage({
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
-  const llamaCloudConfigured = hasLlamaCloudKey();
   const extractGate = await inspectLiveExtractGate();
 
   return (
     <AccuracyAppShell active="sources">
       <PageIntro kicker="Ingest · parse · extract" title="Sources">
-        PDF and PPTX parse through LlamaParse and need <code>LLAMA_CLOUD_API_KEY</code>{" "}
-        in the server environment (uploads are gated without it; never paste the key
-        here). DOCX/XLSX/text stay local. After parse, preview verbatim parse blocks
+        Every file is parsed by the chosen LLM: its text is extracted, then the model decides the
+        blocks, their kinds and headings. After parse, preview verbatim parse blocks
         (quotes must be substrings of this text), then run need + inventory extract
         to populate the ledger. Live extract uses a connected OAuth LLM from the{" "}
         <Link href="/control" className="underline-offset-2 hover:underline">
@@ -87,10 +84,7 @@ export default async function AccuracySourcesPage({
             Workspace · <span className="text-foreground">{active?.name ?? workspaceId}</span>
           </p>
           <ExtractOauthGateBanner gate={extractGate} />
-          <SourceUploadForm
-            workspaceId={workspaceId}
-            llamaCloudConfigured={llamaCloudConfigured}
-          />
+          <SourceUploadForm workspaceId={workspaceId} />
           {sources.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No sources yet. Upload above or seed from gold on the Workspaces page.

@@ -4,10 +4,10 @@ import { registerAccuracyStack } from "@/accuracy";
 import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
-import { LLAMA_PARSE_KEY_CODE, LLAMA_PARSE_KEY_REQUIRED } from "@/lib/ingest/llama-gate";
 
 const mockIngestBuffer = vi.fn();
 const mockParseLocal = vi.fn();
+const mockExtractUnits = vi.fn();
 
 vi.mock("@/lib/ingest/llamaparse", () => ({
   ingestBuffer: (...args: unknown[]) => mockIngestBuffer(...args),
@@ -19,6 +19,11 @@ vi.mock("@/lib/ingest/local-parse", async (importOriginal) => {
     ...actual,
     parseLocalDocument: (...args: unknown[]) => mockParseLocal(...args),
   };
+});
+
+vi.mock("@/lib/ingest/llm-structure", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ingest/llm-structure")>();
+  return { ...actual, extractRawUnits: (...args: unknown[]) => mockExtractUnits(...args) };
 });
 
 async function freshWorkspace(label: string) {
@@ -36,6 +41,7 @@ describe("accuracy source upload API", () => {
   beforeEach(() => {
     mockIngestBuffer.mockReset();
     mockParseLocal.mockReset();
+    mockExtractUnits.mockReset();
   });
 
   it("rejects missing workspace and file", async () => {
@@ -117,10 +123,14 @@ describe("accuracy source upload API", () => {
     expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(1);
   });
 
-  it("gates PDF upload when LLAMA_CLOUD_API_KEY is missing", async () => {
+  it("accepts a PDF with no LlamaParse key and parses it on the parse route", async () => {
     vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
-    const { workspace_id } = await freshWorkspace("pdf-gate");
-    const before = await listSourceFiles(workspace_id);
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("pdf-llm");
+    mockExtractUnits.mockResolvedValue([
+      { location: { kind: "page", ref: "p.1" }, text: "Chart OS Kaplan-Meier" },
+      { location: { kind: "page", ref: "p.2" }, text: "No real-world OS data in elderly patients." },
+    ]);
 
     const form = new FormData();
     form.set("workspace_id", workspace_id);
@@ -130,20 +140,31 @@ describe("accuracy source upload API", () => {
     const res = await uploadPost(
       new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
     );
-    const body = (await res.json()) as { ok: boolean; error?: string; code?: string };
-    expect(res.status).toBe(400);
-    expect(body.ok).toBe(false);
-    expect(body.code).toBe(LLAMA_PARSE_KEY_CODE);
-    expect(body.error).toBe(LLAMA_PARSE_KEY_REQUIRED);
+    const body = (await res.json()) as { ok: boolean; block_count: number; parse_error: string | null; source_file_id: string };
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.parse_error).toBeNull();
+    expect(body.block_count).toBe(2);
     expect(mockIngestBuffer).not.toHaveBeenCalled();
-    expect(mockParseLocal).not.toHaveBeenCalled();
-    expect(await listSourceFiles(workspace_id)).toHaveLength(before.length);
+    expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(2);
     vi.unstubAllEnvs();
   });
 
-  it("gates PPTX upload when LLAMA_CLOUD_API_KEY is missing", async () => {
+  it("accepts a PPTX with no LlamaParse key and never calls LlamaParse", async () => {
     vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
-    const { workspace_id } = await freshWorkspace("pptx-gate");
+    registerAccuracyStack();
+    const { workspace_id } = await freshWorkspace("pptx-llm");
+    mockParseLocal.mockResolvedValue({
+      id: "DOC-pptx",
+      filename: "deck.pptx",
+      title: "Deck",
+      stakeholder_function: "medical_affairs",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      parser: "local",
+      ingested_at: new Date().toISOString(),
+      blocks: [{ id: "DOC-pptx-B01", location: { kind: "slide", ref: "Slide 1" }, text: "Evidence plan", kind: "title" }],
+      fullText: "Evidence plan",
+    });
 
     const form = new FormData();
     form.set("workspace_id", workspace_id);
@@ -158,63 +179,12 @@ describe("accuracy source upload API", () => {
     const res = await uploadPost(
       new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
     );
-    const body = (await res.json()) as { ok: boolean; code?: string };
-    expect(res.status).toBe(400);
-    expect(body.ok).toBe(false);
-    expect(body.code).toBe(LLAMA_PARSE_KEY_CODE);
-    expect(mockParseLocal).not.toHaveBeenCalled();
-    expect(await listSourceFiles(workspace_id)).toHaveLength(0);
-    vi.unstubAllEnvs();
-  });
-
-  it("uses mocked LlamaParse path for PDF when the key is set", async () => {
-    vi.stubEnv("LLAMA_CLOUD_API_KEY", "test-key");
-    registerAccuracyStack();
-    const { workspace_id } = await freshWorkspace("pdf-llama");
-
-    mockIngestBuffer.mockResolvedValue({
-      document: {
-        id: "DOC-llama",
-        filename: "plan.pdf",
-        title: "Plan",
-        stakeholder_function: "medical_affairs",
-        mime: "application/pdf",
-        parser: "llamaparse",
-        ingested_at: new Date().toISOString(),
-        blocks: [
-          {
-            id: "DOC-llama-B01",
-            location: { kind: "page", ref: "p.1" },
-            text: "Chart OS Kaplan-Meier",
-            kind: "paragraph",
-          },
-        ],
-        fullText: "Chart OS Kaplan-Meier",
-      },
-      parserUsed: "llamaparse",
-    });
-
-    const form = new FormData();
-    form.set("workspace_id", workspace_id);
-    form.set("doc_role", "medical");
-    form.set("file", new File([Buffer.from("%PDF-fake")], "plan.pdf", { type: "application/pdf" }));
-
-    const res = await uploadPost(
-      new Request("http://localhost/api/accuracy/sources/upload", { method: "POST", body: form }),
-    );
-    const body = (await res.json()) as {
-      ok: boolean;
-      parser: string;
-      block_count: number;
-      parse_error: string | null;
-    };
+    const body = (await res.json()) as { ok: boolean; block_count: number; parse_error: string | null };
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.parser).toBe("llamaparse");
-    expect(body.block_count).toBe(1);
     expect(body.parse_error).toBeNull();
-    expect(mockIngestBuffer).toHaveBeenCalledOnce();
-    expect(mockParseLocal).not.toHaveBeenCalled();
+    expect(body.block_count).toBe(1);
+    expect(mockIngestBuffer).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
   });
 });

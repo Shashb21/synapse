@@ -23,8 +23,8 @@ export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
     >
       <p className="text-[13px] text-foreground">{gate.message}</p>
       <p className="mt-1 text-[12px] text-muted-foreground">
-        Grok is the default route; Claude is the one-click alternate. LlamaParse keys are a separate
-        parse worker — not this gate.
+        Grok is the default route; Claude is the one-click alternate. Parsing uses the parse route
+        in the control panel.
       </p>
       <Link
         href={gate.connect_path}

@@ -2,10 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import {
-  isLlamaParseSource,
-  LLAMA_PARSE_KEY_REQUIRED,
-} from "@/lib/ingest/llama-gate";
 
 const ROLES = [
   { id: "interview", label: "Interview" },
@@ -16,13 +12,7 @@ const ROLES = [
   { id: "other", label: "Other" },
 ] as const;
 
-export function SourceUploadForm({
-  workspaceId,
-  llamaCloudConfigured,
-}: {
-  workspaceId: string;
-  llamaCloudConfigured: boolean;
-}) {
+export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [docRole, setDocRole] = useState<string>("medical");
@@ -38,11 +28,6 @@ export function SourceUploadForm({
     const file = fileInput?.files?.[0];
     if (!file) {
       setError("Choose a PPTX, DOCX, XLSX, or PDF file.");
-      return;
-    }
-
-    if (!llamaCloudConfigured && isLlamaParseSource(file.name, file.type)) {
-      setError(LLAMA_PARSE_KEY_REQUIRED);
       return;
     }
 
@@ -88,20 +73,10 @@ export function SourceUploadForm({
       className="mb-4 grid gap-3 border border-dashed border-border bg-card/30 p-3"
     >
       <h3 className="text-[13px] font-medium text-foreground">Upload source</h3>
-      {llamaCloudConfigured ? (
-        <p className="text-[12px] text-muted-foreground">
-          PDF/PPTX parse with LlamaParse. DOCX, text, and XLSX stay local.
-        </p>
-      ) : (
-        <p
-          className="border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive"
-          role="alert"
-        >
-          PDF and PPTX are gated until <code>LLAMA_CLOUD_API_KEY</code> is set on the
-          server (never paste it here). DOCX, text, and spreadsheets still parse
-          locally.
-        </p>
-      )}
+      <p className="text-[12px] text-muted-foreground">
+        PDF, PPTX, DOCX, XLSX and text are all parsed by the LLM on the parse route in{" "}
+        <code>/control</code>: the file&apos;s text is extracted, then the model decides the blocks.
+      </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Doc role</span>
         <select

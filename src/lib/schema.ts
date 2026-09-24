@@ -75,7 +75,7 @@ export const parsedDocumentSchema = z.object({
   title: z.string(),
   stakeholder_function: z.enum(STAKEHOLDER_FUNCTIONS),
   mime: z.string(),
-  parser: z.enum(["llamaparse", "local", "seed"]),
+  parser: z.enum(["llamaparse", "local", "seed", "llm"]),
   ingested_at: z.string(),
   blocks: z.array(parsedBlockSchema),
   fullText: z.string(),

@@ -1,57 +1,51 @@
-import { ingestBuffer } from "@/lib/ingest/llamaparse";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
-import { assertLlamaParseConfigured } from "@/lib/ingest/llama-gate";
+import { extractRawUnits, parseWithLlm } from "@/lib/ingest/llm-structure";
+import { isTestStub } from "@/modules/kernel/llm";
+import { hashId } from "@/lib/text";
 import type { ParsedDocument } from "@/lib/schema";
 import type { ParsePolicy } from "./parse-policy";
 
 export type IngestFileResult = {
   document: ParsedDocument;
   effectiveParser: ParsePolicy["parser"];
-  llamaError?: string;
+  dropped: { location: string; reason: string }[];
 };
 
-/** Route buffer ingest per locked parse policy (LlamaParse vs local structured). */
+/** Test stub only: the local extractors' blocks stand in for the model's structure. */
+async function stubDocument(filename: string, buffer: Buffer, mime: string): Promise<ParsedDocument> {
+  if (!filename.toLowerCase().endsWith(".pdf")) return parseLocalDocument({ filename, buffer, mime });
+  const units = await extractRawUnits({ filename, buffer, mime });
+  const blocks = units.map((unit, index) => ({
+    id: `STUB-B${String(index + 1).padStart(2, "0")}`,
+    location: unit.location,
+    text: unit.text,
+    kind: "paragraph" as const,
+  }));
+  return {
+    id: hashId("DOC", `${filename}:${buffer.length}`),
+    filename,
+    title: filename,
+    stakeholder_function: "medical_affairs",
+    mime,
+    parser: "local",
+    ingested_at: new Date().toISOString(),
+    blocks,
+    fullText: blocks.map((block) => `[${block.location.ref}] ${block.text}`).join("\n"),
+  };
+}
+
+/** Extract the file's text, then have the parse route's LLM structure it. */
 export async function ingestFile(args: {
   policy: ParsePolicy;
   filename: string;
   mime: string;
   buffer: Buffer;
+  ask: (args: { system: string; user: string; purpose: string }) => Promise<unknown>;
 }): Promise<IngestFileResult> {
-  const { policy, filename, mime, buffer } = args;
-
-  if (policy.parser === "llamaparse") {
-    assertLlamaParseConfigured();
-    const { document, parserUsed, llamaError } = await ingestBuffer({
-      filename,
-      buffer,
-      mime,
-    });
-    const effectiveParser =
-      parserUsed === "llamaparse" ? "llamaparse" : "local_structured";
-    return { document, effectiveParser, llamaError };
+  const { filename, mime, buffer } = args;
+  if (isTestStub()) {
+    return { document: await stubDocument(filename, buffer, mime), effectiveParser: "local_structured", dropped: [] };
   }
-
-  if (policy.parser === "local_structured") {
-    const document = await parseLocalDocument({ filename, buffer, mime });
-    return { document, effectiveParser: "local_structured" };
-  }
-
-  try {
-    const document = await parseLocalDocument({ filename, buffer, mime });
-    return { document, effectiveParser: "local_structured" };
-  } catch (localError) {
-    const { document, parserUsed, llamaError } = await ingestBuffer({
-      filename,
-      buffer,
-      mime,
-    });
-    if (parserUsed === "local" && llamaError) {
-      const reason =
-        localError instanceof Error ? localError.message : String(localError);
-      throw new Error(
-        `local_llm_assist failed (${reason}); Llama fallback: ${llamaError}`,
-      );
-    }
-    return { document, effectiveParser: "local_llm_assist", llamaError };
-  }
+  const { document, dropped } = await parseWithLlm({ filename, buffer, mime, ask: args.ask });
+  return { document, effectiveParser: "llm", dropped };
 }

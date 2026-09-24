@@ -356,10 +356,10 @@ describe("modular pipeline, S0 to S10", () => {
   }, 60_000);
 
   it("activates a named module per stage, which is how a stage is upgraded", async () => {
-    await activateModule({ stage: "S1", module_id: "s1-parse.local", actor_name: ACTOR.name });
+    await activateModule({ stage: "S1", module_id: "s1-parse.llm", actor_name: ACTOR.name });
     const wiring = await stageWiring();
     const parse = wiring.find((row) => row.stage === "S1")!;
-    expect(parse.active?.id).toBe("s1-parse.local");
+    expect(parse.active?.id).toBe("s1-parse.llm");
     expect(parse.activated_by).toBe(ACTOR.name);
     await expect(
       activateModule({ stage: "S1", module_id: "s2-gap-extract.pcj", actor_name: ACTOR.name }),

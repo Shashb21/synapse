@@ -1982,6 +1982,11 @@ export async function persistSourceAndBlocks(args: {
   stakeholder_function: ActorFunction;
   text: string;
   filename?: string;
+  /**
+   * Blocks the parse LLM already decided. When omitted (test stub, typed
+   * notes) the text is split mechanically.
+   */
+  sections?: { heading: string; text: string; location: string }[];
 }): Promise<{ source_id: string; blocks: IegpState["blocks"] }> {
   const state = await loadState();
   const sourceId = nextId("SRC", state.sources.map((s) => s.id));
@@ -1994,13 +1999,18 @@ export async function persistSourceAndBlocks(args: {
     ingested_at: now(),
     full_text: args.text,
   });
-  const sections = splitSourceIntoBlocks(args.text, args.title);
+  const sections =
+    args.sections ??
+    splitSourceIntoBlocks(args.text, args.title).map((section) => ({
+      ...section,
+      location: section.heading === "Note" ? "Uploaded note" : section.heading,
+    }));
   const blocks = sections.map((section, i) => ({
     id: `${sourceId}-B${String(i + 1).padStart(2, "0")}`,
     source_id: sourceId,
     heading: section.heading,
     text: section.text,
-    location: section.heading === "Note" ? "Uploaded note" : section.heading,
+    location: section.location,
   }));
   if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
   return { source_id: sourceId, blocks };
