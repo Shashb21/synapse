@@ -17,7 +17,7 @@ import {
   EXCLUSION_REASONS,
   GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
-  OVERALL_COVERAGE,
+  ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
 import {
@@ -27,8 +27,7 @@ import {
   displayedGapStatus,
   liveGapsMappedToTactic,
   mappedTactics,
-  suggestResidualGaps,
-  uncoveredDimensions,
+  persistedResidualGaps,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
@@ -56,8 +55,8 @@ export default async function GapDetailPage({
     ...gap,
     computed_status: gap.computed_status ?? computed,
   });
-  const missing = uncoveredDimensions(coverages);
-  const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
+  // Only a leftover a person saved is shown; drafts come from S6 on demand.
+  const leftover = persistedResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const tactics = mappedTactics(state, gap.id);
   const library = buildTacticLibrary(state);
   const parent = gap.parent_gap_id
@@ -140,8 +139,8 @@ export default async function GapDetailPage({
           Tactic mappings (many-to-many, dimensional)
         </h2>
         <p className="mb-3 text-[12px] text-muted-foreground">
-          Uncovered or partial dimensions: {missing.join(", ") || "none"}. A tactic existing is not
-          coverage. A publication existing is not coverage.
+          Each row shows the recorded coverage verdict (S4 model or a person) and its ten
+          dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <MapExistingTactic
@@ -271,7 +270,7 @@ export default async function GapDetailPage({
                       defaultValue={c.overall}
                       className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
                     >
-                      {OVERALL_COVERAGE.map((v) => (
+                      {ASSESSED_COVERAGE.map((v) => (
                         <option key={v} value={v}>
                           {v.replaceAll("_", " ")}
                         </option>
@@ -319,17 +318,17 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {leftover && shown === "validated_partial" ? (
+      {shown === "validated_partial" ? (
         <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Suggested leftover (right side of split)</h2>
-          <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
-          <ul className="mt-2 grid gap-1">
-            {leftover.reasons.map((reason) => (
-              <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
-                {reason}
-              </li>
-            ))}
-          </ul>
+          <h2 className="text-[13px] text-muted-foreground">Leftover (right side of split)</h2>
+          {leftover ? (
+            <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+          ) : (
+            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+              No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
+              have the S6 model propose the addressed slice and the open leftover.
+            </p>
+          )}
         </section>
       ) : null}
 

@@ -1,20 +1,18 @@
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { loadState } from "@/lib/iegp/store";
-import { coverageEval, extractCandidateNeeds, needEvalMetrics, pairNeeds } from "@/lib/iegp/engine";
+import { coverageEval, needEvalMetrics, pairNeeds } from "@/lib/iegp/engine";
 import { engineMaySetStatus } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
 
 export default async function EvalsPage() {
   const state = await loadState();
-  const extracted = extractCandidateNeeds(
-    state.blocks.map((b) => ({
-      id: b.id,
-      source_id: b.source_id,
-      text: b.text,
-      heading: b.heading,
-    })),
-  );
+  // Scores what the S2 stage actually committed, not a local keyword extractor.
+  const extracted = state.needs.map((n) => ({
+    id: n.id,
+    statement: n.statement,
+    source_id: n.source_id,
+  }));
   const pairs = pairNeeds(extracted, state.gold_needs);
   const metrics = needEvalMetrics(pairs, state.gold_needs, extracted.length);
   const cov = coverageEval(
@@ -56,7 +54,7 @@ export default async function EvalsPage() {
         engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))} (must be
         true). Computed addressed without override: {autoClose.length === 0 ? "none" : autoClose.map((g) => g.id).join(", ")}.
       </p>
-      <h2 className="mb-2 text-[13px] text-muted-foreground">Extracted candidate needs (local cues)</h2>
+      <h2 className="mb-2 text-[13px] text-muted-foreground">Committed needs (S2 gap extraction)</h2>
       <div className="grid gap-2">
         {extracted.map((row) => {
           const pair = pairs.find((p) => p.extract_id === row.id);

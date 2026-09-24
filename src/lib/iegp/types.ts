@@ -94,7 +94,8 @@ export type EvidenceNeed = {
   timing: string;
   source_id: string;
   source_quote: string;
-  confidence: number;
+  /** Null until a model or a human scores it. */
+  confidence: number | null;
   status: NeedStatus;
   status_lock: Lock;
 };
