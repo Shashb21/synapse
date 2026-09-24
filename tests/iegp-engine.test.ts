@@ -10,7 +10,6 @@ import {
   extractCandidateGaps,
   extractCandidateTactics,
   gapNameFromStatement,
-  guessDomain,
   isPublishedLiterature,
   needEvalMetrics,
   pairNeeds,
@@ -34,8 +33,7 @@ import {
 import { emptyDimensions, unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
-import { DEMO_PACK } from "@/lib/iegp/demo-pack";
-import type { EvidenceGap, GapTacticCoverage, Tactic } from "@/lib/iegp/types";
+import type { GapTacticCoverage } from "@/lib/iegp/types";
 import { COVERAGE_DIMENSIONS, GAP_STATUS_DEFINITIONS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 
 function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCoverage["dimensions"]>): GapTacticCoverage {

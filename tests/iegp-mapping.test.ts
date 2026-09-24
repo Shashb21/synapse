@@ -67,7 +67,7 @@ describe("gap–tactic scorer (S4 test-stub only)", () => {
   });
 
   it("does not let a dissemination tactic outrank a generation tactic on a comparative-effectiveness gap", () => {
-    const { seed, gap, needs, residual, tactic } = seedPair();
+    const { gap, needs, residual, tactic } = seedPair();
     const elderly = gap("GAP-ELDERLY-CE");
     const chart = tactic("TAC-ELDERLY-RWE");
     const congress = asCongressAbstract(tactic("TAC-PUB-PFS"), {

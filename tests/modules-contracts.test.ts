@@ -29,7 +29,6 @@ import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
   PROVIDERS,
-  findProvider,
   providerConfigured,
 } from "@/modules/llm/provider";
 import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
