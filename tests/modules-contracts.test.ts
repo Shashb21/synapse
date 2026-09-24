@@ -102,6 +102,7 @@ describe("the locked agentic loop", () => {
 
   function fakeContext(run: RunRecorder, stage: StageId = "S2"): ModuleContext {
     return {
+      ai: true,
       workspace_id: "test",
       actor: { name: "Loop Test", function: "medical_affairs" as const },
       role: "medical_affairs",

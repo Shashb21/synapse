@@ -1,6 +1,8 @@
 import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
 import { SessionPanel } from "@/components/platform/session-panel";
+import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
+import { aiSwitch, type AiSwitch } from "@/modules/kernel/ai-switch";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
 import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
@@ -59,6 +61,12 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     // Control panel must render before Postgres or OAuth connections exist.
   }
 
+  const ai: AiSwitch = await aiSwitch().catch(() => ({
+    enabled: true,
+    updated_by: null,
+    updated_at: null,
+    rationale: null,
+  }));
   const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
 
   const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
@@ -112,6 +120,15 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       ) : null}
 
       <div className="grid gap-8">
+        <AiSwitchPanel
+          ai={ai}
+          mayToggle={can(identity.role, "toggle_ai")}
+          identity={{
+            signed_in: identity.signed_in,
+            actor_name: identity.actor.name,
+            actor_function: identity.actor.function,
+          }}
+        />
         <SessionPanel
           actorName={identity.actor.name}
           role={identity.role}

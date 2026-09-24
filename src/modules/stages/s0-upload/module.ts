@@ -98,6 +98,8 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
     summary: "Records uploaded files with checksum and mime. No parsing, no extraction.",
     contract: 1,
     agentic: false,
+    // Uploads only feed the AI parser; with AI off, gaps and tactics are added by hand.
+    needs_ai: true,
     capabilities: ["text", "docx", "pptx", "xlsx", "demo-pack"],
   },
   inputSchema,

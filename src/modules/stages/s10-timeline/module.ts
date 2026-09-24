@@ -359,6 +359,9 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
       "Lays out the final IEGP as dated activities. Dates a user set and durations the tactic's design carries are kept; a model infers the dependencies between activities and estimates any start, duration or readout lag nobody supplied. Only validated bands place an activity. A user can date, add, remove, re-lane and re-sequence any activity by hand; those values are marked human and survive every rebuild. Needs a connected LLM only while something is left for it to estimate.",
     contract: 1,
     agentic: true,
+    // With AI off it still lays out every human or designed date; the rest wait
+    // in "Not dated yet" for a person.
+    ai_optional: true,
     capabilities: ["gantt", "llm-dependencies", "llm-schedule", "save-final", "image-export"],
   },
   inputSchema,
@@ -395,11 +398,12 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     // every date and dependency is already a human's (or a design's), the
     // rebuild needs no model at all.
     const needsDependencies = candidates.length >= 2 && askFor.length > 0;
-    if (needsDependencies || targets.length > 0) requireLlm(ctx, "The timeline");
+    const ai = ctx.ai !== false;
+    if (ai && (needsDependencies || targets.length > 0)) requireLlm(ctx, "The timeline");
 
     // Test stub only: no model runs, so no dependency is inferred.
     const asked: Map<string, DependencyAnswer> =
-      isTestStub() || !needsDependencies
+      !ai || isTestStub() || !needsDependencies
         ? new Map(askFor.map((id) => [id, { upstream: [] }]))
         : await ctx.run.step("dependencies", () =>
             completeAll({
@@ -414,7 +418,9 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     const dependencies = new Map<string, DependencyAnswer>([...asked, ...locked]);
 
     let estimates = new Map<string, ScheduleEstimate>();
-    if (targets.length > 0 && isTestStub()) {
+    if (!ai) {
+      // AI is off: nothing is estimated. Undated activities stay pending.
+    } else if (targets.length > 0 && isTestStub()) {
       /**
        * Test stub only: fixed, labelled values so Vitest and Playwright can lay
        * out a timeline without a provider. The rationale says no model ran.

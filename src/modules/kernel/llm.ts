@@ -1,6 +1,7 @@
 import type { ModuleContext } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
+import { AiDisabledError } from "./ai-switch";
 
 /**
  * Judgement belongs to a model. These helpers are what every stage uses to hold
@@ -22,7 +23,9 @@ export function isTestStub(): boolean {
 }
 
 /** Throws unless the stage can prompt a model (or is running under the test stub). */
-export function requireLlm(ctx: Pick<ModuleContext, "route">, what: string): void {
+export function requireLlm(ctx: Pick<ModuleContext, "route"> & { ai?: boolean }, what: string): void {
+  // The admin switch wins over everything, the test stub included.
+  if (ctx.ai === false) throw new AiDisabledError(what);
   if (isTestStub()) return;
   if (!canPrompt(ctx.route)) {
     throw new NoRouteError(

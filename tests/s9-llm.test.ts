@@ -36,6 +36,7 @@ function route(connected: boolean): ResolvedRoute {
 function context(script: Script, connected = true): { ctx: ModuleContext; calls: Call[] } {
   const calls: Call[] = [];
   const ctx: ModuleContext = {
+    ai: true,
     workspace_id: "default",
     actor: ACTOR,
     role: "medical_affairs",
