@@ -9,7 +9,7 @@ import { createContext, useContext, type ReactNode } from "react";
  */
 const AiStatusContext = createContext(true);
 
-export function AiStatusProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+export function AiStatusProvider({ enabled, children }: { enabled: boolean; children?: ReactNode }) {
   return <AiStatusContext.Provider value={enabled}>{children}</AiStatusContext.Provider>;
 }
 
