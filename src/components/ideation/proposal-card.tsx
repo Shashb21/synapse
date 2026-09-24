@@ -1,31 +1,10 @@
 import Link from "next/link";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { proposalFields } from "@/components/ideation/proposal-fields";
 import { TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
+import type { IdeationProposalRecord } from "@/modules/stages/s9-ideation/module";
 
-export type ProposalCardModel = {
-  id: string;
-  gap_id: string;
-  name: string;
-  type: string;
-  rationale: string;
-  evidence_question: string;
-  design: {
-    population: string;
-    comparator: string;
-    outcomes: string;
-    data_source: string;
-    study_design: string;
-    duration_months: number;
-    readout_lag_months: number;
-  };
-  status: string;
-  critic_note: string | null;
-  judge_score: number;
-  created_at: string;
-  decided_by: string | null;
-  decision_rationale: string | null;
-  tactic_id: string | null;
-};
+export type ProposalCardModel = IdeationProposalRecord;
 
 function typeLabel(type: string): string {
   return TACTIC_TYPE_LABELS[type as TacticType] ?? type.replaceAll("_", " ");
@@ -78,7 +57,17 @@ export function ProposalCard({
         <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
           {typeLabel(proposal.type)}
         </span>
-        <span className="text-[10px] text-muted-foreground">Judge {proposal.judge_score}</span>
+        {proposal.origin === "human" ? (
+          <span className="text-[10px] text-muted-foreground">Written by {proposal.edited_by ?? "a person"}</span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">
+            Judge {proposal.judge_score}
+            {proposal.rank ? ` · rank ${proposal.rank}` : ""}
+          </span>
+        )}
+        {proposal.origin !== "human" && proposal.edited_by ? (
+          <span className="text-[10px] text-muted-foreground">· edited by {proposal.edited_by}</span>
+        ) : null}
       </div>
 
       <h4 className="text-[13px] leading-5 text-foreground">{proposal.name}</h4>
@@ -96,7 +85,11 @@ export function ProposalCard({
         <DesignField label="Design" value={proposal.design.study_design} />
         <DesignField
           label="Timing"
-          value={`${proposal.design.duration_months} month(s) to run · readout +${proposal.design.readout_lag_months}`}
+          value={
+            proposal.design.duration_months === null
+              ? "Not set — the timeline estimates it"
+              : `${proposal.design.duration_months} month(s) to run · readout +${proposal.design.readout_lag_months ?? "?"}`
+          }
         />
       </dl>
 
@@ -135,6 +128,19 @@ export function ProposalCard({
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
           {mayIdeate ? (
             <>
+              <ActionDialog
+                endpoint="/api/plan"
+                payload={{ action: "edit_proposal", id: proposal.id }}
+                fields={proposalFields(proposal)}
+                label="Edit"
+                title={`Edit ${proposal.name}`}
+                description="Change any field before deciding. Your edit is kept: a re-run of S9 adds new ideas and never rewrites this one."
+                confirmLabel="Save edit"
+                requireRationale
+                identity={identity}
+                variant="outline"
+                size="sm"
+              />
               <ActionDialog
                 endpoint="/api/plan"
                 payload={{ action: "decide_proposal", id: proposal.id, decision: "accept" }}

@@ -19,7 +19,7 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { assignTacticToGap, createProposedTactic, loadState } from "@/lib/iegp/store";
+import { createProposedTactic, loadState } from "@/lib/iegp/store";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
@@ -796,7 +796,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           type: proposal.type,
           rationale: proposal.rationale,
           evidence_question: proposal.evidence_question,
-          design: proposal.design,
+          design: { ...proposal.design, rank: proposal.rank, origin: "ai" },
           status: "proposed",
           critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
             .filter(Boolean)
@@ -887,6 +887,58 @@ ideationModule.evals = {
 
 registerModule(ideationModule);
 
+/** A design as stored: a hand-written idea may leave its timing for S10 to estimate. */
+export type StoredDesign = Omit<Design, "duration_months" | "readout_lag_months"> & {
+  duration_months: number | null;
+  readout_lag_months: number | null;
+};
+
+/**
+ * Provenance kept next to the design in the proposal's `design` column: the
+ * judge's rank, who authored the idea, and who last edited it. A proposal a
+ * person wrote or edited is theirs; a re-run of S9 only ever inserts new rows,
+ * so it never replaces or rewrites it.
+ */
+type DesignMeta = {
+  rank?: number | null;
+  origin?: "ai" | "human";
+  edited_by?: string | null;
+  edited_at?: string | null;
+};
+
+const DESIGN_TEXT_FIELDS = [
+  "population",
+  "comparator",
+  "outcomes",
+  "data_source",
+  "study_design",
+  "timing_rationale",
+] as const;
+
+function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
+  const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const str = (value: unknown) => (typeof value === "string" ? value : "");
+  const num = (value: unknown) => (finite(value) ? value : null);
+  return {
+    design: {
+      population: str(row.population),
+      comparator: str(row.comparator),
+      outcomes: str(row.outcomes),
+      data_source: str(row.data_source),
+      study_design: str(row.study_design),
+      duration_months: num(row.duration_months),
+      readout_lag_months: num(row.readout_lag_months),
+      timing_rationale: str(row.timing_rationale),
+    },
+    meta: {
+      rank: num(row.rank),
+      origin: row.origin === "human" ? "human" : "ai",
+      edited_by: typeof row.edited_by === "string" ? row.edited_by : null,
+      edited_at: typeof row.edited_at === "string" ? row.edited_at : null,
+    },
+  };
+}
+
 export type IdeationProposalRecord = {
   id: string;
   gap_id: string;
@@ -894,7 +946,7 @@ export type IdeationProposalRecord = {
   type: string;
   rationale: string;
   evidence_question: string;
-  design: Design;
+  design: StoredDesign;
   status: string;
   critic_note: string | null;
   judge_score: number;
@@ -902,64 +954,295 @@ export type IdeationProposalRecord = {
   decided_by: string | null;
   decision_rationale: string | null;
   tactic_id: string | null;
+  /** The judge's rank within its gap (1 is first choice); null for a hand-written idea. */
+  rank: number | null;
+  /** "human" when a person wrote the idea with no model run. */
+  origin: "ai" | "human";
+  /** Who last edited the idea by hand, if anyone. */
+  edited_by: string | null;
+  edited_at: string | null;
 };
 
 export async function listIdeationProposals(): Promise<IdeationProposalRecord[]> {
   await ensurePlatformSchema();
   const rows = await db().select().from(t.ideationProposals).orderBy(desc(t.ideationProposals.created_at));
-  return rows.map((row) => ({
-    id: row.id,
-    gap_id: row.gap_id,
-    name: row.name,
-    type: row.type,
-    rationale: row.rationale,
-    evidence_question: row.evidence_question,
-    design: row.design as Design,
-    status: row.status,
-    critic_note: row.critic_note,
-    judge_score: row.judge_score,
-    created_at: row.created_at,
-    decided_by: row.decided_by,
-    decision_rationale: row.decision_rationale,
-    tactic_id: row.tactic_id,
-  }));
+  return rows.map((row) => {
+    const { design, meta } = splitDesign(row.design);
+    return {
+      id: row.id,
+      gap_id: row.gap_id,
+      name: row.name,
+      type: row.type,
+      rationale: row.rationale,
+      evidence_question: row.evidence_question,
+      design,
+      status: row.status,
+      critic_note: row.critic_note,
+      judge_score: row.judge_score,
+      created_at: row.created_at,
+      decided_by: row.decided_by,
+      decision_rationale: row.decision_rationale,
+      tactic_id: row.tactic_id,
+      rank: meta.rank ?? null,
+      origin: meta.origin ?? "ai",
+      edited_by: meta.edited_by ?? null,
+      edited_at: meta.edited_at ?? null,
+    };
+  });
 }
 
-/** The S9 human gate: a validated proposal becomes a real proposed tactic mapped to its gap. */
+/** The fields a person may write on an idea, by hand or as an edit. */
+export type ProposalFields = {
+  name?: string;
+  type?: string;
+  evidence_question?: string;
+  /** Why this tactic would close the gap. */
+  idea_rationale?: string;
+  population?: string;
+  comparator?: string;
+  outcomes?: string;
+  data_source?: string;
+  study_design?: string;
+  duration_months?: number | null;
+  readout_lag_months?: number | null;
+  timing_rationale?: string;
+};
+
+type ProposalRow = typeof t.ideationProposals.$inferSelect;
+
+/**
+ * Applies a person's fields over an idea. Text fields are trimmed; a given
+ * name, type or evidence question may not be blank; the timing must be a
+ * positive duration and a non-negative lag, or null to leave it to S10.
+ */
+function applyFields(
+  base: { name: string; type: string; evidence_question: string; rationale: string; design: StoredDesign },
+  fields: ProposalFields,
+) {
+  const next = { ...base, design: { ...base.design } };
+  const required = (value: string | undefined, label: string) => {
+    const trimmed = (value ?? "").trim();
+    if (!trimmed) throw new Error(`${label} is required.`);
+    return trimmed;
+  };
+  if (fields.name !== undefined) next.name = required(fields.name, "Name");
+  if (fields.type !== undefined) {
+    const type = fields.type.trim();
+    if (!TACTIC_TYPES.includes(type as TacticType)) throw new Error(`type "${type}" is not one of the allowed tactic types.`);
+    next.type = type;
+  }
+  if (fields.evidence_question !== undefined) {
+    next.evidence_question = required(fields.evidence_question, "Evidence question");
+  }
+  if (fields.idea_rationale !== undefined && fields.idea_rationale.trim()) next.rationale = fields.idea_rationale.trim();
+  for (const key of DESIGN_TEXT_FIELDS) {
+    if (fields[key] !== undefined) next.design[key] = (fields[key] ?? "").trim();
+  }
+  if (fields.duration_months !== undefined) {
+    const value = fields.duration_months;
+    if (value !== null && (!finite(value) || value <= 0)) {
+      throw new Error("duration_months must be a positive number of months.");
+    }
+    next.design.duration_months = value;
+  }
+  if (fields.readout_lag_months !== undefined) {
+    const value = fields.readout_lag_months;
+    if (value !== null && (!finite(value) || value < 0)) {
+      throw new Error("readout_lag_months must be zero or a positive number of months.");
+    }
+    next.design.readout_lag_months = value;
+  }
+  return next;
+}
+
+async function proposalRow(id: string): Promise<ProposalRow> {
+  const rows = await db().select().from(t.ideationProposals).where(eq(t.ideationProposals.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) throw new Error(`Unknown proposal ${id}`);
+  return row;
+}
+
+async function recordById(id: string): Promise<IdeationProposalRecord> {
+  const record = (await listIdeationProposals()).find((row) => row.id === id);
+  if (!record) throw new Error(`Unknown proposal ${id}`);
+  return record;
+}
+
+/**
+ * A person edits an idea before deciding it: any of its fields, the whole
+ * design and timing included. The edit is audited with its rationale, and the
+ * idea is marked as edited by hand. Decided ideas are fixed — an accepted one
+ * is a tactic now and is edited there.
+ */
+export async function editIdeationProposal(args: {
+  id: string;
+  fields: ProposalFields;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}): Promise<IdeationProposalRecord> {
+  await ensurePlatformSchema();
+  const rationale = requireRationale(args.rationale);
+  const row = await proposalRow(args.id);
+  if (row.status !== "proposed") throw new Error(`${args.id} was already ${row.status}; decided ideas are not edited.`);
+  const { design, meta } = splitDesign(row.design);
+  const before = { name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design };
+  const next = applyFields(before, args.fields);
+  const flat = (value: typeof before) => ({
+    name: value.name,
+    type: value.type,
+    evidence_question: value.evidence_question,
+    rationale: value.rationale,
+    ...value.design,
+  });
+  const was = flat(before);
+  const now = flat(next);
+  const changed = (Object.keys(now) as (keyof typeof now)[]).filter((key) => was[key] !== now[key]);
+  if (changed.length === 0) throw new Error("Nothing changed.");
+  const at = nowIso();
+  await db()
+    .update(t.ideationProposals)
+    .set({
+      name: next.name,
+      type: next.type,
+      evidence_question: next.evidence_question,
+      rationale: next.rationale,
+      design: { ...next.design, ...meta, edited_by: args.actor.name, edited_at: at },
+    })
+    .where(eq(t.ideationProposals.id, args.id));
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S9",
+    entity_type: "ideation_proposal",
+    entity_id: args.id,
+    field: changed.join(","),
+    action: "edit",
+    before: JSON.stringify(Object.fromEntries(changed.map((key) => [key, was[key]]))),
+    after: JSON.stringify(Object.fromEntries(changed.map((key) => [key, now[key]]))),
+    rationale,
+    actor: args.actor,
+  });
+  return recordById(args.id);
+}
+
+/**
+ * A person writes an idea for an Open gap with no model run. It lands as a
+ * proposed idea like any other and goes through the same accept/reject gate.
+ */
+export async function addIdeationProposal(args: {
+  gap_id: string;
+  fields: ProposalFields & { name: string; type: string; evidence_question: string };
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}): Promise<IdeationProposalRecord> {
+  await ensurePlatformSchema();
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const gap = state.gaps.find((row) => row.id === args.gap_id);
+  if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${args.gap_id}.`);
+  if (displayedGapStatus(gap) !== "validated_open") {
+    throw new Error(`${args.gap_id} is not an Open gap; ideas are written for Open gaps.`);
+  }
+  const empty: StoredDesign = {
+    population: "",
+    comparator: "",
+    outcomes: "",
+    data_source: "",
+    study_design: "",
+    duration_months: null,
+    readout_lag_months: null,
+    timing_rationale: "",
+  };
+  const next = applyFields({ name: "", type: "", evidence_question: "", rationale, design: empty }, args.fields);
+  if (!next.name) throw new Error("Name is required.");
+  if (!next.type) throw new Error("Type is required.");
+  if (!next.evidence_question) throw new Error("Evidence question is required.");
+  const id = newId("idea");
+  const at = nowIso();
+  await db()
+    .insert(t.ideationProposals)
+    .values({
+      id,
+      gap_id: args.gap_id,
+      name: next.name,
+      type: next.type,
+      rationale: next.rationale,
+      evidence_question: next.evidence_question,
+      design: { ...next.design, rank: null, origin: "human", edited_by: args.actor.name, edited_at: at },
+      status: "proposed",
+      critic_note: null,
+      judge_score: 0,
+      created_at: at,
+    });
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S9",
+    entity_type: "ideation_proposal",
+    entity_id: id,
+    field: "created",
+    action: "add",
+    before: null,
+    after: `${next.name} (${next.type}) for ${args.gap_id}`,
+    rationale,
+    actor: args.actor,
+  });
+  return recordById(id);
+}
+
+/**
+ * The S9 human gate: a validated proposal becomes a real proposed tactic mapped
+ * to its gap. `fields` lets the person accept an edited version in one step;
+ * the edit is audited before the decision.
+ */
 export async function decideIdeationProposal(args: {
   id: string;
   decision: "accept" | "reject";
   rationale: string;
   actor: Actor;
   workspace_id?: string;
+  fields?: ProposalFields;
 }): Promise<{ tactic_id: string | null }> {
   await ensurePlatformSchema();
   // The rationale is a precondition, not an afterthought: check it before anything
   // is created or a status moves.
   const rationale = requireRationale(args.rationale);
-  const rows = await db()
-    .select()
-    .from(t.ideationProposals)
-    .where(eq(t.ideationProposals.id, args.id))
-    .limit(1);
-  const proposal = rows[0];
-  if (!proposal) throw new Error(`Unknown proposal ${args.id}`);
+  let proposal = await proposalRow(args.id);
   if (proposal.status !== "proposed") throw new Error(`${args.id} was already ${proposal.status}.`);
+  if (args.decision === "accept" && args.fields && Object.keys(args.fields).length > 0) {
+    try {
+      await editIdeationProposal({
+        id: args.id,
+        fields: args.fields,
+        rationale,
+        actor: args.actor,
+        workspace_id: args.workspace_id,
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.message === "Nothing changed.")) throw error;
+    }
+    proposal = await proposalRow(args.id);
+  }
 
   let tactic_id: string | null = null;
   if (args.decision === "accept") {
-    const design = proposal.design as Design;
+    const { design } = splitDesign(proposal.design);
     const state = await loadState();
-    const before = new Set(state.tactics.map((tactic) => tactic.id));
-    await createProposedTactic({
+    // study_design and data_source ride along for stores that persist them;
+    // the variable (not a literal) keeps older store signatures compiling.
+    const tactic = {
       name: proposal.name,
       type: proposal.type as TacticType,
-      description: `Ideated for ${proposal.gap_id}. ${design.study_design}. ${proposal.rationale}`,
+      description: [`Ideated for ${proposal.gap_id}.`, design.study_design && `${design.study_design}.`, proposal.rationale]
+        .filter(Boolean)
+        .join(" "),
       evidence_question: proposal.evidence_question,
       population: design.population,
       intervention: state.asset.name,
       comparator: design.comparator,
       outcomes: design.outcomes,
+      study_design: design.study_design,
+      data_source: design.data_source,
       geography: state.asset.geography,
       owner: args.actor.name,
       function: args.actor.function,
@@ -967,22 +1250,9 @@ export async function decideIdeationProposal(args: {
       gap_id: proposal.gap_id,
       actor_name: args.actor.name,
       actor_function: args.actor.function,
-    });
-    const after = await loadState();
-    tactic_id = after.tactics.find((tactic) => !before.has(tactic.id))?.id ?? null;
-    if (tactic_id) {
-      try {
-        await assignTacticToGap({
-          gap_id: proposal.gap_id,
-          tactic_id,
-          actor_name: args.actor.name,
-          actor_function: args.actor.function,
-          note: `Accepted ideation proposal — ${rationale}`,
-        });
-      } catch {
-        // createProposedTactic may already have joined the pair.
-      }
-    }
+    };
+    // createProposedTactic creates the tactic and maps it to the gap.
+    tactic_id = await createProposedTactic(tactic);
   }
 
   await db()

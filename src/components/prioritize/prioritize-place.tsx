@@ -208,6 +208,8 @@ export async function PrioritizePlace({
       validated: placement?.validated ?? false,
       suggested_band: (placement?.suggested_band ?? null) as Band | null,
       suggested_rationale: placement?.suggested_rationale ?? null,
+      human_axes: placement?.human_axes ?? [],
+      human_band: placement?.human_band ?? false,
       rationale: placement?.rationale ?? null,
       actor_name: placement?.actor_name ?? null,
       at: placement?.at ?? null,

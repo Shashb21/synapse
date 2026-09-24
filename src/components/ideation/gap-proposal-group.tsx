@@ -1,5 +1,6 @@
 import Link from "next/link";
-import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
 
 export type GapProposalGroup = {
@@ -12,6 +13,35 @@ export type GapProposalGroup = {
   mapped_tactic_count: number;
   proposals: ProposalCardModel[];
 };
+
+/** A person writes an idea for the gap with no model run; it is decided like any other. */
+export function AddIdeaDialog({
+  gapId,
+  gapName,
+  identity,
+  variant = "outline",
+}: {
+  gapId: string;
+  gapName: string;
+  identity: ActionIdentity;
+  variant?: "default" | "outline";
+}) {
+  return (
+    <ActionDialog
+      endpoint="/api/plan"
+      payload={{ action: "add_proposal", gap_id: gapId }}
+      fields={proposalFields()}
+      label="Add idea by hand"
+      title={`Add an idea for ${gapName}`}
+      description="Write the tactic yourself — no model run needed. It joins the ideas awaiting a decision and is accepted or rejected the same way."
+      confirmLabel="Add idea"
+      requireRationale
+      identity={identity}
+      variant={variant}
+      size="sm"
+    />
+  );
+}
 
 export function GapProposalGroupCard({
   group,
@@ -58,6 +88,11 @@ export function GapProposalGroupCard({
         <p className="text-[11px] text-muted-foreground">
           {group.proposals.length} proposal(s) · {open} awaiting a decision · {accepted} accepted
         </p>
+        {mayIdeate ? (
+          <div>
+            <AddIdeaDialog gapId={group.gap_id} gapName={group.gap_name} identity={identity} />
+          </div>
+        ) : null}
       </header>
       <div className="grid gap-3 lg:grid-cols-2">
         {group.proposals.map((proposal) => (
