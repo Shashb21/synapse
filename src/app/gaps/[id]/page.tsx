@@ -11,6 +11,7 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { sessionContext } from "@/modules/auth/session";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import {
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
@@ -44,7 +45,11 @@ export default async function GapDetailPage({
 }) {
   const { id } = await params;
   await ensureGapHasConstituentNeed(id);
-  const [state, session] = await Promise.all([loadState(), sessionContext()]);
+  const [state, session, ai] = await Promise.all([
+    loadState(),
+    sessionContext(),
+    aiEnabled().catch(() => true),
+  ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
     actor_name: session.actor.name,
@@ -509,9 +514,18 @@ export default async function GapDetailPage({
           ) : (
             <>
               <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-                No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
-                have the S6 model propose the addressed slice and the open leftover, or write the
-                leftover yourself.
+                {ai ? (
+                  <>
+                    No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
+                    have the S6 model propose the addressed slice and the open leftover, or write the
+                    leftover yourself.
+                  </>
+                ) : (
+                  <>
+                    No leftover drafted. AI is off: open Partially Addressed to split the gap by hand,
+                    or write the leftover yourself.
+                  </>
+                )}
               </p>
               <div className="mt-3">
                 <ActionDialog

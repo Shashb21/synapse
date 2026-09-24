@@ -15,6 +15,7 @@ import type {
   UnprioritizedGapCard,
 } from "@/lib/iegp/engine";
 import {
+  CATCH_UP_TACTIC_STATUSES,
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
   GAP_STATUS_LABELS,
@@ -68,15 +69,18 @@ function CreateGapFields() {
   );
 }
 
-function CreateGapButton() {
+export function CreateGapButton({
+  label = "Create gap",
+  variant,
+}: { label?: string; variant?: "default" | "outline" } = {}) {
   return (
-    <LockForm label="Create gap" action="create_gap" confirmLabel="Add gap">
+    <LockForm label={label} action="create_gap" confirmLabel="Add gap" variant={variant}>
       <CreateGapFields />
     </LockForm>
   );
 }
 
-function CreateTacticButton() {
+export function CreateTacticButton() {
   return (
     <LockForm
       label="Create tactic"
@@ -117,6 +121,100 @@ function CreateTacticFields() {
   );
 }
 
+
+/**
+ * An existing study or programme entered by hand (completed, ongoing, or
+ * planned). It goes into the tactic library, ready to map onto gaps.
+ */
+export function AddTacticsButton({ variant }: { variant?: "default" | "outline" } = {}) {
+  return (
+    <LockForm
+      label="Add tactics"
+      action="record_missed_tactic"
+      confirmLabel="Add to library"
+      variant={variant}
+      description="Record a study or programme you already have. Map it onto gaps on Gaps. Proposed new tactics are ideated on Tactics after Prioritize."
+    >
+      <input
+        name="name"
+        required
+        placeholder="Study, programme, or publication name"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      />
+      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+        {TACTIC_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {TACTIC_TYPE_LABELS[type]}
+          </option>
+        ))}
+      </select>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Status
+        <select
+          name="status"
+          required
+          defaultValue="ongoing"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          {CATCH_UP_TACTIC_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+      </label>
+      <input
+        name="evidence_question"
+        required
+        placeholder="Evidence question"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      />
+      <TacticDetailFields />
+    </LockForm>
+  );
+}
+
+/**
+ * The first screen with AI off: nothing is uploaded or parsed, so the plan
+ * starts from two hand-entry actions.
+ */
+export function ManualStart({ gapCount, tacticCount }: { gapCount: number; tacticCount: number }) {
+  return (
+    <section aria-labelledby="manual-start" className="grid gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="border border-border bg-card/40 p-4">
+          <h2 id="manual-start" className="text-[15px] font-medium text-foreground">
+            Gaps
+          </h2>
+          <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+            Type each evidence gap: what is missing and its domain.{" "}
+            {gapCount > 0 ? `${gapCount} so far.` : "None yet."}
+          </p>
+          <CreateGapButton label="Add gaps" variant="default" />
+        </div>
+        <div className="border border-border bg-card/40 p-4">
+          <h2 className="text-[15px] font-medium text-foreground">Tactics</h2>
+          <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
+            Record the studies and programmes you already have.{" "}
+            {tacticCount > 0 ? `${tacticCount} in the library.` : "None yet."}
+          </p>
+          <AddTacticsButton variant="default" />
+        </div>
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Then map tactics onto gaps and confirm each gap on{" "}
+        <Link href="/?place=gaps" className="text-foreground">
+          Gaps
+        </Link>
+        , prioritize them by hand, and date the plan on{" "}
+        <Link href="/timeline" className="text-foreground">
+          Timeline
+        </Link>
+        .
+      </p>
+    </section>
+  );
+}
 
 function CreateActions() {
   return (
@@ -183,7 +281,7 @@ function GapTacticsBlock({
           </LockForm>
         ) : availableTactics.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
-            Tactic library is empty. Create a tactic on Gaps or Tactics, or ingest a source on Upload.
+            Tactic library is empty. Create a tactic on Gaps or Tactics, or add one on the first screen.
           </p>
         ) : null}
       </div>
@@ -315,7 +413,7 @@ export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
       </p>
       {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          Empty. Ingest a source on Upload, or create a tactic here.
+          Empty. Create a tactic here, or add sources or tactics on the first screen.
         </p>
       ) : (
         <ul className="grid gap-2">

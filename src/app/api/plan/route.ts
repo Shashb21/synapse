@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import "@/modules";
 import { assertCan } from "@/modules/auth/roles";
+import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
 import { requestIdentity } from "@/modules/auth/request";
 import {
   listPlacements,
@@ -283,13 +284,30 @@ export async function POST(request: Request) {
       case "save_plan": {
         const status = field(planStatusSchema, body.status ?? "draft", "status");
         assertCan(identity.role, status === "final" ? "save_final" : "export");
-        const plan = await savePlan({ status, note: rationale, actor: identity.actor });
-        return NextResponse.json({ ok: true, plan });
+        try {
+          const plan = await savePlan({ status, note: rationale, actor: identity.actor });
+          return NextResponse.json({ ok: true, plan });
+        } catch (error) {
+          // With AI off nothing rebuilds or estimates: the remedy is by hand.
+          const message = error instanceof Error ? error.message : "";
+          if (/Rebuild the timeline before saving/.test(message) && !(await aiEnabled().catch(() => true))) {
+            throw new Error(
+              message.replace(
+                /Rebuild the timeline before saving it as final\.?/,
+                "Date them by hand or remove them before saving it as final.",
+              ),
+            );
+          }
+          throw error;
+        }
       }
       default:
         return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
     }
   } catch (error) {
+    if (error instanceof AiDisabledError) {
+      return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Plan action failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }

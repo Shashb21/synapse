@@ -12,6 +12,7 @@ import {
   ListChecks,
   Lock,
   Menu,
+  PencilLine,
   Rocket,
   SlidersHorizontal,
   Upload,
@@ -26,6 +27,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
 
 export type ShellId =
@@ -112,24 +114,38 @@ const SECONDARY: SecondaryItem[] = [
   { id: "sdlc", href: "/sdlc", label: "Spec", icon: FileText },
 ];
 
-function placesOf(nav: PlanNavModel): PlaceItem[] {
+/**
+ * With AI off nothing is uploaded or parsed: the first place is Start (add
+ * gaps and tactics by hand) and Gaps never waits for an ingested source.
+ */
+function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
+  const gapsUnlocked = nav.gapsUnlocked || !ai;
   return [
-    {
-      id: "upload",
-      href: "/?place=upload",
-      label: "Upload",
-      hint: "Demo pack and ingest",
-      icon: Upload,
-      unlocked: true,
-    },
+    ai
+      ? {
+          id: "upload",
+          href: "/?place=upload",
+          label: "Upload",
+          hint: "Demo pack and ingest",
+          icon: Upload,
+          unlocked: true,
+        }
+      : {
+          id: "upload",
+          href: "/?place=upload",
+          label: "Start",
+          hint: "Add gaps and tactics by hand",
+          icon: PencilLine,
+          unlocked: true,
+        },
     {
       id: "gaps",
       href: "/?place=gaps",
       label: "Gaps",
-      hint: nav.gapsUnlocked ? "Mapped gaps with computed status" : "Ingest a source first",
+      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Ingest a source first",
       icon: ClipboardList,
       count: nav.unvalidatedCount || nav.gapsCount,
-      unlocked: nav.gapsUnlocked,
+      unlocked: gapsUnlocked,
     },
     {
       id: "plan",
@@ -256,7 +272,7 @@ function NavLists({
   dense?: boolean;
   label: string;
 }) {
-  const places = placesOf(nav);
+  const places = placesOf(nav, useAiEnabled());
   return (
     <>
       <PrepRoomToggle dense={dense} />
@@ -295,13 +311,15 @@ export function PlanChrome({
   nav: PlanNavModel;
 }) {
   const [open, setOpen] = useState(false);
-  const places = placesOf(nav);
+  const ai = useAiEnabled();
+  const places = placesOf(nav, ai);
   const current =
     places.find((p) => p.id === active)?.label ??
     SECONDARY.find((s) => s.id === active)?.label ??
     TOOL_LABELS[active] ??
     "Synapse IEGP";
-  const showReadiness = nav.gapsCount > 0 || nav.gapsUnlocked;
+  // With AI off Gaps is always open, so the strip waits for the first gap.
+  const showReadiness = nav.gapsCount > 0 || (ai && nav.gapsUnlocked);
 
   return (
     <div className="flex min-h-full bg-background">

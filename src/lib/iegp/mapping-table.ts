@@ -70,7 +70,15 @@ function decisionsFor(state: IegpState, gapId: string): Record<string, PairDecis
   return out;
 }
 
-export function buildMappingTableView(state: IegpState, proposed: MappingTableRow[] | null): MappingTableViewRow[] {
+export const UNMAPPED_RATIONALE_AI = "Not mapped yet: run S4 for a coverage verdict, or map tactics by hand.";
+export const UNMAPPED_RATIONALE_MANUAL = "Not mapped yet: pick the tactics and a status by hand.";
+
+export function buildMappingTableView(
+  state: IegpState,
+  proposed: MappingTableRow[] | null,
+  options: { ai?: boolean } = {},
+): MappingTableViewRow[] {
+  const ai = options.ai !== false;
   const gaps = state.gaps.filter((gap) => gapEligibleForMapping(gap.status) && !gap.retired);
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
@@ -117,7 +125,7 @@ export function buildMappingTableView(state: IegpState, proposed: MappingTableRo
       tactic_names: locked.map(tacticName),
       mapping_status: undefined,
       confidence: undefined,
-      rationale: ["Not mapped yet: run S4 for a coverage verdict, or map tactics by hand."],
+      rationale: [ai ? UNMAPPED_RATIONALE_AI : UNMAPPED_RATIONALE_MANUAL],
       mappings: [],
       review: null,
       source: "workspace" as const,

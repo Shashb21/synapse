@@ -8,6 +8,7 @@ import { ActionDialog, type ActionIdentity } from "@/components/platform/action-
 import { SettingChips } from "@/components/gap-settings-editor";
 import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, type Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import {
   favourability,
   favourableLabel,
@@ -167,6 +168,7 @@ export function AxisChooser({
   onCancel?: () => void;
 }) {
   const router = useRouter();
+  const ai = useAiEnabled();
   const [xAxis, setXAxis] = useState(initialX);
   const [yAxis, setYAxis] = useState(initialY);
   const [pending, setPending] = useState(false);
@@ -185,7 +187,8 @@ export function AxisChooser({
       setError(saveError);
       return;
     }
-    if (gapIds.length > 0) {
+    // With AI off the axes are saved and every gap is placed by hand.
+    if (ai && gapIds.length > 0) {
       const result = await runPrioritization({
         identity,
         gapIds,
@@ -216,9 +219,10 @@ export function AxisChooser({
           How should {scopeLabel} be prioritized?
         </h2>
         <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">
-          Pick the two axes for the matrix. The model places each Open gap as a first draft; you then
-          drag gaps to change their priority and validate each one. Top-left is High, bottom-right
-          is Low, the other two corners are Medium.
+          {ai
+            ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
+            : "Pick the two axes for the matrix. AI is off, so you place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
+          Top-left is High, bottom-right is Low, the other two corners are Medium.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -241,7 +245,7 @@ export function AxisChooser({
           className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground disabled:opacity-50"
         >
           {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
-          {pending ? "Placing gaps…" : submitLabel}
+          {pending ? (ai ? "Placing gaps…" : "Saving axes…") : ai ? submitLabel : "Save axes"}
         </button>
         {onCancel ? (
           <button
@@ -471,6 +475,7 @@ export function PrioritizeMatrix({
   mayPrioritize: boolean;
 }) {
   const router = useRouter();
+  const ai = useAiEnabled();
   const plotRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ gapId: string; startX: number; startY: number; moved: boolean } | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -494,7 +499,8 @@ export function PrioritizeMatrix({
 
   // Gaps new to this scope (or to these axes) get a first placement automatically.
   useEffect(() => {
-    if (autoPlaced.current || unplaced.length === 0 || !mayPrioritize) return;
+    // With AI off nothing is placed for you: unplaced gaps wait for a person.
+    if (!ai || autoPlaced.current || unplaced.length === 0 || !mayPrioritize) return;
     autoPlaced.current = true;
     setBusy("Placing new gaps on the matrix…");
     void runPrioritization({
@@ -509,7 +515,7 @@ export function PrioritizeMatrix({
       if (!result.ok) setMessage(result.error ?? "Could not place the new gaps.");
       router.refresh();
     });
-  }, [unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, router]);
+  }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, router]);
 
   const view = gaps.map((gap) => {
     const point = positions[gap.gap_id] ?? pointOf(gap, xAxis, yAxis);
@@ -673,15 +679,17 @@ export function PrioritizeMatrix({
           >
             Change axes
           </button>
-          <button
-            type="button"
-            onClick={() => void resuggest()}
-            disabled={!mayPrioritize || Boolean(busy) || validatedCount === gaps.length}
-            className="h-7 rounded-md border border-border px-2.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
-            title="Ask the model again for every gap you have not validated yet"
-          >
-            Re-suggest unvalidated
-          </button>
+          {ai ? (
+            <button
+              type="button"
+              onClick={() => void resuggest()}
+              disabled={!mayPrioritize || Boolean(busy) || validatedCount === gaps.length}
+              className="h-7 rounded-md border border-border px-2.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
+              title="Ask the model again for every gap you have not validated yet"
+            >
+              Re-suggest unvalidated
+            </button>
+          ) : null}
         </div>
       </div>
       {message ? <p className="text-[12px] text-muted-foreground">{message}</p> : null}
@@ -740,7 +748,10 @@ export function PrioritizeMatrix({
               })}
               {placed.length === 0 ? (
                 <p className="absolute inset-0 grid place-items-center p-6 text-center text-[12px] text-muted-foreground">
-                  {busy ?? "No gap is placed yet."}
+                  {busy ??
+                    (ai
+                      ? "No gap is placed yet."
+                      : "No gap is placed yet. AI is off: pick one under Not placed yet and place it by hand.")}
                 </p>
               ) : null}
             </div>
