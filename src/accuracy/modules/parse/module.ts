@@ -3,7 +3,8 @@ import {
   blocksFromParsedDocument,
   persistParseBlocks,
 } from "@/accuracy/store/parse-store";
-import { mechanicalModule } from "../_factory";
+import { agenticModule } from "../_factory";
+import { completeJson, requireAccuracyLlm } from "../../kernel/routing";
 import { ingestFile } from "./ingest-file";
 import { resolveParsePolicy } from "./parse-policy";
 
@@ -16,19 +17,22 @@ const inputSchema = z.object({
 });
 
 const outputSchema = z.object({
-  parser: z.enum(["llamaparse", "local_structured", "local_llm_assist"]),
+  parser: z.enum(["llm", "local_structured"]),
   reason: z.string(),
   block_count: z.number().int().nonnegative(),
+  /** Units the model judged to be noise, with its reason. */
+  dropped: z.array(z.object({ location: z.string(), reason: z.string() })),
 });
 
-export const parseModule = mechanicalModule({
-  id: "parse.router-v1",
+export const parseModule = agenticModule({
+  id: "parse.llm-v1",
   call_kind: "parse",
-  title: "Parse router",
-  summary: "Select parser and emit parse-store blocks (LlamaParse vs local).",
+  title: "LLM parse",
+  summary: "Extract the file's text, then the chosen LLM decides blocks, kinds and headings. LlamaParse is disabled.",
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
+    requireAccuracyLlm(ctx.route, "Parsing");
     const policy = resolveParsePolicy({ filename: input.filename, mime: input.mime });
     ctx.run.note("parse:policy", policy);
 
@@ -43,16 +47,19 @@ export const parseModule = mechanicalModule({
         filename: input.filename,
         mime: input.mime,
         buffer,
+        ask: (args) => completeJson(ctx.complete, args),
       }),
     );
-    if (ingested.llamaError) {
-      ctx.run.note("parse:llama_fallback", { error: ingested.llamaError });
-    }
+    if (ingested.dropped.length > 0) ctx.run.note("parse:dropped", ingested.dropped);
 
     const blocks = blocksFromParsedDocument({
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
-      blocks: ingested.document.blocks,
+      // Ids are per source file, so re-uploading the same file cannot collide.
+      blocks: ingested.document.blocks.map((block, index) => ({
+        ...block,
+        id: `${input.source_file_id}-B${String(index + 1).padStart(3, "0")}`,
+      })),
     });
 
     const block_count = await ctx.run.step("parse:persist", () =>
@@ -69,6 +76,7 @@ export const parseModule = mechanicalModule({
         parser: ingested.effectiveParser,
         reason: policy.reason,
         block_count,
+        dropped: ingested.dropped,
       },
       summary: `Parsed ${input.filename} → ${block_count} blocks (${ingested.effectiveParser})`,
     };

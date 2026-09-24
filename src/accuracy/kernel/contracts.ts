@@ -54,9 +54,9 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
   parse: {
     id: "parse",
     title: "Parse store",
-    purpose: "PDF/PPTX via LlamaParse; DOCX/text via local structured parse.",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Text is extracted from every file type, then the chosen LLM structures it into blocks.",
+    kind: "agentic",
+    llm_roles: ["proposer"],
     upstream: ["upload"],
   },
   inventory_extract: {
