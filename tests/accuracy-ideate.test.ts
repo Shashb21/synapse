@@ -154,18 +154,18 @@ describe("ideate module", () => {
     }
   });
 
-  it("keeps a locked ideated proposal for the high open gap", async () => {
+  it("re-asks for a real tactic type instead of defaulting one", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {
       const ctx = mockCtx(true);
-      ctx.complete = vi.fn(async () => ({
+      const answer = (type: string) => ({
         raw: JSON.stringify({
           tactics: [
             {
               gap_id: "gap_high",
               name: "Prospective OS follow-up in biomarker-high cohort",
-              type: "not_a_type",
+              type,
               origin: "ideated",
               status: "proposed",
               rationale: "No inventory tactic covers residual OS in this subgroup.",
@@ -173,7 +173,11 @@ describe("ideate module", () => {
           ],
         }),
         usage: { prompt_tokens: 8, completion_tokens: 8, total_tokens: 16 },
-      }));
+      });
+      ctx.complete = vi
+        .fn()
+        .mockResolvedValueOnce(answer("not_a_type"))
+        .mockResolvedValueOnce(answer("registry"));
 
       const result = await ideateModule.run(
         {
@@ -191,7 +195,9 @@ describe("ideate module", () => {
       expect(proposal.origin).toBe("ideated");
       expect(proposal.status).toBe("proposed");
       expect(proposal.not_from_reference).toBe(true);
-      expect(proposal.type).toBe("rwe_study");
+      expect(proposal.type).toBe("registry");
+      expect(ctx.complete).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(ctx.complete).mock.calls[1]?.[0].user).toContain("invalid_type");
       expect(proposal.gap_id).toBe("gap_high");
     } finally {
       process.env.SYNAPSE_TEST_STUB_LLM = prev;

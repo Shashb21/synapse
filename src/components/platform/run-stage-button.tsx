@@ -69,7 +69,7 @@ export function RunStageButton({
       ) : result?.summary ? (
         <p className="text-[11px] text-muted-foreground">
           {result.summary}
-          {result.mode ? ` · ${result.mode === "llm" ? "LLM route" : "deterministic route"}` : ""}
+          {result.mode ? ` · ${result.mode === "llm" ? "LLM route" : "no model call"}` : ""}
         </p>
       ) : null}
     </div>

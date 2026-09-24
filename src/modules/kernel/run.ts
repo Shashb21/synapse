@@ -8,12 +8,16 @@ import { recordSignal } from "./hillclimb";
 import { recordEvalRun } from "./evals";
 import type { Actor, EvalScore, ModuleContext, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
+import { isTestStub } from "./llm";
+import type { RunStep } from "./contracts";
 
 export const DEFAULT_WORKSPACE = "default";
 
 /** Agentic stages require a connected LLM; mechanical stages may run without one. */
 async function resolveRouteForRun(stage: StageId) {
-  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+  // Test stub only: modules swap the model for labelled local output, so the
+  // route is marked connected without a real provider behind it.
+  if (isTestStub()) {
     const preferred = await routeConfig(stage);
     const provider =
       findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
@@ -51,6 +55,18 @@ async function resolveRouteForRun(stage: StageId) {
       reason: message,
     };
   }
+}
+
+/**
+ * Whether a run's decisions came from a model. A stage that reports its own
+ * `mode` is believed; otherwise any recorded `llm:*` completion step counts.
+ */
+export function runMode(output: unknown, steps: Pick<RunStep, "name">[]): "llm" | "deterministic" {
+  if (output && typeof output === "object" && "mode" in output) {
+    const mode = (output as { mode?: unknown }).mode;
+    if (mode === "llm" || mode === "deterministic") return mode;
+  }
+  return steps.some((step) => step.name.startsWith("llm:")) ? "llm" : "deterministic";
 }
 
 export type StageRunResult<O> = {
@@ -160,13 +176,12 @@ export async function runStage<O = unknown>(args: {
     for (const signal of result.signals ?? []) {
       await recordSignal(signal);
     }
-    const modeStep = recorder.steps().find((step) => step.name === "proposer:llm");
     return {
       run_id: recorder.id,
       stage: args.stage,
       module_id: implementation.manifest.id,
       module_version: implementation.manifest.version,
-      mode: modeStep ? "llm" : "deterministic",
+      mode: runMode(parsedOutput.data, recorder.steps()),
       summary: result.summary,
       output: parsedOutput.data as O,
       evals,

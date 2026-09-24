@@ -2,6 +2,7 @@ import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import { digestAsPrompt, hillclimbDigest } from "./hillclimb";
+import { isTestStub } from "./llm";
 
 /**
  * Locked shape of every agentic stage: propose → critique → revise, three times,
@@ -112,7 +113,7 @@ export async function runAgenticCycle<C>(
   ctx.run.note("hillclimb:hints", { open: digest.open, corrections: digest.corrections });
 
   const propose = async (args: ProposerArgs<C>): Promise<{ candidates: C[]; via: "llm" | "local" }> => {
-    if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+    if (isTestStub()) {
       return { candidates: await cycle.proposer.local(args), via: "local" };
     }
     if (!canPrompt(ctx.route)) {
