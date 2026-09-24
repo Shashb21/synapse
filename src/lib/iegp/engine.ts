@@ -988,6 +988,12 @@ export type ExtractedGap = {
   domain: EvidenceDomain;
   source_id: string;
   source_quote: string;
+  /**
+   * Set by the stage's LLM judge: the id of the existing live gap this one is
+   * the same as. Commit merges only when this is set; it never decides
+   * equivalence itself.
+   */
+  duplicate_of?: string | null;
 };
 
 export function extractCandidateGaps(
@@ -1021,6 +1027,12 @@ export type ExtractedTactic = {
   evidence_question: string;
   source_id: string;
   source_quote: string;
+  /**
+   * Set by the stage's LLM judge: the id of the existing live tactic this one is
+   * the same as. Commit merges only when this is set; it never decides
+   * equivalence itself.
+   */
+  duplicate_of?: string | null;
 };
 
 export function extractCandidateTactics(
