@@ -6,6 +6,7 @@ import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
 import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
+import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import {
@@ -148,6 +149,11 @@ export default async function GapDetailPage({
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
           />
+          <AssignTacticWithCoverage
+            gapId={gap.id}
+            availableTactics={library}
+            mappedTacticIds={coverages.map((c) => c.tactic_id)}
+          />
           <RecordMissedTactic gapId={gap.id} />
         </div>
         {coverages.map((c) => {
@@ -165,6 +171,7 @@ export default async function GapDetailPage({
                   overall={c.overall}
                   dimensions={coverageDimensionValues(c.dimensions)}
                 />
+                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} />
               </div>
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
@@ -246,7 +253,21 @@ export default async function GapDetailPage({
                                   ))}
                                 </select>
                               </label>
-                              <input type="hidden" name="rationale" value={cell.rationale} />
+                              {cell.rationale ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Current rationale: {cell.rationale}
+                                </p>
+                              ) : null}
+                              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                                Your rationale (required)
+                                <textarea
+                                  name="rationale"
+                                  required
+                                  minLength={3}
+                                  placeholder="Why this dimension has this value"
+                                  className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+                                />
+                              </label>
                             </LockForm>
                           </td>
                         </tr>
@@ -277,11 +298,18 @@ export default async function GapDetailPage({
                       ))}
                     </select>
                   </label>
+                  {c.overall_rationale ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Current rationale: {c.overall_rationale}
+                    </p>
+                  ) : null}
                   <label className="grid gap-1 text-[12px] text-muted-foreground">
-                    Rationale
+                    Your rationale (required)
                     <textarea
                       name="rationale"
-                      defaultValue={c.overall_rationale}
+                      required
+                      minLength={3}
+                      placeholder="Why this tactic covers the gap this much"
                       className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
                     />
                   </label>

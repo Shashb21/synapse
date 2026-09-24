@@ -7,6 +7,7 @@ import type { PlanningContext } from "./planning-context";
 import { parsePlanningContext } from "./planning-context";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
+import { requireRationale } from "@/modules/kernel/edit-records";
 import type {
   ActorFunction,
   CatchUpReason,
@@ -606,7 +607,23 @@ async function applyMappedStatusSideEffects(args: {
   }
 }
 
-export async function syncComputedGapStatuses(gapId?: string) {
+/**
+ * A gap a person validated and whose lock still stands. The engine may not take
+ * its status or its validation away; a disagreeing computation is flagged stale
+ * for that person to review.
+ */
+function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
+  if (!gap.human_validated || !gap.status_lock.locked) return null;
+  return gap.status === "validated_open" || gap.status === "validated_addressed" ? gap.status : null;
+}
+
+/**
+ * Recomputes Open / Partial / Addressed from coverage. `human` marks a change a
+ * person just made (their coverage or mapping edit): the new computation then
+ * applies. Otherwise (a model run, an ingest) a human override or a
+ * human-validated status is kept and only flagged stale when it disagrees.
+ */
+export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }) {
   const state = await loadState();
   const children = childParents(state);
   const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
@@ -644,7 +661,39 @@ export async function syncComputedGapStatuses(gapId?: string) {
       }
       continue;
     }
-    if (gap.status !== computed || gap.computed_status !== computed) {
+    const held = opts?.human ? null : humanHeldStatus(gap);
+    if (held && held !== computed) {
+      const lock = gap.status_lock;
+      const kept: GapStatusOverride = {
+        status: held,
+        from: held,
+        to: held,
+        reason: lock.note?.trim() || `Validated ${held} by a person; kept after a coverage change.`,
+        actor_name: lock.actor_name ?? "Human",
+        actor_function: lock.actor_function ?? "evidence_lead",
+        at: lock.locked_at ?? now(),
+        stale: true,
+      };
+      await db()
+        .update(t.gaps)
+        .set({ computed_status: computed, status_override: kept })
+        .where(eq(t.gaps.id, gap.id));
+      await appendAudit(
+        "Engine",
+        "evidence_lead",
+        "gap",
+        gap.id,
+        "status_override_stale",
+        `Human-validated ${held} kept; engine now computes ${computed}`,
+      );
+      continue;
+    }
+    if (gap.status === computed && gap.computed_status !== computed) {
+      // Same status, newly recorded computation: nothing a person decided changes.
+      await db().update(t.gaps).set({ computed_status: computed }).where(eq(t.gaps.id, gap.id));
+      continue;
+    }
+    if (gap.status !== computed) {
       await db()
         .update(t.gaps)
         .set({
@@ -655,22 +704,20 @@ export async function syncComputedGapStatuses(gapId?: string) {
           human_validated: false,
         })
         .where(eq(t.gaps.id, gap.id));
-      if (gap.status !== computed) {
-        await appendAudit(
-          "Engine",
-          "evidence_lead",
-          "gap",
-          gap.id,
-          "compute_status",
-          `${gap.status} → ${computed}`,
-        );
-        await applyMappedStatusSideEffects({
-          gap_id: gap.id,
-          status: computed,
-          actor_name: "Engine",
-          actor_function: "evidence_lead",
-        });
-      }
+      await appendAudit(
+        "Engine",
+        "evidence_lead",
+        "gap",
+        gap.id,
+        "compute_status",
+        `${gap.status} → ${computed}`,
+      );
+      await applyMappedStatusSideEffects({
+        gap_id: gap.id,
+        status: computed,
+        actor_name: "Engine",
+        actor_function: "evidence_lead",
+      });
     }
   }
 }
@@ -928,15 +975,23 @@ export async function lockCoverageDimension(args: {
   actor_name: string;
   actor_function: ActorFunction;
 }) {
+  if (!(COVERAGE_DIMENSIONS as readonly string[]).includes(args.dimension)) {
+    throw new Error(`Unknown coverage dimension "${String(args.dimension)}".`);
+  }
+  if (!(DIMENSION_VALUES as readonly string[]).includes(args.value)) {
+    throw new Error(`Choose a dimension value (${DIMENSION_VALUES.join(", ")}).`);
+  }
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const row = state.coverages.find((c) => c.id === args.coverage_id);
   if (!row) throw new Error("Coverage not found");
+  const before = row.dimensions[args.dimension]?.value;
   const dimensions = {
     ...row.dimensions,
     [args.dimension]: {
       value: args.value,
-      rationale: args.rationale,
-      lock: makeLock(args.actor_name, args.actor_function, args.rationale),
+      rationale,
+      lock: makeLock(args.actor_name, args.actor_function, rationale),
     },
   };
   await db()
@@ -950,9 +1005,9 @@ export async function lockCoverageDimension(args: {
     "coverage",
     args.coverage_id,
     "lock_dimension",
-    `${args.dimension}=${args.value}`,
+    `${args.dimension}: ${before ?? "unknown"} → ${args.value}: ${rationale}`,
   );
-  await syncComputedGapStatuses(row.gap_id);
+  await syncComputedGapStatuses(row.gap_id, { human: true });
 }
 
 export async function lockCoverageOverall(args: {
@@ -965,6 +1020,7 @@ export async function lockCoverageOverall(args: {
   if (!(ASSESSED_COVERAGE as readonly string[]).includes(args.overall)) {
     throw new Error(`Choose a coverage verdict (${ASSESSED_COVERAGE.join(", ")}).`);
   }
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const row = state.coverages.find((c) => c.id === args.coverage_id);
   if (!row) throw new Error("Coverage not found");
@@ -972,8 +1028,8 @@ export async function lockCoverageOverall(args: {
     .update(t.coverages)
     .set({
       overall: args.overall,
-      overall_rationale: args.rationale,
-      overall_lock: makeLock(args.actor_name, args.actor_function, args.rationale),
+      overall_rationale: rationale,
+      overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
       stale: false,
       needs_review: false,
     })
@@ -985,9 +1041,9 @@ export async function lockCoverageOverall(args: {
     "coverage",
     args.coverage_id,
     "lock_overall",
-    args.overall,
+    `${row.overall} → ${args.overall}: ${rationale}`,
   );
-  await syncComputedGapStatuses(row.gap_id);
+  await syncComputedGapStatuses(row.gap_id, { human: true });
 }
 
 async function flagSiblingCoveragesForReview(tactic_id: string, except_gap_id: string) {
@@ -1329,11 +1385,34 @@ function coverageDimensions(
 }
 
 /**
+ * A pair a person rejected or removed. A model run may never map it again;
+ * only a person can (assignTacticToGap with `human`).
+ */
+function humanRejection(state: IegpState, gap_id: string, tactic_id: string) {
+  return state.mapping_suggestions.find(
+    (m) => m.gap_id === gap_id && m.tactic_id === tactic_id && m.status === "rejected" && m.lock.locked,
+  );
+}
+
+/** `gap_id::tactic_id` of every pair a person rejected or removed. */
+export function humanRejectedPairs(state: IegpState): Set<string> {
+  return new Set(
+    state.mapping_suggestions
+      .filter((m) => m.status === "rejected" && m.lock.locked && !isMappingRowKey(m.tactic_id))
+      .map((m) => `${m.gap_id}::${m.tactic_id}`),
+  );
+}
+
+/**
  * Writes one gap ↔ tactic coverage row. `coverage` and `dimensions` carry the
- * verdict of whoever decided the mapping (the S4 model, or a human); they are
- * stored unlocked, as given. Without a verdict the row is "unassessed" with
- * every dimension "unknown" — nothing is invented. A human lock (lockCoverage*)
- * is what can make a gap Addressed.
+ * verdict of whoever decided the mapping (the S4 model, or a human). Without a
+ * verdict the row is "unassessed" with every dimension "unknown" — nothing is
+ * invented. A model's verdict is stored unlocked; a human lock (lockCoverage*,
+ * or `lock_coverage` here) is what can make a gap Addressed.
+ *
+ * `human` marks a person's mapping: it records the pair as human-accepted and
+ * may re-map a pair that person (or another) rejected or removed. Without it
+ * (a model run) a human-rejected pair is refused.
  */
 export async function assignTacticToGap(args: {
   gap_id: string;
@@ -1343,7 +1422,10 @@ export async function assignTacticToGap(args: {
   note?: string;
   coverage?: OverallCoverage | null;
   dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
-}) {
+  human?: boolean;
+  /** Human only: the given verdict and dimensions are the person's and are locked. */
+  lock_coverage?: boolean;
+}): Promise<string> {
   const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -1353,24 +1435,43 @@ export async function assignTacticToGap(args: {
   if (tactic.review_status !== "accepted") {
     throw new Error("Only accepted tactics can be assigned to a gap.");
   }
+  const rejection = humanRejection(state, args.gap_id, args.tactic_id);
+  if (rejection && !args.human) {
+    throw new Error(
+      `${rejection.lock.actor_name ?? "A reviewer"} rejected or removed "${tactic.name}" for this gap; only a person can map it again.`,
+    );
+  }
   const existing = state.coverages.find(
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
   if (existing) {
     throw new Error("That tactic is already assigned to this gap.");
   }
+  const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
+  const lockVerdict =
+    Boolean(args.human && args.lock_coverage) && (overall !== "unassessed" || givenDimensions.length > 0);
+  const rationale = lockVerdict
+    ? requireRationale(args.note)
+    : args.note ||
+      "Assigned from the plan. Coverage is not assessed until a model or a human records it.";
+  const dimensions = coverageDimensions(args.dimensions, args.note ?? "");
+  if (lockVerdict) {
+    for (const dim of givenDimensions) {
+      dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
+    }
+  }
   const coverageId = nextId("COV", state.coverages.map((c) => c.id));
-  const rationale =
-    args.note ||
-    "Assigned from the plan. Coverage is not assessed until a model or a human records it.";
   await db().insert(t.coverages).values({
     id: coverageId,
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
-    dimensions: coverageDimensions(args.dimensions, args.note ?? ""),
+    dimensions,
     overall,
     overall_rationale: rationale,
-    overall_lock: unlocked(),
+    overall_lock:
+      lockVerdict && overall !== "unassessed"
+        ? makeLock(args.actor_name, args.actor_function, rationale)
+        : unlocked(),
     stale: false,
     needs_review: false,
   });
@@ -1380,9 +1481,57 @@ export async function assignTacticToGap(args: {
     "coverage",
     coverageId,
     "assign_tactic",
-    `${args.tactic_id} → ${args.gap_id}`,
+    `${args.tactic_id} → ${args.gap_id}${lockVerdict ? ` (${overall}, set by a person)` : ""}`,
   );
-  await syncComputedGapStatuses(args.gap_id);
+  if (args.human) {
+    await upsertMappingSuggestion({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      status: "accepted",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: rationale,
+    });
+  }
+  await syncComputedGapStatuses(args.gap_id, { human: args.human });
+  return coverageId;
+}
+
+/**
+ * Removes a gap ↔ tactic mapping a person no longer wants. The pair is recorded
+ * as rejected by that person, so no later model run maps it again.
+ */
+export async function unassignTacticFromGap(args: {
+  gap_id: string;
+  tactic_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  const row = state.coverages.find((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  if (!row) throw new Error("That tactic is not mapped to this gap.");
+  await db().delete(t.coverages).where(eq(t.coverages.id, row.id));
+  await upsertMappingSuggestion({
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    status: "rejected",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: rationale,
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "coverage",
+    row.id,
+    "unassign_tactic",
+    `${args.tactic_id} ↛ ${args.gap_id} (was ${row.overall}): ${rationale}`,
+  );
+  await syncComputedGapStatuses(args.gap_id, { human: true });
 }
 
 async function upsertMappingSuggestion(args: {
@@ -1415,12 +1564,19 @@ async function upsertMappingSuggestion(args: {
   await db().insert(t.mappingSuggestions).values(row);
 }
 
+/**
+ * A person accepts a gap ↔ tactic mapping (an S4 proposal, or their own pick).
+ * A pair S4 already committed keeps its coverage and is marked human-accepted;
+ * otherwise it is assigned, with the proposal's verdict when one is given.
+ */
 export async function acceptMapping(args: {
   gap_id: string;
   tactic_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
+  coverage?: OverallCoverage | null;
+  dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -1433,15 +1589,22 @@ export async function acceptMapping(args: {
   if (!tacticEligibleForMapping(tactic)) {
     throw new Error("Only accepted, non-cancelled tactics can be mapped.");
   }
-  await upsertMappingSuggestion({
-    ...args,
-    status: "accepted",
-    note: args.note || "Accepted mapping suggestion.",
-  });
-  await assignTacticToGap({
-    ...args,
-    note: args.note || "Accepted mapping suggestion.",
-  });
+  const note = args.note?.trim() || "Accepted mapping suggestion.";
+  const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  if (covered) {
+    await upsertMappingSuggestion({ ...args, status: "accepted", note });
+  } else {
+    await assignTacticToGap({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note,
+      coverage: args.coverage,
+      dimensions: args.dimensions,
+      human: true,
+    });
+  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1455,6 +1618,38 @@ export async function acceptMapping(args: {
 export const MAPPING_ROW_STATUSES = ["open", "addressed", "partially_addressed"] as const;
 export type MappingRowStatus = (typeof MAPPING_ROW_STATUSES)[number];
 
+/**
+ * A /mappings row a person saved is stored as one mapping_suggestions record
+ * per gap under this reserved tactic key (`__row__:<status>`); the row's tactic
+ * set is the gap's coverages, each marked human-accepted.
+ */
+export const HUMAN_MAPPING_ROW_PREFIX = "__row__:";
+
+export function isMappingRowKey(tactic_id: string): boolean {
+  return tactic_id.startsWith(HUMAN_MAPPING_ROW_PREFIX);
+}
+
+export type HumanMappingRow = {
+  gap_id: string;
+  mapping_status: MappingRowStatus;
+  rationale: string;
+  lock: Lock;
+};
+
+/** The row a person saved for this gap on /mappings, if any. */
+export function humanMappingRow(state: IegpState, gap_id: string): HumanMappingRow | null {
+  const row = state.mapping_suggestions.find((m) => m.gap_id === gap_id && isMappingRowKey(m.tactic_id));
+  if (!row) return null;
+  const status = row.tactic_id.slice(HUMAN_MAPPING_ROW_PREFIX.length);
+  if (!(MAPPING_ROW_STATUSES as readonly string[]).includes(status)) return null;
+  return {
+    gap_id,
+    mapping_status: status as MappingRowStatus,
+    rationale: row.lock.note ?? "",
+    lock: row.lock,
+  };
+}
+
 /** Rejects an empty or unknown mapping status instead of casting it. */
 export function requireMappingRowStatus(value: unknown): MappingRowStatus {
   if (typeof value === "string" && (MAPPING_ROW_STATUSES as readonly string[]).includes(value)) {
@@ -1467,6 +1662,11 @@ export function requireMappingRowStatus(value: unknown): MappingRowStatus {
   );
 }
 
+/**
+ * Saves a /mappings row as the person's decision: the gap's tactic set becomes
+ * exactly `tactic_ids` (removed tactics are unassigned and recorded as rejected,
+ * new ones assigned), and the row status is stored so it wins over any S4 run.
+ */
 export async function saveMappingTableRow(args: {
   gap_id: string;
   tactic_ids: string[];
@@ -1476,46 +1676,60 @@ export async function saveMappingTableRow(args: {
   rationale: string;
 }) {
   const mapping_status = requireMappingRowStatus(args.mapping_status);
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
   if (!gapEligibleForMapping(gap.status)) {
     throw new Error("Only live gaps eligible for mapping can be edited here.");
   }
-  const uniqueIds = [...new Set(args.tactic_ids.filter(Boolean))];
+  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new Error("Addressed or partially addressed rows need at least one tactic.");
   }
   for (const tactic_id of uniqueIds) {
-    const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === tactic_id);
-    if (!covered) {
-      await assignTacticToGap({
-        gap_id: args.gap_id,
-        tactic_id,
-        actor_name: args.actor_name,
-        actor_function: args.actor_function,
-        note: args.rationale,
-      });
-    }
-    await upsertMappingSuggestion({
-      gap_id: args.gap_id,
-      tactic_id,
-      status: "accepted",
-      actor_name: args.actor_name,
-      actor_function: args.actor_function,
-      note: args.rationale,
-    });
+    const tactic = state.tactics.find((x) => x.id === tactic_id);
+    if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
   }
+  const current = state.coverages.filter((c) => c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const removed = current.filter((id) => !uniqueIds.includes(id));
+  const actor = { actor_name: args.actor_name, actor_function: args.actor_function };
+  for (const tactic_id of removed) {
+    await unassignTacticFromGap({ gap_id: args.gap_id, tactic_id, rationale, ...actor });
+  }
+  for (const tactic_id of uniqueIds) {
+    if (current.includes(tactic_id)) {
+      await upsertMappingSuggestion({ gap_id: args.gap_id, tactic_id, status: "accepted", ...actor, note: rationale });
+    } else {
+      await assignTacticToGap({ gap_id: args.gap_id, tactic_id, ...actor, note: rationale, human: true });
+    }
+  }
+  for (const old of state.mapping_suggestions.filter((m) => m.gap_id === args.gap_id && isMappingRowKey(m.tactic_id))) {
+    await db()
+      .delete(t.mappingSuggestions)
+      .where(and(eq(t.mappingSuggestions.gap_id, args.gap_id), eq(t.mappingSuggestions.tactic_id, old.tactic_id)));
+  }
+  await db().insert(t.mappingSuggestions).values({
+    gap_id: args.gap_id,
+    tactic_id: `${HUMAN_MAPPING_ROW_PREFIX}${mapping_status}`,
+    status: "accepted",
+    lock: makeLock(args.actor_name, args.actor_function, rationale),
+  });
   await appendAudit(
     args.actor_name,
     args.actor_function,
     "mapping",
     args.gap_id,
     "save_mapping_row",
-    `${mapping_status} · ${uniqueIds.join(", ") || "none"}`,
+    `${mapping_status} · ${uniqueIds.join(", ") || "none"}${removed.length ? ` · removed ${removed.join(", ")}` : ""}: ${rationale}`,
   );
 }
 
+/**
+ * A person rejects a gap ↔ tactic mapping. A pair already committed (by S4 or
+ * anyone) is removed like unassignTacticFromGap, which needs a rationale. Either
+ * way the pair is recorded as rejected, so no later model run maps it again.
+ */
 export async function rejectMapping(args: {
   gap_id: string;
   tactic_id: string;
@@ -1532,13 +1746,20 @@ export async function rejectMapping(args: {
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
   if (covered) {
-    throw new Error("That tactic already covers this gap. Reject does not remove an assignment.");
+    await unassignTacticFromGap({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      rationale: args.note ?? "",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+  } else {
+    await upsertMappingSuggestion({
+      ...args,
+      status: "rejected",
+      note: args.note || "Rejected mapping suggestion.",
+    });
   }
-  await upsertMappingSuggestion({
-    ...args,
-    status: "rejected",
-    note: args.note || "Rejected mapping suggestion.",
-  });
   await appendAudit(
     args.actor_name,
     args.actor_function,

@@ -6,20 +6,36 @@ import {
 } from "@/modules/stages/s4-kg-mapping/module";
 import { listRuns } from "@/modules/kernel/observability";
 import { gapEligibleForMapping } from "@/lib/iegp/engine";
-import type { IegpState } from "@/lib/iegp/types";
+import { humanMappingRow, isMappingRowKey } from "@/lib/iegp/store";
+import type { IegpState, Lock } from "@/lib/iegp/types";
+
+/** A person's decision on one gap ↔ tactic pair (accept, map, reject or remove). */
+export type PairDecision = {
+  status: "accepted" | "rejected";
+  actor_name: string | null;
+  note: string | null;
+};
 
 /**
- * One row of the /mappings table. A "proposal" row carries the S4 model's
- * verdict. A "workspace" row is a gap S4 has not mapped yet: its status and
- * confidence are undefined ("not mapped yet"), never invented.
+ * One row of the /mappings table.
+ * - "human": a person saved this row; its status and tactic set win over any S4 run.
+ * - "proposal": the latest S4 run's verdict, waiting for a person to accept or reject each tactic.
+ * - "workspace": a gap S4 has not mapped yet: status and confidence are undefined
+ *   ("not mapped yet"), never invented.
  */
 export type MappingTableViewRow = Omit<MappingTableRow, "mapping_status" | "confidence" | "mappings" | "review"> & {
   mapping_status: MappingStatus | undefined;
   confidence: number | undefined;
   mappings: MappingTableRow["mappings"];
   review: MappingTableRow["review"];
-  source: "proposal" | "workspace";
+  source: "proposal" | "workspace" | "human";
   locked_tactic_ids: string[];
+  /** Human decisions per tactic id for this gap. */
+  decisions: Record<string, PairDecision>;
+  /** Set when source is "human": who saved the row and when. */
+  human_lock: Lock | null;
+  /** Tactics mapped (e.g. by a later S4 run) that no person has accepted yet. */
+  unreviewed_tactic_ids: string[];
 };
 
 const storedRows = z.array(mappingTableRowSchema);
@@ -45,11 +61,43 @@ export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
   }
 }
 
+function decisionsFor(state: IegpState, gapId: string): Record<string, PairDecision> {
+  const out: Record<string, PairDecision> = {};
+  for (const m of state.mapping_suggestions) {
+    if (m.gap_id !== gapId || isMappingRowKey(m.tactic_id) || !m.lock.locked) continue;
+    out[m.tactic_id] = { status: m.status, actor_name: m.lock.actor_name, note: m.lock.note };
+  }
+  return out;
+}
+
 export function buildMappingTableView(state: IegpState, proposed: MappingTableRow[] | null): MappingTableViewRow[] {
   const gaps = state.gaps.filter((gap) => gapEligibleForMapping(gap.status) && !gap.retired);
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
+  const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
     const locked = state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.tactic_id);
+    const decisions = decisionsFor(state, gap.id);
+    const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
+    const human = humanMappingRow(state, gap.id);
+    if (human) {
+      // The person's row wins over the latest S4 run.
+      return {
+        gap_id: gap.id,
+        gap_name: gap.name,
+        tactic_ids: locked,
+        tactic_names: locked.map(tacticName),
+        mapping_status: human.mapping_status,
+        confidence: undefined,
+        rationale: [human.rationale],
+        mappings: [],
+        review: null,
+        source: "human" as const,
+        locked_tactic_ids: locked,
+        decisions,
+        human_lock: human.lock,
+        unreviewed_tactic_ids: unreviewed,
+      };
+    }
     const proposal = proposedByGap.get(gap.id);
     if (proposal) {
       return {
@@ -57,20 +105,26 @@ export function buildMappingTableView(state: IegpState, proposed: MappingTableRo
         gap_name: gap.name,
         source: "proposal" as const,
         locked_tactic_ids: locked,
+        decisions,
+        human_lock: null,
+        unreviewed_tactic_ids: unreviewed,
       };
     }
     return {
       gap_id: gap.id,
       gap_name: gap.name,
       tactic_ids: locked,
-      tactic_names: locked.map((id) => state.tactics.find((t) => t.id === id)?.name ?? id),
+      tactic_names: locked.map(tacticName),
       mapping_status: undefined,
       confidence: undefined,
-      rationale: ["Not mapped yet: run S4 for a coverage verdict."],
+      rationale: ["Not mapped yet: run S4 for a coverage verdict, or map tactics by hand."],
       mappings: [],
       review: null,
       source: "workspace" as const,
       locked_tactic_ids: locked,
+      decisions,
+      human_lock: null,
+      unreviewed_tactic_ids: unreviewed,
     };
   });
 }
