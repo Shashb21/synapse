@@ -74,6 +74,9 @@ export async function extractRawUnits(args: {
   return local.blocks.map((block) => ({ location: block.location, text: block.text }));
 }
 
+/** A unit the model judged to be noise, kept verbatim so a human can restore it. */
+export type DroppedUnit = { location: string; reason: string; text: string };
+
 type UnitAnswer = { blocks: Omit<ParsedBlock, "id" | "location">[]; dropped_reason: string | null };
 
 function readAnswer(unit: RawUnit, row: unknown): UnitAnswer | undefined {
@@ -123,7 +126,12 @@ export async function structureWithLlm(args: {
   filename: string;
   units: RawUnit[];
   ask: Ask;
-}): Promise<{ blocks: Omit<ParsedBlock, "id">[]; dropped: { location: string; reason: string }[] }> {
+}): Promise<{
+  blocks: Omit<ParsedBlock, "id">[];
+  dropped: { location: string; reason: string }[];
+  /** The same dropped units with their raw text, so a human can restore one as a block. */
+  dropped_units: DroppedUnit[];
+}> {
   const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
   const answers = new Map<string, UnitAnswer>();
   for (const [index, group] of chunk(entries).entries()) {
@@ -160,15 +168,17 @@ export async function structureWithLlm(args: {
   }
   const blocks: Omit<ParsedBlock, "id">[] = [];
   const dropped: { location: string; reason: string }[] = [];
+  const dropped_units: DroppedUnit[] = [];
   for (const entry of entries) {
     const answer = answers.get(entry.id)!;
     if (answer.dropped_reason && answer.blocks.length === 0) {
       dropped.push({ location: entry.unit.location.ref, reason: answer.dropped_reason });
+      dropped_units.push({ location: entry.unit.location.ref, reason: answer.dropped_reason, text: entry.unit.text });
     }
     for (const block of answer.blocks) blocks.push({ ...block, location: entry.unit.location });
   }
   if (blocks.length === 0) throw new Error(`The model found no content blocks in ${args.filename}.`);
-  return { blocks, dropped };
+  return { blocks, dropped, dropped_units };
 }
 
 const STAKEHOLDER_SYSTEM = `You read the opening of a pharma evidence-planning document and say which stakeholder function it comes from or speaks for.
@@ -220,11 +230,12 @@ export async function parseWithLlm(args: {
 }): Promise<{
   document: ParsedDocument;
   dropped: { location: string; reason: string }[];
+  dropped_units: DroppedUnit[];
   stakeholder_rationale: string;
 }> {
   const mime = args.mime || mimeForFilename(args.filename);
   const units = await extractRawUnits({ filename: args.filename, buffer: args.buffer, mime });
-  const { blocks, dropped } = await structureWithLlm({ filename: args.filename, units, ask: args.ask });
+  const { blocks, dropped, dropped_units } = await structureWithLlm({ filename: args.filename, units, ask: args.ask });
   const stakeholder = await classifyStakeholder({ filename: args.filename, blocks, ask: args.ask });
   const id = hashId("DOC", `${args.filename}:${args.buffer.length}`);
   const numbered = blocks.map((block, index) => ({ ...block, id: `${id}-B${String(index + 1).padStart(2, "0")}` }));
@@ -241,6 +252,7 @@ export async function parseWithLlm(args: {
       fullText: numbered.map((block) => `[${block.location.ref}] ${block.text}`).join("\n"),
     },
     dropped,
+    dropped_units,
     stakeholder_rationale: stakeholder.rationale,
   };
 }

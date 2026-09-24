@@ -1,11 +1,20 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
-import { ParseBlockPreview } from "@/components/accuracy/parse-block-preview";
+import { ParseBlockPreview, ParseSourceControls } from "@/components/accuracy/parse-block-preview";
+import { ManualSourceForm } from "@/components/platform/manual-source-form";
+import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { sessionContext } from "@/modules/auth/session";
+import { STAKEHOLDER_FUNCTIONS } from "@/lib/schema";
 import { SourceExtractActions, ExtractOauthGateBanner } from "@/components/accuracy/source-extract-actions";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack, inspectLiveExtractGate } from "@/accuracy";
 import { toParseBlockPreviews } from "@/accuracy/store/parse-preview";
-import { readParseBlocks } from "@/accuracy/store/parse-store";
+import {
+  PARSE_BLOCK_KINDS,
+  listDroppedUnits,
+  readParseBlocksWithMeta,
+  readSourceStakeholder,
+} from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 
@@ -24,7 +33,11 @@ export default async function AccuracySourcesPage({
   let sources: Array<
     Awaited<ReturnType<typeof listSourceFiles>>[number] & {
       block_count: number;
-      parse_blocks: ReturnType<typeof toParseBlockPreviews>;
+      parse_blocks: (ReturnType<typeof toParseBlockPreviews>[number] & {
+        provenance: Awaited<ReturnType<typeof readParseBlocksWithMeta>>[number]["provenance"];
+      })[];
+      stakeholder: Awaited<ReturnType<typeof readSourceStakeholder>>;
+      dropped: Awaited<ReturnType<typeof listDroppedUnits>>;
     }
   > = [];
   let loadError: string | null = null;
@@ -35,11 +48,17 @@ export default async function AccuracySourcesPage({
       const rows = await listSourceFiles(workspaceId);
       sources = await Promise.all(
         rows.map(async (row) => {
-          const parse_blocks = toParseBlockPreviews(await readParseBlocks(workspaceId, row.id));
+          const stored = await readParseBlocksWithMeta(workspaceId, row.id);
+          const parse_blocks = toParseBlockPreviews(stored).map((preview) => ({
+            ...preview,
+            provenance: stored.find((block) => block.id === preview.id)!.provenance,
+          }));
           return {
             ...row,
             block_count: parse_blocks.length,
             parse_blocks,
+            stakeholder: await readSourceStakeholder(workspaceId, row.id),
+            dropped: await listDroppedUnits(workspaceId, row.id),
           };
         }),
       );
@@ -50,6 +69,12 @@ export default async function AccuracySourcesPage({
 
   const active = workspaces.find((w) => w.id === workspaceId);
   const extractGate = await inspectLiveExtractGate();
+  const session = await sessionContext();
+  const identity: ActionIdentity = {
+    signed_in: session.signed_in,
+    actor_name: session.actor.name,
+    actor_function: session.actor.function,
+  };
 
   return (
     <AccuracyAppShell active="sources">
@@ -85,6 +110,39 @@ export default async function AccuracySourcesPage({
           </p>
           <ExtractOauthGateBanner gate={extractGate} />
           <SourceUploadForm workspaceId={workspaceId} />
+          <details className="mb-3 border border-border bg-card/40 p-3">
+            <summary className="cursor-pointer text-[12px] text-foreground">
+              Type or paste a source by hand (no AI)
+            </summary>
+            <p className="mb-2 mt-1 text-[11px] text-muted-foreground">
+              One block per paragraph you confirm. Stored as human-entered; no model runs and a re-parse never
+              replaces these blocks.
+            </p>
+            <ManualSourceForm
+              endpoint="/api/accuracy/sources/blocks"
+              payload={{ workspace_id: workspaceId }}
+              fields={[
+                { name: "filename", label: "Name", required: true, placeholder: "kol-call-notes.txt" },
+                {
+                  name: "doc_role",
+                  label: "Document role",
+                  type: "select",
+                  options: ["interview", "medical", "heor", "publications", "iis", "other"].map((v) => ({
+                    value: v,
+                    label: v,
+                  })),
+                },
+                {
+                  name: "stakeholder_function",
+                  label: "Stakeholder function",
+                  type: "select",
+                  options: STAKEHOLDER_FUNCTIONS.map((v) => ({ value: v, label: v })),
+                },
+              ]}
+              kindOptions={PARSE_BLOCK_KINDS}
+              identity={identity}
+            />
+          </details>
           {sources.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No sources yet. Upload above or seed from gold on the Workspaces page.
@@ -102,7 +160,16 @@ export default async function AccuracySourcesPage({
                     {source.reference_pack_id ? ` · pack ${source.reference_pack_id}` : ""}
                   </p>
                   <p className="mt-1 font-mono text-[10px] text-muted-foreground">{source.id}</p>
-                  <ParseBlockPreview blocks={source.parse_blocks} />
+                  <ParseSourceControls
+                    edit={{ workspaceId, sourceFileId: source.id, identity, kinds: PARSE_BLOCK_KINDS }}
+                    stakeholder={source.stakeholder}
+                    stakeholderOptions={STAKEHOLDER_FUNCTIONS}
+                    dropped={source.dropped}
+                  />
+                  <ParseBlockPreview
+                    blocks={source.parse_blocks}
+                    edit={{ workspaceId, sourceFileId: source.id, identity, kinds: PARSE_BLOCK_KINDS }}
+                  />
                   <SourceExtractActions
                     workspaceId={workspaceId}
                     sourceFileId={source.id}
