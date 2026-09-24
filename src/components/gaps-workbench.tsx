@@ -6,6 +6,7 @@ import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/compone
 import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
+import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import {
   GAPS_TACTIC_HELPER,
   MapExistingTactic,
@@ -191,6 +192,7 @@ function GapListRow({
       <div className="flex flex-wrap items-center gap-1.5">
         <GapBadge status={card.gap_status} />
         <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</span>
+        <SettingChips settings={card.settings} />
       </div>
       <p className="mt-1 truncate text-[13px] leading-5 text-foreground">{card.gap_name}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">
@@ -205,9 +207,11 @@ function GapListRow({
 function GapDetailPane({
   card,
   availableTactics,
+  settingOptions,
 }: {
   card: ReviewGapCard;
   availableTactics: TacticLibraryItem[];
+  settingOptions: string[];
 }) {
   const isPartial = card.gap_status === "validated_partial";
   return (
@@ -246,6 +250,15 @@ function GapDetailPane({
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <p className="mt-3 text-[13px] leading-5 text-muted-foreground">{card.statement}</p>
+      <div className="mt-4">
+        {/* Keyed by gap so switching the selected gap resets the editor's local tags. */}
+        <GapSettingsEditor
+          key={card.gap_id}
+          gapId={card.gap_id}
+          settings={card.settings}
+          options={settingOptions}
+        />
+      </div>
       <div className="mt-4">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
         <ul className="mt-1 grid gap-1.5">
@@ -293,11 +306,13 @@ export function GapsWorkbench({
   availableTactics,
   readyForPrioritize,
   initialFilter,
+  settingOptions = [],
 }: {
   cards: ReviewGapCard[];
   availableTactics: TacticLibraryItem[];
   readyForPrioritize: boolean;
   initialFilter?: ReviewGapFilter;
+  settingOptions?: string[];
 }) {
   const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
   const counts = reviewGapFilterCounts(cards);
@@ -318,7 +333,8 @@ export function GapsWorkbench({
     <div className="grid gap-6">
       <p className="text-[12px] leading-5 text-muted-foreground">
         Engine computes Open, Partially Addressed, or Addressed. Confirm each gap before Prioritize.
-        Partial must be split or rewritten.
+        Partial must be split or rewritten. Tag each gap with its treatment settings (1L,
+        perioperative, metastatic…) — Prioritize works one setting at a time.
       </p>
       <p className="text-[12px] leading-5 text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
       <div className="flex flex-wrap items-center gap-2">
@@ -369,7 +385,11 @@ export function GapsWorkbench({
                   >
                     ← Back to list
                   </Button>
-                  <GapDetailPane card={selected} availableTactics={availableTactics} />
+                  <GapDetailPane
+                    card={selected}
+                    availableTactics={availableTactics}
+                    settingOptions={settingOptions}
+                  />
                 </>
               ) : (
                 <p className="text-[12px] text-muted-foreground">Select a gap from the list.</p>

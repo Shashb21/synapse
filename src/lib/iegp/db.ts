@@ -227,6 +227,9 @@ export async function ensureSchema() {
   await d.execute(
     sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_reason text"),
   );
+  await d.execute(
+    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb"),
+  );
 }
 
 export async function wipeIegp() {

@@ -1731,6 +1731,7 @@ export function buildSeed(): IegpState {
       human_validated: gap.status !== "candidate" && gap.status !== "excluded",
       parked_at: null,
       parked_reason: null,
+      settings: [],
     })),
     residuals: state.residuals.map((residual) => ({
       ...residual,

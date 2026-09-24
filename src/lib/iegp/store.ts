@@ -70,6 +70,24 @@ function asLock(value: unknown): Lock {
   };
 }
 
+/**
+ * Settings are free tags, so the same setting typed twice ("1L", " 1l ") must
+ * collapse to one. The first spelling wins; order is kept.
+ */
+export function normalizeSettings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") continue;
+    const tag = raw.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    out.push(tag);
+  }
+  return out;
+}
+
 export async function loadState(): Promise<IegpState> {
   await ensureSchema();
   const d = db();
@@ -161,6 +179,7 @@ async function readState(): Promise<IegpState> {
       human_validated: Boolean(g.human_validated),
       parked_at: g.parked_at ?? null,
       parked_reason: g.parked_reason ?? null,
+      settings: normalizeSettings(g.settings),
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -870,6 +889,29 @@ export async function parkGap(args: {
     .set({ parked_at: now(), parked_reason: reason })
     .where(eq(t.gaps.id, args.gap_id));
   await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "park", reason);
+}
+
+export async function setGapSettings(args: {
+  gap_id: string;
+  settings: string[];
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string[]> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
+  const settings = normalizeSettings(args.settings);
+  await db().update(t.gaps).set({ settings }).where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "set_settings",
+    settings.length ? settings.join(", ") : "No setting",
+  );
+  return settings;
 }
 
 export async function unparkGap(args: {
@@ -1805,6 +1847,7 @@ export async function createGap(args: {
   actor_function: ActorFunction;
   note?: string;
   parent_gap_id?: string | null;
+  settings?: string[];
 }) {
   const statement = args.statement.trim();
   if (!statement) throw new Error("Statement is required.");
@@ -1812,9 +1855,12 @@ export async function createGap(args: {
   const state = await loadState();
   const obj = state.objectives[0];
   if (!obj) throw new Error("No strategic objective to attach this gap to.");
+  // Split and rewrite children carry the parent's settings through.
+  let settings = normalizeSettings(args.settings ?? []);
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
     if (!parent) throw new Error("Parent gap not found");
+    if (!args.settings) settings = parent.settings;
   }
   const name = args.name?.trim() || gapNameFromStatement(statement);
   const id = nextId(
@@ -1838,6 +1884,7 @@ export async function createGap(args: {
     human_validated: false,
     parked_at: null,
     parked_reason: null,
+    settings,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   await syncComputedGapStatuses(id);

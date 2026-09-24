@@ -175,7 +175,7 @@ export default async function IdeationPage() {
             <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
               S9 only runs for open gaps whose priority band has been validated as High. Validate a
               band on the{" "}
-              <Link href="/matrix" className="text-foreground no-underline hover:underline">
+              <Link href="/?place=plan" className="text-foreground no-underline hover:underline">
                 prioritization matrix
               </Link>{" "}
               first, then run S9 here.
