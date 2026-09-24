@@ -33,8 +33,9 @@ import {
 } from "@/modules/llm/provider";
 import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
 import { DEFAULT_AXES, parseAxesConfig, validateAxes } from "@/modules/stages/s8-prioritization/axes";
-import { addMonths, buildTimeline, monthsBetween } from "@/modules/stages/s10-timeline/build";
+import { addMonths, buildTimeline, monthsBetween, timelineCandidates } from "@/modules/stages/s10-timeline/build";
 import { buildSeed } from "@/lib/iegp/seed";
+import { displayedGapStatus } from "@/lib/iegp/engine";
 
 describe("module contracts", () => {
   it("registers exactly one implementation per stage, all on the kernel contract", () => {
@@ -415,42 +416,101 @@ describe("timeline build", () => {
     expect(monthsBetween("2026-01-10", "2026-03-10")).toBe(3);
   });
 
-  it("dates every mapped tactic, lanes it by band and gates dissemination on readouts", () => {
+  const validated = (gapId: string, band: "high" | "medium" | "low", isValidated = true) => ({
+    gap_id: gapId,
+    axis_scores: { decision_impact: 80 },
+    suggested_band: band,
+    suggested_rationale: "seeded",
+    band,
+    validated: isValidated,
+    rationale: isValidated ? "seeded" : null,
+    actor_name: "Test",
+    at: "2026-01-01T00:00:00.000Z",
+  });
+
+  /** Every candidate estimated in full, so the layout is exercised on supplied values only. */
+  const estimateAll = (state: ReturnType<typeof buildSeed>, placements: ReturnType<typeof validated>[]) =>
+    new Map(
+      timelineCandidates({ state, placements }).map((candidate) => [
+        candidate.id,
+        { start_offset_months: 2, duration_months: 6, readout_lag_months: 1, rationale: "estimated" },
+      ]),
+    );
+
+  it("lays out only the values it is given and never dates a tactic on its own", () => {
     const state = buildSeed();
+    const bare = buildTimeline({ state, placements: [], anchor: "2026-01-01" });
+    // Seed tactics carry a start date but no designed duration: nothing is invented.
+    expect(bare.activities).toHaveLength(0);
+    expect(bare.pending.length).toBeGreaterThan(0);
+    for (const row of bare.pending) expect(row.missing).toContain("duration");
+
     const model = buildTimeline({
       state,
-      placements: state.gaps.slice(0, 2).map((gap) => ({
-        gap_id: gap.id,
-        axis_scores: { decision_impact: 80 },
-        suggested_band: "high" as const,
-        suggested_rationale: "seeded",
-        band: "high" as const,
-        validated: true,
-        rationale: "seeded",
-        actor_name: "Test",
-        at: "2026-01-01T00:00:00.000Z",
-      })),
+      placements: [],
+      estimates: estimateAll(state, []),
       anchor: "2026-01-01",
     });
-    expect(model.activities.length).toBeGreaterThan(0);
+    expect(model.pending).toHaveLength(0);
+    expect(model.activities.length).toBe(bare.pending.length);
     for (const activity of model.activities) {
-      expect(activity.gap_ids.length).toBeGreaterThan(0);
-      expect(activity.end_date >= activity.start_date).toBe(true);
+      const tactic = state.tactics.find((row) => row.id === activity.tactic_id)!;
+      expect(activity.start_date).toBe(tactic.start_date ?? "2026-03-01");
+      expect(activity.end_date).toBe(addMonths(activity.start_date, 6));
+      expect(activity.readout_date).toBe(tactic.evidence_available ?? addMonths(activity.end_date, 1));
+      expect(activity.meta.schedule_basis.end).toBe("model");
+      expect(activity.depends_on).toEqual([]);
     }
-    expect(model.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "addressed"]);
+    expect(model.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "unprioritized", "addressed"]);
     expect(model.window.months).toBeGreaterThan(0);
-    const dependent = model.activities.filter((activity) => activity.depends_on.length > 0);
-    for (const activity of dependent) {
-      for (const upstreamId of activity.depends_on) {
-        const upstream = model.activities.find((candidate) => candidate.id === upstreamId)!;
-        expect(activity.start_date >= (upstream.readout_date ?? upstream.end_date)).toBe(true);
-      }
-    }
+  });
+
+  it("lanes an activity only by a validated band", () => {
+    const state = buildSeed();
+    const probe = timelineCandidates({ state, placements: [] }).find((candidate) => candidate.band !== "addressed")!;
+    const gapId = probe.gap_ids.find((id) => {
+      const gap = state.gaps.find((row) => row.id === id);
+      return gap && displayedGapStatus(gap) !== "validated_addressed";
+    })!;
+    const others = probe.gap_ids.filter((id) => id !== gapId);
+    const suggestedOnly = [validated(gapId, "high", false), ...others.map((id) => validated(id, "high", false))];
+    const unvalidated = timelineCandidates({ state, placements: suggestedOnly }).find((row) => row.id === probe.id)!;
+    expect(unvalidated.band).toBe("unprioritized");
+
+    const placed = [validated(gapId, "medium"), ...others.map((id) => validated(id, "low", false))];
+    const model = buildTimeline({ state, placements: placed, estimates: estimateAll(state, placed), anchor: "2026-01-01" });
+    const activity = model.activities.find((row) => row.id === probe.id)!;
+    expect(activity.band).toBe("medium");
+    expect(activity.lane).toBe("medium");
+  });
+
+  it("gates a model-dated start on the readouts the model said it depends on", () => {
+    const state = buildSeed();
+    const [upstream, downstream] = timelineCandidates({ state, placements: [] });
+    // The downstream tactic has no start of its own, so its start is the model's to set.
+    const tactic = state.tactics.find((row) => row.id === downstream!.tactic.id)!;
+    tactic.start_date = null;
+    tactic.evidence_available = null;
+    const model = buildTimeline({
+      state,
+      placements: [],
+      estimates: estimateAll(state, []),
+      dependencies: new Map([
+        [downstream!.id, { upstream: [{ id: upstream!.id, reason: "reports its results" }] }],
+      ]),
+      anchor: "2020-01-01",
+    });
+    const before = model.activities.find((row) => row.id === upstream!.id)!;
+    const after = model.activities.find((row) => row.id === downstream!.id)!;
+    expect(after.depends_on).toEqual([upstream!.id]);
+    expect(after.start_date).toBe(before.readout_date);
+    expect(after.end_date).toBe(addMonths(after.start_date, 6));
+    expect(after.meta.dependency_note).toMatch(/reports its results/);
   });
 
   it("keeps a user's saved dates when it rebuilds", () => {
     const state = buildSeed();
-    const first = buildTimeline({ state, placements: [], anchor: "2026-01-01" });
+    const first = buildTimeline({ state, placements: [], estimates: estimateAll(state, []), anchor: "2026-01-01" });
     const target = first.activities[0]!;
     const second = buildTimeline({
       state,
@@ -471,5 +531,6 @@ describe("timeline build", () => {
     expect(moved.start_date).toBe("2027-05-01");
     expect(moved.end_date).toBe("2027-11-01");
     expect(moved.readout_date).toBe("2027-12-01");
+    expect(moved.meta.schedule_basis.start).toBe("saved");
   });
 });
