@@ -7,6 +7,12 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  persistDroppedSourceUnits,
+  recordLlmSourceStakeholder,
+  reparseSourceBlocks,
+} from "@/lib/iegp/source-blocks";
+import * as iegp from "@/lib/iegp/schema";
+import {
   extractCandidateGaps,
   extractCandidateTactics,
   splitSourceIntoBlocks,
@@ -127,9 +133,15 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
                   : (await parseLocalDocument({ filename: record.filename, buffer, mime: record.mime })).blocks
                       .map((block) => block.text)
                       .join("\n\n");
-              return { text, sections: undefined, parser: "local" as const };
+              return {
+                text,
+                sections: undefined,
+                parser: "local" as const,
+                dropped_units: [],
+                stakeholder: null,
+              };
             }
-            const { document, dropped } = await parseWithLlm({
+            const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
               filename: record.filename,
               buffer,
               mime: record.mime,
@@ -144,6 +156,8 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
                 location: block.location.ref,
               })),
               parser: "llm" as const,
+              dropped_units,
+              stakeholder: { stakeholder_function: document.stakeholder_function as string, rationale: stakeholder_rationale },
             };
           },
           record.mime,
@@ -174,14 +188,36 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           ctx.run.note(`dry-parsed:${file_id}`, quality, `${sections.length} block(s), not persisted`);
           continue;
         }
-        const { source_id, blocks } = await persistSourceAndBlocks({
-          title: record.title,
-          source_type: record.source_type as SourceType,
-          stakeholder_function: record.stakeholder_function as ActorFunction,
-          text: parsed.text,
-          filename: record.filename,
-          sections: parsed.sections,
-        });
+        // Re-parsing a file that already has a source updates that source in
+        // place: human-made and human-edited blocks survive, only model blocks
+        // are replaced. A first parse creates the source.
+        const existingSource = record.source_id
+          ? (await db().select({ id: iegp.sources.id }).from(iegp.sources).where(eq(iegp.sources.id, record.source_id)))[0]
+          : undefined;
+        const { source_id, blocks } = existingSource
+          ? await reparseSourceBlocks({ source_id: existingSource.id, sections: sectionsFor() }).then((result) => {
+              if (result.kept_human > 0 || result.kept_cited > 0) {
+                ctx.run.note(`parse:kept:${file_id}`, {
+                  kept_human: result.kept_human,
+                  kept_cited: result.kept_cited,
+                  skipped_duplicates: result.skipped_duplicates,
+                });
+              }
+              return result;
+            })
+          : await persistSourceAndBlocks({
+              title: record.title,
+              source_type: record.source_type as SourceType,
+              stakeholder_function: record.stakeholder_function as ActorFunction,
+              text: parsed.text,
+              filename: record.filename,
+              sections: parsed.sections,
+            });
+        await persistDroppedSourceUnits(source_id, parsed.dropped_units);
+        if (parsed.stakeholder) {
+          // Kept beside the source's function (chosen at upload or by a human override), never over it.
+          await recordLlmSourceStakeholder({ source_id, ...parsed.stakeholder });
+        }
         const quality = qualityOf(blocks);
         const id = newId("DOC");
         await db().insert(parsedDocuments).values({
