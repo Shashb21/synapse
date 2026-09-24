@@ -457,7 +457,8 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     }
 
     const model = buildTimeline({ state, placements, designs, overrides, estimates, dependencies, anchor });
-    if (model.pending.length > 0) {
+    // With AI off, undated activities simply wait for a person; the dated ones are saved.
+    if (ai && model.pending.length > 0) {
       throw new Error(
         `The timeline could not date ${model.pending.map((row) => row.tactic_name).join(", ")}. Nothing was saved; ${REMEDY}`,
       );

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertAiEnabled } from "@/modules/kernel/ai-switch";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { completeJson, requireAccuracyLlm } from "@/accuracy/kernel/routing";
 import { completeAll } from "@/modules/kernel/llm";
@@ -28,6 +29,8 @@ export async function judgeEquivalence(args: {
 }): Promise<EquivalentPair[]> {
   const { ctx } = args;
   if (args.questions.length === 0) return [];
+  // Merge-dedupe itself is mechanical; only this judge needs a model, so the switch is checked here.
+  await assertAiEnabled("Merge / dedupe");
   requireAccuracyLlm(ctx.route, "Merge / dedupe");
   const byId = new Map(args.candidates.map((candidate) => [candidate.id, candidate]));
   const questionById = new Map(args.questions.map((q, index) => [`p${index + 1}`, q]));

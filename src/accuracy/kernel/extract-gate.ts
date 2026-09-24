@@ -1,4 +1,5 @@
 import { NoRouteError } from "@/modules/llm/provider";
+import { AI_OFF_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
 import { accuracyAuthAllowsLive, resolveAccuracyRoute } from "./routing";
 import { isTestStub } from "@/modules/kernel/llm";
 
@@ -50,6 +51,7 @@ export function isExtractStubLlm(): boolean {
 
 /** Whether inventory/need extract can run (stub tests or a connected OAuth/key route). */
 export async function inspectLiveExtractGate(): Promise<LiveExtractGate> {
+  if (!(await aiEnabled())) return notReady(AI_OFF_MESSAGE);
   if (isExtractStubLlm()) {
     return { ready: true, stub: true, connect_path: EXTRACT_CONNECT_PATH };
   }

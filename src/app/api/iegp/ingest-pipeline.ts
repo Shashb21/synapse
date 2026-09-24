@@ -1,4 +1,5 @@
 import "@/modules";
+import { assertAiEnabled } from "@/modules/kernel/ai-switch";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
 import { resolveRoute } from "@/modules/kernel/routing";
@@ -29,6 +30,8 @@ export type IngestResult = {
  * model, so a source is never half-ingested and nothing falls back to rules.
  */
 async function requireLlmStages(): Promise<void> {
+  // The admin switch first: with AI off nothing is ingested; gaps and tactics are added by hand.
+  await assertAiEnabled("Ingest");
   if (isTestStub()) return;
   for (const stage of LLM_STAGES) {
     try {

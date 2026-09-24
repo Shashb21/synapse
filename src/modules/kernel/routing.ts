@@ -1,4 +1,5 @@
 import { db, ensurePlatformSchema } from "./db";
+import { AI_OFF_MESSAGE, aiEnabled } from "./ai-switch";
 import * as t from "./schema";
 import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
@@ -231,6 +232,8 @@ export function stageLabel(stage: StageId): string {
 /** UI preview when no provider is connected yet (does not throw). */
 export async function previewRoute(stage: StageId): Promise<ResolvedRoute> {
   try {
+    // The preview says why nothing will be prompted when an admin has AI off.
+    if (!(await aiEnabled().catch(() => true))) throw new Error(AI_OFF_MESSAGE);
     return await resolveRoute(stage);
   } catch (error) {
     let config = defaultConfig(stage);

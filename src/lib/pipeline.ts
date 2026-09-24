@@ -1,4 +1,5 @@
 import { assignThemes } from "@/lib/cluster/cluster";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { proposeCatalogChanges } from "@/lib/cluster/catalog-evolution";
 import { hasAnthropicKey } from "@/lib/config";
 import { critiqueInsights, scoreMetrics } from "@/lib/eval/critique";
@@ -49,7 +50,8 @@ export async function extractAndClusterLive(
   theme_links: EngineState["theme_links"];
   extractor: "claude" | "local";
 }> {
-  if (hasAnthropicKey()) {
+  // Legacy path outside the kernel: it still honours the admin AI switch.
+  if (hasAnthropicKey() && (await aiEnabled().catch(() => true))) {
     try {
       const raw = await proposeWithClaude(documents);
       if (raw.length > 0) {
