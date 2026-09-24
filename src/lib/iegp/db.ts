@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS needs (
   decision_supported text NOT NULL, geography text NOT NULL,
   population text NOT NULL, intervention text NOT NULL, comparator text NOT NULL,
   outcome text NOT NULL, timing text NOT NULL, source_id text NOT NULL,
-  source_quote text NOT NULL, confidence real NOT NULL, status text NOT NULL,
+  source_quote text NOT NULL, confidence real, status text NOT NULL,
   lock jsonb NOT NULL
 );
 CREATE TABLE IF NOT EXISTS gaps (
@@ -230,6 +230,8 @@ export async function ensureSchema() {
   await d.execute(
     sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb"),
   );
+  // Need confidence is null until a model or a human scores it.
+  await d.execute(sql.raw("ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL"));
 }
 
 export async function wipeIegp() {

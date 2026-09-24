@@ -318,12 +318,14 @@ export const DIMENSION_QUESTIONS: Record<CoverageDimension, string> = {
 export const DIMENSION_VALUES = ["yes", "partial", "no", "unknown"] as const;
 export type DimensionValue = (typeof DIMENSION_VALUES)[number];
 
-export const OVERALL_COVERAGE = [
-  "full",
-  "partial",
-  "limited",
-  "not_relevant",
-] as const;
+/** Verdicts a model or a human can record for one gap ↔ tactic pair. */
+export const ASSESSED_COVERAGE = ["full", "partial", "limited", "not_relevant"] as const;
+
+/**
+ * Stored coverage values: an assessed verdict, or "unassessed" for a tactic
+ * assigned with no verdict yet (nothing is guessed on its behalf).
+ */
+export const OVERALL_COVERAGE = [...ASSESSED_COVERAGE, "unassessed"] as const;
 export type OverallCoverage = (typeof OVERALL_COVERAGE)[number];
 
 /** How much this tactic covers this gap — not tactic lifecycle (ongoing/planned). */
@@ -332,6 +334,7 @@ export const OVERALL_COVERAGE_LABELS: Record<OverallCoverage, string> = {
   partial: "Partial coverage",
   limited: "Limited coverage",
   not_relevant: "Not relevant",
+  unassessed: "Not yet assessed",
 };
 
 export const OVERALL_COVERAGE_HELPERS: Record<OverallCoverage, string> = {
@@ -340,6 +343,8 @@ export const OVERALL_COVERAGE_HELPERS: Record<OverallCoverage, string> = {
   limited:
     "This tactic only limitedly covers this gap — for example the population or endpoints are too thin. Separate from whether the tactic is ongoing or planned.",
   not_relevant: "This tactic does not apply to this gap.",
+  unassessed:
+    "This tactic is assigned but its coverage has not been assessed yet. Run S4 mapping or record the coverage.",
 };
 
 export const PRIORITY_BANDS = ["critical", "high", "medium", "low"] as const;

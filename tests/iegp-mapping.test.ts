@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   MAPPING_SCORE_FLOOR,
-  MAPPING_SUGGESTION_CAP,
+  buildPlanWorkspace,
+  isDisseminationTactic,
   scoreGapTacticMapping,
-  suggestMappings,
 } from "@/lib/iegp/engine";
-import { unlocked } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
 import type { Tactic } from "@/lib/iegp/types";
 
@@ -40,7 +39,7 @@ function asCongressAbstract(base: Tactic, overrides: Partial<Tactic> = {}): Tact
   };
 }
 
-describe("gap–tactic mapping engine", () => {
+describe("gap–tactic scorer (S4 test-stub only)", () => {
   it("prefers the ≥65 chart review over an unrelated publication for the elderly CE gap", () => {
     const { score } = seedPair();
     const chart = score("GAP-ELDERLY-CE", "TAC-ELDERLY-RWE");
@@ -84,20 +83,9 @@ describe("gap–tactic mapping engine", () => {
     expect(chartScore.score).toBeGreaterThan(congressScore.score);
     expect(chart.type).toBe("chart_review");
     expect(congress.type).toBe("congress_abstract");
-    const ranked = suggestMappings({
-      ...seed,
-      coverages: [],
-      tactics: [...seed.tactics, congress],
-    });
-    const elderlyRows = ranked.filter((row) => row.gap_id === "GAP-ELDERLY-CE");
-    expect(elderlyRows[0]?.tactic_id).toBe("TAC-ELDERLY-RWE");
-    const congressRank = elderlyRows.findIndex((row) => row.tactic_id === congress.id);
-    const chartRank = elderlyRows.findIndex((row) => row.tactic_id === "TAC-ELDERLY-RWE");
-    expect(chartRank).toBeGreaterThanOrEqual(0);
-    if (congressRank >= 0) expect(chartRank).toBeLessThan(congressRank);
   });
 
-  it("keeps rejected pairs out and never suggests an existing coverage join", () => {
+  it("rejected or covered pairs score zero", () => {
     const { seed, score } = seedPair();
     expect(score("GAP-ELDERLY-CE", "TAC-ELDERLY-RWE").score).toBeGreaterThanOrEqual(MAPPING_SCORE_FLOOR);
     expect(
@@ -106,36 +94,6 @@ describe("gap–tactic mapping engine", () => {
     expect(
       scoreGapTacticMapping(seed.gaps[0]!, seed.tactics[0]!, { covered: true }).score,
     ).toBe(0);
-
-    const uncovered = {
-      ...seed,
-      coverages: seed.coverages.filter(
-        (row) => !(row.gap_id === "GAP-ELDERLY-CE" && row.tactic_id === "TAC-ELDERLY-RWE"),
-      ),
-    };
-    expect(
-      suggestMappings(uncovered).some(
-        (row) => row.gap_id === "GAP-ELDERLY-CE" && row.tactic_id === "TAC-ELDERLY-RWE",
-      ),
-    ).toBe(true);
-    expect(
-      suggestMappings({
-        ...uncovered,
-        mapping_suggestions: [
-          {
-            gap_id: "GAP-ELDERLY-CE",
-            tactic_id: "TAC-ELDERLY-RWE",
-            status: "rejected",
-            lock: unlocked(),
-          },
-        ],
-      }).some((row) => row.gap_id === "GAP-ELDERLY-CE" && row.tactic_id === "TAC-ELDERLY-RWE"),
-    ).toBe(false);
-    expect(
-      suggestMappings(seed).some(
-        (row) => row.gap_id === "GAP-ELDERLY-CE" && row.tactic_id === "TAC-ELDERLY-RWE",
-      ),
-    ).toBe(false);
   });
 
   it("maps a pneumonitis safety gap to an extracted chart review above the floor", () => {
@@ -162,17 +120,17 @@ describe("gap–tactic mapping engine", () => {
     expect(scored.reasons.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("returns non-empty reasons for every shown suggestion and caps the list", () => {
-    const seed = buildSeed();
-    const suggestions = suggestMappings(seed);
-    expect(suggestions.length).toBeGreaterThan(0);
-    expect(suggestions.length).toBeLessThanOrEqual(MAPPING_SUGGESTION_CAP);
-    for (const row of suggestions) {
-      expect(row.reasons.length).toBeGreaterThanOrEqual(2);
-      expect(row.reasons.length).toBeLessThanOrEqual(4);
-      expect(row.reasons.every((reason) => reason.trim().length > 8)).toBe(true);
-      expect(row.reasons.join(" ")).not.toMatch(/score:\s*\d/i);
-      expect(row.score).toBeGreaterThanOrEqual(MAPPING_SCORE_FLOOR);
-    }
+  it("reads dissemination off the tactic type, never its wording", () => {
+    const { tactic } = seedPair();
+    const chart = tactic("TAC-ELDERLY-RWE");
+    expect(isDisseminationTactic({ type: "congress_abstract" })).toBe(true);
+    expect(isDisseminationTactic({ type: "publication" })).toBe(true);
+    const worded = { ...chart, name: "Congress abstract manuscript disseminating results" };
+    expect(isDisseminationTactic(worded)).toBe(false);
+  });
+
+  it("offers no engine-ranked mapping suggestions: S4 is the only source of coverage", () => {
+    const workspace = buildPlanWorkspace({ ...buildSeed(), coverages: [] });
+    expect("mappingSuggestions" in workspace).toBe(false);
   });
 });

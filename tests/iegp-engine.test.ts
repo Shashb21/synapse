@@ -8,17 +8,14 @@ import {
   draftResidualStatement,
   engineMaySetStatus,
   extractCandidateGaps,
-  extractCandidateNeeds,
   extractCandidateTactics,
   gapNameFromStatement,
   guessDomain,
   isPublishedLiterature,
-  MAPPING_SUGGESTION_CAP,
   needEvalMetrics,
   pairNeeds,
+  persistedResidualGaps,
   planColumn,
-  residualDraftEligible,
-  residualGapEligible,
   splitSourceIntoBlocks,
   requireOverrideReason,
   suggestGapStatus,
@@ -27,10 +24,8 @@ import {
   isParked,
   displayedGapStatus,
   planNavCounts,
-  suggestMappings,
-  suggestPriority,
-  suggestResidualGaps,
   tacticCountsTowardAddressing,
+  uncoveredDimensions,
   filterReviewGapCards,
   liveGapsMappedToTactic,
   reviewGapFilterCounts,
@@ -117,46 +112,58 @@ describe("IEGP engine", () => {
     expect(draft.rationale).toMatch(/preserved|Uncovered/i);
   });
 
-  it("only treats locked partial or limited overall coverage as a residual", () => {
-    const unlockedLimited = cov("limited", {});
-    expect(
-      residualDraftEligible({
-        gap: { status: "validated_open" },
-        coverages: [unlockedLimited],
-      }),
-    ).toBe(false);
-    expect(
-      residualDraftEligible({
-        gap: { status: "validated_open" },
-        coverages: [],
-      }),
-    ).toBe(false);
-    const lockedPartial: GapTacticCoverage = {
-      ...cov("partial", {}),
-      overall_lock: {
-        locked: true,
-        actor_name: "A. Rao",
-        actor_function: "heor",
-        locked_at: "2026-09-18T00:00:00Z",
-        note: "Partial.",
-      },
+  it("derives gap status from the recorded coverage verdicts, with no weights or thresholds", () => {
+    const planned = {
+      id: "t",
+      status: "planned" as const,
+      type: "rwe_study" as const,
+      evidence_available: null,
     };
-    expect(
-      residualDraftEligible({
-        gap: { status: "validated_open" },
-        coverages: [lockedPartial],
-      }),
-    ).toBe(true);
-    const lockedFull: GapTacticCoverage = {
-      ...lockedPartial,
-      overall: "full",
+    const humanLock = {
+      locked: true,
+      actor_name: "A. Rao",
+      actor_function: "heor" as const,
+      locked_at: "2026-09-18T00:00:00Z",
+      note: "Human verdict.",
     };
-    expect(
-      residualDraftEligible({
-        gap: { status: "validated_open" },
-        coverages: [lockedFull],
+    // A human-locked Full closes the gap even when every dimension is "no":
+    // the verdict decides, not a weighted fraction of dimensions.
+    const lockedFullThinDims: GapTacticCoverage = {
+      ...cov("full", {
+        comparator: { value: "no", rationale: "", lock: unlocked() },
+        population: { value: "no", rationale: "", lock: unlocked() },
+        decision_utility: { value: "no", rationale: "", lock: unlocked() },
       }),
-    ).toBe(false);
+      overall_lock: humanLock,
+    };
+    expect(computeGapStatus([lockedFullThinDims], [planned])).toBe("validated_addressed");
+    // A model verdict of Full that no human has locked stays Partial.
+    expect(computeGapStatus([cov("full", {})], [planned])).toBe("validated_partial");
+    // Partial, limited or not-yet-assessed coverage is Partial.
+    expect(computeGapStatus([cov("partial", {})], [planned])).toBe("validated_partial");
+    expect(computeGapStatus([cov("limited", {})], [planned])).toBe("validated_partial");
+    expect(computeGapStatus([cov("unassessed", {})], [planned])).toBe("validated_partial");
+    // Not relevant is no coverage at all.
+    expect(computeGapStatus([cov("not_relevant", {})], [planned])).toBe("validated_open");
+    expect(computeGapStatus([], [planned])).toBe("validated_open");
+    // A locked Partial next to a locked Full: the locked Full closes it.
+    expect(
+      computeGapStatus(
+        [{ ...cov("partial", {}), overall_lock: humanLock }, lockedFullThinDims],
+        [planned],
+      ),
+    ).toBe("validated_addressed");
+  });
+
+  it("lists uncovered dimensions from recorded yes verdicts only", () => {
+    const row = cov("partial", {
+      relevance: { value: "yes", rationale: "", lock: unlocked() },
+      population: { value: "partial", rationale: "", lock: unlocked() },
+    });
+    const missing = uncoveredDimensions([row]);
+    expect(missing).not.toContain("relevance");
+    expect(missing).toContain("population");
+    expect(missing).toHaveLength(COVERAGE_DIMENSIONS.length - 1);
   });
 
   it("computes Open when only proposed tactics exist", () => {
@@ -255,22 +262,6 @@ describe("IEGP engine", () => {
     expect(engineMaySetStatus("validated_addressed")).toBe(true);
   });
 
-  it("suggests priority without using cost or effort", () => {
-    const pri = suggestPriority({
-      residual: { statement: "IRA BIM remaining" },
-      objective: {
-        strategic_importance: 5,
-        decision_date: "2026-12-01",
-        key_decision: "P&T",
-      },
-      coverages: [],
-      stakeholder: "hta",
-      today: new Date("2026-09-17"),
-    });
-    expect(pri.score).toBeGreaterThan(50);
-    expect(pri.reasons.join(" ")).not.toMatch(/\bcost\b|\bbudget\b|\beffort\b/i);
-  });
-
   it("pairs extracted needs to gold without double-claiming", () => {
     const pairs = pairNeeds(
       [
@@ -285,19 +276,6 @@ describe("IEGP engine", () => {
     expect(pairs.some((p) => p.kind === "wrong" && p.extract_id === "e2")).toBe(true);
     const metrics = needEvalMetrics(pairs, [{ id: "g1", must_find: true }], 2);
     expect(metrics.recall).toBe(1);
-  });
-
-  it("extracts candidate-need cues from source blocks", () => {
-    const rows = extractCandidateNeeds([
-      {
-        id: "b",
-        source_id: "s",
-        heading: "Burden",
-        text: "We need to understand the economic burden associated with recurrence. The weather was fine.",
-      },
-    ]);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows[0]!.statement).toMatch(/economic burden/i);
   });
 
   it("extracts candidate gaps and tactics from the same source", () => {
@@ -458,8 +436,9 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(false);
     expect(workspace.unprioritized.every((c) => c.gap_status === "validated_open")).toBe(true);
     expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
-    expect(workspace.reviewResiduals.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
-    expect(workspace.residualGapSuggestions.some((c) => c.parent_gap_id === "GAP-OS")).toBe(true);
+    // No template leftovers: the seed has no saved leftover rows, so none show.
+    expect(workspace.reviewResiduals).toHaveLength(0);
+    expect(workspace.residualGapSuggestions).toHaveLength(0);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
     expect(pfs).toBeTruthy();
     expect(pfs!.tactics.some((t) => t.id === "TAC-VEL-301")).toBe(true);
@@ -476,9 +455,7 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     const elderly = workspace.review.find((c) => c.gap_id === "GAP-ELDERLY-CE");
     expect(elderly).toBeTruthy();
     expect(elderly!.tactics.length).toBeGreaterThan(0);
-    const os = workspace.reviewResiduals.find((c) => c.parent_gap_id === "GAP-OS");
-    expect(os).toBeTruthy();
-    expect(os!.statement).not.toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);
+    expect(workspace.review.every((c) => c.residual === null)).toBe(true);
 
     const mapped = buildPlanWorkspace({
       ...seed,
@@ -495,158 +472,46 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(mapped.review.find((c) => c.gap_id === "GAP-ELDERLY-CE")!.tactics.length).toBeGreaterThan(0);
   });
 
-  it("suggests mappings only for accepted open/partial gaps and accepted tactics", () => {
+  it("shows only saved leftover rows, never a drafted one", () => {
     const seed = buildSeed();
-    const suggestions = suggestMappings(seed);
-    expect(suggestions.length).toBeGreaterThan(0);
-    expect(suggestions.length).toBeLessThanOrEqual(MAPPING_SUGGESTION_CAP);
-    for (const row of suggestions) {
-      const gap = seed.gaps.find((g) => g.id === row.gap_id);
-      const tactic = seed.tactics.find((t) => t.id === row.tactic_id);
-      expect(gap?.status === "validated_open" || gap?.status === "validated_partial").toBe(true);
-      expect(tactic?.review_status).toBe("accepted");
-      expect(tactic?.status).not.toBe("cancelled");
-      expect(seed.coverages.some((c) => c.gap_id === row.gap_id && c.tactic_id === row.tactic_id)).toBe(
-        false,
-      );
-      expect(row.reasons.length).toBeGreaterThanOrEqual(2);
-    }
-    expect(suggestions.some((s) => s.gap_id === "GAP-ILD")).toBe(false);
-    expect(suggestions.some((s) => s.gap_id === "GAP-CONGRESS")).toBe(false);
-    expect(suggestions.some((s) => s.gap_id === "GAP-PFS-TRIAL")).toBe(false);
-    expect(
-      suggestions.some((s) => s.gap_id === "GAP-ELDERLY-CE" && s.tactic_id === "TAC-ELDERLY-RWE"),
-    ).toBe(false);
-  });
-
-  it("drops a mapping after it is rejected or already covered", () => {
-    const seed = buildSeed();
-    const [first] = suggestMappings(seed);
-    expect(first).toBeTruthy();
-    const rejected = suggestMappings({
+    expect(persistedResidualGaps(seed)).toHaveLength(0);
+    const saved = {
       ...seed,
-      mapping_suggestions: [
+      residual_gap_suggestions: [
         {
-          gap_id: first!.gap_id,
-          tactic_id: first!.tactic_id,
-          status: "rejected",
+          parent_gap_id: "GAP-OS",
+          statement: "Overall survival beyond 36 months in routine care",
+          reasons: ["Saved by a person."],
+          status: "candidate" as const,
           lock: unlocked(),
         },
       ],
-    });
-    expect(rejected.some((s) => s.gap_id === first!.gap_id && s.tactic_id === first!.tactic_id)).toBe(
-      false,
-    );
-    const covered = suggestMappings({
-      ...seed,
-      coverages: [
-        ...seed.coverages,
-        {
-          ...seed.coverages[0]!,
-          id: "COV-SUGGEST-TEST",
-          gap_id: first!.gap_id,
-          tactic_id: first!.tactic_id,
-        },
-      ],
-    });
-    expect(covered.some((s) => s.gap_id === first!.gap_id && s.tactic_id === first!.tactic_id)).toBe(
-      false,
-    );
-  });
+    };
+    const rows = persistedResidualGaps(saved);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.statement).toBe("Overall survival beyond 36 months in routine care");
+    expect(rows[0]!.parent_statement).toBe(seed.gaps.find((g) => g.id === "GAP-OS")!.statement);
+    const card = buildPlanWorkspace(saved).review.find((c) => c.gap_id === "GAP-OS");
+    expect(card?.residual?.statement).toBe("Overall survival beyond 36 months in routine care");
 
-  it("suggests leftover as a new gap when locked coverage is partial and no child exists", () => {
-    const seed = buildSeed();
-    const suggestions = suggestResidualGaps(seed);
-    expect(suggestions.some((s) => s.parent_gap_id === "GAP-OS")).toBe(true);
-    const os = suggestions.find((s) => s.parent_gap_id === "GAP-OS")!;
-    const parent = seed.gaps.find((g) => g.id === "GAP-OS")!;
-    expect(os.statement.toLowerCase()).not.toBe(parent.statement.toLowerCase());
-    expect(os.parent_statement).toBe(parent.statement);
-    expect(os.reasons.length).toBeGreaterThan(0);
-    expect(os.reasons.join(" ")).toMatch(/partial|limited/i);
-  });
-
-  it("does not suggest leftover when a child gap exists or the leftover was rejected", () => {
-    const seed = buildSeed();
+    const rejected = {
+      ...saved,
+      residual_gap_suggestions: [{ ...saved.residual_gap_suggestions[0]!, status: "rejected" as const }],
+    };
+    expect(persistedResidualGaps(rejected)).toHaveLength(0);
     const withChild = {
-      ...seed,
+      ...saved,
       gaps: [
         ...seed.gaps,
         {
           ...seed.gaps[0]!,
-          id: "GAP-CHILD-ELDERLY",
+          id: "GAP-CHILD-OS",
           parent_gap_id: "GAP-OS",
           status: "validated_open" as const,
         },
       ],
     };
-    expect(suggestResidualGaps(withChild).some((s) => s.parent_gap_id === "GAP-OS")).toBe(
-      false,
-    );
-    const rejected = {
-      ...seed,
-      residual_gap_suggestions: [
-        {
-          parent_gap_id: "GAP-OS",
-          statement: "leftover",
-          reasons: ["test"],
-          status: "rejected" as const,
-          lock: unlocked(),
-        },
-      ],
-    };
-    expect(suggestResidualGaps(rejected).some((s) => s.parent_gap_id === "GAP-OS")).toBe(
-      false,
-    );
-  });
-
-  it("does not treat unlocked assignment coverage as a leftover-as-gap suggestion", () => {
-    expect(
-      residualGapEligible({
-        gap: { status: "validated_open" },
-        coverages: [cov("limited", {})],
-        hasChild: false,
-        suppressed: false,
-      }),
-    ).toBe(false);
-    const lockedPartial: GapTacticCoverage = {
-      ...cov("partial", {}),
-      overall_lock: {
-        locked: true,
-        actor_name: "A. Rao",
-        actor_function: "heor",
-        locked_at: "2026-09-18T00:00:00Z",
-        note: "Partial.",
-      },
-    };
-    expect(
-      residualGapEligible({
-        gap: { status: "validated_open" },
-        coverages: [lockedPartial],
-        hasChild: false,
-        suppressed: false,
-      }),
-    ).toBe(true);
-    const inferredPartial: GapTacticCoverage = {
-      ...cov("partial", {}),
-      overall_lock: unlocked(),
-    };
-    expect(
-      residualGapEligible({
-        gap: { status: "candidate" },
-        coverages: [inferredPartial],
-        hasChild: false,
-        suppressed: false,
-      }),
-    ).toBe(true);
-    expect(
-      residualGapEligible({
-        gap: { status: "validated_partial" },
-        coverages: [cov("limited", {})],
-        hasChild: false,
-        suppressed: false,
-      }),
-    ).toBe(true);
+    expect(persistedResidualGaps(withChild)).toHaveLength(0);
   });
 
   it("sorts workbench cards Partial first, then needs-validation, then Open, then Addressed", () => {

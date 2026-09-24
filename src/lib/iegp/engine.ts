@@ -15,30 +15,22 @@ import type {
   DimensionAssessment,
   GapTacticCoverage,
   GapStatusOverride,
-  ResidualNeed,
-  StrategicObjective,
   EvidenceGap,
   IegpState,
   Tactic,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
-import {
-  MAPPING_SCORE_FLOOR,
-  MAPPING_SUGGESTION_CAP,
-  isDisseminationTactic,
-  scoreGapTacticMapping,
-  type MappingScoreExtras,
-  type MappingSuggestion,
-} from "./mapping";
 
+/**
+ * Test-stub support only. No production path ranks or assigns gap ↔ tactic
+ * pairs from these scores: S4 is the only source of coverage verdicts.
+ */
 export {
   MAPPING_SCORE_FLOOR,
-  MAPPING_SUGGESTION_CAP,
   scoreGapTacticMapping,
   isDisseminationTactic,
   type MappingScore,
   type MappingScoreExtras,
-  type MappingSuggestion,
 } from "./mapping";
 
 export const unlocked = (): {
@@ -66,64 +58,19 @@ export const emptyDimensions = (): Record<
   return row;
 };
 
-const DIM_WEIGHT: Record<CoverageDimension, number> = {
-  relevance: 1.2,
-  population: 1.3,
-  intervention: 1.1,
-  comparator: 1.3,
-  outcomes: 1.2,
-  geography: 1,
-  setting: 0.8,
-  timing: 1.1,
-  methodology: 1,
-  decision_utility: 1.4,
-};
-
-function dimScore(value: DimensionValue): number {
-  if (value === "yes") return 1;
-  if (value === "partial") return 0.45;
-  if (value === "unknown") return 0.15;
-  return 0;
-}
-
-export function coverageFraction(coverage: GapTacticCoverage): number {
-  let w = 0;
-  let s = 0;
-  for (const dim of COVERAGE_DIMENSIONS) {
-    const weight = DIM_WEIGHT[dim];
-    w += weight;
-    s += weight * dimScore(coverage.dimensions[dim].value);
-  }
-  const overallBoost =
-    coverage.overall === "full"
-      ? 1
-      : coverage.overall === "partial"
-        ? 0.5
-        : coverage.overall === "limited"
-          ? 0.25
-          : 0;
-  return 0.7 * (w === 0 ? 0 : s / w) + 0.3 * overallBoost;
-}
-
-export function bestCoverageFraction(coverages: GapTacticCoverage[]): number {
-  if (coverages.length === 0) return 0;
-  return Math.max(...coverages.map(coverageFraction));
-}
-
+/**
+ * Dimensions no relevant coverage row answers "yes" on. Reads the recorded
+ * per-dimension verdicts (S4 model or human); it weighs nothing.
+ */
 export function uncoveredDimensions(
   coverages: GapTacticCoverage[],
 ): CoverageDimension[] {
   if (coverages.length === 0) return [...COVERAGE_DIMENSIONS];
   const relevant = coverages.filter((c) => c.overall !== "not_relevant");
   const pool = relevant.length > 0 ? relevant : coverages;
-  const out: CoverageDimension[] = [];
-  for (const dim of COVERAGE_DIMENSIONS) {
-    const best = Math.max(
-      ...pool.map((c) => dimScore(c.dimensions[dim].value)),
-    );
-    if (best < 0.8) out.push(dim);
-  }
-  return out;
+  return COVERAGE_DIMENSIONS.filter(
+    (dim) => !pool.some((c) => c.dimensions[dim].value === "yes"),
+  );
 }
 
 export type AddressingTactic = Pick<Tactic, "id" | "status" | "type" | "evidence_available">;
@@ -170,10 +117,15 @@ export function countingCoverages(
 }
 
 /**
- * Application-computed Open / Partially Addressed / Addressed from joined
- * tactics + published literature. Proposed tactics do not count. Unlocked
- * assignment placeholders (limited) are Partial, never Addressed. Split
- * leftovers: a confirmed child gap means the parent is the addressed part.
+ * Open / Partially Addressed / Addressed read straight off the recorded
+ * coverage verdicts (S4's model verdict or a human's locked overall). No
+ * weights, fractions or thresholds:
+ * - no counting coverage other than "not relevant" → Open;
+ * - a human-locked "full" coverage → Addressed;
+ * - any other counting coverage (partial, limited, or a model "full" a human
+ *   has not locked) → Partially Addressed.
+ * Proposed tactics do not count. Split leftovers: a confirmed child gap means
+ * the parent is the addressed part.
  */
 export function computeGapStatus(
   coverages: GapTacticCoverage[],
@@ -184,10 +136,7 @@ export function computeGapStatus(
   const pool = tactics ? countingCoverages(coverages, tactics) : coverages;
   const relevant = pool.filter((c) => c.overall !== "not_relevant");
   if (relevant.length === 0) return "validated_open";
-
-  const lockedRelevant = relevant.filter((c) => c.overall_lock.locked);
-  const lockedBest = lockedRelevant.length > 0 ? bestCoverageFraction(lockedRelevant) : 0;
-  if (lockedRelevant.some((c) => c.overall === "full") && lockedBest >= 0.85) {
+  if (relevant.some((c) => c.overall === "full" && c.overall_lock.locked)) {
     return "validated_addressed";
   }
   return "validated_partial";
@@ -228,6 +177,10 @@ export function engineMaySetStatus(status: GapStatus): boolean {
   );
 }
 
+/**
+ * Template leftover text. Kept only for test stubs of the S6 stage; no store or
+ * UI path drafts leftovers from it.
+ */
 export function draftResidualStatement(args: {
   gap: Pick<EvidenceGap, "name" | "statement" | "domain">;
   coverages: GapTacticCoverage[];
@@ -258,99 +211,6 @@ export function draftResidualStatement(args: {
   return { statement, rationale, domain: args.gap.domain };
 }
 
-/** Leftover evidence need exists only after a tactic is assigned and coverage is understood as partial/limited. */
-export function residualDraftEligible(args: {
-  gap: Pick<EvidenceGap, "status">;
-  coverages: GapTacticCoverage[];
-}): boolean {
-  if (args.gap.status === "validated_addressed" || args.gap.status === "excluded") return false;
-  if (args.coverages.length === 0) return false;
-  return args.coverages.some(
-    (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
-  );
-}
-
-/**
- * Residual-as-gap: prefer human-locked overall of partial/limited.
- * Pressure-test drafts use overall "partial" without a human lock.
- * Unlocked assignment placeholders are "limited" and must not enqueue a leftover.
- */
-export function residualGapEligible(args: {
-  gap: Pick<EvidenceGap, "status">;
-  coverages: GapTacticCoverage[];
-  hasChild: boolean;
-  suppressed: boolean;
-}): boolean {
-  if (args.suppressed || args.hasChild) return false;
-  if (args.gap.status === "excluded" || args.gap.status === "validated_addressed") return false;
-  if (args.gap.status === "validated_partial") return true;
-  if (args.coverages.length === 0) return false;
-  if (residualDraftEligible(args)) return true;
-  return args.coverages.some((c) => !c.overall_lock.locked && c.overall === "partial");
-}
-
-
-
-function tacticEligibleForPressureTest(tactic: Pick<Tactic, "review_status" | "status">): boolean {
-  return tactic.review_status !== "rejected" && tactic.status !== "cancelled";
-}
-
-/** Deterministic mapping/coverage vs extracted tactics — not a human lock. */
-export function inferPressureTestCoverages(
-  gap: Pick<EvidenceGap, "id" | "name" | "statement" | "domain">,
-  tactics: Tactic[],
-  extras: { needs?: MappingScoreExtras["needs"] } = {},
-): GapTacticCoverage[] {
-  const hits: GapTacticCoverage[] = [];
-  for (const tactic of tactics) {
-    if (!tacticEligibleForPressureTest(tactic)) continue;
-    if (isDisseminationTactic(tactic) && gap.domain !== "implementation") continue;
-    const scored = scoreGapTacticMapping(gap, tactic, extras);
-    if (scored.score < MAPPING_SCORE_FLOOR) continue;
-    const dimensions = emptyDimensions();
-    const gapHay = `${gap.name} ${gap.statement}`.toLowerCase();
-    const tacticHay =
-      `${tactic.name} ${tactic.evidence_question} ${tactic.description} ${tactic.population} ${tactic.comparator} ${tactic.outcomes}`.toLowerCase();
-    dimensions.relevance = {
-      value: "partial",
-      rationale: scored.reasons[0] ?? "Related extracted tactic.",
-      lock: unlocked(),
-    };
-    const popCue = /elderly|aged|65|frail|cns|brain|community/;
-    dimensions.population = {
-      value: popCue.test(gapHay) && popCue.test(tacticHay) ? "partial" : "unknown",
-      rationale: "",
-      lock: unlocked(),
-    };
-    const wantsComparator = /comparat|versus|vs\.|standard of care|\bsoc\b/.test(gapHay);
-    const singleArm = /no comparative|single-arm|no comparator|not a powered comparative/.test(
-      tacticHay,
-    );
-    if (wantsComparator && (singleArm || !/comparat|versus|standard of care|\bsoc\b/.test(tacticHay))) {
-      dimensions.comparator = { value: "no", rationale: "Extracted tactic has no SoC arm.", lock: unlocked() };
-    } else if (wantsComparator) {
-      dimensions.comparator = { value: "partial", rationale: "", lock: unlocked() };
-    }
-    dimensions.decision_utility = {
-      value: "partial",
-      rationale: "Pressure-test: parent is already partial, not closed.",
-      lock: unlocked(),
-    };
-    hits.push({
-      id: `pt-${gap.id}-${tactic.id}`,
-      gap_id: gap.id,
-      tactic_id: tactic.id,
-      dimensions,
-      overall: "partial",
-      overall_rationale: scored.reasons.join(" "),
-      overall_lock: unlocked(),
-      stale: false,
-      needs_review: false,
-    });
-  }
-  return hits;
-}
-
 export type ResidualGapSuggestion = {
   parent_gap_id: string;
   parent_name: string;
@@ -360,7 +220,10 @@ export type ResidualGapSuggestion = {
   domain: EvidenceGap["domain"];
 };
 
-/** Draft leftover text that is not a copy of the parent gap sentence. */
+/**
+ * Template leftover draft. Kept only for test stubs of the S6 stage; no store or
+ * UI path drafts leftovers from it — S6 is the only source of leftovers.
+ */
 export function draftResidualGapSuggestion(args: {
   gap: Pick<EvidenceGap, "id" | "name" | "statement" | "domain">;
   coverages: GapTacticCoverage[];
@@ -401,130 +264,31 @@ export function draftResidualGapSuggestion(args: {
   };
 }
 
-function needsForGap(state: IegpState, gapId: string) {
-  const ids = state.need_gap_links.filter((link) => link.gap_id === gapId).map((link) => link.need_id);
-  return state.needs.filter((need) => ids.includes(need.id));
-}
-
-function coveragesForResidualDraft(state: IegpState, gap: EvidenceGap): GapTacticCoverage[] {
-  const stored = state.coverages.filter((c) => c.gap_id === gap.id);
-  const displayed = displayedGapStatus(gap);
-  if (displayed === "validated_partial" && stored.length > 0) return stored;
-  if (residualDraftEligible({ gap, coverages: stored })) {
-    return stored.filter(
-      (c) => c.overall_lock.locked && (c.overall === "partial" || c.overall === "limited"),
-    );
-  }
-  const unlockedPartial = stored.filter((c) => !c.overall_lock.locked && c.overall === "partial");
-  if (unlockedPartial.length > 0) return unlockedPartial;
-  if (stored.length > 0) return [];
-  return inferPressureTestCoverages(gap, state.tactics, { needs: needsForGap(state, gap.id) });
-}
-
-
-/** Ranked leftover-as-new-gap drafts for Review. Engine suggests; it does not create the child. */
-export function suggestResidualGaps(state: IegpState): ResidualGapSuggestion[] {
-  const suppressed = new Set(
-    state.residual_gap_suggestions
-      .filter((row) => row.status === "rejected" || row.status === "accepted")
-      .map((row) => row.parent_gap_id),
-  );
+/**
+ * Leftover-as-new-gap drafts for Review, read from the persisted table. S6 is
+ * the only thing that drafts a leftover (a human may edit it); the engine never
+ * writes one. A leftover is shown while it is a pending candidate, its parent
+ * is live and has no child gap yet.
+ */
+export function persistedResidualGaps(state: IegpState): ResidualGapSuggestion[] {
   const childByParent = new Set(
     state.gaps.map((gap) => gap.parent_gap_id).filter((id): id is string => Boolean(id)),
   );
-  const edited = new Map(
-    state.residual_gap_suggestions
-      .filter((row) => row.status === "candidate")
-      .map((row) => [row.parent_gap_id, row.statement] as const),
-  );
-
   const out: ResidualGapSuggestion[] = [];
-  for (const gap of state.gaps) {
-    if (
-      !residualGapEligible({
-        gap,
-        coverages: coveragesForResidualDraft(state, gap),
-        hasChild: childByParent.has(gap.id),
-        suppressed: suppressed.has(gap.id),
-      })
-    ) {
-      continue;
-    }
-    const coverages = coveragesForResidualDraft(state, gap);
-    const saved = edited.get(gap.id);
-    if (coverages.length === 0) {
-      if (gap.status === "validated_partial" && saved) {
-        out.push({
-          parent_gap_id: gap.id,
-          parent_name: gap.name,
-          parent_statement: gap.statement,
-          statement: saved,
-          reasons: [
-            "Human locked Partially Addressed. Residual leftover is a new Open gap if accepted.",
-          ],
-          domain: gap.domain,
-        });
-      }
-      continue;
-    }
-    const draft = draftResidualGapSuggestion({ gap, coverages });
-    const statement = saved ?? draft.statement;
-    out.push({ ...draft, statement });
+  for (const row of state.residual_gap_suggestions) {
+    if (row.status !== "candidate") continue;
+    const gap = state.gaps.find((g) => g.id === row.parent_gap_id);
+    if (!gap || !isLiveGap(gap) || childByParent.has(gap.id)) continue;
+    out.push({
+      parent_gap_id: gap.id,
+      parent_name: gap.name,
+      parent_statement: gap.statement,
+      statement: row.statement,
+      reasons: row.reasons,
+      domain: gap.domain,
+    });
   }
   return out;
-}
-
-const STAKEHOLDER_WEIGHT: Record<string, number> = {
-  hta: 1,
-  market_access: 0.95,
-  regulatory: 0.9,
-  heor: 0.85,
-  evidence_lead: 0.8,
-  rwe: 0.7,
-  medical_affairs: 0.65,
-  clinical_development: 0.65,
-  commercial: 0.5,
-  regional: 0.55,
-  epidemiology: 0.5,
-  patient_engagement: 0.45,
-};
-
-export function suggestPriority(args: {
-  residual: Pick<ResidualNeed, "statement">;
-  objective: Pick<
-    StrategicObjective,
-    "strategic_importance" | "decision_date" | "key_decision"
-  >;
-  coverages: GapTacticCoverage[];
-  stakeholder?: string;
-  today?: Date;
-}): { score: number; band: PriorityBand; reasons: string[] } {
-  const today = args.today ?? new Date("2026-09-17T00:00:00Z");
-  const importance = Math.min(5, Math.max(1, args.objective.strategic_importance)) / 5;
-  const decision = new Date(args.objective.decision_date);
-  const days = Math.max(
-    0,
-    (decision.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-  );
-  const timeUrgency = days <= 90 ? 1 : days <= 180 ? 0.8 : days <= 365 ? 0.55 : 0.35;
-  const uncovered = uncoveredDimensions(args.coverages);
-  const severity = Math.min(
-    1,
-    0.35 + (1 - bestCoverageFraction(args.coverages)) * 0.65 + (uncovered.includes("comparator") ? 0.08 : 0),
-  );
-  const stakeholder =
-    STAKEHOLDER_WEIGHT[args.stakeholder ?? "heor"] ?? 0.6;
-  const raw = 100 * importance * (0.35 + 0.65 * timeUrgency) * severity * (0.5 + 0.5 * stakeholder);
-  const score = Math.round(Math.min(100, Math.max(1, raw)));
-  const band: PriorityBand =
-    score >= 75 ? "critical" : score >= 55 ? "high" : score >= 35 ? "medium" : "low";
-  const reasons = [
-    `Strategic importance ${args.objective.strategic_importance}/5`,
-    `Decision "${args.objective.key_decision}" on ${args.objective.decision_date} (urgency ${timeUrgency})`,
-    `Residual severity ${severity.toFixed(2)} from coverage (feasibility lives on the tactic)`,
-    `Stakeholder weight ${stakeholder.toFixed(2)}`,
-  ];
-  return { score, band, reasons };
 }
 
 export type NeedPairKind = "exact" | "partial" | "new" | "wrong" | "missed";
@@ -644,6 +408,12 @@ export function coverageEval(
   };
 }
 
+/*
+ * Keyword cues, the extractCandidate* functions and the guess* helpers below
+ * exist only for the S2/S3 test stubs (SYNAPSE_TEST_STUB_LLM). No production
+ * path extracts, classifies or dates records from them: S2 and S3 are LLM
+ * stages and throw without a connected model.
+ */
 const NEED_CUES =
   /\b(need to (know|understand|characterise|characterize|quantify)|insufficient|limited evidence|not (adequately )?characterised|not (adequately )?characterized|evidence gap|unknown whether|no (comparative|rwe|real-world)|lack of|unresolved|open question)\b/i;
 
@@ -655,31 +425,6 @@ function sentencesOf(text: string): string[] {
     .split(/(?<=[.?!])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 24);
-}
-
-export function extractCandidateNeeds(
-  blocks: { id: string; source_id: string; text: string; heading: string }[],
-): { id: string; statement: string; source_id: string; source_quote: string }[] {
-  const out: {
-    id: string;
-    statement: string;
-    source_id: string;
-    source_quote: string;
-  }[] = [];
-  let n = 0;
-  for (const block of blocks) {
-    for (const sentence of sentencesOf(block.text)) {
-      if (!NEED_CUES.test(sentence) && !NEED_CUES.test(block.heading)) continue;
-      n += 1;
-      out.push({
-        id: `EXT-${String(n).padStart(3, "0")}`,
-        statement: sentence.replace(/\s+/g, " "),
-        source_id: block.source_id,
-        source_quote: sentence.slice(0, 280),
-      });
-    }
-  }
-  return out;
 }
 
 export function guessDomain(text: string): EvidenceDomain {
@@ -1033,6 +778,12 @@ export type ExtractedTactic = {
    * equivalence itself.
    */
   duplicate_of?: string | null;
+  /**
+   * The S3 judge's review verdict. S3 commits only rows its judge accepted, so
+   * an absent value is stored "accepted"; "candidate" holds a row for human
+   * review on the Gaps workbench.
+   */
+  review_status?: "accepted" | "candidate";
 };
 
 export function extractCandidateTactics(
@@ -1098,56 +849,6 @@ export function gapEligibleForMapping(status: GapStatus): boolean {
 
 export function tacticEligibleForMapping(tactic: Pick<Tactic, "review_status" | "status">): boolean {
   return tactic.review_status === "accepted" && tactic.status !== "cancelled";
-}
-
-/** Ranked gap–tactic pairs. Engine suggests; it does not write coverage. */
-export function suggestMappings(state: IegpState): MappingSuggestion[] {
-  const rejected = new Set(
-    state.mapping_suggestions
-      .filter((row) => row.status === "rejected")
-      .map((row) => `${row.gap_id}::${row.tactic_id}`),
-  );
-  const covered = new Set(
-    state.coverages.map((row) => `${row.gap_id}::${row.tactic_id}`),
-  );
-  const needsByGap = new Map<string, IegpState["needs"]>();
-  for (const link of state.need_gap_links) {
-    const need = state.needs.find((row) => row.id === link.need_id);
-    if (!need) continue;
-    const list = needsByGap.get(link.gap_id) ?? [];
-    list.push(need);
-    needsByGap.set(link.gap_id, list);
-  }
-  const residualByGap = new Map(state.residuals.map((row) => [row.gap_id, row.statement]));
-  const gaps = state.gaps.filter((gap) => gapEligibleForMapping(gap.status));
-  const tactics = state.tactics.filter((tactic) => tacticEligibleForMapping(tactic));
-  const out: MappingSuggestion[] = [];
-  for (const gap of gaps) {
-    for (const tactic of tactics) {
-      const key = `${gap.id}::${tactic.id}`;
-      if (rejected.has(key) || covered.has(key)) continue;
-      const scored = scoreGapTacticMapping(gap, tactic, {
-        needs: needsByGap.get(gap.id),
-        residual_statement: residualByGap.get(gap.id),
-        rejected: false,
-        covered: false,
-      });
-      if (scored.score < MAPPING_SCORE_FLOOR) continue;
-      out.push({
-        gap_id: gap.id,
-        gap_name: gap.name,
-        gap_statement: gap.statement,
-        tactic_id: tactic.id,
-        tactic_name: tactic.name,
-        reasons: scored.reasons,
-        score: scored.score,
-      });
-    }
-  }
-  out.sort(
-    (a, b) => b.score - a.score || a.gap_name.localeCompare(b.gap_name) || a.tactic_name.localeCompare(b.tactic_name),
-  );
-  return out.slice(0, MAPPING_SUGGESTION_CAP);
 }
 
 export type PlanColumn = "high" | "medium" | "low";
@@ -1391,11 +1092,10 @@ export function buildPlanWorkspace(state: IegpState): {
   board: Record<PlanColumn, PlanGapCard[]>;
   addressed: PlanGapCard[];
   availableTactics: TacticLibraryItem[];
-  mappingSuggestions: MappingSuggestion[];
   residualGapSuggestions: ResidualGapSuggestion[];
 } {
   const children = childGapIds(state);
-  const reviewResiduals = suggestResidualGaps(state);
+  const reviewResiduals = persistedResidualGaps(state);
   const residualByParent = new Map(
     reviewResiduals.map((row) => [row.parent_gap_id, row] as const),
   );
@@ -1518,7 +1218,6 @@ export function buildPlanWorkspace(state: IegpState): {
     board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
-    mappingSuggestions: suggestMappings(state),
     residualGapSuggestions: reviewResiduals,
   };
 }
