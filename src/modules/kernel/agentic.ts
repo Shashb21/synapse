@@ -49,9 +49,9 @@ export type AgenticCycle<C> = {
    */
   subjectOf: (candidate: C) => string;
   proposer: {
-    /** LLM path. Omitted or skipped when the route cannot prompt. */
+    /** LLM path. The loop throws when the route cannot prompt. */
     llm?: (args: ProposerArgs<C>) => Promise<C[]>;
-    /** Always available, so the loop runs with no provider connected. */
+    /** Only runs under SYNAPSE_TEST_STUB_LLM; never a production fallback. */
     local: (args: ProposerArgs<C>) => C[] | Promise<C[]>;
   };
   critic: (candidates: C[], round: number) => Promise<Critique[]> | Critique[];
