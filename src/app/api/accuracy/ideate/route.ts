@@ -19,6 +19,7 @@ import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { TACTIC_TYPES } from "@/lib/iegp/enums";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import { isTestStub } from "@/modules/kernel/llm";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,6 +123,7 @@ async function persistProposal(args: {
  * Ideate proposed tactics for validated high-priority open gaps.
  * - Manual: title + rationale inserts one human-authored proposed tactic (no LLM).
  * - Live: runs the ideate module (OAuth / API key). Stub LLM returns empty proposals.
+ *   With the admin AI switch off the live path answers 409 { code: "ai_off" }.
  */
 export async function POST(req: Request) {
   try {
@@ -171,6 +173,10 @@ export async function POST(req: Request) {
         tactics_inserted: 1,
       });
     }
+
+    // LLM ideation from here on: nothing runs or is written with AI off.
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
 
     const org_id = await getWorkspaceOrgId(body.workspace_id);
     if (!org_id) {
@@ -257,6 +263,8 @@ export async function POST(req: Request) {
       summary: result.summary,
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     const message = error instanceof Error ? error.message : "Ideate failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

@@ -8,6 +8,7 @@ import { recordMissFlagAction } from "@/accuracy/store/miss-flag-store";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { listSourceFiles } from "@/accuracy/store/source-store";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ registerAccuracyStack();
  * GET /api/accuracy/review?workspace_id=…
  * Runs completeness_audit (LLM completeness critic) and returns open miss flags
  * (+ source filenames). Without a connected LLM it fails; nothing is guessed.
+ * With the admin AI switch off the audit never runs: 409 { code: "ai_off" }.
  */
 export async function GET(req: Request) {
   try {
@@ -26,6 +28,8 @@ export async function GET(req: Request) {
     if (!workspace_id) {
       return NextResponse.json({ ok: false, error: "workspace_id is required" }, { status: 400 });
     }
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     const org_id = await getWorkspaceOrgId(workspace_id);
     if (!org_id) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
@@ -61,6 +65,8 @@ export async function GET(req: Request) {
       })),
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     const message = error instanceof Error ? error.message : "Review load failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

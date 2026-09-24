@@ -20,6 +20,7 @@ import {
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
 export const dynamic = "force-dynamic";
@@ -77,11 +78,13 @@ function toCard(claim: ClaimRow, statementById: Map<string, string>): LedgerClai
 export default async function AccuracyLedgerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace_id?: string; chapter?: string; si?: string }>;
+  searchParams: Promise<{ workspace_id?: string; chapter?: string; si?: string; add?: string }>;
 }) {
   const params = await searchParams;
   const workspaceId = params.workspace_id ?? "";
   const filters = parseLedgerFilters(params);
+  const addKind = params.add === "gap" || params.add === "tactic" ? params.add : null;
+  const aiOn = await aiEnabled();
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let gaps: LedgerClaimCardModel[] = [];
@@ -147,8 +150,9 @@ export default async function AccuracyLedgerPage({
   return (
     <AccuracyAppShell active="ledger" planLabel={planLabel}>
       <PageIntro kicker="Human gate · gaps & tactics" title="Ledger">
-        Draft and validated claims for one workspace. Filter by chapter (Tisle) or SI (BGB). Validate
-        or reject with a rationale — every decision feeds hillclimb.
+        {aiOn
+          ? "Draft and validated claims for one workspace. Filter by chapter (Tisle) or SI (BGB). Validate or reject with a rationale — every decision feeds hillclimb."
+          : "AI is off: this is where the plan starts. Add each gap and tactic by hand, then validate or reject with a rationale. Filter by chapter (Tisle) or SI (BGB)."}
       </PageIntro>
 
       {loadError ? (
@@ -214,6 +218,14 @@ export default async function AccuracyLedgerPage({
             </ul>
           </section>
 
+          {!aiOn ? (
+            <LedgerNewClaimForm
+              workspaceId={workspaceId}
+              tacticOptions={tacticOptions}
+              initialKind={addKind}
+            />
+          ) : null}
+
           {ready ? (
             <WorkshopSaveCta
               workspaceId={workspaceId}
@@ -224,7 +236,13 @@ export default async function AccuracyLedgerPage({
             />
           ) : null}
 
-          <LedgerNewClaimForm workspaceId={workspaceId} tacticOptions={tacticOptions} />
+          {aiOn ? (
+            <LedgerNewClaimForm
+              workspaceId={workspaceId}
+              tacticOptions={tacticOptions}
+              initialKind={addKind}
+            />
+          ) : null}
 
           <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
 

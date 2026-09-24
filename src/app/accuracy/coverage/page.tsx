@@ -9,6 +9,7 @@ import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +29,7 @@ export default async function AccuracyCoveragePage({
   let tacticOptions: { id: string; statement: string }[] = [];
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
+  const aiOn = await aiEnabled();
 
   try {
     workspaces = await listWorkspaces();
@@ -54,8 +56,9 @@ export default async function AccuracyCoveragePage({
   return (
     <AccuracyAppShell active="coverage">
       <PageIntro kicker="Pairwise · one decision at a time" title="Coverage">
-        Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and
-        rationale — you still confirm with a decide button. Linked inventory pairs are preferred.
+        {aiOn
+          ? "Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and rationale — you still confirm with a decide button. Linked inventory pairs are preferred."
+          : "Work one undecided gap↔tactic pair at a time: pick an overall and write the rationale yourself (AI is off, so there are no suggestions). Use the pair picker for any gap↔tactic pair."}
       </PageIntro>
 
       {loadError ? (

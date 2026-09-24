@@ -6,6 +6,11 @@ import { WorkspaceHygieneActions } from "@/components/accuracy/workspace-hygiene
 import { registerAccuracyStack } from "@/accuracy";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
+
+function addHref(workspaceId: string, kind: "gap" | "tactic"): string {
+  return `/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}&add=${kind}`;
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,13 +33,17 @@ export default async function AccuracyWorkspacesPage({
   }
 
   const archivedCount = workspaces.filter((w) => w.archived_at).length;
+  // AI off (owner's decision): no upload / parse / extract, so the first screen
+  // leads with hand entry of gaps and tactics.
+  const aiOn = await aiEnabled();
+  const openWorkspaces = workspaces.filter((w) => !w.archived_at);
 
   return (
     <AccuracyAppShell active="workspaces">
       <PageIntro kicker="Tenancy · org → workspace" title="Workspaces">
-        One workspace maps to one IEP or IEGP. Seed from BeOne gold for a full demo ledger, or create
-        an empty workspace and upload sources. Archive hides a workspace from pickers; delete removes
-        its ledger and run history.
+        {aiOn
+          ? "One workspace maps to one IEP or IEGP. Seed from BeOne gold for a full demo ledger, or create an empty workspace and upload sources. Archive hides a workspace from pickers; delete removes its ledger and run history."
+          : "One workspace maps to one IEP or IEGP. AI is off, so there is no upload or parsing: pick a workspace (or create one) and add its gaps and tactics by hand. Archive hides a workspace from pickers; delete removes its ledger and run history."}
       </PageIntro>
 
       {loadError ? (
@@ -43,9 +52,55 @@ export default async function AccuracyWorkspacesPage({
         </p>
       ) : null}
 
+      {!aiOn ? (
+        <section
+          className="mb-6 grid gap-3 border border-border bg-card/40 p-3"
+          aria-labelledby="manual-start"
+          data-testid="accuracy-manual-start"
+        >
+          <h2 id="manual-start" className="text-[15px] font-medium text-foreground">
+            Add gaps and tactics
+          </h2>
+          <p className="text-[12px] text-muted-foreground">
+            AI is off: everything is entered by hand. Choose a workspace, add its evidence gaps and
+            tactics, then validate, decide coverage, set priority and schedule dates.
+          </p>
+          {openWorkspaces.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">
+              No workspaces yet — create one below, then add gaps and tactics.
+            </p>
+          ) : (
+            <ul className="grid gap-2">
+              {openWorkspaces.map((workspace) => (
+                <li
+                  key={workspace.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0"
+                >
+                  <span className="text-[13px] text-foreground">{workspace.name}</span>
+                  <span className="flex flex-wrap gap-2">
+                    <Link
+                      href={addHref(workspace.id, "gap")}
+                      className="border border-foreground bg-foreground px-3 py-1 text-[12px] text-background no-underline"
+                    >
+                      Add gaps
+                    </Link>
+                    <Link
+                      href={addHref(workspace.id, "tactic")}
+                      className="border border-foreground bg-foreground px-3 py-1 text-[12px] text-background no-underline"
+                    >
+                      Add tactics
+                    </Link>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
       <div className="mb-6 grid gap-4 md:grid-cols-2">
-        <SeedFromGoldForm />
-        <CreateWorkspaceForm />
+        {aiOn ? <SeedFromGoldForm /> : <CreateWorkspaceForm />}
+        {aiOn ? <CreateWorkspaceForm /> : <SeedFromGoldForm />}
       </div>
 
       <section className="grid gap-2" aria-labelledby="workspace-list">
@@ -86,6 +141,22 @@ export default async function AccuracyWorkspacesPage({
                   {workspace.id} · org {workspace.org_id}
                 </p>
                 <p className="mt-2 flex flex-wrap gap-3">
+                  {!aiOn ? (
+                    <>
+                      <Link
+                        href={addHref(workspace.id, "gap")}
+                        className="text-[12px] font-medium text-foreground underline-offset-2 hover:underline"
+                      >
+                        Add gaps
+                      </Link>
+                      <Link
+                        href={addHref(workspace.id, "tactic")}
+                        className="text-[12px] font-medium text-foreground underline-offset-2 hover:underline"
+                      >
+                        Add tactics
+                      </Link>
+                    </>
+                  ) : null}
                   <Link
                     href={`/accuracy/sources?workspace_id=${encodeURIComponent(workspace.id)}`}
                     className="text-[12px] text-foreground underline-offset-2 hover:underline"
