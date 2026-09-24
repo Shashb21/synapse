@@ -30,6 +30,10 @@ export type PrioritizeGap = {
   validated: boolean;
   suggested_band: Band | null;
   suggested_rationale: string | null;
+  /** Axis ids a person set; a model re-run keeps their scores. */
+  human_axes?: string[];
+  /** The band is a person's; a model re-run keeps it. */
+  human_band?: boolean;
   rationale: string | null;
   actor_name: string | null;
   at: string | null;
@@ -338,6 +342,7 @@ function GapDetail({
               <dt className="text-muted-foreground">{axis.label}</dt>
               <dd className="text-foreground">
                 {gap.axis_scores?.[axis.id]} / 100
+                {gap.human_axes?.includes(axis.id) ? <span className="text-muted-foreground"> · set by hand</span> : null}
                 <span className="text-muted-foreground">
                   {" "}
                   · {(gap.axis_scores?.[axis.id] ?? 0) >= 50 ? axis.high_label : axis.low_label}
@@ -367,9 +372,62 @@ function GapDetail({
         </p>
       ) : (
         <p className="text-[11px] text-muted-foreground">
-          Not validated. Drag the gap to the right quadrant, then validate it.
+          Not validated. Drag the gap to the right quadrant or edit its scores, then validate it.
         </p>
       )}
+      {mayPrioritize ? (
+        <ActionDialog
+          endpoint="/api/plan"
+          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id }}
+          fields={[
+            {
+              name: "y_score",
+              label: `${yAxis.label} score (0–100)`,
+              defaultValue:
+                typeof gap.axis_scores?.[yAxis.id] === "number" ? String(gap.axis_scores[yAxis.id]) : "",
+              placeholder: "0–100",
+              hint: `0 = ${yAxis.low_label}, 100 = ${yAxis.high_label}. Leave empty to keep it unscored.`,
+            },
+            {
+              name: "x_score",
+              label: `${xAxis.label} score (0–100)`,
+              defaultValue:
+                typeof gap.axis_scores?.[xAxis.id] === "number" ? String(gap.axis_scores[xAxis.id]) : "",
+              placeholder: "0–100",
+              hint: `0 = ${xAxis.low_label}, 100 = ${xAxis.high_label}. Leave empty to keep it unscored.`,
+            },
+            {
+              name: "band",
+              label: "Band",
+              type: "select",
+              defaultValue: "",
+              options: [
+                { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
+                ...(["high", "medium", "low"] as const).map((value) => ({ value, label: BAND_LABELS[value] })),
+              ],
+              hint: "A band you set here is yours: a later model run keeps it and only updates its own suggestion.",
+            },
+            {
+              name: "validate",
+              label: "Validate the band now",
+              type: "select",
+              defaultValue: "no",
+              options: [
+                { value: "no", label: "No — keep it as a draft" },
+                { value: "yes", label: "Yes — lock it as validated" },
+              ],
+            },
+          ]}
+          label={point ? "Edit scores" : "Place by hand"}
+          title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
+          description="Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
+          confirmLabel="Save placement"
+          requireRationale
+          identity={identity}
+          variant="outline"
+          size="sm"
+        />
+      ) : null}
       {band && mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
@@ -749,9 +807,33 @@ export function PrioritizeMatrix({
               );
             })}
             {unplaced.length > 0 && !busy ? (
-              <p className="text-[11px] text-muted-foreground">
-                {unplaced.length} gap{unplaced.length === 1 ? "" : "s"} not placed yet.
-              </p>
+              <section aria-label="Gaps not placed yet">
+                <h3 className="mb-1 text-[12px] font-medium text-foreground">
+                  Not placed yet <span className="font-normal text-muted-foreground">{unplaced.length}</span>
+                </h3>
+                <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
+                  Select one to type its scores or band by hand — no model run needed.
+                </p>
+                <ul className="grid gap-0.5">
+                  {unplaced.map((gap) => (
+                    <li key={gap.gap_id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(gap.gap_id)}
+                        className={cn(
+                          "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                          gap.gap_id === selectedId && "bg-muted",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {gap.band ? `${BAND_LABELS[gap.band]}${gap.validated ? " · validated" : ""}` : "Unplaced"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ) : null}
           </div>
         </div>

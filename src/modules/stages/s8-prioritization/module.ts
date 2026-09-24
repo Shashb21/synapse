@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
-import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
 import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle } from "@/modules/kernel/agentic";
@@ -21,6 +21,52 @@ import {
   type PriorityAxis,
   type StoredAxes,
 } from "./axes";
+
+/**
+ * The kernel's `priority_placements` table plus the human markers S8 owns:
+ * `human_axes` lists the axis ids a person set (by drag or by typing a score)
+ * and `human_band` says the working band is a person's. A re-run never
+ * overwrites either; the model only refreshes its own suggestion.
+ */
+const placementsTable = pgTable("priority_placements", {
+  gap_id: text("gap_id").primaryKey(),
+  axis_scores: jsonb("axis_scores").notNull(),
+  suggested_band: text("suggested_band").notNull(),
+  suggested_rationale: text("suggested_rationale").notNull(),
+  band: text("band"),
+  validated: boolean("validated").notNull().default(false),
+  rationale: text("rationale"),
+  actor_name: text("actor_name"),
+  actor_function: text("actor_function"),
+  at: text("at").notNull(),
+  human_axes: jsonb("human_axes").$type<string[]>().notNull().default([]),
+  human_band: boolean("human_band").notNull().default(false),
+});
+
+const globalForS8 = globalThis as unknown as { synapseS8Schema?: Promise<void> };
+
+async function ensurePlacementSchema() {
+  await ensurePlatformSchema();
+  if (!globalForS8.synapseS8Schema) {
+    globalForS8.synapseS8Schema = (async () => {
+      await db().execute(
+        sql.raw(
+          "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_axes jsonb NOT NULL DEFAULT '[]'::jsonb",
+        ),
+      );
+      await db().execute(
+        sql.raw("ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_band boolean NOT NULL DEFAULT false"),
+      );
+    })().catch((error) => {
+      globalForS8.synapseS8Schema = undefined;
+      throw error;
+    });
+  }
+  await globalForS8.synapseS8Schema;
+}
+
+const humanAxesOf = (row: { human_axes: unknown } | undefined): string[] =>
+  Array.isArray(row?.human_axes) ? (row.human_axes as unknown[]).map(String) : [];
 
 const inputSchema = z.object({
   gap_ids: z.array(z.string()).optional(),
@@ -398,11 +444,14 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     });
 
     if (!input.dry_run) {
-      const existing = await db().select().from(t.priorityPlacements);
+      await ensurePlacementSchema();
+      const existing = await db().select().from(placementsTable);
       for (const placement of outcome.accepted) {
         const current = existing.find((row) => row.gap_id === placement.gap_id);
         const currentScores = (current?.axis_scores as Record<string, number> | undefined) ?? {};
         const locked = current?.validated ?? false;
+        const humanAxes = humanAxesOf(current);
+        const humanBand = current?.human_band ?? false;
         const placedAlready =
           typeof currentScores[xAxis.id] === "number" && typeof currentScores[yAxis.id] === "number";
         if (current && input.only_missing && placedAlready) continue;
@@ -411,6 +460,14 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         // validated gap only gains scores on axes it was never placed on, so it
         // has a spot on a matrix drawn on new axes. The new suggestion is still
         // in this run's output and trace.
+        //
+        // An unvalidated gap takes the new suggestion, except where a person
+        // already put it: axes they set keep their score, and a band they set
+        // stays the working band. The model's own suggested band and rationale
+        // are refreshed either way, so the delta stays visible.
+        const humanScores = Object.fromEntries(
+          humanAxes.filter((id) => typeof currentScores[id] === "number").map((id) => [id, currentScores[id]!]),
+        );
         const values = locked
           ? {
               gap_id: placement.gap_id,
@@ -423,24 +480,28 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
               actor_name: current!.actor_name,
               actor_function: current!.actor_function,
               at: current!.at,
+              human_axes: humanAxes,
+              human_band: humanBand,
             }
           : {
               gap_id: placement.gap_id,
-              axis_scores: { ...currentScores, ...placement.axis_scores },
+              axis_scores: { ...currentScores, ...placement.axis_scores, ...humanScores },
               suggested_band: placement.suggested_band,
               suggested_rationale: placement.rationale,
-              // The working band: the quadrant until someone drags or validates it.
-              band: placement.suggested_band,
+              // The working band: the quadrant until someone drags, sets or validates it.
+              band: humanBand && current?.band ? current.band : placement.suggested_band,
               validated: false,
-              rationale: null,
-              actor_name: null,
-              actor_function: null,
-              at: nowIso(),
+              rationale: humanBand ? (current?.rationale ?? null) : null,
+              actor_name: humanBand ? (current?.actor_name ?? null) : null,
+              actor_function: humanBand ? (current?.actor_function ?? null) : null,
+              at: humanBand && current ? current.at : nowIso(),
+              human_axes: humanAxes,
+              human_band: humanBand && Boolean(current?.band),
             };
         await db()
-          .insert(t.priorityPlacements)
+          .insert(placementsTable)
           .values(values)
-          .onConflictDoUpdate({ target: t.priorityPlacements.gap_id, set: values });
+          .onConflictDoUpdate({ target: placementsTable.gap_id, set: values });
       }
     }
 
@@ -511,106 +572,271 @@ export type PlacementRecord = {
   gap_id: string;
   axis_scores: Record<string, number>;
   suggested_band: "high" | "medium" | "low";
+  /** Empty when no model has suggested a placement (a hand-placed gap). */
   suggested_rationale: string;
   band: "high" | "medium" | "low" | null;
   validated: boolean;
   rationale: string | null;
   actor_name: string | null;
   at: string;
+  /** Axis ids a person set; a re-run keeps these scores. */
+  human_axes?: string[];
+  /** True when the working band is a person's; a re-run keeps it. */
+  human_band?: boolean;
 };
 
-export async function listPlacements(): Promise<PlacementRecord[]> {
-  await ensurePlatformSchema();
-  const rows = await db().select().from(t.priorityPlacements);
-  return rows.map((row) => ({
+type Band = PlacementRecord["suggested_band"];
+type PlacementRow = typeof placementsTable.$inferSelect;
+
+function toRecord(row: PlacementRow): PlacementRecord {
+  return {
     gap_id: row.gap_id,
     axis_scores: (row.axis_scores as Record<string, number>) ?? {},
-    suggested_band: row.suggested_band as PlacementRecord["suggested_band"],
+    suggested_band: row.suggested_band as Band,
     suggested_rationale: row.suggested_rationale,
-    band: (row.band as PlacementRecord["band"]) ?? null,
+    band: (row.band as Band | null) ?? null,
     validated: row.validated,
     rationale: row.rationale,
     actor_name: row.actor_name,
     at: row.at,
-  }));
+    human_axes: humanAxesOf(row),
+    human_band: row.human_band,
+  };
+}
+
+export async function listPlacements(): Promise<PlacementRecord[]> {
+  await ensurePlacementSchema();
+  const rows = await db().select().from(placementsTable);
+  return rows.map(toRecord);
+}
+
+async function currentPlacement(gapId: string): Promise<PlacementRow | undefined> {
+  const rows = await db().select().from(placementsTable).where(eq(placementsTable.gap_id, gapId)).limit(1);
+  return rows[0];
+}
+
+/** A hand-placed gap must be a live Open gap, the same set S8 places. */
+async function requireOpenGap(gapId: string) {
+  const state = await loadState();
+  const gap = state.gaps.find((row) => row.id === gapId);
+  if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${gapId}.`);
+  if (displayedGapStatus(gap) !== "validated_open") {
+    throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
+  }
+}
+
+/**
+ * A row for a gap no model has placed. There is no suggestion yet, so the
+ * suggested band mirrors the person's band and the suggested rationale stays
+ * empty until a model run fills it in.
+ */
+async function insertManualPlacement(values: {
+  gap_id: string;
+  axis_scores: Record<string, number>;
+  band: Band;
+  validated: boolean;
+  rationale: string | null;
+  actor: Actor | null;
+  human_axes: string[];
+}): Promise<PlacementRow> {
+  const row = {
+    gap_id: values.gap_id,
+    axis_scores: values.axis_scores,
+    suggested_band: values.band,
+    suggested_rationale: "",
+    band: values.band,
+    validated: values.validated,
+    rationale: values.rationale,
+    actor_name: values.actor?.name ?? null,
+    actor_function: values.actor?.function ?? null,
+    at: nowIso(),
+    human_axes: values.human_axes,
+    human_band: true,
+  };
+  await db().insert(placementsTable).values(row);
+  return row;
+}
+
+async function mirrorLegacyBand(gapId: string, band: Band, rationale: string, actor: Actor) {
+  // Keep the legacy residual-keyed board in step when the gap has a residual.
+  const state = await loadState();
+  const residual = state.residuals.find((row) => row.gap_id === gapId);
+  if (!residual) return;
+  try {
+    await lockPriority({
+      residual_id: residual.id,
+      band,
+      override_reason: rationale,
+      actor_name: actor.name,
+      actor_function: actor.function,
+    });
+  } catch {
+    // The legacy board is a mirror; a mismatch there must not fail validation.
+  }
 }
 
 /**
  * The S8 human gate: the user accepts or changes the suggested band with a
- * rationale, which is both the audit record and a hillclimb signal.
+ * rationale, which is both the audit record and a hillclimb signal. A gap no
+ * model has placed can be validated straight away: the person's band is the
+ * placement.
  */
 export async function validatePlacement(args: {
   gap_id: string;
-  band: "high" | "medium" | "low";
+  band: Band;
   rationale: string;
   actor: Actor;
   workspace_id?: string;
 }): Promise<PlacementRecord> {
-  await ensurePlatformSchema();
+  await ensurePlacementSchema();
   // Rationale first: a band must not move before the reason for it is known good.
   const rationale = requireRationale(args.rationale);
-  const rows = await db()
-    .select()
-    .from(t.priorityPlacements)
-    .where(eq(t.priorityPlacements.gap_id, args.gap_id))
-    .limit(1);
-  const current = rows[0];
-  if (!current) throw new Error(`${args.gap_id} has no suggested placement yet. Run S8 first.`);
-  const values = {
-    band: args.band,
-    validated: true,
-    rationale,
-    actor_name: args.actor.name,
-    actor_function: args.actor.function,
-    at: nowIso(),
-  };
-  await db().update(t.priorityPlacements).set(values).where(eq(t.priorityPlacements.gap_id, args.gap_id));
+  const current = await currentPlacement(args.gap_id);
+  let row: PlacementRow;
+  if (!current) {
+    await requireOpenGap(args.gap_id);
+    row = await insertManualPlacement({
+      gap_id: args.gap_id,
+      axis_scores: {},
+      band: args.band,
+      validated: true,
+      rationale,
+      actor: args.actor,
+      human_axes: [],
+    });
+  } else {
+    const values = {
+      band: args.band,
+      validated: true,
+      rationale,
+      actor_name: args.actor.name,
+      actor_function: args.actor.function,
+      at: nowIso(),
+      human_band: true,
+    };
+    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
+    row = { ...current, ...values };
+  }
   await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S8",
     entity_type: "gap",
     entity_id: args.gap_id,
     field: "priority_band",
-    action: current.suggested_band === args.band ? "accept" : "edit",
-    before: current.suggested_band,
+    action: !current ? "add" : current.suggested_band === args.band ? "accept" : "edit",
+    before: current?.suggested_band ?? null,
     after: args.band,
     rationale,
     actor: args.actor,
   });
-  // Keep the legacy residual-keyed board in step when the gap has a residual.
-  const state = await loadState();
-  const residual = state.residuals.find((row) => row.gap_id === args.gap_id);
-  if (residual) {
-    try {
-      await lockPriority({
-        residual_id: residual.id,
-        band: args.band,
-        override_reason: rationale,
-        actor_name: args.actor.name,
-        actor_function: args.actor.function,
-      });
-    } catch {
-      // The legacy board is a mirror; a mismatch there must not fail validation.
+  await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
+  return toRecord(row);
+}
+
+/**
+ * A person places a gap by hand, with no model run: typed axis scores (raw
+ * 0–100 on each axis's own scale), a band, or both. With both plotted axes
+ * scored and no band given, the band is the quadrant. The scores and band are
+ * marked as the person's, so a later S8 run keeps them. `validate` also locks
+ * the band, as the validate gate does; otherwise a validated gap keeps its
+ * validation only while its band is unchanged.
+ */
+export async function setPlacement(args: {
+  gap_id: string;
+  axis_scores?: Record<string, number>;
+  x_axis?: string;
+  y_axis?: string;
+  band?: Band;
+  validate?: boolean;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}): Promise<PlacementRecord> {
+  await ensurePlacementSchema();
+  const rationale = requireRationale(args.rationale);
+  const axes = await loadAxes();
+  const typed: Record<string, number> = {};
+  for (const [id, value] of Object.entries(args.axis_scores ?? {})) {
+    if (!axes.axes.some((axis) => axis.id === id)) throw new Error(`Unknown matrix axis ${id}.`);
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
+      throw new Error(`The ${id} score must be a number from 0 to 100.`);
     }
+    typed[id] = Math.round(value);
   }
-  return {
-    gap_id: args.gap_id,
-    axis_scores: (current.axis_scores as Record<string, number>) ?? {},
-    suggested_band: current.suggested_band as PlacementRecord["suggested_band"],
-    suggested_rationale: current.suggested_rationale,
-    band: args.band,
-    validated: true,
-    rationale: values.rationale,
-    actor_name: args.actor.name,
-    at: values.at,
-  };
+  const xAxis = args.x_axis ? axes.axes.find((axis) => axis.id === args.x_axis) : undefined;
+  const yAxis = args.y_axis ? axes.axes.find((axis) => axis.id === args.y_axis) : undefined;
+  if ((args.x_axis && !xAxis) || (args.y_axis && !yAxis)) throw new Error("Unknown matrix axis.");
+  if (xAxis && yAxis && xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
+  if (Object.keys(typed).length === 0 && !args.band) {
+    throw new Error("Give an axis score or a band to place the gap.");
+  }
+
+  const current = await currentPlacement(args.gap_id);
+  if (!current) await requireOpenGap(args.gap_id);
+  const axis_scores = { ...((current?.axis_scores as Record<string, number> | undefined) ?? {}), ...typed };
+  const quadrant =
+    xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
+      ? quadrantBand({ xAxis, yAxis, scores: axis_scores })
+      : null;
+  const before = current ? ((current.band ?? current.suggested_band) as Band) : null;
+  const band = args.band ?? quadrant ?? before;
+  if (!band) throw new Error("Give a band, or score both plotted axes so the quadrant sets it.");
+  const human_axes = [...new Set([...humanAxesOf(current), ...Object.keys(typed)])];
+  const validated = Boolean(args.validate) || Boolean(current?.validated && current.band === band);
+
+  let row: PlacementRow;
+  if (!current) {
+    row = await insertManualPlacement({
+      gap_id: args.gap_id,
+      axis_scores,
+      band,
+      validated,
+      rationale,
+      actor: args.actor,
+      human_axes,
+    });
+  } else {
+    const values = {
+      axis_scores,
+      band,
+      validated,
+      rationale,
+      actor_name: args.actor.name,
+      actor_function: args.actor.function,
+      at: nowIso(),
+      human_axes,
+      human_band: true,
+    };
+    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
+    row = { ...current, ...values };
+  }
+  const scoreText = (scores: Record<string, number>) =>
+    Object.entries(scores)
+      .map(([id, value]) => `${id}=${value}`)
+      .join(", ");
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S8",
+    entity_type: "gap",
+    entity_id: args.gap_id,
+    field: "placement",
+    action: current ? "edit" : "add",
+    before: current ? `${before} (${scoreText((current.axis_scores as Record<string, number>) ?? {})})` : null,
+    after: `${band} (${scoreText(axis_scores)})${validated ? " validated" : ""}`,
+    rationale,
+    actor: args.actor,
+  });
+  if (validated) await mirrorLegacyBand(args.gap_id, band, rationale, args.actor);
+  return toRecord(row);
 }
 
 /**
  * A drag on the matrix. The gap takes the band of the quadrant it lands in. A
  * validated gap dropped in a different band goes back to unvalidated — the
  * band a human locked is no longer the band on the board — while a nudge
- * inside the same quadrant keeps the validation.
+ * inside the same quadrant keeps the validation. The two dragged axes and the
+ * band become the person's, so a re-run does not move the gap back. A gap no
+ * model has placed yet can be dropped on the matrix too.
  */
 export async function movePlacement(args: {
   gap_id: string;
@@ -622,7 +848,7 @@ export async function movePlacement(args: {
   actor: Actor;
   workspace_id?: string;
 }): Promise<PlacementRecord> {
-  await ensurePlatformSchema();
+  await ensurePlacementSchema();
   const axes = await loadAxes();
   const xAxis = axes.axes.find((axis) => axis.id === args.x_axis);
   const yAxis = axes.axes.find((axis) => axis.id === args.y_axis);
@@ -631,31 +857,43 @@ export async function movePlacement(args: {
   if (![args.x, args.y].every((value) => Number.isFinite(value))) {
     throw new Error("A matrix position needs two numbers.");
   }
-  const rows = await db()
-    .select()
-    .from(t.priorityPlacements)
-    .where(eq(t.priorityPlacements.gap_id, args.gap_id))
-    .limit(1);
-  const current = rows[0];
-  if (!current) throw new Error(`${args.gap_id} is not on the matrix yet.`);
+  const current = await currentPlacement(args.gap_id);
+  if (!current) await requireOpenGap(args.gap_id);
   const axis_scores = {
-    ...((current.axis_scores as Record<string, number>) ?? {}),
+    ...((current?.axis_scores as Record<string, number> | undefined) ?? {}),
     [xAxis.id]: scoreFromFavourability(xAxis, args.x),
     [yAxis.id]: scoreFromFavourability(yAxis, args.y),
   };
-  const before = (current.band ?? current.suggested_band) as PlacementRecord["suggested_band"];
+  const before = current ? ((current.band ?? current.suggested_band) as Band) : null;
   const band = quadrantBand({ xAxis, yAxis, scores: axis_scores });
-  const keepsValidation = current.validated && current.band === band;
-  const values = {
-    axis_scores,
-    band,
-    validated: keepsValidation,
-    rationale: keepsValidation ? current.rationale : null,
-    actor_name: keepsValidation ? current.actor_name : null,
-    actor_function: keepsValidation ? current.actor_function : null,
-    at: nowIso(),
-  };
-  await db().update(t.priorityPlacements).set(values).where(eq(t.priorityPlacements.gap_id, args.gap_id));
+  const human_axes = [...new Set([...humanAxesOf(current), xAxis.id, yAxis.id])];
+  let row: PlacementRow;
+  if (!current) {
+    row = await insertManualPlacement({
+      gap_id: args.gap_id,
+      axis_scores,
+      band,
+      validated: false,
+      rationale: null,
+      actor: null,
+      human_axes,
+    });
+  } else {
+    const keepsValidation = current.validated && current.band === band;
+    const values = {
+      axis_scores,
+      band,
+      validated: keepsValidation,
+      rationale: keepsValidation ? current.rationale : null,
+      actor_name: keepsValidation ? current.actor_name : null,
+      actor_function: keepsValidation ? current.actor_function : null,
+      at: nowIso(),
+      human_axes,
+      human_band: true,
+    };
+    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
+    row = { ...current, ...values };
+  }
   if (before !== band) {
     await recordEdit({
       workspace_id: args.workspace_id,
@@ -663,24 +901,14 @@ export async function movePlacement(args: {
       entity_type: "gap",
       entity_id: args.gap_id,
       field: "matrix_band",
-      action: "edit",
+      action: current ? "edit" : "add",
       before,
       after: band,
       rationale: `Moved on the ${xAxis.label} × ${yAxis.label} matrix`,
       actor: args.actor,
     });
   }
-  return {
-    gap_id: args.gap_id,
-    axis_scores,
-    suggested_band: current.suggested_band as PlacementRecord["suggested_band"],
-    suggested_rationale: current.suggested_rationale,
-    band,
-    validated: keepsValidation,
-    rationale: values.rationale,
-    actor_name: values.actor_name,
-    at: values.at,
-  };
+  return toRecord(row);
 }
 
 export type { StoredAxes };

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import {
+  AddIdeaDialog,
   GapProposalGroupCard,
   type GapProposalGroup,
 } from "@/components/ideation/gap-proposal-group";
@@ -104,7 +105,8 @@ export default async function IdeationPage() {
       <PageIntro kicker="S9 · Tactics ideation" title="Tactics ideation review">
         S9 designs candidate tactics for open gaps whose band was validated as High, critiques them
         against the tactic library and keeps the best per gap. Accepting a proposal creates a
-        proposed tactic mapped to the gap; both decisions need a rationale.
+        proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea
+        before deciding it, or write your own — a re-run adds ideas and never rewrites yours.
       </PageIntro>
 
       <div className="grid gap-4">
@@ -142,7 +144,7 @@ export default async function IdeationPage() {
             </h2>
             <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">
               These open gaps have a validated High band but no ideated tactic yet. Run S9 to design
-              candidates for them.
+              candidates for them, or add an idea by hand.
             </p>
             <ul className="flex flex-wrap gap-2">
               {highWithoutProposal.map((gap) => (
@@ -154,6 +156,11 @@ export default async function IdeationPage() {
                     {gap.gap_name}
                   </Link>
                   <p className="text-[10px] text-muted-foreground">{gap.domain_label}</p>
+                  {mayIdeate ? (
+                    <div className="mt-1">
+                      <AddIdeaDialog gapId={gap.gap_id} gapName={gap.gap_name} identity={identity} />
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -178,7 +185,7 @@ export default async function IdeationPage() {
               <Link href="/?place=plan" className="text-foreground no-underline hover:underline">
                 prioritization matrix
               </Link>{" "}
-              first, then run S9 here.
+              first (by hand or with the model), then run S9 here or add ideas by hand.
             </p>
             <div>
               <RunStageButton
