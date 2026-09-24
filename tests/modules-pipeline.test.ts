@@ -85,7 +85,9 @@ describe("modular pipeline, S0 to S10", () => {
     expect(result.output.committed_gap_ids.length).toBeGreaterThan(0);
     for (const candidate of result.output.accepted) {
       expect(candidate.source_quote.trim().length).toBeGreaterThan(0);
-      expect(candidate.score).toBeGreaterThanOrEqual(45);
+      // Under the test stub no model judges; the note says so and nothing is marked a duplicate.
+      expect(candidate.critic_note).toMatch(/test stub/i);
+      expect(candidate.duplicate_of).toBeNull();
     }
     const candidates = await listGapCandidates();
     expect(candidates.length).toBe(result.output.accepted.length + result.output.rejected.length);
