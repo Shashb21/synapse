@@ -7,7 +7,7 @@ import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle, type Critique } from "@/mod
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { assignTacticToGap, loadState } from "@/lib/iegp/store";
+import { assignTacticToGap, humanRejectedPairs, loadState } from "@/lib/iegp/store";
 import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS, DIMENSION_VALUES, OVERALL_COVERAGE } from "@/lib/iegp/enums";
 import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
@@ -109,7 +109,7 @@ Each TABLE ROW is one evidence gap. For each gap you are given, decide which tac
 - mapping_status: "open" (no tactic bears on the gap), "addressed" (the tactics together fully close it) or "partially_addressed" (they cover part of it).
 - confidence (0-100) and a one-sentence rationale for the row as a whole.
 
-At most max_tactics_per_gap mappings per gap may have coverage other than "not_relevant". Do not map dissemination-only tactics unless the gap is about dissemination. Tactics already assigned to a gap are listed on it; judge them like any other.
+At most max_tactics_per_gap mappings per gap may have coverage other than "not_relevant". Do not map dissemination-only tactics unless the gap is about dissemination. Tactics already assigned to a gap are listed on it; judge them like any other. A gap may list human_rejected_tactic_ids: a reviewer rejected or removed those tactics for that gap, so never map them to it.
 
 When a gap carries a previous row and a critic objection, answer the objection: change the mappings or status it names, or keep them and say why in the rationale.
 
@@ -168,16 +168,28 @@ function finiteNumber(value: unknown): value is number {
 }
 
 /**
+ * Pairs S4 must leave alone: a person rejected or removed the tactic for the
+ * gap. (A pair already assigned, including one whose coverage a person set, is
+ * never rewritten: assignTacticToGap refuses an existing pair.)
+ */
+function blockedPairs(state: IegpState): Set<string> {
+  return humanRejectedPairs(state);
+}
+
+const pairKey = (gap_id: string, tactic_id: string) => `${gap_id}::${tactic_id}`;
+
+/**
  * Test stub only (SYNAPSE_TEST_STUB_LLM=1). Every row says no model ran, so a
  * stub mapping cannot pass for a judgement.
  */
 function localTableRows(state: IegpState, input: MappingInput): Row[] {
   if (!isTestStub()) throw new NoRouteError("Mapping has no rule-based fallback.");
   const { gaps, tactics } = candidateSets(state, input);
-  const covered = new Set(state.coverages.map((c) => `${c.gap_id}::${c.tactic_id}`));
+  const covered = new Set(state.coverages.map((c) => pairKey(c.gap_id, c.tactic_id)));
+  const blocked = blockedPairs(state);
   return gaps.map((gap) => {
     const scored = tactics
-      .filter((tactic) => !covered.has(`${gap.id}::${tactic.id}`))
+      .filter((tactic) => !covered.has(pairKey(gap.id, tactic.id)) && !blocked.has(pairKey(gap.id, tactic.id)))
       .map((tactic) => ({ tactic, result: scoreGapTacticMapping(gap, tactic, {}) }))
       .filter((item) => item.result.score >= MAPPING_SCORE_FLOOR)
       .sort((a, b) => b.result.score - a.result.score)
@@ -224,7 +236,13 @@ type RawRow = {
  * Schema check of one model row. Anything missing, out of vocabulary or
  * inconsistent returns null so the row is asked for again; nothing is filled in.
  */
-function parseProposedRow(raw: RawRow, gap: Gap, tactics: TacticRow[], maxPerGap: number): Row | null {
+function parseProposedRow(
+  raw: RawRow,
+  gap: Gap,
+  tactics: TacticRow[],
+  maxPerGap: number,
+  blocked: Set<string> = new Set(),
+): Row | null {
   const status = mappingStatusSchema.safeParse(raw.mapping_status);
   if (!status.success) return null;
   if (!finiteNumber(raw.confidence)) return null;
@@ -235,6 +253,8 @@ function parseProposedRow(raw: RawRow, gap: Gap, tactics: TacticRow[], maxPerGap
   for (const item of raw.mappings as RawMapping[]) {
     const tactic = tactics.find((candidate) => candidate.id === item?.tactic_id);
     if (!tactic || mappings.some((mapping) => mapping.tactic_id === tactic.id)) return null;
+    // A person rejected or removed this pair: it is left out, never proposed again.
+    if (blocked.has(pairKey(gap.id, tactic.id))) continue;
     const coverage = coverageSchema.safeParse(item.coverage);
     if (!coverage.success || !finiteNumber(item.confidence)) return null;
     const note = typeof item.rationale === "string" ? item.rationale.trim() : "";
@@ -313,7 +333,14 @@ type Shared = {
   gapById: Map<string, Gap>;
   tactics: TacticRow[];
   hints: string;
+  /** Pairs a person rejected or removed. */
+  blocked: Set<string>;
 };
+
+function rejectedFor(shared: Shared, gapId: string): string[] | undefined {
+  const ids = shared.tactics.map((tactic) => tactic.id).filter((id) => shared.blocked.has(pairKey(gapId, id)));
+  return ids.length ? ids : undefined;
+}
 
 function promptGap(shared: Shared, gapId: string) {
   const gap = shared.gapById.get(gapId)!;
@@ -323,6 +350,7 @@ function promptGap(shared: Shared, gapId: string) {
     statement: gap.statement,
     domain: gap.domain,
     assigned_tactic_ids: shared.state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.tactic_id),
+    human_rejected_tactic_ids: rejectedFor(shared, gap.id),
   };
 }
 
@@ -354,7 +382,7 @@ async function llmProposals(
   for (const raw of payload?.rows ?? []) {
     const gap = typeof raw?.gap_id === "string" ? shared.gapById.get(raw.gap_id) : undefined;
     if (!gap || !args.gapIds.includes(gap.id)) continue;
-    const row = parseProposedRow(raw, gap, shared.tactics, shared.input.max_per_gap);
+    const row = parseProposedRow(raw, gap, shared.tactics, shared.input.max_per_gap, shared.blocked);
     if (row) map.set(gap.id, row);
   }
   return map;
@@ -468,7 +496,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
     // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
-    const shared: Shared = { ctx, state, input, gapById, tactics, hints: "" };
+    const shared: Shared = { ctx, state, input, gapById, tactics, hints: "", blocked: blockedPairs(state) };
     const reviewByGap = new Map<string, Review>();
     const judgeVerdicts = new Map<string, JudgeVerdict>();
 
@@ -623,6 +651,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
       for (const row of outcome.accepted) {
         const joined: string[] = [];
         for (const mapping of row.mappings.filter(bearsOnGap)) {
+          if (shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id))) continue;
           try {
             await assignTacticToGap({
               gap_id: row.gap_id,

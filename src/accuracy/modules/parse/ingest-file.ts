@@ -1,5 +1,5 @@
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
-import { extractRawUnits, parseWithLlm } from "@/lib/ingest/llm-structure";
+import { extractRawUnits, parseWithLlm, type DroppedUnit } from "@/lib/ingest/llm-structure";
 import { isTestStub } from "@/modules/kernel/llm";
 import { hashId } from "@/lib/text";
 import type { ParsedDocument } from "@/lib/schema";
@@ -9,6 +9,10 @@ export type IngestFileResult = {
   document: ParsedDocument;
   effectiveParser: ParsePolicy["parser"];
   dropped: { location: string; reason: string }[];
+  /** Dropped noise units with their raw text (a human can restore one). */
+  dropped_units: DroppedUnit[];
+  /** The model's stakeholder classification and why; null under the test stub. */
+  stakeholder: { stakeholder_function: string; rationale: string } | null;
 };
 
 /** Test stub only: the local extractors' blocks stand in for the model's structure. */
@@ -44,8 +48,25 @@ export async function ingestFile(args: {
 }): Promise<IngestFileResult> {
   const { filename, mime, buffer } = args;
   if (isTestStub()) {
-    return { document: await stubDocument(filename, buffer, mime), effectiveParser: "local_structured", dropped: [] };
+    return {
+      document: await stubDocument(filename, buffer, mime),
+      effectiveParser: "local_structured",
+      dropped: [],
+      dropped_units: [],
+      stakeholder: null,
+    };
   }
-  const { document, dropped } = await parseWithLlm({ filename, buffer, mime, ask: args.ask });
-  return { document, effectiveParser: "llm", dropped };
+  const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
+    filename,
+    buffer,
+    mime,
+    ask: args.ask,
+  });
+  return {
+    document,
+    effectiveParser: "llm",
+    dropped,
+    dropped_units,
+    stakeholder: { stakeholder_function: document.stakeholder_function, rationale: stakeholder_rationale },
+  };
 }

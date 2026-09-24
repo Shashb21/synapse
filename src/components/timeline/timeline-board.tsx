@@ -12,6 +12,7 @@ import {
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import { ExportImageButton } from "@/components/timeline/export-image-button";
+import { DependencyDialog } from "@/components/timeline/dependency-dialog";
 import { GanttChart } from "@/components/timeline/gantt-chart";
 import {
   DOMAIN_LABELS,
@@ -23,7 +24,13 @@ import {
   type TacticStatus,
   type TacticType,
 } from "@/lib/iegp/enums";
-import type { TimelineActivity, TimelineModel } from "@/modules/stages/s10-timeline/build";
+import {
+  LANE_LABELS,
+  TIMELINE_LANES,
+  type ScheduleSource,
+  type TimelineActivity,
+  type TimelineModel,
+} from "@/modules/stages/s10-timeline/build";
 
 export type PlanView = {
   version: number;
@@ -47,6 +54,7 @@ export function TimelineBoard({
   canSaveFinal,
   canReschedule,
   gapDomains,
+  addable = [],
 }: {
   model: TimelineModel;
   today: string;
@@ -56,9 +64,15 @@ export function TimelineBoard({
   canSaveFinal: boolean;
   canReschedule: boolean;
   gapDomains: Record<string, string>;
+  /** Tactics not on the timeline in any form, which a user can add by hand. */
+  addable?: { tactic_id: string; name: string }[];
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [selected, setSelected] = useState<TimelineActivity | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Read from the live model, so an edit shows as soon as the page refreshes.
+  const selected = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
+  const setSelected = (activity: TimelineActivity | null) => setSelectedId(activity?.id ?? null);
+  const nameOf = new Map(model.activities.map((row) => [row.id, row.tactic_name]));
   const stale = plan ? plan.activities !== model.activities.length : false;
 
   return (
@@ -94,6 +108,14 @@ export function TimelineBoard({
             label="Rebuild from validated state"
             identity={identity}
           />
+          {canReschedule && addable.length > 0 ? (
+            <ManualDatesDialog
+              identity={identity}
+              tactics={addable}
+              label="Add activity"
+              title="Add an activity by hand"
+            />
+          ) : null}
           <ExportImageButton
             svgRef={svgRef}
             fileName={`synapse-iegp-v${plan?.version ?? "draft"}.png`}
@@ -148,10 +170,55 @@ export function TimelineBoard({
       {model.pending.length > 0 ? (
         <section className="border border-[var(--unknown)]/40 bg-card/40 p-3">
           <h2 className="text-[13px] font-medium text-foreground">Not dated yet</h2>
-          <ul className="mt-2 grid gap-1">
+          <ul className="mt-2 grid gap-2">
             {model.pending.map((row) => (
-              <li key={row.activity_id} className="text-[11px] text-muted-foreground">
-                <span className="text-foreground">{row.tactic_name}</span> — {row.reason}
+              <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 text-[11px] text-muted-foreground">
+                  <span className="text-foreground">{row.tactic_name}</span> — {row.reason}
+                </span>
+                {canReschedule ? (
+                  <span className="flex flex-wrap gap-2">
+                    <ManualDatesDialog
+                      identity={identity}
+                      tacticId={row.tactic_id}
+                      label="Date by hand"
+                      title={`Date ${row.tactic_name} by hand`}
+                    />
+                    <ActionDialog
+                      endpoint="/api/plan"
+                      payload={{ action: "remove_activity", id: row.activity_id }}
+                      label="Remove"
+                      title={`Remove ${row.tactic_name} from the timeline`}
+                      description="It stays off on every rebuild until someone adds it back. The tactic itself is not changed."
+                      confirmLabel="Remove"
+                      identity={identity}
+                    />
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {model.removed.length > 0 ? (
+        <section className="border border-border bg-card/40 p-3">
+          <h2 className="text-[13px] font-medium text-foreground">Removed by hand</h2>
+          <ul className="mt-2 grid gap-2">
+            {model.removed.map((row) => (
+              <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 text-[11px] text-muted-foreground">
+                  <span className="text-foreground">{row.tactic_name}</span> — “{row.reason}”
+                </span>
+                {canReschedule ? (
+                  <ManualDatesDialog
+                    identity={identity}
+                    tacticId={row.tactic_id}
+                    label="Add back"
+                    title={`Add ${row.tactic_name} back to the timeline`}
+                    hint="Leave the dates empty to keep the ones it had, if it had any."
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -216,19 +283,37 @@ export function TimelineBoard({
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Timing</h3>
                   <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
-                    <Row label="Start" value={selected.start_date} />
-                    <Row label="End" value={selected.end_date} />
-                    <Row label="Readout" value={selected.readout_date ?? "—"} />
-                    {selected.depends_on.length > 0 ? (
-                      <Row label="Depends on" value={selected.depends_on.join(", ")} />
-                    ) : null}
+                    <Row label="Start" value={`${selected.start_date} · ${BASIS_LABELS[selected.meta.schedule_basis.start]}`} />
+                    <Row label="End" value={`${selected.end_date} · ${BASIS_LABELS[selected.meta.schedule_basis.end]}`} />
+                    <Row
+                      label="Readout"
+                      value={
+                        selected.readout_date
+                          ? `${selected.readout_date} · ${BASIS_LABELS[selected.meta.schedule_basis.readout ?? "saved"]}`
+                          : "—"
+                      }
+                    />
+                    <Row
+                      label="Lane"
+                      value={`${LANE_LABELS[selected.lane]} · ${selected.meta.lane_locked ? "set by hand" : "follows the validated band"}`}
+                    />
+                    <Row
+                      label="Depends on"
+                      value={`${
+                        selected.depends_on.length > 0
+                          ? selected.depends_on.map((id) => nameOf.get(id) ?? id).join(", ")
+                          : "nothing"
+                      } · ${selected.meta.depends_locked ? "set by hand" : "model"}`}
+                    />
+                    {selected.meta.manual ? <Row label="Added" value="by hand" /> : null}
                   </dl>
                   {selected.meta.dependency_note ? (
                     <p className="mt-1 text-[11px] text-[var(--opportunity)]">{selected.meta.dependency_note}</p>
                   ) : null}
                   {selected.meta.schedule_rationale ? (
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Why these dates: {selected.meta.schedule_rationale}
+                      Why these dates ({selected.meta.rationale_locked ? "written by hand" : "model or design"}):{" "}
+                      {selected.meta.schedule_rationale}
                     </p>
                   ) : null}
                 </section>
@@ -259,25 +344,56 @@ export function TimelineBoard({
                 ) : null}
 
                 {canReschedule ? (
-                  <ActionDialog
-                    endpoint="/api/plan"
-                    payload={{ action: "move_activity", id: selected.id }}
-                    label="Reschedule"
-                    title={`Reschedule ${selected.tactic_name}`}
-                    description="Your dates survive the next rebuild. The change is recorded with its rationale."
-                    confirmLabel="Move"
-                    identity={identity}
-                    fields={[
-                      { name: "start_date", label: "Start", type: "date", defaultValue: selected.start_date },
-                      { name: "end_date", label: "End", type: "date", defaultValue: selected.end_date },
-                      {
-                        name: "readout_date",
-                        label: "Readout",
-                        type: "date",
-                        defaultValue: selected.readout_date ?? "",
-                      },
-                    ]}
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    <ActionDialog
+                      endpoint="/api/plan"
+                      payload={{ action: "move_activity", id: selected.id }}
+                      label="Reschedule"
+                      title={`Reschedule ${selected.tactic_name}`}
+                      description="Your dates, lane and rationale are marked as yours and survive every rebuild. The change is recorded with its rationale."
+                      confirmLabel="Move"
+                      identity={identity}
+                      fields={[
+                        { name: "start_date", label: "Start", type: "date", defaultValue: selected.start_date },
+                        { name: "end_date", label: "End", type: "date", defaultValue: selected.end_date },
+                        {
+                          name: "readout_date",
+                          label: "Readout",
+                          type: "date",
+                          defaultValue: selected.readout_date ?? "",
+                        },
+                        {
+                          name: "lane",
+                          label: "Lane",
+                          type: "select",
+                          defaultValue: "",
+                          options: [
+                            { value: "", label: `Unchanged (${LANE_LABELS[selected.lane]})` },
+                            ...TIMELINE_LANES.map((lane) => ({ value: lane, label: LANE_LABELS[lane] })),
+                            ...(selected.meta.lane_locked
+                              ? [{ value: "band", label: "Follow the validated band again" }]
+                              : []),
+                          ],
+                        },
+                        {
+                          name: "schedule_rationale",
+                          label: "Why these dates (shown on the activity)",
+                          type: "textarea",
+                          defaultValue: selected.meta.schedule_rationale ?? "",
+                        },
+                      ]}
+                    />
+                    <DependencyDialog activity={selected} activities={model.activities} identity={identity} />
+                    <ActionDialog
+                      endpoint="/api/plan"
+                      payload={{ action: "remove_activity", id: selected.id }}
+                      label="Remove from timeline"
+                      title={`Remove ${selected.tactic_name} from the timeline`}
+                      description="It stays off on every rebuild until someone adds it back. The tactic itself is not changed."
+                      confirmLabel="Remove"
+                      identity={identity}
+                    />
+                  </div>
                 ) : null}
               </div>
             </>
@@ -285,6 +401,72 @@ export function TimelineBoard({
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+const BASIS_LABELS: Record<ScheduleSource, string> = {
+  human: "set by hand",
+  saved: "saved",
+  tactic: "from the tactic",
+  design: "from the study design",
+  model: "model estimate",
+};
+
+/** Dates an activity by hand, with no model: start, end, readout, and optionally a lane and rationale. */
+function ManualDatesDialog({
+  identity,
+  tacticId,
+  label,
+  title,
+  hint,
+  tactics,
+}: {
+  identity: ActionIdentity;
+  /** Fixed tactic; omit and pass `tactics` to let the user choose one. */
+  tacticId?: string;
+  label: string;
+  title: string;
+  hint?: string;
+  tactics?: { tactic_id: string; name: string }[];
+}) {
+  return (
+    <ActionDialog
+      endpoint="/api/plan"
+      payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}) }}
+      label={label}
+      title={title}
+      description="Your dates are marked as yours and survive every rebuild; no model is needed. The change is recorded with its rationale."
+      confirmLabel="Save dates"
+      identity={identity}
+      fields={[
+        ...(tactics
+          ? [
+              {
+                name: "tactic_id",
+                label: "Tactic",
+                type: "select" as const,
+                defaultValue: tactics[0]?.tactic_id,
+                options: tactics.map((row) => ({ value: row.tactic_id, label: row.name })),
+                required: true,
+              },
+            ]
+          : []),
+        { name: "start_date", label: "Start", type: "date", hint },
+        { name: "end_date", label: "End", type: "date" },
+        { name: "readout_date", label: "Readout (optional)", type: "date" },
+        {
+          name: "lane",
+          label: "Lane",
+          type: "select",
+          defaultValue: "",
+          options: [
+            { value: "", label: "Follow the validated band" },
+            ...TIMELINE_LANES.map((lane) => ({ value: lane, label: LANE_LABELS[lane] })),
+          ],
+        },
+        { name: "schedule_rationale", label: "Why these dates (optional, shown on the activity)", type: "textarea" },
+      ]}
+    />
   );
 }
 

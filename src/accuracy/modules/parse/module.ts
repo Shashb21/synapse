@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
   blocksFromParsedDocument,
-  persistParseBlocks,
+  persistDroppedUnits,
+  persistParseBlocksDetailed,
+  recordLlmStakeholder,
 } from "@/accuracy/store/parse-store";
 import { agenticModule } from "../_factory";
 import { completeJson, requireAccuracyLlm } from "../../kernel/routing";
@@ -22,13 +24,20 @@ const outputSchema = z.object({
   block_count: z.number().int().nonnegative(),
   /** Units the model judged to be noise, with its reason. */
   dropped: z.array(z.object({ location: z.string(), reason: z.string() })),
+  /** Re-parse of the same source: human blocks kept as they are. */
+  kept_human_blocks: z.number().int().nonnegative().default(0),
+  /** Re-parse: model blocks kept because a claim quotes them. */
+  kept_cited_blocks: z.number().int().nonnegative().default(0),
+  /** The model's stakeholder classification and why (null under the test stub). */
+  stakeholder: z.object({ stakeholder_function: z.string(), rationale: z.string() }).nullable().default(null),
 });
 
 export const parseModule = agenticModule({
   id: "parse.llm-v1",
   call_kind: "parse",
   title: "LLM parse",
-  summary: "Extract the file's text, then the chosen LLM decides blocks, kinds and headings. LlamaParse is disabled.",
+  summary:
+    "Extract the file's text, then the chosen LLM decides blocks, kinds and headings. A re-parse keeps every human-made or human-edited block. LlamaParse is disabled.",
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
@@ -62,23 +71,44 @@ export const parseModule = agenticModule({
       })),
     });
 
-    const block_count = await ctx.run.step("parse:persist", () =>
-      persistParseBlocks({
+    const persisted = await ctx.run.step("parse:persist", () =>
+      persistParseBlocksDetailed({
         workspace_id: input.workspace_id,
         source_file_id: input.source_file_id,
         parser: ingested.effectiveParser,
         blocks,
       }),
     );
+    if (persisted.kept_human > 0 || persisted.kept_cited > 0) ctx.run.note("parse:kept", persisted);
+    await persistDroppedUnits({
+      workspace_id: input.workspace_id,
+      source_file_id: input.source_file_id,
+      units: ingested.dropped_units,
+    });
+    if (ingested.stakeholder) {
+      // Stored beside, never over, a human override.
+      await recordLlmStakeholder({
+        workspace_id: input.workspace_id,
+        source_file_id: input.source_file_id,
+        stakeholder_function: ingested.stakeholder.stakeholder_function,
+        rationale: ingested.stakeholder.rationale,
+      });
+    }
 
+    const block_count = persisted.inserted;
     return {
       output: {
         parser: ingested.effectiveParser,
         reason: policy.reason,
         block_count,
         dropped: ingested.dropped,
+        kept_human_blocks: persisted.kept_human,
+        kept_cited_blocks: persisted.kept_cited,
+        stakeholder: ingested.stakeholder,
       },
-      summary: `Parsed ${input.filename} → ${block_count} blocks (${ingested.effectiveParser})`,
+      summary: `Parsed ${input.filename} → ${block_count} blocks (${ingested.effectiveParser})${
+        persisted.kept_human ? `, ${persisted.kept_human} human block(s) kept` : ""
+      }`,
     };
   },
 });

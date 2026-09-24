@@ -31,6 +31,19 @@ export default async function TimelinePage() {
     loadState(),
   ]);
 
+  // Tactics not on the timeline in any form: a user can add any of them by hand.
+  const onTimeline = new Set([
+    ...model.activities.map((row) => row.tactic_id),
+    ...model.pending.map((row) => row.tactic_id),
+    ...model.removed.map((row) => row.tactic_id),
+  ]);
+  const addable = state.tactics
+    .filter(
+      (tactic) =>
+        !onTimeline.has(tactic.id) && tactic.status !== "cancelled" && tactic.review_status !== "rejected",
+    )
+    .map((tactic) => ({ tactic_id: tactic.id, name: tactic.name }));
+
   const gapDomains: Record<string, string> = {};
   for (const gap of state.gaps.filter(isLiveGap)) {
     gapDomains[gap.id] = gap.domain;
@@ -67,6 +80,7 @@ export default async function TimelinePage() {
         canSaveFinal={can(identity.role, "save_final")}
         canReschedule={can(identity.role, "validate")}
         gapDomains={gapDomains}
+        addable={addable}
       />
     </AppShell>
   );

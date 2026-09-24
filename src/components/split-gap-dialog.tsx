@@ -15,7 +15,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
+import {
+  ACTOR_FUNCTIONS,
+  DIMENSION_LABELS,
+  FUNCTION_LABELS,
+  type ActorFunction,
+  type CoverageDimension,
+} from "@/lib/iegp/enums";
 import type { PlanTactic } from "@/lib/iegp/engine";
 
 const DEFAULT_FUNCTION: ActorFunction = "evidence_lead";
@@ -67,6 +73,32 @@ function TacticChecklist({
   );
 }
 
+/**
+ * The split request the dialog sends to /api/iegp. Both statements go with it
+ * so a statement the person wrote (or the S6 proposal filled in) is kept; an
+ * empty statement is left out and the API falls back to the title.
+ */
+export function splitPayload(args: {
+  gapId: string;
+  addressedName: string;
+  addressedStatement: string;
+  openName: string;
+  openStatement: string;
+  addressedTacticIds: string[];
+  openTacticIds: string[];
+}) {
+  return {
+    action: "split_partial_gap",
+    parent_gap_id: args.gapId,
+    addressed_name: args.addressedName,
+    open_name: args.openName,
+    ...(args.addressedStatement.trim() ? { addressed_statement: args.addressedStatement.trim() } : {}),
+    ...(args.openStatement.trim() ? { open_statement: args.openStatement.trim() } : {}),
+    tactic_ids: args.addressedTacticIds.join(","),
+    open_tactic_ids: args.openTacticIds.join(","),
+  };
+}
+
 export function SplitGapDialog({
   gapId,
   gapName,
@@ -89,6 +121,10 @@ export function SplitGapDialog({
   const [actorFunction, setActorFunction] = useState<ActorFunction>(DEFAULT_FUNCTION);
   const [addressedName, setAddressedName] = useState(gapName);
   const [openName, setOpenName] = useState(residualName);
+  /** Empty means "same as the title" — the API falls back to it. */
+  const [addressedStatement, setAddressedStatement] = useState("");
+  const [openStatement, setOpenStatement] = useState("");
+  const [uncoveredDimensions, setUncoveredDimensions] = useState<string[]>([]);
   const [rewriteName, setRewriteName] = useState(gapName);
   const [rewriteStatus, setRewriteStatus] = useState<"validated_open" | "validated_addressed">(
     "validated_open",
@@ -120,6 +156,9 @@ export function SplitGapDialog({
     setMode("split");
     setAddressedName(gapName);
     setOpenName(residualName);
+    setAddressedStatement("");
+    setOpenStatement("");
+    setUncoveredDimensions([]);
     setRewriteName(gapName);
     setRewriteStatus("validated_open");
     setAddressedTacticIds(defaultAddressed);
@@ -151,7 +190,10 @@ export function SplitGapDialog({
       output?: {
         proposal: {
           addressed_name: string;
+          addressed_statement?: string;
           open_name: string;
+          open_statement?: string;
+          uncovered_dimensions?: string[];
           addressed_tactic_ids: string[];
           confidence: number;
           rationale: string[];
@@ -172,6 +214,9 @@ export function SplitGapDialog({
     setMode("split");
     setAddressedName(proposal.addressed_name);
     setOpenName(proposal.open_name);
+    setAddressedStatement(proposal.addressed_statement ?? "");
+    setOpenStatement(proposal.open_statement ?? "");
+    setUncoveredDimensions(proposal.uncovered_dimensions ?? []);
     if (proposal.addressed_tactic_ids.length > 0) {
       setAddressedTacticIds(proposal.addressed_tactic_ids);
     }
@@ -221,12 +266,15 @@ export function SplitGapDialog({
     const payload =
       mode === "split"
         ? {
-            action: "split_partial_gap",
-            parent_gap_id: gapId,
-            addressed_name: addressedName,
-            open_name: openName,
-            tactic_ids: addressedTacticIds.join(","),
-            open_tactic_ids: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)).join(","),
+            ...splitPayload({
+              gapId,
+              addressedName,
+              addressedStatement,
+              openName,
+              openStatement,
+              addressedTacticIds,
+              openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)),
+            }),
             note: rationale.trim(),
             actor_name: name,
             actor_function: actorFunction,
@@ -334,6 +382,19 @@ export function SplitGapDialog({
                   }}
                 />
               </label>
+              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+                Statement
+                <Textarea
+                  value={addressedStatement}
+                  rows={3}
+                  placeholder="What the chosen tactics close. Empty uses the title."
+                  className="min-h-20 whitespace-normal"
+                  onChange={(e) => {
+                    setAddressedStatement(e.target.value);
+                    setTouched(true);
+                  }}
+                />
+              </label>
               <p className="mt-3 text-[12px] text-muted-foreground">Mapped tactics</p>
               <TacticChecklist
                 tactics={tactics}
@@ -362,6 +423,28 @@ export function SplitGapDialog({
                   }}
                 />
               </label>
+              <label className="mt-3 grid gap-1 text-[12px] text-muted-foreground">
+                Statement
+                <Textarea
+                  value={openStatement}
+                  rows={3}
+                  placeholder="The evidence question still unanswered. Empty uses the title."
+                  className="min-h-20 whitespace-normal"
+                  onChange={(e) => {
+                    setOpenStatement(e.target.value);
+                    setTouched(true);
+                  }}
+                />
+              </label>
+              {uncoveredDimensions.length > 0 ? (
+                <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                  Suggested as uncovered:{" "}
+                  {uncoveredDimensions
+                    .map((dimension) => DIMENSION_LABELS[dimension as CoverageDimension] ?? dimension)
+                    .join(", ")}
+                  . Say so in the statement if it matters; the split records the statement, not this list.
+                </p>
+              ) : null}
               <p className="mt-3 text-[12px] text-muted-foreground">Remaining tactics (optional)</p>
               <TacticChecklist
                 tactics={leftoverTactics}

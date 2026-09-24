@@ -73,6 +73,9 @@ type PlaceItem = {
 };
 
 type SecondaryId =
+  | "needs"
+  | "residuals"
+  | "roadmap"
   | "mappings"
   | "pipeline"
   | "runs"
@@ -98,6 +101,9 @@ const TOOL_LABELS: Partial<Record<ShellId, string>> = {
 
 const SECONDARY: SecondaryItem[] = [
   { id: "setup", href: "/setup", label: "Get started", icon: Rocket },
+  { id: "needs", href: "/needs", label: "Needs", icon: ListChecks },
+  { id: "residuals", href: "/residuals", label: "Residuals", icon: ClipboardList },
+  { id: "roadmap", href: "/roadmap", label: "Roadmap", icon: ChartGantt },
   { id: "mappings", href: "/mappings", label: "Mapping table", icon: Columns3 },
   { id: "pipeline", href: "/pipeline", label: "Pipeline", icon: Workflow },
   { id: "runs", href: "/runs", label: "Runs", icon: Activity },

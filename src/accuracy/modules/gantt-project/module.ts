@@ -11,6 +11,7 @@ const tacticSchema = z.object({
   depends_on: z.array(z.string()).optional(),
   tactic_type: z.string().nullable().optional(),
   gap_ids: z.array(z.string()).optional(),
+  dates_locked: z.boolean().optional(),
 });
 
 const activityOverrideSchema = z.object({

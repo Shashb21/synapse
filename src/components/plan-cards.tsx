@@ -5,6 +5,7 @@ import {
   TacticBadge,
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { TacticDetailFields } from "@/components/gap-tactic-actions";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import type {
   OpenGapCard,
@@ -111,14 +112,7 @@ function CreateTacticFields() {
         placeholder="Evidence question"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
-      <input type="hidden" name="description" value="Proposed from the IEGP plan." />
-      <input type="hidden" name="population" value="To be specified" />
-      <input type="hidden" name="intervention" value="Velmara" />
-      <input type="hidden" name="comparator" value="To be specified" />
-      <input type="hidden" name="outcomes" value="To be specified" />
-      <input type="hidden" name="geography" value="US + EU5" />
-      <input type="hidden" name="owner" value="" />
-      <input type="hidden" name="function" value="evidence_lead" />
+      <TacticDetailFields />
     </>
   );
 }

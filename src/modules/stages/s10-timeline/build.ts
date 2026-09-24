@@ -21,10 +21,11 @@ export const LANE_LABELS: Record<TimelineBand, string> = {
 };
 
 /**
- * Where a date came from: a saved activity row (a user's edit or an earlier
- * build), the tactic record, the S9 study design, or a model estimate.
+ * Where a date came from: a user's own entry ("human"), a saved activity row
+ * whose origin was not recorded ("saved"), the tactic record, the S9 study
+ * design, or a model estimate.
  */
-export type ScheduleSource = "saved" | "tactic" | "design" | "model";
+export type ScheduleSource = "human" | "saved" | "tactic" | "design" | "model";
 
 export type ScheduleField = "start" | "duration" | "readout_lag";
 
@@ -66,7 +67,21 @@ export type TimelineActivity = {
     schedule_basis: ScheduleBasis;
     /** True once a user has moved the activity to a lane by hand. */
     lane_locked: boolean;
+    /** True once a user set the dependencies by hand; rebuilds keep them and never ask the model. */
+    depends_locked: boolean;
+    /** True once a user wrote the schedule rationale by hand. */
+    rationale_locked: boolean;
+    /** True when a user added this activity by hand (its tactic need not be mapped to a gap). */
+    manual: boolean;
   };
+};
+
+/** An activity a user took off the timeline; rebuilds leave it off until someone adds it back. */
+export type RemovedActivity = {
+  activity_id: string;
+  tactic_id: string;
+  tactic_name: string;
+  reason: string;
 };
 
 export type PendingActivity = {
@@ -82,8 +97,10 @@ export type TimelineModel = {
   window: { start: string; end: string; months: number };
   lanes: { id: TimelineBand; label: string; count: number }[];
   unscheduled: { gap_id: string; gap_name: string; reason: string }[];
-  /** Mapped tactics with no schedule yet: a timeline build (with a model) dates them. */
+  /** Mapped tactics with no schedule yet: a user dates them by hand, or a build (with a model) does. */
   pending: PendingActivity[];
+  /** Activities a user removed by hand. */
+  removed: RemovedActivity[];
 };
 
 /** Duration and readout lag carried by the tactic's own design (S9, model- or human-authored). */
@@ -112,8 +129,31 @@ export type SavedActivity = {
   readout_date: string | null;
   lane: string;
   depends_on: string[];
-  meta?: Partial<Pick<TimelineActivity["meta"], "schedule_rationale" | "schedule_basis" | "dependency_note" | "lane_locked">> | null;
+  meta?:
+    | (Partial<
+        Pick<
+          TimelineActivity["meta"],
+          | "schedule_rationale"
+          | "schedule_basis"
+          | "dependency_note"
+          | "lane_locked"
+          | "depends_locked"
+          | "rationale_locked"
+          | "manual"
+        >
+      > & {
+        /** A user's reason for each dependency they set, by upstream activity id. */
+        dependency_reasons?: Record<string, string>;
+        removed?: boolean;
+        removed_reason?: string;
+      })
+    | null;
 };
+
+/** True when the saved row says a user took the activity off the timeline. */
+export function isRemoved(saved: SavedActivity | null | undefined): boolean {
+  return saved?.meta?.removed === true;
+}
 
 export type TimelineCandidate = {
   id: string;
@@ -199,12 +239,16 @@ export function timelineCandidates(args: {
   for (const tactic of args.state.tactics) {
     if (tactic.status === "cancelled" || tactic.review_status === "rejected") continue;
     const gapIds = [...new Set(gapsForTactic.get(tactic.id) ?? [])];
-    if (gapIds.length === 0) continue;
     const id = activityId(tactic.id);
+    const saved = args.overrides?.find((row) => row.id === id) ?? null;
+    // A user can put any tactic on the timeline by hand, mapped or not.
+    if (gapIds.length === 0 && saved?.meta?.manual !== true) continue;
+    // A user removed it: it stays off until someone adds it back.
+    if (isRemoved(saved)) continue;
     candidates.push({
       id,
       tactic,
-      band: bandOf(gapIds),
+      band: gapIds.length === 0 ? "unprioritized" : bandOf(gapIds),
       gap_ids: gapIds,
       gap_names: gapIds.map((gapId) => gapById.get(gapId)?.name ?? gapId),
       priority_rationale:
@@ -217,7 +261,7 @@ export function timelineCandidates(args: {
           args.state.tactics,
         ).length > 0,
       design: args.designs?.get(tactic.id) ?? {},
-      saved: args.overrides?.find((row) => row.id === id) ?? null,
+      saved,
     });
   }
   return candidates;
@@ -308,7 +352,7 @@ export function buildTimeline(args: {
         tactic_id: tactic.id,
         tactic_name: tactic.name,
         missing,
-        reason: `No ${missing.map((field) => field.replace("_", " ")).join(", ")} yet. Rebuild the timeline to have the model estimate ${missing.length === 1 ? "it" : "them"}.`,
+        reason: `No ${missing.map((field) => field.replace("_", " ")).join(", ")} yet. Date it by hand, or rebuild the timeline to have the model estimate ${missing.length === 1 ? "it" : "them"}.`,
       });
       continue;
     }
@@ -340,12 +384,18 @@ export function buildTimeline(args: {
     });
   }
 
-  // Dependencies the model inferred for this build, else the ones saved with the row.
+  // Dependencies a user set by hand always win; else the model's for this
+  // build; else the ones saved with the row.
   const dependenciesOf = (id: string): { id: string; reason: string | null }[] => {
-    const answer = args.dependencies?.get(id);
+    const saved = resolved.get(id)?.candidate.saved;
+    const locked = saved?.meta?.depends_locked === true;
+    const answer = locked ? undefined : args.dependencies?.get(id);
     const list = answer
       ? answer.upstream.map((row) => ({ id: row.id, reason: row.reason }))
-      : (resolved.get(id)?.candidate.saved?.depends_on ?? []).map((upstream) => ({ id: upstream, reason: null }));
+      : (saved?.depends_on ?? []).map((upstream) => ({
+          id: upstream,
+          reason: locked ? (saved?.meta?.dependency_reasons?.[upstream] ?? null) : null,
+        }));
     return list.filter((row) => row.id !== id && resolved.has(row.id));
   };
 
@@ -421,6 +471,9 @@ export function buildTimeline(args: {
         schedule_rationale: row.rationale,
         schedule_basis: { start: row.startSource, end: row.endSource, readout: readout ? row.readoutSource : null },
         lane_locked: laneLocked,
+        depends_locked: candidate.saved?.meta?.depends_locked === true,
+        rationale_locked: candidate.saved?.meta?.rationale_locked === true,
+        manual: candidate.saved?.meta?.manual === true,
       },
     };
     placed.set(id, activity);
@@ -431,6 +484,19 @@ export function buildTimeline(args: {
   const windowStart = dates.length ? dates.slice().sort()[0]! : anchor;
   const windowEnd = dates.length ? dates.slice().sort()[dates.length - 1]! : addMonths(anchor, 12);
 
+  const tacticById = new Map(args.state.tactics.map((tactic) => [tactic.id, tactic]));
+  const removed: RemovedActivity[] = [];
+  for (const row of args.overrides ?? []) {
+    const tactic = tacticById.get(row.id.replace(/^ACT-/, ""));
+    if (!isRemoved(row) || !tactic) continue;
+    removed.push({
+      activity_id: row.id,
+      tactic_id: tactic.id,
+      tactic_name: tactic.name,
+      reason: row.meta?.removed_reason ?? "Removed by hand.",
+    });
+  }
+  const removedTactics = new Set(removed.map((row) => row.tactic_id));
   const unscheduled = liveGaps
     .filter(
       (gap) =>
@@ -440,7 +506,11 @@ export function buildTimeline(args: {
     .map((gap) => ({
       gap_id: gap.id,
       gap_name: gap.name,
-      reason: "Open gap with no mapped or ideated tactic yet.",
+      reason: args.state.coverages.some(
+        (coverage) => coverage.gap_id === gap.id && removedTactics.has(coverage.tactic_id),
+      )
+        ? "Its activity was removed from the timeline by hand."
+        : "Open gap with no mapped or ideated tactic yet.",
     }));
 
   const lanes: TimelineModel["lanes"] = TIMELINE_LANES.map((lane) => ({
@@ -461,5 +531,6 @@ export function buildTimeline(args: {
     lanes,
     unscheduled,
     pending,
+    removed,
   };
 }

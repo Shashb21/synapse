@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 registerAccuracyStack();
 
 type AuditRow = {
-  kind: "validation" | "coverage" | "priority" | "run";
+  kind: "validation" | "coverage" | "priority" | "run" | "edit";
   at: string;
   title: string;
   detail: string;
@@ -33,7 +33,7 @@ export default async function AccuracyAuditPage({
     snapshot_hash: queryHash = "",
   } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
-  let rows: AuditRow[] = [];
+  const rows: AuditRow[] = [];
   let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
   let plan: AccuracyPlanRecord | null = null;
@@ -68,7 +68,27 @@ export default async function AccuracyAuditPage({
             detail: `${claim.statement.slice(0, 120)} — ${v.rationale ?? ""} (${v.by ?? "unknown"})`,
           });
         }
-        if (typeof meta.priority_rationale === "string" && meta.priority_rationale) {
+        for (const entry of Array.isArray(meta.edit_history) ? meta.edit_history : []) {
+          if (!entry || typeof entry !== "object") continue;
+          const changes = (entry.fields ?? [])
+            .map((field) => {
+              const before = entry.before?.[field];
+              const after = entry.after?.[field];
+              return `${field}: ${JSON.stringify(before ?? null)} → ${JSON.stringify(after ?? null)}`;
+            })
+            .join("; ");
+          rows.push({
+            kind: "edit",
+            at: entry.at ?? claim.updated_at,
+            title: `human ${entry.action} · ${claim.claim_type} ${claim.id}`,
+            detail: `${claim.statement.slice(0, 100)} — ${changes || entry.fields.join(", ")} — “${entry.rationale}” (${entry.by})`,
+          });
+        }
+        if (
+          typeof meta.priority_rationale === "string" &&
+          meta.priority_rationale &&
+          meta.priority_origin !== "human"
+        ) {
           rows.push({
             kind: "priority",
             at: claim.updated_at,
