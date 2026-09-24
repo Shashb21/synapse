@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 export function CreateWorkspaceForm() {
   const router = useRouter();
+  const aiOn = useAiEnabled();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -30,7 +32,10 @@ export function CreateWorkspaceForm() {
         setError(body.error ?? "Create failed");
         return;
       }
-      router.push(`/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}`);
+      // AI off: land on hand entry of gaps (there is nothing to upload or extract).
+      router.push(
+        `/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}${aiOn ? "" : "&add=gap"}`,
+      );
       router.refresh();
     });
   }

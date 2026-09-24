@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 const PACKS = [
   { id: "beone-bgb-58067-prmt5i", label: "BGB-58067 PRMT5i IEP" },
@@ -10,6 +11,7 @@ const PACKS = [
 
 export function SeedFromGoldForm() {
   const router = useRouter();
+  const aiOn = useAiEnabled();
   const [pending, startTransition] = useTransition();
   const [packId, setPackId] = useState<string>(PACKS[0].id);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +25,8 @@ export function SeedFromGoldForm() {
       const res = await fetch("/api/accuracy/seed", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pack_id: packId, parse_source: true }),
+        // AI off: load the gold claims only; the reference source is not parsed.
+        body: JSON.stringify({ pack_id: packId, parse_source: aiOn }),
       });
       const body = (await res.json()) as {
         ok?: boolean;
@@ -31,6 +34,7 @@ export function SeedFromGoldForm() {
         gaps?: number;
         tactics?: number;
         parse_blocks?: number;
+        parse_skipped?: string | null;
         error?: string;
       };
       if (!res.ok || !body.ok || !body.workspace_id) {
@@ -38,7 +42,9 @@ export function SeedFromGoldForm() {
         return;
       }
       setSummary(
-        `Seeded ${body.gaps ?? 0} gaps, ${body.tactics ?? 0} tactics, ${body.parse_blocks ?? 0} parse blocks`,
+        body.parse_skipped
+          ? `Seeded ${body.gaps ?? 0} gaps and ${body.tactics ?? 0} tactics. ${body.parse_skipped}`
+          : `Seeded ${body.gaps ?? 0} gaps, ${body.tactics ?? 0} tactics, ${body.parse_blocks ?? 0} parse blocks`,
       );
       router.push(`/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}`);
       router.refresh();
@@ -49,8 +55,9 @@ export function SeedFromGoldForm() {
     <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card/40 p-3">
       <h3 className="text-[13px] font-medium text-foreground">Seed from BeOne reference gold</h3>
       <p className="text-[12px] text-muted-foreground">
-        Creates a workspace, loads gold gap/tactic statements, and has the parse route&apos;s LLM
-        parse the reference source when present.
+        {aiOn
+          ? "Creates a workspace, loads gold gap/tactic statements, and has the parse route’s LLM parse the reference source when present."
+          : "Creates a workspace and loads the gold gap/tactic statements as drafts to review by hand. AI is off, so the reference source is not parsed."}
       </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Reference pack</span>

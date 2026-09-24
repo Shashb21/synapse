@@ -11,6 +11,7 @@ import {
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +29,7 @@ export default async function AccuracyPlanPage({
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
+  const aiOn = await aiEnabled();
 
   try {
     workspaces = await listWorkspaces();
@@ -57,9 +59,9 @@ export default async function AccuracyPlanPage({
   return (
     <AccuracyAppShell active="plan">
       <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
-        Set priority bands on evidence gaps. Validated high-priority open gaps can run live LLM
-        ideation — origin ideated, status proposed until you validate. Inventory tactics stay on
-        extract.
+        {aiOn
+          ? "Set priority bands on evidence gaps. Validated high-priority open gaps can run live LLM ideation — origin ideated, status proposed until you validate. Inventory tactics stay on extract."
+          : "Set priority bands on evidence gaps. AI is off: for validated high-priority open gaps, write proposed tactics by hand — status proposed until you validate."}
       </PageIntro>
 
       {loadError ? (
@@ -80,7 +82,7 @@ export default async function AccuracyPlanPage({
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
-            open eligible for ideate · edit proposed tactics (name, type, design, dates) on the{" "}
+            open eligible for {aiOn ? "ideate" : "a proposed tactic"} · edit proposed tactics (name, type, design, dates) on the{" "}
             <Link
               href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
               className="text-foreground underline-offset-2 hover:underline"
@@ -98,7 +100,7 @@ export default async function AccuracyPlanPage({
             />
           ) : null}
           {gaps.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No gaps yet — seed gold or extract needs.</p>
+            <p className="text-[12px] text-muted-foreground">{aiOn ? "No gaps yet — seed gold or extract needs." : "No gaps yet — add them by hand on the Ledger."}</p>
           ) : (
             <div className="grid gap-2">
               <PlanIdeateAllButton workspaceId={workspaceId} eligibleCount={eligibleCount} />

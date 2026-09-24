@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -55,8 +56,17 @@ export function PlanIdeateAllButton({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const aiOn = useAiEnabled();
 
   if (eligibleCount < 1) return null;
+  if (!aiOn) {
+    return (
+      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="plan-ideate-ai-off">
+        AI is off — no LLM ideation. Write proposed tactics by hand with &ldquo;Save manual
+        proposal&rdquo; on each high open gap below.
+      </p>
+    );
+  }
 
   function run() {
     setError(null);
@@ -105,6 +115,7 @@ export function PlanPriorityCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const aiOn = useAiEnabled();
   const [value, setValue] = useState(priority ?? "medium");
   const [error, setError] = useState<string | null>(null);
   const [ideateTitle, setIdeateTitle] = useState("");
@@ -231,29 +242,40 @@ export function PlanPriorityCard({
 
       {canIdeate ? (
         <form onSubmit={ideateManual} className="mt-3 grid gap-2 border-t border-border pt-3">
-          <p className="text-[11px] text-muted-foreground">
-            High + validated + open — run live LLM ideation (origin: ideated, status: proposed until
-            you validate). Inventory tactics stay on extract.
-          </p>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={runLlm}
-            className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
-          >
-            {pending ? "Working…" : "Run LLM ideate"}
-          </button>
+          {aiOn ? (
+            <>
+              <p className="text-[11px] text-muted-foreground">
+                High + validated + open — run live LLM ideation (origin: ideated, status: proposed
+                until you validate). Inventory tactics stay on extract.
+              </p>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={runLlm}
+                className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+              >
+                {pending ? "Working…" : "Run LLM ideate"}
+              </button>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              High + validated + open — AI is off, so propose a tactic by hand: title (8+
+              characters) and rationale, then save (status: proposed until you validate).
+            </p>
+          )}
           <input
             value={ideateTitle}
             onChange={(e) => setIdeateTitle(e.target.value)}
-            placeholder="Optional title hint, or submit as a manual proposal"
+            placeholder={aiOn ? "Optional title hint, or submit as a manual proposal" : "Proposed tactic title"}
             minLength={8}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <input
             value={ideateRationale}
             onChange={(e) => setIdeateRationale(e.target.value)}
-            placeholder="Optional rationale (required to save a manual proposal)"
+            placeholder={
+              aiOn ? "Optional rationale (required to save a manual proposal)" : "Rationale (required)"
+            }
             minLength={3}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
