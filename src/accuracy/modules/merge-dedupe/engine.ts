@@ -33,6 +33,12 @@ export type MergeCandidate = {
   tactic_status?: TacticLifecycle | null;
   provenance: MergeProvenance[];
   created_at?: string | null;
+  /**
+   * Validated or human-edited. A protected claim may survive a merge (absorb
+   * AI duplicates) but is never merged away automatically — the pair becomes
+   * a proposal a human confirms.
+   */
+  protected?: boolean;
 };
 
 export type MergeReason = "identity" | "statement" | "model_equivalence" | "transitive";
@@ -73,6 +79,8 @@ export type MergeDedupeResult = {
   contradictions: MergeContradiction[];
   /** duplicate claim id → surviving claim id (cluster root). */
   absorbed: Record<string, string>;
+  /** Merges the model found but did not apply because the duplicate is protected. */
+  proposals: MergeRecord[];
 };
 
 const TACTIC_LIFECYCLES = new Set<TacticLifecycle>([
@@ -184,6 +192,7 @@ export function tacticStatusesConflict(a: MergeCandidate, b: MergeCandidate): bo
 }
 
 function preferSurvivor(a: MergeCandidate, b: MergeCandidate): MergeCandidate {
+  if (Boolean(a.protected) !== Boolean(b.protected)) return a.protected ? a : b;
   if (a.validated !== b.validated) return a.validated ? a : b;
   const aCreated = a.created_at ?? "";
   const bCreated = b.created_at ?? "";
@@ -247,7 +256,7 @@ function mechanicalMatch(a: MergeCandidate, b: MergeCandidate): PairMatch | null
   return null;
 }
 
-function pairKey(a: string, b: string): string {
+export function pairKey(a: string, b: string): string {
   return a <= b ? `${a}::${b}` : `${b}::${a}`;
 }
 
@@ -256,13 +265,17 @@ function pairKey(a: string, b: string): string {
  * no identity key. Citing the same block makes them worth asking about; it
  * decides nothing — the LLM judge says whether they are the same item.
  */
-export function equivalenceQuestions(candidates: MergeCandidate[]): EquivalenceQuestion[] {
+export function equivalenceQuestions(
+  candidates: MergeCandidate[],
+  blocked: ReadonlySet<string> = new Set(),
+): EquivalenceQuestion[] {
   const out: EquivalenceQuestion[] = [];
   for (let i = 0; i < candidates.length; i += 1) {
     for (let j = i + 1; j < candidates.length; j += 1) {
       const a = candidates[i]!;
       const b = candidates[j]!;
       if (!comparable(a, b) || mechanicalMatch(a, b)) continue;
+      if (blocked.has(pairKey(a.id, b.id))) continue;
       const shared = sharedBlockIds(a, b);
       if (shared.length === 0) continue;
       out.push({ a_id: a.id, b_id: b.id, claim_type: a.claim_type, shared_block_ids: shared });
@@ -304,8 +317,13 @@ class UnionFind {
  */
 export function mergeDedupeCandidates(
   candidates: MergeCandidate[],
-  options: { equivalent?: EquivalentPair[] } = {},
+  options: {
+    equivalent?: EquivalentPair[];
+    /** Pair keys (see `pairKey`) a human marked as not-the-same. Never merged or proposed. */
+    blocked?: ReadonlySet<string>;
+  } = {},
 ): MergeDedupeResult {
+  const blocked = options.blocked ?? new Set<string>();
   const judged = new Map<string, PairMatch>();
   for (const pair of options.equivalent ?? []) {
     judged.set(pairKey(pair.a_id, pair.b_id), {
@@ -315,6 +333,7 @@ export function mergeDedupeCandidates(
     });
   }
   const pairMatch = (a: MergeCandidate, b: MergeCandidate): PairMatch | null => {
+    if (blocked.has(pairKey(a.id, b.id))) return null;
     const mechanical = mechanicalMatch(a, b);
     if (mechanical) return mechanical;
     if (!comparable(a, b)) return null;
@@ -322,6 +341,7 @@ export function mergeDedupeCandidates(
     return verdict ? { ...verdict, keys: sharedBlockIds(a, b) } : null;
   };
   const merges: MergeRecord[] = [];
+  const proposals: MergeRecord[] = [];
   const contradictions: MergeContradiction[] = [];
   const absorbed: Record<string, string> = {};
   const byId = new Map(candidates.map((c) => [c.id, { ...c, provenance: [...c.provenance] }]));
@@ -373,6 +393,18 @@ export function mergeDedupeCandidates(
       let folded = { ...survivor };
       for (const member of members) {
         if (member.id === survivor.id) continue;
+        if (blocked.has(pairKey(survivor.id, member.id))) continue;
+        if (member.protected) {
+          const match = pairMatch(survivor, member);
+          proposals.push({
+            survivor_id: survivor.id,
+            duplicate_id: member.id,
+            reason: match?.reason ?? "transitive",
+            keys: match?.keys ?? [],
+            rationale: match?.rationale ?? null,
+          });
+          continue;
+        }
         folded = mergeInto(folded, member);
         absorbed[member.id] = survivor.id;
         const already = merges.some(
@@ -396,5 +428,5 @@ export function mergeDedupeCandidates(
   const mergedAway = new Set(Object.keys(absorbed));
   const survivors = [...byId.values()].filter((c) => !mergedAway.has(c.id));
 
-  return { survivors, merges, contradictions, absorbed };
+  return { survivors, merges, contradictions, absorbed, proposals };
 }

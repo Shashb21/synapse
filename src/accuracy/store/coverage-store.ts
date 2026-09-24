@@ -4,6 +4,7 @@ import * as t from "./schema";
 import { newId } from "@/modules/kernel/ids";
 import {
   claimMetadata,
+  getClaimsByIds,
   isActiveLedgerClaim,
   listClaims,
   type AccuracyClaimRow,
@@ -55,7 +56,48 @@ export async function listCoveragePairs(workspace_id: string): Promise<CoverageP
       });
     }
   }
-  return pairs.slice(0, 80);
+  // Decisions a user made on any pair (manual pair picker) always stay visible,
+  // even when the pair is not one of the heuristic candidates above.
+  const listed = new Set(pairs.map((pair) => `${pair.gap.id}::${pair.tactic.id}`));
+  const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
+  const tacticById = new Map(tactics.map((tactic) => [tactic.id, tactic]));
+  const decided: CoveragePair[] = [];
+  for (const join of joins) {
+    const key = `${join.gap_id}::${join.tactic_id}`;
+    if (listed.has(key)) continue;
+    const gap = gapById.get(join.gap_id);
+    const tactic = tacticById.get(join.tactic_id);
+    if (!gap || !tactic) continue;
+    listed.add(key);
+    decided.push({
+      id: join.id,
+      gap,
+      tactic,
+      overall: join.overall,
+      rationale: join.rationale,
+      validated: join.validated,
+    });
+  }
+  return [...pairs.slice(0, 80), ...decided];
+}
+
+/** Throws unless gap_id is an active gap and tactic_id an active tactic in the workspace. */
+export async function requireCoveragePairClaims(args: {
+  workspace_id: string;
+  gap_id: string;
+  tactic_id: string;
+}): Promise<{ gap: AccuracyClaimRow; tactic: AccuracyClaimRow }> {
+  const rows = await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
+  const gap = rows.find((row) => row.id === args.gap_id);
+  const tactic = rows.find((row) => row.id === args.tactic_id);
+  if (!gap || gap.claim_type !== "gap") throw new Error(`Unknown gap: ${args.gap_id}`);
+  if (!tactic || tactic.claim_type !== "tactic") {
+    throw new Error(`Unknown tactic: ${args.tactic_id}`);
+  }
+  if (!isActiveLedgerClaim(gap) || !isActiveLedgerClaim(tactic)) {
+    throw new Error("Coverage can only be decided between active (not merged / rejected) claims.");
+  }
+  return { gap, tactic };
 }
 
 export async function upsertCoverageDecision(args: {

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CompletenessAuditOutput } from "@/accuracy/modules/completeness-audit/module";
 import { missFlagSuggestedSchema } from "@/accuracy/modules/completeness-audit/engine";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { createManualClaim } from "@/accuracy/store/claim-edit";
 import { recordMissFlagAction } from "@/accuracy/store/miss-flag-store";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
@@ -71,6 +71,8 @@ const postSchema = z.object({
   block_id: z.string().min(1),
   action: z.enum(["promote", "dismiss"]),
   suggested: missFlagSuggestedSchema.optional(),
+  /** Promote only: the reviewer's wording of the claim (defaults to the block excerpt). */
+  statement: z.string().max(2000).optional(),
   rationale: z.string().min(1),
   actor_name: z.string().min(1).optional(),
   actor_function: z.string().min(1).optional(),
@@ -103,16 +105,21 @@ export async function POST(req: Request) {
 
     if (body.action === "promote") {
       const excerpt = block.text.replace(/\s+/g, " ").trim().slice(0, 500);
-      const claim = await insertClaim({
+      const statement = body.statement?.trim() || excerpt;
+      // Promotion is a human decision: the claim is human-authored (statement locked).
+      const claim = await createManualClaim({
         workspace_id: body.workspace_id,
         claim_type: suggested,
-        statement: excerpt,
+        statement,
+        rationale: body.rationale,
+        actor,
+        action: "promote",
+        origin: "completeness_audit",
+        source_badge: "miss_flag",
         status: "draft",
-        validated: false,
         source_file_id: block.source_file_id,
         metadata: {
-          origin: "completeness_audit",
-          source_badge: "miss_flag",
+          ...(statement !== excerpt ? { promoted_from_excerpt: excerpt } : {}),
           provenance: [
             {
               source_file_id: block.source_file_id,

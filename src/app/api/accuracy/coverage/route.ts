@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
-import { listCoveragePairs, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import {
+  listCoveragePairs,
+  requireCoveragePairClaims,
+  upsertCoverageDecision,
+} from "@/accuracy/store/coverage-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 
 export const runtime = "nodejs";
@@ -34,12 +38,18 @@ const decideSchema = z.object({
   gap_id: z.string(),
   tactic_id: z.string(),
   overall: z.enum(["covers", "partial", "none", "unknown"]),
-  rationale: z.string().min(3),
+  rationale: z.string().trim().min(3),
 });
+
+/**
+ * POST /api/accuracy/coverage — human coverage decision for ANY gap↔tactic
+ * pair in the workspace (queue pick or manual pair picker). Rationale required.
+ */
 
 export async function POST(req: Request) {
   try {
     const body = decideSchema.parse(await req.json());
+    await requireCoveragePairClaims(body);
     await upsertCoverageDecision(body);
     const org_id = await getWorkspaceOrgId(body.workspace_id);
     let statuses: unknown = null;

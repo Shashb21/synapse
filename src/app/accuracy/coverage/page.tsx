@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { CoverageQueue } from "@/components/accuracy/coverage-queue";
+import { CoverageManualPairForm } from "@/components/accuracy/coverage-manual-pair-form";
+import { isActiveLedgerClaim, listClaims } from "@/accuracy/store/claim-store";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
@@ -22,6 +24,8 @@ export default async function AccuracyCoveragePage({
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let pairs: Awaited<ReturnType<typeof listCoveragePairs>> = [];
   let loadError: string | null = null;
+  let gapOptions: { id: string; statement: string }[] = [];
+  let tacticOptions: { id: string; statement: string }[] = [];
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
 
@@ -29,6 +33,13 @@ export default async function AccuracyCoveragePage({
     workspaces = await listWorkspaces();
     if (workspaceId) {
       pairs = await listCoveragePairs(workspaceId);
+      const active = (await listClaims(workspaceId, { limit: 500 })).filter(isActiveLedgerClaim);
+      gapOptions = active
+        .filter((c) => c.claim_type === "gap")
+        .map((c) => ({ id: c.id, statement: c.statement }));
+      tacticOptions = active
+        .filter((c) => c.claim_type === "tactic")
+        .map((c) => ({ id: c.id, statement: c.statement }));
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
@@ -76,6 +87,11 @@ export default async function AccuracyCoveragePage({
               workshopHref={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspaceId)}`}
             />
           ) : null}
+          <CoverageManualPairForm
+            workspaceId={workspaceId}
+            gaps={gapOptions}
+            tactics={tacticOptions}
+          />
           {pairs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No gap/tactic pairs yet. Seed gold or add claims on the Ledger.

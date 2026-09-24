@@ -39,11 +39,55 @@ export type AccuracyClaimMetadata = {
   merged_into?: string | null;
   merged_from?: string[];
   merge_reason?: string | null;
-  status_override?: { status: string; rationale: string } | null;
+  status_override?: {
+    status: string;
+    rationale: string;
+    at?: string;
+    by?: string;
+    by_function?: string;
+  } | null;
+  /** Fields a human set by hand. AI re-runs never overwrite these. */
+  human_locked?: string[];
+  /** Human edit / create / merge / unmerge trail (rationale required). */
+  edit_history?: ClaimEditEntry[];
+  /** Model-proposed merge a human must confirm (never auto-applied to protected claims). */
+  merge_proposal?: ClaimMergeProposal | null;
+  /** Claim ids a human decided are NOT duplicates of this one. */
+  merge_rejected_with?: string[];
+  /** Ledger status before the claim was merged away (restored on unmerge). */
+  pre_merge_status?: string | null;
   [key: string]: unknown;
 };
 
 export type AccuracyClaimRow = typeof t.accuracyClaims.$inferSelect;
+
+export type ClaimEditAction =
+  | "create"
+  | "edit"
+  | "promote"
+  | "merge"
+  | "unmerge"
+  | "merge_dismiss";
+
+export type ClaimEditEntry = {
+  id: string;
+  action: ClaimEditAction;
+  fields: string[];
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  rationale: string;
+  at: string;
+  by: string;
+  by_function: string;
+};
+
+export type ClaimMergeProposal = {
+  survivor_id: string;
+  reason: string;
+  keys: string[];
+  rationale: string | null;
+  proposed_at: string;
+};
 
 const RATIONALE_MIN = 3;
 
@@ -268,9 +312,12 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
     .filter((row) => row.claim_type === "tactic")
     .map((row) => {
       const meta = claimMetadata(row);
+      const locked = metaStringList(meta.human_locked);
       return {
         id: row.id,
         validated: row.validated,
+        /** Human-entered dates are pinned: gantt continuity never shifts them. */
+        dates_locked: locked.includes("start") || locked.includes("end"),
         start: metaString(meta.start),
         end: metaString(meta.end),
         readout:

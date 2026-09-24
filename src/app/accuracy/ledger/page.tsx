@@ -2,6 +2,10 @@ import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { LedgerClaimCard, type LedgerClaimCardModel } from "@/components/accuracy/ledger-claim-card";
 import { LedgerFilterBar } from "@/components/accuracy/ledger-filter-bar";
+import { LedgerMergedList, type MergedClaimModel } from "@/components/accuracy/ledger-merged-list";
+import { LedgerNewClaimForm } from "@/components/accuracy/ledger-new-claim-form";
+import { claimFieldSnapshot } from "@/accuracy/domain/claim-fields";
+import { humanLockedFields } from "@/accuracy/store/claim-edit";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import {
@@ -23,8 +27,15 @@ export const runtime = "nodejs";
 
 registerAccuracyStack();
 
-function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerClaimCardModel {
+type ClaimRow = Awaited<ReturnType<typeof listClaims>>[number];
+
+function toCard(claim: ClaimRow, statementById: Map<string, string>): LedgerClaimCardModel {
   const meta = claimMetadata(claim);
+  const lastEdit =
+    meta.last_human_edit && typeof meta.last_human_edit === "object"
+      ? (meta.last_human_edit as { at?: unknown; by?: unknown; rationale?: unknown })
+      : null;
+  const proposal = meta.merge_proposal ?? null;
   const chapter = claimChapterSlug({ metadata: meta });
   const si = claimSiSlugs({ metadata: meta })[0] ?? null;
   return {
@@ -39,6 +50,27 @@ function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerCl
     external_id: typeof meta.external_id === "string" ? meta.external_id : null,
     chapter_label: chapter ? chapterLabel(chapter) : null,
     si_label: si ? siThemeLabel(si) : null,
+    fields: claimFieldSnapshot(claim),
+    human_locked: humanLockedFields(meta),
+    last_edit: lastEdit
+      ? {
+          at: String(lastEdit.at ?? ""),
+          by: String(lastEdit.by ?? ""),
+          rationale: String(lastEdit.rationale ?? ""),
+        }
+      : null,
+    status_override:
+      meta.status_override && typeof meta.status_override === "object"
+        ? String(meta.status_override.status ?? "") || null
+        : null,
+    merge_proposal: proposal
+      ? {
+          survivor_id: proposal.survivor_id,
+          survivor_statement: statementById.get(proposal.survivor_id) ?? null,
+          reason: proposal.reason,
+          rationale: proposal.rationale ?? null,
+        }
+      : null,
   };
 }
 
@@ -55,6 +87,9 @@ export default async function AccuracyLedgerPage({
   let gaps: LedgerClaimCardModel[] = [];
   let tactics: LedgerClaimCardModel[] = [];
   let facets = ledgerFilterFacets([]);
+  let tacticOptions: { id: string; statement: string }[] = [];
+  let gapTargets: { id: string; statement: string }[] = [];
+  let merged: MergedClaimModel[] = [];
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
@@ -64,13 +99,39 @@ export default async function AccuracyLedgerPage({
     if (workspaceId) {
       const claims = await listClaims(workspaceId);
       const live = claims.filter((c) => c.status !== "merged");
+      const statementById = new Map(claims.map((c) => [c.id, c.statement]));
+      const active = live.filter((c) => c.status !== "rejected");
+      tacticOptions = active
+        .filter((c) => c.claim_type === "tactic")
+        .map((c) => ({ id: c.id, statement: c.statement }));
+      gapTargets = active
+        .filter((c) => c.claim_type === "gap")
+        .map((c) => ({ id: c.id, statement: c.statement }));
+      merged = claims
+        .filter((c) => c.status === "merged")
+        .map((c) => {
+          const meta = claimMetadata(c);
+          const into = typeof meta.merged_into === "string" ? meta.merged_into : null;
+          return {
+            id: c.id,
+            claim_type: c.claim_type,
+            statement: c.statement,
+            merged_into: into,
+            merged_into_statement: into ? (statementById.get(into) ?? null) : null,
+            merge_reason: typeof meta.merge_reason === "string" ? meta.merge_reason : null,
+          };
+        });
       facets = ledgerFilterFacets(live.map((c) => ({ metadata: claimMetadata(c) })));
       const visible = filterLedgerClaims(
         live.map((c) => ({ ...c, metadata: claimMetadata(c) })),
         filters,
       );
-      gaps = visible.filter((c) => c.claim_type === "gap").map(toCard);
-      tactics = visible.filter((c) => c.claim_type === "tactic").map(toCard);
+      gaps = visible
+        .filter((c) => c.claim_type === "gap")
+        .map((c) => toCard(c, statementById));
+      tactics = visible
+        .filter((c) => c.claim_type === "tactic")
+        .map((c) => toCard(c, statementById));
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
@@ -163,6 +224,8 @@ export default async function AccuracyLedgerPage({
             />
           ) : null}
 
+          <LedgerNewClaimForm workspaceId={workspaceId} tacticOptions={tacticOptions} />
+
           <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
 
           <section className="mb-8 grid gap-2" aria-labelledby="gaps-section">
@@ -178,7 +241,13 @@ export default async function AccuracyLedgerPage({
             ) : (
               <ul className="grid gap-2">
                 {gaps.map((claim) => (
-                  <LedgerClaimCard key={claim.id} claim={claim} workspaceId={workspaceId} />
+                  <LedgerClaimCard
+                    key={claim.id}
+                    claim={claim}
+                    workspaceId={workspaceId}
+                    tacticOptions={tacticOptions}
+                    mergeTargets={gapTargets.filter((row) => row.id !== claim.id)}
+                  />
                 ))}
               </ul>
             )}
@@ -197,11 +266,19 @@ export default async function AccuracyLedgerPage({
             ) : (
               <ul className="grid gap-2">
                 {tactics.map((claim) => (
-                  <LedgerClaimCard key={claim.id} claim={claim} workspaceId={workspaceId} />
+                  <LedgerClaimCard
+                    key={claim.id}
+                    claim={claim}
+                    workspaceId={workspaceId}
+                    tacticOptions={tacticOptions}
+                    mergeTargets={tacticOptions.filter((row) => row.id !== claim.id)}
+                  />
                 ))}
               </ul>
             )}
           </section>
+
+          <LedgerMergedList workspaceId={workspaceId} rows={merged} />
         </>
       )}
     </AccuracyAppShell>
