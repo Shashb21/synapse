@@ -21,7 +21,7 @@ export type AxesConfig = {
   /** Which axes the matrix plots. Any axis can be moved onto an edge. */
   x_axis: string;
   y_axis: string;
-  /** Thresholds on the weighted 0–100 score. */
+  /** Legacy thresholds from the weighted-score band; the band is now the quadrant. */
   bands: { high: number; medium: number };
 };
 
@@ -34,17 +34,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 1,
       low_label: "Informative",
       high_label: "Blocks a decision",
-      cues: [
-        "hta",
-        "reimbursement",
-        "payer",
-        "label",
-        "regulatory",
-        "launch",
-        "guideline",
-        "formulary",
-        "submission",
-      ],
     },
     {
       id: "time_pressure",
@@ -53,7 +42,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 1,
       low_label: "Later cycle",
       high_label: "This cycle",
-      cues: ["q1", "q2", "q3", "q4", "before launch", "deadline", "dossier", "urgent", "next year"],
     },
     {
       id: "external_scrutiny",
@@ -62,7 +50,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 0.6,
       low_label: "Internal only",
       high_label: "Externally challenged",
-      cues: ["competitor", "kol", "congress", "publication", "comparative", "versus", "standard of care"],
     },
     {
       id: "feasibility",
@@ -71,7 +58,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 0.4,
       low_label: "Hard to run",
       high_label: "Readily runnable",
-      cues: ["registry", "chart review", "claims", "secondary analysis", "existing data", "survey"],
     },
     {
       id: "effort_cost",
@@ -81,16 +67,6 @@ export const DEFAULT_AXES: AxesConfig = {
       low_label: "Low effort",
       high_label: "High effort",
       higher_is_priority: false,
-      cues: [
-        "prospective",
-        "randomised",
-        "randomized",
-        "rct",
-        "head-to-head",
-        "multi-country",
-        "long-term",
-        "phase",
-      ],
     },
     {
       id: "patient_impact",
@@ -99,7 +75,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 0,
       low_label: "Marginal",
       high_label: "Changes patient care",
-      cues: ["survival", "mortality", "quality of life", "qol", "toxicity", "safety", "adherence", "burden"],
     },
     {
       id: "payer_value",
@@ -108,7 +83,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 0,
       low_label: "Not access-relevant",
       high_label: "Core to access",
-      cues: ["hta", "nice", "g-ba", "cost-effectiveness", "budget impact", "reimbursement", "payer", "icer"],
     },
     {
       id: "strategic_fit",
@@ -117,7 +91,6 @@ export const DEFAULT_AXES: AxesConfig = {
       weight: 0,
       low_label: "Peripheral",
       high_label: "Core to strategy",
-      cues: ["launch", "label", "positioning", "differentiation", "indication", "lifecycle", "expansion"],
     },
   ],
   x_axis: "decision_impact",
@@ -169,7 +142,6 @@ export const axesConfigSchema = z.object({
         weight: z.number().min(0).max(5),
         low_label: z.string().min(1),
         high_label: z.string().min(1),
-        cues: z.array(z.string()).default([]),
         higher_is_priority: z.boolean().optional(),
       }),
     )
@@ -222,19 +194,6 @@ export async function saveAxes(args: { config: unknown; actor_name: string }): P
     .values(values)
     .onConflictDoUpdate({ target: t.priorityAxes.id, set: values });
   return { ...config, updated_by: values.updated_by, updated_at: values.updated_at };
-}
-
-export function bandFor(score: number, bands: AxesConfig["bands"]): "high" | "medium" | "low" {
-  if (score >= bands.high) return "high";
-  if (score >= bands.medium) return "medium";
-  return "low";
-}
-
-export function weightedScore(scores: Record<string, number>, axes: PriorityAxis[]): number {
-  const totalWeight = axes.reduce((sum, axis) => sum + axis.weight, 0);
-  if (totalWeight === 0) return 0;
-  const sum = axes.reduce((acc, axis) => acc + (scores[axis.id] ?? 0) * axis.weight, 0);
-  return Math.round(sum / totalWeight);
 }
 
 /**

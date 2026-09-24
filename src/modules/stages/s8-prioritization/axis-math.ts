@@ -7,12 +7,10 @@ export type PriorityAxis = {
   id: string;
   label: string;
   description: string;
-  /** Relative contribution to the suggested band. 0 keeps an axis visible but non-scoring. */
+  /** Legacy relative weight; the band is the quadrant on the two plotted axes. */
   weight: number;
   low_label: string;
   high_label: string;
-  /** Phrases that raise this axis for a gap. Editable by the user. */
-  cues: string[];
   /**
    * Whether a higher score argues for a higher priority. False for cost-style
    * axes (Effort & cost): there the low end is the favourable one. The matrix

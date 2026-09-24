@@ -32,13 +32,7 @@ import {
   providerConfigured,
 } from "@/modules/llm/provider";
 import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
-import {
-  DEFAULT_AXES,
-  bandFor,
-  parseAxesConfig,
-  validateAxes,
-  weightedScore,
-} from "@/modules/stages/s8-prioritization/axes";
+import { DEFAULT_AXES, parseAxesConfig, validateAxes } from "@/modules/stages/s8-prioritization/axes";
 import { addMonths, buildTimeline, monthsBetween } from "@/modules/stages/s10-timeline/build";
 import { buildSeed } from "@/lib/iegp/seed";
 
@@ -386,15 +380,6 @@ describe("roles", () => {
 });
 
 describe("prioritization axes", () => {
-  it("weights axes and bands the weighted score", () => {
-    const scores = { decision_impact: 80, time_pressure: 70, external_scrutiny: 40, feasibility: 20 };
-    const score = weightedScore(scores, DEFAULT_AXES.axes);
-    expect(score).toBeGreaterThan(50);
-    expect(bandFor(score, DEFAULT_AXES.bands)).toBe("medium");
-    expect(bandFor(90, DEFAULT_AXES.bands)).toBe("high");
-    expect(bandFor(10, DEFAULT_AXES.bands)).toBe("low");
-  });
-
   it("rejects a malformed axis configuration before it is stored", () => {
     expect(() => parseAxesConfig({ axes: [], x_axis: "a", y_axis: "b", bands: { high: 60, medium: 40 } })).toThrow(
       /malformed/i,

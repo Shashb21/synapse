@@ -143,7 +143,7 @@ export async function planState(request: APIRequestContext) {
       rationale: string | null;
     }[];
     axes: {
-      axes: { id: string; label: string; weight: number; cues: string[]; low_label: string; high_label: string; description: string }[];
+      axes: { id: string; label: string; weight: number; low_label: string; high_label: string; description: string }[];
       x_axis: string;
       y_axis: string;
       bands: { high: number; medium: number };
