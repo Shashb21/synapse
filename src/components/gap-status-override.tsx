@@ -52,9 +52,10 @@ export function GapStatusDisagreement({
   }
   return (
     <p className="text-[12px] leading-5 text-amber-300" role="status">
-      Override disagrees with the engine. Showing {GAP_STATUS_LABELS[override.status]} (human). Engine
-      now computes {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"} after
-      ingest or coverage refresh. Not silent-clobbered.
+      Override disagrees with the engine. Showing {GAP_STATUS_LABELS[override.status]} (human, kept).
+      Engine now computes {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"} after
+      ingest, a model run or a coverage refresh. Not silent-clobbered: keep your status, or open the status
+      dialog and use the computed one.
     </p>
   );
 }

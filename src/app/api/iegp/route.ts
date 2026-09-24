@@ -37,11 +37,12 @@ import {
   rewritePartialGap,
   splitPartialGap,
   unassignGapFromBreakoutGroup,
+  unassignTacticFromGap,
   unlockTacticsStage,
   validateGap,
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
-import type { CoverageDimension } from "@/lib/iegp/enums";
+import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
 import { recordEdit, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
@@ -62,6 +63,41 @@ function idList(...values: (string | undefined)[]): string[] {
   ];
 }
 
+const RATIONALE_REQUIRED = "A short rationale is required for every edit.";
+
+function rationaleOf(body: Record<string, string>): string {
+  return (body.rationale || body.note || "").trim();
+}
+
+/**
+ * A person's coverage verdict sent with a mapping: `overall` plus dimensions as
+ * `dim_<dimension>` fields or a `dimensions` object (or its JSON). Blank values
+ * are left out, so an unset dimension stays "unknown".
+ */
+function coverageInput(body: Record<string, unknown>): {
+  coverage?: OverallCoverage;
+  dimensions?: Partial<Record<CoverageDimension, DimensionValue>>;
+} {
+  const overall =
+    typeof body.overall === "string" && body.overall.trim() ? (body.overall.trim() as OverallCoverage) : undefined;
+  let raw: unknown = body.dimensions;
+  if (typeof raw === "string") raw = raw.trim() ? JSON.parse(raw) : undefined;
+  const dimensions: Partial<Record<CoverageDimension, DimensionValue>> = {};
+  if (raw && typeof raw === "object") {
+    for (const [dim, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === "string" && value) dimensions[dim as CoverageDimension] = value as DimensionValue;
+    }
+  }
+  for (const dim of COVERAGE_DIMENSIONS) {
+    const value = body[`dim_${dim}`];
+    if (typeof value === "string" && value) dimensions[dim] = value as DimensionValue;
+  }
+  return {
+    coverage: overall,
+    dimensions: Object.keys(dimensions).length ? dimensions : undefined,
+  };
+}
+
 /**
  * Gate actions on the legacy workbench that carry a user judgement. When the
  * user gave a reason, it is filed as an edit record so the same rationale reaches
@@ -76,6 +112,7 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   assign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   accept_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
+  unassign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
   save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
   lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
@@ -177,6 +214,9 @@ export async function POST(request: Request) {
         });
         break;
       case "lock_dimension":
+        if (rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
         await lockCoverageDimension({
           coverage_id: body.coverage_id,
           dimension: body.dimension as CoverageDimension,
@@ -187,6 +227,9 @@ export async function POST(request: Request) {
         });
         break;
       case "lock_overall":
+        if (rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
         await lockCoverageOverall({
           coverage_id: body.coverage_id,
           overall: body.overall as never,
@@ -283,37 +326,67 @@ export async function POST(request: Request) {
           actor_function,
         });
         break;
-      case "assign_tactic":
+      case "assign_tactic": {
+        // A person's mapping. A coverage verdict set in the same step is theirs and is locked.
+        const verdict = coverageInput(body);
+        const hasVerdict =
+          Boolean(verdict.coverage && verdict.coverage !== "unassessed") || Boolean(verdict.dimensions);
+        if (hasVerdict && rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
         await assignTacticToGap({
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,
-          note: body.note,
+          note: rationaleOf(body) || undefined,
+          ...verdict,
+          human: true,
+          lock_coverage: true,
+        });
+        break;
+      }
+      case "unassign_tactic":
+        if (rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
+        await unassignTacticFromGap({
+          gap_id: body.gap_id,
+          tactic_id: body.tactic_id,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
         });
         break;
       case "accept_mapping":
+        if (rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
         await acceptMapping({
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,
-          note: body.note,
+          note: rationaleOf(body),
+          ...coverageInput(body),
         });
         break;
       case "reject_mapping":
+        if (rationaleOf(body).length < 3) {
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
+        }
         await rejectMapping({
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,
-          note: body.note,
+          note: rationaleOf(body),
         });
         break;
       case "save_mapping_row": {
-        const rationale = (body.rationale || body.note || "").trim();
+        const rationale = rationaleOf(body);
         if (rationale.length < 3) {
-          return NextResponse.json({ error: "A short rationale is required for every edit." }, { status: 400 });
+          return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
         const tactic_ids = (body.tactic_ids || "")
           .split(",")
