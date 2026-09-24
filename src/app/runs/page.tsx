@@ -9,6 +9,7 @@ import { listSignals } from "@/modules/kernel/hillclimb";
 import { listEvalRuns } from "@/modules/kernel/evals";
 import { HillclimbSweepButton } from "@/components/platform/hillclimb-sweep-button";
 import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +20,13 @@ function statusTone(status: string): string {
 }
 
 export default async function RunsPage() {
-  const [runs, health, edits, signals, evals] = await Promise.all([
+  const [runs, health, edits, signals, evals, ai] = await Promise.all([
     listRuns({ limit: 40 }),
     stageHealth(),
     listEdits({ limit: 12 }),
     listSignals({ limit: 12 }),
     listEvalRuns({ limit: 12 }),
+    aiEnabled(),
   ]);
 
   return (
@@ -158,11 +160,17 @@ export default async function RunsPage() {
             Score registered prompt variants against curated gold, store per-version baselines, and promote
             the winning variant when it beats its baseline.
           </p>
-          <div className="flex flex-wrap gap-2">
-            {HILLCLIMB_STAGES.map((stage) => (
-              <HillclimbSweepButton key={stage} stage={stage} />
-            ))}
-          </div>
+          {ai ? (
+            <div className="flex flex-wrap gap-2">
+              {HILLCLIMB_STAGES.map((stage) => (
+                <HillclimbSweepButton key={stage} stage={stage} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground" data-testid="hillclimb-ai-off">
+              AI is off, so there are no prompts to tune. Past scores stay listed here.
+            </p>
+          )}
         </section>
 
         <section className="grid gap-2" aria-labelledby="signals">

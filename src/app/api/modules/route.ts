@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { stageErrorResponse } from "@/app/api/modules/ai-off";
 import { runStage } from "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
@@ -35,7 +36,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Stage run failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return stageErrorResponse(error, "Stage run failed");
   }
 }

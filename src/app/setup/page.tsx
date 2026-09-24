@@ -4,6 +4,7 @@ import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { parsePlanningContext, type PlanningContext } from "@/lib/iegp/planning-context";
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext, type SessionContext } from "@/modules/auth/session";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -48,13 +49,19 @@ async function loadSetupIdentity(): Promise<SessionContext> {
 }
 
 export default async function SetupPage() {
-  const [state, identity] = await Promise.all([loadSetupState(), loadSetupIdentity()]);
+  const [state, identity, ai] = await Promise.all([
+    loadSetupState(),
+    loadSetupIdentity(),
+    aiEnabled().catch(() => true),
+  ]);
   const initial = initialFromAsset(state);
 
   return (
     <AppShell active="setup">
       <PageIntro kicker="Onboarding" title="Get started">
-        Visual walkthrough of the IEGP pipeline plus asset context for smarter prioritization.
+        {ai
+          ? "Visual walkthrough of the IEGP pipeline plus asset context for smarter prioritization."
+          : "Asset context for prioritization, then a walkthrough of the manual path: Add gaps, Add tactics, and every step by hand."}
       </PageIntro>
       <SetupWizard
         initial={initial}

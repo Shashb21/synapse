@@ -22,7 +22,7 @@ export function AiSwitchPanel({
           <p className="mt-1 max-w-2xl text-[12px] text-muted-foreground">
             {ai.enabled
               ? "Stages may call the routed models: extraction, mapping, suggestions, critics and schedules."
-              : "No model is called. Upload and parsing are hidden; gaps, tactics, mappings, priorities and dates are all entered by hand."}
+              : "No model is called and there is no upload or parsing. Work starts at Add gaps and Add tactics; mappings, needs, priorities, ideas and dates are all entered by hand."}
           </p>
           {ai.updated_by ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
@@ -40,7 +40,7 @@ export function AiSwitchPanel({
             description={
               next
                 ? "Every stage may call its routed model again. Nothing entered by hand is changed."
-                : "Every AI suggestion and automatic AI step stops for everyone. Work already done stays."
+                : "Every AI suggestion and automatic AI step stops for everyone, and upload and parsing are switched off. People add gaps and tactics by hand. Work already done stays."
             }
             confirmLabel={next ? "Turn AI on" : "Turn AI off"}
             identity={identity}

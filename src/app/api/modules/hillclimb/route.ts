@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { runStage } from "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activeModule } from "@/modules/kernel/registry";
@@ -19,6 +21,8 @@ export async function POST(request: Request) {
   if (!HILLCLIMB_STAGES.includes(stage)) {
     return NextResponse.json({ error: `${stage} does not participate in the hillclimb loop yet.` }, { status: 400 });
   }
+  // Hillclimbing scores prompt variants, which only exist to be sent to a model.
+  if (!(await aiEnabled())) return aiOffResponse();
   const identity = await requestIdentity(body);
   try {
     const implementation = await activeModule(stage);
@@ -36,7 +40,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...sweep });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Hillclimb sweep failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return stageErrorResponse(error, "Hillclimb sweep failed");
   }
 }

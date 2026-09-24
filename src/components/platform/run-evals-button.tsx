@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 type EvalResponse = {
   error?: string;
@@ -13,8 +14,12 @@ type EvalResponse = {
   metrics?: { name: string; value: number; target?: number }[];
 };
 
-/** Runs the stage's own gold cases. Nothing is written to the domain store. */
-export function RunEvalsButton({ stage, identity }: { stage: string; identity: ActionIdentity }) {
+/** Runs the stage's own gold cases. Nothing is written to the domain store. Hidden while AI is off. */
+export function RunEvalsButton(props: { stage: string; identity: ActionIdentity }) {
+  return useAiEnabled() ? <EvalsButton {...props} /> : null;
+}
+
+function EvalsButton({ stage, identity }: { stage: string; identity: ActionIdentity }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<EvalResponse | null>(null);

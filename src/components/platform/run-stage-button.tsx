@@ -1,18 +1,32 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { useAiEnabled } from "@/components/platform/ai-status";
+import { STAGES, type StageId } from "@/modules/kernel/contracts";
 
 export type StageRunResponse = {
   ok?: boolean;
+  code?: string;
   error?: string;
   run_id?: string;
   summary?: string;
   mode?: "llm" | "deterministic";
 };
+
+/**
+ * Stages whose module only exists to call a model (every agentic stage except
+ * the timeline, which lays out human dates without AI) plus upload and parse,
+ * which the owner switched off with AI. The kernel refuses these while AI is off.
+ */
+export function stageNeedsAi(stage: string): boolean {
+  if (stage === "S0" || stage === "S1") return true;
+  if (stage === "S10") return false;
+  return STAGES[stage as StageId]?.kind === "agentic";
+}
 
 /** Runs one stage through the kernel and reports what came back, inline. */
 export function RunStageButton({
@@ -22,12 +36,44 @@ export function RunStageButton({
   identity,
   variant = "outline",
   onDone,
+  aiOffFallback = null,
 }: {
   stage: string;
   input?: Record<string, unknown>;
   label?: string;
   identity: ActionIdentity;
   variant?: "default" | "outline" | "ghost" | "secondary";
+  onDone?: (result: StageRunResponse) => void;
+  /** Shown instead of the button when AI is off and this stage needs AI. */
+  aiOffFallback?: ReactNode;
+}) {
+  const ai = useAiEnabled();
+  if (!ai && stageNeedsAi(stage)) return <>{aiOffFallback}</>;
+  return (
+    <StageButton
+      stage={stage}
+      input={input}
+      label={label}
+      identity={identity}
+      variant={variant}
+      onDone={onDone}
+    />
+  );
+}
+
+function StageButton({
+  stage,
+  input,
+  label,
+  identity,
+  variant,
+  onDone,
+}: {
+  stage: string;
+  input?: Record<string, unknown>;
+  label?: string;
+  identity: ActionIdentity;
+  variant: "default" | "outline" | "ghost" | "secondary";
   onDone?: (result: StageRunResponse) => void;
 }) {
   const router = useRouter();

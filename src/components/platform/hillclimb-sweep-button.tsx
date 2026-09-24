@@ -4,8 +4,14 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { StageId } from "@/modules/kernel/contracts";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
+/** Scores prompt variants against gold. Prompts only matter to a model, so this is hidden while AI is off. */
 export function HillclimbSweepButton({ stage }: { stage: StageId }) {
+  return useAiEnabled() ? <SweepButton stage={stage} /> : null;
+}
+
+function SweepButton({ stage }: { stage: StageId }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { runStage } from "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activeModule } from "@/modules/kernel/registry";
@@ -21,6 +23,9 @@ export async function POST(request: Request) {
   const identity = await requestIdentity(body);
   try {
     const implementation = await activeModule(stage);
+    const manifest = implementation.manifest;
+    const aiOnly = (manifest.agentic && !manifest.ai_optional) || manifest.needs_ai;
+    if (aiOnly && !(await aiEnabled())) return aiOffResponse();
     if (!implementation.evals) {
       return NextResponse.json(
         { error: `${implementation.manifest.id} does not ship an eval harness yet.` },
@@ -51,7 +56,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, cases, metrics, passed: record.passed, eval_run_id: record.id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Eval run failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return stageErrorResponse(error, "Eval run failed");
   }
 }

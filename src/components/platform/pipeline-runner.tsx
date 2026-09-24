@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SOURCE_TYPES, SOURCE_TYPE_LABELS, type SourceType } from "@/lib/iegp/enums";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 type StageStep = { stage: string; label: string; input?: Record<string, unknown> };
 
@@ -30,8 +31,12 @@ async function runOne(step: StageStep, identity: ActionIdentity) {
   return json;
 }
 
-/** Runs a fixed chain of stages in order and reports each one as it lands. */
-export function ChainRunner({
+/** Runs a fixed chain of stages in order and reports each one as it lands. Hidden while AI is off. */
+export function ChainRunner(props: { steps: StageStep[]; label: string; identity: ActionIdentity }) {
+  return useAiEnabled() ? <Chain {...props} /> : null;
+}
+
+function Chain({
   steps,
   label,
   identity,
@@ -109,14 +114,20 @@ export function ChainRunner({
   );
 }
 
-/** S0 upload: demo pack files or a pasted note. S1 parses whatever lands. */
-export function ModularUploadForm({
-  demoOptions,
-  identity,
-}: {
+type UploadFormProps = {
   demoOptions: { id: string; title: string; filename: string }[];
   identity: ActionIdentity;
-}) {
+};
+
+/**
+ * S0 upload: demo pack files or a pasted note. S1 parses whatever lands.
+ * With AI off there is no upload or parsing at all; the form is not rendered.
+ */
+export function ModularUploadForm(props: UploadFormProps) {
+  return useAiEnabled() ? <UploadForm {...props} /> : null;
+}
+
+function UploadForm({ demoOptions, identity }: UploadFormProps) {
   const router = useRouter();
   const [picked, setPicked] = useState<string[]>([]);
   const [title, setTitle] = useState("");
