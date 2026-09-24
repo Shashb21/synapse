@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Grid2x2,
+  Hand,
   Inbox,
   Lightbulb,
   Loader2,
@@ -22,8 +23,11 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { PlanningContext } from "@/lib/iegp/planning-context";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 const STEPS = ["Asset context", "Your journey", "Connect models", "Ready"] as const;
+/** With AI off there are no models to connect; step three explains the manual path instead. */
+const MANUAL_STEPS = ["Asset context", "Your journey", "Work by hand", "Ready"] as const;
 
 const JOURNEY = [
   {
@@ -77,6 +81,52 @@ const JOURNEY = [
   },
 ] as const;
 
+/** The same journey while AI is off: no upload or parsing, every step entered by hand. */
+const MANUAL_JOURNEY = [
+  {
+    stage: "Gaps",
+    title: "Add gaps",
+    detail: "Enter each evidence gap and its needs by hand. There is no upload or parsing while AI is off.",
+    icon: Inbox,
+    tone: "var(--chart-2)",
+  },
+  {
+    stage: "Tactics",
+    title: "Add tactics",
+    detail: "Enter the studies and activities that already exist in your tactic library.",
+    icon: Lightbulb,
+    tone: "var(--chart-1)",
+  },
+  {
+    stage: "S4",
+    title: "Mapping table",
+    detail: "Record which tactics cover each gap, with a rationale.",
+    icon: Grid2x2,
+    tone: "var(--chart-3)",
+  },
+  {
+    stage: "S5–S6",
+    title: "Validate & split",
+    detail: "Validate status on Gaps and split partial gaps by hand.",
+    icon: ShieldCheck,
+    tone: "var(--chart-4)",
+  },
+  {
+    stage: "S8",
+    title: "Prioritize",
+    detail: "Place each gap on the matrix yourself and confirm its band.",
+    icon: Split,
+    tone: "var(--chart-5)",
+  },
+  {
+    stage: "S9–S10",
+    title: "Ideate & Gantt",
+    detail: "Add proposed tactics for open gaps, then add and move timeline activities.",
+    icon: ChartGantt,
+    tone: "var(--known)",
+  },
+] as const;
+
 export function SetupWizard({
   initial,
   actorName,
@@ -89,12 +139,15 @@ export function SetupWizard({
   setupComplete: boolean;
 }) {
   const router = useRouter();
+  const ai = useAiEnabled();
+  const steps = ai ? STEPS : MANUAL_STEPS;
+  const journey = ai ? JOURNEY : MANUAL_JOURNEY;
   const [step, setStep] = useState(setupComplete ? 3 : 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<PlanningContext>(initial);
 
-  const progress = useMemo(() => ((step + 1) / STEPS.length) * 100, [step]);
+  const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step, steps.length]);
 
   async function save(markComplete: boolean) {
     setBusy(true);
@@ -116,7 +169,7 @@ export function SetupWizard({
       setError(json.error ?? "Could not save setup");
       return false;
     }
-    if (markComplete) router.push("/pipeline");
+    if (markComplete) router.push(ai ? "/pipeline" : "/?place=gaps");
     else router.refresh();
     return true;
   }
@@ -133,8 +186,9 @@ export function SetupWizard({
           Build your Integrated Evidence Generation Plan
         </h1>
         <p className="max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
-          A short questionnaire anchors prioritization to your asset. Then we walk the modular pipeline —
-          upload through Gantt — and connect live models on the control panel.
+          {ai
+            ? "A short questionnaire anchors prioritization to your asset. Then we walk the modular pipeline — upload through Gantt — and connect live models on the control panel."
+            : "A short questionnaire anchors prioritization to your asset. AI is off, so there is no upload: you start with Add gaps and Add tactics and do every step by hand."}
         </p>
         <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -143,7 +197,7 @@ export function SetupWizard({
           />
         </div>
         <ol className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          {STEPS.map((label, index) => (
+          {steps.map((label, index) => (
             <li
               key={label}
               className={cn(
@@ -273,10 +327,12 @@ export function SetupWizard({
         <section className="grid gap-4">
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <Workflow className="size-4" aria-hidden />
-            Modular pipeline — each card is an independent stage with its own contract and trace.
+            {ai
+              ? "Modular pipeline — each card is an independent stage with its own contract and trace."
+              : "AI is off — every step below is done by hand, in this order."}
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {JOURNEY.map((item) => {
+            {journey.map((item) => {
               const Icon = item.icon;
               return (
                 <article
@@ -306,12 +362,46 @@ export function SetupWizard({
           </div>
           <p className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <Lightbulb className="size-4 shrink-0" aria-hidden />
-            Agentic stages run proposer → critic (×3) → judge. Every exchange is observable under Runs.
+            {ai
+              ? "Agentic stages run proposer → critic (×3) → judge. Every exchange is observable under Runs."
+              : "Every edit you make is recorded with its rationale and author."}
           </p>
         </section>
       ) : null}
 
-      {step === 2 ? (
+      {step === 2 && !ai ? (
+        <section
+          className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]"
+          data-testid="setup-ai-off"
+        >
+          <div className="grid gap-3">
+            <h2 className="flex items-center gap-2 text-[15px] font-medium">
+              <Hand className="size-4 text-[var(--chart-1)]" aria-hidden />
+              AI is off — you work by hand
+            </h2>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              An admin has switched AI off in the control panel. No model is called and nothing is
+              uploaded or parsed. You enter gaps and tactics yourself; every later step has a manual form.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/?place=gaps" className={buttonVariants({ size: "sm" })}>
+                Add gaps
+              </Link>
+              <Link href="/tactics" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                Add tactics
+              </Link>
+            </div>
+          </div>
+          <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
+            <p className="font-medium text-foreground">Quick checklist</p>
+            <p>1. Add your evidence gaps</p>
+            <p>2. Add the tactics in your library</p>
+            <p>3. Map tactics to gaps on the mapping table</p>
+          </aside>
+        </section>
+      ) : null}
+
+      {step === 2 && ai ? (
         <section className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]">
           <div className="grid gap-3">
             <h2 className="flex items-center gap-2 text-[15px] font-medium">
@@ -349,17 +439,30 @@ export function SetupWizard({
           <CheckCircle2 className="mx-auto size-10 text-[var(--known)]" aria-hidden />
           <h2 className="text-lg font-medium">You are set up</h2>
           <p className="mx-auto max-w-md text-[13px] text-muted-foreground">
-            Asset context is saved for prioritization. Head to the pipeline to upload sources, or open Gaps
-            after ingest. Revisit this wizard anytime from <strong>Get started</strong> in the sidebar.
+            {ai
+              ? "Asset context is saved for prioritization. Head to the pipeline to upload sources, or open Gaps after ingest."
+              : "Asset context is saved for prioritization. AI is off, so start by adding gaps and tactics by hand."}{" "}
+            Revisit this wizard anytime from <strong>Get started</strong> in the sidebar.
           </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <Link href="/pipeline" className={buttonVariants()}>
-              Open pipeline
-            </Link>
-            <Link href="/control" className={buttonVariants({ variant: "outline" })}>
-              Control panel
-            </Link>
-          </div>
+          {ai ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link href="/pipeline" className={buttonVariants()}>
+                Open pipeline
+              </Link>
+              <Link href="/control" className={buttonVariants({ variant: "outline" })}>
+                Control panel
+              </Link>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link href="/?place=gaps" className={buttonVariants()}>
+                Add gaps
+              </Link>
+              <Link href="/tactics" className={buttonVariants({ variant: "outline" })}>
+                Add tactics
+              </Link>
+            </div>
+          )}
         </section>
       ) : null}
 

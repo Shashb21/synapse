@@ -33,6 +33,8 @@ export const CAPABILITIES = [
   "configure_routing",
   "connect_provider",
   "activate_module",
+  /** The admin AI switch: turn every AI suggestion and automatic AI action on or off. */
+  "toggle_ai",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -48,6 +50,7 @@ const MATRIX: Record<Role, Capability[]> = {
     "export",
     "configure_routing",
     "connect_provider",
+    "toggle_ai",
   ],
   contributor: ["upload", "run_stage", "validate", "prioritize", "ideate", "export", "configure_routing"],
   operator: [...CAPABILITIES],

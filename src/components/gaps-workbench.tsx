@@ -29,6 +29,7 @@ import {
 } from "@/lib/iegp/engine";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import {
   Dialog,
   DialogContent,
@@ -315,6 +316,7 @@ export function GapsWorkbench({
   settingOptions?: string[];
 }) {
   const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
+  const ai = useAiEnabled();
   const counts = reviewGapFilterCounts(cards);
   const visible = useMemo(
     () => sortReviewGapCards(filterReviewGapCards(cards, filter)),
@@ -343,7 +345,9 @@ export function GapsWorkbench({
       </div>
       {cards.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No mapped gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here.
+          {ai
+            ? "No mapped gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here."
+            : "No gaps yet. AI is off: add an Open or Addressed gap here by hand."}
         </p>
       ) : (
         <>

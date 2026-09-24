@@ -7,6 +7,7 @@ import { getClaimsByIds } from "@/accuracy/store/claim-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { isTestStub } from "@/modules/kernel/llm";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,8 @@ const bodySchema = z.object({
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     const org_id = await getWorkspaceOrgId(body.workspace_id);
     if (!org_id) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
@@ -88,6 +91,8 @@ export async function POST(req: Request) {
       stub: mode === "stub",
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     const message = error instanceof Error ? error.message : "Coverage assist failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

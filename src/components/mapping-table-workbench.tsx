@@ -6,6 +6,7 @@ import type { MappingTableViewRow } from "@/lib/iegp/mapping-table";
 import type { TacticLibraryItem } from "@/lib/iegp/engine";
 import { LockForm } from "@/components/lock-form";
 import { Button } from "@/components/ui/button";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 const STATUS_OPTIONS = [
   { value: "open", label: "Open" },
@@ -21,6 +22,7 @@ export function MappingTableWorkbench({
   tactics: TacticLibraryItem[];
 }) {
   const [filter, setFilter] = useState<"all" | "proposal" | "human" | "open">("all");
+  const ai = useAiEnabled();
   const filtered = useMemo(() => {
     if (filter === "proposal") return rows.filter((row) => row.source === "proposal");
     if (filter === "human") return rows.filter((row) => row.source === "human");
@@ -29,6 +31,17 @@ export function MappingTableWorkbench({
   }, [filter, rows]);
 
   if (rows.length === 0) {
+    if (!ai) {
+      return (
+        <section className="border border-border bg-card/40 p-4 text-[13px] text-muted-foreground">
+          No gaps to map yet. AI is off: add gaps and tactics by hand on{" "}
+          <Link href="/?place=upload" className="text-foreground underline-offset-2 hover:underline">
+            Start
+          </Link>
+          , then map them here or on Gaps.
+        </section>
+      );
+    }
     return (
       <section className="border border-border bg-card/40 p-4 text-[13px] text-muted-foreground">
         Run gap and tactic extraction, then{" "}
@@ -62,8 +75,9 @@ export function MappingTableWorkbench({
           </Button>
         ))}
         <span className="text-[11px] text-muted-foreground">
-          Accept, reject or edit any row — a saved row wins over later S4 runs, and a removed or rejected
-          tactic is never mapped again by S4. Rationale feeds S4 hillclimb.
+          {ai
+            ? "Accept, reject or edit any row — a saved row wins over later S4 runs, and a removed or rejected tactic is never mapped again by S4. Rationale feeds S4 hillclimb."
+            : "AI is off: pick the tactics and a status for each row and save it with a rationale."}
         </span>
       </div>
 
@@ -80,7 +94,7 @@ export function MappingTableWorkbench({
           </thead>
           <tbody>
             {filtered.map((row) => (
-              <MappingRowEditor key={row.gap_id} row={row} tactics={tactics} />
+              <MappingRowEditor key={row.gap_id} row={row} tactics={tactics} ai={ai} />
             ))}
           </tbody>
         </table>
@@ -165,7 +179,15 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
   );
 }
 
-function MappingRowEditor({ row, tactics }: { row: MappingTableViewRow; tactics: TacticLibraryItem[] }) {
+function MappingRowEditor({
+  row,
+  tactics,
+  ai,
+}: {
+  row: MappingTableViewRow;
+  tactics: TacticLibraryItem[];
+  ai: boolean;
+}) {
   const [tacticIds, setTacticIds] = useState(row.tactic_ids.join(","));
   const [status, setStatus] = useState(row.mapping_status);
   const [rationale, setRationale] = useState("");
@@ -244,7 +266,9 @@ function MappingRowEditor({ row, tactics }: { row: MappingTableViewRow; tactics:
       </td>
       <td className="px-3 py-3">
         {status ? null : (
-          <p className="mb-2 text-[11px] text-muted-foreground">Pick a status or run S4 before saving.</p>
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            {ai ? "Pick a status or run S4 before saving." : "Pick a status before saving."}
+          </p>
         )}
         <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">
           <input type="hidden" name="gap_id" value={row.gap_id} />

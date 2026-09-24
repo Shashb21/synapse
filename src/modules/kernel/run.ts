@@ -1,12 +1,13 @@
 import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
-import { completionFor, resolveRoute, routeConfig } from "./routing";
+import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
+import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "./ai-switch";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
 import { recordEvalRun } from "./evals";
-import type { Actor, EvalScore, ModuleContext, StageId } from "./contracts";
+import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 import { isTestStub } from "./llm";
 import type { RunStep } from "./contracts";
@@ -55,6 +56,24 @@ async function resolveRouteForRun(stage: StageId) {
       reason: message,
     };
   }
+}
+
+/** The route a run sees while AI is off: nothing to prompt, and it says why. */
+async function aiOffRoute(stage: StageId): Promise<ResolvedRoute> {
+  const preferred = await routeConfig(stage);
+  const provider = findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
+  return {
+    stage,
+    provider_id: provider.id,
+    provider_label: provider.label,
+    model: preferred.model || provider.default_model,
+    auth: "none",
+    connected: false,
+    params: preferred.params,
+    fallbacks: preferred.fallbacks,
+    degraded: false,
+    reason: AI_OFF_MESSAGE,
+  };
 }
 
 /**
@@ -109,6 +128,12 @@ export async function runStage<O = unknown>(args: {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const implementation = await activeModule(args.stage);
   await ensurePlatformSchema(implementation.migrations ?? []);
+  // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
+  const ai = await aiEnabled();
+  const manifest = implementation.manifest;
+  if (!ai && ((manifest.agentic && !manifest.ai_optional) || manifest.needs_ai)) {
+    throw new AiDisabledError(stageLabel(args.stage));
+  }
 
   const workspace_id = args.workspace_id ?? DEFAULT_WORKSPACE;
   const recorder = new RunRecorder({
@@ -132,7 +157,7 @@ export async function runStage<O = unknown>(args: {
   }
   recorder.note("input:accepted", parsedInput.data);
 
-  const route = await resolveRouteForRun(args.stage);
+  const route = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
   const ctx: ModuleContext = {
@@ -141,7 +166,12 @@ export async function runStage<O = unknown>(args: {
     role: args.role,
     run: recorder,
     route,
-    complete: completionFor(route, recorder),
+    complete: ai
+      ? completionFor(route, recorder)
+      : async () => {
+          throw new AiDisabledError(stageLabel(args.stage));
+        },
+    ai,
   };
 
   try {

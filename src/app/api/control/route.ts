@@ -13,18 +13,21 @@ import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
 import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
+import { aiSwitch, setAiEnabled } from "@/modules/kernel/ai-switch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [wiring, routes, connections, axes] = await Promise.all([
+  const [wiring, routes, connections, axes, ai] = await Promise.all([
     stageWiring(),
     routeConfigs(),
     listConnections(),
     loadAxes(),
+    aiSwitch(),
   ]);
   return NextResponse.json({
+    ai,
     wiring,
     routes,
     connections,
@@ -51,6 +54,16 @@ export async function POST(request: Request) {
 
   try {
     switch (action) {
+      case "set_ai_enabled": {
+        assertCan(identity.role, "toggle_ai");
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const ai = await setAiEnabled({
+          enabled: body.enabled,
+          actor_name: identity.actor.name,
+          rationale: String(body.rationale ?? ""),
+        });
+        return NextResponse.json({ ok: true, ai });
+      }
       case "set_route": {
         assertCan(identity.role, "configure_routing");
         const stage = String(body.stage ?? "") as StageId;

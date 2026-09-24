@@ -1,13 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { useAiEnabled } from "@/components/platform/ai-status";
+import { stageNeedsAi } from "@/modules/kernel/stage-ai";
 
 export type StageRunResponse = {
   ok?: boolean;
+  code?: string;
   error?: string;
   run_id?: string;
   summary?: string;
@@ -22,12 +25,44 @@ export function RunStageButton({
   identity,
   variant = "outline",
   onDone,
+  aiOffFallback = null,
 }: {
   stage: string;
   input?: Record<string, unknown>;
   label?: string;
   identity: ActionIdentity;
   variant?: "default" | "outline" | "ghost" | "secondary";
+  onDone?: (result: StageRunResponse) => void;
+  /** Shown instead of the button when AI is off and this stage needs AI. */
+  aiOffFallback?: ReactNode;
+}) {
+  const ai = useAiEnabled();
+  if (!ai && stageNeedsAi(stage)) return <>{aiOffFallback}</>;
+  return (
+    <StageButton
+      stage={stage}
+      input={input}
+      label={label}
+      identity={identity}
+      variant={variant}
+      onDone={onDone}
+    />
+  );
+}
+
+function StageButton({
+  stage,
+  input,
+  label,
+  identity,
+  variant,
+  onDone,
+}: {
+  stage: string;
+  input?: Record<string, unknown>;
+  label?: string;
+  identity: ActionIdentity;
+  variant: "default" | "outline" | "ghost" | "secondary";
   onDone?: (result: StageRunResponse) => void;
 }) {
   const router = useRouter();

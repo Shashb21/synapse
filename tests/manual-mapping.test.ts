@@ -179,6 +179,7 @@ describe("S4 re-run leaves human decisions alone", () => {
     });
     const bodies: Record<string, unknown>[] = [];
     const ctx: ModuleContext = {
+      ai: true,
       workspace_id: "default",
       actor: { name: MODEL.actor_name, function: MODEL.actor_function },
       role: "medical_affairs",

@@ -6,6 +6,7 @@ import { CircleCheck, CircleDashed, Loader2, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 export type ProviderConnectionView = {
   provider_id: string;
@@ -45,6 +46,7 @@ export function ProviderPanel({
   canConnect: boolean;
   canRoute: boolean;
 }) {
+  const ai = useAiEnabled();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,11 @@ export function ProviderPanel({
           <p className="mt-1 text-[12px] text-muted-foreground">
             Every provider is reached by OAuth login. Synapse never asks you for an API key.
           </p>
+          {ai ? null : (
+            <p className="mt-1 text-[12px] text-[var(--unknown)]" data-testid="providers-ai-off">
+              AI is off, so no provider is called. Connections are kept for when AI is turned back on.
+            </p>
+          )}
         </div>
         {canRoute ? (
           <div className="flex flex-wrap items-center gap-2">

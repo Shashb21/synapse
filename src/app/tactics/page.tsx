@@ -7,14 +7,16 @@ import { CATCH_UP_TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/li
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
 import { listRejectedTacticCandidates } from "@/app/api/iegp/promote-candidates";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function TacticsPage() {
-  const [state, session, rejected] = await Promise.all([
+  const [state, session, rejected, ai] = await Promise.all([
     loadState(),
     sessionContext(),
     listRejectedTacticCandidates(),
+    aiEnabled().catch(() => true),
   ]);
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
@@ -42,6 +44,8 @@ export default async function TacticsPage() {
         openGaps={workspace.openGaps}
         availableTactics={workspace.availableTactics}
       />
+      {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
+      {ai || rejected.length > 0 ? (
       <section className="mt-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Rejected by the AI ({pending.length})</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
@@ -122,6 +126,7 @@ export default async function TacticsPage() {
           </p>
         ) : null}
       </section>
+      ) : null}
     </AppShell>
   );
 }

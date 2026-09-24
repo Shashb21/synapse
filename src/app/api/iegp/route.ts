@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AI_OFF_MESSAGE, AiDisabledError } from "@/modules/kernel/ai-switch";
 import {
   acceptMapping,
   acceptResidualGap,
@@ -713,6 +714,9 @@ export async function POST(request: Request) {
     await fileGateEdit(body, actor_name, actor_function);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof AiDisabledError) {
+      return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }

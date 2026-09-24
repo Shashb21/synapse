@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 export type ProviderOption = {
   id: string;
@@ -45,6 +46,7 @@ export function RoutingPanel({
   canRoute: boolean;
   canActivate: boolean;
 }) {
+  const ai = useAiEnabled();
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
@@ -55,6 +57,12 @@ export function RoutingPanel({
           Each stage resolves its own provider, model and parameters. Agentic stages require a
           connected LLM — log in on this page first, or the run blocks with a link back here.
         </p>
+        {ai ? null : (
+          <p className="mt-1 text-[12px] text-[var(--unknown)]" data-testid="routing-ai-off">
+            AI is off, so these routes are not used. You can still edit them; they take effect when
+            an admin turns AI back on.
+          </p>
+        )}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {routes.map((route) => (

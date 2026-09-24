@@ -5,6 +5,7 @@ import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CompletenessAuditOutput } from "@/accuracy/modules/completeness-audit/module";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,10 +25,13 @@ export default async function AccuracyReviewPage({
   let openCount = 0;
   let skippedNoise = 0;
   let loadError: string | null = null;
+  // The completeness audit is an AI step that runs on page load: never with AI off.
+  let aiOn = true;
 
   try {
+    aiOn = await aiEnabled();
     workspaces = await listWorkspaces();
-    if (workspaceId) {
+    if (workspaceId && aiOn) {
       const org = workspaces.find((w) => w.id === workspaceId);
       if (org) {
         const [result, sources] = await Promise.all([
@@ -52,7 +56,12 @@ export default async function AccuracyReviewPage({
       }
     }
   } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load review inbox";
+    if (error instanceof AiDisabledError) {
+      // Switched off between the check and the run: show the AI-off note, not an error.
+      aiOn = false;
+    } else {
+      loadError = error instanceof Error ? error.message : "Could not load review inbox";
+    }
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
@@ -71,7 +80,31 @@ export default async function AccuracyReviewPage({
         </p>
       ) : null}
 
-      {!workspaceId ? (
+      {workspaceId && !aiOn ? (
+        <section
+          className="grid gap-2 border border-border bg-card/40 p-3"
+          aria-labelledby="review-ai-off"
+          data-testid="review-ai-off"
+        >
+          <h2 id="review-ai-off" className="text-[15px] font-medium text-foreground">
+            AI is off — the completeness audit is an AI step
+          </h2>
+          <p className="text-[12px] text-muted-foreground">
+            No audit runs and no miss flags are raised while AI is off (an admin can turn AI on
+            in the control panel). Add any missing gaps or tactics by hand on the{" "}
+            <Link
+              href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              Ledger
+            </Link>
+            .
+          </p>
+          <p className="text-[12px] text-muted-foreground">
+            Workspace · {active?.name ?? workspaceId}
+          </p>
+        </section>
+      ) : !workspaceId ? (
         <section className="grid gap-2" aria-labelledby="review-empty">
           <h2 id="review-empty" className="text-[15px] font-medium text-foreground">
             Choose a workspace

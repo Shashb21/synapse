@@ -15,6 +15,7 @@ import { listSourceFiles } from "@/accuracy/store/source-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { NoRouteError } from "@/modules/llm/provider";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,9 @@ const MAX_EXTRACT_BLOCKS = 80;
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    // Extract is an AI step: with AI off, refuse before reading or writing anything.
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     const org_id = await getWorkspaceOrgId(body.workspace_id);
     if (!org_id) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
@@ -217,6 +221,8 @@ export async function POST(req: Request) {
       auth: gate.stub ? null : gate.auth,
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     if (error instanceof NoRouteError) {
       const gate = await inspectLiveExtractGate();
       if (!gate.ready) {

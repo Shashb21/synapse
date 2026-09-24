@@ -1,4 +1,5 @@
 import { activeAccuracyModule } from "./registry";
+import { AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
 import { ensureAccuracySchema } from "../store/db";
 import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun } from "./observability";
 import {
@@ -39,6 +40,10 @@ export async function runAccuracyModule<O = unknown>(args: {
   const agent_role = args.agent_role ?? "proposer";
   const implementation = await activeAccuracyModule(args.call_kind);
   await ensureAccuracySchema(implementation.migrations ?? []);
+  // The admin AI switch: with AI off, no agentic module runs at all.
+  if (implementation.manifest.agentic && !(await aiEnabled())) {
+    throw new AiDisabledError(implementation.manifest.title);
+  }
 
   const recorder = new AccuracyRunRecorder({
     org_id: args.org_id,

@@ -3,11 +3,26 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { ManualSourceForm } from "@/components/platform/manual-source-form";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, SOURCE_TYPES, SOURCE_TYPE_LABELS } from "@/lib/iegp/enums";
 import { sessionContext } from "@/modules/auth/session";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewTypedSourcePage() {
   const context = await sessionContext();
+  // With AI off there are no sources at all: gaps and tactics are added by hand.
+  if (!(await aiEnabled().catch(() => true))) {
+    return (
+      <AppShell active="sources">
+        <PageIntro kicker="AI is off" title="Sources are not used">
+          With AI off there is no upload, parsing or typed source. Add gaps and tactics by hand from{" "}
+          <Link href="/" className="underline-offset-2 hover:underline">
+            Start
+          </Link>
+          .
+        </PageIntro>
+      </AppShell>
+    );
+  }
   return (
     <AppShell active="sources">
       <PageIntro kicker="Manual entry · no AI" title="Type a source">

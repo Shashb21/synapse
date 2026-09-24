@@ -9,6 +9,7 @@ import {
   type CompletenessVerdict,
 } from "./engine";
 import { judgeCompleteness } from "./critic";
+import { assertAiEnabled } from "@/modules/kernel/ai-switch";
 import {
   claimMetadata,
   isActiveLedgerClaim,
@@ -104,6 +105,9 @@ export const completenessAuditModule = agenticModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
+    // Defence in depth behind runAccuracyModule: with AI off the audit never
+    // reads blocks, asks a model or stores a verdict (the test stub included).
+    await assertAiEnabled("The completeness audit");
     const [blocks, claimRows, resolved] = await Promise.all([
       readAllParseBlocks(input.workspace_id),
       listClaims(input.workspace_id, { limit: 500 }),

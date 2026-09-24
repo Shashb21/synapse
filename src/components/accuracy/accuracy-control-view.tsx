@@ -7,11 +7,17 @@ import { CALL_KINDS_META } from "@/accuracy/kernel/contracts";
 import { PROVIDERS } from "@/modules/llm/provider";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
+import { aiSwitch } from "@/modules/kernel/ai-switch";
+import Link from "next/link";
 
 registerAccuracyStack();
 
 export async function AccuracyControlView() {
-  const [configs, identity] = await Promise.all([accuracyRouteConfigs(), sessionContext()]);
+  const [configs, identity, ai] = await Promise.all([
+    accuracyRouteConfigs(),
+    sessionContext(),
+    aiSwitch(),
+  ]);
 
   const routes: AccuracyRouteView[] = await Promise.all(
     configs.map(async (config) => {
@@ -36,6 +42,29 @@ export async function AccuracyControlView() {
 
   return (
     <div className="grid gap-8">
+      <section
+        className="grid gap-1 border border-border bg-card/40 p-3"
+        aria-labelledby="ai-switch-state"
+        data-testid="accuracy-ai-switch-state"
+      >
+        <h2 id="ai-switch-state" className="text-[15px] font-medium text-foreground">
+          AI switch · {ai.enabled ? "on" : "off"}
+        </h2>
+        <p className="text-[12px] text-muted-foreground">
+          {ai.enabled
+            ? "Models run on the routes below (parse, extract, audit, coverage assist, ideate)."
+            : "AI is off: no route below is called. Every accuracy step is done by hand — add gaps and tactics on the Ledger, decide coverage, set priority and dates yourself."}
+          {ai.updated_by ? ` Last changed by ${ai.updated_by}` : ""}
+          {ai.updated_at ? ` at ${ai.updated_at}` : ""}
+          {ai.rationale ? ` — “${ai.rationale}”` : ""}
+          {ai.updated_by || ai.updated_at ? "." : ""}
+        </p>
+        <p className="text-[12px]">
+          <Link href="/control" className="text-foreground underline-offset-2 hover:underline">
+            Change the AI switch in the control panel →
+          </Link>
+        </p>
+      </section>
       <AccuracyRoutingPanel
         routes={routes}
         providers={PROVIDERS.map((provider) => ({

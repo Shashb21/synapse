@@ -3,6 +3,8 @@ import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { listReferencePacks } from "@/accuracy/eval/reference-gold";
 import { seedWorkspaceFromGold } from "@/accuracy/store/seed-from-gold";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiOffFromError, aiOffResponse } from "@/app/api/accuracy/_lib/ai-off";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +30,9 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    // An explicit parse request is an AI step: refuse it before creating anything.
+    // Without one, AI off seeds the gold claims and skips the parse (parse_skipped).
+    if (body.parse_source === true && !(await aiEnabled())) return aiOffResponse();
     const result = await seedWorkspaceFromGold({
       packId: body.pack_id,
       workspaceName: body.workspace_name,
@@ -35,6 +40,8 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     const message = error instanceof Error ? error.message : "Seed failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
