@@ -80,7 +80,13 @@ export default async function AccuracyPlanPage({
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
-            open eligible for ideate
+            open eligible for ideate · edit proposed tactics (name, type, design, dates) on the{" "}
+            <Link
+              href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              Ledger
+            </Link>
           </p>
           {ready ? (
             <WorkshopSaveCta

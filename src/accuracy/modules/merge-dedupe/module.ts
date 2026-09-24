@@ -18,7 +18,13 @@ import {
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
+import {
+  isHumanProtectedClaim,
+  mergeRejectedPairs,
+  preserveHumanLocks,
+} from "@/accuracy/store/claim-edit";
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
+import { nowIso } from "@/modules/kernel/ids";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 
 export {
@@ -92,6 +98,7 @@ export function claimToMergeCandidate(
     tactic_status: asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status),
     provenance: provenanceFromMeta(meta),
     created_at: claim.created_at,
+    protected: isHumanProtectedClaim(claim),
   };
 }
 
@@ -122,6 +129,9 @@ export const mergeDedupeOutputSchema = z.object({
   survivors: z.number().int(),
   contradictions: z.number().int(),
   merges: z.array(mergeRowSchema),
+  /** Merges found but not applied: the duplicate is validated / human-edited. A human confirms. */
+  proposed: z.number().int().default(0),
+  proposals: z.array(mergeRowSchema).default([]),
   contradiction_rows: z.array(contradictionSchema),
 });
 
@@ -150,7 +160,8 @@ export const mergeDedupeModule = agenticModule({
     );
     const active = claims.filter(isActiveLedgerClaim);
     const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
-    const questions = equivalenceQuestions(candidates);
+    const blocked = mergeRejectedPairs(active);
+    const questions = equivalenceQuestions(candidates, blocked);
     const stub = isTestStub();
     let equivalent: EquivalentPair[] = [];
     if (stub) {
@@ -159,12 +170,14 @@ export const mergeDedupeModule = agenticModule({
     } else {
       equivalent = await judgeEquivalence({ ctx, questions, candidates });
     }
-    const result = mergeDedupeCandidates(candidates, { equivalent });
+    const result = mergeDedupeCandidates(candidates, { equivalent, blocked });
     const byId = new Map(active.map((row) => [row.id, row]));
 
     for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
       const duplicate = byId.get(duplicateId);
       if (!duplicate) continue;
+      // Defence in depth: never auto-merge away a validated or human-edited claim.
+      if (isHumanProtectedClaim(duplicate)) continue;
       const meta = claimMetadata(duplicate);
       const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
       await persistClaimPatch({
@@ -173,6 +186,7 @@ export const mergeDedupeModule = agenticModule({
         status: "merged",
         metadata: {
           ...meta,
+          pre_merge_status: duplicate.status,
           merged_into: survivorId,
           merge_reason: mergeRow?.reason ?? "transitive",
           merge_rationale: mergeRow?.rationale ?? null,
@@ -203,7 +217,7 @@ export const mergeDedupeModule = agenticModule({
       await persistClaimPatch({
         workspace_id: input.workspace_id,
         claim_id: survivor.id,
-        metadata: {
+        metadata: preserveHumanLocks(meta, {
           ...meta,
           external_id: survivor.external_id ?? meta.external_id ?? null,
           reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
@@ -211,8 +225,41 @@ export const mergeDedupeModule = agenticModule({
           provenance: survivor.provenance,
           merged_from: mergedFrom,
           merged_into: null,
-        },
+        }),
       });
+    }
+
+    // Proposals: persist on the protected duplicate; a human confirms or dismisses.
+    const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));
+    const proposedAt = nowIso();
+    const fresh = (await listClaims(input.workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
+    for (const row of fresh) {
+      const meta = claimMetadata(row);
+      const proposal = proposalByDuplicate.get(row.id);
+      const existing = meta.merge_proposal ?? null;
+      if (proposal) {
+        if (existing && existing.survivor_id === proposal.survivor_id) continue;
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          claim_id: row.id,
+          metadata: {
+            ...meta,
+            merge_proposal: {
+              survivor_id: proposal.survivor_id,
+              reason: proposal.reason,
+              keys: proposal.keys,
+              rationale: proposal.rationale ?? null,
+              proposed_at: proposedAt,
+            },
+          },
+        });
+      } else if (existing) {
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          claim_id: row.id,
+          metadata: { ...meta, merge_proposal: null },
+        });
+      }
     }
 
     const output: MergeDedupeOutput = {
@@ -223,6 +270,8 @@ export const mergeDedupeModule = agenticModule({
       survivors: result.survivors.length,
       contradictions: result.contradictions.length,
       merges: result.merges,
+      proposed: result.proposals.length,
+      proposals: result.proposals,
       contradiction_rows: result.contradictions,
     };
     ctx.run.note("merge:result", {
@@ -237,6 +286,10 @@ export const mergeDedupeModule = agenticModule({
         output.merged === 0
           ? `Merge dedupe — ${output.survivors} survivor(s), no duplicates`
           : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`
+      }${
+        result.proposals.length > 0
+          ? ` · ${result.proposals.length} merge(s) proposed for human review (validated / human-edited)`
+          : ""
       }${
         stub && questions.length > 0
           ? ` · test stub (SYNAPSE_TEST_STUB_LLM): ${questions.length} same-block pair(s) not judged`

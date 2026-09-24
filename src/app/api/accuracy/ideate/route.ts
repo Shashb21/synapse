@@ -14,7 +14,10 @@ import {
   listClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
+import { normalizeClaimDate, withHumanEdit } from "@/accuracy/store/claim-edit";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { TACTIC_TYPES } from "@/lib/iegp/enums";
+import type { Actor } from "@/accuracy/kernel/contracts";
 import { isTestStub } from "@/modules/kernel/llm";
 
 export const runtime = "nodejs";
@@ -30,6 +33,7 @@ const bodySchema = z.object({
   hints: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
+  type: z.enum(TACTIC_TYPES).optional(),
   per_gap: z.number().int().min(1).max(3).optional(),
   actor_name: z.string().min(1).optional(),
   actor_function: z.string().min(1).optional(),
@@ -69,9 +73,40 @@ async function persistProposal(args: {
   start?: string | null;
   end?: string | null;
   source_file_id?: string | null;
+  /** Manual (human-authored) proposal: fields are human-locked + audited. */
+  human?: { rationale: string; actor: Actor };
 }) {
   const meta = claimMetadata(args.gap);
   const external = typeof meta.external_id === "string" ? meta.external_id : args.gap.id;
+  const start = normalizeClaimDate("start", args.start);
+  const end = normalizeClaimDate("end", args.end);
+  if (start && end && end < start) {
+    throw new Error("End date must be on or after the start date.");
+  }
+  const base = {
+    origin: "ideated",
+    source_badge: "ideate",
+    gap_ids: [external],
+    type: args.type ?? null,
+    tactic_type: args.type ?? null,
+    design_summary: args.design_summary.trim(),
+    ideation_rationale: args.design_summary.trim(),
+    not_from_reference: true,
+    start,
+    end,
+  };
+  const fields = ["statement", "design_summary", ...(args.type ? ["type"] : []),
+    ...(start ? ["start"] : []), ...(end ? ["end"] : [])];
+  const metadata = args.human
+    ? withHumanEdit(base, {
+        action: "create",
+        fields,
+        before: {},
+        after: { statement: args.name.trim(), design_summary: base.design_summary, type: base.type, start, end },
+        rationale: args.human.rationale,
+        actor: args.human.actor,
+      })
+    : base;
   return insertClaim({
     workspace_id: args.workspace_id,
     claim_type: "tactic",
@@ -79,17 +114,7 @@ async function persistProposal(args: {
     status: "proposed",
     validated: false,
     source_file_id: args.source_file_id ?? null,
-    metadata: {
-      origin: "ideated",
-      source_badge: "ideate",
-      gap_ids: [external],
-      type: args.type ?? null,
-      design_summary: args.design_summary.trim(),
-      ideation_rationale: args.design_summary.trim(),
-      not_from_reference: true,
-      start: args.start ?? null,
-      end: args.end ?? null,
-    },
+    metadata,
   });
 }
 
@@ -127,7 +152,15 @@ export async function POST(req: Request) {
         design_summary: body.rationale!.trim(),
         start: body.start ?? null,
         end: body.end ?? null,
+        type: body.type,
         source_file_id: gap.source_file_id,
+        human: {
+          rationale: body.rationale!.trim(),
+          actor: {
+            name: body.actor_name?.trim() || "Accuracy planner",
+            function: (body.actor_function?.trim() || "medical_affairs") as Actor["function"],
+          },
+        },
       });
       return NextResponse.json({
         ok: true,

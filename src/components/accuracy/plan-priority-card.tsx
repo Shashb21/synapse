@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
+import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -109,6 +110,10 @@ export function PlanPriorityCard({
   const [ideateTitle, setIdeateTitle] = useState("");
   const [ideateRationale, setIdeateRationale] = useState("");
   const [ideateMsg, setIdeateMsg] = useState<string | null>(null);
+  const [priorityRationale, setPriorityRationale] = useState("");
+  const [ideateStart, setIdeateStart] = useState("");
+  const [ideateEnd, setIdeateEnd] = useState("");
+  const [ideateType, setIdeateType] = useState("");
 
   const band = resolvePriorityBand(value) ?? resolvePriorityBand(priority);
   const canIdeate = validated && band === "high" && resolveGapStatus(status) === "open";
@@ -116,6 +121,10 @@ export function PlanPriorityCard({
   function save(next: string) {
     setError(null);
     setIdeateMsg(null);
+    if (priorityRationale.trim().length < 3) {
+      setError("Type a short rationale (min 3 characters) before changing the priority band.");
+      return;
+    }
     startTransition(async () => {
       const res = await fetch("/api/accuracy/claims/priority", {
         method: "POST",
@@ -124,7 +133,7 @@ export function PlanPriorityCard({
           workspace_id: workspaceId,
           claim_id: claimId,
           priority: next,
-          rationale: `Set priority band to ${next}`,
+          rationale: priorityRationale.trim(),
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
@@ -133,6 +142,7 @@ export function PlanPriorityCard({
         return;
       }
       setValue(next);
+      setPriorityRationale("");
       router.refresh();
     });
   }
@@ -167,6 +177,9 @@ export function PlanPriorityCard({
         gap_id: claimId,
         title: ideateTitle.trim(),
         rationale: ideateRationale.trim(),
+        ...(ideateStart ? { start: ideateStart } : {}),
+        ...(ideateEnd ? { end: ideateEnd } : {}),
+        ...(ideateType ? { type: ideateType } : {}),
       });
       if (!ok) {
         setError(json.error ?? "Ideate failed");
@@ -175,6 +188,9 @@ export function PlanPriorityCard({
       setIdeateMsg(outcomeMessage(json));
       setIdeateTitle("");
       setIdeateRationale("");
+      setIdeateStart("");
+      setIdeateEnd("");
+      setIdeateType("");
       router.refresh();
     });
   }
@@ -188,6 +204,13 @@ export function PlanPriorityCard({
         </span>
       </div>
       <p className="mt-1 font-mono text-[10px] text-muted-foreground">{claimId}</p>
+      <input
+        value={priorityRationale}
+        onChange={(e) => setPriorityRationale(e.target.value)}
+        placeholder="Why this priority band (required, then pick a band)"
+        aria-label="Priority rationale"
+        className="mt-2 w-full border border-border bg-background px-2 py-1.5 text-[12px]"
+      />
       <div className="mt-2 flex flex-wrap gap-2">
         {(["high", "medium", "low"] as const).map((bandOption) => (
           <button
@@ -234,6 +257,41 @@ export function PlanPriorityCard({
             minLength={3}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Type (optional)
+              <select
+                value={ideateType}
+                onChange={(e) => setIdeateType(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              >
+                <option value="">—</option>
+                {TACTIC_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {TACTIC_TYPE_LABELS[type] ?? type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Start (optional)
+              <input
+                type="date"
+                value={ideateStart}
+                onChange={(e) => setIdeateStart(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              End (optional)
+              <input
+                type="date"
+                value={ideateEnd}
+                onChange={(e) => setIdeateEnd(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+              />
+            </label>
+          </div>
           <button
             type="submit"
             disabled={pending || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}

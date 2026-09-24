@@ -9,6 +9,9 @@ import {
   workspaceLatestPlan,
 } from "@/accuracy/modules/gantt-project/save-final";
 import { listWorkspaces } from "@/accuracy/store/tenant";
+import { claimFieldSnapshot } from "@/accuracy/domain/claim-fields";
+import { isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import type { GanttTacticSchedule } from "@/components/accuracy/gantt-schedule-editor";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,6 +30,7 @@ export default async function AccuracyTimelinePage({
   let catalog: Awaited<ReturnType<typeof projectWorkspaceGantt>>["catalog"] = [];
   let plan: Awaited<ReturnType<typeof workspaceLatestPlan>> = null;
   let loadError: string | null = null;
+  let tactics: GanttTacticSchedule[] = [];
 
   try {
     workspaces = await listWorkspaces();
@@ -35,6 +39,23 @@ export default async function AccuracyTimelinePage({
       activities = projected.activities;
       catalog = projected.catalog;
       plan = await workspaceLatestPlan(workspaceId);
+      const claims = (await listClaims(workspaceId, { limit: 500 })).filter(
+        (row) => row.claim_type === "tactic" && isActiveLedgerClaim(row),
+      );
+      const lockById = new Map(tacticsForGantt(claims).map((row) => [row.id, row.dates_locked]));
+      tactics = claims.map((row) => {
+        const fields = claimFieldSnapshot(row);
+        return {
+          id: row.id,
+          statement: row.statement,
+          validated: row.validated,
+          start: fields.start,
+          end: fields.end,
+          readout: fields.readout,
+          depends_on: fields.depends_on,
+          dates_locked: lockById.get(row.id) ?? false,
+        };
+      });
     }
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load timeline";
@@ -131,6 +152,7 @@ export default async function AccuracyTimelinePage({
             planId={plan?.id ?? null}
             snapshotHash={plan ? snapshotHashForPlan(plan) : null}
             auditBundleHref={plan ? auditBundleFromPlan(plan).href : null}
+            tactics={tactics}
           />
         </>
       )}
