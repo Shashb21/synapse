@@ -9,7 +9,11 @@ import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-a
 import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
+import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { sessionContext } from "@/modules/auth/session";
 import {
+  DOMAIN_LABELS,
+  EVIDENCE_DOMAINS,
   COVERAGE_DIMENSIONS,
   DIMENSION_LABELS,
   DIMENSION_QUESTIONS,
@@ -40,7 +44,12 @@ export default async function GapDetailPage({
 }) {
   const { id } = await params;
   await ensureGapHasConstituentNeed(id);
-  const state = await loadState();
+  const [state, session] = await Promise.all([loadState(), sessionContext()]);
+  const identity: ActionIdentity = {
+    signed_in: session.signed_in,
+    actor_name: session.actor.name,
+    actor_function: session.actor.function,
+  };
   const gap = state.gaps.find((g) => g.id === id);
   if (!gap) notFound();
   const needs = state.need_gap_links
@@ -66,6 +75,13 @@ export default async function GapDetailPage({
 
   const mapped =
     shown === "validated_open" || shown === "validated_partial" || shown === "validated_addressed";
+  // Gaps a need can move onto: every gap still on record except this one.
+  const moveTargets = [
+    ...state.gaps
+      .filter((g) => g.id !== gap.id && !g.retired)
+      .map((g) => ({ value: g.id, label: `${g.id} · ${g.name}` })),
+    { value: "__new__", label: "A new gap made from this need" },
+  ];
 
   return (
     <AppShell active="gaps">
@@ -101,6 +117,34 @@ export default async function GapDetailPage({
         )}
       </div>
       <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
+      <div className="mb-4 border border-border bg-card/40 p-3">
+        <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
+          {gap.retired ? null : (
+            <ActionDialog
+              endpoint="/api/iegp"
+              payload={{ action: "modify_gap", gap_id: gap.id }}
+              identity={identity}
+              label="Edit gap"
+              title={`Edit ${gap.id}`}
+              description="Your wording replaces the current name, statement and domain. It is locked to you and kept on every later AI run; the AI only adds needs to a gap, it never rewrites one."
+              confirmLabel="Save edit"
+              fields={[
+                { name: "name", label: "Name", defaultValue: gap.name, required: true },
+                { name: "statement", label: "Statement", type: "textarea", defaultValue: gap.statement, required: true },
+                {
+                  name: "domain",
+                  label: "Domain",
+                  type: "select",
+                  defaultValue: gap.domain,
+                  options: EVIDENCE_DOMAINS.map((domain) => ({ value: domain, label: DOMAIN_LABELS[domain] })),
+                },
+              ]}
+            />
+          )}
+        </div>
+      </div>
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
         {GAP_STATUS_DEFINITIONS[shown]}{" "}
         {shown === "validated_partial"
@@ -113,8 +157,35 @@ export default async function GapDetailPage({
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
           Where this gap comes from. Constituent needs are the sourced statements extracted from
           documents or interviews. If the same gap was identified in several sources, every source
-          is listed. Role is primary or supporting.
+          is listed. Role is primary or supporting. If the AI joined a need onto the wrong gap,
+          move it to the right one (or to a new gap); later runs never re-link it.
         </p>
+        {gap.retired ? null : (
+          <div className="mb-3">
+            <ActionDialog
+              endpoint="/api/iegp"
+              payload={{ action: "create_need", gap_id: gap.id }}
+              identity={identity}
+              label="Add need"
+              description="Record a need by hand, e.g. from a meeting no uploaded source covers. Pick its source if it came from an ingested document."
+              confirmLabel="Add need"
+              fields={[
+                { name: "statement", label: "Need statement", type: "textarea", required: true },
+                { name: "source_quote", label: "Source quote (optional)", type: "textarea" },
+                {
+                  name: "source_id",
+                  label: "Source",
+                  type: "select",
+                  defaultValue: "",
+                  options: [
+                    { value: "", label: "Recorded by hand (no source file)" },
+                    ...state.sources.map((s) => ({ value: s.id, label: s.title })),
+                  ],
+                },
+              ]}
+            />
+          </div>
+        )}
         <div className="grid gap-2">
           {needs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
@@ -122,13 +193,62 @@ export default async function GapDetailPage({
             needs.map(({ need, link }) => {
               const source = state.sources.find((s) => s.id === need.source_id);
               return (
-                <p key={need.id} className="border border-border bg-card p-3 text-[13px]">
+                <div key={need.id} className="border border-border bg-card p-3 text-[13px]">
                   <span className="text-[11px] capitalize text-muted-foreground">
-                    {link.role} · {source?.title || need.source_id}
+                    {link.role} · {source?.title || need.source_id} · {need.id}
                   </span>
-                  <br />
-                  {need.statement}
-                </p>
+                  <p className="mt-1">{need.statement}</p>
+                  {need.source_quote && need.source_quote !== need.statement ? (
+                    <p className="mt-1 text-[12px] text-muted-foreground">“{need.source_quote}”</p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <ActionDialog
+                      endpoint="/api/iegp"
+                      payload={{ action: "edit_need", need_id: need.id }}
+                      identity={identity}
+                      label="Edit need"
+                      description="Correct the need's wording or its source quote. The edit is locked to you and kept on later AI runs."
+                      confirmLabel="Save edit"
+                      fields={[
+                        { name: "statement", label: "Statement", type: "textarea", defaultValue: need.statement, required: true },
+                        { name: "source_quote", label: "Source quote", type: "textarea", defaultValue: need.source_quote },
+                      ]}
+                    />
+                    <ActionDialog
+                      endpoint="/api/iegp"
+                      payload={{ action: "move_need", need_id: need.id, from_gap_id: gap.id }}
+                      identity={identity}
+                      label="Move to another gap"
+                      description="Moves this need off this gap. Use it when the AI merged a need into the wrong gap."
+                      confirmLabel="Move need"
+                      fields={[
+                        {
+                          name: "to_gap_id",
+                          label: "Move onto",
+                          type: "select",
+                          defaultValue: moveTargets[0]?.value,
+                          options: moveTargets,
+                          required: true,
+                        },
+                        {
+                          name: "new_gap_name",
+                          label: "Name for the new gap (only when moving to a new gap)",
+                          placeholder: "Blank: derived from the need",
+                        },
+                      ]}
+                    />
+                    {needs.length > 1 ? (
+                      <ActionDialog
+                        endpoint="/api/iegp"
+                        payload={{ action: "unlink_need", need_id: need.id, gap_id: gap.id }}
+                        identity={identity}
+                        label="Unlink"
+                        description="Removes this need from this gap. The need itself stays on the Needs page."
+                        confirmLabel="Unlink need"
+                      />
+                    ) : null}
+                  </div>
+                </div>
               );
             })
           )}
@@ -350,12 +470,63 @@ export default async function GapDetailPage({
         <section className="mb-8 border border-border bg-card p-4">
           <h2 className="text-[13px] text-muted-foreground">Leftover (right side of split)</h2>
           {leftover ? (
-            <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+            <>
+              <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "accept_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Accept as new gap"
+                  variant="default"
+                  description="Creates the leftover as a new Open gap and locks this gap as Addressed. You can adjust the wording first."
+                  confirmLabel="Accept leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", defaultValue: leftover.statement, required: true },
+                  ]}
+                />
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "modify_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Edit leftover"
+                  description="Saves your wording as the leftover draft. Nothing is created until you accept it."
+                  confirmLabel="Save leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", defaultValue: leftover.statement, required: true },
+                  ]}
+                />
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "reject_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Reject leftover"
+                  description="Rejects this leftover. It will not be suggested again for this gap."
+                  confirmLabel="Reject leftover"
+                />
+              </div>
+            </>
           ) : (
-            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-              No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
-              have the S6 model propose the addressed slice and the open leftover.
-            </p>
+            <>
+              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
+                have the S6 model propose the addressed slice and the open leftover, or write the
+                leftover yourself.
+              </p>
+              <div className="mt-3">
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "modify_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Write leftover"
+                  description="Saves your leftover as a draft on this gap. Accept it afterwards to create the new Open gap."
+                  confirmLabel="Save leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", required: true },
+                  ]}
+                />
+              </div>
+            </>
           )}
         </section>
       ) : null}

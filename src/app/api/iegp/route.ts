@@ -12,6 +12,11 @@ import {
   createGap,
   createProposedTactic,
   deleteBreakoutGroup,
+  createNeed,
+  editNeed,
+  moveNeedToGap,
+  unlinkNeedFromGap,
+  TACTIC_EDIT_FIELDS,
   recordMissedTactic,
   lockCoverageDimension,
   lockCoverageOverall,
@@ -44,11 +49,12 @@ import {
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
-import { recordEdit, type EditAction } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
 import { requestIdentity } from "@/modules/auth/request";
 import type { SourceType } from "@/lib/iegp/enums";
 import { ingestThroughStages } from "./ingest-pipeline";
+import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
 
 export const runtime = "nodejs";
 
@@ -108,7 +114,8 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   override_gap_status: { stage: "S5", entity: "gap", field: "computed_status", action: "override" },
   clear_gap_status_override: { stage: "S5", entity: "gap", field: "computed_status", action: "edit" },
   validate_gap: { stage: "S5", entity: "gap", field: "human_validated", action: "validate" },
-  modify_gap: { stage: "S5", entity: "gap", field: "statement", action: "edit" },
+  // modify_gap, modify_tactic, need edits, leftover decisions and promotions file
+  // their own edit records (with before/after) in the store.
   assign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   accept_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
   reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
@@ -165,7 +172,73 @@ export async function POST(request: Request) {
           gap_id: body.gap_id || undefined,
           actor_name,
           actor_function,
-          note: body.note,
+          note: rationaleOf(body),
+        });
+        break;
+      case "create_need":
+        await createNeed({
+          gap_id: body.gap_id,
+          statement: body.statement,
+          source_quote: body.source_quote,
+          source_id: body.source_id || undefined,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "edit_need":
+        await editNeed({
+          need_id: body.need_id,
+          statement: typeof body.statement === "string" ? body.statement : undefined,
+          source_quote: typeof body.source_quote === "string" ? body.source_quote : undefined,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "unlink_need":
+        await unlinkNeedFromGap({
+          need_id: body.need_id,
+          gap_id: body.gap_id,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "move_need":
+        await moveNeedToGap({
+          need_id: body.need_id,
+          from_gap_id: body.from_gap_id || body.gap_id,
+          to_gap_id: body.to_gap_id === "__new__" ? undefined : body.to_gap_id,
+          new_gap: body.to_gap_id === "__new__" || body.new_gap === "true",
+          new_gap_name: body.new_gap_name,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "promote_gap_candidate":
+        await promoteGapCandidate({
+          candidate_id: body.candidate_id,
+          name: body.name,
+          statement: body.statement,
+          domain: body.domain,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "promote_tactic_candidate":
+        await promoteTacticCandidate({
+          candidate_id: body.candidate_id,
+          name: body.name,
+          type: body.type,
+          status: body.status,
+          evidence_question: body.evidence_question,
+          gap_id: body.gap_id,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
         });
         break;
       case "lock_gap":
@@ -276,6 +349,8 @@ export async function POST(request: Request) {
             comparator: body.comparator,
             outcomes: body.outcomes,
             geography: body.geography,
+            study_design: body.study_design,
+            data_source: body.data_source,
             owner: body.owner,
             function: body.function as ActorFunction,
             residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
@@ -297,6 +372,8 @@ export async function POST(request: Request) {
           comparator: body.comparator,
           outcomes: body.outcomes,
           geography: body.geography,
+          study_design: body.study_design,
+          data_source: body.data_source,
           owner: body.owner,
           function: body.function as ActorFunction,
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
@@ -316,6 +393,8 @@ export async function POST(request: Request) {
           comparator: body.comparator,
           outcomes: body.outcomes,
           geography: body.geography,
+          study_design: body.study_design,
+          data_source: body.data_source,
           owner: body.owner,
           function: body.function as ActorFunction,
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
@@ -409,7 +488,7 @@ export async function POST(request: Request) {
           statement: body.statement || undefined,
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       case "reject_residual_gap":
@@ -417,7 +496,7 @@ export async function POST(request: Request) {
           parent_gap_id: body.parent_gap_id,
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       case "modify_residual_gap":
@@ -426,7 +505,7 @@ export async function POST(request: Request) {
           statement: body.statement,
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       case "create_gap":
@@ -442,11 +521,12 @@ export async function POST(request: Request) {
       case "modify_gap":
         await modifyGap({
           gap_id: body.gap_id,
-          name: body.name,
-          statement: body.statement,
+          name: typeof body.name === "string" ? body.name : undefined,
+          statement: typeof body.statement === "string" ? body.statement : undefined,
+          domain: body.domain || undefined,
+          rationale: rationaleOf(body),
           actor_name,
           actor_function,
-          note: body.note,
         });
         break;
       case "lock_tactic_review":
@@ -455,17 +535,16 @@ export async function POST(request: Request) {
           review_status: body.review_status as "accepted" | "rejected",
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       case "modify_tactic":
         await modifyTactic({
           tactic_id: body.tactic_id,
-          name: body.name,
-          evidence_question: body.evidence_question,
+          fields: tacticFieldsOf(body),
+          rationale: rationaleOf(body),
           actor_name,
           actor_function,
-          note: body.note,
         });
         break;
       case "complete_wizard":
@@ -637,4 +716,18 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "Failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }
+}
+
+/** The reason a person typed, from whichever field the form used. */
+function rationaleOf(body: Record<string, string>): string {
+  return (body.rationale || body.note || "").trim();
+}
+
+/** Tactic fields present in the body; a field absent from the form is left unchanged. */
+function tacticFieldsOf(body: Record<string, string>) {
+  const fields: Partial<Record<(typeof TACTIC_EDIT_FIELDS)[number], string>> = {};
+  for (const field of TACTIC_EDIT_FIELDS) {
+    if (typeof body[field] === "string") fields[field] = body[field];
+  }
+  return fields;
 }

@@ -163,6 +163,7 @@ describe("IEGP postgres store", () => {
       gap_id: gap!.id,
       name: "Routine-care ILD / QT",
       statement: "Need ILD and QT characterisation in routine US care, not only the label.",
+      rationale: "Tighter wording for the plan.",
       actor_name: "S. Iyer",
       actor_function: "evidence_lead",
     });
