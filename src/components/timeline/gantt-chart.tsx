@@ -13,7 +13,15 @@ const PAD_R = 28;
 const PAD_B = 10;
 const LEGEND_H = 30;
 
-const BANDS: TimelineBand[] = ["high", "medium", "low", "addressed"];
+const BANDS: TimelineBand[] = ["high", "medium", "low", "unprioritized", "addressed"];
+
+const LEGEND_LABELS: Record<TimelineBand, string> = {
+  high: "High priority",
+  medium: "Medium priority",
+  low: "Low priority",
+  unprioritized: "Not yet prioritized",
+  addressed: "Addressed",
+};
 
 /**
  * Colours are read from the app's CSS tokens at mount so the chart matches the
@@ -24,6 +32,7 @@ const FALLBACK = {
   high: "#fb7185",
   medium: "#fbbf24",
   low: "#38bdf8",
+  unprioritized: "#8c8c8c",
   addressed: "#4ade80",
   readout: "#60a5fa",
   today: "#c084fc",
@@ -40,6 +49,7 @@ const TOKENS: Record<keyof Palette, string> = {
   high: "--chart-5",
   medium: "--chart-4",
   low: "--chart-3",
+  unprioritized: "--muted-foreground",
   addressed: "--known",
   readout: "--opportunity",
   today: "--chart-2",
@@ -421,23 +431,23 @@ export function GanttChart({
           <g key={`legend-${band}`} transform={`translate(${12 + index * 116}, ${legendY})`}>
             <rect x={0} y={-7} width={14} height={9} rx={2} fill={bandColour(band)} fillOpacity={0.28} stroke={bandColour(band)} />
             <text x={20} y={1} fill={palette.muted} fontSize={9.5}>
-              {band === "addressed" ? "Addressed" : `${band[0]!.toUpperCase()}${band.slice(1)} priority`}
+              {LEGEND_LABELS[band]}
             </text>
           </g>
         ))}
-        <g transform={`translate(${12 + 4 * 116}, ${legendY})`}>
+        <g transform={`translate(${12 + BANDS.length * 116}, ${legendY})`}>
           <polygon points="5,-8 10,-3 5,2 0,-3" fill={palette.readout} />
           <text x={16} y={1} fill={palette.muted} fontSize={9.5}>
             Readout
           </text>
         </g>
-        <g transform={`translate(${12 + 4 * 116 + 80}, ${legendY})`}>
+        <g transform={`translate(${12 + BANDS.length * 116 + 80}, ${legendY})`}>
           <path d="M 0 -3 H 16" stroke={palette.muted} strokeWidth={1} strokeDasharray="4 3" markerEnd="url(#synapse-dep-arrow)" />
           <text x={26} y={1} fill={palette.muted} fontSize={9.5}>
             Depends on
           </text>
         </g>
-        <text x={12 + 4 * 116 + 190} y={legendY + 1} fill={palette.muted} fontSize={9.5}>
+        <text x={12 + BANDS.length * 116 + 190} y={legendY + 1} fill={palette.muted} fontSize={9.5}>
           Dashed bar outline = proposed tactic
         </text>
       </g>

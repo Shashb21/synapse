@@ -5,7 +5,7 @@ import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import { registerModule } from "@/modules/kernel/registry";
 import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle } from "@/modules/kernel/agentic";
-import { canPrompt } from "@/modules/kernel/routing";
+import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
@@ -91,8 +91,7 @@ Review every gap you are given.
 
 Return JSON only: {"reviews":[{"gap_id":"","verdict":"keep","confidence":0,"note":""}]}`;
 
-/** Re-asks for rows a model left out before the stage gives up. */
-const COMPLETION_ATTEMPTS = 3;
+const REMEDY = "run prioritization again or switch the S8 route in /control.";
 
 type PlanningContext = PrioritizationInput["context"] & {
   launch_timeline?: string;
@@ -112,38 +111,6 @@ type PromptGap = {
   previous?: { scores: Record<string, number>; rationale: string };
   objection?: string;
 };
-
-/**
- * Asks the model once per attempt for the rows still missing, and keeps what
- * each answer completes. A row the model never completes fails the stage:
- * nothing is filled in on its behalf.
- */
-async function completeAll<T>(args: {
-  ids: string[];
-  what: string;
-  ask: (missing: string[], attempt: number) => Promise<Map<string, T>>;
-  describe: (id: string) => string;
-}): Promise<Map<string, T>> {
-  const done = new Map<string, T>();
-  for (let attempt = 1; attempt <= COMPLETION_ATTEMPTS; attempt += 1) {
-    const missing = args.ids.filter((id) => !done.has(id));
-    if (missing.length === 0) break;
-    const answer = await args.ask(missing, attempt);
-    for (const id of missing) {
-      const row = answer.get(id);
-      if (row !== undefined) done.set(id, row);
-    }
-  }
-  const unanswered = args.ids.filter((id) => !done.has(id));
-  if (unanswered.length > 0) {
-    throw new Error(
-      `The model did not return a complete ${args.what} for ${unanswered
-        .map(args.describe)
-        .join(", ")} after ${COMPLETION_ATTEMPTS} attempts. Nothing was saved; run prioritization again or switch the S8 route in /control.`,
-    );
-  }
-  return done;
-}
 
 function promptContext(args: {
   asset: IegpState["asset"];
@@ -243,11 +210,6 @@ async function llmReviews(
   return map;
 }
 
-/** Vitest and Playwright only: the kernel runs the local proposer instead of a model. */
-function testStub(): boolean {
-  return process.env.SYNAPSE_TEST_STUB_LLM === "1";
-}
-
 export const prioritizationModule: SynapseModule<PrioritizationInput, PrioritizationOutput> = {
   manifest: {
     id: "s8-prioritization.axes",
@@ -263,12 +225,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   inputSchema,
   outputSchema,
   async run(input, ctx) {
-    if (!testStub() && !canPrompt(ctx.route)) {
-      throw new NoRouteError(
-        ctx.route.reason ??
-          "Prioritization needs a connected LLM. Log in at /control (Grok, Claude, or another provider) and run it again.",
-      );
-    }
+    requireLlm(ctx, "Prioritization");
     const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]);
     const axisById = (id: string | undefined) => axesConfig.axes.find((axis) => axis.id === id);
     const xAxis = axisById(input.x_axis) ?? axisById(axesConfig.x_axis) ?? axesConfig.axes[0]!;
@@ -291,7 +248,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     if (openGaps.length === 0) {
       return {
         output: {
-          mode: testStub() ? "deterministic" : "llm",
+          mode: isTestStub() ? "deterministic" : "llm",
           axes: scoredAxes.map((axis) => ({ id: axis.id, label: axis.label, weight: axis.weight })),
           placements: [],
           skipped: 0,
@@ -328,7 +285,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
          * says no model ran, so a stub placement cannot pass for a judgement.
          */
         local: ({ round, previous }) => {
-          if (!testStub()) throw new NoRouteError("Prioritization has no rule-based fallback.");
+          if (!isTestStub()) throw new NoRouteError("Prioritization has no rule-based fallback.");
           if (round > 1) return previous;
           return openGaps.map((gap) =>
             toPlacement(gap.id, {
@@ -352,6 +309,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             ids: targets,
             what: "score",
             describe: describeGap,
+            remedy: REMEDY,
             ask: (missing, attempt) =>
               llmScores(ctx, {
                 ...shared(),
@@ -378,7 +336,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         },
       },
       critic: async (placements, round) => {
-        if (testStub()) {
+        if (isTestStub()) {
           return placements.map((placement) => ({
             subject: placement.gap_id,
             verdict: "keep" as const,
@@ -390,6 +348,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
           ids: placements.map((placement) => placement.gap_id),
           what: "review",
           describe: describeGap,
+          remedy: REMEDY,
           ask: (missing, attempt) =>
             llmReviews(ctx, {
               ...shared(),

@@ -22,6 +22,7 @@ import {
   providerConfigured,
 } from "@/modules/llm/provider";
 import { estimateCostUsd, usageFromMessages } from "./cost";
+import { isTestStub } from "@/modules/kernel/llm";
 
 /** Live LLM may use OAuth always, or an env API key except Claude without a workspace id. */
 export function anthropicWorkspaceConfigured(): boolean {
@@ -229,6 +230,21 @@ export function accuracyCompletionFor(args: {
     args.onUsage(usage, cost_usd);
     return { raw, usage };
   };
+}
+
+/**
+ * Throws unless this route can prompt a model (or the test stub is on). Accuracy
+ * modules call it before any judgement; there is no rule-based fallback.
+ */
+export function requireAccuracyLlm(
+  route: Pick<ResolvedAccuracyRoute, "connected" | "auth">,
+  what: string,
+): void {
+  if (isTestStub()) return;
+  if (route.connected && (route.auth === "oauth" || route.auth === "api_key")) return;
+  throw new NoRouteError(
+    `${what} needs a connected LLM. Connect Grok or Claude in /control and run it again.`,
+  );
 }
 
 /** Parse JSON from completion when module expects structured output. */

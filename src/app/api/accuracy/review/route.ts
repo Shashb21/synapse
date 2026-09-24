@@ -16,7 +16,8 @@ registerAccuracyStack();
 
 /**
  * GET /api/accuracy/review?workspace_id=…
- * Runs completeness_audit and returns open miss flags (+ source filenames).
+ * Runs completeness_audit (LLM completeness critic) and returns open miss flags
+ * (+ source filenames). Without a connected LLM it fails; nothing is guessed.
  */
 export async function GET(req: Request) {
   try {
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
 
     const result = await runAccuracyModule<CompletenessAuditOutput>({
       call_kind: "completeness_audit",
-      agent_role: "none",
+      agent_role: "critic",
       input: { workspace_id },
       actor: { name: "Accuracy reviewer", function: "medical_affairs" },
       org_id,
@@ -47,10 +48,13 @@ export async function GET(req: Request) {
       workspace_id,
       run_id: result.run_id,
       summary: result.summary,
+      mode: result.output.mode,
       scanned_blocks: result.output.scanned_blocks,
       open_flags: result.output.open_flags,
+      cited_blocks: result.output.cited_blocks,
+      judged_blocks: result.output.judged_blocks,
+      reused_verdicts: result.output.reused_verdicts,
       skipped_noise: result.output.skipped_noise,
-      skipped_by_reason: result.output.skipped_by_reason,
       flags: result.output.flags.map((flag) => ({
         ...flag,
         source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,

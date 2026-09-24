@@ -33,7 +33,7 @@ export default async function AccuracyReviewPage({
         const [result, sources] = await Promise.all([
           runAccuracyModule<CompletenessAuditOutput>({
             call_kind: "completeness_audit",
-            agent_role: "none",
+            agent_role: "critic",
             input: { workspace_id: workspaceId },
             actor: { name: "Accuracy reviewer", function: "medical_affairs" },
             org_id: org.org_id,
@@ -60,9 +60,9 @@ export default async function AccuracyReviewPage({
   return (
     <AccuracyAppShell active="review">
       <PageIntro kicker="Recall gate · completeness audit" title="Review">
-        Miss flags from parse blocks that are not yet in the ledger. Heading-only, chapter, and SI
-        chrome is skipped so Review stays usable on full PPTX gold. Promote to a draft gap or tactic,
-        or dismiss with a rationale — every decision feeds hillclimb.
+        Miss flags from parse blocks that are not yet in the ledger. A model critic reads each uncited
+        block and flags the ones that state a gap or tactic the ledger is missing, with its reason.
+        Promote to a draft gap or tactic, or dismiss with a rationale — every decision feeds hillclimb.
       </PageIntro>
 
       {loadError ? (
@@ -103,7 +103,7 @@ export default async function AccuracyReviewPage({
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {scanned} block(s) scanned · {openCount} open
             miss flag(s)
-            {skippedNoise > 0 ? ` · ${skippedNoise} heading/chapter/SI skipped` : ""}
+            {skippedNoise > 0 ? ` · ${skippedNoise} judged not a miss by the model critic` : ""}
           </p>
           {scanned === 0 ? (
             <p className="text-[12px] text-muted-foreground">

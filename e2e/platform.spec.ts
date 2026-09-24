@@ -61,7 +61,7 @@ test.describe("platform surfaces", () => {
       await expect(page.getByRole("heading", { name: step, exact: true })).toBeVisible();
     }
     await expect(page.getByText(/accept_rate/).first()).toBeVisible();
-    await expect(page.getByText("Deterministic (no LLM)").first()).toBeVisible();
+    await expect(page.getByText("test stub").first()).toBeVisible();
 
     // Locked: three proposer↔critic exchanges, all of them in the trace.
     await expect(page.getByRole("heading", { name: /proposer ↔ critic exchanges/i })).toBeVisible();

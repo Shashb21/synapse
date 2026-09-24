@@ -172,7 +172,7 @@ export async function POST(req: Request) {
 
     const mergeRun = await runAccuracyModule<MergeDedupeOutput>({
       call_kind: "merge_dedupe",
-      agent_role: "none",
+      agent_role: "judge",
       input: { workspace_id: body.workspace_id },
       actor,
       org_id,

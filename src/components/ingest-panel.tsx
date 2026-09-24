@@ -25,7 +25,9 @@ export function IngestPanel({
           Demo source files
         </h2>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Nothing is ingested until you do it. Each file extracts candidate gaps and tactics.
+          Nothing is ingested until you do it. Ingest runs the stage pipeline: upload, parse, then
+          gap extraction, tactic extraction and mapping on your connected LLM. Without a connected
+          model it stops and says so.
         </p>
         <div className="grid gap-3">
           {DEMO_PACK.map((file) => {
@@ -101,7 +103,7 @@ export function IngestPanel({
           <textarea
             name="text"
             required
-            placeholder="Paste interview notes or drop a downloaded demo file above. Gap cues such as 'need to understand' become candidate gaps. Mentions of trials, registries, chart reviews, or publications become extracted tactics."
+            placeholder="Paste interview notes or drop a downloaded demo file above. The LLM stages extract evidence gaps and existing tactics from it, then map them."
             className="min-h-28 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
           />
         </LockForm>

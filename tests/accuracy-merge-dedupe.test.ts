@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  equivalenceQuestions,
   extractDeterministicIds,
   identityKeys,
   mergeDedupeCandidates,
@@ -147,8 +148,8 @@ describe("merge / dedupe engine", () => {
     expect(result.merges[0]?.reason).toBe("statement");
   });
 
-  it("merges conservative same-block overlap with near-identical wording", () => {
-    const result = mergeDedupeCandidates([
+  it("puts same-block pairs to the judge and merges only what it calls the same", () => {
+    const pair = [
       candidate({
         id: "tac_1",
         claim_type: "tactic",
@@ -165,9 +166,34 @@ describe("merge / dedupe engine", () => {
         tactic_status: "ongoing",
         provenance: [{ source_file_id: "s", block_id: "row-12", quote: "community hospitals" }],
       }),
+    ];
+    expect(equivalenceQuestions(pair)).toEqual([
+      { a_id: "tac_1", b_id: "tac_2", claim_type: "tactic", shared_block_ids: ["row-12"] },
     ]);
+
+    // Near-identical wording alone decides nothing.
+    expect(mergeDedupeCandidates(pair).survivors).toHaveLength(2);
+
+    const result = mergeDedupeCandidates(pair, {
+      equivalent: [{ a_id: "tac_2", b_id: "tac_1", rationale: "Same registry, restated." }],
+    });
     expect(result.survivors).toHaveLength(1);
-    expect(result.merges[0]?.reason).toBe("block_overlap");
+    expect(result.merges[0]).toMatchObject({
+      reason: "model_equivalence",
+      keys: ["row-12"],
+      rationale: "Same registry, restated.",
+    });
+  });
+
+  it("does not ask about pairs the identity keys already settle", () => {
+    const shared = [{ source_file_id: "s", block_id: "b1", quote: "q" }];
+    expect(
+      equivalenceQuestions([
+        candidate({ id: "a", claim_type: "gap", statement: "x NSCLC_CE_01", external_id: "NSCLC_CE_01", provenance: shared }),
+        candidate({ id: "b", claim_type: "gap", statement: "y", external_id: "NSCLC_CE_01", provenance: shared }),
+        candidate({ id: "c", claim_type: "tactic", statement: "z", provenance: shared }),
+      ]),
+    ).toEqual([]);
   });
 
   it("surfaces conflicting tactic statuses instead of auto-picking", () => {

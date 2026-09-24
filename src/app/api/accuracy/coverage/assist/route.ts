@@ -6,6 +6,7 @@ import { mapCoverageOverallToUi } from "@/accuracy/modules/coverage-decide/overa
 import { getClaimsByIds } from "@/accuracy/store/claim-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { isTestStub } from "@/modules/kernel/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,11 +70,8 @@ export async function POST(req: Request) {
     });
 
     const ui_overall = mapCoverageOverallToUi(result.output.overall);
-    const mode: "llm" | "stub" =
-      process.env.SYNAPSE_TEST_STUB_LLM === "1" ||
-      result.output.rationale.includes("deterministic not_relevant stub")
-        ? "stub"
-        : "llm";
+    // Only the test stub skips the model; a production run either used it or threw.
+    const mode: "llm" | "stub" = isTestStub() ? "stub" : "llm";
 
     return NextResponse.json({
       ok: true,

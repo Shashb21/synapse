@@ -1,8 +1,38 @@
-import { describe, expect, it } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, ingestNeedFromText, ingestDemoSource, modifyGap, assignTacticToGap, lockTactic, lockTacticReview, completeWizard, createProposedTactic, createGap, acceptMapping, rejectMapping, suggestMappings, lockCoverageOverall, acceptResidualGap, rejectResidualGap, suggestResidualGaps, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup } from "@/lib/iegp/store";
+import { describe, expect, it, vi } from "vitest";
+import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
+import { resetWorkspaceModules } from "@/modules/kernel/db";
+import { ingestThroughStages } from "@/app/api/iegp/ingest-pipeline";
+import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
+
+const PIPE_ACTOR = { actor: { name: "A. Rao", function: "heor" as const }, role: "medical_affairs" as const };
+
+async function freshWorkspace() {
+  await resetSeed();
+  await resetWorkspaceModules();
+}
+
+/** Ingest is the S0→S4 stage pipeline (test stub LLM). */
+async function ingestDemoSource(args: { demo_id: string; actor_name?: string; actor_function?: ActorFunction }) {
+  return ingestThroughStages({ demo_ids: [args.demo_id], ...PIPE_ACTOR });
+}
+
+async function ingestNeedFromText(args: {
+  title: string;
+  source_type: SourceType;
+  stakeholder_function: ActorFunction;
+  text: string;
+  actor_name?: string;
+  actor_function?: ActorFunction;
+}) {
+  const { title, source_type, stakeholder_function, text } = args;
+  return ingestThroughStages({
+    files: [{ title, source_type, stakeholder_function, text, filename: `${title.replaceAll(" ", "_")}.txt` }],
+    ...PIPE_ACTOR,
+  });
+}
 
 describe("IEGP postgres store", () => {
   it("starts from a blank Velmara workspace", async () => {
@@ -69,7 +99,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("ingests a source into mapped gaps with computed status, not a candidate inbox", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestNeedFromText({
       title: "Affiliate safety note",
       source_type: "other_internal",
@@ -99,7 +129,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("ingests a demo pack file from a blank workspace", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "heor-interview",
       actor_name: "A. Rao",
@@ -113,12 +143,14 @@ describe("IEGP postgres store", () => {
     expect(state.gaps.every((g) => !/^(We need|It has no)\b/i.test(g.name))).toBe(true);
     expect(state.gaps.every((g) => !/[.?!]$/.test(g.name))).toBe(true);
     expect(state.gaps.some((g) => /economic burden|comparative/i.test(g.name))).toBe(true);
-    expect(buildPlanWorkspace(state).reviewResiduals.length).toBeGreaterThan(0);
+    // Leftovers come only from S6 on demand: ingest drafts none.
+    expect(buildPlanWorkspace(state).reviewResiduals).toHaveLength(0);
+    expect(state.residual_gap_suggestions).toHaveLength(0);
     expect(state.tactics.some((t) => /chart review/i.test(t.name + t.evidence_question))).toBe(true);
   });
 
   it("modifies a candidate gap without accepting it", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "medical-plan",
       actor_name: "S. Iyer",
@@ -141,7 +173,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("reviews extracted tactics and only assigns accepted ones", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "heor-interview",
       actor_name: "A. Rao",
@@ -170,7 +202,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("shows mapped tactics on the gaps workbench after ingest", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "heor-interview",
       actor_name: "A. Rao",
@@ -184,7 +216,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("puts accepted and created tactics in the library so one tactic tags many gaps", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "heor-interview",
       actor_name: "A. Rao",
@@ -256,43 +288,171 @@ describe("IEGP postgres store", () => {
     expect(need?.source_id).toBe("SRC-PLAN-ENTRY");
   });
 
-  it("flags every source that identified the same gap as a constituent need", async () => {
-    await resetSeed();
+  it("joins a gap to an existing one only when the S2 judge set duplicate_of", async () => {
+    await freshWorkspace();
     const text =
       "Limited evidence characterises comparative effectiveness of Velmara versus regional standard of care in elderly patients with advanced EGFR-mutant NSCLC.";
-    await ingestNeedFromText({
-      title: "HTA briefing",
-      source_type: "other_internal",
-      stakeholder_function: "hta",
-      text,
-      actor_name: "A. Rao",
-      actor_function: "heor",
+    const who = { stakeholder_function: "hta" as const, actor_name: "A. Rao", actor_function: "heor" as const };
+    const first = await persistSourceAndBlocks({ title: "HTA briefing", source_type: "other_internal", stakeholder_function: "hta", text });
+    const second = await persistSourceAndBlocks({ title: "KOL interview", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", text });
+    const row = (source_id: string, duplicate_of: string | null = null) => ({
+      id: "XGAP-001",
+      name: "Comparative effectiveness in elderly patients",
+      statement: text,
+      domain: "comparative_effectiveness" as const,
+      source_id,
+      source_quote: text,
+      duplicate_of,
     });
-    await ingestNeedFromText({
-      title: "KOL interview",
-      source_type: "stakeholder_interview",
-      stakeholder_function: "medical_affairs",
-      text,
-      actor_name: "M. Hale",
-      actor_function: "medical_affairs",
+    const a = await commitExtractedRecords({
+      ...who, source_id: first.source_id, title: "HTA briefing",
+      needs: [{ id: "XGAP-001", statement: text, source_quote: text }],
+      gaps: [row(first.source_id)], tactics: [],
     });
+    expect(a.gap_ids).toHaveLength(1);
+    const gapId = a.gap_ids[0]!;
+
+    // Identical text, but duplicate_of null: the store does not judge equivalence.
+    const b = await commitExtractedRecords({
+      ...who, source_id: second.source_id, title: "KOL interview",
+      needs: [{ id: "XGAP-001", statement: text, source_quote: text }],
+      gaps: [row(second.source_id)], tactics: [],
+    });
+    expect(b.gap_ids).toHaveLength(1);
+    expect(b.gap_ids[0]).not.toBe(gapId);
+
+    // The judge says it repeats the first gap: it joins, both sources are linked.
+    const c = await commitExtractedRecords({
+      ...who, source_id: second.source_id, title: "KOL interview",
+      needs: [{ id: "XGAP-001", statement: text, source_quote: text }],
+      gaps: [row(second.source_id, gapId)], tactics: [],
+    });
+    expect(c.gap_ids).toHaveLength(0);
+    expect(c.merged_gap_ids).toEqual([gapId]);
     const state = await loadState();
-    const match = state.gaps.find(
-      (g) =>
-        !g.retired &&
-        g.status !== "excluded" &&
-        /comparative effectiveness/i.test(`${g.statement} ${g.name}`) &&
-        /elderly/i.test(`${g.statement} ${g.name}`),
-    );
-    expect(match).toBeTruthy();
-    const linkedNeeds = state.need_gap_links
-      .filter((l) => l.gap_id === match!.id)
-      .map((l) => state.needs.find((n) => n.id === l.need_id))
-      .filter((n): n is NonNullable<typeof n> => Boolean(n));
-    const sourceIds = new Set(linkedNeeds.map((n) => n.source_id));
-    expect(sourceIds.size).toBeGreaterThanOrEqual(2);
-    const titles = [...sourceIds].map((id) => state.sources.find((s) => s.id === id)?.title);
-    expect(titles).toEqual(expect.arrayContaining(["HTA briefing", "KOL interview"]));
+    const linked = state.need_gap_links
+      .filter((l) => l.gap_id === gapId)
+      .map((l) => state.needs.find((n) => n.id === l.need_id)!);
+    const titles = new Set(linked.map((n) => state.sources.find((src) => src.id === n.source_id)?.title));
+    expect([...titles].sort()).toEqual(["HTA briefing", "KOL interview"]);
+    expect(state.need_gap_links.filter((l) => l.gap_id === gapId && l.role === "primary")).toHaveLength(1);
+    // Needs carry no invented PICO or confidence.
+    expect(linked.every((n) => n.population === "" && n.comparator === "" && n.confidence === null)).toBe(true);
+    // Commit never maps: no coverage rows appear.
+    expect(state.coverages).toHaveLength(0);
+
+    // An unknown duplicate id throws and writes nothing.
+    const before = (await loadState()).gaps.length;
+    await expect(
+      commitExtractedRecords({
+        ...who, source_id: second.source_id, title: "KOL interview",
+        needs: [], gaps: [row(second.source_id, "GAP-NOPE")], tactics: [],
+      }),
+    ).rejects.toThrow(/not a live gap/i);
+    expect((await loadState()).gaps.length).toBe(before);
+
+    // A need with no gap is refused rather than linked by similarity.
+    await expect(
+      commitExtractedRecords({
+        ...who, source_id: second.source_id, title: "KOL interview",
+        needs: [{ id: "XNEED-9", statement: text, source_quote: text }], gaps: [], tactics: [],
+      }),
+    ).rejects.toThrow(/has no gap/i);
+  });
+
+  it("skips a tactic only when the S3 judge set duplicate_of", async () => {
+    await freshWorkspace();
+    const src = await persistSourceAndBlocks({ title: "CDP", source_type: "other_internal", stakeholder_function: "heor", text: "A chart review is underway." });
+    const who = { source_id: src.source_id, title: "CDP", stakeholder_function: "heor" as const, actor_name: "A. Rao", actor_function: "heor" as const, needs: [], gaps: [] };
+    const tactic = (duplicate_of: string | null) => ({
+      id: "XTAC-001", name: "EU5 chart review", type: "chart_review" as const, status: "ongoing" as const,
+      evidence_question: "A chart review is underway.", source_id: src.source_id, source_quote: "A chart review is underway.", duplicate_of,
+    });
+    const first = await commitExtractedRecords({ ...who, tactics: [tactic(null)] });
+    expect(first.tactic_ids).toHaveLength(1);
+    const again = await commitExtractedRecords({ ...who, tactics: [tactic(null)] });
+    expect(again.tactic_ids).toHaveLength(1);
+    const dup = await commitExtractedRecords({ ...who, tactics: [tactic(first.tactic_ids[0]!)] });
+    expect(dup.tactic_ids).toHaveLength(0);
+    expect(dup.skipped_tactic_ids).toEqual(["XTAC-001"]);
+    await expect(commitExtractedRecords({ ...who, tactics: [tactic("TAC-NOPE")] })).rejects.toThrow(/not a known tactic/i);
+    const held = await commitExtractedRecords({ ...who, tactics: [{ ...tactic(null), review_status: "candidate" as const }] });
+    const state = await loadState();
+    expect(state.tactics.find((x) => x.id === held.tactic_ids[0])?.review_status).toBe("candidate");
+    expect(state.tactics.find((x) => x.id === first.tactic_ids[0])?.review_status).toBe("accepted");
+  });
+
+  it("refuses to ingest without a connected LLM instead of falling back to rules", async () => {
+    await freshWorkspace();
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "");
+    try {
+      await expect(ingestDemoSource({ demo_id: "heor-interview" })).rejects.toThrow(/LLM|connect/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const state = await loadState();
+    expect(state.sources).toHaveLength(0);
+    expect(state.gaps).toHaveLength(0);
+  });
+
+  it("records the mapping verdict it is given and drafts no leftover when coverage turns partial", async () => {
+    await freshWorkspace();
+    const gapId = await createGap({ statement: "Need ILD rates in community clinics.", actor_name: "A. Rao", actor_function: "heor" });
+    const tacticId = await createProposedTactic({
+      name: "Community ILD chart review", type: "chart_review", description: "x", evidence_question: "ILD in community clinics?",
+      population: "", intervention: "", comparator: "", outcomes: "", geography: "US", owner: "A. Rao", function: "heor",
+      residual_ids: [], actor_name: "A. Rao", actor_function: "heor",
+    });
+    await lockTactic({ tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
+    await expect(
+      assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
+    ).rejects.toThrow(/Unknown coverage/i);
+    await assignTacticToGap({
+      gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor",
+      coverage: "full", dimensions: { population: "yes", comparator: "no" },
+    });
+    let state = await loadState();
+    const row = state.coverages.find((c) => c.gap_id === gapId)!;
+    expect(row.overall).toBe("full");
+    expect(row.overall_lock.locked).toBe(false);
+    expect(row.dimensions.population.value).toBe("yes");
+    expect(row.dimensions.comparator.value).toBe("no");
+    expect(row.dimensions.outcomes.value).toBe("unknown");
+    // A model Full is Partial until a human locks it.
+    expect(state.gaps.find((g) => g.id === gapId)?.status).toBe("validated_partial");
+    await lockCoverageOverall({ coverage_id: row.id, overall: "partial", rationale: "Only a slice.", actor_name: "A. Rao", actor_function: "heor" });
+    state = await loadState();
+    expect(state.residual_gap_suggestions).toHaveLength(0);
+    expect(state.residuals.filter((r) => r.gap_id === gapId)).toHaveLength(0);
+    expect(await listResidualGapDrafts()).toHaveLength(0);
+    await lockCoverageOverall({ coverage_id: row.id, overall: "full", rationale: "Closes it.", actor_name: "A. Rao", actor_function: "heor" });
+    expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_addressed");
+    await expect(
+      lockCoverageOverall({ coverage_id: row.id, overall: "unassessed", rationale: "x", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/coverage verdict/i);
+  });
+
+  it("rejects a blank or unknown mapping status", async () => {
+    expect(() => requireMappingRowStatus(undefined)).toThrow(/Choose a mapping status/i);
+    expect(() => requireMappingRowStatus("")).toThrow(/Choose a mapping status/i);
+    expect(() => requireMappingRowStatus("done")).toThrow(/Unknown mapping status/i);
+    expect(requireMappingRowStatus("partially_addressed")).toBe("partially_addressed");
+    await freshWorkspace();
+    const gapId = await createGap({ statement: "Need something.", actor_name: "A. Rao", actor_function: "heor" });
+    await expect(
+      saveMappingTableRow({ gap_id: gapId, tactic_ids: [], mapping_status: undefined as never, actor_name: "A", actor_function: "heor", rationale: "x" }),
+    ).rejects.toThrow(/Choose a mapping status/i);
+  });
+
+  it("accepts a leftover only from a saved row or a typed statement", async () => {
+    await persistState(buildSeed());
+    await expect(
+      acceptResidualGap({ parent_gap_id: "GAP-OS", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/No leftover residual/i);
+    await modifyResidualGap({ parent_gap_id: "GAP-OS", statement: "OS beyond 36 months", actor_name: "A. Rao", actor_function: "heor" });
+    expect((await listResidualGapDrafts()).map((r) => r.statement)).toEqual(["OS beyond 36 months"]);
+    await rejectResidualGap({ parent_gap_id: "GAP-OS", actor_name: "A. Rao", actor_function: "heor" });
+    expect(await listResidualGapDrafts()).toHaveLength(0);
   });
 
   it("repairs a live gap that lost its constituent need links", async () => {
@@ -313,7 +473,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("maps a newly created open gap onto an extracted tactic", async () => {
-    await resetSeed();
+    await freshWorkspace();
     await ingestDemoSource({
       demo_id: "heor-interview",
       actor_name: "A. Rao",
@@ -329,18 +489,17 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    const afterCreate = await suggestMappings();
-    const pair = afterCreate.find((s) => s.gap_id === createdId && s.tactic_id === tactic.id);
-    if (pair) {
-      await acceptMapping({
-        gap_id: createdId,
-        tactic_id: tactic.id,
-        actor_name: "A. Rao",
-        actor_function: "heor",
-      });
-    }
+    // No engine-ranked suggestion: a human maps it (or S4 does).
+    await acceptMapping({
+      gap_id: createdId,
+      tactic_id: tactic.id,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
     const mapped = await loadState();
     expect(mapped.gaps.find((g) => g.id === createdId)?.status).not.toBe("candidate");
+    const row = mapped.coverages.find((c) => c.gap_id === createdId && c.tactic_id === tactic.id);
+    expect(row?.overall).toBe("unassessed");
   });
 
   it("refuses to lock Partially Addressed as a lasting status", async () => {

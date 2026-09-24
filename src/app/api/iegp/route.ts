@@ -13,8 +13,6 @@ import {
   createProposedTactic,
   deleteBreakoutGroup,
   recordMissedTactic,
-  ingestDemoSource,
-  ingestNeedFromText,
   lockCoverageDimension,
   lockCoverageOverall,
   confirmCoverageReview,
@@ -32,6 +30,7 @@ import {
   unparkGap,
   rejectMapping,
   rejectResidualGap,
+  requireMappingRowStatus,
   resetSeed,
   saveMappingTableRow,
   overrideGapStatus,
@@ -46,6 +45,9 @@ import type { CoverageDimension } from "@/lib/iegp/enums";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
 import { recordEdit, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
+import { requestIdentity } from "@/modules/auth/request";
+import type { SourceType } from "@/lib/iegp/enums";
+import { ingestThroughStages } from "./ingest-pipeline";
 
 export const runtime = "nodejs";
 
@@ -317,7 +319,7 @@ export async function POST(request: Request) {
           .split(",")
           .map((id) => id.trim())
           .filter(Boolean);
-        const mapping_status = body.mapping_status as "open" | "addressed" | "partially_addressed";
+        const mapping_status = requireMappingRowStatus(body.mapping_status);
         await saveMappingTableRow({
           gap_id: body.gap_id,
           tactic_ids,
@@ -493,23 +495,35 @@ export async function POST(request: Request) {
           actor_function,
         });
         break;
-      case "ingest":
-        await ingestNeedFromText({
-          title: body.title,
-          source_type: body.source_type as never,
-          stakeholder_function: body.stakeholder_function as ActorFunction,
-          text: body.text,
-          actor_name,
-          actor_function,
+      // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the
+      // error says so. There is no rule-based ingest.
+      case "ingest": {
+        const identity = await requestIdentity(body);
+        const title = (body.title || "").trim();
+        await ingestThroughStages({
+          files: [
+            {
+              filename: body.filename?.trim() || `${title.replaceAll(" ", "_")}.txt`,
+              title,
+              source_type: body.source_type as SourceType,
+              stakeholder_function: body.stakeholder_function as ActorFunction,
+              text: body.text,
+            },
+          ],
+          actor: identity.actor,
+          role: identity.role,
         });
         break;
-      case "ingest_demo":
-        await ingestDemoSource({
-          demo_id: body.demo_id,
-          actor_name,
-          actor_function,
+      }
+      case "ingest_demo": {
+        const identity = await requestIdentity(body);
+        await ingestThroughStages({
+          demo_ids: [body.demo_id],
+          actor: identity.actor,
+          role: identity.role,
         });
         break;
+      }
       case "create_breakout_group":
         await createBreakoutGroup({
           name: body.name,

@@ -37,7 +37,7 @@ export async function GET() {
 const bandSchema = z.enum(["high", "medium", "low"]);
 const decisionSchema = z.enum(["accept", "reject"]);
 const planStatusSchema = z.enum(["draft", "final"]);
-const laneSchema = z.enum(["high", "medium", "low", "addressed"]);
+const laneSchema = z.enum(["high", "medium", "low", "unprioritized", "addressed"]);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
 
 /** Rejects an unknown value with the field name, so the dialog can show why. */

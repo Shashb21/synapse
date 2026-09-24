@@ -7,7 +7,6 @@ import {
 } from "./enums";
 import type { EvidenceGap, EvidenceNeed, Tactic } from "./types";
 
-export const MAPPING_SUGGESTION_CAP = 12;
 /** 0–100. Pairs below this are inventory noise, not a draft join. */
 export const MAPPING_SCORE_FLOOR = 34;
 
@@ -163,16 +162,6 @@ export type MappingScore = {
   reasons: string[];
 };
 
-export type MappingSuggestion = {
-  gap_id: string;
-  gap_name: string;
-  gap_statement: string;
-  tactic_id: string;
-  tactic_name: string;
-  reasons: string[];
-  score: number;
-};
-
 function blankish(value: string | undefined): boolean {
   const t = (value ?? "").trim().toLowerCase();
   return t.length < 2 || t === "n/a" || t === "na" || t === "none" || t === "unknown";
@@ -182,9 +171,9 @@ function joinHay(parts: Array<string | undefined>): string {
   return parts.filter((p) => p && !blankish(p)).join(" ");
 }
 
-export function isDisseminationTactic(tactic: Pick<MappingTactic, "type" | "name" | "description">): boolean {
-  if (DISSEMINATION_TACTIC_TYPES.includes(tactic.type)) return true;
-  return /\b(congress abstract|manuscript|disseminat)/i.test(`${tactic.name} ${tactic.description}`);
+/** Dissemination is a tactic type, recorded by S3 or a human — never read off its wording. */
+export function isDisseminationTactic(tactic: Pick<MappingTactic, "type">): boolean {
+  return DISSEMINATION_TACTIC_TYPES.includes(tactic.type);
 }
 
 function textSimilarity(gap: MappingGap, tactic: MappingTactic): number {
@@ -226,7 +215,8 @@ function uniqueReasons(rows: string[], limit = 4): string[] {
 
 /**
  * Deterministic gap–tactic inventory score (0–100) plus human-readable reasons.
- * Not an LLM. Not embeddings. Engine drafts; a human still accept/rejects.
+ * Test-stub support only: no production path ranks, suggests or assigns pairs
+ * from this score. S4 (an LLM stage) is the only source of coverage verdicts.
  */
 export function scoreGapTacticMapping(
   gap: MappingGap,

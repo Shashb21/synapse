@@ -47,7 +47,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
       expect(activity.end_date >= activity.start_date).toBe(true);
       expect(activity.meta.evidence_question.length).toBeGreaterThan(0);
     }
-    expect(built.output.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "addressed"]);
+    expect(built.output.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "unprioritized", "addressed"]);
   });
 
   test("gates an activity on the readouts it depends on", async ({ request }) => {

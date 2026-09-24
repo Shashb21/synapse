@@ -122,9 +122,15 @@ function MappingRowEditor({ row, tactics }: { row: MappingTableViewRow; tactics:
       <td className="px-3 py-3">
         <select
           className="h-8 w-full max-w-[10rem] rounded-md border border-input bg-transparent px-2 text-[12px]"
-          value={status}
+          value={status ?? ""}
           onChange={(event) => setStatus(event.target.value as MappingTableViewRow["mapping_status"])}
         >
+          {/* S4 has not given this gap a verdict; a person must pick one to save. */}
+          {status ? null : (
+            <option value="" disabled>
+              Not mapped yet
+            </option>
+          )}
           {STATUS_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -140,10 +146,13 @@ function MappingRowEditor({ row, tactics }: { row: MappingTableViewRow; tactics:
         </ul>
       </td>
       <td className="px-3 py-3">
+        {status ? null : (
+          <p className="mb-2 text-[11px] text-muted-foreground">Pick a status or run S4 before saving.</p>
+        )}
         <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">
           <input type="hidden" name="gap_id" value={row.gap_id} />
           <input type="hidden" name="tactic_ids" value={tacticIds} />
-          <input type="hidden" name="mapping_status" value={status} />
+          <input type="hidden" name="mapping_status" value={status ?? ""} />
           <input type="hidden" name="before" value={JSON.stringify({ tactic_ids: row.tactic_ids, status: row.mapping_status })} />
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Rationale (required)

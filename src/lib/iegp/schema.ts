@@ -66,7 +66,8 @@ export const needs = pgTable("needs", {
   timing: text("timing").notNull(),
   source_id: text("source_id").notNull(),
   source_quote: text("source_quote").notNull(),
-  confidence: real("confidence").notNull(),
+  /** Null until a model or a human scores it; never a placeholder. */
+  confidence: real("confidence"),
   status: text("status").notNull(),
   lock: jsonb("lock").notNull(),
 });

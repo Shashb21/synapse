@@ -1,8 +1,12 @@
 /**
- * Deterministic merge / dedupe of inventory + need candidates.
+ * Merge / dedupe of inventory + need candidates.
  *
- * Keys: study / protocol / registry IDs, exact statement, conservative same-block
- * overlap. Gold packs never mix (beone-bgb-58067-prmt5i vs beone-tislelizumab-iegp).
+ * Mechanical keys only settle what is identical: a shared study / protocol /
+ * registry ID, or the same statement text. Whether two differently worded
+ * candidates citing the same block are the same item is a judgement: those
+ * pairs go to the LLM equivalence judge (judge.ts) and come back here as
+ * `equivalent` pairs. There is no similarity threshold.
+ * Gold packs never mix (beone-bgb-58067-prmt5i vs beone-tislelizumab-iegp).
  * Conflicting tactic lifecycles are surfaced, not auto-picked.
  */
 
@@ -31,12 +35,28 @@ export type MergeCandidate = {
   created_at?: string | null;
 };
 
+export type MergeReason = "identity" | "statement" | "model_equivalence" | "transitive";
+
 export type MergeRecord = {
   survivor_id: string;
   duplicate_id: string;
-  reason: "identity" | "statement" | "block_overlap";
+  /** `transitive`: joined to the survivor only through other members of its cluster. */
+  reason: MergeReason;
   keys: string[];
+  /** The judge's rationale for a `model_equivalence` merge. */
+  rationale?: string | null;
 };
+
+/** A same-block pair the mechanical keys could not settle. */
+export type EquivalenceQuestion = {
+  a_id: string;
+  b_id: string;
+  claim_type: MergeClaimType;
+  shared_block_ids: string[];
+};
+
+/** The judge's answer that two candidates are the same item. */
+export type EquivalentPair = { a_id: string; b_id: string; rationale: string };
 
 export type MergeContradiction = {
   keep_id: string;
@@ -142,19 +162,6 @@ export function normalizeStatement(value: string): string {
     .trim();
 }
 
-function tokenSet(value: string): Set<string> {
-  return new Set(normalizeStatement(value).split(" ").filter((t) => t.length > 1));
-}
-
-export function statementJaccard(a: string, b: string): number {
-  const A = tokenSet(a);
-  const B = tokenSet(b);
-  if (A.size === 0 || B.size === 0) return 0;
-  let inter = 0;
-  for (const t of A) if (B.has(t)) inter += 1;
-  return inter / (A.size + B.size - inter);
-}
-
 export function sharedBlockIds(a: MergeCandidate, b: MergeCandidate): string[] {
   const left = new Set(a.provenance.map((p) => p.block_id).filter(Boolean));
   const shared = new Set<string>();
@@ -215,12 +222,15 @@ function mergeInto(survivor: MergeCandidate, duplicate: MergeCandidate): MergeCa
   };
 }
 
-type PairReason = MergeRecord["reason"];
+type PairMatch = { reason: MergeReason; keys: string[]; rationale?: string | null };
 
-function pairReason(a: MergeCandidate, b: MergeCandidate): { reason: PairReason; keys: string[] } | null {
-  if (a.claim_type !== b.claim_type) return null;
-  if (a.id === b.id) return null;
-  if (!packsMayMerge(a, b)) return null;
+function comparable(a: MergeCandidate, b: MergeCandidate): boolean {
+  return a.claim_type === b.claim_type && a.id !== b.id && packsMayMerge(a, b);
+}
+
+/** Identity facts only: a shared strong ID or the same statement text. */
+function mechanicalMatch(a: MergeCandidate, b: MergeCandidate): PairMatch | null {
+  if (!comparable(a, b)) return null;
 
   const aIds = identityKeys(a);
   const bIds = new Set(identityKeys(b));
@@ -234,12 +244,31 @@ function pairReason(a: MergeCandidate, b: MergeCandidate): { reason: PairReason;
   if (sa && sa === sb) {
     return { reason: "statement", keys: [sa] };
   }
-
-  const blocks = sharedBlockIds(a, b);
-  if (blocks.length > 0 && statementJaccard(a.statement, b.statement) >= 0.9) {
-    return { reason: "block_overlap", keys: blocks };
-  }
   return null;
+}
+
+function pairKey(a: string, b: string): string {
+  return a <= b ? `${a}::${b}` : `${b}::${a}`;
+}
+
+/**
+ * Same-type, same-pack candidate pairs that cite a common parse block but share
+ * no identity key. Citing the same block makes them worth asking about; it
+ * decides nothing — the LLM judge says whether they are the same item.
+ */
+export function equivalenceQuestions(candidates: MergeCandidate[]): EquivalenceQuestion[] {
+  const out: EquivalenceQuestion[] = [];
+  for (let i = 0; i < candidates.length; i += 1) {
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const a = candidates[i]!;
+      const b = candidates[j]!;
+      if (!comparable(a, b) || mechanicalMatch(a, b)) continue;
+      const shared = sharedBlockIds(a, b);
+      if (shared.length === 0) continue;
+      out.push({ a_id: a.id, b_id: b.id, claim_type: a.claim_type, shared_block_ids: shared });
+    }
+  }
+  return out;
 }
 
 class UnionFind {
@@ -273,7 +302,25 @@ class UnionFind {
  * Merge candidates of the same claim type. Does not mutate inputs.
  * Gold packs with different `reference_pack_id` never collapse together.
  */
-export function mergeDedupeCandidates(candidates: MergeCandidate[]): MergeDedupeResult {
+export function mergeDedupeCandidates(
+  candidates: MergeCandidate[],
+  options: { equivalent?: EquivalentPair[] } = {},
+): MergeDedupeResult {
+  const judged = new Map<string, PairMatch>();
+  for (const pair of options.equivalent ?? []) {
+    judged.set(pairKey(pair.a_id, pair.b_id), {
+      reason: "model_equivalence",
+      keys: [],
+      rationale: pair.rationale,
+    });
+  }
+  const pairMatch = (a: MergeCandidate, b: MergeCandidate): PairMatch | null => {
+    const mechanical = mechanicalMatch(a, b);
+    if (mechanical) return mechanical;
+    if (!comparable(a, b)) return null;
+    const verdict = judged.get(pairKey(a.id, b.id));
+    return verdict ? { ...verdict, keys: sharedBlockIds(a, b) } : null;
+  };
   const merges: MergeRecord[] = [];
   const contradictions: MergeContradiction[] = [];
   const absorbed: Record<string, string> = {};
@@ -289,7 +336,7 @@ export function mergeDedupeCandidates(candidates: MergeCandidate[]): MergeDedupe
       for (let j = i + 1; j < group.length; j += 1) {
         const a = group[i]!;
         const b = group[j]!;
-        const match = pairReason(a, b);
+        const match = pairMatch(a, b);
         if (!match) continue;
         if (tacticStatusesConflict(a, b)) {
           const keep = preferSurvivor(a, b);
@@ -332,12 +379,13 @@ export function mergeDedupeCandidates(candidates: MergeCandidate[]): MergeDedupe
           (m) => m.survivor_id === survivor.id && m.duplicate_id === member.id,
         );
         if (!already) {
-          const match = pairReason(survivor, member);
+          const match = pairMatch(survivor, member);
           merges.push({
             survivor_id: survivor.id,
             duplicate_id: member.id,
-            reason: match?.reason ?? "identity",
+            reason: match?.reason ?? "transitive",
             keys: match?.keys ?? [],
+            rationale: match?.rationale ?? null,
           });
         }
       }

@@ -65,6 +65,24 @@ export const accuracyProvenance = pgTable("accuracy_provenance", {
   quote: text("quote").notNull(),
 });
 
+/**
+ * Completeness-critic verdicts per parse block, so Review does not re-ask the
+ * model for text it has already judged. Keyed by block text hash.
+ */
+export const accuracyCompletenessVerdicts = pgTable("accuracy_completeness_verdicts", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  block_id: text("block_id").notNull(),
+  text_hash: text("text_hash").notNull(),
+  /** Ledger the verdict was judged against. */
+  ledger_digest: text("ledger_digest").notNull(),
+  missed: boolean("missed").notNull(),
+  claim_type: text("claim_type"),
+  rationale: text("rationale").notNull(),
+  run_id: text("run_id").notNull(),
+  judged_at: text("judged_at").notNull(),
+});
+
 /** Promote / dismiss actions for completeness-audit miss flags (hillclimb rationales). */
 export const accuracyMissFlagActions = pgTable("accuracy_miss_flag_actions", {
   id: text("id").primaryKey(),
@@ -308,6 +326,18 @@ export const ACCURACY_DDL = [
     saved_by text NOT NULL,
     saved_function text NOT NULL,
     saved_at text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_completeness_verdicts (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    block_id text NOT NULL,
+    text_hash text NOT NULL,
+    ledger_digest text NOT NULL,
+    missed boolean NOT NULL,
+    claim_type text,
+    rationale text NOT NULL,
+    run_id text NOT NULL,
+    judged_at text NOT NULL
   )`,
 ];
 

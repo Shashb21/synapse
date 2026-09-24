@@ -137,7 +137,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                   <tr key={round.round} className="border-b border-border/60 last:border-0">
                     <td className="px-2 py-1.5">Round {round.round}</td>
                     <td className="px-2 py-1.5 text-muted-foreground">
-                      {round.proposer === "llm" ? "model" : "deterministic"}
+                      {round.proposer === "llm" ? "model" : "test stub"}
                     </td>
                     <td className="px-2 py-1.5 text-right">{round.in}</td>
                     <td className="px-2 py-1.5 text-right">{round.kept}</td>

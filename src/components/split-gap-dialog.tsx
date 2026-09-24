@@ -165,7 +165,8 @@ export function SplitGapDialog({
     }
     const proposal = json.output?.proposal;
     if (!proposal) {
-      setProposalNote("The stage returned no usable proposal. Fill the split in yourself.");
+      // The S6 judge's reason is in the run summary; show it rather than a generic line.
+      setProposalNote(json.summary ?? "The model proposed no split. Fill the split in yourself.");
       return;
     }
     setMode("split");
