@@ -13,9 +13,12 @@ import type { IegpState } from "@/lib/iegp/types";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
+  activityId,
   buildTimeline,
   missingSchedule,
+  TIMELINE_LANES,
   timelineCandidates,
+  type TimelineBand,
   type ActivityDesign,
   type DependencyAnswer,
   type SavedActivity,
@@ -32,7 +35,7 @@ const inputSchema = z.object({
   persist: z.boolean().default(true),
 });
 
-const sourceSchema = z.enum(["saved", "tactic", "design", "model"]);
+const sourceSchema = z.enum(["human", "saved", "tactic", "design", "model"]);
 
 const activitySchema = z.object({
   id: z.string(),
@@ -63,6 +66,9 @@ const activitySchema = z.object({
     schedule_rationale: z.string().nullable(),
     schedule_basis: z.object({ start: sourceSchema, end: sourceSchema, readout: sourceSchema.nullable() }),
     lane_locked: z.boolean(),
+    depends_locked: z.boolean(),
+    rationale_locked: z.boolean(),
+    manual: z.boolean(),
   }),
 });
 
@@ -79,6 +85,9 @@ const outputSchema = z.object({
       missing: z.array(z.enum(["start", "duration", "readout_lag"])),
       reason: z.string(),
     }),
+  ),
+  removed: z.array(
+    z.object({ activity_id: z.string(), tactic_id: z.string(), tactic_name: z.string(), reason: z.string() }),
   ),
 });
 
@@ -347,7 +356,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     version: "2.0.0",
     title: "Interactive Gantt timeline",
     summary:
-      "Lays out the final IEGP as dated activities. Dates a user set and durations the tactic's design carries are kept; a model infers the dependencies between activities and estimates any start, duration or readout lag nobody supplied. Only validated bands place an activity. Needs a connected LLM.",
+      "Lays out the final IEGP as dated activities. Dates a user set and durations the tactic's design carries are kept; a model infers the dependencies between activities and estimates any start, duration or readout lag nobody supplied. Only validated bands place an activity. A user can date, add, remove, re-lane and re-sequence any activity by hand; those values are marked human and survive every rebuild. Needs a connected LLM only while something is left for it to estimate.",
     contract: 1,
     agentic: true,
     capabilities: ["gantt", "llm-dependencies", "llm-schedule", "save-final", "image-export"],
@@ -355,7 +364,6 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   inputSchema,
   outputSchema,
   async run(input, ctx) {
-    requireLlm(ctx, "The timeline");
     const anchor = (input.anchor ?? new Date().toISOString()).slice(0, 10);
     const [state, placements, overrides, designs] = await Promise.all([
       loadState(),
@@ -366,17 +374,36 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     const candidates = timelineCandidates({ state, placements, designs, overrides });
     const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
     const describe = (id: string) => byId.get(id)?.tactic.name ?? id;
-    const none = () => new Map(candidates.map((candidate) => [candidate.id, { upstream: [] }]));
 
-    // Test stub only: no model runs, so no dependency is inferred. A lone
-    // activity has nothing to wait on, so there is nothing to ask.
+    // Dependencies a user set by hand are theirs: never asked of the model, but
+    // seeded into the graph so the model's answers cannot close a loop through them.
     const graph = new Map<string, string[]>();
-    const dependencies: Map<string, DependencyAnswer> =
-      isTestStub() || candidates.length < 2
-        ? none()
+    const locked = new Map<string, DependencyAnswer>();
+    for (const candidate of candidates) {
+      const saved = candidate.saved;
+      if (saved?.meta?.depends_locked !== true) continue;
+      const upstream = saved.depends_on.filter((id) => id !== candidate.id && byId.has(id));
+      graph.set(candidate.id, upstream);
+      locked.set(candidate.id, {
+        upstream: upstream.map((id) => ({ id, reason: saved.meta?.dependency_reasons?.[id] ?? "Set by hand." })),
+      });
+    }
+    const askFor = candidates.filter((candidate) => !locked.has(candidate.id)).map((candidate) => candidate.id);
+    const targets = candidates.filter((candidate) => missingSchedule(candidate).length > 0);
+
+    // A lone activity has nothing to wait on, so there is nothing to ask. When
+    // every date and dependency is already a human's (or a design's), the
+    // rebuild needs no model at all.
+    const needsDependencies = candidates.length >= 2 && askFor.length > 0;
+    if (needsDependencies || targets.length > 0) requireLlm(ctx, "The timeline");
+
+    // Test stub only: no model runs, so no dependency is inferred.
+    const asked: Map<string, DependencyAnswer> =
+      isTestStub() || !needsDependencies
+        ? new Map(askFor.map((id) => [id, { upstream: [] }]))
         : await ctx.run.step("dependencies", () =>
             completeAll({
-              ids: candidates.map((candidate) => candidate.id),
+              ids: askFor,
               what: "dependency list",
               describe,
               remedy: REMEDY,
@@ -384,8 +411,8 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
                 llmDependencies(ctx, { state, anchor, candidates, missing, graph, retry: attempt > 1 }),
             }),
           );
+    const dependencies = new Map<string, DependencyAnswer>([...asked, ...locked]);
 
-    const targets = candidates.filter((candidate) => missingSchedule(candidate).length > 0);
     let estimates = new Map<string, ScheduleEstimate>();
     if (targets.length > 0 && isTestStub()) {
       /**
@@ -431,6 +458,9 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     }
     if (input.persist) {
       for (const activity of model.activities) {
+        // A user's per-dependency reasons live only on the row; keep them.
+        const saved = byId.get(activity.id)?.saved;
+        const reasons = saved?.meta?.dependency_reasons;
         const values = {
           id: activity.id,
           tactic_id: activity.tactic_id,
@@ -439,9 +469,11 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
           start_date: activity.start_date,
           end_date: activity.end_date,
           readout_date: activity.readout_date,
-          depends_on: activity.depends_on,
+          // Hand-set dependencies are stored as the user wrote them, even one
+          // whose upstream is off the timeline for now.
+          depends_on: activity.meta.depends_locked && saved ? saved.depends_on : activity.depends_on,
           band: activity.band,
-          meta: activity.meta,
+          meta: activity.meta.depends_locked && reasons ? { ...activity.meta, dependency_reasons: reasons } : activity.meta,
           updated_by: ctx.actor.name,
           updated_at: nowIso(),
         };
@@ -451,7 +483,8 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
           .onConflictDoUpdate({
             target: t.timelineActivities.id,
             // A saved row's dates survive a rebuild; derived fields refresh. The
-            // lane follows the validated band unless a user moved it by hand.
+            // lane follows the validated band unless a user moved it by hand,
+            // and dependencies a user set (depends_locked) come back unchanged.
             set: {
               tactic_id: values.tactic_id,
               gap_ids: values.gap_ids,
@@ -556,65 +589,336 @@ timelineModule.evals = {
 
 registerModule(timelineModule);
 
-/** A user moving an activity is an edit, so it needs a rationale like any other. */
+type ActivityRow = typeof t.timelineActivities.$inferSelect;
+type RowMeta = NonNullable<SavedActivity["meta"]> & Record<string, unknown>;
+
+async function activityRow(id: string): Promise<ActivityRow | undefined> {
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.timelineActivities).where(eq(t.timelineActivities.id, id)).limit(1);
+  return rows[0];
+}
+
+const rowMeta = (row: ActivityRow): RowMeta => ({ ...((row.meta as RowMeta | null) ?? {}) });
+
+/** A row a user took off the timeline cannot be edited until it is added back. */
+function assertOnTimeline(row: ActivityRow | undefined, id: string): ActivityRow {
+  if (!row) throw new Error(`Unknown activity ${id}. Date it by hand or rebuild the timeline first.`);
+  if (rowMeta(row).removed === true) throw new Error(`${id} was removed from the timeline. Add it back first.`);
+  return row;
+}
+
+function assertWindow(start: string, end: string) {
+  if (end < start) throw new Error("An activity cannot end before it starts.");
+}
+
+/**
+ * A user moving an activity is an edit, so it needs a rationale like any other.
+ * Every value they set is marked human and survives every rebuild: dates
+ * (schedule_basis "human"), the lane (lane_locked; "band" hands it back to the
+ * validated band) and the schedule rationale (rationale_locked).
+ */
 export async function updateTimelineActivity(args: {
   id: string;
   start_date?: string;
   end_date?: string;
   readout_date?: string | null;
+  /** A lane, or "band" to let the validated band place it again. */
   lane?: string;
+  /** The "why these dates" text shown on the activity; empty clears it. */
+  schedule_rationale?: string | null;
   rationale: string;
   actor: Actor;
   workspace_id?: string;
 }) {
-  await ensurePlatformSchema();
   const rationale = requireRationale(args.rationale);
-  const rows = await db()
-    .select()
-    .from(t.timelineActivities)
-    .where(eq(t.timelineActivities.id, args.id))
-    .limit(1);
-  const current = rows[0];
-  if (!current) throw new Error(`Unknown activity ${args.id}. Rebuild the timeline first.`);
+  if (args.lane && args.lane !== "band" && !TIMELINE_LANES.includes(args.lane as TimelineBand)) {
+    throw new Error(`Unknown lane ${args.lane}.`);
+  }
+  const current = assertOnTimeline(await activityRow(args.id), args.id);
+  const meta = rowMeta(current);
+  const releaseLane = args.lane === "band";
   const next = {
     start_date: args.start_date ?? current.start_date,
     end_date: args.end_date ?? current.end_date,
     readout_date: args.readout_date === undefined ? current.readout_date : args.readout_date,
-    lane: args.lane ?? current.lane,
+    lane: args.lane && !releaseLane ? args.lane : releaseLane ? (current.band ?? current.lane) : current.lane,
     updated_by: args.actor.name,
     updated_at: nowIso(),
   };
-  if (next.end_date < next.start_date) throw new Error("An activity cannot end before it starts.");
-  // The dates are now the user's own; a lane they chose is kept across rebuilds.
-  const meta = { ...((current.meta as Record<string, unknown>) ?? {}) };
+  assertWindow(next.start_date, next.end_date);
   const basis = (meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined) ?? {
     start: "saved",
     end: "saved",
     readout: current.readout_date ? "saved" : null,
   };
+  // Only a value the user actually changed becomes theirs; the dialog resends
+  // unchanged dates when only the lane or rationale was edited.
+  const startChanged = next.start_date !== current.start_date;
+  const endChanged = next.end_date !== current.end_date;
+  const readoutChanged = next.readout_date !== current.readout_date;
   meta.schedule_basis = {
-    start: args.start_date ? "saved" : basis.start,
-    end: args.end_date ? "saved" : basis.end,
-    readout: args.readout_date === undefined ? basis.readout : args.readout_date ? "saved" : null,
+    start: startChanged ? "human" : basis.start,
+    end: endChanged ? "human" : basis.end,
+    readout: !next.readout_date ? null : readoutChanged ? "human" : (basis.readout ?? "saved"),
   };
-  if (args.lane) meta.lane_locked = true;
+  if (args.lane) meta.lane_locked = !releaseLane;
+  const rationaleChanged =
+    args.schedule_rationale !== undefined &&
+    (args.schedule_rationale?.trim() || null) !== ((meta.schedule_rationale as string | null | undefined) ?? null);
+  if (rationaleChanged) {
+    meta.schedule_rationale = args.schedule_rationale?.trim() || null;
+    meta.rationale_locked = true;
+  }
   await db()
     .update(t.timelineActivities)
     .set({ ...next, meta })
+    .where(eq(t.timelineActivities.id, args.id));
+
+  const datesTouched = startChanged || endChanged || readoutChanged;
+  const edit = (field: string, before: string | null, after: string | null) =>
+    recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: args.id,
+      field,
+      action: "edit",
+      before,
+      after,
+      rationale,
+      actor: args.actor,
+    });
+  if (datesTouched || (!args.lane && !rationaleChanged)) {
+    await edit(
+      "schedule",
+      `${current.start_date} → ${current.end_date} (readout ${current.readout_date ?? "—"})`,
+      `${next.start_date} → ${next.end_date} (readout ${next.readout_date ?? "—"})`,
+    );
+  }
+  if (args.lane) await edit("lane", current.lane, releaseLane ? `${next.lane} (follows band)` : next.lane);
+  if (rationaleChanged) {
+    await edit(
+      "schedule_rationale",
+      ((current.meta as RowMeta | null)?.schedule_rationale as string | null | undefined) ?? null,
+      (meta.schedule_rationale as string | null) ?? null,
+    );
+  }
+  return { ...next, meta };
+}
+
+/**
+ * A user sets (or clears) what an activity waits on. The list is theirs: it is
+ * marked depends_locked, rebuilds keep it as written and never ask the model
+ * for it. Every upstream must be a dated activity; self-references and cycles
+ * are refused.
+ */
+export async function setTimelineDependencies(args: {
+  id: string;
+  depends_on: string[];
+  /** Optional reason per upstream id. */
+  reasons?: Record<string, string>;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const current = assertOnTimeline(await activityRow(args.id), args.id);
+  const model = await timelineModel();
+  const byId = new Map(model.activities.map((activity) => [activity.id, activity]));
+  const upstream = [...new Set(args.depends_on.map((id) => id.trim()).filter(Boolean))];
+  for (const id of upstream) {
+    if (id === args.id) throw new Error("An activity cannot depend on itself.");
+    if (!byId.has(id)) throw new Error(`Unknown activity ${id}: an activity can only wait on a dated activity.`);
+  }
+  const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
+  graph.delete(args.id);
+  if (wouldCycle(graph, args.id, upstream)) {
+    throw new Error("That dependency would create a cycle: an upstream activity already waits on this one.");
+  }
+  const reasons: Record<string, string> = {};
+  for (const id of upstream) {
+    const reason = args.reasons?.[id]?.trim();
+    if (reason) reasons[id] = reason;
+  }
+  const meta = rowMeta(current);
+  meta.depends_locked = true;
+  meta.dependency_reasons = reasons;
+  meta.dependency_note =
+    Object.keys(reasons).length > 0
+      ? upstream
+          .filter((id) => reasons[id])
+          .map((id) => `${byId.get(id)?.tactic_name ?? id}: ${reasons[id]}`)
+          .join(" ")
+      : null;
+  const before = (current.depends_on as string[] | null) ?? [];
+  await db()
+    .update(t.timelineActivities)
+    .set({ depends_on: upstream, meta, updated_by: args.actor.name, updated_at: nowIso() })
     .where(eq(t.timelineActivities.id, args.id));
   await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S10",
     entity_type: "timeline_activity",
     entity_id: args.id,
-    field: "schedule",
+    field: "depends_on",
     action: "edit",
-    before: `${current.start_date} → ${current.end_date} (readout ${current.readout_date ?? "—"})`,
-    after: `${next.start_date} → ${next.end_date} (readout ${next.readout_date ?? "—"})`,
+    before: before.join(", ") || "none",
+    after: upstream.join(", ") || "none",
     rationale,
     actor: args.actor,
   });
-  return next;
+  return { id: args.id, depends_on: upstream, meta };
+}
+
+/**
+ * A user dates an activity by hand, with no model: a pending (undated) one, a
+ * tactic not mapped to any gap, or one they removed earlier and now add back.
+ * Every date they enter is marked human.
+ */
+export async function addTimelineActivity(args: {
+  tactic_id: string;
+  start_date?: string;
+  end_date?: string;
+  readout_date?: string | null;
+  lane?: string;
+  schedule_rationale?: string | null;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  if (args.lane && !TIMELINE_LANES.includes(args.lane as TimelineBand)) throw new Error(`Unknown lane ${args.lane}.`);
+  const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
+  const tactic = state.tactics.find((row) => row.id === args.tactic_id);
+  if (!tactic) throw new Error(`Unknown tactic ${args.tactic_id}.`);
+  if (tactic.status === "cancelled" || tactic.review_status === "rejected") {
+    throw new Error(`${tactic.name} is cancelled or rejected, so it cannot go on the timeline.`);
+  }
+  const id = activityId(tactic.id);
+  const existing = await activityRow(id);
+  const restoring = existing && rowMeta(existing).removed === true;
+  if (existing && !restoring) {
+    throw new Error(`${tactic.name} is already on the timeline. Reschedule it instead.`);
+  }
+  const start = args.start_date ?? (restoring && existing.start_date ? existing.start_date : undefined);
+  const end = args.end_date ?? (restoring && existing.end_date ? existing.end_date : undefined);
+  if (!start || !end) throw new Error("A start and an end date are required.");
+  assertWindow(start, end);
+  const readout =
+    args.readout_date !== undefined ? args.readout_date : restoring ? (existing.readout_date ?? null) : null;
+
+  // Mapped tactics keep their gaps and band; an unmapped one is a manual activity.
+  const others = overrides.filter((row) => row.id !== id);
+  const candidate = timelineCandidates({ state, placements, overrides: others }).find((row) => row.id === id);
+  const band: TimelineBand = candidate?.band ?? "unprioritized";
+  const previous = restoring ? rowMeta(existing) : ({} as RowMeta);
+  const note = args.schedule_rationale?.trim() || null;
+  const meta: RowMeta = {
+    ...previous,
+    removed: false,
+    manual: !candidate,
+    schedule_basis: {
+      start: args.start_date || !restoring ? "human" : (previous.schedule_basis?.start ?? "human"),
+      end: args.end_date || !restoring ? "human" : (previous.schedule_basis?.end ?? "human"),
+      readout: readout
+        ? args.readout_date || !restoring
+          ? "human"
+          : (previous.schedule_basis?.readout ?? "human")
+        : null,
+    },
+    schedule_rationale: note ?? previous.schedule_rationale ?? null,
+    rationale_locked: Boolean(note) || previous.rationale_locked === true,
+    lane_locked: Boolean(args.lane) || previous.lane_locked === true,
+  };
+  delete meta.removed_reason;
+  const values = {
+    id,
+    tactic_id: tactic.id,
+    gap_ids: candidate?.gap_ids ?? [],
+    lane: args.lane ?? (previous.lane_locked && existing ? existing.lane : band),
+    start_date: start,
+    end_date: end,
+    readout_date: readout,
+    depends_on: restoring ? ((existing.depends_on as string[]) ?? []) : [],
+    band,
+    meta,
+    updated_by: args.actor.name,
+    updated_at: nowIso(),
+  };
+  await db()
+    .insert(t.timelineActivities)
+    .values(values)
+    .onConflictDoUpdate({ target: t.timelineActivities.id, set: values });
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S10",
+    entity_type: "timeline_activity",
+    entity_id: id,
+    field: "schedule",
+    action: "add",
+    before: restoring ? "removed" : "not dated",
+    after: `${start} → ${end} (readout ${readout ?? "—"})`,
+    rationale,
+    actor: args.actor,
+  });
+  return values;
+}
+
+/**
+ * A user takes an activity off the timeline. The row is kept, marked removed,
+ * so no rebuild puts it back; adding it again restores it.
+ */
+export async function removeTimelineActivity(args: {
+  id: string;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const existing = await activityRow(args.id);
+  if (existing && rowMeta(existing).removed === true) throw new Error(`${args.id} is already off the timeline.`);
+  const tacticId = existing?.tactic_id ?? args.id.replace(/^ACT-/, "");
+  if (!existing) {
+    // A pending activity has no row yet: keep an undated one that says it was removed.
+    const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
+    const candidate = timelineCandidates({ state, placements, overrides }).find((row) => row.id === args.id);
+    if (!candidate) throw new Error(`Unknown activity ${args.id}.`);
+    await db()
+      .insert(t.timelineActivities)
+      .values({
+        id: args.id,
+        tactic_id: tacticId,
+        gap_ids: candidate.gap_ids,
+        lane: candidate.band,
+        start_date: "",
+        end_date: "",
+        readout_date: null,
+        depends_on: [],
+        band: candidate.band,
+        meta: { removed: true, removed_reason: rationale },
+        updated_by: args.actor.name,
+        updated_at: nowIso(),
+      });
+  } else {
+    const meta = { ...rowMeta(existing), removed: true, removed_reason: rationale };
+    await db()
+      .update(t.timelineActivities)
+      .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
+      .where(eq(t.timelineActivities.id, args.id));
+  }
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S10",
+    entity_type: "timeline_activity",
+    entity_id: args.id,
+    field: "on_timeline",
+    action: "edit",
+    before: existing ? `${existing.start_date} → ${existing.end_date}` : "not dated",
+    after: "removed",
+    rationale,
+    actor: args.actor,
+  });
+  return { id: args.id, removed: true };
 }
 
 export type IegpPlanRecord = {
@@ -631,6 +935,8 @@ export type IegpPlanRecord = {
     unscheduled: TimelineModel["unscheduled"];
     /** Absent on snapshots saved before activities could be pending. */
     pending?: TimelineModel["pending"];
+    /** Absent on snapshots saved before activities could be removed by hand. */
+    removed?: TimelineModel["removed"];
     counts: { gaps: number; tactics: number; open: number; addressed: number };
   };
 };
@@ -689,6 +995,7 @@ export async function savePlan(args: {
     lanes: model.lanes,
     unscheduled: model.unscheduled,
     pending: model.pending,
+    removed: model.removed,
     counts: {
       gaps: state.gaps.filter((gap) => !gap.retired).length,
       tactics: state.tactics.length,

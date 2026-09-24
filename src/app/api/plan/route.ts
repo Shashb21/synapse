@@ -12,9 +12,12 @@ import { loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes
 import { setGapSettings } from "@/lib/iegp/store";
 import { decideIdeationProposal, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
+  addTimelineActivity,
   latestPlan,
   planHistory,
+  removeTimelineActivity,
   savePlan,
+  setTimelineDependencies,
   timelineModel,
   updateTimelineActivity,
 } from "@/modules/stages/s10-timeline/module";
@@ -121,11 +124,51 @@ export async function POST(request: Request) {
               : body.readout_date
                 ? field(dateSchema, body.readout_date, "readout_date")
                 : null,
-          lane: body.lane ? field(laneSchema, body.lane, "lane") : undefined,
+          // "band" hands the lane back to the validated band.
+          lane: body.lane ? field(laneSchema.or(z.literal("band")), body.lane, "lane") : undefined,
+          schedule_rationale:
+            body.schedule_rationale === undefined ? undefined : String(body.schedule_rationale ?? ""),
           rationale,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, activity: next });
+      }
+      case "add_activity": {
+        assertCan(identity.role, "validate");
+        const activity = await addTimelineActivity({
+          tactic_id: String(body.tactic_id ?? ""),
+          start_date: body.start_date ? field(dateSchema, body.start_date, "start_date") : undefined,
+          end_date: body.end_date ? field(dateSchema, body.end_date, "end_date") : undefined,
+          readout_date:
+            body.readout_date === undefined
+              ? undefined
+              : body.readout_date
+                ? field(dateSchema, body.readout_date, "readout_date")
+                : null,
+          lane: body.lane ? field(laneSchema, body.lane, "lane") : undefined,
+          schedule_rationale: body.schedule_rationale ? String(body.schedule_rationale) : undefined,
+          rationale,
+          actor: identity.actor,
+        });
+        return NextResponse.json({ ok: true, activity });
+      }
+      case "remove_activity": {
+        assertCan(identity.role, "validate");
+        const removed = await removeTimelineActivity({ id: String(body.id ?? ""), rationale, actor: identity.actor });
+        return NextResponse.json({ ok: true, ...removed });
+      }
+      case "set_dependencies": {
+        assertCan(identity.role, "validate");
+        const dependsOn = field(z.array(z.string()), body.depends_on ?? [], "depends_on");
+        const reasons = field(z.record(z.string(), z.string()), body.reasons ?? {}, "reasons");
+        const activity = await setTimelineDependencies({
+          id: String(body.id ?? ""),
+          depends_on: dependsOn,
+          reasons,
+          rationale,
+          actor: identity.actor,
+        });
+        return NextResponse.json({ ok: true, activity });
       }
       case "save_plan": {
         const status = field(planStatusSchema, body.status ?? "draft", "status");
