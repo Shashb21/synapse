@@ -104,7 +104,7 @@ type JudgeDecision = {
   same_as_candidate: string | null;
 };
 
-const REMEDY = "run gap extraction again or switch the S2 route in /control.";
+const REMEDY = "run gap extraction again or switch the S2 route in /admin/control.";
 
 const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 

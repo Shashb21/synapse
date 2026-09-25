@@ -51,7 +51,7 @@ export async function judgeEquivalence(args: {
       const q = questionById.get(pairId)!;
       return `${q.a_id} vs ${q.b_id}`;
     },
-    remedy: "run extract again or switch the merge_dedupe route in /control.",
+    remedy: "run extract again or switch the merge_dedupe route in /admin/control.",
     ask: async (missing, attempt) => {
       const batches: string[][] = [];
       for (let i = 0; i < missing.length; i += EQUIVALENCE_BATCH) {

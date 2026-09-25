@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// This file switches the LLM test stub off to reach the live-extract gate, which
+// also switches off the test owner bypass; the owner gate is covered in owner-gate.test.ts.
+vi.mock("@/modules/auth/owner", () => ({ ownerGate: async () => null }));
 import { POST as extractPost } from "@/app/api/accuracy/extract/route";
 import { registerAccuracyStack } from "@/accuracy";
 import { listClaims } from "@/accuracy/store/claim-store";
@@ -124,7 +128,7 @@ describe("accuracy extract API", () => {
     expect(json.provider_id).toBeNull();
   });
 
-  it("returns oauth gate with /control when live extract has no connected provider", async () => {
+  it("returns oauth gate with /admin/control when live extract has no connected provider", async () => {
     const prevStub = process.env.SYNAPSE_TEST_STUB_LLM;
     const prevKeys = {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -183,7 +187,7 @@ describe("accuracy extract API", () => {
       };
       expect(json.ok).toBe(false);
       expect(json.gate).toBe("oauth_required");
-      expect(json.connect_path).toBe("/control");
+      expect(json.connect_path).toBe("/admin/control");
       expect(json.error).toMatch(/\/control/i);
     } finally {
       process.env.SYNAPSE_TEST_STUB_LLM = prevStub;

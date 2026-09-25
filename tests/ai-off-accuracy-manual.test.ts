@@ -12,10 +12,10 @@ import { POST as validatePost } from "@/app/api/accuracy/claims/validate/route";
 import { POST as priorityPost } from "@/app/api/accuracy/claims/priority/route";
 import { POST as coveragePost } from "@/app/api/accuracy/coverage/route";
 import { POST as ideatePost } from "@/app/api/accuracy/ideate/route";
-import AccuracyReviewPage from "@/app/accuracy/review/page";
-import AccuracySourcesPage from "@/app/accuracy/sources/page";
-import AccuracyWorkspacesPage from "@/app/accuracy/page";
-import AccuracyLedgerPage from "@/app/accuracy/ledger/page";
+import AccuracyReviewPage from "@/app/admin/accuracy/review/page";
+import AccuracySourcesPage from "@/app/admin/accuracy/sources/page";
+import AccuracyWorkspacesPage from "@/app/admin/accuracy/page";
+import AccuracyLedgerPage from "@/app/admin/accuracy/ledger/page";
 import { MissFlagInbox } from "@/components/accuracy/miss-flag-inbox";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { ExtractOauthGateBanner, SourceExtractActions } from "@/components/accuracy/source-extract-actions";
@@ -265,8 +265,8 @@ describe("the accuracy app with AI off", () => {
     const landing = elements(await AccuracyWorkspacesPage({ searchParams: Promise.resolve({}) }));
     expect(hasTestId(landing, "accuracy-manual-start")).toBe(true);
     const hrefs = landing.map((el) => (el.props as { href?: unknown }).href).filter(Boolean);
-    expect(hrefs).toContain(`/accuracy/ledger?workspace_id=${encodeURIComponent(workspace_id)}&add=gap`);
-    expect(hrefs).toContain(`/accuracy/ledger?workspace_id=${encodeURIComponent(workspace_id)}&add=tactic`);
+    expect(hrefs).toContain(`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspace_id)}&add=gap`);
+    expect(hrefs).toContain(`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspace_id)}&add=tactic`);
 
     const ledger = elements(
       await AccuracyLedgerPage({ searchParams: Promise.resolve({ workspace_id, add: "tactic" }) }),

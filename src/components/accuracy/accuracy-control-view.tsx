@@ -60,7 +60,7 @@ export async function AccuracyControlView() {
           {ai.updated_by || ai.updated_at ? "." : ""}
         </p>
         <p className="text-[12px]">
-          <Link href="/control" className="text-foreground underline-offset-2 hover:underline">
+          <Link href="/admin/control" className="text-foreground underline-offset-2 hover:underline">
             Change the AI switch in the control panel →
           </Link>
         </p>

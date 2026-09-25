@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -16,6 +17,8 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 export async function GET(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
@@ -52,6 +55,8 @@ const insertSchema = z.object({
  * - Without: raw seed insert (tests and early pipeline wiring).
  */
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = insertSchema.parse(await request.json());
     if (body.rationale !== undefined) {
@@ -103,6 +108,8 @@ const patchSchema = z.object({
  * recorded in metadata.edit_history; AI re-runs never overwrite them.
  */
 export async function PATCH(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = patchSchema.parse(await request.json());
     const result = await updateClaim({

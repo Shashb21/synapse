@@ -100,7 +100,7 @@ type Review = z.infer<typeof reviewSchema>;
 type JudgeVerdict = { verdict: "accept" | "reject"; confidence: number; reason: string };
 
 const DIMENSION_KEYS = COVERAGE_DIMENSIONS.join(", ");
-const REMEDY = "run S4 again or switch the S4 route in /control.";
+const REMEDY = "run S4 again or switch the S4 route in /admin/control.";
 
 const MAPPING_TABLE_PROPOSER_SYSTEM = `You produce a gap ↔ tactic mapping TABLE for a pharma Integrated Evidence Generation Plan.
 

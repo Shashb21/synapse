@@ -34,7 +34,7 @@ export async function runCoverageCritic(
   }
   if (!coverageRouteAllowsLlm(ctx.route)) {
     throw new NoRouteError(
-      "The coverage critic needs a connected LLM. Connect Grok or Claude in /control and run it again.",
+      "The coverage critic needs a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
     );
   }
 
@@ -43,7 +43,7 @@ export async function runCoverageCritic(
     ids: [pair],
     what: "coverage critique",
     describe: () => `gap ${parsedDecision.gap_id} × tactic ${parsedDecision.tactic_id}`,
-    remedy: "run the critic again or switch the coverage_critic route in /control.",
+    remedy: "run the critic again or switch the coverage_critic route in /admin/control.",
     ask: async (_missing, attempt) => {
       const out = new Map<string, CoverageCriticOutput>();
       try {

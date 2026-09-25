@@ -85,7 +85,7 @@ type ProposerAnswer = { kind: "tactic"; tactic: TacticCandidate } | { kind: "wit
 type Review = { verdict: Critique["verdict"]; confidence: number; note: string };
 type Decision = { verdict: "accept" | "reject"; confidence: number; reason: string; duplicate_of: string | null };
 
-const REMEDY = "run tactic extraction again or switch the S3 route in /control.";
+const REMEDY = "run tactic extraction again or switch the S3 route in /admin/control.";
 
 const TACTIC_FIELDS = `Each tactic has:
 - name: a short name for the activity.

@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
@@ -23,6 +24,8 @@ const DOC_ROLES = new Set([
 ]);
 
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const form = await req.formData();
     const workspace_id = String(form.get("workspace_id") ?? "").trim();

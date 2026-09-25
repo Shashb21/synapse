@@ -127,7 +127,7 @@ Decide every candidate of every gap you are given.
 
 Return JSON only: {"gaps":[{"gap_id":"","decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":""}]}]}`;
 
-const REMEDY = "run ideation again or switch the S9 route in /control.";
+const REMEDY = "run ideation again or switch the S9 route in /admin/control.";
 
 /**
  * Test stub only. These fixed designs stand in for the model when

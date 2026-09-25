@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { aiOffResponse, stageErrorResponse } from "@/app/api/modules/ai-off";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
@@ -13,6 +14,8 @@ export const dynamic = "force-dynamic";
 
 /** Scores prompt variants against curated gold and updates per-version baselines. */
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const body = (await request.json()) as Record<string, unknown>;
   const stage = String(body.stage ?? "") as StageId;
   if (!STAGE_IDS.includes(stage)) {

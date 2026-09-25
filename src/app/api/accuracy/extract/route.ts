@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -40,6 +41,8 @@ const MAX_EXTRACT_BLOCKS = 80;
  * persist resulting claims, then merge/dedupe and derive Open/Partial/Addressed.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = bodySchema.parse(await req.json());
     // Extract is an AI step: with AI off, refuse before reading or writing anything.

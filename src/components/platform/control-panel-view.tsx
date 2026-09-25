@@ -14,6 +14,7 @@ import {
 } from "@/modules/llm/provider";
 import { capabilitiesOf, can } from "@/modules/auth/roles";
 import { loginOptions, sessionContext } from "@/modules/auth/session";
+import { ownerAccess } from "@/modules/auth/owner";
 
 export type ControlPanelSearchParams = {
   connected?: string;
@@ -22,7 +23,7 @@ export type ControlPanelSearchParams = {
   sign_in_error?: string;
 };
 
-/** OAuth control panel: five LLM providers, Grok default, Claude one-click, no API-key fields. */
+/** Owner control panel (/admin/control): the AI switch, provider logins and per-stage routing. OAuth control panel: five LLM providers, Grok default, Claude one-click, no API-key fields. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
   let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
     stage,
@@ -68,6 +69,9 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     rationale: null,
   }));
   const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
+  // The owner holds every platform capability, whatever their plan role.
+  const owner = (await ownerAccess()).owner;
+  const may = (capability: Parameters<typeof can>[1]) => owner || can(identity.role, capability);
 
   const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
     const config = configs.find((row) => row.stage === stage)!;
@@ -122,7 +126,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       <div className="grid gap-8">
         <AiSwitchPanel
           ai={ai}
-          mayToggle={can(identity.role, "toggle_ai")}
+          mayToggle={may("toggle_ai")}
           identity={{
             signed_in: identity.signed_in,
             actor_name: identity.actor.name,
@@ -155,8 +159,8 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
               default_model: connection.default_model,
             }))}
           defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
-          canConnect={can(identity.role, "connect_provider")}
-          canRoute={can(identity.role, "configure_routing")}
+          canConnect={may("connect_provider")}
+          canRoute={may("configure_routing")}
         />
 
         <RoutingPanel
@@ -169,8 +173,8 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
               auth: provider.auth,
             }),
           )}
-          canRoute={can(identity.role, "configure_routing")}
-          canActivate={can(identity.role, "activate_module")}
+          canRoute={may("configure_routing")}
+          canActivate={may("activate_module")}
         />
       </div>
     </>

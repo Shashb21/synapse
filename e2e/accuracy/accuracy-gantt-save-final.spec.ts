@@ -85,7 +85,7 @@ async function shot(page: Page, name: string) {
 test.describe("accuracy Gantt save-final truth", () => {
   test("click detail, export PNG, save-final hash and audit bundle", async ({ page, request }) => {
     const workspace_id = await seedDatedGantt(request);
-    await page.goto(workspaceUrl("/accuracy/timeline", workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/timeline", workspace_id));
     await expect(page.getByRole("heading", { name: /^timeline$/i })).toBeVisible();
     await expect(page.getByText(/2 bar\(s\) from validated tactics only/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /export png/i })).toBeEnabled();
@@ -132,7 +132,7 @@ test.describe("accuracy Gantt save-final truth", () => {
     expect(hex).toBeTruthy();
     const auditLink = page.getByTestId("gantt-audit-bundle-link");
     await expect(auditLink).toBeVisible();
-    await expect(auditLink).toHaveAttribute("href", /\/accuracy\/audit\?/);
+    await expect(auditLink).toHaveAttribute("href", /\/admin\/accuracy\/audit\?/);
     await expect(auditLink).toHaveAttribute("href", /snapshot_hash=/);
     await shot(page, "gantt_save_final_hash_after.png");
 
