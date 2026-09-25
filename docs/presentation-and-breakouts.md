@@ -54,13 +54,17 @@ The per-group working surface, meant to be one browser window per monitor:
 - **Add gaps** — a picker over every live gap not yet in this group.
 - The group's assigned gaps as large cards (Room type scale — bigger body/title than Prep, per spec §7.5): status badge, domain tag, tactic summary, and the *same* actions already built elsewhere (override status, resolve a Partial, confirm) — a breakout room is for actually working the gaps in that theme, not just displaying them.
 - ← / → moves focus between cards, Esc clears focus — the pattern copied from `/accuracy/workshop`.
-- A link out to `/presentation` if the facilitator wants to switch from working mode to showing mode.
+- A link out to `/room` (the presenter view) if the facilitator wants to switch from working mode to showing mode.
 
-### `/presentation` — read-only chaptered walkthrough
+### `/room` — PowerPoint-style presenter view (replaces the chaptered `/presentation`)
 
-Phase C from the consultant spec, implemented as specified: a single route, four chapters (**Context → Gaps → Tactics → Timeline**), advanced with ← / → (same copied pattern) or the chapter dots. Every chapter is a pure projection of `loadState()` / `buildPlanWorkspace()` — **no new data store**, and no mutation controls anywhere on this route (no `LockForm`, no dialogs). The Timeline chapter reuses the existing `TimelineBoard` component with `canSaveFinal`/`canReschedule` both `false`, which already hides its edit affordances.
+The owner's ask: no bespoke presentation screens — a presenter view like PowerPoint's, where the consultant drives the **real app pages** as a power user. `/presentation` now redirects to `/room`; the old chaptered view is gone.
 
-**Leave-behind export**: a "Export pack (.pptx)" button using `pptxgenjs` (already a dependency, previously only used server-side for demo-file generation — this is its first use for exporting the plan itself). It builds a title slide, a gaps-by-status summary, a tactics-by-band summary, and a Gantt slide — the Gantt image is rasterized client-side with the same SVG→canvas→PNG technique `ExportImageButton` already uses for Timeline's own PNG export, then embedded as a slide image. This is a functional v1: the deck is a snapshot leave-behind, not a live-linked, chart-editable one — that would be real future work, not this pass.
+- **Slides** are the real pages in plan order (`src/lib/room/slides.ts`): Context (`/setup`) → Gaps → Mappings → Prioritize (matrix) → Tactics → Ideation → Timeline. The accuracy app is never a slide.
+- **Presenter console** (`/room`): the current slide as a live, fully interactive iframe of the real page (edit it exactly as on the normal page), a live thumbnail of the next slide, speaker notes per slide (autosaved per workspace), timer + clock, the slide list for jumping, Previous/Next buttons and keys (→ ↓ Space PageDown next, ← ↑ PageUp previous, Home/End, Esc ends the show and returns to Prep). Inside the live page only PageUp/PageDown (clickers) change slide; everything else belongs to the page. A **Breakouts** tab lists the breakout groups (Open room ↗) and links to `/breakouts`. The leave-behind **Export .pptx** moved here unchanged.
+- **Audience window** (`/room/audience`, opened with "Open audience window"): the presenter's current page, chrome-free and full-bleed (F for full screen). It follows the presenter over a per-workspace `BroadcastChannel` (instant, same browser) and by polling `GET /api/room` every 2.5s (a projector on another machine). It also follows the presenter into a page (clicking a gap) and their scroll position. Writes the presenter makes in the live page (any non-GET `fetch` or form post from the framed page) bump the room revision, and the audience reloads its copy into a hidden frame and swaps it in, so it never flashes.
+- **Chrome-free pages**: slides load with `?present=1`, and the room adds one stylesheet to the framed document that hides the shell's sidebar, mobile header, readiness strip and AI-off banner (and anything tagged `data-app-chrome`). No shell code was forked.
+- **Storage** (per workspace schema, lazily created): `room_notes(slide_id, notes)` and `room_presenter(slide_id, href, rev)`; see `src/lib/room/store.ts` and `src/app/api/room/route.ts`.
 
 ## What this does not change
 
