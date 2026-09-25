@@ -8,7 +8,7 @@ import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
 import { ROLE_LABELS, isRole, roleForFunction, type Role } from "./roles";
-import { configuredIdentityProviders, demoMode, identityProvider } from "./idp";
+import { configuredIdentityProviders, demoMode, demoSignInAllowed, identityProvider } from "./idp";
 
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
@@ -239,22 +239,34 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   });
 }
 
-/** Demo sign-in: no identity provider configured, so the typed name is the identity. */
+/** The address a demo user is known by, so workspace invites work in local preview. */
+export function demoEmail(actorName: string): string {
+  const slug = actorName.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+  return `${slug || "demo"}@demo.synapse.local`;
+}
+
+/**
+ * Demo sign-in for local preview and tests: the typed name is the identity.
+ * Never available in a production build, identity provider or not.
+ */
 export async function signInDemo(args: {
   actor_name: string;
   actor_function: ActorFunction;
   role?: Role;
+  email?: string | null;
 }): Promise<Session> {
-  if (!demoMode()) {
-    throw new Error("This deployment has an identity provider configured; use OAuth sign-in.");
+  if (!demoSignInAllowed()) {
+    throw new Error("Demo sign-in is not available in production. Sign in with your organisation's account.");
   }
+  const name = args.actor_name.trim();
+  if (!name) throw new Error("Enter a name to continue as a demo user.");
   return createSession({
     provider_id: "demo",
-    subject: `demo:${args.actor_name}`,
-    email: null,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    role: args.role ?? roleForFunction(args.actor_function),
+    subject: `demo:${name}`,
+    email: args.email?.trim().toLowerCase() || demoEmail(name),
+    actor_name: name,
+    actor_function: asFunction(args.actor_function),
+    role: args.role && isRole(args.role) ? args.role : roleForFunction(asFunction(args.actor_function)),
   });
 }
 
@@ -277,7 +289,8 @@ export async function activeSessions(): Promise<Session[]> {
 
 export function loginOptions() {
   return {
-    demo: demoMode(),
+    /** Offer "continue as a demo user": development and tests only, never production. */
+    demo: demoSignInAllowed(),
     providers: configuredIdentityProviders().map((provider) => ({
       id: provider.id,
       label: provider.label,

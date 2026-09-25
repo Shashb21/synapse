@@ -3,20 +3,15 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
-  Activity,
   ChartGantt,
   ClipboardList,
   Columns3,
-  FileText,
-  FlaskConical,
   ListChecks,
   Lock,
   Menu,
   PencilLine,
   Rocket,
-  SlidersHorizontal,
   Upload,
-  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +24,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
+import { WorkspaceTag } from "@/components/workspaces/workspace-tag";
+import type { WorkspaceTagModel } from "@/components/workspaces/model";
 
 export type ShellId =
   | PlanPlace
@@ -74,26 +71,19 @@ type PlaceItem = {
   unlocked: boolean;
 };
 
-type SecondaryId =
-  | "needs"
-  | "residuals"
-  | "roadmap"
-  | "mappings"
-  | "pipeline"
-  | "runs"
-  | "control"
-  | "evals"
-  | "sdlc"
-  | "setup";
+type SecondaryId = "needs" | "residuals" | "roadmap" | "mappings" | "setup";
 
 type SecondaryItem = {
   id: SecondaryId;
   href: string;
   label: string;
-  icon: typeof FlaskConical;
+  icon: typeof Upload;
 };
 
-/** Not in any nav list any more (demoted to inline tool links), but still valid `active` ids. */
+/**
+ * Not in any nav list (demoted to inline tool links, or owner tools that moved
+ * to /admin), but still valid `active` ids.
+ */
 const TOOL_LABELS: Partial<Record<ShellId, string>> = {
   matrix: "Matrix",
   ideation: "Ideation",
@@ -107,11 +97,6 @@ const SECONDARY: SecondaryItem[] = [
   { id: "residuals", href: "/residuals", label: "Residuals", icon: ClipboardList },
   { id: "roadmap", href: "/roadmap", label: "Roadmap", icon: ChartGantt },
   { id: "mappings", href: "/mappings", label: "Mapping table", icon: Columns3 },
-  { id: "pipeline", href: "/pipeline", label: "Pipeline", icon: Workflow },
-  { id: "runs", href: "/runs", label: "Runs", icon: Activity },
-  { id: "control", href: "/control", label: "Control panel", icon: SlidersHorizontal },
-  { id: "evals", href: "/evals", label: "Eval", icon: FlaskConical },
-  { id: "sdlc", href: "/sdlc", label: "Spec", icon: FileText },
 ];
 
 /**
@@ -264,7 +249,7 @@ export function PrepRoomToggle({ mode = "prep", dense }: { mode?: "prep" | "room
           Room
         </span>
       ) : (
-        <Link href="/accuracy/workshop" className={other} title="Facilitate in the room — the workshop surface">
+        <Link href="/room" className={other} title="Facilitate in the room — the workshop surface">
           Room
         </Link>
       )}
@@ -292,17 +277,17 @@ function NavLists({
           <NavButton key={item.id} item={item} active={active} dense={dense} />
         ))}
       </nav>
-      <details className="mt-auto border-t border-sidebar-border pt-3" aria-label={dense ? "Lab" : "Lab tools"}>
+      <details className="mt-auto border-t border-sidebar-border pt-3" aria-label={dense ? "More" : "More places"}>
         <summary
           className={cn(
             "cursor-pointer list-none text-[11px] text-sidebar-foreground/60 marker:content-none",
             dense ? "text-center md:text-left" : "",
           )}
         >
-          <span className={dense ? "hidden md:inline" : undefined}>Lab</span>
+          <span className={dense ? "hidden md:inline" : undefined}>More</span>
           <span className={dense ? "md:hidden" : "hidden"}>···</span>
         </summary>
-        <div className="mt-1 grid gap-0.5" role="navigation" aria-label={dense ? "Tapes" : "All tapes"}>
+        <div className="mt-1 grid gap-0.5" role="navigation" aria-label={dense ? "More places" : "All more places"}>
           {SECONDARY.map((item) => (
             <NavButton key={item.id} item={item} active={active} dense={dense} />
           ))}
@@ -316,10 +301,16 @@ export function PlanChrome({
   children,
   active,
   nav,
+  workspace,
+  present = false,
 }: {
   children: React.ReactNode;
   active: ShellId;
   nav: PlanNavModel;
+  /** The open workspace and the switcher's list; omitted only when the store is unavailable. */
+  workspace?: WorkspaceTagModel | null;
+  /** Room presenting this page (`?present=1`): just the content, no sidebar, header or strip. */
+  present?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ai = useAiEnabled();
@@ -334,7 +325,8 @@ export function PlanChrome({
 
   return (
     <div className="flex min-h-full bg-background">
-      <aside className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
+      {present ? null : (
+      <aside data-app-chrome className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
         <Link
           href="/"
           className="mb-4 hidden px-2 text-[13px] font-medium text-sidebar-foreground no-underline md:block"
@@ -348,12 +340,19 @@ export function PlanChrome({
         >
           S
         </Link>
+        {workspace ? (
+          <div className="mb-3 px-1 md:px-0">
+            <WorkspaceTag tag={workspace} dense />
+          </div>
+        ) : null}
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 px-1 md:px-0">
           <NavLists nav={nav} active={active} dense label="Places" />
         </div>
       </aside>
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background px-3 py-2 md:hidden">
+        {present ? null : (
+        <header data-app-chrome className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background px-3 py-2 md:hidden">
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger
               render={
@@ -373,7 +372,8 @@ export function PlanChrome({
           </Sheet>
           <p className="text-[13px] font-medium text-foreground">{current}</p>
         </header>
-        {showReadiness ? <ReadinessStrip nav={nav} /> : null}
+        )}
+        {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
         <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-5 sm:px-6">{children}</main>
       </div>
     </div>
@@ -389,6 +389,7 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
   const blocked = nav.partialCount > 0 || nav.unvalidatedCount > 0;
   return (
     <div
+      data-app-chrome
       className={cn(
         "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5 text-[11px] sm:px-6",
         blocked ? "bg-amber-500/10 text-amber-200" : "bg-emerald-500/10 text-emerald-200",

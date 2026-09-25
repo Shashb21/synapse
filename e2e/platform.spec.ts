@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fillNameIfAsked } from "./support/session";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -102,7 +103,7 @@ test.describe("platform surfaces", () => {
 
     await page.getByRole("button", { name: /save as final/i }).click();
     await page.getByPlaceholder(/why this decision/i).fill("Signed off in the e2e review");
-    await page.getByRole("textbox", { name: /^name$/i }).fill("E2E Platform");
+    await fillNameIfAsked(page.getByRole("dialog"), "E2E Platform");
     await page.getByRole("button", { name: /^save$/i }).click();
 
     // No reload: the server component repaints with the new version.
