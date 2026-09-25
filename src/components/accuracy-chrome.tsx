@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PrepRoomToggle } from "@/components/plan-chrome";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import {
@@ -119,24 +120,23 @@ function AccuracyChromeInner({
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
   const current = NAV.find((item) => item.id === active)?.label ?? "Accuracy";
-  const [fetchedLabel, setFetchedLabel] = useState<PlanLabel | null>(null);
+  // The fetched label remembers which workspace it belongs to, so a stale one is never shown.
+  const [fetched, setFetched] = useState<{ workspace_id: string; label: PlanLabel | null } | null>(null);
+  const fetchedLabel = fetched && fetched.workspace_id === workspaceId ? fetched.label : null;
   const planLabel = planLabelProp ?? fetchedLabel;
   const planStatus = chromePlanLabelStatus(planLabel);
 
   useEffect(() => {
-    if (planLabelProp || !workspaceId) {
-      setFetchedLabel(null);
-      return;
-    }
+    if (planLabelProp || !workspaceId) return;
     let cancelled = false;
     fetch(`/api/accuracy/workspaces?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { workspace?: { plan_label?: unknown } } | null) => {
         if (cancelled) return;
-        setFetchedLabel(normalizePlanLabel(body?.workspace?.plan_label));
+        setFetched({ workspace_id: workspaceId, label: normalizePlanLabel(body?.workspace?.plan_label) });
       })
       .catch(() => {
-        if (!cancelled) setFetchedLabel(null);
+        if (!cancelled) setFetched({ workspace_id: workspaceId, label: null });
       });
     return () => {
       cancelled = true;
@@ -172,6 +172,9 @@ function AccuracyChromeInner({
         >
           A
         </Link>
+        <div className="px-1 md:px-0">
+          <PrepRoomToggle mode="room" dense />
+        </div>
         <nav aria-label="Accuracy" className="flex min-h-0 flex-1 flex-col gap-0.5 px-1 md:px-0">
           {NAV.map((item) => (
             <NavButton

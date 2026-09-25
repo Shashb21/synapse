@@ -60,7 +60,7 @@ export async function POST(request: Request) {
         const ai = await setAiEnabled({
           enabled: body.enabled,
           actor_name: identity.actor.name,
-          rationale: String(body.rationale ?? ""),
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
         });
         return NextResponse.json({ ok: true, ai });
       }
