@@ -7,7 +7,6 @@ import { expect, test } from "@playwright/test";
  * out of that so the customer view can be checked.
  */
 
-const CUSTOMER = { cookie: "synapse_test_as=customer" };
 
 test.describe("owner console", () => {
   test("the owner sees Synapse Admin with its own nav", async ({ page }) => {
@@ -51,17 +50,19 @@ test.describe("owner console", () => {
     }
   });
 
-  test("admin APIs refuse a customer with 403", async ({ request }) => {
+  test("admin APIs refuse a customer with 403", async ({ page, context, baseURL }) => {
+    // Keep the signed-in session; only mark this browser as a customer.
+    await context.addCookies([{ name: "synapse_test_as", value: "customer", url: baseURL! }]);
+    const request = page.request;
     const checks = [
-      request.get("/api/accuracy/orchestration", { headers: CUSTOMER }),
-      request.get("/api/control", { headers: CUSTOMER }),
-      request.get("/api/modules", { headers: CUSTOMER }),
+      request.get("/api/accuracy/orchestration"),
+      request.get("/api/control"),
+      request.get("/api/modules"),
       request.post("/api/control", {
-        headers: CUSTOMER,
         data: { action: "set_ai_enabled", enabled: false },
       }),
-      request.post("/api/modules/evals", { headers: CUSTOMER, data: { stage: "S2" } }),
-      request.post("/api/modules/hillclimb", { headers: CUSTOMER, data: { stage: "S2" } }),
+      request.post("/api/modules/evals", { data: { stage: "S2" } }),
+      request.post("/api/modules/hillclimb", { data: { stage: "S2" } }),
     ];
     for (const res of await Promise.all(checks)) {
       expect(res.status(), res.url()).toBe(403);
@@ -69,12 +70,18 @@ test.describe("owner console", () => {
     }
   });
 
-  test("customers still run plain stages and save their axes", async ({ request }) => {
+  test("customers still run plain stages and save their axes", async ({ page, context, baseURL, playwright }) => {
+    await context.addCookies([{ name: "synapse_test_as", value: "customer", url: baseURL! }]);
+    const request = page.request;
     // Not owner-gated: an unknown stage is a 400, not a 403.
-    const run = await request.post("/api/modules", { headers: CUSTOMER, data: { stage: "S99" } });
+    const run = await request.post("/api/modules", { data: { stage: "S99" } });
     expect(run.status()).toBe(400);
-    const signOut = await request.post("/api/control", { headers: CUSTOMER, data: { action: "sign_out" } });
+    // Signing out is open to everyone. Check it on a separate, signed-out
+    // context so the suite's shared session stays signed in for later specs.
+    const anon = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    const signOut = await anon.post("/api/control", { data: { action: "sign_out" } });
     expect(signOut.status()).toBe(200);
+    await anon.dispose();
   });
 
   test("the owner reaches the admin APIs", async ({ request }) => {

@@ -159,7 +159,7 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.reload();
     await expect(page.getByTestId("setup-step-review")).toContainText("M. Hale");
 
-    await page.getByTestId("restart-walkthrough").first().click();
+    await page.getByTestId("restart-walkthrough").filter({ visible: true }).first().click();
     await expect(page).toHaveURL(/place=gaps/);
     await expect(page.getByTestId("walkthrough")).toContainText("1 of 7");
   });

@@ -172,6 +172,7 @@ export function PresenterConsole({
   const channelRef = useRef<BroadcastChannel | null>(null);
   const stateRef = useRef<RoomState>(initialState);
   const locationRef = useRef(initialState.href);
+  const arrivingRef = useRef<string | null>(null);
   const scrollRef = useRef(0);
   const pendingNote = useRef<{ slide_id: string; notes: string } | null>(null);
   const noteTimer = useRef<number | null>(null);
@@ -227,6 +228,8 @@ export function PresenterConsole({
       setFrameSrc(target.href);
       setLocation(target.href);
       locationRef.current = target.href;
+      // Until the frame has loaded this slide, its reports belong to the page being left.
+      arrivingRef.current = target.href;
       scrollRef.current = 0;
       setNoteStatus("idle");
       void sync({ op: "slide", slide_id: target.id }, { slide_id: target.id, href: target.href });
@@ -299,6 +302,11 @@ export function PresenterConsole({
   // The live slide: chrome-free, followed by the audience.
   useWiredFrame(frameRef, {
     onLocation: (href) => {
+      if (arrivingRef.current) {
+        // A late report from the previous slide's page must not move the show back.
+        if (href !== arrivingRef.current) return;
+        arrivingRef.current = null;
+      }
       if (href === locationRef.current) return;
       if (!isShowableHref(href)) {
         // A link inside the page led to the room itself (or the accuracy tool): go back.

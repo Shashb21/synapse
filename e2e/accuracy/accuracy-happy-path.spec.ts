@@ -28,7 +28,7 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
   async function expectShell(page: Page) {
     const nav = page.getByRole("navigation", { name: /^accuracy$/i });
     await expect(nav).toBeVisible();
-    await expect(page.getByRole("link", { name: /synapse · accuracy/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^accuracy lab$/i })).toBeVisible();
   }
 
   test("sources show seeded pack and parse blocks", async ({ page }) => {

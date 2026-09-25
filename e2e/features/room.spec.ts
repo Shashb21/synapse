@@ -46,6 +46,10 @@ test("keyboard moves between the real pages, chrome-free", async ({ page }) => {
   await expect(page.getByTestId("room-slide-title")).toHaveText("Gaps");
   await page.getByRole("button", { name: "Next slide" }).click();
   await expect(page.getByTestId("room-slide-title")).toHaveText("Mappings");
+  // Wait for the server to have the move before reloading.
+  await expect
+    .poll(async () => ((await (await page.request.get("/api/room")).json()) as { state: { slide_id: string } }).state.slide_id)
+    .toBe("mappings");
 
   // The current slide survives a reload (stored per workspace).
   await page.reload();

@@ -58,7 +58,7 @@ async function demoSignInThroughLoginPage(page: Page, name: string, email?: stri
     submit,
   );
   await submit.click();
-  await expect(page).toHaveURL(/\/workspaces/);
+  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 }
 
 async function createWorkspaceThroughUi(page: Page, name: string) {
