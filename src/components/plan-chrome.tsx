@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
+import { RestartWalkthroughButton } from "@/components/walkthrough";
 import { WorkspaceTag } from "@/components/workspaces/workspace-tag";
 import type { WorkspaceTagModel } from "@/components/workspaces/model";
 
@@ -291,6 +292,10 @@ function NavLists({
           {SECONDARY.map((item) => (
             <NavButton key={item.id} item={item} active={active} dense={dense} />
           ))}
+          <RestartWalkthroughButton
+            variant="link"
+            className={cn("h-8 px-2 text-sidebar-foreground/70", dense && "hidden md:inline-flex")}
+          />
         </div>
       </details>
     </>
