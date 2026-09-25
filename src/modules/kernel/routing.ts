@@ -1,4 +1,4 @@
-import { db, ensurePlatformSchema } from "./db";
+import { ensurePlatformSchema, sharedDb } from "./db";
 import { AI_OFF_MESSAGE, aiEnabled } from "./ai-switch";
 import * as t from "./schema";
 import { nowIso } from "./ids";
@@ -49,7 +49,7 @@ function defaultConfig(stage: StageId): RouteConfig {
 
 export async function routeConfigs(): Promise<RouteConfig[]> {
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.routingConfig);
+  const rows = await sharedDb().select().from(t.routingConfig);
   return STAGE_IDS.map((stage) => {
     const row = rows.find((candidate) => candidate.stage === stage);
     if (!row) return defaultConfig(stage);
@@ -100,7 +100,7 @@ export async function setRouteConfig(args: {
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
-  await db()
+  await sharedDb()
     .insert(t.routingConfig)
     .values(values)
     .onConflictDoUpdate({ target: t.routingConfig.stage, set: values });

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "./db";
+import { ensurePlatformSchema, sharedDb } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
 import type { EvalScore, StageId } from "./contracts";
@@ -66,7 +66,7 @@ export async function recordPromptBaseline(args: {
     recorded_at: nowIso(),
     note: args.note ?? null,
   };
-  await db()
+  await sharedDb()
     .insert(t.promptBaselines)
     .values({
       id: record.id,
@@ -98,7 +98,7 @@ export async function baselineFor(
   prompt_version: PromptVersionId,
 ): Promise<PromptBaseline | null> {
   await ensurePlatformSchema([PROMPT_BASELINES_DDL]);
-  const rows = await db()
+  const rows = await sharedDb()
     .select()
     .from(t.promptBaselines)
     .where(eq(t.promptBaselines.stage, stage))
@@ -121,8 +121,8 @@ export async function baselineFor(
 export async function listBaselines(stage?: StageId): Promise<PromptBaseline[]> {
   await ensurePlatformSchema([PROMPT_BASELINES_DDL]);
   const rows = stage
-    ? await db().select().from(t.promptBaselines).where(eq(t.promptBaselines.stage, stage))
-    : await db().select().from(t.promptBaselines);
+    ? await sharedDb().select().from(t.promptBaselines).where(eq(t.promptBaselines.stage, stage))
+    : await sharedDb().select().from(t.promptBaselines);
   return rows.map((row) => ({
     id: row.id,
     stage: row.stage as StageId,

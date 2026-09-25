@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import {
@@ -45,7 +45,7 @@ export function createPkcePair() {
 
 async function row(provider_id: string) {
   await ensurePlatformSchema();
-  const rows = await db()
+  const rows = await sharedDb()
     .select()
     .from(t.oauthConnections)
     .where(eq(t.oauthConnections.provider_id, provider_id))
@@ -55,7 +55,7 @@ async function row(provider_id: string) {
 
 export async function listConnections(): Promise<ProviderConnection[]> {
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.oauthConnections);
+  const rows = await sharedDb().select().from(t.oauthConnections);
   return PROVIDERS.map((provider) => {
     const stored = rows.find((candidate) => candidate.provider_id === provider.id);
     const envKey = hasProviderApiKey(provider.id);
@@ -101,7 +101,7 @@ export async function connectionStatus(provider_id: string): Promise<ConnectionS
 
 async function upsert(values: typeof t.oauthConnections.$inferInsert) {
   await ensurePlatformSchema();
-  await db()
+  await sharedDb()
     .insert(t.oauthConnections)
     .values(values)
     .onConflictDoUpdate({ target: t.oauthConnections.provider_id, set: values });
@@ -243,7 +243,7 @@ export async function completeOauth(args: {
 
 export async function disconnect(provider_id: string) {
   await ensurePlatformSchema();
-  await db().delete(t.oauthConnections).where(eq(t.oauthConnections.provider_id, provider_id));
+  await sharedDb().delete(t.oauthConnections).where(eq(t.oauthConnections.provider_id, provider_id));
 }
 
 /** Returns a usable access token, refreshing first when it is close to expiry.

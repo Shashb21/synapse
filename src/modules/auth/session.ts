@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
@@ -56,7 +56,7 @@ export async function createSession(args: {
   const id = base64Url(randomBytes(24));
   const created_at = nowIso();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-  await db().insert(t.authSessions).values({
+  await sharedDb().insert(t.authSessions).values({
     id,
     provider_id: args.provider_id,
     subject: args.subject,
@@ -92,11 +92,11 @@ export async function currentSession(): Promise<Session | null> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
+  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
   if (Date.parse(row.expires_at) < Date.now()) {
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
     return null;
   }
   return {
@@ -116,7 +116,7 @@ export async function signOut() {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
     await ensurePlatformSchema();
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
   }
   jar.delete(SESSION_COOKIE);
 }
@@ -260,7 +260,7 @@ export async function signInDemo(args: {
 
 export async function activeSessions(): Promise<Session[]> {
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions);
+  const rows = await sharedDb().select().from(t.authSessions);
   return rows
     .filter((row) => Date.parse(row.expires_at) > Date.now())
     .map((row) => ({
@@ -287,7 +287,7 @@ export function loginOptions() {
 
 export async function sessionsForSubject(subject: string) {
   await ensurePlatformSchema();
-  return db()
+  return sharedDb()
     .select()
     .from(t.authSessions)
     .where(and(eq(t.authSessions.subject, subject)));

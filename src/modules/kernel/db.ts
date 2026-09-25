@@ -1,30 +1,10 @@
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/iegp/db";
+import { db, onWorkspaceBootstrap, sharedDb } from "@/lib/iegp/db";
 
-export { db };
+export { db, sharedDb };
 
-const PLATFORM_DDL = `
-CREATE TABLE IF NOT EXISTS module_runs (
-  id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL,
-  module_id text NOT NULL, module_version text NOT NULL, status text NOT NULL,
-  started_at text NOT NULL, finished_at text, duration_ms integer,
-  actor_name text NOT NULL, actor_function text NOT NULL,
-  summary text, error text,
-  input jsonb NOT NULL, output jsonb, steps jsonb NOT NULL,
-  route jsonb, evals jsonb
-);
-CREATE TABLE IF NOT EXISTS edit_records (
-  id text PRIMARY KEY, at text NOT NULL, workspace_id text NOT NULL,
-  stage text NOT NULL, entity_type text NOT NULL, entity_id text NOT NULL,
-  field text NOT NULL, action text NOT NULL, before text, after text,
-  rationale text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL
-);
-CREATE TABLE IF NOT EXISTS hillclimb_signals (
-  id text PRIMARY KEY, at text NOT NULL, stage text NOT NULL, kind text NOT NULL,
-  subject text NOT NULL, rationale text NOT NULL,
-  weight integer NOT NULL DEFAULT 1, status text NOT NULL DEFAULT 'open',
-  payload jsonb
-);
+/** Platform-wide tables: one copy, in the public schema. */
+const SHARED_DDL = `
 CREATE TABLE IF NOT EXISTS eval_runs (
   id text PRIMARY KEY, at text NOT NULL, stage text NOT NULL,
   module_id text NOT NULL, module_version text NOT NULL, run_id text,
@@ -56,6 +36,31 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   id text PRIMARY KEY, provider_id text NOT NULL, subject text NOT NULL, email text,
   actor_name text NOT NULL, actor_function text NOT NULL, role text NOT NULL,
   created_at text NOT NULL, expires_at text NOT NULL
+);
+`;
+
+/** Tables every workspace schema has its own copy of. */
+const WORKSPACE_DDL = `
+CREATE TABLE IF NOT EXISTS module_runs (
+  id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL,
+  module_id text NOT NULL, module_version text NOT NULL, status text NOT NULL,
+  started_at text NOT NULL, finished_at text, duration_ms integer,
+  actor_name text NOT NULL, actor_function text NOT NULL,
+  summary text, error text,
+  input jsonb NOT NULL, output jsonb, steps jsonb NOT NULL,
+  route jsonb, evals jsonb
+);
+CREATE TABLE IF NOT EXISTS edit_records (
+  id text PRIMARY KEY, at text NOT NULL, workspace_id text NOT NULL,
+  stage text NOT NULL, entity_type text NOT NULL, entity_id text NOT NULL,
+  field text NOT NULL, action text NOT NULL, before text, after text,
+  rationale text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hillclimb_signals (
+  id text PRIMARY KEY, at text NOT NULL, stage text NOT NULL, kind text NOT NULL,
+  subject text NOT NULL, rationale text NOT NULL,
+  weight integer NOT NULL DEFAULT 1, status text NOT NULL DEFAULT 'open',
+  payload jsonb
 );
 CREATE TABLE IF NOT EXISTS priority_axes (
   id text PRIMARY KEY, config jsonb NOT NULL,
@@ -91,23 +96,30 @@ const globalForPlatform = globalThis as unknown as {
   synapsePlatformSchema?: Promise<void>;
 };
 
-async function applyDdl(statements: string[]) {
-  const d = db();
+async function applyDdl(statements: string[], target: typeof db = db) {
+  const d = target();
   for (const stmt of statements.map((s) => s.trim()).filter(Boolean)) {
     await d.execute(sql.raw(stmt));
   }
 }
 
+// A new workspace schema gets its own copy of every workspace table.
+onWorkspaceBootstrap(async (run) => {
+  for (const stmt of WORKSPACE_DDL.split(";").map((s) => s.trim()).filter(Boolean)) await run(stmt);
+});
+
 /**
- * Applies platform DDL once per process. Module-owned DDL is passed in by the
- * registry so a module can add its own tables without editing the kernel.
+ * Applies platform DDL once per process: shared tables in the public schema,
+ * workspace tables in the Default workspace (other workspaces get theirs when
+ * their schema is created). Module-owned DDL is passed in by the registry and
+ * applies to the current workspace.
  */
 export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
   if (!globalForPlatform.synapsePlatformSchema) {
     globalForPlatform.synapsePlatformSchema = (async () => {
-      const d = db();
-      await d.execute(sql`set client_min_messages to warning`);
-      await applyDdl(PLATFORM_DDL.split(";"));
+      await sharedDb().execute(sql`set client_min_messages to warning`);
+      await applyDdl(SHARED_DDL.split(";"), sharedDb);
+      await applyDdl(WORKSPACE_DDL.split(";"), sharedDb);
     })();
   }
   await globalForPlatform.synapsePlatformSchema;
