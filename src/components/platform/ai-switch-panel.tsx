@@ -1,4 +1,5 @@
-import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { AiToggle } from "@/components/platform/ai-toggle";
 import type { AiSwitch } from "@/modules/kernel/ai-switch";
 
 /** The admin AI switch on the control panel. */
@@ -11,7 +12,6 @@ export function AiSwitchPanel({
   mayToggle: boolean;
   identity: ActionIdentity;
 }) {
-  const next = !ai.enabled;
   return (
     <section className="border border-border bg-card/40 p-4" data-testid="ai-switch-panel" aria-labelledby="ai-switch">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -27,25 +27,11 @@ export function AiSwitchPanel({
           {ai.updated_by ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
               Last set by {ai.updated_by} · {ai.updated_at}
-              {ai.rationale ? ` · “${ai.rationale}”` : ""}
             </p>
           ) : null}
         </div>
         {mayToggle ? (
-          <ActionDialog
-            endpoint="/api/control"
-            payload={{ action: "set_ai_enabled", enabled: next }}
-            label={next ? "Turn AI on" : "Turn AI off"}
-            title={next ? "Turn AI on" : "Turn AI off"}
-            description={
-              next
-                ? "Every stage may call its routed model again. Nothing entered by hand is changed."
-                : "Every AI suggestion and automatic AI step stops for everyone, and upload and parsing are switched off. People add gaps and tactics by hand. Work already done stays."
-            }
-            confirmLabel={next ? "Turn AI on" : "Turn AI off"}
-            identity={identity}
-            variant={next ? "default" : "outline"}
-          />
+          <AiToggle enabled={ai.enabled} actorName={identity.actor_name} />
         ) : (
           <p className="text-[11px] text-muted-foreground">Only an admin can change this.</p>
         )}

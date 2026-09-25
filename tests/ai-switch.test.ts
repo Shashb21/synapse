@@ -40,15 +40,14 @@ describe("the admin AI switch", () => {
     expect(can("viewer", "toggle_ai")).toBe(false);
   });
 
-  it("needs a reason to flip, and records who flipped it", async () => {
-    await expect(setAiEnabled({ enabled: false, actor_name: ACTOR.name, rationale: "" })).rejects.toThrow(/rationale/i);
-    const bad = await control({ action: "set_ai_enabled", enabled: "no", rationale: "because" });
+  it("flips with no reason asked, and records who flipped it", async () => {
+    const bad = await control({ action: "set_ai_enabled", enabled: "no" });
     expect(bad.status).toBe(400);
 
-    const off = await control({ action: "set_ai_enabled", enabled: false, rationale: "Manual pilot week" });
+    const off = await control({ action: "set_ai_enabled", enabled: false });
     expect(off.status).toBe(200);
     const state = await aiSwitch();
-    expect(state).toMatchObject({ enabled: false, rationale: "Manual pilot week" });
+    expect(state).toMatchObject({ enabled: false, rationale: null });
     expect(state.updated_by).toBeTruthy();
   });
 

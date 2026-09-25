@@ -60,6 +60,18 @@ test.describe.serial("AI switched off by an admin", () => {
     await expect(page.getByText(/add tactics/i).first()).toBeVisible();
   });
 
+  test("the control panel switch flips AI with one click, no reason asked", async ({ page }) => {
+    await page.goto("/control");
+    const toggle = page.getByTestId("ai-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(page.getByTestId("ai-switch-panel")).toContainText(/AI is on/);
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByTestId("ai-toggle").click();
+    await expect(page.getByTestId("ai-switch-panel")).toContainText(/AI is off/);
+  });
+
   test("turning AI back on restores the AI controls", async ({ page, request }) => {
     await setAi(request, true);
     await page.goto("/pipeline");

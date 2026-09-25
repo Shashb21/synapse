@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import { nowIso } from "./ids";
-import { requireRationale } from "./edit-records";
 
 /**
  * The admin AI switch. With AI off the tool is fully manual: no model is
@@ -63,12 +62,13 @@ export async function assertAiEnabled(what?: string): Promise<void> {
   if (!(await aiEnabled())) throw new AiDisabledError(what);
 }
 
+/** A plain switch: no reason is asked for, and it is not an edit that feeds hillclimb. */
 export async function setAiEnabled(args: {
   enabled: boolean;
   actor_name: string;
-  rationale: string;
+  rationale?: string;
 }): Promise<AiSwitch> {
-  const rationale = requireRationale(args.rationale);
+  const rationale = args.rationale?.trim() || undefined;
   await ensurePlatformSchema([PLATFORM_SETTINGS_DDL]);
   const value = JSON.stringify({ enabled: args.enabled, rationale } satisfies StoredValue);
   const at = nowIso();
@@ -77,5 +77,5 @@ export async function setAiEnabled(args: {
         values (${AI_KEY}, ${value}::jsonb, ${args.actor_name}, ${at})
         on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
   );
-  return { enabled: args.enabled, updated_by: args.actor_name, updated_at: at, rationale };
+  return { enabled: args.enabled, updated_by: args.actor_name, updated_at: at, rationale: rationale ?? null };
 }

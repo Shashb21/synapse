@@ -236,27 +236,38 @@ function NavButton({
   );
 }
 
-/** Deep-links to the existing accuracy-workshop facilitation surface. Zero new backend — see docs/consultant-ux-spec.md §10. */
-function PrepRoomToggle({ dense }: { dense?: boolean }) {
+/**
+ * Prep (plan the IEGP) or Room (facilitate the workshop). Both sides render it,
+ * so whichever mode you are in, the other is one click away.
+ */
+export function PrepRoomToggle({ mode = "prep", dense }: { mode?: "prep" | "room"; dense?: boolean }) {
+  const current = "flex h-6 items-center justify-center rounded bg-sidebar-accent text-sidebar-accent-foreground";
+  const other =
+    "flex h-6 items-center justify-center rounded text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground";
   return (
     <div
-      className={cn(
-        "grid grid-cols-2 gap-0.5 rounded-md bg-sidebar-accent/40 p-0.5 text-[11px]",
-        dense ? "mb-3" : "mb-3",
-      )}
+      className={cn("grid grid-cols-2 gap-0.5 rounded-md bg-sidebar-accent/40 p-0.5 text-[11px]", dense ? "mb-3" : "mb-3")}
       role="group"
       aria-label="Prep or Room mode"
     >
-      <span className="flex h-6 items-center justify-center rounded bg-sidebar-accent text-sidebar-accent-foreground">
-        Prep
-      </span>
-      <Link
-        href="/accuracy/workshop"
-        className="flex h-6 items-center justify-center rounded text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
-        title="Facilitate in the room — deep-links to the workshop surface"
-      >
-        Room
-      </Link>
+      {mode === "prep" ? (
+        <span className={current} aria-current="true">
+          Prep
+        </span>
+      ) : (
+        <Link href="/" className={other} title="Back to preparing the plan">
+          Prep
+        </Link>
+      )}
+      {mode === "room" ? (
+        <span className={current} aria-current="true">
+          Room
+        </span>
+      ) : (
+        <Link href="/accuracy/workshop" className={other} title="Facilitate in the room — the workshop surface">
+          Room
+        </Link>
+      )}
     </div>
   );
 }
