@@ -140,7 +140,7 @@ export async function structureWithLlm(args: {
       ids: group.map((entry) => entry.id),
       what: "parse",
       describe: (id) => `${byId.get(id)!.location.ref} (${id})`,
-      remedy: "upload the file again or switch the parse route in /control.",
+      remedy: "upload the file again or switch the parse route in /admin/control.",
       ask: async (missing, attempt) => {
         const payload = (await args.ask({
           system: STRUCTURE_SYSTEM,
@@ -198,7 +198,7 @@ async function classifyStakeholder(args: {
     ids: ["document"],
     what: "stakeholder classification",
     describe: () => args.filename,
-    remedy: "upload the file again or switch the parse route in /control.",
+    remedy: "upload the file again or switch the parse route in /admin/control.",
     ask: async (_missing, attempt) => {
       const payload = (await args.ask({
         system: STAKEHOLDER_SYSTEM,

@@ -46,7 +46,7 @@ export function SeedFromGoldForm() {
           ? `Seeded ${body.gaps ?? 0} gaps and ${body.tactics ?? 0} tactics. ${body.parse_skipped}`
           : `Seeded ${body.gaps ?? 0} gaps, ${body.tactics ?? 0} tactics, ${body.parse_blocks ?? 0} parse blocks`,
       );
-      router.push(`/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}`);
+      router.push(`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}`);
       router.refresh();
     });
   }

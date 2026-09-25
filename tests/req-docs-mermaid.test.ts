@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import mermaid from "mermaid";
-import { splitSpec } from "@/app/sdlc/spec-body";
+import { splitSpec } from "@/app/admin/sdlc/spec-body";
 
 const DOCS = [
   "docs/problem-and-solution.md",

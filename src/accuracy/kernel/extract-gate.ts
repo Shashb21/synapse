@@ -3,11 +3,11 @@ import { AI_OFF_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
 import { accuracyAuthAllowsLive, resolveAccuracyRoute } from "./routing";
 import { isTestStub } from "@/modules/kernel/llm";
 
-export const EXTRACT_CONNECT_PATH = "/control";
+export const EXTRACT_CONNECT_PATH = "/admin/control";
 export const EXTRACT_OAUTH_GATE_CODE = "oauth_required" as const;
 
 export const EXTRACT_OAUTH_GATE_MESSAGE =
-  "Connect Grok (default) or Claude in /control to run live extract. Sign in with OAuth — not an API key.";
+  "Connect Grok (default) or Claude in /admin/control to run live extract. Sign in with OAuth — not an API key.";
 
 export { accuracyAuthAllowsLive, anthropicWorkspaceConfigured } from "./routing";
 

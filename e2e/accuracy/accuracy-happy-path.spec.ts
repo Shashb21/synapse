@@ -32,7 +32,7 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
   }
 
   test("sources show seeded pack and parse blocks", async ({ page }) => {
-    await page.goto(workspaceUrl("/accuracy/sources", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/sources", seed.workspace_id));
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
     await expectShell(page);
     await expect(page.getByText(/Workspace ·/i)).toBeVisible();
@@ -41,12 +41,12 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
     await expect(page.getByText(/pack beone-bgb-58067-prmt5i/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /open ledger/i })).toHaveAttribute(
       "href",
-      `/accuracy/ledger?workspace_id=${encodeURIComponent(seed.workspace_id)}`,
+      `/admin/accuracy/ledger?workspace_id=${encodeURIComponent(seed.workspace_id)}`,
     );
   });
 
   test("ledger lists gaps and tactics; validate one gap", async ({ page }) => {
-    await page.goto(workspaceUrl("/accuracy/ledger", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/ledger", seed.workspace_id));
     await expect(page.getByRole("heading", { name: /^ledger$/i })).toBeVisible();
     await expectShell(page);
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
@@ -68,7 +68,7 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
   });
 
   test("coverage queue: stub LLM assist then decide one pair", async ({ page }) => {
-    await page.goto(workspaceUrl("/accuracy/coverage", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/coverage", seed.workspace_id));
     await expect(page.getByRole("heading", { name: /^coverage$/i })).toBeVisible();
     await expectShell(page);
     await expect(page.getByText(/undecided/i).first()).toBeVisible();
@@ -89,7 +89,7 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
   });
 
   test("plan lists seeded gaps and accepts a priority band", async ({ page }) => {
-    await page.goto(workspaceUrl("/accuracy/plan", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/plan", seed.workspace_id));
     await expect(page.getByRole("heading", { name: /^plan$/i })).toBeVisible();
     await expectShell(page);
     await expect(page.getByText(/43 gap\(s\)/i)).toBeVisible();

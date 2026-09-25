@@ -40,7 +40,7 @@ export async function judgeCompleteness(args: {
     ids: args.blocks.map((block) => block.id),
     what: "completeness verdict",
     describe: (id) => `block ${id}`,
-    remedy: "reload Review to ask again, or switch the completeness_audit route in /control.",
+    remedy: "reload Review to ask again, or switch the completeness_audit route in /admin/control.",
     ask: async (missing, attempt) => {
       const bySource = new Map<string, AuditBlockLite[]>();
       for (const id of missing) {

@@ -51,7 +51,7 @@ type Proposal = z.infer<typeof proposalSchema>;
 type Review = { verdict: "keep" | "revise"; confidence: number; note: string; issues: string[] };
 type Judgement = { verdict: "accept" | "reject"; confidence: number; note: string };
 
-const REMEDY = "run the split proposal again or switch the S6 route in /control.";
+const REMEDY = "run the split proposal again or switch the S6 route in /admin/control.";
 
 const SPLIT_PROPOSER_SYSTEM = `You split a partially addressed evidence gap from a pharma Integrated Evidence Generation Plan into two child gaps.
 

@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { getRun } from "@/modules/kernel/observability";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 /** One run's full trace, for the run page's siblings and for automated checks. */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { id } = await params;
   const run = await getRun(id);
   if (!run) return NextResponse.json({ error: `Unknown run ${id}` }, { status: 404 });

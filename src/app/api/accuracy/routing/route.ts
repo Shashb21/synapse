@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import {
   accuracyRouteConfigs,
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 export async function GET() {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const routes = await accuracyRouteConfigs();
   return NextResponse.json({
     routes,
@@ -36,6 +39,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const body = (await request.json()) as Record<string, unknown>;
   const action = String(body.action ?? "");
   const identity = await requestIdentity(body);

@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -19,6 +20,8 @@ function withPlanLabel<T extends { planning_context?: unknown }>(workspace: T) {
 }
 
 export async function GET(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const workspaceId = searchParams.get("workspace_id")?.trim() ?? "";
   if (workspaceId) {
@@ -41,6 +44,8 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = createSchema.parse(await req.json());
     const org_id = await createOrganization(body.org_name ?? `${body.name} org`);

@@ -26,7 +26,7 @@ test.describe("Control panel OAuth routing", () => {
     }
     expect(state.defaults).toEqual({ primary: "xai-grok", alternate: "anthropic-claude" });
 
-    await page.goto("/control");
+    await page.goto("/admin/control");
     await expect(page.getByRole("heading", { name: /^control panel$/i })).toBeVisible();
     for (const label of [
       "xAI · Grok",
@@ -45,14 +45,14 @@ test.describe("Control panel OAuth routing", () => {
   });
 
   test("never asks for an API key", async ({ page }) => {
-    await page.goto("/control");
+    await page.goto("/admin/control");
     await expect(page.getByText(/Synapse never asks you for an API key/)).toBeVisible();
     await expect(page.getByRole("textbox", { name: /api key|secret|credential/i })).toHaveCount(0);
     await expect(page.getByPlaceholder(/api key|secret|sk-/i)).toHaveCount(0);
   });
 
   test("switches every stage to Claude and back to Grok in one click", async ({ page, request }) => {
-    await page.goto("/control");
+    await page.goto("/admin/control");
     await page.getByRole("button", { name: "Anthropic · Claude", exact: true }).click();
     await expect
       .poll(async () => (await controlState(request)).routes.every((route) => route.provider_id === "anthropic-claude"))

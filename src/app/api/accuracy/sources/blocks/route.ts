@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -34,6 +35,8 @@ registerAccuracyStack();
  * Scoped to workspace + source so BeOne gold packs never mix.
  */
 export async function GET(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const url = new URL(req.url);
   const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
   const source_file_id = url.searchParams.get("source_file_id")?.trim() ?? "";
@@ -151,6 +154,8 @@ const postSchema = z.discriminatedUnion("action", [
  * that would orphan a claim's quote is refused with 409 and the claim ids.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   let body: z.infer<typeof postSchema>;
   try {
     body = postSchema.parse(await req.json());

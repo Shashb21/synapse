@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
 import {
@@ -13,6 +14,8 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 export async function GET(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {

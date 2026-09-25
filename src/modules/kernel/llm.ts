@@ -30,7 +30,7 @@ export function requireLlm(ctx: Pick<ModuleContext, "route"> & { ai?: boolean },
   if (!canPrompt(ctx.route)) {
     throw new NoRouteError(
       ctx.route.reason ??
-        `${what} needs a connected LLM. Log in at /control (Grok, Claude, or another provider) and run it again.`,
+        `${what} needs a connected LLM. Log in at /admin/control (Grok, Claude, or another provider) and run it again.`,
     );
   }
 }
@@ -68,7 +68,7 @@ export async function completeAll<T>(args: {
     const describe = args.describe ?? ((id: string) => id);
     throw new Error(
       `The model did not return a complete ${args.what} for ${unanswered.map(describe).join(", ")} after ${COMPLETION_ATTEMPTS} attempts. Nothing was saved; ${
-        args.remedy ?? "run the stage again or switch its route in /control."
+        args.remedy ?? "run the stage again or switch its route in /admin/control."
       }`,
     );
   }

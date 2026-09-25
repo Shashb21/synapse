@@ -12,7 +12,7 @@ test.describe("accuracy LLM parse", () => {
     expect(created.ok()).toBeTruthy();
     const { workspace_id } = (await created.json()) as { workspace_id: string };
 
-    await page.goto(`/accuracy/sources?workspace_id=${encodeURIComponent(workspace_id)}`);
+    await page.goto(`/admin/accuracy/sources?workspace_id=${encodeURIComponent(workspace_id)}`);
     await expect(page.getByRole("heading", { name: /^sources$/i })).toBeVisible();
     await expect(page.getByText(/parsed by the LLM on the parse route/i)).toBeVisible();
     await expect(page.getByText(/LLAMA_CLOUD_API_KEY/)).toHaveCount(0);

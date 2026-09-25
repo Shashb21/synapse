@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import {
   accuracyEvalReferencePack,
@@ -9,6 +10,8 @@ import { registerAccuracyStack } from "@/accuracy";
 
 /** Orchestrator status for accuracy v2 dev bots / CI. */
 export async function GET() {
+  const denied = await ownerGate();
+  if (denied) return denied;
   registerAccuracyStack();
   const modules = listAccuracyModules().map((m) => ({
     id: m.manifest.id,

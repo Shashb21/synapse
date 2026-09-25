@@ -34,7 +34,7 @@ export function CreateWorkspaceForm() {
       }
       // AI off: land on hand entry of gaps (there is nothing to upload or extract).
       router.push(
-        `/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}${aiOn ? "" : "&add=gap"}`,
+        `/admin/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}${aiOn ? "" : "&add=gap"}`,
       );
       router.refresh();
     });

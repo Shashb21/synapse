@@ -28,8 +28,8 @@ import { RoutingPanel } from "@/components/platform/routing-panel";
 import { ProviderPanel } from "@/components/platform/provider-panel";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
 import { SetupWizard } from "@/components/setup/setup-wizard";
-import PipelinePage from "@/app/pipeline/page";
-import RunsPage from "@/app/runs/page";
+import PipelinePage from "@/app/admin/pipeline/page";
+import RunsPage from "@/app/admin/runs/page";
 import { parsePlanningContext } from "@/lib/iegp/planning-context";
 
 const ACTOR = "AI Off Platform Test";

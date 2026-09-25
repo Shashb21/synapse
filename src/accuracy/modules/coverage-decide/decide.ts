@@ -63,7 +63,7 @@ export async function runCoverageDecide(
   }
   if (!coverageRouteAllowsLlm(ctx.route)) {
     throw new NoRouteError(
-      "Coverage decisions need a connected LLM. Connect Grok or Claude in /control and run it again.",
+      "Coverage decisions need a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
     );
   }
 
@@ -89,7 +89,7 @@ export async function runCoverageDecide(
     ids: [pair],
     what: "coverage decision",
     describe: () => `gap ${input.gap_id} × tactic ${input.tactic_id}`,
-    remedy: "run coverage assist again or switch the coverage_decide route in /control.",
+    remedy: "run coverage assist again or switch the coverage_decide route in /admin/control.",
     ask: async (_missing, attempt) => {
       const out = new Map<string, CoverageDecision>();
       try {

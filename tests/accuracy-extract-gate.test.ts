@@ -107,7 +107,7 @@ describe("live extract OAuth gate", () => {
     expect(gate.ready).toBe(false);
     if (gate.ready) return;
     expect(gate.code).toBe(EXTRACT_OAUTH_GATE_CODE);
-    expect(gate.connect_path).toBe("/control");
+    expect(gate.connect_path).toBe("/admin/control");
     expect(gate.message).toBe(EXTRACT_OAUTH_GATE_MESSAGE);
     expect(gate.reason.length).toBeGreaterThan(0);
   });

@@ -11,6 +11,7 @@ import {
 import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
 import { assertCan } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
+import { ownerAccess, ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
 import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
 import { aiSwitch, setAiEnabled } from "@/modules/kernel/ai-switch";
@@ -18,7 +19,23 @@ import { aiSwitch, setAiEnabled } from "@/modules/kernel/ai-switch";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Platform actions only the owner may take (the admin console at /admin/control).
+ * Sign-in, sign-out and the prioritization axes stay open to customers.
+ */
+const OWNER_ACTIONS = new Set([
+  "set_ai_enabled",
+  "set_route",
+  "set_default_provider",
+  "activate_module",
+  "connect_provider",
+  "disconnect_provider",
+]);
+
+/** Platform configuration (routes, provider connections, module wiring): owner only. */
 export async function GET() {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const [wiring, routes, connections, axes, ai] = await Promise.all([
     stageWiring(),
     routeConfigs(),
@@ -49,13 +66,14 @@ export async function GET() {
 export async function POST(request: Request) {
   const body = (await request.json()) as Record<string, unknown>;
   const action = String(body.action ?? "");
+  // The owner holds every platform capability; nobody else reaches these actions.
+  if (OWNER_ACTIONS.has(action) && !(await ownerAccess()).owner) return ownerOnlyJson();
   const identity = await requestIdentity(body);
   const origin = new URL(request.url).origin;
 
   try {
     switch (action) {
       case "set_ai_enabled": {
-        assertCan(identity.role, "toggle_ai");
         if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
         const ai = await setAiEnabled({
           enabled: body.enabled,
@@ -65,7 +83,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, ai });
       }
       case "set_route": {
-        assertCan(identity.role, "configure_routing");
         const stage = String(body.stage ?? "") as StageId;
         if (!STAGE_IDS.includes(stage)) throw new Error(`Unknown stage ${body.stage}`);
         const config = await setRouteConfig({
@@ -85,7 +102,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, config });
       }
       case "set_default_provider": {
-        assertCan(identity.role, "configure_routing");
         const configs = await setDefaultProvider({
           provider_id: String(body.provider_id ?? ""),
           model: body.model ? String(body.model) : undefined,
@@ -94,7 +110,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, stages: configs.length });
       }
       case "activate_module": {
-        assertCan(identity.role, "activate_module");
         const stage = String(body.stage ?? "") as StageId;
         await activateModule({
           stage,
@@ -104,7 +119,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
       case "connect_provider": {
-        assertCan(identity.role, "connect_provider");
         const provider_id = String(body.provider_id ?? "");
         const { authorize_url } = await beginOauth({
           provider_id,
@@ -114,7 +128,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, authorize_url });
       }
       case "disconnect_provider": {
-        assertCan(identity.role, "connect_provider");
         await disconnect(String(body.provider_id ?? ""));
         return NextResponse.json({ ok: true });
       }

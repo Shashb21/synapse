@@ -137,7 +137,7 @@ describe("ledger SI / chapter filters", () => {
     expect(tisleFacets.chapters.some((f) => f.slug === UNASSIGNED_FILTER)).toBe(true);
 
     expect(ledgerHref("ws_1", { si: "differentiation" })).toBe(
-      "/accuracy/ledger?workspace_id=ws_1&si=differentiation",
+      "/admin/accuracy/ledger?workspace_id=ws_1&si=differentiation",
     );
     expect(parseLedgerFilters({ chapter: "ESCC", si: "CE" })).toEqual({
       chapter: "advanced_metastatic_escc",

@@ -137,7 +137,7 @@ Review every gap you are given.
 
 Return JSON only: {"reviews":[{"gap_id":"","verdict":"keep","confidence":0,"note":""}]}`;
 
-const REMEDY = "run prioritization again or switch the S8 route in /control.";
+const REMEDY = "run prioritization again or switch the S8 route in /admin/control.";
 
 type PlanningContext = PrioritizationInput["context"] & {
   launch_timeline?: string;

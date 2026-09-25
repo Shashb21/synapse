@@ -119,7 +119,7 @@ export async function runAgenticCycle<C>(
     if (!canPrompt(ctx.route)) {
       throw new NoRouteError(
         ctx.route.reason ??
-          "No LLM provider is connected. Log in at /control (Grok, Claude, or another provider) before running this stage.",
+          "No LLM provider is connected. Log in at /admin/control (Grok, Claude, or another provider) before running this stage.",
       );
     }
     if (!cycle.proposer.llm) {
