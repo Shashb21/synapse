@@ -244,6 +244,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
+    // Walkthrough progress, one row per person in each workspace.
+    "CREATE TABLE IF NOT EXISTS walkthrough_progress (principal text PRIMARY KEY, step integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'active', updated_at text NOT NULL)",
   ];
 }
 

@@ -560,13 +560,14 @@ export async function POST(request: Request) {
         if (!context || typeof context !== "object") {
           return NextResponse.json({ error: "context is required" }, { status: 400 });
         }
-        await saveProductSetup({
+        // The wizard posts JSON booleans; older callers sent the string "true".
+        const saved = await saveProductSetup({
           context: context as never,
           actor_name,
           actor_function,
-          mark_complete: body.mark_complete === "true",
+          mark_complete: String(body.mark_complete) === "true",
         });
-        break;
+        return NextResponse.json({ ok: true, context: saved });
       }
       case "unlock_tactics":
         await unlockTacticsStage({

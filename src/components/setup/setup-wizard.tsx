@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Brain,
   ChartGantt,
@@ -13,375 +13,291 @@ import {
   Inbox,
   Lightbulb,
   Loader2,
+  Rocket,
   ShieldCheck,
-  SlidersHorizontal,
   Split,
   Upload,
-  Workflow,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { PlanningContext } from "@/lib/iegp/planning-context";
+import {
+  parsePlanningContext,
+  SETUP_SECTIONS,
+  setupIssues,
+  type PlanningContext,
+  type SetupSection,
+} from "@/lib/iegp/planning-context";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { RestartWalkthroughButton } from "@/components/walkthrough/restart-walkthrough-button";
+import { TOUR_STEPS } from "@/components/walkthrough/tour-steps";
+import { updateWalkthrough } from "@/components/walkthrough/walkthrough-client";
+import {
+  AssetStep,
+  CompanyStep,
+  LandscapeStep,
+  ObjectivesStep,
+  SettingsStep,
+  SetupSummary,
+  StakeholdersStep,
+  type StepProps,
+} from "./setup-steps";
 
-const STEPS = ["Asset context", "Your journey", "Connect models", "Ready"] as const;
-/** With AI off there are no models to connect; step three explains the manual path instead. */
-const MANUAL_STEPS = ["Asset context", "Your journey", "Work by hand", "Ready"] as const;
+type StepId = "welcome" | SetupSection | "models" | "review";
+type Step = { id: StepId; label: string };
+
+const SECTION_VIEWS: Record<SetupSection, (props: StepProps) => ReactNode> = {
+  asset: AssetStep,
+  company: CompanyStep,
+  objectives: ObjectivesStep,
+  landscape: LandscapeStep,
+  stakeholders: StakeholdersStep,
+  settings: SettingsStep,
+};
+
+const isSection = (id: StepId): id is SetupSection => SETUP_SECTIONS.some((section) => section.id === id);
+
+/** The steps, in order. A brand-new workspace opens on a welcome step. */
+export function wizardSteps(opts: { ai: boolean; isNew: boolean }): Step[] {
+  return [
+    ...(opts.isNew ? [{ id: "welcome" as const, label: "Welcome" }] : []),
+    ...SETUP_SECTIONS.map((section) => ({ id: section.id, label: section.label })),
+    opts.ai ? { id: "models" as const, label: "Connect models" } : { id: "models" as const, label: "Work by hand" },
+    { id: "review" as const, label: "Review & finish" },
+  ];
+}
 
 const JOURNEY = [
-  {
-    stage: "S0–S1",
-    title: "Upload & parse",
-    detail: "Bring stakeholder interviews and plans in; parse into structured blocks.",
-    icon: Upload,
-    tone: "var(--chart-1)",
-  },
-  {
-    stage: "S2–S3",
-    title: "Gaps & tactics",
-    detail: "Agentic extraction proposes evidence gaps and candidate tactics with full trace.",
-    icon: Inbox,
-    tone: "var(--chart-2)",
-  },
-  {
-    stage: "S4",
-    title: "Mapping table",
-    detail: "LLM proposes one row per gap (tactics + status); you accept or edit with rationale.",
-    icon: Grid2x2,
-    tone: "var(--chart-3)",
-  },
-  {
-    stage: "S5–S6",
-    title: "Validate & split",
-    detail: "Human gates on Gaps: validate status, resolve partials with explicit splits.",
-    icon: ShieldCheck,
-    tone: "var(--chart-4)",
-  },
-  {
-    stage: "S8",
-    title: "Prioritize",
-    detail: "Matrix placement uses your asset context, launch timeline, and competitive pressure.",
-    icon: Split,
-    tone: "var(--chart-5)",
-  },
-  {
-    stage: "S9–S10",
-    title: "Ideate & Gantt",
-    detail: "Propose tactics for open gaps, then lock the interactive IEGP timeline.",
-    icon: ChartGantt,
-    tone: "var(--known)",
-  },
-  {
-    stage: "Control",
-    title: "OAuth routing",
-    detail: "Log in with Grok (default) or Claude (one-click). Per-stage model routing.",
-    icon: SlidersHorizontal,
-    tone: "var(--chart-1)",
-  },
+  { title: "Gaps", detail: "Evidence gaps extracted from your sources, with mapped tactics and computed status.", icon: Inbox },
+  { title: "Tactics & mapping", detail: "Which studies answer which gaps, and how well.", icon: Grid2x2 },
+  { title: "Validate & split", detail: "Human gates: validate status, resolve partial gaps.", icon: ShieldCheck },
+  { title: "Prioritize", detail: "Rank Open gaps per treatment setting, using the context you enter here.", icon: Split },
+  { title: "Ideate & timeline", detail: "Propose tactics for open gaps, then date them against your key decisions.", icon: ChartGantt },
 ] as const;
 
-/** The same journey while AI is off: no upload or parsing, every step entered by hand. */
 const MANUAL_JOURNEY = [
-  {
-    stage: "Gaps",
-    title: "Add gaps",
-    detail: "Enter each evidence gap and its needs by hand. There is no upload or parsing while AI is off.",
-    icon: Inbox,
-    tone: "var(--chart-2)",
-  },
-  {
-    stage: "Tactics",
-    title: "Add tactics",
-    detail: "Enter the studies and activities that already exist in your tactic library.",
-    icon: Lightbulb,
-    tone: "var(--chart-1)",
-  },
-  {
-    stage: "S4",
-    title: "Mapping table",
-    detail: "Record which tactics cover each gap, with a rationale.",
-    icon: Grid2x2,
-    tone: "var(--chart-3)",
-  },
-  {
-    stage: "S5–S6",
-    title: "Validate & split",
-    detail: "Validate status on Gaps and split partial gaps by hand.",
-    icon: ShieldCheck,
-    tone: "var(--chart-4)",
-  },
-  {
-    stage: "S8",
-    title: "Prioritize",
-    detail: "Place each gap on the matrix yourself and confirm its band.",
-    icon: Split,
-    tone: "var(--chart-5)",
-  },
-  {
-    stage: "S9–S10",
-    title: "Ideate & Gantt",
-    detail: "Add proposed tactics for open gaps, then add and move timeline activities.",
-    icon: ChartGantt,
-    tone: "var(--known)",
-  },
+  { title: "Add gaps", detail: "Enter each evidence gap by hand. There is no upload or parsing while AI is off.", icon: Inbox },
+  { title: "Add tactics", detail: "Enter the studies and activities in your tactic library, and map them to gaps.", icon: Lightbulb },
+  { title: "Validate & split", detail: "Validate status on Gaps and split partial gaps by hand.", icon: ShieldCheck },
+  { title: "Prioritize", detail: "Place each gap on the matrix yourself, setting by setting.", icon: Split },
+  { title: "Ideate & timeline", detail: "Add proposed tactics for open gaps, then place timeline activities.", icon: ChartGantt },
 ] as const;
+
+function issuesBySection(ctx: PlanningContext) {
+  const bySection: Partial<Record<SetupSection, string[]>> = {};
+  const byField: Record<string, string> = {};
+  for (const issue of setupIssues(ctx)) {
+    (bySection[issue.section] ??= []).push(issue.message);
+    byField[issue.field] ??= issue.message;
+  }
+  return { bySection, byField };
+}
 
 export function SetupWizard({
   initial,
   actorName,
   actorFunction,
   setupComplete,
+  isNew = false,
+  workspaceName,
 }: {
   initial: PlanningContext;
   actorName: string;
   actorFunction: string;
   setupComplete: boolean;
+  /** Just created this workspace (/setup?new=1): open on the welcome step. */
+  isNew?: boolean;
+  workspaceName?: string;
 }) {
   const router = useRouter();
   const ai = useAiEnabled();
-  const steps = ai ? STEPS : MANUAL_STEPS;
-  const journey = ai ? JOURNEY : MANUAL_JOURNEY;
-  const [step, setStep] = useState(setupComplete ? 3 : 0);
+  const steps = useMemo(() => wizardSteps({ ai, isNew }), [ai, isNew]);
+  const [form, setForm] = useState<PlanningContext>(initial);
+  const [complete, setComplete] = useState(setupComplete);
+  const [index, setIndex] = useState(() => {
+    if (setupComplete) return steps.length - 1;
+    if (isNew) return 0;
+    if (!initial.saved_at) return 0;
+    // Resume a draft at its first section with something missing.
+    const { bySection } = issuesBySection(parsePlanningContext(initial));
+    const firstOpen = steps.findIndex((step) => isSection(step.id) && bySection[step.id]?.length);
+    return firstOpen >= 0 ? firstOpen : steps.length - 1;
+  });
+  const [attempted, setAttempted] = useState<Set<StepId>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<PlanningContext>(initial);
+  const [savedAt, setSavedAt] = useState<string | null>(initial.saved_at || null);
 
-  const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step, steps.length]);
+  const step = steps[Math.min(index, steps.length - 1)]!;
+  const parsed = useMemo(() => parsePlanningContext(form), [form]);
+  const { bySection, byField } = useMemo(() => issuesBySection(parsed), [parsed]);
+  const progress = ((index + 1) / steps.length) * 100;
 
-  async function save(markComplete: boolean) {
+  const set: StepProps["set"] = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  async function save(markComplete: boolean): Promise<boolean> {
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "save_product_setup",
-        actor_name: actorName,
-        actor_function: actorFunction,
-        mark_complete: markComplete,
-        context: form,
-      }),
-    });
-    const json = (await res.json()) as { error?: string };
-    setBusy(false);
-    if (!res.ok) {
-      setError(json.error ?? "Could not save setup");
+    try {
+      const res = await fetch("/api/iegp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save_product_setup",
+          actor_name: actorName,
+          actor_function: actorFunction,
+          mark_complete: markComplete,
+          context: form,
+        }),
+      });
+      const json = (await res.json()) as { error?: string; context?: PlanningContext };
+      if (!res.ok) {
+        setError(json.error ?? "Could not save setup");
+        return false;
+      }
+      // New objectives get their ids on save; keep them so the next save updates, not duplicates.
+      if (json.context) {
+        setForm(json.context);
+        setSavedAt(json.context.saved_at || new Date().toISOString());
+      }
+      if (markComplete) setComplete(true);
+      return true;
+    } catch {
+      setError("Could not reach the server. Your answers are still here; try again.");
       return false;
+    } finally {
+      setBusy(false);
     }
-    if (markComplete) router.push(ai ? "/pipeline" : "/?place=gaps");
-    else router.refresh();
-    return true;
   }
 
-  function field<K extends keyof PlanningContext>(key: K, value: PlanningContext[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  async function next() {
+    if (isSection(step.id)) {
+      setAttempted((prev) => new Set(prev).add(step.id));
+      if (bySection[step.id]?.length) return;
+      if (!(await save(false))) return;
+    }
+    setIndex((i) => Math.min(steps.length - 1, i + 1));
   }
+
+  async function finish(withTour: boolean) {
+    setAttempted(new Set(steps.map((s) => s.id)));
+    if (Object.keys(bySection).length > 0) {
+      setError("Some required answers are missing. Fix the sections marked below.");
+      return;
+    }
+    const firstTime = !complete;
+    if (!(await save(true))) return;
+    if (withTour) {
+      await updateWalkthrough("start", 0);
+      router.push(TOUR_STEPS[0]!.href);
+    } else if (firstTime) {
+      router.push(ai ? "/pipeline" : "/?place=gaps");
+    } else {
+      router.refresh();
+    }
+  }
+
+  const jump = (id: StepId) => {
+    const at = steps.findIndex((s) => s.id === id);
+    if (at >= 0) setIndex(at);
+  };
+  const errorsFor = (id: StepId) => (attempted.has(id) ? byField : {});
+  const journey = ai ? JOURNEY : MANUAL_JOURNEY;
+  const SectionView = isSection(step.id) ? SECTION_VIEWS[step.id] : null;
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-8">
+    <div className="mx-auto grid max-w-5xl gap-8" data-testid="setup-wizard">
       <header className="grid gap-3">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Synapse setup</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+          IEGP setup{workspaceName ? ` · ${workspaceName}` : ""}
+        </p>
         <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">
-          Build your Integrated Evidence Generation Plan
+          {form.asset_name ? `${form.asset_name} evidence plan` : "Set up this Integrated Evidence Generation Plan"}
         </h1>
         <p className="max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
           {ai
-            ? "A short questionnaire anchors prioritization to your asset. Then we walk the modular pipeline — upload through Gantt — and connect live models on the control panel."
-            : "A short questionnaire anchors prioritization to your asset. AI is off, so there is no upload: you start with Add gaps and Add tactics and do every step by hand."}
+            ? "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. Prioritization, ideation and the timeline use it throughout."
+            : "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. AI is off, so there is no upload: after setup you start with Add gaps and Add tactics and do every step by hand."}
         </p>
         <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full bg-[var(--chart-1)] transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-[var(--chart-1)] transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
-        <ol className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          {steps.map((label, index) => (
-            <li
-              key={label}
-              className={cn(
-                "rounded-full border px-2 py-0.5",
-                index === step
-                  ? "border-[var(--chart-1)]/50 text-foreground"
-                  : index < step
-                    ? "border-[var(--known)]/40 text-foreground"
-                    : "border-border",
-              )}
-            >
-              {index < step ? "✓ " : null}
-              {label}
-            </li>
-          ))}
+        <ol className="flex flex-wrap gap-2 text-[11px] text-muted-foreground" aria-label="Setup steps">
+          {steps.map((item, i) => {
+            const flagged = isSection(item.id) && attempted.has(item.id) && Boolean(bySection[item.id]?.length);
+            return (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  onClick={() => setIndex(i)}
+                  aria-current={i === index ? "step" : undefined}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5",
+                    i === index
+                      ? "border-[var(--chart-1)]/50 text-foreground"
+                      : flagged
+                        ? "border-destructive/60 text-destructive"
+                        : i < index
+                          ? "border-[var(--known)]/40 text-foreground"
+                          : "border-border",
+                  )}
+                >
+                  {i < index && !flagged ? "✓ " : null}
+                  {item.label}
+                </button>
+              </li>
+            );
+          })}
         </ol>
       </header>
 
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
-
-      {step === 0 ? (
-        <section className="grid gap-4 rounded-lg border border-border bg-gradient-to-br from-card/80 via-card/40 to-transparent p-5 md:grid-cols-2">
-          <div className="grid gap-3">
-            <h2 className="text-[15px] font-medium">Asset & indication</h2>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Asset / brand name
-              <Input
-                value={form.asset_name}
-                onChange={(e) => field("asset_name", e.target.value)}
-                placeholder="e.g. Velmara"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              INN / molecule
-              <Input
-                value={form.inn}
-                onChange={(e) => field("inn", e.target.value)}
-                placeholder="e.g. velmaratinib"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Indication
-              <Input
-                value={form.indication}
-                onChange={(e) => field("indication", e.target.value)}
-                placeholder="e.g. 2L EGFR-mutant NSCLC"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Geography
-              <Input
-                value={form.geography}
-                onChange={(e) => field("geography", e.target.value)}
-                placeholder="e.g. US + EU5"
-              />
-            </label>
-          </div>
-          <div className="grid gap-3">
-            <h2 className="text-[15px] font-medium">Company & launch context</h2>
-            <p className="text-[11px] text-muted-foreground">
-              Fed into S8 prioritization so suggested bands reflect your timeline and competitive story.
-            </p>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Lifecycle stage
-              <Input
-                value={form.lifecycle_stage}
-                onChange={(e) => field("lifecycle_stage", e.target.value)}
-                placeholder="peri-launch"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Launch timeline
-              <Input
-                value={form.launch_timeline}
-                onChange={(e) => field("launch_timeline", e.target.value)}
-                placeholder="US launch 2027-H1; EU5 staggered"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Competitor positioning
-              <Input
-                value={form.competitor_positioning}
-                onChange={(e) => field("competitor_positioning", e.target.value)}
-                placeholder="Differentiate vs SoC on CNS / elderly"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Key decision this plan supports
-              <Input
-                value={form.key_decision}
-                onChange={(e) => field("key_decision", e.target.value)}
-                placeholder="P&T / HTA filing"
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Decision date
-              <Input
-                type="date"
-                value={form.decision_date}
-                onChange={(e) => field("decision_date", e.target.value)}
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Strategic importance (1–5)
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={form.strategic_importance}
-                onChange={(e) => field("strategic_importance", Number(e.target.value))}
-              />
-            </label>
-            <label className="grid gap-1 text-[11px] text-muted-foreground">
-              Company situation (free text)
-              <textarea
-                className="min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-[13px]"
-                value={form.company_situation}
-                onChange={(e) => field("company_situation", e.target.value)}
-                placeholder="What leadership already knows about evidence risk..."
-              />
-            </label>
-          </div>
-        </section>
+      {error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {error}
+        </p>
       ) : null}
 
-      {step === 1 ? (
-        <section className="grid gap-4">
-          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <Workflow className="size-4" aria-hidden />
-            {ai
-              ? "Modular pipeline — each card is an independent stage with its own contract and trace."
-              : "AI is off — every step below is done by hand, in this order."}
+      {step.id === "welcome" ? (
+        <section data-testid="setup-step-welcome" className="grid gap-5 rounded-lg border border-[var(--chart-1)]/30 bg-[var(--chart-1)]/5 p-6">
+          <div className="flex items-start gap-3">
+            <Rocket className="mt-0.5 size-6 shrink-0 text-[var(--chart-1)]" aria-hidden />
+            <div className="grid gap-1">
+              <h2 className="text-lg font-medium">Welcome to your new workspace</h2>
+              <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
+                This workspace holds one Integrated Evidence Generation Plan. The next six short steps capture its context:
+                the asset, the company and plan, strategic objectives and key decisions, the evidence landscape, the people
+                involved and the treatment settings. Everything is saved to this workspace only; you can save and come back,
+                and edit it any time from Get started. Afterwards a short walkthrough shows you around.
+              </p>
+            </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {journey.map((item) => {
               const Icon = item.icon;
               return (
-                <article
-                  key={item.stage}
-                  className="group relative overflow-hidden border border-border bg-card/50 p-4 transition hover:border-[var(--chart-1)]/30"
-                >
-                  <div
-                    className="pointer-events-none absolute -right-6 -top-6 size-24 rounded-full opacity-20 blur-2xl"
-                    style={{ background: item.tone }}
-                  />
-                  <div className="flex items-start gap-3">
-                    <span
-                      className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background/80"
-                      style={{ color: item.tone }}
-                    >
-                      <Icon className="size-4" aria-hidden />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{item.stage}</p>
-                      <h3 className="text-[14px] font-medium text-foreground">{item.title}</h3>
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
-                    </div>
-                  </div>
+                <article key={item.title} className="grid content-start gap-1 border border-border bg-card/50 p-3">
+                  <Icon className="size-4 text-[var(--chart-1)]" aria-hidden />
+                  <h3 className="text-[13px] font-medium text-foreground">{item.title}</h3>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
                 </article>
               );
             })}
           </div>
-          <p className="flex items-center gap-2 text-[12px] text-muted-foreground">
-            <Lightbulb className="size-4 shrink-0" aria-hidden />
-            {ai
-              ? "Agentic stages run proposer → critic (×3) → judge. Every exchange is observable under Runs."
-              : "Every edit you make is recorded with its rationale and author."}
-          </p>
         </section>
       ) : null}
 
-      {step === 2 && !ai ? (
-        <section
-          className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]"
-          data-testid="setup-ai-off"
-        >
+      {SectionView ? <SectionView form={form} set={set} errors={errorsFor(step.id)} /> : null}
+
+      {step.id === "models" && !ai ? (
+        <section className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]" data-testid="setup-ai-off">
           <div className="grid gap-3">
             <h2 className="flex items-center gap-2 text-[15px] font-medium">
               <Hand className="size-4 text-[var(--chart-1)]" aria-hidden />
               AI is off — you work by hand
             </h2>
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              An admin has switched AI off in the control panel. No model is called and nothing is
-              uploaded or parsed. You enter gaps and tactics yourself; every later step has a manual form.
+              An admin has switched AI off in the control panel. No model is called and nothing is uploaded or parsed. You
+              enter gaps and tactics yourself; every later step has a manual form. The context you entered still guides
+              your own prioritization and the timeline&apos;s decision dates.
             </p>
             <div className="flex flex-wrap gap-2">
               <Link href="/?place=gaps" className={buttonVariants({ size: "sm" })}>
@@ -401,7 +317,7 @@ export function SetupWizard({
         </section>
       ) : null}
 
-      {step === 2 && ai ? (
+      {step.id === "models" && ai ? (
         <section className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]">
           <div className="grid gap-3">
             <h2 className="flex items-center gap-2 text-[15px] font-medium">
@@ -409,18 +325,11 @@ export function SetupWizard({
               Connect live models
             </h2>
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              Synapse uses OAuth only — no API keys. Built-in public clients start the login flow without
-              operator env vars. Default route is <strong className="font-medium text-foreground">Grok</strong>;
-              switch every stage to <strong className="font-medium text-foreground">Claude</strong> in one click.
+              Synapse uses OAuth only — no API keys. Default route is <strong className="font-medium text-foreground">Grok</strong>;
+              switch every stage to <strong className="font-medium text-foreground">Claude</strong> in one click. The
+              context from this wizard is sent with prioritization, ideation and timeline requests.
             </p>
-            <ul className="grid gap-2 text-[11px] text-muted-foreground">
-              <li>Agentic stages block until a provider is connected — no offline fake model.</li>
-              <li>Per-stage routing stays in the control panel; fallbacks are other live providers.</li>
-            </ul>
-            <Link
-              href="/control"
-              className="inline-flex w-fit items-center gap-1 text-[12px] text-[var(--chart-1)] no-underline hover:underline"
-            >
+            <Link href="/control" className="inline-flex w-fit items-center gap-1 text-[12px] text-[var(--chart-1)] no-underline hover:underline">
               Open control panel
               <ChevronRight className="size-3.5" aria-hidden />
             </Link>
@@ -429,69 +338,96 @@ export function SetupWizard({
             <p className="font-medium text-foreground">Quick checklist</p>
             <p>1. Log in with xAI · Grok (default)</p>
             <p>2. Optional: one-click Claude alternate</p>
-            <p>3. Upload demo sources on Pipeline or Upload</p>
+            <p className="flex items-center gap-1">
+              <Upload className="size-3" aria-hidden /> 3. Upload demo sources on Pipeline or Upload
+            </p>
           </aside>
         </section>
       ) : null}
 
-      {step === 3 ? (
-        <section className="grid gap-4 rounded-lg border border-[var(--known)]/30 bg-[var(--known)]/5 p-6 text-center">
-          <CheckCircle2 className="mx-auto size-10 text-[var(--known)]" aria-hidden />
-          <h2 className="text-lg font-medium">You are set up</h2>
-          <p className="mx-auto max-w-md text-[13px] text-muted-foreground">
-            {ai
-              ? "Asset context is saved for prioritization. Head to the pipeline to upload sources, or open Gaps after ingest."
-              : "Asset context is saved for prioritization. AI is off, so start by adding gaps and tactics by hand."}{" "}
-            Revisit this wizard anytime from <strong>Get started</strong> in the sidebar.
-          </p>
-          {ai ? (
-            <div className="flex flex-wrap justify-center gap-2">
-              <Link href="/pipeline" className={buttonVariants()}>
-                Open pipeline
-              </Link>
-              <Link href="/control" className={buttonVariants({ variant: "outline" })}>
-                Control panel
-              </Link>
+      {step.id === "review" ? (
+        <section className="grid gap-4" data-testid="setup-step-review">
+          <div
+            className={cn(
+              "grid gap-2 rounded-lg border p-5",
+              complete ? "border-[var(--known)]/30 bg-[var(--known)]/5" : "border-border bg-card/40",
+            )}
+          >
+            <h2 className="flex items-center gap-2 text-[15px] font-medium">
+              {complete ? <CheckCircle2 className="size-5 text-[var(--known)]" aria-hidden /> : null}
+              {complete ? "This plan is set up" : "Review and finish"}
+            </h2>
+            <p className="max-w-2xl text-[12px] leading-relaxed text-muted-foreground">
+              {complete
+                ? "The context below is saved for this workspace. Edit any section and save; the stages pick the changes up on their next run."
+                : "Check the context below, then finish. A short walkthrough of the main places follows."}{" "}
+              {ai
+                ? "Next, upload sources on the pipeline, or open Gaps after ingest."
+                : "AI is off, so next you add gaps and tactics by hand."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {ai ? (
+                <>
+                  <Link href="/pipeline" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                    Open pipeline
+                  </Link>
+                  <Link href="/control" className={buttonVariants({ size: "sm", variant: "ghost" })}>
+                    Control panel
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link href="/?place=gaps" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                    Add gaps
+                  </Link>
+                  <Link href="/tactics" className={buttonVariants({ size: "sm", variant: "ghost" })}>
+                    Add tactics
+                  </Link>
+                </>
+              )}
+              {complete ? <RestartWalkthroughButton variant="ghost" /> : null}
             </div>
-          ) : (
-            <div className="flex flex-wrap justify-center gap-2">
-              <Link href="/?place=gaps" className={buttonVariants()}>
-                Add gaps
-              </Link>
-              <Link href="/tactics" className={buttonVariants({ variant: "outline" })}>
-                Add tactics
-              </Link>
-            </div>
-          )}
+          </div>
+          <SetupSummary form={parsed} onEdit={jump} issues={attempted.has("review") ? bySection : {}} />
         </section>
       ) : null}
 
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={step === 0 || busy}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
-        >
-          Back
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="ghost" disabled={index === 0 || busy} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
+            Back
+          </Button>
+          <span className="text-[11px] text-muted-foreground" data-testid="setup-saved-at">
+            {savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}
+          </span>
+        </div>
         <div className="flex flex-wrap gap-2">
-          {step < 3 ? (
-            <Button
-              type="button"
-              disabled={busy}
-              onClick={async () => {
-                const ok = await save(false);
-                if (ok) setStep((s) => Math.min(3, s + 1));
-              }}
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              Save & continue
+          {step.id !== "welcome" ? (
+            <Button type="button" variant="outline" disabled={busy} onClick={() => void save(false)}>
+              Save &amp; continue later
             </Button>
+          ) : null}
+          {step.id === "review" ? (
+            complete ? (
+              <Button type="button" disabled={busy} onClick={() => void finish(false)}>
+                {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+                Save changes
+              </Button>
+            ) : (
+              <>
+                <Button type="button" variant="ghost" disabled={busy} onClick={() => void finish(false)}>
+                  Finish without tour
+                </Button>
+                <Button type="button" disabled={busy} onClick={() => void finish(true)}>
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Finish &amp; start walkthrough
+                </Button>
+              </>
+            )
           ) : (
-            <Button type="button" disabled={busy} onClick={() => void save(true)}>
+            <Button type="button" disabled={busy} onClick={() => void next()}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              Mark complete
+              {step.id === "welcome" ? "Get started" : "Continue"}
             </Button>
           )}
         </div>

@@ -20,6 +20,7 @@ import type {
   Tactic,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
+import { plannedSettings } from "./planning-context";
 
 /**
  * Test-stub support only. No production path ranks or assigns gap ↔ tactic
@@ -1361,9 +1362,17 @@ export function liveGapsMappedToTactic(
     .map((g) => ({ id: g.id, name: g.name }));
 }
 
-/** Every setting tag in use on live gaps, first spelling wins, sorted for pickers. */
-export function settingOptions(state: Pick<IegpState, "gaps">): string[] {
+/**
+ * Every setting tag in use on live gaps, plus the treatment settings named in
+ * setup (when the asset is given), first spelling wins, sorted for pickers.
+ */
+export function settingOptions(state: Pick<IegpState, "gaps"> & Partial<Pick<IegpState, "asset">>): string[] {
   const seen = new Map<string, string>();
+  if (state.asset) {
+    for (const tag of plannedSettings({ asset: state.asset })) {
+      if (!seen.has(tag.toLowerCase())) seen.set(tag.toLowerCase(), tag);
+    }
+  }
   for (const gap of state.gaps) {
     if (!isLiveGap(gap)) continue;
     for (const tag of gap.settings ?? []) {
