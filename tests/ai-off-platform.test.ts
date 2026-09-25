@@ -176,10 +176,13 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     expect(off).not.toContain("Connect models");
     expect(off).toContain('href="/?place=gaps"');
     expect(off).toContain('href="/tactics"');
-    expect(off).not.toContain("Open pipeline");
+    expect(off).not.toContain("Upload sources");
     expect(off).not.toContain("upload sources");
     const on = render(createElement(SetupWizard, props), true);
     expect(on).toContain("Connect models");
-    expect(on).toContain("Open pipeline");
+    expect(on).toContain("Upload sources");
+    // Customers never see owner-only links.
+    expect(on).not.toContain('href="/pipeline"');
+    expect(on).not.toContain('href="/control"');
   });
 });

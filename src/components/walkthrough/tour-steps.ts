@@ -91,10 +91,10 @@ export const TOUR_STEPS: TourStep[] = [
   {
     id: "room",
     place: "Room",
-    href: "/accuracy/workshop",
-    title: "Run the workshop in the Room",
-    ai: "Room is the facilitation surface for the live session with the client team: walk the gaps together and capture what the room decides. Switch back to Prep any time.",
-    manual: "Room is the facilitation surface for the live session with the client team. Everything is captured by hand while AI is off. Switch back to Prep any time.",
+    href: "/room",
+    title: "Present in the Room",
+    ai: "Room is a presenter view, like PowerPoint's: the real pages are your slides, with notes, a timer and an audience window for the projector. Edit live as the client team decides, and use Breakouts for small groups.",
+    manual: "Room is a presenter view, like PowerPoint's: the real pages are your slides, with notes, a timer and an audience window for the projector. Everything is captured by hand while AI is off.",
     targets: [{ selector: '[aria-label="Prep or Room mode"]' }, heading],
   },
 ];

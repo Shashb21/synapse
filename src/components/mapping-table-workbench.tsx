@@ -44,11 +44,11 @@ export function MappingTableWorkbench({
     }
     return (
       <section className="border border-border bg-card/40 p-4 text-[13px] text-muted-foreground">
-        Run gap and tactic extraction, then{" "}
-        <Link href="/pipeline" className="text-foreground underline-offset-2 hover:underline">
-          S4 mapping table
+        Upload and ingest sources on{" "}
+        <Link href="/sources" className="text-foreground underline-offset-2 hover:underline">
+          Sources
         </Link>{" "}
-        on the pipeline to populate rows.
+        to propose rows, or map each gap to its tactics by hand from the gap page.
       </section>
     );
   }

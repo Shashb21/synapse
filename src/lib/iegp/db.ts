@@ -10,13 +10,12 @@ const DEFAULT_URL =
 
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>;
-  pgBySchema?: Map<string, ReturnType<typeof postgres>>;
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
   sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
 };
 
-function connectOptions(searchPath?: string) {
+function connectOptions() {
   let host = "127.0.0.1";
   try {
     host = new URL(DEFAULT_URL.replace(/^postgres:\/\//, "http://")).hostname;
@@ -28,30 +27,16 @@ function connectOptions(searchPath?: string) {
     // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
     max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
     ssl: remote ? ("require" as const) : undefined,
-    // A workspace connection sees only its own schema: a table it lacks is an
-    // error, never a silent read of another workspace's rows.
-    ...(searchPath ? { connection: { search_path: `"${searchPath}"` } } : {}),
   };
 }
 
-/** The shared (public schema) connection: Default workspace + platform-wide tables. */
+/**
+ * The one connection pool, however many workspaces there are. Workspace
+ * queries borrow a connection and point it at their schema for that query.
+ */
 function client() {
   if (!globalForDb.pg) globalForDb.pg = postgres(DEFAULT_URL, connectOptions());
   return globalForDb.pg;
-}
-
-function schemaClient(schemaName: string) {
-  if (schemaName === DEFAULT_SCHEMA) return client();
-  globalForDb.pgBySchema ??= new Map();
-  let pg = globalForDb.pgBySchema.get(schemaName);
-  if (!pg) {
-    pg = postgres(DEFAULT_URL, connectOptions(schemaName));
-    // Drizzle installs its type parsers on the client it is given; mirror them.
-    Object.assign(pg.options.parsers, router.options.parsers);
-    Object.assign(pg.options.serializers, router.options.serializers);
-    globalForDb.pgBySchema.set(schemaName, pg);
-  }
-  return pg;
 }
 
 /** Registered by the workspaces module: workspace id → schema name. */
@@ -59,37 +44,73 @@ export function setWorkspaceSchemaLookup(lookup: (workspaceId: string) => Promis
   globalForDb.schemaLookup = lookup;
 }
 
-async function resolveClient() {
+async function resolveSchema(): Promise<string> {
   const name = await currentSchema(async (id) => {
     // The workspaces module registers the lookup when it loads; load it on first need.
     if (!globalForDb.schemaLookup) await import("@/modules/workspaces/store");
     return globalForDb.schemaLookup ? globalForDb.schemaLookup(id) : null;
   });
   if (name !== DEFAULT_SCHEMA) await ensureWorkspaceSchema(name);
-  return schemaClient(name);
+  return name;
+}
+
+function quoteSchema(name: string): string {
+  if (!/^ws_[a-z0-9_]+$/.test(name)) throw new Error(`Not a workspace schema: ${name}`);
+  return `"${name}"`;
+}
+
+/**
+ * Runs `fn` on a connection whose search path is only `name`, then resets the
+ * connection before it goes back to the pool. A workspace query therefore sees
+ * only its own schema: a table it lacks is an error, never another
+ * workspace's rows.
+ */
+async function onSchema<T>(name: string, fn: (pg: postgres.ReservedSql) => Promise<T>): Promise<T> {
+  const reserved = await client().reserve();
+  try {
+    await reserved.unsafe(`set search_path to ${quoteSchema(name)}`);
+    return await fn(reserved);
+  } finally {
+    await reserved.unsafe("reset search_path").catch(() => undefined);
+    reserved.release();
+  }
 }
 
 type PendingLike = PromiseLike<unknown> & { values(): Promise<unknown> };
 
 /**
  * A postgres-js stand-in that Drizzle drives exactly like the real client: each
- * query picks the current workspace's connection when it runs.
+ * query runs in the current workspace's schema when it executes.
  */
 const router = {
   options: { parsers: {} as Record<string, unknown>, serializers: {} as Record<string, unknown> },
   unsafe(query: string, params?: unknown[]): PendingLike {
-    const run = (values: boolean) =>
-      resolveClient().then((pg) => {
+    const run = async (values: boolean) => {
+      // Drizzle installed its type parsers on this stand-in; the real pool needs them too.
+      Object.assign(client().options.parsers, router.options.parsers);
+      Object.assign(client().options.serializers, router.options.serializers);
+      const name = await resolveSchema();
+      if (name === DEFAULT_SCHEMA) {
+        const pending = client().unsafe(query, params as never);
+        return values ? pending.values() : pending;
+      }
+      return onSchema(name, async (pg) => {
         const pending = pg.unsafe(query, params as never);
         return values ? pending.values() : pending;
       });
+    };
     return {
       then: (onFulfilled, onRejected) => run(false).then(onFulfilled, onRejected),
       values: () => run(true),
     };
   },
-  begin(fn: (tx: unknown) => unknown) {
-    return resolveClient().then((pg) => pg.begin(fn as never));
+  async begin(fn: (tx: postgres.TransactionSql) => unknown) {
+    const name = await resolveSchema();
+    return client().begin(async (tx) => {
+      // SET LOCAL ends with the transaction, so the connection comes back clean.
+      if (name !== DEFAULT_SCHEMA) await tx.unsafe(`set local search_path to ${quoteSchema(name)}`);
+      return fn(tx);
+    });
   },
 };
 
@@ -277,11 +298,12 @@ export async function ensureWorkspaceSchema(name: string): Promise<void> {
   if (!ready) {
     ready = (async () => {
       await client().unsafe(`CREATE SCHEMA IF NOT EXISTS "${name}"`);
-      const pg = schemaClient(name);
-      const run: RunStatement = (statement) => pg.unsafe(statement);
-      await run("set client_min_messages to warning");
-      for (const stmt of iegpStatements()) await run(stmt);
-      for (const hook of bootstrapHooks) await hook(run);
+      await onSchema(name, async (pg) => {
+        const run: RunStatement = (statement) => pg.unsafe(statement);
+        await run("set client_min_messages to warning");
+        for (const stmt of iegpStatements()) await run(stmt);
+        for (const hook of bootstrapHooks) await hook(run);
+      });
     })();
     bootstrapped.set(name, ready);
     ready.catch(() => bootstrapped.delete(name));

@@ -7,7 +7,6 @@ import {
   Brain,
   ChartGantt,
   CheckCircle2,
-  ChevronRight,
   Grid2x2,
   Hand,
   Inbox,
@@ -190,7 +189,7 @@ export function SetupWizard({
       await updateWalkthrough("start", 0);
       router.push(TOUR_STEPS[0]!.href);
     } else if (firstTime) {
-      router.push(ai ? "/pipeline" : "/?place=gaps");
+      router.push(ai ? "/sources" : "/?place=gaps");
     } else {
       router.refresh();
     }
@@ -325,14 +324,9 @@ export function SetupWizard({
               Connect live models
             </h2>
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              Synapse uses OAuth only — no API keys. Default route is <strong className="font-medium text-foreground">Grok</strong>;
-              switch every stage to <strong className="font-medium text-foreground">Claude</strong> in one click. The
-              context from this wizard is sent with prioritization, ideation and timeline requests.
+              Models are connected and routed by your Synapse administrator, so there is nothing to set up here.
+              The context from this wizard is sent with prioritization, ideation and timeline requests.
             </p>
-            <Link href="/control" className="inline-flex w-fit items-center gap-1 text-[12px] text-[var(--chart-1)] no-underline hover:underline">
-              Open control panel
-              <ChevronRight className="size-3.5" aria-hidden />
-            </Link>
           </div>
           <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
             <p className="font-medium text-foreground">Quick checklist</p>
@@ -362,17 +356,17 @@ export function SetupWizard({
                 ? "The context below is saved for this workspace. Edit any section and save; the stages pick the changes up on their next run."
                 : "Check the context below, then finish. A short walkthrough of the main places follows."}{" "}
               {ai
-                ? "Next, upload sources on the pipeline, or open Gaps after ingest."
+                ? "Next, upload sources, or open Gaps after ingest."
                 : "AI is off, so next you add gaps and tactics by hand."}
             </p>
             <div className="flex flex-wrap gap-2">
               {ai ? (
                 <>
-                  <Link href="/pipeline" className={buttonVariants({ size: "sm", variant: "outline" })}>
-                    Open pipeline
+                  <Link href="/sources" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                    Upload sources
                   </Link>
-                  <Link href="/control" className={buttonVariants({ size: "sm", variant: "ghost" })}>
-                    Control panel
+                  <Link href="/?place=gaps" className={buttonVariants({ size: "sm", variant: "ghost" })}>
+                    Open Gaps
                   </Link>
                 </>
               ) : (
