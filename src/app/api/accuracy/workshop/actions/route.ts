@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -24,6 +25,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = bodySchema.parse(await request.json());
     const snapshot = await applyWorkshopAction({

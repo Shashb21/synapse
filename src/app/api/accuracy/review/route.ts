@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -22,6 +23,8 @@ registerAccuracyStack();
  * With the admin AI switch off the audit never runs: 409 { code: "ai_off" }.
  */
 export async function GET(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const url = new URL(req.url);
     const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
@@ -88,6 +91,8 @@ const postSchema = z.object({
  * POST /api/accuracy/review — promote a miss flag to a draft claim, or dismiss with rationale.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = postSchema.parse(await req.json());
     const org_id = await getWorkspaceOrgId(body.workspace_id);

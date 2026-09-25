@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fillNameIfAsked } from "../support/session";
 import {
   firstOpenGap,
   planAction,
@@ -139,7 +140,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await page.getByRole("button", { name: /save as final/i }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByPlaceholder(/why this decision/i).fill("Signed off for the feature spec");
-    await dialog.getByRole("textbox", { name: /^name$/i }).fill("A. Rao");
+    await fillNameIfAsked(dialog, "A. Rao");
     await dialog.getByRole("button", { name: /^save$/i }).click();
     await expect(dialog).toBeHidden();
 

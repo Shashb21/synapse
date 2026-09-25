@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -126,6 +127,8 @@ async function persistProposal(args: {
  *   With the admin AI switch off the live path answers 409 { code: "ai_off" }.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = bodySchema.parse(await req.json());
     const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });

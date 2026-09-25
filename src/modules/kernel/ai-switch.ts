@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "./db";
+import { sharedDb } from "./db";
 import { nowIso } from "./ids";
 
 /**
@@ -16,6 +16,13 @@ export const PLATFORM_SETTINGS_DDL = `CREATE TABLE IF NOT EXISTS platform_settin
 )`;
 
 const AI_KEY = "ai_enabled";
+
+let settingsReady: Promise<unknown> | null = null;
+/** Platform settings are shared by every workspace, so they live in the public schema. */
+function ensureSettingsTable() {
+  settingsReady ??= sharedDb().execute(sql.raw(PLATFORM_SETTINGS_DDL));
+  return settingsReady;
+}
 
 export const AI_OFF_MESSAGE =
   "AI is turned off in the control panel. Do this step by hand, or ask an admin to turn AI on.";
@@ -38,8 +45,8 @@ export type AiSwitch = {
 type StoredValue = { enabled: boolean; rationale?: string };
 
 export async function aiSwitch(): Promise<AiSwitch> {
-  await ensurePlatformSchema([PLATFORM_SETTINGS_DDL]);
-  const rows = (await db().execute(
+  await ensureSettingsTable();
+  const rows = (await sharedDb().execute(
     sql`select value, updated_by, updated_at from platform_settings where key = ${AI_KEY} limit 1`,
   )) as unknown as { value: StoredValue; updated_by: string; updated_at: string }[];
   const row = rows[0];
@@ -69,10 +76,10 @@ export async function setAiEnabled(args: {
   rationale?: string;
 }): Promise<AiSwitch> {
   const rationale = args.rationale?.trim() || undefined;
-  await ensurePlatformSchema([PLATFORM_SETTINGS_DDL]);
+  await ensureSettingsTable();
   const value = JSON.stringify({ enabled: args.enabled, rationale } satisfies StoredValue);
   const at = nowIso();
-  await db().execute(
+  await sharedDb().execute(
     sql`insert into platform_settings (key, value, updated_by, updated_at)
         values (${AI_KEY}, ${value}::jsonb, ${args.actor_name}, ${at})
         on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,

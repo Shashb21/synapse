@@ -1,14 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
 import { ROLE_LABELS, isRole, roleForFunction, type Role } from "./roles";
-import { configuredIdentityProviders, demoMode, identityProvider } from "./idp";
+import { configuredIdentityProviders, demoMode, demoSignInAllowed, identityProvider } from "./idp";
 
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
@@ -56,7 +56,7 @@ export async function createSession(args: {
   const id = base64Url(randomBytes(24));
   const created_at = nowIso();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-  await db().insert(t.authSessions).values({
+  await sharedDb().insert(t.authSessions).values({
     id,
     provider_id: args.provider_id,
     subject: args.subject,
@@ -92,11 +92,11 @@ export async function currentSession(): Promise<Session | null> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
+  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
   if (Date.parse(row.expires_at) < Date.now()) {
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
     return null;
   }
   return {
@@ -116,7 +116,7 @@ export async function signOut() {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
     await ensurePlatformSchema();
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
   }
   jar.delete(SESSION_COOKIE);
 }
@@ -239,28 +239,40 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   });
 }
 
-/** Demo sign-in: no identity provider configured, so the typed name is the identity. */
+/** The address a demo user is known by, so workspace invites work in local preview. */
+export function demoEmail(actorName: string): string {
+  const slug = actorName.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+  return `${slug || "demo"}@demo.synapse.local`;
+}
+
+/**
+ * Demo sign-in for local preview and tests: the typed name is the identity.
+ * Never available in a production build, identity provider or not.
+ */
 export async function signInDemo(args: {
   actor_name: string;
   actor_function: ActorFunction;
   role?: Role;
+  email?: string | null;
 }): Promise<Session> {
-  if (!demoMode()) {
-    throw new Error("This deployment has an identity provider configured; use OAuth sign-in.");
+  if (!demoSignInAllowed()) {
+    throw new Error("Demo sign-in is not available in production. Sign in with your organisation's account.");
   }
+  const name = args.actor_name.trim();
+  if (!name) throw new Error("Enter a name to continue as a demo user.");
   return createSession({
     provider_id: "demo",
-    subject: `demo:${args.actor_name}`,
-    email: null,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    role: args.role ?? roleForFunction(args.actor_function),
+    subject: `demo:${name}`,
+    email: args.email?.trim().toLowerCase() || demoEmail(name),
+    actor_name: name,
+    actor_function: asFunction(args.actor_function),
+    role: args.role && isRole(args.role) ? args.role : roleForFunction(asFunction(args.actor_function)),
   });
 }
 
 export async function activeSessions(): Promise<Session[]> {
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions);
+  const rows = await sharedDb().select().from(t.authSessions);
   return rows
     .filter((row) => Date.parse(row.expires_at) > Date.now())
     .map((row) => ({
@@ -277,7 +289,8 @@ export async function activeSessions(): Promise<Session[]> {
 
 export function loginOptions() {
   return {
-    demo: demoMode(),
+    /** Offer "continue as a demo user": development and tests only, never production. */
+    demo: demoSignInAllowed(),
     providers: configuredIdentityProviders().map((provider) => ({
       id: provider.id,
       label: provider.label,
@@ -287,7 +300,7 @@ export function loginOptions() {
 
 export async function sessionsForSubject(subject: string) {
   await ensurePlatformSchema();
-  return db()
+  return sharedDb()
     .select()
     .from(t.authSessions)
     .where(and(eq(t.authSessions.subject, subject)));

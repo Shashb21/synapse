@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AiStatusProvider } from "@/components/platform/ai-status";
+import { WalkthroughHost } from "@/components/walkthrough/walkthrough-host";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import "./globals.css";
 
@@ -46,6 +47,7 @@ export default async function RootLayout({
             </p>
           )}
           <TooltipProvider>{children}</TooltipProvider>
+          <WalkthroughHost />
         </AiStatusProvider>
       </body>
     </html>

@@ -4,8 +4,9 @@ import * as t from "./schema";
 import { buildBlankWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
-import type { PlanningContext } from "./planning-context";
-import { parsePlanningContext } from "./planning-context";
+import type { PlanningContext, SetupObjective } from "./planning-context";
+import { parsePlanningContext, setupIssues } from "./planning-context";
+import { newId, nowIso } from "@/modules/kernel/ids";
 import type { IegpState, Lock, GapStatusOverride } from "./types";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
@@ -2971,6 +2972,13 @@ export async function modifyTactic(args: {
   return changes;
 }
 
+/**
+ * Saves the setup wizard's IEGP context for the current workspace. The asset
+ * row and the objectives table mirror what the stages read directly; the whole
+ * context is kept in `assets.planning_context`. A draft (Save & continue later)
+ * only refuses malformed values; `mark_complete` needs every required field.
+ * Once setup is complete, later edits keep it complete.
+ */
 export async function saveProductSetup(args: {
   context: PlanningContext;
   actor_name: string;
@@ -2979,30 +2987,23 @@ export async function saveProductSetup(args: {
 }) {
   const state = await loadState();
   const ctx = parsePlanningContext(args.context);
+  const issues = setupIssues(ctx, { required: Boolean(args.mark_complete) });
+  if (issues.length > 0) throw new Error(issues[0]!.message);
+
+  const objectives = await syncSetupObjectives(state, ctx);
+  const saved: PlanningContext = parsePlanningContext({ ...ctx, objectives, saved_at: nowIso() });
+  const complete = Boolean(args.mark_complete) || state.asset.setup_complete;
   await db()
     .update(t.assets)
     .set({
-      name: ctx.asset_name || state.asset.name,
-      inn: ctx.inn || state.asset.inn,
-      indication: ctx.indication || state.asset.indication,
-      geography: ctx.geography || state.asset.geography,
-      planning_context: ctx,
-      setup_complete: args.mark_complete ?? false,
+      name: saved.asset_name || state.asset.name,
+      inn: saved.inn || state.asset.inn,
+      indication: saved.indication || state.asset.indication,
+      geography: saved.geography || state.asset.geography,
+      planning_context: saved,
+      setup_complete: complete,
     })
     .where(eq(t.assets.id, state.asset.id));
-  if (state.objectives[0]) {
-    await db()
-      .update(t.objectives)
-      .set({
-        indication: ctx.indication || state.objectives[0].indication,
-        geography: ctx.geography || state.objectives[0].geography,
-        lifecycle_stage: ctx.lifecycle_stage || state.objectives[0].lifecycle_stage,
-        strategic_importance: ctx.strategic_importance,
-        key_decision: ctx.key_decision || state.objectives[0].key_decision,
-        decision_date: ctx.decision_date || state.objectives[0].decision_date,
-      })
-      .where(eq(t.objectives.id, state.objectives[0].id));
-  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -3010,9 +3011,56 @@ export async function saveProductSetup(args: {
     state.asset.id,
     args.mark_complete ? "complete_setup" : "save_setup",
     args.mark_complete
-      ? "Product setup wizard complete."
-      : "Saved asset and planning context from setup wizard.",
+      ? "Setup wizard complete: IEGP context saved."
+      : "Saved IEGP context from the setup wizard.",
   );
+  return saved;
+}
+
+/**
+ * Makes the objectives table match the wizard's list: rows are updated by id,
+ * new ones inserted, and ones removed from the list deleted, unless a gap or
+ * need still points at them. An empty list leaves the table alone (a draft
+ * saved before objectives were entered must not wipe them).
+ */
+async function syncSetupObjectives(state: IegpState, ctx: PlanningContext): Promise<SetupObjective[]> {
+  const listed = ctx.objectives.filter((objective) => objective.name);
+  if (listed.length === 0) return ctx.objectives;
+  const existing = new Map(state.objectives.map((objective) => [objective.id, objective]));
+  const out: SetupObjective[] = [];
+  for (const objective of listed) {
+    const row = {
+      name: objective.name,
+      description: objective.description,
+      lifecycle_stage: ctx.lifecycle_stage || existing.get(objective.id)?.lifecycle_stage || "",
+      indication: ctx.indication || state.asset.indication,
+      geography: ctx.geography || state.asset.geography,
+      strategic_importance: objective.strategic_importance,
+      key_decision: objective.key_decision,
+      decision_date: objective.decision_date,
+      owner: objective.owner,
+    };
+    if (objective.id && existing.has(objective.id)) {
+      await db().update(t.objectives).set(row).where(eq(t.objectives.id, objective.id));
+      out.push(objective);
+    } else {
+      const id = newId("OBJ");
+      await db().insert(t.objectives).values({ id, ...row });
+      out.push({ ...objective, id });
+    }
+  }
+  const kept = new Set(out.map((objective) => objective.id));
+  for (const objective of state.objectives) {
+    if (kept.has(objective.id)) continue;
+    const inUse =
+      state.gaps.some((gap) => gap.objective_id === objective.id) ||
+      state.needs.some((need) => need.objective_id === objective.id);
+    if (inUse) {
+      throw new Error(`“${objective.name}” is linked to gaps or needs in this plan. Keep it in the list, or move those first.`);
+    }
+    await db().delete(t.objectives).where(eq(t.objectives.id, objective.id));
+  }
+  return out;
 }
 
 export async function completeWizard(args: {

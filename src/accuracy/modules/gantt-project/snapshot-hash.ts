@@ -84,7 +84,7 @@ export function auditBundleHref(args: {
     plan_id: args.plan_id,
     snapshot_hash: args.snapshot_hash,
   });
-  return `/accuracy/audit?${query.toString()}`;
+  return `/admin/accuracy/audit?${query.toString()}`;
 }
 
 export function auditBundleForPlan(args: {

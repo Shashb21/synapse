@@ -1,4 +1,8 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { PRESENT_HEADER } from "@/modules/auth/gate";
 import { PlanChrome, type PlanNavModel, type ShellId } from "@/components/plan-chrome";
+import { loadWorkspaceTag } from "@/components/workspaces/workspace-tag-data";
 import { loadState } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
@@ -28,6 +32,11 @@ export async function AppShell({
   children: React.ReactNode;
   active: ShellId;
 }) {
+  // The proxy only checks that the cookies exist; this is the real check.
+  const workspace = await loadWorkspaceTag();
+  if (workspace.state === "signed_out") redirect("/login");
+  if (workspace.state === "no_workspace") redirect("/workspaces");
+  const present = (await headers()).get(PRESENT_HEADER) === "1";
   let nav = EMPTY_NAV;
   try {
     const state = await loadState();
@@ -49,7 +58,7 @@ export async function AppShell({
     // Setup and other shells must render before Postgres is configured.
   }
   return (
-    <PlanChrome active={active} nav={nav}>
+    <PlanChrome active={active} nav={nav} workspace={workspace.state === "ready" ? workspace.tag : null} present={present}>
       {children}
     </PlanChrome>
   );

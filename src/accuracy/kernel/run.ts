@@ -148,7 +148,7 @@ export async function runAccuracyModule<O = unknown>(args: {
           throw new Error(
             isTestStub()
               ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
-              : "LLM not available — connect Grok or Claude in /control",
+              : "LLM not available — connect Grok or Claude in /admin/control",
           );
         },
     noteCost: (cost) => {

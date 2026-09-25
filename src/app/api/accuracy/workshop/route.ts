@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -23,6 +24,8 @@ function actorFrom(body: { actor_name?: string; actor_function?: string }) {
 }
 
 export async function GET(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const workspace_id = searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id) {
@@ -55,6 +58,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = createSchema.parse(await request.json());
     const org_id = await getWorkspaceOrgId(body.workspace_id);
@@ -82,6 +87,8 @@ const sceneSchema = z.object({
 });
 
 export async function PATCH(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = sceneSchema.parse(await request.json());
     const snapshot = await setWorkshopScene(body);

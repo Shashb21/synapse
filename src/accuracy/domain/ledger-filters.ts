@@ -296,7 +296,7 @@ export function ledgerHref(workspaceId: string, filters: LedgerFilterQuery = {})
   params.set("workspace_id", workspaceId);
   if (filters.chapter) params.set("chapter", filters.chapter);
   if (filters.si) params.set("si", filters.si);
-  return `/accuracy/ledger?${params.toString()}`;
+  return `/admin/accuracy/ledger?${params.toString()}`;
 }
 
 export function parseLedgerFilters(search: {

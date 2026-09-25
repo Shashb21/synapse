@@ -108,7 +108,7 @@ export function MissFlagInbox({
       <p className="text-[12px] text-muted-foreground">
         Inbox clear — every auditable parse block is cited, overlaps a claim, or was resolved.{" "}
         <Link
-          href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+          href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
           className="text-foreground underline-offset-2 hover:underline"
         >
           Open Ledger
@@ -248,7 +248,7 @@ export function MissFlagInbox({
             {pending === "dismiss" ? "Dismissing…" : "Dismiss"}
           </Button>
           <Link
-            href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+            href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
             className="inline-flex h-8 items-center px-2 text-[12px] text-muted-foreground underline-offset-2 hover:underline"
           >
             Ledger

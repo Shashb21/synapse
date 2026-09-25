@@ -88,3 +88,11 @@ export function configuredIdentityProviders(): IdentityProvider[] {
 export function demoMode(): boolean {
   return configuredIdentityProviders().length === 0;
 }
+
+/**
+ * The "continue as a demo user" sign-in exists for local preview and tests
+ * only. It is never offered, and never accepted, in a production build.
+ */
+export function demoSignInAllowed(): boolean {
+  return process.env.NODE_ENV !== "production";
+}

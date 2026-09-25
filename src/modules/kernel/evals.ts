@@ -1,5 +1,5 @@
 import { desc, eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "./db";
+import { ensurePlatformSchema, sharedDb } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
 import type { EvalScore, StageId, SynapseModule } from "./contracts";
@@ -40,7 +40,7 @@ export async function recordEvalRun(args: {
     metrics: args.metrics,
     note: args.note ?? null,
   };
-  await db().insert(t.evalRuns).values({
+  await sharedDb().insert(t.evalRuns).values({
     id: record.id,
     at: record.at,
     stage: record.stage,
@@ -57,7 +57,7 @@ export async function recordEvalRun(args: {
 export async function listEvalRuns(args?: { stage?: StageId; limit?: number }): Promise<EvalRunRecord[]> {
   await ensurePlatformSchema();
   const limit = args?.limit ?? 50;
-  const query = db().select().from(t.evalRuns);
+  const query = sharedDb().select().from(t.evalRuns);
   const rows = args?.stage
     ? await query.where(eq(t.evalRuns.stage, args.stage)).orderBy(desc(t.evalRuns.at)).limit(limit)
     : await query.orderBy(desc(t.evalRuns.at)).limit(limit);

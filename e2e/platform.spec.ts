@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fillNameIfAsked } from "./support/session";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -24,7 +25,7 @@ test.describe("platform surfaces", () => {
   });
 
   test("pipeline page lists every stage with its module and route", async ({ page }) => {
-    await page.goto("/pipeline");
+    await page.goto("/admin/pipeline");
     await expect(page.getByRole("heading", { name: /^pipeline$/i })).toBeVisible();
     for (const heading of [
       "S0 · File upload",
@@ -44,18 +45,18 @@ test.describe("platform surfaces", () => {
     await runStage(page, "S0", { demo_ids: ["heor-interview", "medical-kol"] });
     await runStage(page, "S1");
 
-    await page.goto("/pipeline");
+    await page.goto("/admin/pipeline");
     await page.getByRole("button", { name: /^run s2$/i }).click();
     await expect(page.getByText(/gap candidate\(s\) accepted/i)).toBeVisible({ timeout: 30_000 });
 
-    await page.goto("/runs");
+    await page.goto("/admin/runs");
     await expect(page.getByRole("heading", { name: /^runs$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /S2 · s2-gap-extract\.pcj/ }).first()).toBeVisible();
 
     const listed = await page.request.get("/api/modules");
     const { runs } = (await listed.json()) as { runs: { id: string; stage: string; status: string }[] };
     const traced = runs.find((run) => run.stage === "S2" && run.status === "ok")!;
-    await page.goto(`/runs/${traced.id}`);
+    await page.goto(`/admin/runs/${traced.id}`);
     await expect(page.getByRole("heading", { name: /^steps$/i })).toBeVisible();
     for (const step of ["input:accepted", "round1:proposer", "judge"]) {
       await expect(page.getByRole("heading", { name: step, exact: true })).toBeVisible();
@@ -74,7 +75,7 @@ test.describe("platform surfaces", () => {
   });
 
   test("control panel offers OAuth login per provider with Grok as the default route", async ({ page }) => {
-    await page.goto("/control");
+    await page.goto("/admin/control");
     await expect(page.getByRole("heading", { name: /^control panel$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^xAI · Grok$/ })).toBeVisible();
     await expect(page.getByText("Default route", { exact: true })).toBeVisible();
@@ -102,7 +103,7 @@ test.describe("platform surfaces", () => {
 
     await page.getByRole("button", { name: /save as final/i }).click();
     await page.getByPlaceholder(/why this decision/i).fill("Signed off in the e2e review");
-    await page.getByRole("textbox", { name: /^name$/i }).fill("E2E Platform");
+    await fillNameIfAsked(page.getByRole("dialog"), "E2E Platform");
     await page.getByRole("button", { name: /^save$/i }).click();
 
     // No reload: the server component repaints with the new version.
@@ -132,7 +133,7 @@ test.describe("platform surfaces", () => {
     });
     expect(detail.ok()).toBeTruthy();
 
-    await page.goto("/runs");
+    await page.goto("/admin/runs");
     await expect(page.getByText(/Both source quotes check out/i).first()).toBeVisible();
   });
 });

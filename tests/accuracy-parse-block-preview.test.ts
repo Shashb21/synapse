@@ -246,7 +246,7 @@ describe("parse-block preview API", () => {
 describe("Sources UI preview wiring", () => {
   it("renders ParseBlockPreview with verbatim block text (no excerpt ellipsis)", () => {
     const page = readFileSync(
-      path.join(process.cwd(), "src/app/accuracy/sources/page.tsx"),
+      path.join(process.cwd(), "src/app/admin/accuracy/sources/page.tsx"),
       "utf8",
     );
     expect(page).toContain("ParseBlockPreview");

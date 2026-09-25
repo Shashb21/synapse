@@ -20,6 +20,7 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { createProposedTactic, loadState } from "@/lib/iegp/store";
+import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
@@ -126,7 +127,7 @@ Decide every candidate of every gap you are given.
 
 Return JSON only: {"gaps":[{"gap_id":"","decisions":[{"id":"","verdict":"accept","rank":1,"confidence":0,"reason":""}]}]}`;
 
-const REMEDY = "run ideation again or switch the S9 route in /control.";
+const REMEDY = "run ideation again or switch the S9 route in /admin/control.";
 
 /**
  * Test stub only. These fixed designs stand in for the model when
@@ -387,7 +388,7 @@ type PromptGap = IdeationGap & {
 
 async function askProposer(
   ctx: ModuleContext,
-  args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number },
+  args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
 ): Promise<Record<string, unknown>[]> {
   const payload = (await ctx.complete({
     system: IDEATION_SYSTEM,
@@ -395,6 +396,8 @@ async function askProposer(
       reviewer_corrections: args.hints || undefined,
       exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
       candidates_per_gap: args.perGap,
+      // The IEGP context from setup: asset, objectives, key decisions, landscape.
+      plan_context: args.plan,
       library: args.library,
       gaps: args.gaps,
     }),
@@ -435,6 +438,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   async run(input, ctx) {
     requireLlm(ctx, "Ideation");
     const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+    const planContext = prioritizationContextFromState(state);
     // Ideation is for high-priority open gaps, and only after a human validated the band.
     const highGapIds = new Set(
       placements
@@ -492,6 +496,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         remedy: REMEDY,
         ask: async (missing) => {
           const rows = await askProposer(ctx, {
+            plan: planContext,
             hints,
             perGap: input.per_gap,
             library,
@@ -542,6 +547,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         ask: async (missing) => {
           const targets = missing.map((id) => byId.get(id)!);
           const rows = await askProposer(ctx, {
+            plan: planContext,
             hints,
             perGap: input.per_gap,
             library,

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fillNameIfAsked } from "../support/session";
 import {
   consolidate,
   expectRouteIsHonest,
@@ -83,7 +84,7 @@ test.describe("S6 partial gap split", () => {
     await expect(dialog.getByText(/Proposed with confidence/)).toBeVisible({ timeout: 30_000 });
 
     // Accepting the suggestion as-is needs no rationale.
-    await dialog.getByRole("textbox", { name: /^name$/i }).fill("A. Rao");
+    await fillNameIfAsked(dialog, "A. Rao");
     await expect(dialog.getByText(/needs no rationale/i)).toBeVisible();
 
     // Editing the suggested title is a change: the gate now requires a rationale.

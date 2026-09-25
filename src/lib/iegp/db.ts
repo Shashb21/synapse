@@ -2,6 +2,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import * as schema from "./schema";
+import { currentSchema, DEFAULT_SCHEMA } from "@/modules/workspaces/context";
 
 const DEFAULT_URL =
   process.env.DATABASE_URL ??
@@ -10,31 +11,121 @@ const DEFAULT_URL =
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>;
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
+  sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
+  schemaLookup?: (workspaceId: string) => Promise<string | null>;
 };
 
-function client() {
-  if (!globalForDb.pg) {
-    let host = "127.0.0.1";
-    try {
-      host = new URL(DEFAULT_URL.replace(/^postgres:\/\//, "http://")).hostname;
-    } catch {
-      // keep localhost default
-    }
-    const remote = host !== "127.0.0.1" && host !== "localhost";
-    globalForDb.pg = postgres(DEFAULT_URL, {
-      // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
-      max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
-      ssl: remote ? "require" : undefined,
-    });
+function connectOptions() {
+  let host = "127.0.0.1";
+  try {
+    host = new URL(DEFAULT_URL.replace(/^postgres:\/\//, "http://")).hostname;
+  } catch {
+    // keep localhost default
   }
+  const remote = host !== "127.0.0.1" && host !== "localhost";
+  return {
+    // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
+    max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
+    ssl: remote ? ("require" as const) : undefined,
+  };
+}
+
+/**
+ * The one connection pool, however many workspaces there are. Workspace
+ * queries borrow a connection and point it at their schema for that query.
+ */
+function client() {
+  if (!globalForDb.pg) globalForDb.pg = postgres(DEFAULT_URL, connectOptions());
   return globalForDb.pg;
 }
 
+/** Registered by the workspaces module: workspace id → schema name. */
+export function setWorkspaceSchemaLookup(lookup: (workspaceId: string) => Promise<string | null>) {
+  globalForDb.schemaLookup = lookup;
+}
+
+async function resolveSchema(): Promise<string> {
+  const name = await currentSchema(async (id) => {
+    // The workspaces module registers the lookup when it loads; load it on first need.
+    if (!globalForDb.schemaLookup) await import("@/modules/workspaces/store");
+    return globalForDb.schemaLookup ? globalForDb.schemaLookup(id) : null;
+  });
+  if (name !== DEFAULT_SCHEMA) await ensureWorkspaceSchema(name);
+  return name;
+}
+
+function quoteSchema(name: string): string {
+  if (!/^ws_[a-z0-9_]+$/.test(name)) throw new Error(`Not a workspace schema: ${name}`);
+  return `"${name}"`;
+}
+
+/**
+ * Runs `fn` on a connection whose search path is only `name`, then resets the
+ * connection before it goes back to the pool. A workspace query therefore sees
+ * only its own schema: a table it lacks is an error, never another
+ * workspace's rows.
+ */
+async function onSchema<T>(name: string, fn: (pg: postgres.ReservedSql) => Promise<T>): Promise<T> {
+  const reserved = await client().reserve();
+  try {
+    await reserved.unsafe(`set search_path to ${quoteSchema(name)}`);
+    return await fn(reserved);
+  } finally {
+    await reserved.unsafe("reset search_path").catch(() => undefined);
+    reserved.release();
+  }
+}
+
+type PendingLike = PromiseLike<unknown> & { values(): Promise<unknown> };
+
+/**
+ * A postgres-js stand-in that Drizzle drives exactly like the real client: each
+ * query runs in the current workspace's schema when it executes.
+ */
+const router = {
+  options: { parsers: {} as Record<string, unknown>, serializers: {} as Record<string, unknown> },
+  unsafe(query: string, params?: unknown[]): PendingLike {
+    const run = async (values: boolean) => {
+      // Drizzle installed its type parsers on this stand-in; the real pool needs them too.
+      Object.assign(client().options.parsers, router.options.parsers);
+      Object.assign(client().options.serializers, router.options.serializers);
+      const name = await resolveSchema();
+      if (name === DEFAULT_SCHEMA) {
+        const pending = client().unsafe(query, params as never);
+        return values ? pending.values() : pending;
+      }
+      return onSchema(name, async (pg) => {
+        const pending = pg.unsafe(query, params as never);
+        return values ? pending.values() : pending;
+      });
+    };
+    return {
+      then: (onFulfilled, onRejected) => run(false).then(onFulfilled, onRejected),
+      values: () => run(true),
+    };
+  },
+  async begin(fn: (tx: postgres.TransactionSql) => unknown) {
+    const name = await resolveSchema();
+    return client().begin(async (tx) => {
+      // SET LOCAL ends with the transaction, so the connection comes back clean.
+      if (name !== DEFAULT_SCHEMA) await tx.unsafe(`set local search_path to ${quoteSchema(name)}`);
+      return fn(tx);
+    });
+  },
+};
+
+/** Workspace-scoped: every IEGP and stage table. */
 export function db() {
   if (!globalForDb.drizzle) {
-    globalForDb.drizzle = drizzle(client(), { schema });
+    globalForDb.drizzle = drizzle(router as unknown as ReturnType<typeof postgres>, { schema });
   }
   return globalForDb.drizzle;
+}
+
+/** Platform-wide tables: users, workspaces, sessions, routing, provider logins, settings, accuracy. */
+export function sharedDb() {
+  if (!globalForDb.sharedDrizzle) globalForDb.sharedDrizzle = drizzle(client(), { schema });
+  return globalForDb.sharedDrizzle;
 }
 
 const DDL = `
@@ -150,92 +241,74 @@ CREATE TABLE IF NOT EXISTS breakout_group_gaps (
 );
 `;
 
+/** Every statement that brings a schema's IEGP tables up to date. */
+function iegpStatements(): string[] {
+  return [
+    ...DDL.split(";").map((s) => s.trim()).filter(Boolean),
+    "ALTER TABLE assets ADD COLUMN IF NOT EXISTS wizard_complete boolean NOT NULL DEFAULT false",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'accepted'",
+    "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'rejected'",
+    "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS lock jsonb NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parent_gap_id text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS computed_status text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS status_override jsonb",
+    "ALTER TABLE residuals ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'candidate'",
+    "ALTER TABLE residuals ADD COLUMN IF NOT EXISTS created_gap_id text",
+    "ALTER TABLE assets ADD COLUMN IF NOT EXISTS tactics_unlocked boolean NOT NULL DEFAULT false",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS retired boolean NOT NULL DEFAULT false",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS human_validated boolean NOT NULL DEFAULT false",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
+    "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
+    "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_at text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_reason text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
+    "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
+    // Walkthrough progress, one row per person in each workspace.
+    "CREATE TABLE IF NOT EXISTS walkthrough_progress (principal text PRIMARY KEY, step integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'active', updated_at text NOT NULL)",
+  ];
+}
+
 export async function ensureSchema() {
   const d = db();
   await d.execute(sql`set client_min_messages to warning`);
-  for (const stmt of DDL.split(";").map((s) => s.trim()).filter(Boolean)) {
+  for (const stmt of iegpStatements()) {
     await d.execute(sql.raw(stmt));
   }
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS wizard_complete boolean NOT NULL DEFAULT false",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'accepted'",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'rejected'",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE mapping_suggestions ADD COLUMN IF NOT EXISTS lock jsonb NOT NULL DEFAULT '{}'::jsonb",
-    ),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parent_gap_id text"),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS computed_status text"),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS status_override jsonb"),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE residuals ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'candidate'",
-    ),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE residuals ADD COLUMN IF NOT EXISTS created_gap_id text"),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS tactics_unlocked boolean NOT NULL DEFAULT false",
-    ),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS retired boolean NOT NULL DEFAULT false"),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS human_validated boolean NOT NULL DEFAULT false",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
-    ),
-  );
-  await d.execute(
-    sql.raw(
-      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
-    ),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_at text"),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_reason text"),
-  );
-  await d.execute(
-    sql.raw("ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb"),
-  );
-  // The source sentence S3 extracted a tactic from; empty for hand-created rows.
-  await d.execute(
-    sql.raw("ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''"),
-  );
-  // Need confidence is null until a model or a human scores it.
-  await d.execute(sql.raw("ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL"));
+}
+
+type RunStatement = (statement: string) => Promise<unknown>;
+const bootstrapHooks: ((run: RunStatement) => Promise<void>)[] = [];
+
+/**
+ * Other layers (the kernel, module migrations) add the tables a new workspace
+ * schema needs; they run once when the schema is first used.
+ */
+export function onWorkspaceBootstrap(hook: (run: RunStatement) => Promise<void>) {
+  bootstrapHooks.push(hook);
+}
+
+const bootstrapped = new Map<string, Promise<void>>();
+
+/** Creates a workspace schema and every table in it, once per process. */
+export async function ensureWorkspaceSchema(name: string): Promise<void> {
+  if (!/^ws_[a-z0-9_]+$/.test(name)) throw new Error(`Not a workspace schema: ${name}`);
+  let ready = bootstrapped.get(name);
+  if (!ready) {
+    ready = (async () => {
+      await client().unsafe(`CREATE SCHEMA IF NOT EXISTS "${name}"`);
+      await onSchema(name, async (pg) => {
+        const run: RunStatement = (statement) => pg.unsafe(statement);
+        await run("set client_min_messages to warning");
+        for (const stmt of iegpStatements()) await run(stmt);
+        for (const hook of bootstrapHooks) await hook(run);
+      });
+    })();
+    bootstrapped.set(name, ready);
+    ready.catch(() => bootstrapped.delete(name));
+  }
+  await ready;
 }
 
 export async function wipeIegp() {

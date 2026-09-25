@@ -9,9 +9,13 @@ import { Input } from "@/components/ui/input";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import { ROLES, ROLE_LABELS, ROLE_SUMMARIES, type Role } from "@/modules/auth/roles";
 
+/** Demo sign-in is for local preview and tests only; a production build never offers it. */
+const DEMO_SIGN_IN = process.env.NODE_ENV !== "production";
+
 /**
- * Identity for the session. With an identity provider configured this is an
- * OAuth sign-in; with none, the typed-name gate the app already uses stands in.
+ * Identity for the session: SSO sign-in (Google, Microsoft, GitHub), plus a
+ * demo sign-in outside production. Signing in goes through /api/auth, so it
+ * lands on the workspace picker like the /login page.
  */
 export function SessionPanel({
   actorName,
@@ -38,19 +42,20 @@ export function SessionPanel({
   async function post(body: Record<string, unknown>, key: string) {
     setPending(key);
     setError(null);
-    const res = await fetch("/api/control", {
+    const url = body.action === "sign_out" ? "/api/auth/logout" : "/api/auth/login";
+    const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const json = (await res.json()) as { error?: string; authorize_url?: string };
+    const json = (await res.json()) as { error?: string; authorize_url?: string; redirect?: string };
     setPending(null);
     if (!res.ok) {
       setError(json.error ?? "Sign-in failed");
       return;
     }
-    if (json.authorize_url) {
-      window.location.href = json.authorize_url;
+    if (json.authorize_url || json.redirect) {
+      window.location.href = json.authorize_url ?? json.redirect!;
       return;
     }
     router.refresh();
@@ -66,8 +71,8 @@ export function SessionPanel({
           <p className="mt-1 text-[12px] text-muted-foreground">
             {signedIn
               ? `${actorName} · ${ROLE_LABELS[role]}`
-              : demo
-                ? "No identity provider is configured, so this deployment runs in demo mode: the name you type on each gate is the actor."
+              : demo && DEMO_SIGN_IN
+                ? "No identity provider is configured. In development you can continue as a demo user."
                 : "Sign in to act on the plan."}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground">{ROLE_SUMMARIES[role]}</p>
@@ -100,7 +105,7 @@ export function SessionPanel({
               key={provider.id}
               size="sm"
               disabled={pending !== null}
-              onClick={() => void post({ action: "sign_in_oauth", provider_id: provider.id }, provider.id)}
+              onClick={() => void post({ provider_id: provider.id }, provider.id)}
             >
               {pending === provider.id ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -113,13 +118,13 @@ export function SessionPanel({
         </div>
       ) : null}
 
-      {!signedIn && demo ? (
+      {!signedIn && DEMO_SIGN_IN ? (
         <form
           className="grid gap-2 border-t border-border pt-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
           onSubmit={(event) => {
             event.preventDefault();
             void post(
-              { action: "sign_in_demo", actor_name: name, actor_function: fn, role: pickedRole },
+              { demo: true, actor_name: name, actor_function: fn, role: pickedRole },
               "demo",
             );
           }}
@@ -157,7 +162,7 @@ export function SessionPanel({
             </select>
           </label>
           <Button size="sm" type="submit" variant="outline" disabled={pending !== null || !name.trim()}>
-            Start session
+            Continue as a demo user (development only)
           </Button>
         </form>
       ) : null}

@@ -171,7 +171,7 @@ Answer for every activity you are given.
 
 Return JSON only: {"activities":[{"id":"","start_offset_months":0,"duration_months":0,"readout_lag_months":0,"rationale":""}]}`;
 
-const REMEDY = "rebuild the timeline or switch the S10 route in /control.";
+const REMEDY = "rebuild the timeline or switch the S10 route in /admin/control.";
 
 function describeActivity(candidate: TimelineCandidate) {
   const tactic = candidate.tactic;

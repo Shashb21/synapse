@@ -168,7 +168,7 @@ export async function resolveAccuracyRoute(args: {
     if (!accuracyAuthAllowsLive(provider.id, authKind)) {
       reasons.push(
         provider.id === "anthropic-claude"
-          ? `${provider.label}: org API key needs ANTHROPIC_WORKSPACE_ID — connect Grok OAuth in /control`
+          ? `${provider.label}: org API key needs ANTHROPIC_WORKSPACE_ID — connect Grok OAuth in /admin/control`
           : `${provider.label}: not usable for live LLM`,
       );
       continue;
@@ -191,7 +191,7 @@ export async function resolveAccuracyRoute(args: {
           : null,
     };
   }
-  throw new NoRouteError(reasons.join("; ") || "Connect a provider in /control");
+  throw new NoRouteError(reasons.join("; ") || "Connect a provider in /admin/control");
 }
 
 export function accuracyCompletionFor(args: {
@@ -243,7 +243,7 @@ export function requireAccuracyLlm(
   if (isTestStub()) return;
   if (route.connected && (route.auth === "oauth" || route.auth === "api_key")) return;
   throw new NoRouteError(
-    `${what} needs a connected LLM. Connect Grok or Claude in /control and run it again.`,
+    `${what} needs a connected LLM. Connect Grok or Claude in /admin/control and run it again.`,
   );
 }
 

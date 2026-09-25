@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/iegp/db";
+import { sharedDb as db } from "@/lib/iegp/db";
 import { ACCURACY_DDL, ACCURACY_MIGRATIONS } from "./schema";
 
 export { db as accuracyDb };

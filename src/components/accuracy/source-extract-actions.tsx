@@ -30,7 +30,7 @@ export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
         href={gate.connect_path}
         className="mt-2 inline-block text-[12px] text-foreground underline-offset-2 hover:underline"
       >
-        Connect a provider in /control →
+        Connect a provider in /admin/control →
       </Link>
     </div>
   );
@@ -90,7 +90,7 @@ export function SourceExtractActions({
       ];
       const via = json.provider_label ? ` via ${json.provider_label}` : "";
       const note = json.stub
-        ? " (stub LLM — connect a provider in /control for live extract)"
+        ? " (stub LLM — connect a provider in /admin/control for live extract)"
         : via;
       setSummary(`Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
@@ -133,7 +133,7 @@ export function SourceExtractActions({
           Inventory only
         </button>
         <Link
-          href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+          href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
           className="px-1 text-[11px] text-foreground underline-offset-2 hover:underline"
         >
           Ledger →
@@ -146,7 +146,7 @@ export function SourceExtractActions({
             <>
               {" "}
               <Link href={connectPath} className="underline-offset-2 hover:underline">
-                Connect in /control →
+                Connect in /admin/control →
               </Link>
             </>
           ) : null}

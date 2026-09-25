@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -42,6 +43,8 @@ const bodySchema = z.discriminatedUnion("action", [
 ]);
 
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body = bodySchema.parse(await req.json());
     if (body.action === "sweep_stale_runs") {

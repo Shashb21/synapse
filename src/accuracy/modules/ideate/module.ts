@@ -233,7 +233,7 @@ export const ideateModule = agenticModule({
       throw new NoRouteError(
         ctx.route.reason && ctx.route.reason !== "mechanical"
           ? ctx.route.reason
-          : "Ideation needs a connected LLM. Connect Grok or Claude in /control and run it again.",
+          : "Ideation needs a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
       );
     }
 

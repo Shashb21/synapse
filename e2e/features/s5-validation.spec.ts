@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fillNameIfAsked } from "../support/session";
 import {
   consolidate,
   runStageExpectingError,
@@ -33,7 +34,7 @@ test.describe("S5 classification and validation gate", () => {
     const card = page.locator("article").filter({ hasText: target.gap_id });
     await card.getByRole("button", { name: /^confirm status$/i }).click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByRole("textbox", { name: /^name$/i }).fill("A. Rao");
+    await fillNameIfAsked(dialog, "A. Rao");
     await dialog.getByRole("textbox").last().fill("Both source quotes support this gap");
     await dialog.getByRole("button", { name: /^confirm /i }).click();
     await expect(dialog).toBeHidden();

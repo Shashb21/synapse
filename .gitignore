@@ -46,3 +46,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# playwright signed-in storage state (e2e/global.setup.ts)
+/e2e/.auth/

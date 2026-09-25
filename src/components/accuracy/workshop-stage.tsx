@@ -68,34 +68,33 @@ export function WorkshopStage({
           ),
     [scene, snapshot.payload.inventory.gaps, snapshot.payload.facilitator_tags, overlays],
   );
-  const currentBoard = boards[Math.min(boardIndex, Math.max(boards.length - 1, 0))] ?? boards[0];
+  // Until the facilitator picks a board, show the first one with gaps on it.
+  const firstWithGaps = Math.max(
+    boards.findIndex((board) => board.gaps.length > 0),
+    0,
+  );
+  const activeIndex = Math.min(boardTouched ? boardIndex : firstWithGaps, Math.max(boards.length - 1, 0));
+  const currentBoard = boards[activeIndex] ?? boards[0];
   const selected = snapshot.payload.inventory.gaps.find((gap) => gap.id === selectedId) ?? null;
   const selectedView = selected ? effectiveGapView(selected, overlays[selected.id]) : null;
   const tactics = snapshot.payload.inventory.tactics;
-  const splitHref = `/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`;
-
-  useEffect(() => {
-    if (boardTouched) {
-      setBoardIndex((i) => Math.min(i, Math.max(boards.length - 1, 0)));
-      return;
-    }
-    const withGaps = boards.findIndex((board) => board.gaps.length > 0);
-    setBoardIndex(withGaps >= 0 ? withGaps : 0);
-  }, [boards, boardTouched]);
+  const splitHref = `/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`;
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "ArrowRight") {
-        setBoardIndex((i) => Math.min(i + 1, boards.length - 1));
+        setBoardTouched(true);
+        setBoardIndex(Math.min(activeIndex + 1, boards.length - 1));
       } else if (event.key === "ArrowLeft") {
-        setBoardIndex((i) => Math.max(i - 1, 0));
+        setBoardTouched(true);
+        setBoardIndex(Math.max(activeIndex - 1, 0));
       } else if (event.key === "Escape") {
         setSelectedId(null);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [boards.length]);
+  }, [activeIndex, boards.length]);
 
   const openMenu = useCallback((gap: WorkshopGapLite) => {
     setSelectedId(gap.id);
@@ -252,7 +251,7 @@ export function WorkshopStage({
             Prioritize
           </button>
           <Link
-            href={`/accuracy/w/${encodeURIComponent(workspaceSlug)}/workshop`}
+            href={`/admin/accuracy/w/${encodeURIComponent(workspaceSlug)}/workshop`}
             className="border border-border px-3 py-2 text-[12px] text-muted-foreground no-underline"
           >
             /w/{workspaceSlug}

@@ -31,7 +31,7 @@ test.describe("Observability and the run trace", () => {
     const extract = await runStage(request, "S2", { dry_run: true });
     const { rounds } = await expectThreeExchanges(request, extract.run_id);
 
-    await page.goto(`/runs/${extract.run_id}`);
+    await page.goto(`/admin/runs/${extract.run_id}`);
     await expect(page.getByRole("heading", { name: /proposer ↔ critic exchanges/i })).toBeVisible();
     for (const round of rounds) {
       await expect(page.getByRole("cell", { name: `Round ${round.round}`, exact: true })).toBeVisible();
@@ -65,7 +65,7 @@ test.describe("Observability and the run trace", () => {
 
   test("lists stage health and recent runs on the runs page", async ({ page, request }) => {
     await runStage(request, "S3");
-    await page.goto("/runs");
+    await page.goto("/admin/runs");
     await expect(page.getByRole("heading", { name: /^runs$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^stage health$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^recent runs$/i })).toBeVisible();
@@ -82,7 +82,7 @@ test.describe("Observability and the run trace", () => {
     expect(failed, "a contract violation must still be traced").toBeTruthy();
     expect(failed!.error).toMatch(/rejected its input/i);
 
-    await page.goto(`/runs/${failed!.id}`);
+    await page.goto(`/admin/runs/${failed!.id}`);
     await expect(page.getByText(/rejected its input/i).first()).toBeVisible();
   });
 
@@ -98,7 +98,7 @@ test.describe("Observability and the run trace", () => {
       expect.arrayContaining(["S1", "S2", "S3", "S4", "S6", "S7", "S8", "S9", "S10"]),
     );
 
-    await page.goto("/pipeline");
+    await page.goto("/admin/pipeline");
     await expect(page.getByRole("button", { name: /run evals/i }).first()).toBeVisible();
   });
 });
