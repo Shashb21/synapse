@@ -417,10 +417,11 @@ export function GapsWorkbench({
           </>
         ) : (
           <>
-            <h2 className="text-[15px] font-medium">Prioritize is locked</h2>
+            <h2 className="text-[15px] font-medium">Not ready for Prioritize yet</h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
               {unvalidated} gap{unvalidated === 1 ? "" : "s"} still unconfirmed
-              {partials ? ` · ${partials} partial must be split or rewritten` : ""}.
+              {partials ? ` · ${partials} partial must be split or rewritten` : ""}. You can open
+              Prioritize now, but it only has the gaps already validated as Open.
             </p>
           </>
         )}
