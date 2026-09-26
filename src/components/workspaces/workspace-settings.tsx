@@ -6,17 +6,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { WorkspaceMember, WorkspaceRole } from "@/modules/workspaces/store";
+import { DemoBadge } from "./demo-badge";
 import { formatCreated, sendJson, WORKSPACE_ROLE_LABELS } from "./model";
+import { WorkspaceContents } from "./workspace-contents";
 
-/** Rename (owner), see who is in, invite by email (any member), remove people (owner). */
+/**
+ * Rename (owner), see who is in, invite by email (any member), remove people
+ * (owner), and load the demo data or reset to blank (owner).
+ */
 export function WorkspaceSettings({
   workspace,
   members: initialMembers,
   me,
+  isCurrent = false,
 }: {
-  workspace: { id: string; name: string; role: WorkspaceRole; created_at: string };
+  workspace: { id: string; name: string; role: WorkspaceRole; created_at: string; demo: boolean };
   members: WorkspaceMember[];
   me: string;
+  /** This is the workspace the person has open. */
+  isCurrent?: boolean;
 }) {
   const owner = workspace.role === "owner";
   const [name, setName] = useState(workspace.name);
@@ -74,8 +82,13 @@ export function WorkspaceSettings({
             {savedName} <span className="text-[11px] text-muted-foreground">(only the owner can rename it)</span>
           </p>
         )}
-        <p className="text-[11px] text-muted-foreground">Created {formatCreated(workspace.created_at)}</p>
+        <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          Created {formatCreated(workspace.created_at)}
+          {!owner && workspace.demo ? <DemoBadge /> : null}
+        </p>
       </section>
+
+      {owner ? <WorkspaceContents workspaceId={workspace.id} demo={workspace.demo} isCurrent={isCurrent} /> : null}
 
       <section aria-labelledby="ws-members" className="grid gap-2">
         <h2 id="ws-members" className="text-[15px] font-medium text-foreground">

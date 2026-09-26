@@ -27,8 +27,8 @@ export async function loadWorkspaceTag(): Promise<WorkspaceTagState> {
     return {
       state: "ready",
       tag: {
-        current: { id: current.id, name: current.name, role: current.role },
-        workspaces: workspaces.map(({ id, name, role }) => ({ id, name, role })),
+        current: { id: current.id, name: current.name, role: current.role, demo: current.demo },
+        workspaces: workspaces.map(({ id, name, role, demo }) => ({ id, name, role, demo })),
         person: { name: session.actor.name, email: session.email, owner: access.owner },
       },
     };

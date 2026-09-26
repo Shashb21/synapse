@@ -9,6 +9,7 @@ import { TacticsPlace } from "@/components/tactics-place";
 import { ManualStart } from "@/components/plan-cards";
 import { StepWaiting } from "@/components/step-waiting";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
@@ -91,7 +92,7 @@ export default async function HomePage({
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
-  const ai = await aiEnabled().catch(() => true);
+  const [ai, demo] = await Promise.all([aiEnabled().catch(() => true), currentWorkspaceIsDemo()]);
   // With AI off nothing is ingested, so Gaps never waits for a source.
   const gapsUnlocked = gates.gapsUnlocked || !ai;
   const params = await searchParams;
@@ -114,7 +115,7 @@ export default async function HomePage({
     pane = (
       <>
         {ai ? (
-          <IngestPanel sources={state.sources} />
+          <IngestPanel sources={state.sources} demoFiles={demo} />
         ) : (
           <ManualStart
             gapCount={workspace.review.length}

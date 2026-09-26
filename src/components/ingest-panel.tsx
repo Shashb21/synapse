@@ -9,17 +9,25 @@ import {
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { SourceDocument } from "@/lib/iegp/types";
 
+/**
+ * Upload: your own note, plus the Velmara demo source files in a demo
+ * workspace only. A team's own workspace never offers demo content unasked.
+ */
 export function IngestPanel({
   sources,
   compact,
+  demoFiles = false,
 }: {
   sources: SourceDocument[];
   compact?: boolean;
+  /** The workspace holds the Velmara demo: offer its demo source files. */
+  demoFiles?: boolean;
 }) {
   const ingestedTitles = new Set(sources.map((s) => s.title));
 
   return (
     <div>
+      {demoFiles ? (
       <section aria-labelledby="demo-pack">
         <h2 id="demo-pack" className="text-[15px] font-medium text-foreground">
           Demo source files
@@ -69,8 +77,9 @@ export function IngestPanel({
           })}
         </div>
       </section>
+      ) : null}
 
-      <div className="mt-6 border border-border bg-card p-4">
+      <div className={demoFiles ? "mt-6 border border-border bg-card p-4" : "border border-border bg-card p-4"}>
         <h2 className="mb-3 text-[13px] text-foreground">Upload your own note</h2>
         <LockForm label="Ingest gaps and tactics" action="ingest" confirmLabel="Ingest">
           <IngestFileField />
@@ -103,7 +112,7 @@ export function IngestPanel({
           <textarea
             name="text"
             required
-            placeholder="Paste interview notes or drop a downloaded demo file above. The LLM stages extract evidence gaps and existing tactics from it, then map them."
+            placeholder={`Paste interview notes or drop a ${demoFiles ? "downloaded demo " : ""}file above. The LLM stages extract evidence gaps and existing tactics from it, then map them.`}
             className="min-h-28 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
           />
         </LockForm>

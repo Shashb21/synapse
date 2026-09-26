@@ -3,12 +3,13 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { loadState } from "@/lib/iegp/store";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const state = await loadState();
-  const ai = await aiEnabled().catch(() => true);
+  const [ai, demo] = await Promise.all([aiEnabled().catch(() => true), currentWorkspaceIsDemo()]);
   const blockCount = new Map<string, number>();
   for (const block of state.blocks) blockCount.set(block.source_id, (blockCount.get(block.source_id) ?? 0) + 1);
 
@@ -18,9 +19,9 @@ export default async function SourcesPage() {
         <>
           <PageIntro kicker="Deep link — ingest also lives on the plan" title="Sources">
             First visit uses the stepper on the plan. After that, new files ingest on the Upload
-            place. This list is the same demo pack.
+            place.
           </PageIntro>
-          <IngestPanel sources={state.sources} />
+          <IngestPanel sources={state.sources} demoFiles={demo} />
         </>
       ) : (
         <PageIntro kicker="AI is off · read only" title="Sources">
