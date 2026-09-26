@@ -1,32 +1,29 @@
 import { NextResponse } from "next/server";
-import { currentSession } from "@/modules/auth/session";
-import { principalOf } from "@/modules/workspaces/session";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { getWalkthrough, saveWalkthrough, WALKTHROUGH_STATUSES, type WalkthroughStatus } from "@/lib/iegp/walkthrough";
 
 export const runtime = "nodejs";
 
-/** Progress is per person: the signed-in principal, else the typed demo name. */
-async function principal(fallback?: unknown): Promise<string> {
-  const session = await currentSession().catch(() => null);
-  if (session) return principalOf(session);
-  const name = typeof fallback === "string" ? fallback.trim() : "";
-  return `guest:${name || "anonymous"}`;
-}
-
+/**
+ * Progress is per person per workspace: the signed-in principal. There is no
+ * typed-name fallback; only the Vitest anonymous path (see api-guard) names a
+ * guest from the request.
+ */
 export async function GET(request: Request) {
   try {
-    const who = await principal(new URL(request.url).searchParams.get("actor_name"));
-    return NextResponse.json({ progress: await getWalkthrough(who) });
+    const actor_name = new URL(request.url).searchParams.get("actor_name");
+    const { principal } = await requireCustomerContext({ body: { actor_name } });
+    return NextResponse.json({ progress: await getWalkthrough(principal) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 400 });
+    return apiErrorResponse(error, "Failed");
   }
 }
 
-/** Body: { action: "start" | "restart" | "step" | "dismiss" | "finish", step?, actor_name? }. */
+/** Body: { action: "start" | "restart" | "step" | "dismiss" | "finish", step? }. */
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Record<string, unknown>;
-    const who = await principal(body.actor_name);
+    const body = await readJsonBody(request);
+    const { principal } = await requireCustomerContext({ body });
     const step = Number(body.step) || 0;
     const action = String(body.action ?? "");
     const next: Record<string, { status: WalkthroughStatus; step: number }> = {
@@ -36,12 +33,12 @@ export async function POST(request: Request) {
       dismiss: { status: "dismissed", step },
       finish: { status: "done", step },
     };
-    const target = next[action];
+    const target = Object.hasOwn(next, action) ? next[action] : undefined;
     if (!target || !WALKTHROUGH_STATUSES.includes(target.status)) {
       return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
     }
-    return NextResponse.json({ progress: await saveWalkthrough(who, target) });
+    return NextResponse.json({ progress: await saveWalkthrough(principal, target) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 400 });
+    return apiErrorResponse(error, "Failed");
   }
 }

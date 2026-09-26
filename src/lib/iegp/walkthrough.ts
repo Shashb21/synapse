@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db, ensureSchema } from "./db";
+import { db, ensureCurrentSchemaTables } from "./db";
 
 /**
  * Walkthrough progress, stored in the workspace's own schema so it is kept per
@@ -13,7 +13,7 @@ export type WalkthroughProgress = { status: WalkthroughStatus | "not_started"; s
 const NOT_STARTED: WalkthroughProgress = { status: "not_started", step: 0, updated_at: null };
 
 export async function getWalkthrough(principal: string): Promise<WalkthroughProgress> {
-  await ensureSchema();
+  await ensureCurrentSchemaTables();
   const rows = (await db().execute(
     sql`select step, status, updated_at from walkthrough_progress where principal = ${principal} limit 1`,
   )) as unknown as { step: number; status: string; updated_at: string }[];
@@ -30,7 +30,7 @@ export async function saveWalkthrough(
   if (!(WALKTHROUGH_STATUSES as readonly string[]).includes(next.status)) throw new Error(`Unknown walkthrough status ${next.status}`);
   const step = Math.max(0, Math.min(50, Math.floor(Number(next.step) || 0)));
   const at = new Date().toISOString();
-  await ensureSchema();
+  await ensureCurrentSchemaTables();
   await db().execute(sql`
     insert into walkthrough_progress (principal, step, status, updated_at)
     values (${principal}, ${step}, ${next.status}, ${at})

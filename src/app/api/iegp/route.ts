@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { AI_OFF_MESSAGE, AiDisabledError } from "@/modules/kernel/ai-switch";
 import {
   acceptMapping,
   acceptResidualGap,
@@ -52,7 +51,14 @@ import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type 
 import { resetWorkspaceModules } from "@/modules/kernel/db";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
-import { requestIdentity } from "@/modules/auth/request";
+import {
+  apiErrorResponse,
+  readJsonBody,
+  requireCapability,
+  requireCustomerContext,
+  type CustomerContext,
+} from "@/modules/auth/api-guard";
+import { iegpActionCapability } from "./capabilities";
 import type { SourceType } from "@/lib/iegp/enums";
 import { ingestThroughStages } from "./ingest-pipeline";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
@@ -154,12 +160,20 @@ async function fileGateEdit(body: Record<string, string>, actor_name: string, ac
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, string>;
-  const actor_name = body.actor_name?.trim();
-  const actor_function = body.actor_function as ActorFunction;
-  if (!actor_name || !actor_function) {
-    return NextResponse.json({ error: "Name and function are required." }, { status: 400 });
+  let body: Record<string, string>;
+  let identity: CustomerContext;
+  try {
+    body = (await readJsonBody(request)) as Record<string, string>;
+    identity = await requireCustomerContext({ body });
+    const capability = iegpActionCapability(String(body.action ?? ""));
+    if (!capability) return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
+    requireCapability(identity, capability);
+  } catch (error) {
+    return apiErrorResponse(error);
   }
+  // The recorded actor is the signed-in person, never the request body (REQ-AUTH-005).
+  const actor_name = identity.actor.name;
+  const actor_function = identity.actor.function;
   try {
     switch (body.action) {
       case "reset":
@@ -652,7 +666,6 @@ export async function POST(request: Request) {
       // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the
       // error says so. There is no rule-based ingest.
       case "ingest": {
-        const identity = await requestIdentity(body);
         const title = (body.title || "").trim();
         await ingestThroughStages({
           files: [
@@ -670,7 +683,6 @@ export async function POST(request: Request) {
         break;
       }
       case "ingest_demo": {
-        const identity = await requestIdentity(body);
         await ingestThroughStages({
           demo_ids: [body.demo_id],
           actor: identity.actor,
@@ -715,11 +727,7 @@ export async function POST(request: Request) {
     await fileGateEdit(body, actor_name, actor_function);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    if (error instanceof AiDisabledError) {
-      return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
-    }
-    const message = error instanceof Error ? error.message : "Failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return apiErrorResponse(error, "Failed");
   }
 }
 

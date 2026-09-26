@@ -65,6 +65,11 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | **Yes** | Hosted Postgres (see §1) |
+| `SESSION_SECRET` | **Yes** | ≥ 32 random characters (`openssl rand -base64 48`). Signs the workspace-selection cookie (bound to the session, expires with it). The production server refuses to start without it — there is no fallback in production |
+| `OWNER_EMAILS` | Owner console | Comma-separated platform-owner emails. Only an identity provider's **verified** email matches |
+| `ALLOWED_EMAIL_DOMAINS` | Optional | Comma-separated domains (exact match). When set, only verified emails on these domains may sign in |
+| `AZURE_TENANT_ID` | Microsoft sign-in | Your Entra ID directory id. `common` / `organizations` / `consumers` are refused unless `MICROSOFT_ALLOW_MULTI_TENANT=1` |
+| `MICROSOFT_ALLOW_MULTI_TENANT` | Optional | `1` deliberately allows the multi-tenant endpoint. Not recommended |
 | `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field). Missing key gates PDF/PPTX on `/accuracy/sources`. |
 | `LLAMA_PARSE_TIER` | Optional | Default `agentic` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Claude keys | Required when the Anthropic key is org-scoped |
@@ -76,6 +81,13 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Gemini | |
 | `OPENROUTER_OAUTH_CLIENT_ID` | OpenRouter | Optional (PKCE can be client-less) |
 | `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | App sign-in | Omit for demo mode (typed-name gate) |
+
+```bash
+vercel env add SESSION_SECRET   # paste the output of: openssl rand -base64 48
+vercel env add OWNER_EMAILS
+```
+
+**Sign-in identity.** Only a verified email reaches a session: Google needs `email_verified=true`; Microsoft uses `email` only when the ID token carries `xms_edov` (add it under *Token configuration → optional claims*) or `email_verified`, never `preferred_username`; GitHub uses the primary verified address from `/user/emails`. Without a verified email the person is known as `provider:subject`, which never matches a workspace invite or `OWNER_EMAILS`. Demo sign-in is off in production.
 
 Optional overrides: `XAI_OAUTH_*_URL`, `XAI_BASE_URL`, `XAI_MODELS` — defaults in `.env.example`.
 

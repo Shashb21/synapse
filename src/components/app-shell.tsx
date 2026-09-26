@@ -35,7 +35,8 @@ export async function AppShell({
   // The proxy only checks that the cookies exist; this is the real check.
   const workspace = await loadWorkspaceTag();
   if (workspace.state === "signed_out") redirect("/login");
-  if (workspace.state === "no_workspace") redirect("/workspaces");
+  // Fail closed: if the session or membership cannot be verified, nothing renders.
+  if (workspace.state !== "ready") redirect("/workspaces");
   const present = (await headers()).get(PRESENT_HEADER) === "1";
   let nav = EMPTY_NAV;
   try {
@@ -58,7 +59,7 @@ export async function AppShell({
     // Setup and other shells must render before Postgres is configured.
   }
   return (
-    <PlanChrome active={active} nav={nav} workspace={workspace.state === "ready" ? workspace.tag : null} present={present}>
+    <PlanChrome active={active} nav={nav} workspace={workspace.tag} present={present}>
       {children}
     </PlanChrome>
   );

@@ -144,7 +144,10 @@ async function ensureParseSchema() {
     globalParseStore.accuracyParseEditSchema = (async () => {
       const d = accuracyDb();
       for (const stmt of PARSE_EDIT_DDL) await d.execute(sql.raw(stmt));
-    })();
+    })().catch((error) => {
+      globalParseStore.accuracyParseEditSchema = undefined; // retry on the next call
+      throw error;
+    });
   }
   await globalParseStore.accuracyParseEditSchema;
 }

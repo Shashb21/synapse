@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import "@/modules";
 import { assertCan } from "@/modules/auth/roles";
-import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
-import { requestIdentity } from "@/modules/auth/request";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import {
   listPlacements,
   movePlacement,
@@ -34,6 +34,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  try {
+    await requireCustomerContext();
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const [placements, axes, proposals, timeline, plan, history] = await Promise.all([
     listPlacements(),
     loadAxes(),
@@ -104,12 +109,12 @@ function proposalFieldsOf(body: Record<string, unknown>): ProposalFields {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
-  const action = String(body.action ?? "");
-  const identity = await requestIdentity(body);
-  const rationale = String(body.rationale ?? body.note ?? "").trim();
-
   try {
+    const body = await readJsonBody(request);
+    const action = String(body.action ?? "");
+    // The actor is the signed-in person; each action checks its own capability.
+    const identity = await requireCustomerContext({ body });
+    const rationale = String(body.rationale ?? body.note ?? "").trim();
     switch (action) {
       case "validate_band": {
         assertCan(identity.role, "prioritize");
@@ -283,7 +288,8 @@ export async function POST(request: Request) {
       }
       case "save_plan": {
         const status = field(planStatusSchema, body.status ?? "draft", "status");
-        assertCan(identity.role, status === "final" ? "save_final" : "export");
+        // A draft is an edit to the plan; only Medical Affairs saves it as final.
+        assertCan(identity.role, status === "final" ? "save_final" : "validate");
         try {
           const plan = await savePlan({ status, note: rationale, actor: identity.actor });
           return NextResponse.json({ ok: true, plan });
@@ -305,10 +311,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
     }
   } catch (error) {
-    if (error instanceof AiDisabledError) {
-      return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
-    }
-    const message = error instanceof Error ? error.message : "Plan action failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return apiErrorResponse(error, "Plan action failed");
   }
 }

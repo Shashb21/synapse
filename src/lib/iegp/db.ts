@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import * as schema from "./schema";
 import { currentSchema, DEFAULT_SCHEMA } from "@/modules/workspaces/context";
+import { workspaceTableStatements } from "./workspace-tables";
 
 const DEFAULT_URL =
   process.env.DATABASE_URL ??
@@ -52,6 +53,14 @@ async function resolveSchema(): Promise<string> {
   });
   if (name !== DEFAULT_SCHEMA) await ensureWorkspaceSchema(name);
   return name;
+}
+
+/**
+ * The schema the current request's queries run in (`public` for Default).
+ * Key per-workspace caches by this, never by a process-wide flag.
+ */
+export async function currentSchemaName(): Promise<string> {
+  return resolveSchema();
 }
 
 function quoteSchema(name: string): string {
@@ -265,8 +274,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
-    // Walkthrough progress, one row per person in each workspace.
-    "CREATE TABLE IF NOT EXISTS walkthrough_progress (principal text PRIMARY KEY, step integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'active', updated_at text NOT NULL)",
+    // Kernel, source-block, room, walkthrough and stage-module tables.
+    ...workspaceTableStatements(),
   ];
 }
 
@@ -279,36 +288,78 @@ export async function ensureSchema() {
 }
 
 type RunStatement = (statement: string) => Promise<unknown>;
-const bootstrapHooks: ((run: RunStatement) => Promise<void>)[] = [];
+type BootstrapHook = (run: RunStatement) => Promise<void>;
+const bootstrapHooks: BootstrapHook[] = [];
 
 /**
- * Other layers (the kernel, module migrations) add the tables a new workspace
- * schema needs; they run once when the schema is first used.
+ * Extra DDL a schema needs beyond `iegpStatements()` (the registry adds the
+ * migrations of every registered module). Hooks run once per schema per
+ * process. Tables every workspace needs belong in `workspace-tables.ts`
+ * instead, which does not depend on import order. Returns an unregister
+ * function (test seam).
  */
-export function onWorkspaceBootstrap(hook: (run: RunStatement) => Promise<void>) {
+export function onWorkspaceBootstrap(hook: BootstrapHook): () => void {
   bootstrapHooks.push(hook);
+  return () => {
+    const at = bootstrapHooks.indexOf(hook);
+    if (at >= 0) bootstrapHooks.splice(at, 1);
+  };
 }
 
 const bootstrapped = new Map<string, Promise<void>>();
 
+/**
+ * Loads every stage module before a schema is bootstrapped, so the registry
+ * hook sees all of them, not just the ones some route happened to import.
+ */
+async function loadModules() {
+  await import("@/modules");
+}
+
+async function bootstrap(run: RunStatement) {
+  await run("set client_min_messages to warning");
+  for (const stmt of iegpStatements()) await run(stmt);
+  for (const hook of [...bootstrapHooks]) await hook(run);
+}
+
+/**
+ * Runs `build` once per schema per process. A failure is forgotten, so the
+ * next call retries instead of one DB blip breaking the process for good.
+ */
+function once(name: string, build: () => Promise<void>): Promise<void> {
+  let ready = bootstrapped.get(name);
+  if (!ready) {
+    const attempt = build();
+    ready = attempt;
+    bootstrapped.set(name, attempt);
+    attempt.catch(() => {
+      if (bootstrapped.get(name) === attempt) bootstrapped.delete(name);
+    });
+  }
+  return ready;
+}
+
 /** Creates a workspace schema and every table in it, once per process. */
 export async function ensureWorkspaceSchema(name: string): Promise<void> {
   if (!/^ws_[a-z0-9_]+$/.test(name)) throw new Error(`Not a workspace schema: ${name}`);
-  let ready = bootstrapped.get(name);
-  if (!ready) {
-    ready = (async () => {
-      await client().unsafe(`CREATE SCHEMA IF NOT EXISTS "${name}"`);
-      await onSchema(name, async (pg) => {
-        const run: RunStatement = (statement) => pg.unsafe(statement);
-        await run("set client_min_messages to warning");
-        for (const stmt of iegpStatements()) await run(stmt);
-        for (const hook of bootstrapHooks) await hook(run);
-      });
-    })();
-    bootstrapped.set(name, ready);
-    ready.catch(() => bootstrapped.delete(name));
-  }
-  await ready;
+  await once(name, async () => {
+    await loadModules();
+    await client().unsafe(`CREATE SCHEMA IF NOT EXISTS "${name}"`);
+    await onSchema(name, (pg) => bootstrap((statement) => pg.unsafe(statement)));
+  });
+}
+
+/**
+ * Every workspace table exists in the current schema, Default included; once
+ * per schema per process. Code that uses its tables lazily calls this first.
+ */
+export async function ensureCurrentSchemaTables(): Promise<void> {
+  const name = await currentSchemaName();
+  if (name !== DEFAULT_SCHEMA) return ensureWorkspaceSchema(name);
+  await once(DEFAULT_SCHEMA, async () => {
+    await loadModules();
+    await bootstrap((statement) => client().unsafe(statement));
+  });
 }
 
 export async function wipeIegp() {

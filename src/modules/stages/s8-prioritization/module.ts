@@ -1,4 +1,5 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -43,26 +44,13 @@ const placementsTable = pgTable("priority_placements", {
   human_band: boolean("human_band").notNull().default(false),
 });
 
-const globalForS8 = globalThis as unknown as { synapseS8Schema?: Promise<void> };
-
+/**
+ * The placement columns (human_axes, human_band) are part of every workspace
+ * schema's tables (workspace-tables.ts), created once per schema.
+ */
 async function ensurePlacementSchema() {
   await ensurePlatformSchema();
-  if (!globalForS8.synapseS8Schema) {
-    globalForS8.synapseS8Schema = (async () => {
-      await db().execute(
-        sql.raw(
-          "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_axes jsonb NOT NULL DEFAULT '[]'::jsonb",
-        ),
-      );
-      await db().execute(
-        sql.raw("ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_band boolean NOT NULL DEFAULT false"),
-      );
-    })().catch((error) => {
-      globalForS8.synapseS8Schema = undefined;
-      throw error;
-    });
-  }
-  await globalForS8.synapseS8Schema;
+  await ensureCurrentSchemaTables();
 }
 
 const humanAxesOf = (row: { human_axes: unknown } | undefined): string[] =>

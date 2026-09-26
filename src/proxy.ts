@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { gateFor, PRESENT_HEADER, PROXY_SESSION_COOKIE, PROXY_WORKSPACE_COOKIE } from "@/modules/auth/gate";
+import { verifyWorkspaceCookie } from "@/modules/workspaces/context";
 
 /** Customer routes need a session and a workspace; see modules/auth/gate.ts for the rules. */
 export function proxy(request: NextRequest) {
@@ -17,13 +18,24 @@ export function proxy(request: NextRequest) {
     if (next !== "/") url.searchParams.set("next", next);
     return NextResponse.redirect(url);
   }
-  if (gate === "workspace" && !request.cookies.get(PROXY_WORKSPACE_COOKIE)?.value) {
+  // Proxy runs on Node (Next 16), so the workspace cookie's signature and expiry
+  // are checked here: a tampered or expired selection never reaches a page.
+  // Membership and the session row are still verified server-side.
+  const workspaceCookie = request.cookies.get(PROXY_WORKSPACE_COOKIE)?.value;
+  const workspaceValid =
+    Boolean(workspaceCookie) &&
+    verifyWorkspaceCookie(workspaceCookie, request.cookies.get(PROXY_SESSION_COOKIE)?.value) !== null;
+  if (gate === "workspace" && !workspaceValid) {
     if (api) {
-      return NextResponse.json({ error: "Choose a workspace first.", code: "no_workspace" }, { status: 409 });
+      const res = NextResponse.json({ error: "Choose a workspace first.", code: "no_workspace" }, { status: 409 });
+      if (workspaceCookie) res.cookies.delete(PROXY_WORKSPACE_COOKIE);
+      return res;
     }
     const url = new URL("/workspaces", request.url);
     if (next !== "/") url.searchParams.set("next", next);
-    return NextResponse.redirect(url);
+    const res = NextResponse.redirect(url);
+    if (workspaceCookie) res.cookies.delete(PROXY_WORKSPACE_COOKIE);
+    return res;
   }
   return withPresentHeader(request);
 }

@@ -7,8 +7,20 @@ import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
-import { ROLE_LABELS, isRole, roleForFunction, type Role } from "./roles";
-import { configuredIdentityProviders, demoMode, demoSignInAllowed, identityProvider } from "./idp";
+import { ROLE_LABELS, isRole, roleForFunction, testOwnerBypass, type Role } from "./roles";
+import {
+  configuredIdentityProviders,
+  demoMode,
+  demoSignInAllowed,
+  emailDomainAllowed,
+  GITHUB_EMAILS_URL,
+  identityProvider,
+  idpRefusal,
+  idTokenClaims,
+  resolveIdentity,
+  type GithubEmail,
+  type IdentityProvider,
+} from "./idp";
 
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
@@ -153,6 +165,8 @@ export async function beginLogin(args: {
   if (!provider) throw new Error(`Unknown identity provider ${args.provider_id}`);
   const clientId = process.env[provider.descriptor.client_id_env]?.trim();
   if (!clientId) throw new Error(`${provider.label} sign-in is not configured in this deployment.`);
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
   const verifier = base64Url(randomBytes(48));
   const state = base64Url(randomBytes(16));
   const jar = await cookies();
@@ -192,7 +206,10 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   if (pending.state !== args.state) throw new Error("Sign-in state mismatch.");
   const provider = identityProvider(pending.provider_id);
   if (!provider) throw new Error("Unknown identity provider.");
-  const clientId = process.env[provider.descriptor.client_id_env]!.trim();
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
+  const clientId = process.env[provider.descriptor.client_id_env]?.trim();
+  if (!clientId) throw new Error(`${provider.label} sign-in is not configured in this deployment.`);
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: args.code,
@@ -211,32 +228,65 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   });
   const tokenText = await tokenRes.text();
   if (!tokenRes.ok) throw new Error(`Token exchange failed (HTTP ${tokenRes.status}).`);
-  const token = JSON.parse(tokenText) as { access_token?: string };
+  const token = JSON.parse(tokenText) as { access_token?: string; id_token?: unknown };
   if (!token.access_token) throw new Error("Token exchange returned no access token.");
   const profileRes = await fetch(provider.userinfo_url, {
     headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
   });
   if (!profileRes.ok) throw new Error(`Profile lookup failed (HTTP ${profileRes.status}).`);
   const profile = (await profileRes.json()) as Record<string, unknown>;
-  const pick = (claims: string[]) =>
-    claims.map((claim) => profile[claim]).find((value) => typeof value === "string") as
-      | string
-      | undefined;
-  const name = pick(provider.name_claims) ?? "Unnamed user";
-  const email = pick(provider.email_claims) ?? null;
+  let github_emails: GithubEmail[] | null = null;
+  if (provider.id === "github") {
+    const emailsRes = await fetch(GITHUB_EMAILS_URL, {
+      headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
+    });
+    const list = emailsRes.ok ? ((await emailsRes.json().catch(() => null)) as unknown) : null;
+    github_emails = Array.isArray(list) ? (list as GithubEmail[]) : null;
+  }
+  const sessionArgs = loginIdentity({
+    provider,
+    profile,
+    id_token_claims: idTokenClaims(token.id_token),
+    github_emails,
+  });
+  jar.delete(PENDING_COOKIE);
+  return createSession(sessionArgs);
+}
+
+/**
+ * The session a completed OAuth sign-in gets. Only a verified email is kept
+ * (else the subject `provider:id` is the principal), and ALLOWED_EMAIL_DOMAINS
+ * is enforced here. Throws when the sign-in must be refused.
+ */
+export function loginIdentity(args: {
+  provider: IdentityProvider;
+  profile: Record<string, unknown>;
+  id_token_claims?: Record<string, unknown>;
+  github_emails?: GithubEmail[] | null;
+}): Parameters<typeof createSession>[0] {
+  const { provider, profile } = args;
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
+  const identity = resolveIdentity(args);
+  if (!emailDomainAllowed(identity.email)) {
+    throw new Error(
+      identity.email
+        ? "Your account's email domain is not allowed to sign in to this deployment."
+        : "Sign-in needs a verified email address on an allowed domain.",
+    );
+  }
   const claimedRole = provider.role_claim ? profile[provider.role_claim] : undefined;
   const fn = asFunction(typeof profile.synapse_function === "string" ? profile.synapse_function : null);
-  jar.delete(PENDING_COOKIE);
-  return createSession({
+  return {
     provider_id: provider.id,
-    subject: String(profile.sub ?? profile.id ?? email ?? name),
-    email,
-    actor_name: name,
+    subject: identity.subject,
+    email: identity.email,
+    actor_name: identity.name,
     actor_function: fn,
     role: isRole(typeof claimedRole === "string" ? claimedRole : undefined)
       ? (claimedRole as Role)
       : roleForFunction(fn),
-  });
+  };
 }
 
 /** The address a demo user is known by, so workspace invites work in local preview. */
@@ -248,6 +298,13 @@ export function demoEmail(actorName: string): string {
 /**
  * Demo sign-in for local preview and tests: the typed name is the identity.
  * Never available in a production build, identity provider or not.
+ *
+ * The caller cannot choose its privileges. Outside the test stub
+ * (SYNAPSE_TEST_STUB_LLM=1, never production) a supplied `role` and `email`
+ * are ignored: a demo user is a "contributor" known as `<name>@demo.synapse.local`.
+ * Under the test stub the role (never "operator") and email are honoured, and
+ * without a role it follows the function, so the Playwright/Vitest suites keep
+ * their Medical Affairs demo user.
  */
 export async function signInDemo(args: {
   actor_name: string;
@@ -260,14 +317,28 @@ export async function signInDemo(args: {
   }
   const name = args.actor_name.trim();
   if (!name) throw new Error("Enter a name to continue as a demo user.");
+  const fn = asFunction(args.actor_function);
   return createSession({
     provider_id: "demo",
     subject: `demo:${name}`,
-    email: args.email?.trim().toLowerCase() || demoEmail(name),
+    email: demoEmailFor(name, args.email),
     actor_name: name,
-    actor_function: asFunction(args.actor_function),
-    role: args.role && isRole(args.role) ? args.role : roleForFunction(asFunction(args.actor_function)),
+    actor_function: fn,
+    role: demoRole(fn, args.role),
   });
+}
+
+/** The role a demo sign-in gets (see signInDemo). Never "operator". */
+export function demoRole(fn: ActorFunction, requested?: string | null): Role {
+  if (!testOwnerBypass()) return "contributor";
+  if (requested && isRole(requested) && requested !== "operator") return requested;
+  return roleForFunction(fn);
+}
+
+/** The email a demo sign-in is known by: the supplied one only under the test stub. */
+export function demoEmailFor(name: string, requested?: string | null): string {
+  const supplied = requested?.trim().toLowerCase();
+  return testOwnerBypass() && supplied ? supplied : demoEmail(name);
 }
 
 export async function activeSessions(): Promise<Session[]> {
