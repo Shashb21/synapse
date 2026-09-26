@@ -9,7 +9,9 @@ export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const state = await loadState();
-  const [ai, demo] = await Promise.all([aiEnabled().catch(() => true), currentWorkspaceIsDemo()]);
+  const ai = await aiEnabled().catch(() => true);
+  // Demo source files are offered only in a workspace that holds the Velmara demo.
+  const demo = await currentWorkspaceIsDemo();
   const blockCount = new Map<string, number>();
   for (const block of state.blocks) blockCount.set(block.source_id, (blockCount.get(block.source_id) ?? 0) + 1);
 

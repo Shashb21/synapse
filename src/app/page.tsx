@@ -92,7 +92,9 @@ export default async function HomePage({
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
-  const [ai, demo] = await Promise.all([aiEnabled().catch(() => true), currentWorkspaceIsDemo()]);
+  const ai = await aiEnabled().catch(() => true);
+  // Demo source files are offered only in a workspace that holds the Velmara demo.
+  const demo = await currentWorkspaceIsDemo();
   // With AI off nothing is ingested, so Gaps never waits for a source.
   const gapsUnlocked = gates.gapsUnlocked || !ai;
   const params = await searchParams;
