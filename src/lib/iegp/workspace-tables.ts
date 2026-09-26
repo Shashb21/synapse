@@ -106,6 +106,12 @@ export const WALKTHROUGH_DDL = [
   "CREATE TABLE IF NOT EXISTS walkthrough_progress (principal text PRIMARY KEY, step integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'active', updated_at text NOT NULL)",
 ];
 
+/** Columns S8 added to priority_placements for hand-set axes and bands. */
+export const S8_PLACEMENT_COLUMNS_DDL = [
+  "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_axes jsonb NOT NULL DEFAULT '[]'::jsonb",
+  "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_band boolean NOT NULL DEFAULT false",
+];
+
 /** Tables owned by the built-in stage modules (their `migrations`). */
 export const STAGE_MODULE_DDL = [
   SOURCE_FILES_DDL,
@@ -120,6 +126,7 @@ export const STAGE_MODULE_DDL = [
 export function workspaceTableStatements(): string[] {
   return [
     ...split(KERNEL_WORKSPACE_DDL),
+    ...S8_PLACEMENT_COLUMNS_DDL,
     ...SOURCE_BLOCKS_DDL,
     ...ROOM_DDL,
     ...WALKTHROUGH_DDL,
