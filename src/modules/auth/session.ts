@@ -295,7 +295,21 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   jar.delete(PENDING_COOKIE);
   // Customers sign in only with a seat their organisation was assigned (KAN-28).
   if (!(await seatAllowsSignIn(sessionArgs.email))) throw new NoSeatError();
-  return createSession(sessionArgs);
+  return createSession(await withoutClaimedOperator(sessionArgs));
+}
+
+/**
+ * A customer's own directory can set the `synapse_role` claim, so an IdP may
+ * never grant "operator" (which is platform owner) to a seat holder: only
+ * OWNER_EMAILS and admin accounts keep it. Anyone else gets their function's role.
+ */
+export async function withoutClaimedOperator(
+  args: Parameters<typeof createSession>[0],
+): Promise<Parameters<typeof createSession>[0]> {
+  if (args.role !== "operator") return args;
+  const email = args.email?.trim().toLowerCase();
+  const platformAdmin = Boolean(email) && (ownerEmails().includes(email!) || (await isAdminEmail(email!)));
+  return platformAdmin ? args : { ...args, role: roleForFunction(args.actor_function) };
 }
 
 /**

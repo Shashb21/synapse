@@ -53,6 +53,7 @@ import {
   NO_SEAT_MESSAGE,
   seatAllowsSignIn,
   SESSION_COOKIE,
+  withoutClaimedOperator,
 } from "@/modules/auth/session";
 import { mayClaimDefault } from "@/modules/workspaces/session";
 
@@ -283,6 +284,23 @@ describe("KAN-28: SSO sign-in needs a seat", () => {
     const demo = await loginPost(jsonRequest("/api/auth/login", "POST", { demo: true, actor_name: `Demo ${run}` }));
     expect(demo.status).toBe(200);
     expect((await currentSession())?.provider_id).toBe("demo");
+  });
+});
+
+describe("KAN-28: a customer's IdP can't make a seat holder the platform owner", () => {
+  it("a claimed operator role is dropped for a seat holder, kept for OWNER_EMAILS", async () => {
+    const base = {
+      provider_id: "microsoft",
+      subject: "microsoft:x",
+      actor_name: "Claimer",
+      actor_function: "heor" as const,
+      role: "operator" as const,
+    };
+    expect((await withoutClaimedOperator({ ...base, email: at("claimer") })).role).toBe("contributor");
+    expect((await withoutClaimedOperator({ ...base, email: null })).role).toBe("contributor");
+    process.env.OWNER_EMAILS = at("owner");
+    expect((await withoutClaimedOperator({ ...base, email: at("owner") })).role).toBe("operator");
+    expect((await withoutClaimedOperator({ ...base, role: "viewer", email: at("claimer") })).role).toBe("viewer");
   });
 });
 
