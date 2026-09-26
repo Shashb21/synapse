@@ -121,15 +121,28 @@ export async function createWorkspace(args: { name: string; owner: string }): Pr
 /**
  * The Default workspace (the public schema, holding the data from before
  * workspaces) is claimed by the first person who signs in.
+ *
+ * Atomic: one statement inserts the workspace and, only when that insert won,
+ * its owner. Concurrent first sign-ins therefore yield exactly one owner.
+ * Returns the workspace to the winner, null to everyone else.
  */
 export async function claimDefaultWorkspace(principal: string): Promise<Workspace | null> {
   const existing = await getWorkspace(DEFAULT_WORKSPACE_ID);
   if (existing) return null;
-  await rows(sql`
-    insert into workspaces (id, name, schema_name, created_by, created_at)
-    values (${DEFAULT_WORKSPACE_ID}, ${"Default workspace"}, ${DEFAULT_SCHEMA}, ${normalizePrincipal(principal)}, ${nowIso()})
-    on conflict (id) do nothing`);
-  await addMember({ workspace_id: DEFAULT_WORKSPACE_ID, principal, role: "owner", added_by: principal });
+  const who = normalizePrincipal(principal);
+  const at = nowIso();
+  const won = await rows(sql`
+    with claimed as (
+      insert into workspaces (id, name, schema_name, created_by, created_at)
+      values (${DEFAULT_WORKSPACE_ID}, ${"Default workspace"}, ${DEFAULT_SCHEMA}, ${who}, ${at})
+      on conflict do nothing
+      returning id
+    )
+    insert into workspace_members (workspace_id, principal, role, added_by, added_at)
+    select id, ${who}, 'owner', ${who}, ${at} from claimed
+    on conflict (workspace_id, principal) do nothing
+    returning workspace_id`);
+  if (!won[0]) return null;
   return getWorkspace(DEFAULT_WORKSPACE_ID);
 }
 

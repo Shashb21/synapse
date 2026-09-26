@@ -133,7 +133,10 @@ export function ownerDecision(subject: OwnerSubject, options: OwnerOptions = {})
   if (subject.role === "operator") return { owner: true, reason: "operator role" };
   const emails = options.emails ?? ownerEmails();
   const email = subject.email?.trim().toLowerCase();
-  if (subject.signed_in && email && emails.includes(email)) {
+  // Only an identity-provider session carries a verified email (modules/auth/idp.ts);
+  // a demo sign-in's address is typed, so it never matches OWNER_EMAILS.
+  const verifiedSession = subject.signed_in && subject.provider_id !== "demo";
+  if (verifiedSession && email && emails.includes(email)) {
     return { owner: true, reason: "listed in OWNER_EMAILS" };
   }
   const bypass = options.bypass ?? testOwnerBypass();

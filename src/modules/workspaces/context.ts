@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { sessionSecret } from "@/modules/auth/secret";
 
 /**
  * Which workspace a query belongs to. Every workspace is its own Postgres
@@ -33,28 +34,55 @@ export function runInWorkspace<T>(workspace: { workspace_id: string; schema: str
   return scope.run(workspace, fn);
 }
 
-function secret(): string {
-  return process.env.SESSION_SECRET?.trim() || process.env.AUTH_SECRET?.trim() || "synapse-dev-workspace-secret";
+/**
+ * How long a workspace selection stays valid. It matches the session lifetime
+ * (modules/auth/session.ts), so a copied cookie stops working with the session.
+ */
+export const WORKSPACE_COOKIE_TTL_MS = 12 * 60 * 60 * 1000;
+
+/** Signed with SESSION_SECRET; production never falls back to a default (see modules/auth/secret.ts). */
+function sign(workspaceId: string, expiresAt: number, sessionId: string): string {
+  return createHmac("sha256", sessionSecret())
+    .update(`${workspaceId}.${expiresAt}.${sessionId}`)
+    .digest("base64url");
 }
 
-function sign(workspaceId: string, sessionId: string): string {
-  return createHmac("sha256", secret()).update(`${workspaceId}.${sessionId}`).digest("base64url");
+/**
+ * The cookie value that selects `workspaceId` for this session:
+ * `<workspace id>.<expiry ms>.<hmac>`. The expiry is part of the signed value.
+ */
+export function workspaceCookieValue(
+  workspaceId: string,
+  sessionId: string,
+  options: { now?: number; ttlMs?: number } = {},
+): string {
+  const expiresAt = (options.now ?? Date.now()) + (options.ttlMs ?? WORKSPACE_COOKIE_TTL_MS);
+  return `${workspaceId}.${expiresAt}.${sign(workspaceId, expiresAt, sessionId)}`;
 }
 
-/** The cookie value that selects `workspaceId` for this session. */
-export function workspaceCookieValue(workspaceId: string, sessionId: string): string {
-  return `${workspaceId}.${sign(workspaceId, sessionId)}`;
-}
-
-/** The workspace id a cookie selects, when its signature matches the session. */
-export function verifyWorkspaceCookie(value: string | undefined, sessionId: string | undefined): string | null {
+/**
+ * The workspace id a cookie selects, when its signature matches the session
+ * and it has not expired. Anything else (forged, expired, another session's,
+ * or the old unexpiring format) is null.
+ */
+export function verifyWorkspaceCookie(
+  value: string | undefined,
+  sessionId: string | undefined,
+  now: number = Date.now(),
+): string | null {
   if (!value || !sessionId) return null;
-  const dot = value.lastIndexOf(".");
-  if (dot <= 0) return null;
-  const id = value.slice(0, dot);
-  const given = Buffer.from(value.slice(dot + 1));
-  const expected = Buffer.from(sign(id, sessionId));
+  const sigDot = value.lastIndexOf(".");
+  if (sigDot <= 0) return null;
+  const expDot = value.lastIndexOf(".", sigDot - 1);
+  if (expDot <= 0) return null;
+  const id = value.slice(0, expDot);
+  const expRaw = value.slice(expDot + 1, sigDot);
+  if (!/^\d{1,16}$/.test(expRaw)) return null;
+  const expiresAt = Number(expRaw);
+  const given = Buffer.from(value.slice(sigDot + 1));
+  const expected = Buffer.from(sign(id, expiresAt, sessionId));
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  if (expiresAt <= now) return null;
   return id;
 }
 

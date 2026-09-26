@@ -12,6 +12,10 @@ export const dynamic = "force-dynamic";
  * URL (Google, Microsoft or GitHub); `{ demo: true, actor_name }` signs in as a
  * demo user, which only a non-production build accepts. Either way the person
  * then chooses a workspace.
+ *
+ * A demo body's `role` and `email` are requests, not grants: signInDemo honours
+ * them only under the test stub (SYNAPSE_TEST_STUB_LLM=1); otherwise a demo user
+ * is a contributor at `<name>@demo.synapse.local`.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

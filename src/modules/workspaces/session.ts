@@ -1,11 +1,24 @@
 import { cookies } from "next/headers";
 import { currentSession, SESSION_COOKIE, type Session } from "@/modules/auth/session";
-import { selectedWorkspaceId, WORKSPACE_COOKIE, workspaceCookieValue } from "./context";
+import { selectedWorkspaceId, WORKSPACE_COOKIE, WORKSPACE_COOKIE_TTL_MS, workspaceCookieValue } from "./context";
 import { claimDefaultWorkspace, getWorkspace, listWorkspacesFor, memberRole, type WorkspaceWithRole } from "./store";
 
-/** Who a signed-in person is for membership: their email, else the provider subject. */
-export function principalOf(session: Pick<Session, "email" | "subject">): string {
-  return session.email?.trim() || session.subject;
+/**
+ * Who a signed-in person is for membership: their email, which a session only
+ * carries when the identity provider verified it (modules/auth/idp.ts), else
+ * `provider:subject`. That form can never match an email invite or
+ * OWNER_EMAILS. `provider_id` is optional for backwards compatibility; sessions
+ * already store the subject as `provider:subject`.
+ */
+export function principalOf(
+  session: Pick<Session, "email" | "subject"> & { provider_id?: string | null },
+): string {
+  const email = session.email?.trim();
+  if (email) return email;
+  const subject = session.subject.trim();
+  const provider = session.provider_id?.trim();
+  if (provider && !subject.startsWith(`${provider}:`)) return `${provider}:${subject}`;
+  return subject;
 }
 
 /** The signed-in person's workspaces. The very first sign-in claims the Default workspace. */
@@ -32,7 +45,7 @@ export async function selectWorkspace(workspaceId: string): Promise<WorkspaceWit
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: WORKSPACE_COOKIE_TTL_MS / 1000,
   });
   return { ...workspace, role };
 }
