@@ -100,6 +100,11 @@ export type OwnerSubject = {
   demo: boolean;
   /** "demo" for a demo sign-in, else the identity provider id; null when unsigned. */
   provider_id: string | null;
+  /**
+   * An email + password session whose account is an enabled admin (created by
+   * `npm run create-admin` or promoted in /admin/users). Looked up by the caller.
+   */
+  admin_account?: boolean;
 };
 
 /** Emails listed in OWNER_EMAILS (comma-separated), normalised to lower case. */
@@ -129,11 +134,15 @@ export type OwnerOptions = {
 };
 
 /**
- * Owner = role "operator", or a signed-in email listed in OWNER_EMAILS. The
+ * Owner = role "operator", an admin email + password account, or a signed-in
+ * email listed in OWNER_EMAILS. The
  * test bypass covers only the demo session (unsigned demo, or a demo sign-in).
  */
 export function ownerDecision(subject: OwnerSubject, options: OwnerOptions = {}): OwnerDecision {
   if (subject.role === "operator") return { owner: true, reason: "operator role" };
+  if (subject.signed_in && subject.provider_id === "password" && subject.admin_account === true) {
+    return { owner: true, reason: "admin account" };
+  }
   const emails = options.emails ?? ownerEmails();
   const email = subject.email?.trim().toLowerCase();
   // Only an identity-provider session carries a verified email (modules/auth/idp.ts);
