@@ -7,6 +7,7 @@ import { GanttChart } from "@/components/timeline/gantt-chart";
 import { GAP_STATUS_LABELS, type GapStatus } from "@/lib/iegp/enums";
 import type { PlanColumn, PlanGapCard, ReviewGapCard } from "@/lib/iegp/engine";
 import type { TimelineModel } from "@/modules/stages/s10-timeline/build";
+import { assetSubtitle } from "@/lib/iegp/asset";
 
 /**
  * The leave-behind .pptx (kept from the retired chaptered presentation). The
@@ -74,6 +75,12 @@ async function rasterize(svg: SVGSVGElement | null): Promise<string | null> {
   }
 }
 
+/** "<Asset>-IEGP.pptx", or "IEGP.pptx" before the asset is named. */
+export function exportFileName(assetName: string): string {
+  const slug = assetName.trim().replace(/\s+/g, "-");
+  return slug ? `${slug}-IEGP.pptx` : "IEGP.pptx";
+}
+
 export function ExportPackButton({ data }: { data: ExportPackData }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [pending, setPending] = useState(false);
@@ -86,14 +93,19 @@ export function ExportPackButton({ data }: { data: ExportPackData }) {
       const { default: PptxGenJS } = await import("pptxgenjs");
       const pptx = new PptxGenJS();
 
+      // A blank plan has no asset details yet: show only what was entered, never placeholders.
+      const assetName = data.assetName.trim();
+      const subtitle = assetSubtitle({ inn: data.inn, indication: data.indication, geography: data.geography });
       const title = pptx.addSlide();
-      title.addText(data.assetName, { x: 0.5, y: 1.2, fontSize: 32, bold: true });
-      title.addText(`${data.inn} · ${data.indication} · ${data.geography}`, {
-        x: 0.5,
-        y: 2,
-        fontSize: 16,
-        color: "666666",
-      });
+      if (assetName) title.addText(assetName, { x: 0.5, y: 1.2, fontSize: 32, bold: true });
+      if (subtitle) {
+        title.addText(subtitle, {
+          x: 0.5,
+          y: 2,
+          fontSize: 16,
+          color: "666666",
+        });
+      }
       title.addText("Integrated Evidence Generation Plan", { x: 0.5, y: 2.6, fontSize: 14, color: "999999" });
 
       const counts = statusCounts(data.gaps);
@@ -122,7 +134,7 @@ export function ExportPackButton({ data }: { data: ExportPackData }) {
         ganttSlide.addImage({ data: ganttImage, x: 0.3, y: 0.9, w: 9.4, h: 5 });
       }
 
-      await pptx.writeFile({ fileName: `${data.assetName.replace(/\s+/g, "-")}-IEGP.pptx` });
+      await pptx.writeFile({ fileName: exportFileName(assetName) });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Export failed.");
     } finally {
