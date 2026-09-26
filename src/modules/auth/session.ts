@@ -7,6 +7,7 @@ import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
+import { signupAllowed } from "./signup-policy";
 import { ROLE_LABELS, isRole, roleForFunction, testOwnerBypass, type Role } from "./roles";
 import {
   configuredIdentityProviders,
@@ -362,6 +363,8 @@ export function loginOptions() {
   return {
     /** Offer "continue as a demo user": development and tests only, never production. */
     demo: demoSignInAllowed(),
+    /** Self sign-up with email and password (ALLOW_SIGNUP, default open). */
+    signup: signupAllowed(),
     providers: configuredIdentityProviders().map((provider) => ({
       id: provider.id,
       label: provider.label,
