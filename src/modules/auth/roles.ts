@@ -35,7 +35,11 @@ export const CAPABILITIES = [
   "activate_module",
   /** The admin AI switch: turn every AI suggestion and automatic AI action on or off. */
   "toggle_ai",
-  /** Wipe the workspace's plan back to the seed (the IEGP "reset" action). Medical Affairs only. */
+  /**
+   * Replace the workspace's whole plan: reset it to blank (the IEGP "reset"
+   * action) or load the Velmara demo ("load_demo"). Medical Affairs only, and
+   * the workspace owner only.
+   */
   "reset_workspace",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];

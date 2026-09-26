@@ -2,11 +2,13 @@ import type { Capability } from "@/modules/auth/roles";
 
 /**
  * What each action needs (REQ-AUTH-006). Every action here writes; reads go
- * through the pages. Viewers hold none of these. Reset wipes the workspace, so
- * only Medical Affairs (and the platform operator) may do it.
+ * through the pages. Viewers hold none of these. "reset" (to blank) and
+ * "load_demo" replace the whole workspace, so only Medical Affairs (and the
+ * platform operator) may do them, and the route also requires the workspace owner.
  */
 export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   reset: "reset_workspace",
+  load_demo: "reset_workspace",
   ingest: "upload",
   ingest_demo: "upload",
   lock_priority: "prioritize",

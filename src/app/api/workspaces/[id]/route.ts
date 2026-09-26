@@ -19,6 +19,7 @@ export async function GET(_request: Request, { params }: Context) {
         role: workspace.role,
         created_at: workspace.created_at,
         created_by: workspace.created_by,
+        demo: workspace.demo,
       },
       members: await listMembers(id),
     });
