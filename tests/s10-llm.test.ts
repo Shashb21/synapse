@@ -5,7 +5,7 @@ import * as t from "@/modules/kernel/schema";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { assignTacticToGap, createGap, createProposedTactic, loadState, resetWorkedExample } from "@/lib/iegp/store";
+import { assignTacticToGap, createGap, createProposedTactic, loadState, resetDemo } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { addMonths, timelineCandidates, type TimelineCandidate } from "@/modules/stages/s10-timeline/build";
 import { tacticDesigns, timelineModule } from "@/modules/stages/s10-timeline/module";
@@ -80,7 +80,7 @@ describe("S10 on the model path", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetWorkedExample();
+    await resetDemo();
     await wipePlatform();
     await ensurePlatformSchema();
     await createGap({

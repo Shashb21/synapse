@@ -11,7 +11,7 @@ import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, loadState, resetSeed } from "@/lib/iegp/store";
+import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import {
   listPlacements,
   movePlacement,
@@ -51,7 +51,7 @@ const placementOf = async (gapId: string) => (await listPlacements()).find((row)
 let ids: string[] = [];
 
 beforeAll(async () => {
-  await resetSeed();
+  await resetDemoSetup();
   await wipePlatform();
   for (const statement of [
     "No comparative effectiveness evidence versus standard of care for the HTA dossier.",

@@ -3,7 +3,7 @@ import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform } from "@/modules/kernel/db";
 import { displayedGapStatus, gapInSetting, isLiveGap, settingOptions } from "@/lib/iegp/engine";
-import { createGap, loadState, normalizeSettings, resetSeed, setGapSettings } from "@/lib/iegp/store";
+import { createGap, loadState, normalizeSettings, resetDemoSetup, setGapSettings } from "@/lib/iegp/store";
 import {
   ALL_SETTINGS_SCOPE,
   DEFAULT_AXES,
@@ -63,7 +63,7 @@ describe("Prioritize on a setting's matrix", () => {
   let openIds: string[] = [];
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform();
     for (const statement of [
       "No head-to-head comparative effectiveness versus standard of care for the HTA submission.",

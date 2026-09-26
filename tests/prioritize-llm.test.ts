@@ -4,7 +4,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { createGap, loadState, resetSeed } from "@/lib/iegp/store";
+import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { DEFAULT_AXES, quadrantBand } from "@/modules/stages/s8-prioritization/axes";
 import { prioritizationModule } from "@/modules/stages/s8-prioritization/module";
 
@@ -69,7 +69,7 @@ describe("S8 on the model path", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform();
     for (const statement of [
       "No comparative effectiveness data versus standard of care for the payer dossier.",

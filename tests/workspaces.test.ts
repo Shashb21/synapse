@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import "@/modules";
-import { createGap, loadState, resetSeed } from "@/lib/iegp/store";
+import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { runStage } from "@/modules/kernel/run";
 import { listRuns } from "@/modules/kernel/observability";
 import { runInWorkspace, verifyWorkspaceCookie, workspaceCookieValue } from "@/modules/workspaces/context";
@@ -30,11 +30,11 @@ describe("workspaces", () => {
     const b = await createWorkspace({ name: "Velmara US", owner });
 
     await withWorkspace(a.id, async () => {
-      await resetSeed();
+      await resetDemoSetup();
       await addGap("Only in workspace A: no real-world data in elderly patients.");
     });
     await withWorkspace(b.id, async () => {
-      await resetSeed();
+      await resetDemoSetup();
     });
 
     const inA = await withWorkspace(a.id, loadState);
@@ -52,7 +52,7 @@ describe("workspaces", () => {
     const a = await createWorkspace({ name: "Runs A", owner });
     const b = await createWorkspace({ name: "Runs B", owner });
     const run = await withWorkspace(a.id, async () => {
-      await resetSeed();
+      await resetDemoSetup();
       return runStage({ stage: "S7", input: {}, actor: ACTOR, role: "medical_affairs" });
     });
     const runsA = await withWorkspace(a.id, () => listRuns({ limit: 100 }));
@@ -104,7 +104,7 @@ describe("workspaces", () => {
     const ws = await createWorkspace({ name: "Scoped", owner });
     const statement = `Scoped gap ${unique()}`;
     await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
-      await resetSeed();
+      await resetDemoSetup();
       await addGap(statement);
     });
     expect((await withWorkspace(ws.id, loadState)).gaps.some((gap) => gap.statement === statement)).toBe(true);

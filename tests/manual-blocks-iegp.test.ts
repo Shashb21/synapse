@@ -13,7 +13,7 @@ import "@/modules";
 import { runStage } from "@/modules/kernel/run";
 import { wipePlatform, db } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
-import { loadState, persistSourceAndBlocks, resetSeed } from "@/lib/iegp/store";
+import { loadState, persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
 import * as t from "@/lib/iegp/schema";
 import { GET as blocksGet, POST as blocksPost } from "@/app/api/sources/blocks/route";
 import {
@@ -86,7 +86,7 @@ function post(body: Record<string, unknown>) {
 
 describe("S1 source blocks: human edit, add, split, merge, delete", () => {
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
   }, 60_000);
 
   it("edits a block with rationale, keeps the model's original and writes an edit record", async () => {
@@ -190,7 +190,7 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
 
 describe("S1 re-parse keeps human-edited blocks", () => {
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents"]);
   }, 60_000);
 

@@ -9,7 +9,7 @@ import { listEvalRuns } from "@/modules/kernel/evals";
 import { routeConfig, resolveRoute, setDefaultProvider, setRouteConfig } from "@/modules/kernel/routing";
 import { activateModule, stageWiring } from "@/modules/kernel/registry";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { loadState, resetSeed } from "@/lib/iegp/store";
+import { loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listSourceFiles } from "@/modules/stages/s0-upload/module";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { listGapCandidates } from "@/modules/stages/s2-gap-extract/module";
@@ -35,7 +35,7 @@ async function run<O>(stage: Parameters<typeof runStage>[0]["stage"], input: unk
 
 describe("modular pipeline, S0 to S10", () => {
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform([
       "source_files",
       "parsed_documents",

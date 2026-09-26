@@ -10,7 +10,7 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import { runStage } from "@/modules/kernel/run";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
-import { commitExtractedRecords, loadState, resetSeed } from "@/lib/iegp/store";
+import { commitExtractedRecords, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { tacticExtractModule } from "@/modules/stages/s3-tactic-extract/module";
 
 /**
@@ -94,7 +94,7 @@ describe("S3 on the model path", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await ensurePlatformSchema(tacticExtractModule.migrations ?? []);
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates", "tactic_candidates"]);
     await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, actor: ACTOR, role: "medical_affairs" });

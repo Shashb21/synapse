@@ -9,7 +9,7 @@ import {
   createProposedTactic,
   loadState,
   lockTactic,
-  resetSeed,
+  resetDemoSetup,
   syncComputedGapStatuses,
 } from "@/lib/iegp/store";
 import { partialSplitModule } from "@/modules/stages/s6-partial-split/module";
@@ -61,7 +61,7 @@ function context(script: Script, connected = true): { ctx: ModuleContext; calls:
 const role = (call: Call) => call.purpose.split(":")[0];
 
 async function makePartialGap() {
-  await resetSeed();
+  await resetDemoSetup();
   await wipePlatform();
   const gapId = await createGap({
     name: "Comparative effectiveness versus regional SoC in elderly patients",

@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 // Deliberately no `import "@/modules"`: bootstrap must not depend on which
 // stage modules a caller happened to load first.
 import { ensureCurrentSchemaTables, ensureWorkspaceSchema, onWorkspaceBootstrap, sharedDb } from "@/lib/iegp/db";
-import { persistSourceAndBlocks, resetSeed } from "@/lib/iegp/store";
+import { persistSourceAndBlocks, resetDemoSetup } from "@/lib/iegp/store";
 import {
   addSourceBlock,
   createManualSource,
@@ -141,11 +141,11 @@ describe("KAN-13: per-workspace tables", () => {
     // Default first: before the fix, this cached "done" for the whole process.
     await exerciseSourceBlocks("Default");
     const inA = await withWorkspace(a.id, async () => {
-      await resetSeed();
+      await resetDemoSetup();
       return exerciseSourceBlocks("A");
     });
     const inB = await withWorkspace(b.id, async () => {
-      await resetSeed();
+      await resetDemoSetup();
       return exerciseSourceBlocks("B");
     });
 

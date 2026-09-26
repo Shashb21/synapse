@@ -6,7 +6,7 @@ import * as t from "@/modules/kernel/schema";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { NoRouteError } from "@/modules/llm/provider";
-import { loadState, persistState, resetWorkedExample } from "@/lib/iegp/store";
+import { loadState, persistState, resetDemo } from "@/lib/iegp/store";
 import {
   addTimelineActivity,
   removeTimelineActivity,
@@ -71,7 +71,7 @@ describe("S10 by hand", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetWorkedExample();
+    await resetDemo();
     await wipePlatform();
     await ensurePlatformSchema();
     // A tactic mapped to no gap: only a user can put it on the timeline.
@@ -277,7 +277,7 @@ describe("S10 by hand", () => {
 
 describe("S10 overrides of model-estimated values", () => {
   beforeAll(async () => {
-    await resetWorkedExample();
+    await resetDemo();
     await wipePlatform();
     await ensurePlatformSchema();
   }, 60_000);
