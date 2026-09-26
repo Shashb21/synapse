@@ -60,6 +60,9 @@ export type AccountWithHash = Account & { password_hash: string };
 let ready: Promise<void> | null = null;
 function ensureTables(): Promise<void> {
   ready ??= (async () => {
+    // Skip the DDL when the table exists, so Postgres does not log "already exists" notices.
+    const found = (await sharedDb().execute(sql`select to_regclass('user_accounts') as t`)) as unknown as Row[];
+    if (found[0]?.t) return;
     for (const stmt of DDL) await sharedDb().execute(sql.raw(stmt));
   })().catch((error) => {
     ready = null; // a failed attempt is forgotten, so the next call retries
