@@ -132,7 +132,10 @@ describe("the first screen with AI off", () => {
     expect(off).not.toContain('aria-label="Prep readiness"');
     const on = renderChrome(true);
     expect(on).toContain("Upload");
-    expect(on).not.toMatch(/href="\/\?place=gaps"/);
+    // KAN-24: Gaps still opens with AI on and no source, but shows it is waiting.
+    expect(on).toMatch(/href="\/\?place=gaps"/);
+    expect(on).toContain('data-testid="nav-waiting-gaps"');
+    expect(off).not.toContain('data-testid="nav-waiting-gaps"');
   });
 
   it("hides AI buttons and switches copy on the other places", () => {
