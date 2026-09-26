@@ -151,11 +151,17 @@ function parseName(input: unknown): string {
   return name;
 }
 
-/** Splits a pasted list (commas, semicolons, whitespace, newlines) into emails. */
+/**
+ * Splits a pasted list (commas, semicolons, whitespace, newlines) into
+ * lower-cased, de-duplicated emails. A `Name <a@b.co>` entry keeps the address.
+ */
 export function parseEmailList(input: unknown): string[] {
-  const raw = Array.isArray(input) ? input.map(String) : typeof input === "string" ? input.split(/[\s,;]+/) : [];
-  // "Name <a@b.co>" pastes: keep the address.
-  return [...new Set(raw.map((e) => normalizeEmail(e.replace(/^.*<|>.*$/g, ""))).filter(Boolean))];
+  const chunks = Array.isArray(input) ? input.map(String) : typeof input === "string" ? input.split(/[,;\n\r]+/) : [];
+  const raw = chunks.flatMap((chunk) => {
+    const bracketed = /<([^<>]+)>/.exec(chunk);
+    return bracketed ? [bracketed[1]] : chunk.split(/\s+/);
+  });
+  return [...new Set(raw.map(normalizeEmail).filter(Boolean))];
 }
 
 export function emailDomain(email: string): string {

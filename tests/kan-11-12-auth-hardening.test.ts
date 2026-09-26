@@ -253,7 +253,7 @@ describe("KAN-12: only verified emails identify a person", () => {
     const identity = loginIdentity({ provider: identityProvider("google")!, profile: { sub, email: address, email_verified: false } });
     expect(identity.email).toBeNull();
     expect(identity.subject).toBe(`google:${sub}`);
-    expect(principalOf({ ...identity, provider_id: "google" })).toBe(`google:${sub}`);
+    expect(principalOf({ subject: identity.subject, email: identity.email ?? null, provider_id: "google" })).toBe(`google:${sub}`);
     await deleteCustomersLike(customer.name);
   });
 });
