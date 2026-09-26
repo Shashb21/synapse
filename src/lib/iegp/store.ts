@@ -2975,7 +2975,7 @@ export async function modifyTactic(args: {
 /**
  * Saves the setup wizard's IEGP context for the current workspace. The asset
  * row and the objectives table mirror what the stages read directly; the whole
- * context is kept in `assets.planning_context`. A draft (Save & continue later)
+ * context is kept in `assets.planning_context`. A draft (saved on each Continue)
  * only refuses malformed values; `mark_complete` needs every required field.
  * Once setup is complete, later edits keep it complete.
  */
