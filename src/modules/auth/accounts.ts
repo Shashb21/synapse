@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { sql } from "drizzle-orm";
-import { sharedDb } from "@/modules/kernel/db";
+import { and, eq, ne, sql } from "drizzle-orm";
+import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
+import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import { ACTOR_FUNCTIONS, type ActorFunction } from "@/lib/iegp/enums";
 import { isRole, type Role } from "./roles";
@@ -245,6 +246,18 @@ export async function recordSuccessfulSignIn(accountId: string): Promise<void> {
   await rows(sql`
     update user_accounts set failed_attempts = 0, locked_until = null, last_sign_in_at = ${nowIso()}
     where id = ${accountId}`);
+}
+
+/**
+ * Ends an account's password sessions (after a reset, a role change or
+ * disabling it), so the change applies at once rather than at next sign-in.
+ */
+export async function revokeAccountSessions(accountId: string, options: { except?: string } = {}): Promise<void> {
+  await ensurePlatformSchema();
+  const match = and(eq(t.authSessions.provider_id, PASSWORD_PROVIDER), eq(t.authSessions.subject, accountId));
+  await sharedDb()
+    .delete(t.authSessions)
+    .where(options.except ? and(match, ne(t.authSessions.id, options.except)) : match);
 }
 
 /** Test helper: removes accounts whose email matches the LIKE pattern. */
