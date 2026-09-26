@@ -20,7 +20,7 @@ export const PRESENT_HEADER = "x-synapse-present";
  */
 const PUBLIC_PREFIXES = ["/login", "/signup", "/api/auth", "/api/oauth", "/_next", "/favicon.ico"];
 /** The owner tool gates itself by owner role (see the admin routes). */
-const ADMIN_PREFIXES = ["/admin", "/api/accuracy", "/api/control"];
+const ADMIN_PREFIXES = ["/admin", "/api/admin", "/api/accuracy", "/api/control"];
 /** Need a session but no workspace: where a workspace is chosen, and your own account. */
 const SESSION_ONLY_PREFIXES = ["/workspaces", "/api/workspaces", "/account", "/api/account"];
 
