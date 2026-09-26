@@ -526,9 +526,13 @@ export function GapGantt({
           />
         ))}
 
-        {view.markers.map((marker) => {
+        {view.markers.map((marker, index) => {
           const mx = x(marker.date);
           if (mx < LABEL_W || mx > LABEL_W + trackW) return null;
+          // Labels only get the room up to the next marker; the tooltip always has the full text.
+          const next = view.markers.slice(index + 1).find((other) => x(other.date) > mx + 1);
+          const room = (next ? x(next.date) : LABEL_W + trackW + PAD_R) - mx - 12;
+          const chars = Math.min(28, Math.floor(room / 5));
           return (
             <g key={marker.id} aria-label={`${marker.detail}: ${marker.label}, ${marker.date}`}>
               <title>{`${marker.detail}: ${marker.label} · ${marker.date}`}</title>
@@ -537,9 +541,11 @@ export function GapGantt({
                 points={`${mx},${HEADER_H + 2} ${mx + 5},${HEADER_H + 8} ${mx},${HEADER_H + 14} ${mx - 5},${HEADER_H + 8}`}
                 fill={marker.kind === "key_decision" ? palette.today : palette.readout}
               />
-              <text x={mx + 8} y={HEADER_H + 12} fill={palette.muted} fontSize={9}>
-                {truncate(marker.label, 28)}
-              </text>
+              {chars >= 4 ? (
+                <text x={mx + 8} y={HEADER_H + 12} fill={palette.muted} fontSize={9}>
+                  {truncate(marker.label, chars)}
+                </text>
+              ) : null}
             </g>
           );
         })}
@@ -623,7 +629,7 @@ export function GapGantt({
                   </div>
                 ) : null}
                 {!group.start ? (
-                  <div className="pointer-events-auto absolute" style={{ top: row.y + 4, left: LABEL_W + 84 }}>
+                  <div className="pointer-events-auto absolute" style={{ top: row.y + 4, left: LABEL_W + 92 }}>
                     {undated.length > 0 ? (
                       <ManualDatesDialog
                         identity={identity}
@@ -646,7 +652,7 @@ export function GapGantt({
                 key={row.key}
                 data-testid={`item-actions-${row.item.key}`}
                 className="pointer-events-auto absolute flex gap-1"
-                style={{ top: row.y + 3, left: LABEL_W + 84 }}
+                style={{ top: row.y + 3, left: LABEL_W + 92 }}
               >
                 <ManualDatesDialog
                   identity={identity}
