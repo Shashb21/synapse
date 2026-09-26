@@ -75,19 +75,21 @@ export function SignupPanel({ next, minLength }: { next: string; minLength: numb
           ))}
         </select>
       </label>
-      <label className="grid gap-1 text-[11px] text-muted-foreground">
-        Password
-        <Input
-          type="password"
-          value={password}
-          autoComplete="new-password"
-          minLength={minLength}
-          required
-          aria-describedby="password-hint"
-          onChange={(event) => setPassword(event.target.value)}
-        />
+      <div className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1">
+          Password
+          <Input
+            type="password"
+            value={password}
+            autoComplete="new-password"
+            minLength={minLength}
+            required
+            aria-describedby="password-hint"
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
         <span id="password-hint">At least {minLength} characters. Not your email, not a common password.</span>
-      </label>
+      </div>
       <label className="grid gap-1 text-[11px] text-muted-foreground">
         Confirm password
         <Input

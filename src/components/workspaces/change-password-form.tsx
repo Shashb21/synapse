@@ -57,11 +57,19 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
         Current password
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
       </label>
-      <label className="grid gap-1 text-[11px] text-muted-foreground">
-        New password
-        <Input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
-        <span>At least {minLength} characters. Not your email, not a common password.</span>
-      </label>
+      <div className="grid gap-1 text-[11px] text-muted-foreground">
+        <label className="grid gap-1">
+          New password
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            aria-describedby="new-password-hint"
+            onChange={(e) => setNext(e.target.value)}
+          />
+        </label>
+        <span id="new-password-hint">At least {minLength} characters. Not your email, not a common password.</span>
+      </div>
       <label className="grid gap-1 text-[11px] text-muted-foreground">
         Confirm new password
         <Input
