@@ -616,7 +616,7 @@ export function GapGantt({
             const group = row.group;
             const undated = group.items.filter((item) => !item.activity);
             return (
-              <div key={row.key}>
+              <div key={row.key} data-testid={`gap-actions-${group.gap_id}`}>
                 {canCreate ? (
                   <div className="pointer-events-auto absolute" style={{ top: row.y + 4, left: LABEL_W - 96 }}>
                     <CreateActivityDialog identity={identity} gap={group} />
@@ -644,6 +644,7 @@ export function GapGantt({
             return (
               <div
                 key={row.key}
+                data-testid={`item-actions-${row.item.key}`}
                 className="pointer-events-auto absolute flex gap-1"
                 style={{ top: row.y + 3, left: LABEL_W + 84 }}
               >
