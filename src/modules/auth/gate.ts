@@ -14,8 +14,11 @@ export const PROXY_WORKSPACE_COOKIE = "synapse_workspace";
 /** Set by the proxy on requests whose URL carries `?present=1` (Room presenting a page). */
 export const PRESENT_HEADER = "x-synapse-present";
 
-/** Reachable by anyone: sign-in, OAuth callbacks, and assets. */
-const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/oauth", "/_next", "/favicon.ico"];
+/**
+ * Reachable by anyone: sign-in and sign-up (including /api/auth/password/*),
+ * OAuth callbacks, and assets.
+ */
+const PUBLIC_PREFIXES = ["/login", "/signup", "/api/auth", "/api/oauth", "/_next", "/favicon.ico"];
 /** The owner tool gates itself by owner role (see the admin routes). */
 const ADMIN_PREFIXES = ["/admin", "/api/accuracy", "/api/control"];
 /** Need a session but no workspace: this is where a workspace is chosen. */
