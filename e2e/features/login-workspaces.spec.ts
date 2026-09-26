@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -83,8 +84,9 @@ test("first sign-in asks for a workspace; the tag shows it; switching changes th
   const email = `ws.${id}@example.com`;
   await demoSignInThroughLoginPage(page, `Workspace Tester ${id}`, email);
 
-  // A brand-new person has no workspaces, so they are asked to create one.
-  await expect(page.getByRole("heading", { name: "Create your first workspace" })).toBeVisible();
+  // A brand-new person has no workspaces: ask your workspace owner, or create one.
+  await expect(page.getByTestId("no-workspaces")).toContainText("Ask your workspace owner to invite you");
+  await expect(page.getByRole("heading", { name: "Or create your first workspace" })).toBeVisible();
   const alpha = `Alpha ${id}`;
   await createWorkspaceThroughUi(page, alpha);
 
@@ -173,40 +175,60 @@ test("the customer app shows no owner or lab tools", async ({ page }) => {
   await expect(toggle.getByRole("link", { name: "Room" })).toHaveAttribute("href", "/room");
 });
 
-test("email and password: sign up, your account, sign out, sign back in; a wrong password is generic", async ({ page }) => {
-  const id = unique();
-  const email = `signup.${id}@example.com`;
-  const password = `lantern-harbour-${id}-9`;
+/** `npm run create-admin`, the only way a password account starts (KAN-28). The password goes on stdin. */
+function createAdmin(email: string, password: string, name: string) {
+  return execFileSync("npm", ["run", "-s", "create-admin", "--", "--email", email, "--name", name], {
+    input: `${password}\n`,
+    encoding: "utf8",
+    env: process.env,
+  });
+}
 
-  // The login page leads with the email form and links to sign-up.
+test("no sign-up: /signup is gone, and /login has no link to it; a seatless SSO user sees the seat message", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByRole("form", { name: "Sign in with email" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /create an account/i })).toHaveCount(0);
+  await expect(page.locator('a[href^="/signup"]')).toHaveCount(0);
+
+  const signup = await page.request.get("/signup", { maxRedirects: 0 });
+  expect(signup.status()).not.toBe(200);
+  const api = await page.request.post("/api/auth/password/signup", {
+    data: { name: "Nope", email: `nope.${unique()}@example.com`, password: "x".repeat(16) },
+  });
+  expect(api.status()).toBe(404);
+
+  await page.goto("/login?error=no_seat");
+  await expect(page.getByTestId("login-error")).toHaveText(
+    "Your organisation hasn't assigned you a Synapse seat. Ask your administrator.",
+  );
+});
+
+test("staff email and password: your account, sign out, sign back in; a wrong password is generic", async ({ page }) => {
+  const id = unique();
+  const email = `staff.${id}@example.com`;
+  const password = `lantern-harbour-${id}-9`;
+  const out = createAdmin(email, password, `Staff ${id}`);
+  expect(out).not.toContain(password);
+
   await page.goto("/login");
   const signIn = page.getByRole("form", { name: "Sign in with email" });
-  await expect(signIn.getByLabel("Email")).toBeVisible();
-  await clickUntilUrl(page, page.getByRole("link", { name: "Create an account" }), /\/signup/);
-
-  const form = page.getByRole("form", { name: "Create an account" });
-  const create = form.getByRole("button", { name: "Create account" });
+  const submit = signIn.getByRole("button", { name: "Sign in", exact: true });
   await fillUntilEnabled(async () => {
-    await refill(form.getByLabel("Your name"), `Signup ${id}`);
-    await refill(form.getByLabel("Work email"), email);
-    await refill(form.getByLabel("Password", { exact: true }), password);
-    await refill(form.getByLabel("Confirm password"), password);
-  }, create);
-  await create.click();
+    await refill(signIn.getByLabel("Email"), email);
+    await refill(signIn.getByLabel("Password"), password);
+  }, submit);
+  await submit.click();
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 
-  // A self sign-up is a contributor whose email is not verified yet.
   await page.goto("/account");
   const profile = page.getByTestId("account-profile");
   await expect(profile).toContainText(email);
-  await expect(profile).toContainText("Contributing function");
+  await expect(profile).toContainText("Platform operator");
   await expect(profile).toContainText("Email and password");
-  await expect(profile).toContainText("Not yet");
-  await expect(page.getByTestId("account-admin-link")).toHaveCount(0);
+  await expect(page.getByTestId("account-admin-link")).toBeVisible();
 
   await clickUntilUrl(page, page.getByRole("button", { name: /sign out/i }), /\/login/);
 
-  const submit = signIn.getByRole("button", { name: "Sign in", exact: true });
   await fillUntilEnabled(async () => {
     await refill(signIn.getByLabel("Email"), email);
     await refill(signIn.getByLabel("Password"), "definitely-not-it");
@@ -218,3 +240,4 @@ test("email and password: sign up, your account, sign out, sign back in; a wrong
   await submit.click();
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 });
+
