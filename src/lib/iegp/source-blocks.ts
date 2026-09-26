@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { boolean, doublePrecision, pgTable, text } from "drizzle-orm/pg-core";
-import { db, ensureSchema } from "./db";
+import { db, ensureCurrentSchemaTables } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, SOURCE_TYPES, type ActorFunction, type SourceType } from "./enums";
 import { appendAudit, persistSourceAndBlocks } from "./store";
@@ -77,40 +77,13 @@ export const sourceStakeholderMeta = pgTable("source_stakeholder_meta", {
   source_generation: text("source_generation"),
 });
 
-const SOURCE_BLOCKS_DDL = [
-  `CREATE TABLE IF NOT EXISTS source_block_meta (
-    block_id text PRIMARY KEY, source_id text NOT NULL, origin text NOT NULL,
-    locked boolean NOT NULL DEFAULT false, deleted boolean NOT NULL DEFAULT false,
-    position double precision, current_text text NOT NULL,
-    original_text text, original_heading text,
-    edited_by text, edited_function text, edited_at text
-  )`,
-  `CREATE TABLE IF NOT EXISTS source_dropped_units (
-    id text PRIMARY KEY, source_id text NOT NULL, location text NOT NULL,
-    reason text NOT NULL, text text NOT NULL, restored_block_id text, created_at text NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS source_stakeholder_meta (
-    source_id text PRIMARY KEY, llm_function text, llm_rationale text, llm_at text,
-    override_function text, override_rationale text, override_by text, override_at text
-  )`,
-];
-
-const SOURCE_BLOCKS_MIGRATIONS = [
-  "ALTER TABLE source_block_meta ADD COLUMN IF NOT EXISTS source_generation text",
-  "ALTER TABLE source_dropped_units ADD COLUMN IF NOT EXISTS source_generation text",
-  "ALTER TABLE source_stakeholder_meta ADD COLUMN IF NOT EXISTS source_generation text",
-];
-
-const globalSourceBlocks = globalThis as unknown as { sourceBlocksSchema?: Promise<void> };
-
+/**
+ * The side tables are created with every workspace schema (their DDL lives in
+ * `workspace-tables.ts`); this makes sure the current schema has them, once per
+ * schema per process.
+ */
 async function ensureSourceBlocksSchema() {
-  await ensureSchema();
-  if (!globalSourceBlocks.sourceBlocksSchema) {
-    globalSourceBlocks.sourceBlocksSchema = (async () => {
-      for (const stmt of [...SOURCE_BLOCKS_DDL, ...SOURCE_BLOCKS_MIGRATIONS]) await db().execute(sql.raw(stmt));
-    })();
-  }
-  await globalSourceBlocks.sourceBlocksSchema;
+  await ensureCurrentSchemaTables();
 }
 
 /**

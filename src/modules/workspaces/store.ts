@@ -40,7 +40,10 @@ let ready: Promise<void> | null = null;
 function ensureTables(): Promise<void> {
   ready ??= (async () => {
     for (const stmt of DDL) await sharedDb().execute(sql.raw(stmt));
-  })();
+  })().catch((error) => {
+    ready = null; // retry on the next call
+    throw error;
+  });
   return ready;
 }
 
