@@ -57,10 +57,9 @@ function PlaceIntro({
   if (place === "gaps") {
     return (
       <PageIntro kicker="Status engine · human validation" title="Gaps">
-        Every extracted gap is shown with its mapped tactics and computed status. There is no
-        accept/reject inbox. Map existing library tactics, or record a missed real study. Do not
-        invent proposed tactics here. Add Open or Addressed gaps (Addressed needs a tactic). Partial
-        must be split or rewritten before Prioritize.
+        Every extracted gap is shown with its mapped tactics and computed status. Confirm each one,
+        map existing library tactics, or record a missed real study. Add Open or Addressed gaps by
+        hand (Addressed needs a tactic). Partial gaps must be split or rewritten before Prioritize.
       </PageIntro>
     );
   }

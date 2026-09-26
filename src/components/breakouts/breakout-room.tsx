@@ -16,14 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  ACTOR_FUNCTIONS,
-  DOMAIN_LABELS,
-  FUNCTION_LABELS,
-  GAP_STATUS_LABELS,
-  type ActorFunction,
-} from "@/lib/iegp/enums";
+import { DOMAIN_LABELS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
 import { cn } from "@/lib/utils";
 
@@ -33,21 +26,13 @@ type PickableGap = { gap_id: string; gap_name: string; domain_label: string };
 export function AddGapsDialog({
   groupId,
   availableGaps,
-  defaultActorName,
-  defaultActorFunction,
 }: {
   groupId: string;
   availableGaps: PickableGap[];
-  defaultActorName?: string;
-  defaultActorFunction?: ActorFunction;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const [actorName, setActorName] = useState(defaultActorName ?? "");
-  const [actorFunction, setActorFunction] = useState<ActorFunction>(
-    defaultActorFunction ?? "medical_affairs",
-  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,19 +40,12 @@ export function AddGapsDialog({
     setOpen(next);
     if (next) {
       setSelected([]);
-      setActorName(defaultActorName ?? "");
-      setActorFunction(defaultActorFunction ?? "medical_affairs");
       setError(null);
       setPending(false);
     }
   }
 
   async function onSubmit() {
-    const name = actorName.trim();
-    if (!name) {
-      setError("Type your name.");
-      return;
-    }
     if (selected.length === 0) {
       setError("Pick at least one gap.");
       return;
@@ -82,8 +60,6 @@ export function AddGapsDialog({
           action: "assign_gap_to_breakout",
           group_id: groupId,
           gap_id,
-          actor_name: name,
-          actor_function: actorFunction,
         }),
       });
       if (!res.ok) {
@@ -138,21 +114,6 @@ export function AddGapsDialog({
           </ul>
         )}
         <div className="grid gap-2 border-t border-border pt-3">
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
-            Name
-            <Input value={actorName} placeholder="Your name" onChange={(e) => setActorName(e.target.value)} />
-          </label>
-          <select
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            value={actorFunction}
-            onChange={(e) => setActorFunction(e.target.value as ActorFunction)}
-          >
-            {ACTOR_FUNCTIONS.map((fn) => (
-              <option key={fn} value={fn}>
-                {FUNCTION_LABELS[fn]}
-              </option>
-            ))}
-          </select>
           {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>
@@ -169,14 +130,10 @@ function RoomGapCard({
   card,
   groupId,
   focused,
-  defaultActorName,
-  defaultActorFunction,
 }: {
   card: ReviewGapCard;
   groupId: string;
   focused: boolean;
-  defaultActorName?: string;
-  defaultActorFunction?: ActorFunction;
 }) {
   const isPartial = card.gap_status === "validated_partial";
   return (
@@ -220,8 +177,6 @@ function RoomGapCard({
             extra={{ gap_id: card.gap_id }}
             confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
             variant="default"
-            defaultActorName={defaultActorName}
-            defaultActorFunction={defaultActorFunction}
           />
         ) : null}
         <LockForm
@@ -229,8 +184,6 @@ function RoomGapCard({
           action="unassign_gap_from_breakout"
           extra={{ group_id: groupId, gap_id: card.gap_id }}
           confirmLabel="Remove"
-          defaultActorName={defaultActorName}
-          defaultActorFunction={defaultActorFunction}
         />
       </div>
     </article>
@@ -244,13 +197,9 @@ function RoomGapCard({
 export function BreakoutBoard({
   groupId,
   cards,
-  defaultActorName,
-  defaultActorFunction,
 }: {
   groupId: string;
   cards: ReviewGapCard[];
-  defaultActorName?: string;
-  defaultActorFunction?: ActorFunction;
 }) {
   const [focused, setFocused] = useState<number | null>(null);
 
@@ -287,8 +236,6 @@ export function BreakoutBoard({
           card={card}
           groupId={groupId}
           focused={focused === i}
-          defaultActorName={defaultActorName}
-          defaultActorFunction={defaultActorFunction}
         />
       ))}
     </div>

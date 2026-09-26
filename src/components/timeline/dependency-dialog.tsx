@@ -65,7 +65,7 @@ export function DependencyDialog({
   async function submit() {
     setError(null);
     if (rationale.trim().length < 3) {
-      setError("A short rationale is required. It is stored with the edit and feeds hillclimb.");
+      setError("A short rationale is required. It is stored with the edit.");
       return;
     }
     if (!identity.signed_in && !actorName.trim()) {
