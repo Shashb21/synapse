@@ -27,7 +27,16 @@ export class NoWorkspaceError extends Error {
   }
 }
 
-const scope = new AsyncLocalStorage<{ workspace_id: string; schema: string }>();
+/**
+ * One scope per process. Next bundles each route separately, so this module
+ * can load more than once, while the query router lives on globalThis
+ * (lib/iegp/db.ts) and is built by whichever bundle ran first. A per-module
+ * AsyncLocalStorage would then be invisible to it and an explicit
+ * `runInWorkspace` would silently fall back to the cookie's schema.
+ */
+type Scope = AsyncLocalStorage<{ workspace_id: string; schema: string }>;
+const globalScope = globalThis as unknown as { __synapseWorkspaceScope?: Scope };
+const scope: Scope = (globalScope.__synapseWorkspaceScope ??= new AsyncLocalStorage());
 
 /** Runs `fn` with every query scoped to one workspace schema. */
 export function runInWorkspace<T>(workspace: { workspace_id: string; schema: string }, fn: () => T): T {

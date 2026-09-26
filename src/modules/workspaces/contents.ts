@@ -1,6 +1,7 @@
+import { currentSchemaName } from "@/lib/iegp/db";
 import { replaceWorkspaceContents, type WorkspaceContents } from "@/lib/iegp/store";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
-import { setWorkspaceDemo, withWorkspace } from "./store";
+import { getWorkspace, setWorkspaceDemo, withWorkspace } from "./store";
 
 /**
  * Replaces everything in the current workspace's schema (IEGP rows and the
@@ -16,8 +17,17 @@ export async function replaceContents(workspaceId: string | null, contents: Work
 }
 
 /** Same, for a workspace that is not the one this request is scoped to (e.g. one just created). */
-export function replaceContentsOf(workspaceId: string, contents: WorkspaceContents): Promise<void> {
-  return withWorkspace(workspaceId, () => replaceContents(workspaceId, contents));
+export async function replaceContentsOf(workspaceId: string, contents: WorkspaceContents): Promise<void> {
+  const workspace = await getWorkspace(workspaceId);
+  if (!workspace) throw new Error(`Unknown workspace ${workspaceId}`);
+  await withWorkspace(workspaceId, async () => {
+    // This wipes a schema: refuse if the query scope did not take (never touch another workspace).
+    const schema = await currentSchemaName();
+    if (schema !== workspace.schema_name) {
+      throw new Error(`Refusing to replace contents: queries resolve to ${schema}, not ${workspace.schema_name}.`);
+    }
+    await replaceContents(workspaceId, contents);
+  });
 }
 
 /** Parses the create form's / API's `start` choice. Anything but "demo" starts blank. */
