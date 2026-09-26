@@ -17,7 +17,8 @@ import {
   splitSourceBlock,
 } from "@/lib/iegp/source-blocks";
 import { listEdits } from "@/modules/kernel/edit-records";
-import { requestIdentity } from "@/modules/auth/request";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
+import type { Actor } from "@/modules/kernel/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const source_id = new URL(req.url).searchParams.get("source_id")?.trim() ?? "";
   if (!source_id) return NextResponse.json({ error: "source_id required" }, { status: 400 });
+  try {
+    await requireCustomerContext();
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   try {
     const stakeholder = await readSourceStakeholder(source_id);
     const [blocks, dropped] = await Promise.all([listSourceBlocks(source_id), listDroppedSourceUnits(source_id)]);
@@ -107,7 +113,15 @@ const postSchema = z.discriminatedUnion("action", [
  * would orphan a need's quote is refused with 409 and the need ids.
  */
 export async function POST(req: Request) {
-  const raw = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+  let actor: Actor;
+  try {
+    raw = await readJsonBody(req);
+    // S1 source edits are upload work: viewers may not change blocks. The actor is the signed-in person.
+    ({ actor } = await requireCustomerContext({ body: raw, capability: "upload" }));
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const parsed = postSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json(
@@ -116,7 +130,6 @@ export async function POST(req: Request) {
     );
   }
   const body = parsed.data;
-  const { actor } = await requestIdentity(raw);
   const base = { rationale: body.rationale, actor };
   try {
     switch (body.action) {
@@ -180,6 +193,6 @@ export async function POST(req: Request) {
     if (error instanceof SourceQuoteConflictError) {
       return NextResponse.json({ error: error.message, orphaned_needs: error.orphans.map((o) => o.id) }, { status: 409 });
     }
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Block edit failed" }, { status: 400 });
+    return apiErrorResponse(error, "Block edit failed");
   }
 }

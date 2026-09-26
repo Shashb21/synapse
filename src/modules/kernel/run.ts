@@ -110,7 +110,8 @@ const CAPABILITY_BY_STAGE: Record<StageId, Capability> = {
   S7: "run_stage",
   S8: "prioritize",
   S9: "ideate",
-  S10: "export",
+  // Building the timeline writes the plan's activities: an edit, not an export (viewers only read and export).
+  S10: "run_stage",
 };
 
 /**

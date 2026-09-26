@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { NoWorkspaceError } from "@/modules/workspaces/context";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { getRoomState, listRoomNotes, saveRoomNote, setRoomState } from "@/lib/room/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function failure(error: unknown) {
-  const status = error instanceof NoWorkspaceError ? 409 : 400;
-  return NextResponse.json({ error: error instanceof Error ? error.message : "Room request failed." }, { status });
+  return apiErrorResponse(error, "Room request failed.");
 }
 
-/** The presenter's current slide (audiences poll this), and optionally the notes. */
+/** The presenter's current slide (audiences poll this), and optionally the notes. Any member may read. */
 export async function GET(request: Request) {
   try {
+    await requireCustomerContext();
     const url = new URL(request.url);
     const state = await getRoomState();
     if (url.searchParams.get("notes") === "1") {
@@ -30,9 +30,11 @@ type RoomOp =
   | { op: "bump" }
   | { op: "note"; slide_id: string; notes: string };
 
+/** Presenting (moving the slide) and writing notes are edits: viewers only follow along. */
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as RoomOp;
+    const body = (await readJsonBody(request)) as RoomOp;
+    await requireCustomerContext({ capability: "validate" });
     switch (body.op) {
       case "slide":
         return NextResponse.json({ state: await setRoomState({ slide_id: body.slide_id, href: body.href }) });
