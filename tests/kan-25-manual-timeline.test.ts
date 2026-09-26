@@ -299,6 +299,7 @@ describe("KAN-25 manual timeline, no stage run, AI off", () => {
   it("shows key decisions from the setup context as markers", async () => {
     const state = await loadState();
     const decisions = state.objectives.filter((objective) => objective.key_decision && /^\d{4}-\d{2}-\d{2}$/.test(objective.decision_date));
+    expect(decisions.length).toBeGreaterThan(0);
     const view = gapTimelineView({ model: await timelineModel(), state, placements: await listPlacements(), today: TODAY });
     expect(view.markers.filter((marker) => marker.kind === "key_decision")).toHaveLength(decisions.length);
     for (const marker of view.markers) expect(marker.date >= view.window.start && marker.date <= view.window.end).toBe(true);
