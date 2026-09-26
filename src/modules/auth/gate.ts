@@ -15,10 +15,11 @@ export const PROXY_WORKSPACE_COOKIE = "synapse_workspace";
 export const PRESENT_HEADER = "x-synapse-present";
 
 /**
- * Reachable by anyone: sign-in and sign-up (including /api/auth/password/*),
- * OAuth callbacks, and assets.
+ * Reachable by anyone: sign-in (including /api/auth/password/login), OAuth
+ * callbacks, and assets. There is no self sign-up: customers sign in with SSO
+ * and a seat their organisation assigned (KAN-28).
  */
-const PUBLIC_PREFIXES = ["/login", "/signup", "/api/auth", "/api/oauth", "/_next", "/favicon.ico"];
+const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/oauth", "/_next", "/favicon.ico"];
 /** The owner tool gates itself by owner role (see the admin routes). */
 const ADMIN_PREFIXES = ["/admin", "/api/admin", "/api/accuracy", "/api/control"];
 /** Need a session but no workspace: where a workspace is chosen, and your own account. */

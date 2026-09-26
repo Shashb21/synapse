@@ -25,7 +25,16 @@ import {
 } from "@/modules/auth/idp";
 import { ownerDecision } from "@/modules/auth/roles";
 import { assertSessionSecret, DEV_SESSION_SECRET, MissingSessionSecretError, sessionSecret } from "@/modules/auth/secret";
-import { beginLogin, completeLogin, currentSession, demoEmail, loginIdentity, signInDemo } from "@/modules/auth/session";
+import { assignSeats, createCustomer, deleteCustomersLike } from "@/modules/auth/customers";
+import {
+  beginLogin,
+  completeLogin,
+  currentSession,
+  demoEmail,
+  loginIdentity,
+  NoSeatError,
+  signInDemo,
+} from "@/modules/auth/session";
 import { verifyWorkspaceCookie, workspaceCookieValue, WORKSPACE_COOKIE_TTL_MS } from "@/modules/workspaces/context";
 import { principalOf } from "@/modules/workspaces/session";
 import {
@@ -222,7 +231,10 @@ describe("KAN-12: only verified emails identify a person", () => {
     expect(pick([]).email).toBeNull();
   });
 
-  it("a full Google callback with an unverified email stores google:<sub> and no email", async () => {
+  it("a full Google callback with an unverified email is refused, even when that address holds a seat (KAN-28)", async () => {
+    const address = `unverified-${unique()}@kernel.example`;
+    const customer = await createCustomer({ name: `KAN-12 unverified ${unique()}`, seats: 1 });
+    await assignSeats({ customer_id: customer.id, emails: [address], by: "test" });
     vi.stubEnv("GOOGLE_IDP_CLIENT_ID", "client-id");
     await beginLogin({ provider_id: "google", redirect_uri: "http://localhost/api/auth/callback" });
     const pending = JSON.parse(jar.get("synapse_oauth_pending")!) as { state: string };
@@ -232,14 +244,17 @@ describe("KAN-12: only verified emails identify a person", () => {
       vi.fn(async (url: string) =>
         String(url).includes("token")
           ? new Response(JSON.stringify({ access_token: "at", id_token: idToken({ sub }) }))
-          : new Response(JSON.stringify({ sub, email: "owner@kernel.example", email_verified: false, name: "Nope" })),
+          : new Response(JSON.stringify({ sub, email: address, email_verified: false, name: "Nope" })),
       ),
     );
-    const session = await completeLogin({ code: "c", state: pending.state });
-    expect(session.email).toBeNull();
-    expect(session.subject).toBe(`google:${sub}`);
-    expect(session.provider_id).toBe("google");
-    expect(principalOf(session)).toBe(`google:${sub}`);
+    await expect(completeLogin({ code: "c", state: pending.state })).rejects.toBeInstanceOf(NoSeatError);
+    expect(jar.get("synapse_session")).toBeUndefined();
+    // The identity it would have had: google:<sub>, no email.
+    const identity = loginIdentity({ provider: identityProvider("google")!, profile: { sub, email: address, email_verified: false } });
+    expect(identity.email).toBeNull();
+    expect(identity.subject).toBe(`google:${sub}`);
+    expect(principalOf({ ...identity, provider_id: "google" })).toBe(`google:${sub}`);
+    await deleteCustomersLike(customer.name);
   });
 });
 

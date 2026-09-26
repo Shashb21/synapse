@@ -15,9 +15,9 @@ export default async function AdminUsersPage() {
   return (
     <AdminMain>
       <PageIntro kicker="Owner · platform-wide" title="Users">
-        Everyone who signs in with an email and password. Accounts you create here are verified, so their email matches
-        workspace invites; self sign-ups stay unverified until you verify them. Single sign-on users are not listed:
-        their identity provider manages them.
+        Your own staff, who sign in with an email and password. Every account here is an admin or a Platform operator;
+        accounts you create are verified, so their email matches workspace invites. Customers never get a password:
+        they sign in with single sign-on and a seat you assign under Customers.
       </PageIntro>
       <AdminUsers initialUsers={users} selfId={selfId} />
     </AdminMain>

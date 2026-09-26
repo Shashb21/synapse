@@ -15,7 +15,6 @@ vi.mock("next/headers", () => ({
 import { sql } from "drizzle-orm";
 import { sharedDb } from "@/modules/kernel/db";
 import { POST as passwordLogin } from "@/app/api/auth/password/login/route";
-import { POST as passwordSignup } from "@/app/api/auth/password/signup/route";
 import { POST as changePassword } from "@/app/api/account/password/route";
 import { GET as usersGet, POST as usersPost } from "@/app/api/admin/users/route";
 import {
@@ -26,9 +25,9 @@ import {
   MAX_FAILED_ATTEMPTS,
 } from "@/modules/auth/accounts";
 import { ensureAdminAccount } from "@/modules/auth/admin-setup";
-import { ownerAccess } from "@/modules/auth/owner";
-import { INCORRECT_CREDENTIALS } from "@/modules/auth/password-login";
-import { currentSession, SESSION_COOKIE } from "@/modules/auth/session";
+import { TEST_AS_CUSTOMER_COOKIE } from "@/modules/auth/owner";
+import { INCORRECT_CREDENTIALS, passwordSessionArgs } from "@/modules/auth/password-login";
+import { createSession, currentSession, SESSION_COOKIE, signInDemo } from "@/modules/auth/session";
 import { principalOf } from "@/modules/workspaces/session";
 import { createWorkspace, inviteMember, memberRole } from "@/modules/workspaces/store";
 
@@ -54,22 +53,23 @@ async function login(address: string, password: string) {
   return json(await passwordLogin(post("/api/auth/password/login", { email: address, password })));
 }
 
+/** A verified staff account (KAN-28: password accounts are admins or operators). */
 async function verifiedUser(who: string, extra: Partial<Parameters<typeof createAccount>[0]> = {}) {
   return createAccount({
     email: email(who),
     name: `KAN-22 ${who}`,
     password: PASSWORD,
     email_verified: true,
+    role: "operator",
     created_by: "test",
     ...extra,
   });
 }
 
-const savedEnv = { ALLOW_SIGNUP: process.env.ALLOW_SIGNUP, OWNER_EMAILS: process.env.OWNER_EMAILS, ALLOWED_EMAIL_DOMAINS: process.env.ALLOWED_EMAIL_DOMAINS };
+const savedEnv = { OWNER_EMAILS: process.env.OWNER_EMAILS, ALLOWED_EMAIL_DOMAINS: process.env.ALLOWED_EMAIL_DOMAINS };
 
 beforeEach(() => {
   jar.values.clear();
-  delete process.env.ALLOW_SIGNUP;
   delete process.env.ALLOWED_EMAIL_DOMAINS;
   process.env.OWNER_EMAILS = savedEnv.OWNER_EMAILS ?? "";
 });
@@ -84,7 +84,7 @@ afterAll(async () => {
 
 describe("KAN-22 password sign-in", () => {
   it("signs in with the right password: a password session with the verified email and the account's role", async () => {
-    const account = await verifiedUser("ok", { role: "medical_affairs", actor_function: "heor" });
+    const account = await verifiedUser("ok", { role: "medical_affairs", is_admin: true, actor_function: "heor" });
     const res = await login(email("ok").toUpperCase(), PASSWORD);
     expect(res.status).toBe(200);
     expect(res.body.redirect).toBe("/workspaces");
@@ -144,33 +144,17 @@ describe("KAN-22 password sign-in", () => {
   });
 });
 
-describe("KAN-22 sign-up", () => {
-  it("creates an unverified contributor, signs them in as password:<id>, and never matches an invite or OWNER_EMAILS", async () => {
-    const address = email("signup");
-    process.env.OWNER_EMAILS = address;
-    const res = await json(
-      await passwordSignup(
-        post("/api/auth/password/signup", {
-          name: "Sign Up Sam",
-          email: address,
-          actor_function: "medical_affairs",
-          password: PASSWORD,
-          confirm: PASSWORD,
-        }),
-      ),
-    );
-    expect(res.status).toBe(200);
-    const account = await findAccountByEmail(address);
-    expect(account).toMatchObject({ role: "contributor", email_verified: false, is_admin: false });
+describe("KAN-22 password identity (staff only since KAN-28)", () => {
+  it("an unverified staff account is password:<id> and never matches an invite or OWNER_EMAILS", async () => {
+    const account = await verifiedUser("unverified", { email_verified: false });
+    process.env.OWNER_EMAILS = email("unverified");
+    expect((await login(email("unverified"), PASSWORD)).status).toBe(200);
     const session = (await currentSession())!;
     expect(session.email).toBeNull();
-    expect(session.role).toBe("contributor");
-    expect(principalOf(session)).toBe(`password:${account!.id}`);
-
+    expect(principalOf(session)).toBe(`password:${account.id}`);
     const ws = await createWorkspace({ name: `KAN-22 invite ${run}`, owner: email("wsowner") });
-    await inviteMember({ workspace_id: ws.id, email: address, by: email("wsowner") });
+    await inviteMember({ workspace_id: ws.id, email: email("unverified"), by: email("wsowner") });
     expect(await memberRole(ws.id, principalOf(session))).toBeNull();
-    expect((await ownerAccess()).owner).toBe(false);
   });
 
   it("an admin-created (verified) account matches its email invite", async () => {
@@ -183,23 +167,25 @@ describe("KAN-22 sign-up", () => {
     expect(await memberRole(ws.id, principalOf(session))).toBe("member");
   });
 
-  it("refuses weak passwords, mismatched confirmation and taken emails; ALLOW_SIGNUP=0 closes it; domains are enforced", async () => {
-    const body = { name: "Weak Will", email: email("weak"), actor_function: "heor" };
-    expect((await passwordSignup(post("/x", { ...body, password: "short", confirm: "short" }))).status).toBe(400);
-    expect((await passwordSignup(post("/x", { ...body, password: PASSWORD, confirm: `${PASSWORD}!` }))).status).toBe(400);
-    await verifiedUser("taken");
-    const taken = await passwordSignup(post("/x", { ...body, email: email("taken"), password: PASSWORD, confirm: PASSWORD }));
-    expect(taken.status).toBe(409);
+  it("a non-staff account (a pre-KAN-28 self sign-up) can't sign in, and its old sessions stop working", async () => {
+    const legacy = await createAccount({
+      email: email("legacy"),
+      name: "Legacy Lee",
+      password: PASSWORD,
+      created_by: "self-signup",
+    });
+    expect(legacy).toMatchObject({ role: "contributor", is_admin: false });
+    const refused = await login(email("legacy"), PASSWORD);
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe("not_staff");
+    expect(jar.values.get(SESSION_COOKIE)).toBeUndefined();
+    // Wrong password still says only "incorrect", so the refusal leaks nothing to a guesser.
+    expect((await login(email("legacy"), "not-the-password-at-all")).body.error).toBe(INCORRECT_CREDENTIALS);
 
-    process.env.ALLOW_SIGNUP = "0";
-    const closed = await json(await passwordSignup(post("/x", { ...body, password: PASSWORD, confirm: PASSWORD })));
-    expect(closed.status).toBe(403);
-    expect(closed.body.code).toBe("signup_closed");
-    delete process.env.ALLOW_SIGNUP;
-
-    process.env.ALLOWED_EMAIL_DOMAINS = "elsewhere.example";
-    expect((await passwordSignup(post("/x", { ...body, password: PASSWORD, confirm: PASSWORD }))).status).toBe(400);
-    expect(await findAccountByEmail(email("weak"))).toBeNull();
+    // A session from before KAN-28 is refused at lookup.
+    await createSession(passwordSessionArgs(legacy));
+    expect(jar.values.get(SESSION_COOKIE)).toBeTruthy();
+    expect(await currentSession()).toBeNull();
   });
 });
 
@@ -241,14 +227,14 @@ describe("KAN-22 account and admin", () => {
     await expect(ensureAdminAccount({ email: address, password: "short" })).rejects.toThrow(/12 characters/);
     await expect(ensureAdminAccount({ email: "not-an-email", password: PASSWORD })).rejects.toThrow(/valid email/);
 
-    // A self sign-up with the same email is taken over: promoted, verified, new password.
+    // A legacy (pre-KAN-28) self sign-up with the same email is taken over: promoted, verified, new password.
     const squatter = email("squat");
     await createAccount({ email: squatter, name: "Squatter", password: PASSWORD, created_by: "self-signup" });
     const taken = await ensureAdminAccount({ email: squatter, password: reset });
     expect(taken.account).toMatchObject({ is_admin: true, email_verified: true, role: "operator" });
   });
 
-  it("an admin account passes the owner gate (200); a plain account gets 403", async () => {
+  it("an admin account passes the owner gate (200); a customer gets 403", async () => {
     const adminEmail = email("gate-admin");
     await ensureAdminAccount({ email: adminEmail, name: "Gate Admin", password: PASSWORD });
     // A viewer-role admin shows it is is_admin, not the operator role, that grants owner.
@@ -261,8 +247,10 @@ describe("KAN-22 account and admin", () => {
     expect(JSON.stringify(allowed.body)).not.toContain("password_hash");
     expect(JSON.stringify(allowed.body)).not.toContain("scrypt$");
 
-    await verifiedUser("gate-plain");
-    expect((await login(email("gate-plain"), PASSWORD)).status).toBe(200);
+    // Password accounts are all staff now (KAN-28), so the customer is a demo session opted out of the test bypass.
+    jar.values.clear();
+    await signInDemo({ actor_name: "Gate Customer", actor_function: "medical_affairs", role: "contributor" });
+    jar.values.set(TEST_AS_CUSTOMER_COOKIE, "customer");
     expect((await usersGet()).status).toBe(403);
     expect((await usersPost(post("/api/admin/users", { action: "create", email: email("x"), name: "X" }))).status).toBe(403);
   });
@@ -273,13 +261,21 @@ describe("KAN-22 account and admin", () => {
     expect((await login(adminEmail, PASSWORD)).status).toBe(200);
     const call = async (body: Record<string, unknown>) => json(await usersPost(post("/api/admin/users", body)));
 
-    const created = await call({ action: "create", email: email("made"), name: "Made Maria", role: "medical_affairs" });
+    // KAN-28: only staff get passwords — an admin, or the operator role.
+    const customer = await call({ action: "create", email: email("cust"), name: "Not Staff", role: "medical_affairs" });
+    expect(customer.status).toBe(400);
+    expect(String(customer.body.error)).toMatch(/only for your own staff/);
+    expect(await findAccountByEmail(email("cust"))).toBeNull();
+    const operator = await call({ action: "create", email: email("op"), name: "Op Olu" });
+    expect(operator.body.user).toMatchObject({ role: "operator", is_admin: false });
+
+    const created = await call({ action: "create", email: email("made"), name: "Made Maria", role: "medical_affairs", is_admin: true });
     expect(created.status).toBe(200);
     const temp = String(created.body.temporary_password);
     expect(temp.length).toBeGreaterThanOrEqual(12);
     const made = created.body.user as { id: string; email_verified: boolean; role: string };
-    expect(made).toMatchObject({ email_verified: true, role: "medical_affairs" });
-    expect((await call({ action: "create", email: email("made"), name: "Again" })).status).toBe(409);
+    expect(made).toMatchObject({ email_verified: true, role: "medical_affairs", is_admin: true });
+    expect((await call({ action: "create", email: email("made"), name: "Again", is_admin: true })).status).toBe(409);
 
     const reset = await call({ action: "reset_password", id: made.id });
     const temp2 = String(reset.body.temporary_password);
@@ -287,6 +283,10 @@ describe("KAN-22 account and admin", () => {
 
     expect((await call({ action: "set_role", id: made.id, role: "viewer" })).body.user).toMatchObject({ role: "viewer" });
     expect((await call({ action: "set_role", id: made.id, role: "emperor" })).status).toBe(400);
+    // A viewer can't lose admin (it would stop being staff); an operator can't become a viewer without admin.
+    expect((await call({ action: "set_admin", id: made.id, is_admin: false })).status).toBe(400);
+    const op = operator.body.user as { id: string };
+    expect((await call({ action: "set_role", id: op.id, role: "contributor" })).status).toBe(400);
     expect((await call({ action: "set_disabled", id: made.id, disabled: true })).body.user).toMatchObject({ disabled: true });
     expect((await call({ action: "set_disabled", id: made.id, disabled: false })).body.user).toMatchObject({ disabled: false });
 
@@ -299,18 +299,17 @@ describe("KAN-22 account and admin", () => {
     expect((await call({ action: "nope", id: admin.id })).status).toBe(400);
     expect((await call({ action: "unlock", id: "acct_missing" })).status).toBe(404);
 
-    // Verify a self sign-up; unlock a locked account.
-    const unverified = await createAccount({ email: email("unv"), name: "Unv", password: PASSWORD, created_by: "self-signup" });
+    // Verify an unverified staff account; unlock a locked account.
+    const unverified = await createAccount({ email: email("unv"), name: "Unv", password: PASSWORD, role: "operator", created_by: "test" });
     expect((await call({ action: "verify", id: unverified.id })).body.user).toMatchObject({ email_verified: true });
     await sharedDb().execute(
       sql`update user_accounts set locked_until = ${new Date(Date.now() + 600_000).toISOString()} where id = ${unverified.id}`,
     );
     expect((await call({ action: "unlock", id: unverified.id })).body.user).toMatchObject({ locked: false });
 
-    // The temporary password works (the admin's own session is replaced by this sign-in).
+    // The temporary password works (the admin's own session is replaced by this sign-in), and staff are owners.
     expect((await login(email("made"), temp2)).status).toBe(200);
-    // ...and that non-admin session is refused by the API.
-    expect((await call({ action: "set_role", id: admin.id, role: "viewer" })).status).toBe(403);
+    expect((await usersGet()).status).toBe(200);
   });
 
   it("disabling an account ends its sessions at once", async () => {
