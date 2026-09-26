@@ -9,7 +9,7 @@ import {
   PROVIDERS,
 } from "@/modules/llm/provider";
 import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
-import { assertCan } from "@/modules/auth/roles";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { requestIdentity } from "@/modules/auth/request";
 import { ownerAccess, ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
@@ -21,7 +21,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * Platform actions only the owner may take (the admin console at /admin/control).
- * Sign-in, sign-out and the prioritization axes stay open to customers.
+ * Sign-in and sign-out stay open; the prioritization axes (save_axes) go
+ * through the customer guard like every other customer write.
  */
 const OWNER_ACTIONS = new Set([
   "set_ai_enabled",
@@ -64,14 +65,19 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const action = String(body.action ?? "");
   // The owner holds every platform capability; nobody else reaches these actions.
   if (OWNER_ACTIONS.has(action) && !(await ownerAccess()).owner) return ownerOnlyJson();
-  const identity = await requestIdentity(body);
   const origin = new URL(request.url).origin;
 
   try {
+    const identity = await requestIdentity(body);
     switch (action) {
       case "set_ai_enabled": {
         if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
@@ -132,10 +138,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
       case "save_axes": {
-        assertCan(identity.role, "prioritize");
+        // Customer data: a verified session, a selected workspace the person is a
+        // member of, and the prioritize capability. Never the Default workspace by fallback.
+        const customer = await requireCustomerContext({ body, capability: "prioritize" });
         const axes = await saveAxes({
           config: body.config,
-          actor_name: identity.actor.name,
+          actor_name: customer.actor.name,
         });
         return NextResponse.json({ ok: true, axes });
       }
@@ -163,7 +171,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Control-panel action failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return apiErrorResponse(error, "Control-panel action failed");
   }
 }

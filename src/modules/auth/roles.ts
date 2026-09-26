@@ -35,6 +35,8 @@ export const CAPABILITIES = [
   "activate_module",
   /** The admin AI switch: turn every AI suggestion and automatic AI action on or off. */
   "toggle_ai",
+  /** Wipe the workspace's plan back to the seed (the IEGP "reset" action). Medical Affairs only. */
+  "reset_workspace",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -51,6 +53,7 @@ const MATRIX: Record<Role, Capability[]> = {
     "configure_routing",
     "connect_provider",
     "toggle_ai",
+    "reset_workspace",
   ],
   contributor: ["upload", "run_stage", "validate", "prioritize", "ideate", "export", "configure_routing"],
   operator: [...CAPABILITIES],

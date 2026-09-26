@@ -5,7 +5,7 @@ import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
 import { listRuns, stageHealth } from "@/modules/kernel/observability";
 import { routeConfigs } from "@/modules/kernel/routing";
-import { requestIdentity } from "@/modules/auth/request";
+import { readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { ownerGate } from "@/modules/auth/owner";
 
 export const runtime = "nodejs";
@@ -24,15 +24,19 @@ export async function GET() {
   return NextResponse.json({ wiring, runs, health, routes });
 }
 
-/** Plain stage runs stay open to customers: S8 re-suggest, S9 ideation, S10 timeline run from their pages. */
+/**
+ * Plain stage runs stay open to customers (S8 re-suggest, S9 ideation, S10
+ * timeline run from their pages), behind a verified session and workspace
+ * membership. runStage checks the stage's capability against the session role.
+ */
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
-  const stage = String(body.stage ?? "") as StageId;
-  if (!STAGE_IDS.includes(stage)) {
-    return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
-  }
-  const identity = await requestIdentity(body);
   try {
+    const body = await readJsonBody(request);
+    const identity = await requireCustomerContext({ body });
+    const stage = String(body.stage ?? "") as StageId;
+    if (!STAGE_IDS.includes(stage)) {
+      return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });
+    }
     const result = await runStage({
       stage,
       input: (body.input as unknown) ?? {},

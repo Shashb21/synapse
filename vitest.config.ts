@@ -15,6 +15,12 @@ export default defineConfig({
         "postgres://synapse:synapse@127.0.0.1:5432/synapse_test",
       /** Vitest-only: agentic stages use local proposers (no live LLM). Not set in production. */
       SYNAPSE_TEST_STUB_LLM: "1",
+      /**
+       * Vitest-only: a route handler called directly with no session cookie acts
+       * as the demo Medical Affairs user named in the body (see
+       * modules/auth/api-guard.ts). Never set for the dev server or production.
+       */
+      SYNAPSE_TEST_ANON_API: "1",
     },
   },
   resolve: {
