@@ -154,7 +154,8 @@ test.describe.serial("IEGP setup wizard", () => {
     // Edit a section and save; the change sticks.
     await page.getByTestId("setup-summary-company").getByRole("button", { name: "Edit" }).click();
     await page.getByLabel(/Plan owner/).fill("M. Hale");
-    await page.getByRole("button", { name: /save & continue later/i }).click();
+    await expect(page.getByRole("button", { name: /continue later/i })).toHaveCount(0);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page.getByTestId("setup-saved-at")).toContainText("Saved");
     await page.reload();
     await expect(page.getByTestId("setup-step-review")).toContainText("M. Hale");
