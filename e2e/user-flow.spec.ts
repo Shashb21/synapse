@@ -1,10 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function resetBlank(page: Page) {
+/** The demo's asset and objectives, no sources yet; the demo files wait on Upload. */
+async function loadDemoSetup(page: Page) {
   const res = await page.request.post("/api/iegp", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({
-      action: "reset",
+      action: "load_demo",
+      scope: "setup",
       actor_name: "E2E",
       actor_function: "evidence_lead",
     }),
@@ -30,7 +32,7 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("gaps then prioritize then tactics", () => {
   test.beforeEach(async ({ page }) => {
-    await resetBlank(page);
+    await loadDemoSetup(page);
   });
 
   test("first visit is upload; later places open but say what they wait on", async ({ page }) => {

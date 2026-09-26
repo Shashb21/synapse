@@ -4,7 +4,8 @@ test("lock dialog records a named actor without login", async ({ page }) => {
   await page.request.post("/api/iegp", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({
-      action: "reset",
+      action: "load_demo",
+      scope: "setup",
       actor_name: "E2E",
       actor_function: "evidence_lead",
     }),
