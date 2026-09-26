@@ -20,7 +20,12 @@ const AI_KEY = "ai_enabled";
 let settingsReady: Promise<unknown> | null = null;
 /** Platform settings are shared by every workspace, so they live in the public schema. */
 function ensureSettingsTable() {
-  settingsReady ??= sharedDb().execute(sql.raw(PLATFORM_SETTINGS_DDL));
+  settingsReady ??= sharedDb()
+    .execute(sql.raw(PLATFORM_SETTINGS_DDL))
+    .catch((error) => {
+      settingsReady = null; // retry on the next call
+      throw error;
+    });
   return settingsReady;
 }
 

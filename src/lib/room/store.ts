@@ -1,7 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { integer, pgTable, text } from "drizzle-orm/pg-core";
-import { db, onWorkspaceBootstrap } from "@/lib/iegp/db";
-import { selectedWorkspaceId } from "@/modules/workspaces/context";
+import { db, ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import { nowIso } from "@/modules/kernel/ids";
 import { FIRST_SLIDE_ID, isShowableHref, slideById } from "./slides";
 
@@ -27,35 +26,9 @@ export const roomPresenter = pgTable("room_presenter", {
   updated_at: text("updated_at").notNull(),
 });
 
-const ROOM_DDL = [
-  `CREATE TABLE IF NOT EXISTS room_notes (
-    slide_id text PRIMARY KEY, notes text NOT NULL, updated_at text NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS room_presenter (
-    id text PRIMARY KEY, slide_id text NOT NULL, href text NOT NULL,
-    rev integer NOT NULL, updated_at text NOT NULL
-  )`,
-];
-
-onWorkspaceBootstrap(async (run) => {
-  for (const stmt of ROOM_DDL) await run(stmt);
-});
-
-const globalRoom = globalThis as unknown as { roomSchema?: Map<string, Promise<void>> };
-
-/** Creates the room tables once per workspace schema (lazily, like source-blocks). */
+/** The room tables come with every workspace schema (DDL in `lib/iegp/workspace-tables.ts`). */
 async function ensureRoomSchema() {
-  const key = (await selectedWorkspaceId()) ?? "default";
-  globalRoom.roomSchema ??= new Map();
-  let ready = globalRoom.roomSchema.get(key);
-  if (!ready) {
-    ready = (async () => {
-      for (const stmt of ROOM_DDL) await db().execute(sql.raw(stmt));
-    })();
-    globalRoom.roomSchema.set(key, ready);
-    ready.catch(() => globalRoom.roomSchema?.delete(key));
-  }
-  await ready;
+  await ensureCurrentSchemaTables();
 }
 
 export const NOTES_MAX = 20_000;
