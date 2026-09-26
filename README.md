@@ -33,6 +33,22 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217) (local dev port; Vercel uses the platform default).
 
+### Sign-in and the admin account
+
+Everyone can sign in with an **email and password** on `/login`; Google, Microsoft or GitHub single sign-on buttons appear alongside when configured, and a demo sign-in is offered in development only. New people create an account on `/signup` (a contributor whose email is unverified until an admin verifies it); set `ALLOW_SIGNUP=0` to close self sign-up. `/account` shows who you are and changes your password.
+
+The admin account that opens the owner control panel (`/admin`) is created from the command line — nothing secret goes in config:
+
+```bash
+npm run create-admin
+# prompts for email, name, and the password twice (hidden); the same command resets an admin's password
+# non-interactive: printf '%s\n' "$ADMIN_PASSWORD" | npm run create-admin -- --email you@example.com --name "Your Name"
+```
+
+It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login` with that email and password, then manage everyone else at **Admin → Users** (`/admin/users`): create users (a temporary password is shown once), reset passwords, change roles, verify, disable/enable and unlock.
+
+Passwords: at least 12 characters, not your email, not a common password; stored only as scrypt hashes. Five wrong passwords in a row lock the account for 15 minutes (an admin can unlock it sooner).
+
 **Deploy to Vercel:** [`docs/deploy-checklist.md`](docs/deploy-checklist.md) (operator list) and [`docs/deployment-vercel.md`](docs/deployment-vercel.md) — Postgres via Vercel Postgres / `DATABASE_URL`, OAuth redirects on `/control`.
 
 The first visit is **Upload** on `/`. Ingest a demo file. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
@@ -54,6 +70,8 @@ Gap status after mapping (not the Plan High / Medium / Low bands):
 | `/pipeline` | Run any stage or the chain; module, route and last run per stage |
 | `/runs` | Observability: run traces, edit rationales, hillclimb signals, eval runs |
 | `/control` | Control panel: session and role, per-provider OAuth login, per-stage routing |
+| `/login`, `/signup`, `/account` | Email and password sign-in (plus SSO), self sign-up, your account and password |
+| `/admin/users` | Owner only: email and password accounts |
 | `/evals` | View-only gold tape (needs + coverage; engine computes Addressed when evidence closes) |
 | `/sdlc` | Spec tape |
 

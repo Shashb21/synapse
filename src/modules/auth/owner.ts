@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { forbidden } from "next/navigation";
 import { cookies } from "next/headers";
 import type { Actor } from "@/modules/kernel/contracts";
+import { isAdminAccount, PASSWORD_PROVIDER } from "./accounts";
 import { sessionContext } from "./session";
 import { OWNER_ONLY_MESSAGE, ownerDecision, testOwnerBypass, type Role } from "./roles";
 
@@ -47,8 +48,12 @@ export async function ownerAccess(): Promise<OwnerAccess> {
       signed_in: false,
     };
   }
+  const session = context.session;
+  const admin_account =
+    session?.provider_id === PASSWORD_PROVIDER ? await isAdminAccount(session.subject).catch(() => false) : false;
   const decision = ownerDecision(
     {
+      admin_account,
       role: context.role,
       email: context.session?.email ?? null,
       signed_in: context.signed_in,
