@@ -7,7 +7,7 @@ import { claimDefaultWorkspace, getWorkspace, listWorkspacesFor, memberRole, typ
  * Who a signed-in person is for membership: their email, which a session only
  * carries when the identity provider verified it (modules/auth/idp.ts), else
  * `provider:subject`. That form can never match an email invite or
- * OWNER_EMAILS. `provider_id` is optional for backwards compatibility; sessions
+ * OWNER_EMAILS. An unverified email + password account is `password:<account id>`. `provider_id` is optional for backwards compatibility; sessions
  * already store the subject as `provider:subject`.
  */
 export function principalOf(
@@ -17,6 +17,9 @@ export function principalOf(
   if (email) return email;
   const subject = session.subject.trim();
   const provider = session.provider_id?.trim();
+  // An email + password session carries its email only once it is verified
+  // (modules/auth/password-login.ts); until then the person is `password:<account id>`.
+  if (provider === "password") return subject.startsWith("password:") ? subject : `password:${subject}`;
   if (provider && !subject.startsWith(`${provider}:`)) return `${provider}:${subject}`;
   return subject;
 }

@@ -13,8 +13,16 @@ import { ActionDialog, type ActionIdentity } from "@/components/platform/action-
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { ExportImageButton } from "@/components/timeline/export-image-button";
+import { AlertTriangle } from "lucide-react";
 import { DependencyDialog } from "@/components/timeline/dependency-dialog";
-import { GanttChart } from "@/components/timeline/gantt-chart";
+import { GapGantt } from "@/components/timeline/gap-gantt";
+import {
+  ConflictList,
+  DragRescheduleDialog,
+  EditActivityDialog,
+  ManualDatesDialog,
+  type DragChange,
+} from "@/components/timeline/timeline-dialogs";
 import {
   DOMAIN_LABELS,
   FUNCTION_LABELS,
@@ -32,6 +40,7 @@ import {
   type TimelineActivity,
   type TimelineModel,
 } from "@/modules/stages/s10-timeline/build";
+import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 
 export type PlanView = {
   version: number;
@@ -64,22 +73,35 @@ export function layoutLabel(ai: boolean, empty: boolean): string {
  */
 export function TimelineBoard({
   model,
+  view,
   today,
   identity,
   plan,
   history,
   canSaveFinal,
   canReschedule,
+  canRun = canReschedule,
+  canCreate = canReschedule,
+  canEditDetails = canCreate,
   gapDomains,
   addable = [],
 }: {
   model: TimelineModel;
+  /** The gap-grouped view the chart draws (KAN-25). */
+  view: GapTimelineView;
   today: string;
   identity: ActionIdentity;
   plan: PlanView | null;
   history: PlanView[];
   canSaveFinal: boolean;
+  /** Dates, dependencies and removals may be edited; false for a viewer. */
   canReschedule: boolean;
+  /** May run S10 (lay out or rebuild). */
+  canRun?: boolean;
+  /** May create a new activity under a gap. */
+  canCreate?: boolean;
+  /** May edit the tactic behind an activity. */
+  canEditDetails?: boolean;
   gapDomains: Record<string, string>;
   /** Tactics not on the timeline in any form, which a user can add by hand. */
   addable?: { tactic_id: string; name: string }[];
@@ -92,6 +114,11 @@ export function TimelineBoard({
   const setSelected = (activity: TimelineActivity | null) => setSelectedId(activity?.id ?? null);
   const nameOf = new Map(model.activities.map((row) => [row.id, row.tactic_name]));
   const stale = plan ? plan.activities !== model.activities.length : false;
+  const [dragChange, setDragChange] = useState<DragChange | null>(null);
+  const selectedConflicts = selected
+    ? view.conflicts.filter((row) => row.successor_id === selected.id || row.predecessor_id === selected.id)
+    : [];
+  const hasRows = view.prioritized.length + view.not_prioritized.length + view.other.length > 0;
 
   return (
     <div className="grid gap-4">
@@ -120,12 +147,14 @@ export function TimelineBoard({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <RunStageButton
-            stage="S10"
-            input={{ persist: true }}
-            label={layoutLabel(ai, false)}
-            identity={identity}
-          />
+          {canRun ? (
+            <RunStageButton
+              stage="S10"
+              input={{ persist: true }}
+              label={layoutLabel(ai, false)}
+              identity={identity}
+            />
+          ) : null}
           {canReschedule && addable.length > 0 ? (
             <ManualDatesDialog
               identity={identity}
@@ -173,58 +202,61 @@ export function TimelineBoard({
             />
           ) : (
             <p className="text-[11px] text-muted-foreground">
-              Your role may export but not save the plan as final.
+              {canReschedule
+                ? "Your role may export but not save the plan as final."
+                : "Read-only: your role may view and export the timeline, not edit it."}
             </p>
           )}
         </div>
       </section>
 
-      {model.activities.length === 0 ? (
-        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} />
+      {view.conflicts.length > 0 ? (
+        <section role="alert" className="grid gap-1 border border-destructive/50 bg-destructive/10 p-3">
+          <h2 className="flex items-center gap-1 text-[13px] font-medium text-destructive">
+            <AlertTriangle className="size-4" /> {view.conflicts.length} broken dependenc
+            {view.conflicts.length === 1 ? "y" : "ies"}
+          </h2>
+          <ConflictList conflicts={view.conflicts} />
+          <p className="text-[11px] text-muted-foreground">
+            A successor starts before the activity it waits on ends. Nothing is shifted automatically: move a bar or
+            edit its dependencies.
+          </p>
+        </section>
+      ) : null}
+
+      {!hasRows ? (
+        <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} canRun={canRun} />
       ) : (
         <div className="overflow-x-auto border border-border bg-background">
-          <GanttChart
-            model={model}
+          <GapGantt
+            view={view}
+            activities={model.activities}
             today={today}
             selectedId={selected?.id ?? null}
-            onSelect={(activity) => setSelected(activity)}
+            onSelect={(id) => setSelectedId(id)}
             svgRef={svgRef}
+            editable={canReschedule}
+            canCreate={canCreate}
+            identity={identity}
+            onDragCommit={setDragChange}
           />
         </div>
       )}
+      {canReschedule && hasRows ? (
+        <p className="-mt-2 text-[11px] text-muted-foreground">
+          Drag a bar to move it, or drag either end to change its start or end. From the keyboard, focus a bar and
+          press Enter to open it, then use Reschedule.
+        </p>
+      ) : null}
 
-      {model.pending.length > 0 ? (
-        <section className="border border-[var(--unknown)]/40 bg-card/40 p-3">
-          <h2 className="text-[13px] font-medium text-foreground">Not dated yet</h2>
-          <ul className="mt-2 grid gap-2">
-            {model.pending.map((row) => (
-              <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0 text-[11px] text-muted-foreground">
-                  <span className="text-foreground">{row.tactic_name}</span> — {pendingReason(row.reason, ai)}
-                </span>
-                {canReschedule ? (
-                  <span className="flex flex-wrap gap-2">
-                    <ManualDatesDialog
-                      identity={identity}
-                      tacticId={row.tactic_id}
-                      label="Date by hand"
-                      title={`Date ${row.tactic_name} by hand`}
-                    />
-                    <ActionDialog
-                      endpoint="/api/plan"
-                      payload={{ action: "remove_activity", id: row.activity_id }}
-                      label="Remove"
-                      title={`Remove ${row.tactic_name} from the timeline`}
-                      description="It stays off on every rebuild until someone adds it back. The tactic itself is not changed."
-                      confirmLabel="Remove"
-                      identity={identity}
-                    />
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {dragChange ? (
+        <DragRescheduleDialog
+          key={`${dragChange.activity.id}:${dragChange.start_date}:${dragChange.end_date}`}
+          change={dragChange}
+          activities={model.activities}
+          identity={identity}
+          onClose={() => setDragChange(null)}
+        />
       ) : null}
 
       {model.removed.length > 0 ? (
@@ -245,19 +277,6 @@ export function TimelineBoard({
                     hint="Leave the dates empty to keep the ones it had, if it had any."
                   />
                 ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {model.unscheduled.length > 0 && model.activities.length > 0 ? (
-        <section className="border border-[var(--unknown)]/40 bg-card/40 p-3">
-          <h2 className="text-[13px] font-medium text-foreground">Not on the timeline yet</h2>
-          <ul className="mt-2 grid gap-1">
-            {model.unscheduled.map((row) => (
-              <li key={row.gap_id} className="text-[11px] text-muted-foreground">
-                <span className="text-foreground">{row.gap_name}</span> — {row.reason}
               </li>
             ))}
           </ul>
@@ -333,6 +352,14 @@ export function TimelineBoard({
                     />
                     {selected.meta.manual ? <Row label="Added" value="by hand" /> : null}
                   </dl>
+                  {selectedConflicts.length > 0 ? (
+                    <div role="alert" className="mt-2 grid gap-1 border border-destructive/50 bg-destructive/10 p-2">
+                      <p className="flex items-center gap-1 text-[11px] font-medium text-destructive">
+                        <AlertTriangle className="size-3.5" /> Broken dependency
+                      </p>
+                      <ConflictList conflicts={selectedConflicts} />
+                    </div>
+                  ) : null}
                   {selected.meta.dependency_note ? (
                     <p className="mt-1 text-[11px] text-[var(--opportunity)]">{selected.meta.dependency_note}</p>
                   ) : null}
@@ -410,6 +437,7 @@ export function TimelineBoard({
                       ]}
                     />
                     <DependencyDialog activity={selected} activities={model.activities} identity={identity} />
+                    {canEditDetails ? <EditActivityDialog identity={identity} activity={selected} /> : null}
                     <ActionDialog
                       endpoint="/api/plan"
                       payload={{ action: "remove_activity", id: selected.id }}
@@ -438,64 +466,6 @@ const BASIS_LABELS: Record<ScheduleSource, string> = {
   model: "model estimate",
 };
 
-/** Dates an activity by hand, with no model: start, end, readout, and optionally a lane and rationale. */
-function ManualDatesDialog({
-  identity,
-  tacticId,
-  label,
-  title,
-  hint,
-  tactics,
-}: {
-  identity: ActionIdentity;
-  /** Fixed tactic; omit and pass `tactics` to let the user choose one. */
-  tacticId?: string;
-  label: string;
-  title: string;
-  hint?: string;
-  tactics?: { tactic_id: string; name: string }[];
-}) {
-  return (
-    <ActionDialog
-      endpoint="/api/plan"
-      payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}) }}
-      label={label}
-      title={title}
-      description="Your dates are marked as yours and survive every rebuild; no model is needed. The change is recorded with its rationale."
-      confirmLabel="Save dates"
-      identity={identity}
-      fields={[
-        ...(tactics
-          ? [
-              {
-                name: "tactic_id",
-                label: "Tactic",
-                type: "select" as const,
-                defaultValue: tactics[0]?.tactic_id,
-                options: tactics.map((row) => ({ value: row.tactic_id, label: row.name })),
-                required: true,
-              },
-            ]
-          : []),
-        { name: "start_date", label: "Start", type: "date", hint },
-        { name: "end_date", label: "End", type: "date" },
-        { name: "readout_date", label: "Readout (optional)", type: "date" },
-        {
-          name: "lane",
-          label: "Lane",
-          type: "select",
-          defaultValue: "",
-          options: [
-            { value: "", label: "Follow the validated band" },
-            ...TIMELINE_LANES.map((lane) => ({ value: lane, label: LANE_LABELS[lane] })),
-          ],
-        },
-        { name: "schedule_rationale", label: "Why these dates (optional, shown on the activity)", type: "textarea" },
-      ]}
-    />
-  );
-}
-
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[104px_minmax(0,1fr)] gap-2">
@@ -509,10 +479,12 @@ function EmptyTimeline({
   identity,
   unscheduled,
   ai,
+  canRun,
 }: {
   identity: ActionIdentity;
   unscheduled: TimelineModel["unscheduled"];
   ai: boolean;
+  canRun: boolean;
 }) {
   return (
     <section className="border border-border bg-card/40 p-4">
@@ -527,9 +499,11 @@ function EmptyTimeline({
           {unscheduled.length} open gap(s) have no tactic yet, so there is nothing to schedule for them.
         </p>
       ) : null}
-      <div className="mt-3">
-        <RunStageButton stage="S10" input={{ persist: true }} label={layoutLabel(ai, true)} identity={identity} />
-      </div>
+      {canRun ? (
+        <div className="mt-3">
+          <RunStageButton stage="S10" input={{ persist: true }} label={layoutLabel(ai, true)} identity={identity} />
+        </div>
+      ) : null}
     </section>
   );
 }

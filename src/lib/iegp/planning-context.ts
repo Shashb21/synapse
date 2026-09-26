@@ -265,7 +265,7 @@ function validDate(value: string): boolean {
 
 /**
  * What is missing or malformed. `required` issues block finishing the wizard;
- * a draft (Save & continue later) is only refused for malformed values.
+ * a draft (saved on each Continue) is only refused for malformed values.
  */
 export function setupIssues(ctx: PlanningContext, opts: { required?: boolean } = {}): SetupIssue[] {
   const required = opts.required ?? true;

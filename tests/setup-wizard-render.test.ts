@@ -97,7 +97,8 @@ describe("setup wizard steps", () => {
       createElement(SetupWizard, { initial: draft, actorName: "T", actorFunction: "medical_affairs", setupComplete: false }),
     );
     expect(html).toContain('data-testid="setup-step-company"');
-    expect(html).toContain("Save &amp; continue later");
+    // KAN-23: there is no "Save & continue later" option; Continue saves the draft.
+    expect(html).not.toMatch(/continue later/i);
   });
 
   it("a completed setup opens on the review with the saved values and a restart-walkthrough button", () => {

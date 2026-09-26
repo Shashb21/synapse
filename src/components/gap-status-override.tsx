@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -17,21 +16,12 @@ import {
 } from "@/components/ui/dialog";
 import { GapBadge } from "@/components/iegp-badges";
 import {
-  ACTOR_FUNCTIONS,
-  FUNCTION_LABELS,
   GAP_STATUS_LABELS,
   MAPPED_GAP_STATUSES,
-  type ActorFunction,
   type GapStatus,
   type MappedGapStatus,
 } from "@/lib/iegp/enums";
 import type { GapStatusOverride as GapStatusOverrideRecord } from "@/lib/iegp/types";
-
-const DEFAULT_FUNCTION: ActorFunction = "evidence_lead";
-const FUNCTION_OPTIONS: ActorFunction[] = [
-  DEFAULT_FUNCTION,
-  ...ACTOR_FUNCTIONS.filter((fn) => fn !== DEFAULT_FUNCTION),
-];
 
 export function GapStatusDisagreement({
   computedStatus,
@@ -74,19 +64,13 @@ export function GapStatusOverride({
   children?: ReactNode;
 }) {
   const router = useRouter();
-  const nameId = useId();
-  const functionId = useId();
   const reasonId = useId();
   const statusId = useId();
-  const nameRef = useRef<HTMLInputElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [actorName, setActorName] = useState("");
-  const [actorFunction, setActorFunction] = useState<ActorFunction>(DEFAULT_FUNCTION);
   const [reason, setReason] = useState("");
   const mappedDefault: MappedGapStatus =
     status === "validated_partial" || status === "validated_addressed" || status === "validated_open"
@@ -98,10 +82,7 @@ export function GapStatusOverride({
     setOpen(next);
     if (next) {
       setError(null);
-      setNameError(null);
       setReasonError(null);
-      setActorName("");
-      setActorFunction(DEFAULT_FUNCTION);
       setReason("");
       setPending(false);
       setNextStatus(mappedDefault);
@@ -110,17 +91,9 @@ export function GapStatusOverride({
 
   async function onSubmit(form: HTMLFormElement) {
     const formData = new FormData(form);
-    const name = String(formData.get("actor_name") || actorName || "").trim();
-    const fn = String(formData.get("actor_function") || actorFunction || "").trim();
     const why = String(formData.get("reason") || reason || "").trim();
     setError(null);
-    setNameError(null);
     setReasonError(null);
-    if (!name) {
-      setNameError("Type your name. “Your name” is a placeholder, not a filled value.");
-      nameRef.current?.focus();
-      return;
-    }
     if (!why) {
       setReasonError("A reason is required to override computed gap status.");
       reasonRef.current?.focus();
@@ -135,8 +108,6 @@ export function GapStatusOverride({
         gap_id: gapId,
         status: nextStatus,
         reason: why,
-        actor_name: name,
-        actor_function: fn,
       }),
     });
     const json = (await res.json()) as { error?: string };
@@ -150,12 +121,6 @@ export function GapStatusOverride({
   }
 
   async function clearOverride() {
-    const name = actorName.trim();
-    if (!name) {
-      setNameError("Type your name. “Your name” is a placeholder, not a filled value.");
-      nameRef.current?.focus();
-      return;
-    }
     setPending(true);
     const res = await fetch("/api/iegp", {
       method: "POST",
@@ -163,8 +128,6 @@ export function GapStatusOverride({
       body: JSON.stringify({
         action: "clear_gap_status_override",
         gap_id: gapId,
-        actor_name: name,
-        actor_function: actorFunction,
       }),
     });
     const json = (await res.json()) as { error?: string };
@@ -193,7 +156,7 @@ export function GapStatusOverride({
       >
         {children ?? <GapBadge status={status} />}
       </DialogTrigger>
-      <DialogContent className="z-[60] sm:max-w-md" initialFocus={nameRef}>
+      <DialogContent className="z-[60] sm:max-w-md" initialFocus={reasonRef}>
         <form
           noValidate
           onSubmit={(e) => {
@@ -250,51 +213,6 @@ export function GapStatusOverride({
               ) : (
                 <p className="text-[11px] text-muted-foreground">Required. Empty reason does not save.</p>
               )}
-            </div>
-            <div className="grid gap-1">
-              <label htmlFor={nameId} className="text-[12px] text-muted-foreground">
-                Name
-              </label>
-              <Input
-                ref={nameRef}
-                id={nameId}
-                name="actor_name"
-                value={actorName}
-                autoComplete="name"
-                placeholder="Your name"
-                aria-required="true"
-                aria-invalid={nameError ? true : undefined}
-                className="placeholder:italic placeholder:text-muted-foreground/70"
-                onChange={(e) => {
-                  setActorName(e.target.value);
-                  if (nameError) setNameError(null);
-                }}
-              />
-              {nameError ? (
-                <p className="text-[12px] text-destructive">{nameError}</p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Empty until you type. Example: A. Rao
-                </p>
-              )}
-            </div>
-            <div className="grid gap-1">
-              <label htmlFor={functionId} className="text-[12px] text-muted-foreground">
-                Function
-              </label>
-              <select
-                id={functionId}
-                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-                value={actorFunction}
-                onChange={(e) => setActorFunction(e.target.value as ActorFunction)}
-              >
-                {FUNCTION_OPTIONS.map((fn) => (
-                  <option key={fn} value={fn}>
-                    {FUNCTION_LABELS[fn]}
-                  </option>
-                ))}
-              </select>
-              <input type="hidden" name="actor_function" value={actorFunction} />
             </div>
             {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
           </div>

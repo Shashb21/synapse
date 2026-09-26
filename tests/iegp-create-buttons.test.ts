@@ -72,7 +72,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(page).toContain("TacticsPlace");
     const tacticsRoute = readFileSync(path.join(process.cwd(), "src/app/tactics/page.tsx"), "utf8");
     expect(tacticsRoute).toContain("TacticsPlace");
-    expect(tacticsRoute).toContain("tacticsUnlocked");
+    expect(tacticsRoute).toContain("ready={gates.tacticsUnlocked}");
     expect(tacticsRoute).not.toContain("Propose a tactic");
     const tacticsPlace = readFileSync(path.join(process.cwd(), "src/components/tactics-place.tsx"), "utf8");
     expect(tacticsPlace).toContain("Ideate proposed tactics here after Prioritize");

@@ -17,10 +17,13 @@ async function ok<T>(response: Awaited<ReturnType<APIRequestContext["post"]>>, w
   return JSON.parse(text) as T;
 }
 
-/** Demo sign-in (development builds only). */
+/**
+ * Demo sign-in (development builds only). `role` is honoured only under the
+ * test stub, as the Playwright dev server runs.
+ */
 export async function demoSignIn(
   request: APIRequestContext,
-  user: { actor_name: string; actor_function?: string; email?: string },
+  user: { actor_name: string; actor_function?: string; email?: string; role?: string },
 ): Promise<{ redirect: string }> {
   return ok(await request.post("/api/auth/login", { data: { demo: true, ...user } }), "demo sign-in");
 }

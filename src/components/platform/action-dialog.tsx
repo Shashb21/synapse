@@ -82,7 +82,7 @@ export function ActionDialog({
     const rationale = String(data.get("rationale") ?? "").trim();
     setError(null);
     if (requireRationale && rationale.length < 3) {
-      setError("A short rationale is required. It is stored with the edit and feeds hillclimb.");
+      setError("A short rationale is required. It is stored with the edit.");
       return;
     }
     if (!identity.signed_in && !actorName.trim()) {
@@ -172,7 +172,7 @@ export function ActionDialog({
                 {rationaleLabel ?? "Rationale (required)"}
                 <Textarea name="rationale" rows={3} placeholder="Why this decision, in one line" />
                 <span className="text-[11px] text-muted-foreground/80">
-                  Stored on the edit record and replayed as a hillclimb signal for this stage.
+                  Stored on the edit record.
                 </span>
               </label>
             ) : (

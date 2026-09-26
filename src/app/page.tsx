@@ -7,6 +7,7 @@ import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
 import { ManualStart } from "@/components/plan-cards";
+import { StepWaiting } from "@/components/step-waiting";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -56,10 +57,9 @@ function PlaceIntro({
   if (place === "gaps") {
     return (
       <PageIntro kicker="Status engine · human validation" title="Gaps">
-        Every extracted gap is shown with its mapped tactics and computed status. There is no
-        accept/reject inbox. Map existing library tactics, or record a missed real study. Do not
-        invent proposed tactics here. Add Open or Addressed gaps (Addressed needs a tactic). Partial
-        must be split or rewritten before Prioritize.
+        Every extracted gap is shown with its mapped tactics and computed status. Confirm each one,
+        map existing library tactics, or record a missed real study. Add Open or Addressed gaps by
+        hand (Addressed needs a tactic). Partial gaps must be split or rewritten before Prioritize.
       </PageIntro>
     );
   }
@@ -78,15 +78,6 @@ function PlaceIntro({
         ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set their priority, then validate each one."
         : "Pick a setting and two axes, then place each Open gap by hand — type its scores or band, or drop it on the matrix — and validate each one."}
     </PageIntro>
-  );
-}
-
-function LockedPlace({ title, body }: { title: string; body: string }) {
-  return (
-    <section className="border border-border bg-card/40 p-4">
-      <h2 className="text-[15px] font-medium text-foreground">{title}</h2>
-      <p className="mt-1 text-[12px] text-muted-foreground">{body}</p>
-    </section>
   );
 }
 
@@ -147,16 +138,24 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
-    pane = gapsUnlocked ? (
-      <GapsWorkbench
-        cards={workspace.review}
-        availableTactics={workspace.availableTactics}
-        readyForPrioritize={ready}
-        initialFilter={gapFilter}
-        settingOptions={settingOptions(state)}
-      />
-    ) : (
-      <LockedPlace title="Gaps is locked" body="Ingest at least one source on Upload." />
+    pane = (
+      <>
+        {!gapsUnlocked ? (
+          <StepWaiting
+            title="Waiting on Upload"
+            body="Nothing has been ingested yet, so there are no extracted gaps to review. Upload a source first, or add a gap by hand below."
+            href="/?place=upload"
+            cta="Go to Upload"
+          />
+        ) : null}
+        <GapsWorkbench
+          cards={workspace.review}
+          availableTactics={workspace.availableTactics}
+          readyForPrioritize={ready}
+          initialFilter={gapFilter}
+          settingOptions={settingOptions(state)}
+        />
+      </>
     );
   } else if (place === "tactics") {
     // The validated matrix band is the gap's priority.
@@ -167,26 +166,29 @@ export default async function HomePage({
     });
     pane = (
       <TacticsPlace
-        unlocked={gates.tacticsUnlocked}
+        ready={gates.tacticsUnlocked}
         openGaps={openGaps}
         availableTactics={workspace.availableTactics}
       />
     );
-  } else if (!gates.planUnlocked) {
-    pane = (
-      <LockedPlace
-        title="Prioritize is locked"
-        body="Validate every live gap on Gaps. Partially Addressed gaps must be split or rewritten."
-      />
-    );
   } else {
     pane = (
-      <PrioritizePlace
-        state={state}
-        setting={params.setting}
-        addressed={workspace.addressed}
-        availableTactics={workspace.availableTactics}
-      />
+      <>
+        {!gates.planUnlocked ? (
+          <StepWaiting
+            title="Waiting on Gaps"
+            body="Prioritize needs every live gap validated, with Partially Addressed gaps split or rewritten. Until then the matrix shows only the gaps already validated as Open, so priorities will be incomplete."
+            href="/?place=gaps"
+            cta="Go to Gaps"
+          />
+        ) : null}
+        <PrioritizePlace
+          state={state}
+          setting={params.setting}
+          addressed={workspace.addressed}
+          availableTactics={workspace.availableTactics}
+        />
+      </>
     );
   }
 

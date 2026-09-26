@@ -1,10 +1,9 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useAiEnabled } from "@/components/platform/ai-status";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -16,20 +15,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  ACTOR_FUNCTIONS,
-  DIMENSION_LABELS,
-  FUNCTION_LABELS,
-  type ActorFunction,
-  type CoverageDimension,
-} from "@/lib/iegp/enums";
+import { DIMENSION_LABELS, type CoverageDimension } from "@/lib/iegp/enums";
 import type { PlanTactic } from "@/lib/iegp/engine";
 
-const DEFAULT_FUNCTION: ActorFunction = "evidence_lead";
-const FUNCTION_OPTIONS: ActorFunction[] = [
-  DEFAULT_FUNCTION,
-  ...ACTOR_FUNCTIONS.filter((fn) => fn !== DEFAULT_FUNCTION),
-];
 
 function toggleId(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((row) => row !== id) : [...list, id];
@@ -112,14 +100,10 @@ export function SplitGapDialog({
   tactics: PlanTactic[];
 }) {
   const router = useRouter();
-  const nameId = useId();
-  const nameRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"split" | "rewrite">("split");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [actorName, setActorName] = useState("");
-  const [actorFunction, setActorFunction] = useState<ActorFunction>(DEFAULT_FUNCTION);
   const [addressedName, setAddressedName] = useState(gapName);
   const [openName, setOpenName] = useState(residualName);
   /** Empty means "same as the title" — the API falls back to it. */
@@ -153,8 +137,6 @@ export function SplitGapDialog({
   function reset() {
     setError(null);
     setPending(false);
-    setActorName("");
-    setActorFunction(DEFAULT_FUNCTION);
     setMode("split");
     setAddressedName(gapName);
     setOpenName(residualName);
@@ -182,8 +164,6 @@ export function SplitGapDialog({
       body: JSON.stringify({
         stage: "S6",
         input: { gap_id: gapId },
-        actor_name: actorName.trim() || "Unsigned",
-        actor_function: actorFunction,
       }),
     });
     const json = (await res.json()) as {
@@ -230,12 +210,6 @@ export function SplitGapDialog({
   }
 
   async function onSubmit() {
-    const name = actorName.trim();
-    if (!name) {
-      setError("Type your name.");
-      nameRef.current?.focus();
-      return;
-    }
     if (mode === "split") {
       if (!addressedName.trim() || !openName.trim()) {
         setError("Both titles are required.");
@@ -259,7 +233,7 @@ export function SplitGapDialog({
       setError(
         mode === "split"
           ? "You changed the suggested split — a short rationale is required."
-          : "A short rationale is required. It is stored with the edit and feeds hillclimb.",
+          : "A short rationale is required. It is stored with the edit.",
       );
       return;
     }
@@ -278,8 +252,6 @@ export function SplitGapDialog({
               openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)),
             }),
             note: rationale.trim(),
-            actor_name: name,
-            actor_function: actorFunction,
           }
         : {
             action: "rewrite_partial_gap",
@@ -288,8 +260,6 @@ export function SplitGapDialog({
             status: rewriteStatus,
             tactic_ids: rewriteStatus === "validated_addressed" ? addressedTacticIds.join(",") : "",
             note: rationale.trim(),
-            actor_name: name,
-            actor_function: actorFunction,
           };
     const res = await fetch("/api/iegp", {
       method: "POST",
@@ -516,32 +486,11 @@ export function SplitGapDialog({
             <span className="text-[11px] text-muted-foreground/80">
               {mode === "split"
                 ? touched
-                  ? "Required because you changed the suggested split. Stored on the edit record and replayed as a hillclimb signal."
+                  ? "Required because you changed the suggested split. Stored on the edit record."
                   : "Accepting the split as suggested needs no rationale."
-                : "Stored on the edit record and replayed as a hillclimb signal for the split stage."}
+                : "Stored on the edit record."}
             </span>
           </label>
-          <label htmlFor={nameId} className="text-[12px] text-muted-foreground">
-            Name
-          </label>
-          <Input
-            ref={nameRef}
-            id={nameId}
-            value={actorName}
-            placeholder="Your name"
-            onChange={(e) => setActorName(e.target.value)}
-          />
-          <select
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            value={actorFunction}
-            onChange={(e) => setActorFunction(e.target.value as ActorFunction)}
-          >
-            {FUNCTION_OPTIONS.map((fn) => (
-              <option key={fn} value={fn}>
-                {FUNCTION_LABELS[fn]}
-              </option>
-            ))}
-          </select>
           {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>

@@ -17,7 +17,6 @@ async function resetBlank(page: Page) {
 async function ingestFirstDemo(page: Page) {
   await page.goto("/?place=upload");
   await page.getByRole("button", { name: /ingest this file/i }).first().click();
-  await page.getByLabel(/^name$/i).fill("A. Rao");
   await page.getByRole("button", { name: /^ingest$/i }).click();
   await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
 }
@@ -33,13 +32,26 @@ test.describe("gaps then prioritize then tactics", () => {
     await resetBlank(page);
   });
 
-  test("first visit is upload; later places stay locked", async ({ page }) => {
+  test("first visit is upload; later places open but say what they wait on", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: /upload sources/i })).toBeVisible();
     await expect(places(page).getByRole("link", { name: /^upload/i })).toBeVisible();
-    await expect(places(page).getByRole("link", { name: /^gaps/i })).toHaveCount(0);
-    await expect(places(page).getByRole("link", { name: /^prioritize/i })).toHaveCount(0);
-    await expect(places(page).getByRole("link", { name: /^tactics/i })).toHaveCount(0);
+    for (const name of [/^gaps/i, /^prioritize/i, /^tactics/i]) {
+      await expect(places(page).getByRole("link", { name })).toBeVisible();
+      await expect(places(page).getByRole("link", { name })).toContainText(/waiting on an earlier step/i);
+    }
+    await expect(places(page).getByRole("link", { name: /^upload/i })).not.toContainText(/waiting/i);
+
+    await places(page).getByRole("link", { name: /^gaps/i }).click();
+    await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
+    await expect(page.getByTestId("step-waiting")).toContainText(/waiting on upload/i);
+    await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
+
+    await places(page).getByRole("link", { name: /^prioritize/i }).click();
+    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await expect(page.getByTestId("step-waiting")).toContainText(/waiting on gaps/i);
+    await page.getByTestId("step-waiting").getByRole("link", { name: /go to gaps/i }).click();
+    await expect(page).toHaveURL(/place=gaps/);
     await expect(places(page).getByText(/^review$/i)).toHaveCount(0);
     await expect(places(page).getByText(/^mappings$/i)).toHaveCount(0);
   });
@@ -64,15 +76,16 @@ test.describe("gaps then prioritize then tactics", () => {
     ).toBeVisible();
   });
 
-  test("tactics place URLs explain the lock instead of 404", async ({ page }) => {
+  test("tactics place URLs open and say they wait on Prioritize", async ({ page }) => {
     const query = await page.goto("/?place=tactics");
     expect(query?.ok()).toBe(true);
     await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /tactics is locked/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /waiting on prioritize/i })).toBeVisible();
+    await expect(page.getByRole("region", { name: /tag the same tactic/i })).toBeVisible();
 
     const dedicated = await page.goto("/tactics");
     expect(dedicated?.ok()).toBe(true);
     await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /tactics is locked/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /waiting on prioritize/i })).toBeVisible();
   });
 });
