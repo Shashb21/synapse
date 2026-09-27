@@ -325,6 +325,7 @@ export function PrioritizeCard({
           action="lock_priority"
           extra={{ residual_id: card.residual_id }}
           confirmLabel="Lock band"
+          note={{ label: "Reason for this band (optional)" }}
         >
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Band (you choose — no engine suggestion)

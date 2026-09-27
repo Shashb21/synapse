@@ -330,6 +330,7 @@ export default async function GapDetailPage({
                     action="confirm_coverage_review"
                     extra={{ coverage_id: c.id }}
                     confirmLabel="Confirm coverage"
+                    note={{ label: "Note (optional)" }}
                     description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
                   />
                 </div>
@@ -362,6 +363,7 @@ export default async function GapDetailPage({
                               action="lock_dimension"
                               extra={{ coverage_id: c.id, dimension: dim }}
                               confirmLabel="Change dimension"
+                              note={{ label: "Rationale (required)", required: true }}
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
                               <label className="grid gap-1 text-[12px] text-muted-foreground">
@@ -407,6 +409,7 @@ export default async function GapDetailPage({
                   action="lock_overall"
                   extra={{ coverage_id: c.id }}
                   confirmLabel="Change overall coverage"
+                  note={{ label: "Rationale (required)", required: true }}
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >
                   <label className="grid gap-1 text-[12px] text-muted-foreground">

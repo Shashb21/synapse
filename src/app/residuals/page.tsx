@@ -60,7 +60,12 @@ export default async function ResidualsPage() {
                   <textarea name="statement" defaultValue={r.statement} className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm" />
                 </label>
               </LockForm>
-              <LockForm label="Lock priority band" action="lock_priority" extra={{ residual_id: r.id }}>
+              <LockForm
+                label="Lock priority band"
+                action="lock_priority"
+                extra={{ residual_id: r.id }}
+                note={{ label: "Reason for this band (optional)" }}
+              >
                 <label className="grid gap-1 text-[12px] text-muted-foreground">
                   Band (you choose)
                   <select name="band" defaultValue={pri?.band ?? ""} required className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">

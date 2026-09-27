@@ -14,6 +14,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
+/** The optional note a dialog collects. Only actions that store a note pass one. */
+export type LockFormNote = { label: string; required?: boolean; placeholder?: string };
+
 function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
   for (const el of Array.from(form.elements)) {
     if (
@@ -22,7 +25,6 @@ function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
       continue;
     }
     if (el.disabled || el.type === "hidden" || el.type === "submit" || el.type === "button") continue;
-    if (el.name === "note") continue;
     if (!el.required) continue;
     if (!String(el.value || "").trim()) return el;
   }
@@ -37,6 +39,7 @@ export function LockForm({
   confirmLabel,
   description,
   variant = "outline",
+  note,
 }: {
   label: string;
   action: string;
@@ -46,6 +49,11 @@ export function LockForm({
   description?: string;
   /** Visual weight of the trigger button. Defaults to secondary ("outline"); pass "default" for a hero/primary action. */
   variant?: "default" | "outline";
+  /**
+   * Show a note field. Leave it out when the action does not use a note; the
+   * request then carries an empty note.
+   */
+  note?: LockFormNote;
 }) {
   const router = useRouter();
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -101,7 +109,7 @@ export function LockForm({
       <DialogTrigger render={<Button size="sm" variant={variant} />}>
         {label}
       </DialogTrigger>
-      <DialogContent className="z-[60] sm:max-w-md" initialFocus={noteRef}>
+      <DialogContent className="z-[60] sm:max-w-md" initialFocus={note ? noteRef : undefined}>
         <form
           noValidate
           onSubmit={(e) => {
@@ -117,10 +125,18 @@ export function LockForm({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {children}
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
-              Note (required to override Addressed)
-              <Textarea ref={noteRef} name="note" rows={3} />
-            </label>
+            {note ? (
+              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                {note.label}
+                <Textarea
+                  ref={noteRef}
+                  name="note"
+                  rows={3}
+                  required={note.required}
+                  placeholder={note.placeholder}
+                />
+              </label>
+            ) : null}
             {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>

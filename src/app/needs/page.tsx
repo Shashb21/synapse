@@ -165,6 +165,7 @@ export default async function NeedsPage() {
                               label="Reject"
                               action="lock_need"
                               extra={{ need_id: n.id, status: "rejected" }}
+                              note={{ label: "Reason (optional)" }}
                             />
                           </>
                         ) : null}
