@@ -158,7 +158,7 @@ export function ProposalCard({
                 payload={{ action: "decide_proposal", id: proposal.id, decision: "reject" }}
                 label="Reject"
                 title={`Reject ${proposal.name}`}
-                description="Rejecting keeps the proposal on the record with your reason, and feeds S9 hillclimb."
+                description="Rejecting keeps the proposal on the record with your reason."
                 confirmLabel="Reject proposal"
                 requireRationale
                 identity={identity}

@@ -170,7 +170,7 @@ export async function parseLocalDocument(args: {
     }));
   } else if (lower.endsWith(".pdf")) {
     throw new Error(
-      "PDF ingest needs LlamaCloud (charts/OCR). Set LLAMA_CLOUD_API_KEY.",
+      "This local parser does not read PDF. PDFs are read by the connected model on upload.",
     );
   } else {
     throw new Error(
