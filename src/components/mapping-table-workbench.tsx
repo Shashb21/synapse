@@ -59,7 +59,7 @@ export function MappingTableWorkbench({
         {(
           [
             { id: "all", label: "All gaps" },
-            { id: "proposal", label: "Latest S4 proposal" },
+            { id: "proposal", label: "Latest AI proposal" },
             { id: "human", label: "Saved by a person" },
             { id: "open", label: "Open rows" },
           ] as const
@@ -76,7 +76,7 @@ export function MappingTableWorkbench({
         ))}
         <span className="text-[11px] text-muted-foreground">
           {ai
-            ? "Accept, reject or edit any row — a saved row wins over later S4 runs, and a removed or rejected tactic is never mapped again by S4.."
+            ? "Accept, reject or edit any row — a saved row wins over later AI mapping runs, and a removed or rejected tactic is never mapped to that gap again."
             : "AI is off: pick the tactics and a status for each row and save it with a rationale."}
         </span>
       </div>
@@ -134,7 +134,7 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
         return (
           <li key={mapping.tactic_id} className="border border-border/70 p-2">
             <p className="text-[11px] text-foreground">
-              {mapping.tactic_name} · S4 coverage{" "}
+              {mapping.tactic_name} · AI coverage{" "}
               {mapping.coverage.replaceAll("_", " ")} ({mapping.confidence})
             </p>
             <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
@@ -155,7 +155,7 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
                     dimensions: JSON.stringify(mapping.dimensions ?? {}),
                   }}
                   confirmLabel="Accept mapping"
-                  description="Maps this tactic to the gap with the S4 verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
+                  description="Maps this tactic to the gap with the AI's coverage verdict (or marks an already committed pair as accepted). You can still edit coverage on the gap page."
                 >
                   <RationaleField placeholder="Why this tactic bears on the gap" />
                 </LockForm>
@@ -166,7 +166,7 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
                   action="reject_mapping"
                   extra={pair}
                   confirmLabel="Reject mapping"
-                  description="Records the pair as rejected (and removes it if S4 already committed it). S4 will not map it again."
+                  description="Records the pair as rejected (and removes it if the AI already mapped it). The AI will not map it again."
                 >
                   <RationaleField placeholder="Why this tactic does not bear on the gap" />
                 </LockForm>
@@ -200,7 +200,7 @@ function MappingRowEditor({
         </Link>
         <p className="mt-1 text-[11px] text-muted-foreground">{row.gap_id}</p>
         {row.source === "proposal" ? (
-          <span className="mt-1 inline-block text-[10px] text-[var(--chart-3)]">S4 proposal</span>
+          <span className="mt-1 inline-block text-[10px] text-[var(--chart-3)]">AI proposal</span>
         ) : null}
         {row.source === "human" ? (
           <span className="mt-1 inline-block text-[10px] text-[var(--chart-3)]">
@@ -267,7 +267,7 @@ function MappingRowEditor({
       <td className="px-3 py-3">
         {status ? null : (
           <p className="mb-2 text-[11px] text-muted-foreground">
-            {ai ? "Pick a status or run S4 before saving." : "Pick a status before saving."}
+            {ai ? "Pick a status, or run AI mapping, before saving." : "Pick a status before saving."}
           </p>
         )}
         <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">

@@ -30,7 +30,7 @@ function ensureSettingsTable() {
 }
 
 export const AI_OFF_MESSAGE =
-  "AI is turned off in the control panel. Do this step by hand, or ask an admin to turn AI on.";
+  "AI is turned off for Synapse. Do this step by hand, or ask your Synapse administrator to turn AI on.";
 
 /** Thrown by every AI entry point while the switch is off. */
 export class AiDisabledError extends Error {

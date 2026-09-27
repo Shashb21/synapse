@@ -51,7 +51,7 @@ export default async function NeedsPage() {
                 <p className="mb-4 text-[12px] text-muted-foreground">
                   {status === "candidate"
                     ? ai
-                      ? "Empty. Ingest a demo source to extract candidate needs, or add one by hand on a gap."
+                      ? "Empty. Upload a source to extract candidate needs, or add one by hand on a gap."
                       : "Empty. AI is off: add a need by hand on a gap."
                     : "None."}
                 </p>
@@ -184,7 +184,7 @@ export default async function NeedsPage() {
             Rejected by the AI ({pendingRejected.length})
           </h2>
           <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
-            Gap candidates the S2 judge rejected. If the AI was wrong, promote one: it becomes a
+            Gap candidates the AI rejected while extracting gaps. If the AI was wrong, promote one: it becomes a
             gap you created, with its source quote as the first need.
           </p>
           {pendingRejected.length === 0 ? (

@@ -134,7 +134,7 @@ export function ProposalCard({
                 fields={proposalFields(proposal)}
                 label="Edit"
                 title={`Edit ${proposal.name}`}
-                description="Change any field before deciding. Your edit is kept: a re-run of S9 adds new ideas and never rewrites this one."
+                description="Change any field before deciding. Your edit is kept: generating ideas again adds new ones and never rewrites this one."
                 confirmLabel="Save edit"
                 requireRationale
                 identity={identity}

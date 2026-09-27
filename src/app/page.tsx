@@ -50,8 +50,9 @@ function PlaceIntro({
         kicker={wizardComplete ? "Living plan · ingest" : "First visit · ingest"}
         title="Upload sources"
       >
-        Demo files and notes extract gaps and tactics already mapped, with engine-computed status.
-        After you enter Prioritize, ingest stays here.
+        Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
+        them and computes each gap&apos;s status for you to confirm on Gaps. You can come back here to
+        add sources at any time.
       </PageIntro>
     );
   }
