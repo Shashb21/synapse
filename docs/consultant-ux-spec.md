@@ -377,7 +377,6 @@ Room behaviour now
 
 **Phase C — Presentation view (later)**
 - Read-only chaptered walkthrough: context → gaps → tactics → Gantt.
-- Export pack for leave-behind.
 - No parallel data store; projection of validated plan only.
 
 > **Status:** Phase C, plus a new Breakout Groups capability the user asked for alongside it, are specified in [`presentation-and-breakouts.md`](presentation-and-breakouts.md).
