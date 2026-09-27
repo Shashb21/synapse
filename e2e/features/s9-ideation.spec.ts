@@ -102,7 +102,7 @@ test.describe("S9 tactics ideation", () => {
       decision: "maybe",
       rationale: "Undecided",
     });
-    expect(badDecision.error).toMatch(/decision: Invalid option/i);
+    expect(badDecision.error).toBe("Decision must be one of: accept, reject.");
 
     const accepted = (await planAction(request, {
       action: "decide_proposal",

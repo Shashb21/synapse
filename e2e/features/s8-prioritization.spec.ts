@@ -128,7 +128,7 @@ test.describe("S8 prioritization matrix", () => {
       band: "urgent",
       rationale: "Not a band",
     });
-    expect(badBand.error).toMatch(/band: Invalid option/i);
+    expect(badBand.error).toBe("Band must be one of: high, medium, low.");
 
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 reimbursement dossier");
     const after = await planState(request);
