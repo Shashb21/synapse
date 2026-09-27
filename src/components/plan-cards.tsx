@@ -16,6 +16,8 @@ import type {
 } from "@/lib/iegp/engine";
 import {
   CATCH_UP_TACTIC_STATUSES,
+  CREATE_TACTIC_STATUS_LABELS,
+  CREATE_TACTIC_STATUSES,
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
   GAP_STATUS_LABELS,
@@ -86,7 +88,7 @@ export function CreateTacticButton() {
       label="Create tactic"
       action="create_tactic"
       confirmLabel="Add to library"
-      description="Ideate a proposed tactic after Prioritize. It does not count as addressing until planned, ongoing, or completed."
+      description="Add a tactic to the library. A proposed tactic is an idea and does not count as addressing; planned, ongoing and completed ones do."
     >
       <input type="hidden" name="origin" value="tactics" />
       <CreateTacticFields />
@@ -116,6 +118,41 @@ function CreateTacticFields() {
         placeholder="Evidence question"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Status
+        <select
+          name="status"
+          defaultValue="proposed"
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          {CREATE_TACTIC_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {CREATE_TACTIC_STATUS_LABELS[status]}
+            </option>
+          ))}
+        </select>
+        <span className="text-[11px] text-muted-foreground/80">
+          Pick Planned, Ongoing or Completed for a real study you already have.
+        </span>
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Start date (optional)
+          <input
+            name="start_date"
+            type="date"
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+          />
+        </label>
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Evidence available (optional)
+          <input
+            name="evidence_available"
+            type="date"
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+          />
+        </label>
+      </div>
       <TacticDetailFields />
     </>
   );
