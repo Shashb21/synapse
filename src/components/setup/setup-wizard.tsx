@@ -25,7 +25,7 @@ import {
   type PlanningContext,
   type SetupSection,
 } from "@/lib/iegp/planning-context";
-import { useAiEnabled } from "@/components/platform/ai-status";
+import { useAiEnabled, useAiOffBy } from "@/components/platform/ai-status";
 import { RestartWalkthroughButton } from "@/components/walkthrough/restart-walkthrough-button";
 import { TOUR_STEPS } from "@/components/walkthrough/tour-steps";
 import { updateWalkthrough } from "@/components/walkthrough/walkthrough-client";
@@ -108,6 +108,7 @@ export function SetupWizard({
 }) {
   const router = useRouter();
   const ai = useAiEnabled();
+  const aiOffBy = useAiOffBy();
   const steps = useMemo(() => wizardSteps({ ai, isNew }), [ai, isNew]);
   const [form, setForm] = useState<PlanningContext>(initial);
   const [complete, setComplete] = useState(setupComplete);
@@ -293,7 +294,10 @@ export function SetupWizard({
               AI is off — you work by hand
             </h2>
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              Your Synapse administrator has turned AI off. No model is called and nothing is uploaded or parsed. You
+              {aiOffBy === "workspace"
+                ? "The workspace owner has turned AI assistance off for this workspace."
+                : "Your Synapse administrator has turned AI off."}{" "}
+              No model is called and nothing is uploaded or parsed. You
               enter gaps and tactics yourself; every later step has a manual form. The context you entered still guides
               your own prioritization and the timeline&apos;s decision dates.
             </p>
@@ -309,8 +313,9 @@ export function SetupWizard({
           <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground" data-testid="setup-ai-status">
               <Hand className="size-3.5" aria-hidden />
-              AI is off
+              {aiOffBy === "workspace" ? "AI is off for this workspace" : "AI is off · turned off by your Synapse administrator"}
             </p>
+            {aiOffBy === "workspace" ? <p>The workspace owner can turn it back on from the workspace menu.</p> : null}
             <p>1. Add your evidence gaps</p>
             <p>2. Add the tactics in your library</p>
             <p>3. Map tactics to gaps on the mapping table</p>
@@ -337,7 +342,7 @@ export function SetupWizard({
           <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground" data-testid="setup-ai-status">
               <CheckCircle2 className="size-3.5 text-[var(--known)]" aria-hidden />
-              AI is on
+              AI is on for this workspace
             </p>
             <p>Models suggest; people decide. Every step that uses AI can also be done by hand.</p>
           </aside>
