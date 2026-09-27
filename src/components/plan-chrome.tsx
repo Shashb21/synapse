@@ -58,7 +58,25 @@ export type PlanNavModel = {
   tacticsUnlocked: boolean;
   setupComplete: boolean;
   readyForPrioritize: boolean;
+  /** Open gaps and how many have a validated band. Left out when it could not be loaded. */
+  prioritized?: { validated: number; open: number };
 };
+
+/**
+ * The strip's one-line verdict: the real next step, not a stage the plan has
+ * already passed. Before Prioritize it says whether Gaps is done; after, it
+ * shows how far prioritization has got and whether Tactics is open.
+ */
+export function readinessText(nav: PlanNavModel): string {
+  const progress = nav.prioritized;
+  const counted = progress && progress.open > 0 ? `${progress.validated} of ${progress.open} validated` : null;
+  // Past Prioritize: a gap added or reopened since shows in the counts, not as a step back.
+  if (nav.tacticsUnlocked) return counted ? `${counted} · Tactics open` : "Tactics open";
+  if (!nav.readyForPrioritize) return "Not ready for Prioritize";
+  if (!counted || progress!.validated === 0) return "Ready for Prioritize";
+  if (progress!.validated === progress!.open) return `${counted} · Ready for Tactics`;
+  return `Prioritizing · ${counted}`;
+}
 
 type PlaceId = PlanPlace | "timeline";
 
@@ -415,7 +433,7 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
         Unconfirmed {nav.unvalidatedCount}
       </Link>
       <span className="font-medium">
-        {nav.readyForPrioritize ? "Ready for Prioritize" : "Not ready for Prioritize"}
+        {readinessText(nav)}
       </span>
     </div>
   );

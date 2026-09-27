@@ -4,6 +4,7 @@ import { PRESENT_HEADER } from "@/modules/auth/gate";
 import { PlanChrome, type PlanNavModel, type ShellId } from "@/components/plan-chrome";
 import { loadWorkspaceTag } from "@/components/workspaces/workspace-tag-data";
 import { loadState } from "@/lib/iegp/store";
+import { prioritizationProgress } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
   gapsReadyForPrioritize,
@@ -54,6 +55,7 @@ export async function AppShell({
       tacticsUnlocked: gates.tacticsUnlocked,
       setupComplete: state.asset.setup_complete,
       readyForPrioritize: gapsReadyForPrioritize(state),
+      prioritized: await prioritizationProgress(state),
     };
   } catch {
     // Setup and other shells must render before Postgres is configured.

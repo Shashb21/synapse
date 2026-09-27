@@ -595,6 +595,17 @@ export async function listPlacements(): Promise<PlacementRecord[]> {
   return rows.map(toRecord);
 }
 
+/**
+ * How far Prioritize has got: the Open gaps (the ones the matrix places) and
+ * how many of them have a validated band. The same count the Prioritize
+ * footer shows.
+ */
+export async function prioritizationProgress(state: IegpState): Promise<{ validated: number; open: number }> {
+  const validated = new Set((await listPlacements()).filter((row) => row.validated).map((row) => row.gap_id));
+  const open = state.gaps.filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
+  return { open: open.length, validated: open.filter((gap) => validated.has(gap.id)).length };
+}
+
 async function currentPlacement(gapId: string): Promise<PlacementRow | undefined> {
   const rows = await db().select().from(placementsTable).where(eq(placementsTable.gap_id, gapId)).limit(1);
   return rows[0];
