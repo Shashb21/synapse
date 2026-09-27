@@ -19,6 +19,8 @@ const SESSION_COOKIE = "synapse_session";
 
 /** The Default workspace keeps the data that existed before workspaces. */
 export const DEFAULT_SCHEMA = "public";
+/** The id of the workspace whose schema is DEFAULT_SCHEMA. */
+export const DEFAULT_WORKSPACE_ID = "default";
 
 export class NoWorkspaceError extends Error {
   constructor(message = "Choose a workspace first.") {
@@ -113,6 +115,24 @@ export async function selectedWorkspaceId(): Promise<string | null> {
   const jar = await requestCookies();
   if (!jar) return null;
   return verifyWorkspaceCookie(jar.get(WORKSPACE_COOKIE)?.value, jar.get(SESSION_COOKIE)?.value);
+}
+
+/**
+ * The workspace the current query belongs to, resolved the way `currentSchema`
+ * picks the schema: an explicit `runInWorkspace` scope, else the signed
+ * workspace cookie, else (a request with no cookie) the Default workspace.
+ * Null outside any request, and for a cookie that does not verify (where
+ * `currentSchema` would refuse the query). Workspace settings such as AI
+ * assistance read it.
+ */
+export async function scopedWorkspaceId(): Promise<string | null> {
+  const scoped = scope.getStore();
+  if (scoped) return scoped.workspace_id;
+  const jar = await requestCookies();
+  if (!jar) return null;
+  const raw = jar.get(WORKSPACE_COOKIE)?.value;
+  if (!raw) return DEFAULT_WORKSPACE_ID;
+  return verifyWorkspaceCookie(raw, jar.get(SESSION_COOKIE)?.value);
 }
 
 /**
