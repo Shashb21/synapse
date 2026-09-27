@@ -7,6 +7,9 @@ import { NoWorkspaceError, selectedWorkspaceId } from "@/modules/workspaces/cont
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 import { currentSession, SESSION_COOKIE, type Session } from "./session";
+import { NoRouteError } from "@/modules/llm/provider";
+import { noLlmBody } from "@/modules/kernel/no-llm";
+import { ownerAccess } from "./owner";
 import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./roles";
 
 /**
@@ -158,7 +161,20 @@ export async function readJsonBody(request: Request): Promise<Record<string, unk
  * Guard and role failures keep their status (401/403/409), AI-off is 409, and
  * anything else is a 400 with its message.
  */
-export function apiErrorResponse(error: unknown, fallback = "Request failed"): NextResponse {
+/**
+ * A 409 `no_llm` for an AI step with no connected model. Customers get the plain
+ * "ask your administrator, or carry on by hand" text; only the platform owner
+ * (checked the way the admin pages check it) gets the provider detail and the
+ * /admin/control link.
+ */
+export async function noLlmResponse(detail: string): Promise<NextResponse> {
+  const owner = await ownerAccess()
+    .then((access) => access.owner)
+    .catch(() => false);
+  return NextResponse.json(noLlmBody(detail, owner), { status: 409 });
+}
+
+export async function apiErrorResponse(error: unknown, fallback = "Request failed"): Promise<NextResponse> {
   if (error instanceof ApiGuardError) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
@@ -171,6 +187,7 @@ export function apiErrorResponse(error: unknown, fallback = "Request failed"): N
   if (error instanceof AiDisabledError) {
     return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
   }
+  if (error instanceof NoRouteError) return noLlmResponse(error.message);
   const message = error instanceof Error ? error.message : fallback;
   return NextResponse.json({ error: message }, { status: 400 });
 }

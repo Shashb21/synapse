@@ -108,7 +108,7 @@ export async function setRouteConfig(args: {
 }
 
 const CONNECT_PROMPT =
-  "Connect an LLM provider in the control panel (/control) — log in with Grok, Claude, or another provider — then retry.";
+  "Connect an LLM provider in the owner control panel (/admin/control) — log in with Grok, Claude, or another provider — then retry.";
 
 /**
  * Turns the control-panel configuration into the route a run will actually use.
@@ -200,7 +200,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
   return async ({ system, user, purpose, maxTokens }) => {
     if (!canPrompt(route)) {
       throw new NoRouteError(
-        `${route.provider_label} cannot serve ${purpose}: connect it in the control panel`,
+        `${route.provider_label} cannot serve ${purpose}: connect it in the owner control panel (/admin/control)`,
       );
     }
     const provider = findProvider(route.provider_id)!;

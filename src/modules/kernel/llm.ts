@@ -30,7 +30,7 @@ export function requireLlm(ctx: Pick<ModuleContext, "route"> & { ai?: boolean },
   if (!canPrompt(ctx.route)) {
     throw new NoRouteError(
       ctx.route.reason ??
-        `${what} needs a connected LLM. Log in at /admin/control (Grok, Claude, or another provider) and run it again.`,
+        `${what} needs a connected LLM. Connect a provider in the owner control panel (/admin/control) and run it again.`,
     );
   }
 }

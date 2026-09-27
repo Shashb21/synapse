@@ -75,7 +75,7 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
       <h3 className="text-[13px] font-medium text-foreground">Upload source</h3>
       <p className="text-[12px] text-muted-foreground">
         PDF, PPTX, DOCX, XLSX and text are all parsed by the LLM on the parse route in{" "}
-        <code>/control</code>: the file&apos;s text is extracted, then the model decides the blocks.
+        <code>/admin/control</code>: the file&apos;s text is extracted, then the model decides the blocks.
       </p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Doc role</span>
