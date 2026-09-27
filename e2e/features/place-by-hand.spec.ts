@@ -94,4 +94,61 @@ test.describe("Place by hand", () => {
     await expect(unplaced.getByText(gapName, { exact: true })).toHaveCount(0);
     await expect(page.getByRole("region", { name: /(High|Medium|Low) gaps/ }).getByText(gapName).first()).toBeVisible();
   });
+
+  test("a save the server refuses, then a corrected one, refreshes the matrix at once", async ({ page }) => {
+    await page.goto("/?place=plan&setting=all");
+    const unplaced = page.getByRole("region", { name: "Gaps not placed yet" });
+    await expect(unplaced.getByRole("listitem")).toHaveCount(1);
+    const row = unplaced.getByRole("listitem").first();
+    const gapName = (await row.locator("span").first().innerText()).trim();
+    const trigger = page.getByRole("button", { name: "Place by hand" });
+    const dialog = page.getByRole("dialog");
+    const open = async () =>
+      expect(async () => {
+        await row.getByRole("button").click();
+        await trigger.click({ timeout: 1_000 });
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 30_000 });
+    await open();
+    const save = dialog.getByRole("button", { name: "Save placement" });
+    const rationale = dialog.getByPlaceholder("Why this decision, in one line");
+
+    // One score and no band would leave the gap off the matrix: refused, with why.
+    await dialog.locator('input[name="y_score"]').fill("70");
+    await rationale.fill("Placed by hand in the e2e");
+    await save.click();
+    await expect(
+      dialog.getByText("Give the Feasibility score too, so the gap has a place on the matrix, or pick a band."),
+    ).toBeVisible();
+
+    // The first save fails on the server; the dialog stays open with the error.
+    let refused = 0;
+    await page.route("**/api/plan", async (route) => {
+      if (route.request().method() === "POST" && refused === 0) {
+        refused += 1;
+        await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "Try again." }) });
+        return;
+      }
+      await route.fallback();
+    });
+    await dialog.locator('input[name="x_score"]').fill("30");
+    await save.click();
+    await expect(dialog.getByText("Try again.")).toBeVisible();
+
+    // Reopening starts clean: the old error does not linger.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await open();
+    await expect(dialog.getByText("Try again.")).toHaveCount(0);
+
+    // The corrected save succeeds and the gap leaves Not placed yet without a reload.
+    await dialog.locator('input[name="y_score"]').fill("70");
+    await dialog.locator('input[name="x_score"]').fill("30");
+    await rationale.fill("Placed by hand in the e2e");
+    await save.click();
+    await expect(dialog).toBeHidden();
+    expect(refused).toBe(1);
+    await expect(unplaced).toHaveCount(0);
+    await expect(page.getByRole("region", { name: /(High|Medium|Low) gaps/ }).getByText(gapName).first()).toBeVisible();
+  });
 });

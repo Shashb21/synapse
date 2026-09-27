@@ -55,6 +55,7 @@ export function ActionDialog({
   size = "sm",
   className,
   trigger,
+  validateForm,
 }: {
   endpoint: string;
   payload: Record<string, unknown>;
@@ -70,6 +71,8 @@ export function ActionDialog({
   size?: "sm" | "default" | "icon-sm";
   className?: string;
   trigger?: React.ReactElement;
+  /** A check across fields (by name, as typed) once each field passes its own; message or null. */
+  validateForm?: (values: Record<string, string>) => string | null;
 }) {
   const router = useRouter();
   const formId = useId();
@@ -92,9 +95,11 @@ export function ActionDialog({
       return;
     }
     const extra: Record<string, unknown> = {};
+    const typed: Record<string, string> = {};
     for (const field of fields) {
       const value = data.get(field.name);
       if (value !== null) extra[field.name] = field.type === "number" ? Number(value) : String(value);
+      typed[field.name] = String(value ?? "");
       if (field.required && !String(value ?? "").trim()) {
         setError(`${field.label} is required.`);
         return;
@@ -104,6 +109,11 @@ export function ActionDialog({
         setError(invalid);
         return;
       }
+    }
+    const invalid = validateForm?.(typed);
+    if (invalid) {
+      setError(invalid);
+      return;
     }
     setPending(true);
     const res = await fetch(endpoint, {
@@ -123,12 +133,22 @@ export function ActionDialog({
       setError(json.error ?? "Action failed");
       return;
     }
+    setError(null);
     setOpen(false);
     router.refresh();
   }
 
+  function onOpenChange(next: boolean) {
+    // Each opening starts clean: an error from an earlier attempt does not linger.
+    if (next) {
+      setError(null);
+      setPending(false);
+    }
+    setOpen(next);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger render={trigger ?? <Button size={size} variant={variant} className={className} />}>
         {label}
       </DialogTrigger>
