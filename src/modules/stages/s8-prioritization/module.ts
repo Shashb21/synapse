@@ -742,9 +742,10 @@ export async function setPlacement(args: {
   const axes = await loadAxes();
   const typed: Record<string, number> = {};
   for (const [id, value] of Object.entries(args.axis_scores ?? {})) {
-    if (!axes.axes.some((axis) => axis.id === id)) throw new Error(`Unknown matrix axis ${id}.`);
+    const axis = axes.axes.find((candidate) => candidate.id === id);
+    if (!axis) throw new Error(`Unknown matrix axis ${id}.`);
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
-      throw new Error(`The ${id} score must be a number from 0 to 100.`);
+      throw new Error(`${axis.label} score must be a number from 0 to 100.`);
     }
     typed[id] = Math.round(value);
   }

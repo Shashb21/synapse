@@ -25,6 +25,8 @@ export type ActionField = {
   placeholder?: string;
   hint?: string;
   required?: boolean;
+  /** Checks the typed value before anything is sent; returns the message to show, or null. */
+  validate?: (value: string) => string | null;
 };
 
 export type ActionIdentity = {
@@ -97,6 +99,11 @@ export function ActionDialog({
         setError(`${field.label} is required.`);
         return;
       }
+      const invalid = field.validate?.(String(value ?? ""));
+      if (invalid) {
+        setError(invalid);
+        return;
+      }
     }
     setPending(true);
     const res = await fetch(endpoint, {
@@ -110,7 +117,7 @@ export function ActionDialog({
         actor_function: actorFunction,
       }),
     });
-    const json = (await res.json()) as { error?: string };
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Action failed");
