@@ -107,7 +107,11 @@ test.describe.serial("IEGP setup wizard", () => {
     await settings.press("Enter");
     await page.getByRole("button", { name: /^continue$/i }).click();
 
-    // Connect models / Work by hand, then review.
+    // AI models / Work by hand: says whether AI is on, with no stale checklist, then review.
+    const aiStatus = page.getByTestId("setup-ai-status");
+    await expect(aiStatus).toBeVisible();
+    await expect(aiStatus).toContainText(/AI is (on|off)/);
+    await expect(page.getByText(/Quick checklist|Log in with xAI|demo sources/)).toHaveCount(0);
     await page.getByRole("button", { name: /^continue$/i }).click();
     const review = page.getByTestId("setup-step-review");
     await expect(review).toBeVisible();
