@@ -7,8 +7,9 @@ import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
-import { signupAllowed } from "./signup-policy";
-import { ROLE_LABELS, isRole, roleForFunction, testOwnerBypass, type Role } from "./roles";
+import { ROLE_LABELS, isRole, ownerEmails, roleForFunction, testOwnerBypass, type Role } from "./roles";
+import { isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER } from "./accounts";
+import { hasActiveSeat } from "./customers";
 import {
   configuredIdentityProviders,
   demoMode,
@@ -108,7 +109,7 @@ export async function currentSession(): Promise<Session | null> {
   const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
-  if (Date.parse(row.expires_at) < Date.now()) {
+  if (Date.parse(row.expires_at) < Date.now() || !(await sessionStillAllowed(row))) {
     await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
     return null;
   }
@@ -122,6 +123,47 @@ export async function currentSession(): Promise<Session | null> {
     created_at: row.created_at,
     expires_at: row.expires_at,
   };
+}
+
+/** The `?error=` code /login shows the no-seat message for (see LOGIN_ERROR_MESSAGES). */
+export const NO_SEAT_ERROR = "no_seat";
+export const NO_SEAT_MESSAGE = "Your organisation hasn't assigned you a Synapse seat. Ask your administrator.";
+
+/** Messages /login shows for an `?error=` code; anything else is shown as sent. */
+export const LOGIN_ERROR_MESSAGES: Record<string, string> = { [NO_SEAT_ERROR]: NO_SEAT_MESSAGE };
+
+/** SSO refused: the verified email holds no seat on an active customer. Carries no detail on purpose. */
+export class NoSeatError extends Error {
+  readonly code = NO_SEAT_ERROR;
+  constructor() {
+    super(NO_SEAT_MESSAGE);
+    this.name = "NoSeatError";
+  }
+}
+
+/**
+ * Whether an SSO identity may have a session (KAN-28): its verified email holds
+ * a seat on an active customer, or it is a platform admin (OWNER_EMAILS, or an
+ * enabled admin account with that email). No verified email, no seat.
+ */
+export async function seatAllowsSignIn(email: string | null | undefined): Promise<boolean> {
+  const address = email?.trim().toLowerCase();
+  if (!address) return false;
+  if (ownerEmails().includes(address)) return true;
+  if (await hasActiveSeat(address)) return true;
+  return isAdminEmail(address);
+}
+
+/**
+ * Re-checked on every session lookup, so an unassigned seat, a deactivated
+ * customer or a demoted staff account stops working even if a session row
+ * survived. Demo sessions (development only) need nothing; password sessions
+ * need a staff account; SSO sessions need a seat (one indexed query).
+ */
+async function sessionStillAllowed(row: { provider_id: string; subject: string; email: string | null }): Promise<boolean> {
+  if (row.provider_id === "demo") return true;
+  if (row.provider_id === PASSWORD_PROVIDER) return passwordSessionValid(row.subject);
+  return seatAllowsSignIn(row.email);
 }
 
 export async function signOut() {
@@ -251,7 +293,23 @@ export async function completeLogin(args: { code: string; state: string }): Prom
     github_emails,
   });
   jar.delete(PENDING_COOKIE);
-  return createSession(sessionArgs);
+  // Customers sign in only with a seat their organisation was assigned (KAN-28).
+  if (!(await seatAllowsSignIn(sessionArgs.email))) throw new NoSeatError();
+  return createSession(await withoutClaimedOperator(sessionArgs));
+}
+
+/**
+ * A customer's own directory can set the `synapse_role` claim, so an IdP may
+ * never grant "operator" (which is platform owner) to a seat holder: only
+ * OWNER_EMAILS and admin accounts keep it. Anyone else gets their function's role.
+ */
+export async function withoutClaimedOperator(
+  args: Parameters<typeof createSession>[0],
+): Promise<Parameters<typeof createSession>[0]> {
+  if (args.role !== "operator") return args;
+  const email = args.email?.trim().toLowerCase();
+  const platformAdmin = Boolean(email) && (ownerEmails().includes(email!) || (await isAdminEmail(email!)));
+  return platformAdmin ? args : { ...args, role: roleForFunction(args.actor_function) };
 }
 
 /**
@@ -363,8 +421,6 @@ export function loginOptions() {
   return {
     /** Offer "continue as a demo user": development and tests only, never production. */
     demo: demoSignInAllowed(),
-    /** Self sign-up with email and password (ALLOW_SIGNUP, default open). */
-    signup: signupAllowed(),
     providers: configuredIdentityProviders().map((provider) => ({
       id: provider.id,
       label: provider.label,

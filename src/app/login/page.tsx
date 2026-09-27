@@ -2,7 +2,14 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginPanel } from "@/components/workspaces/login-panel";
 import { afterSignIn, safeNext } from "@/modules/auth/redirect";
-import { currentSession, loginOptions } from "@/modules/auth/session";
+import { currentSession, LOGIN_ERROR_MESSAGES, loginOptions } from "@/modules/auth/session";
+
+/** A known `?error=` code gets its fixed message; any other text is shown as sent. */
+function loginErrorMessage(raw: string | undefined): string | null {
+  const error = raw?.trim();
+  if (!error) return null;
+  return Object.hasOwn(LOGIN_ERROR_MESSAGES, error) ? LOGIN_ERROR_MESSAGES[error] : error;
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,9 +44,8 @@ export default async function LoginPage({
           <LoginPanel
             providers={options.providers}
             demo={options.demo}
-            signup={options.signup}
             next={next}
-            initialError={params.error?.trim() || null}
+            initialError={loginErrorMessage(params.error)}
           />
         </section>
       </div>

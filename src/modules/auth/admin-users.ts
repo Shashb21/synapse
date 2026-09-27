@@ -21,7 +21,14 @@ import type { Session } from "./session";
  * accounts. Callers must already have passed ownerGate. An admin can never
  * demote, un-admin or disable their own account, so the console can't lock
  * its last owner out.
+ *
+ * Password accounts are for the owner's own staff only (KAN-28): every account
+ * stays an admin or a Platform operator. Customers sign in with SSO and a seat
+ * (Admin → Customers), never with a password.
  */
+
+export const STAFF_ONLY_MESSAGE =
+  "Password accounts are only for your own staff: make it an admin or give it the Platform operator role. Customers sign in with single sign-on and a seat (Admin → Customers).";
 
 export type AdminUserView = Omit<Account, "failed_attempts" | "locked_until"> & {
   locked: boolean;
@@ -68,8 +75,9 @@ export async function runAdminUserAction(
   const action = String(input.action ?? "");
   switch (action) {
     case "create": {
-      const role = typeof input.role === "string" && input.role ? input.role : "contributor";
+      const role = typeof input.role === "string" && input.role ? input.role : "operator";
       if (!isRole(role)) throw new AccountError("Unknown role.");
+      if (input.is_admin !== true && role !== "operator") throw new AccountError(STAFF_ONLY_MESSAGE);
       const temporary_password = temporaryPassword();
       const account = await createAccount({
         email: String(input.email ?? ""),
@@ -95,6 +103,7 @@ export async function runAdminUserAction(
       const role = String(input.role ?? "");
       if (!isRole(role)) throw new AccountError("Unknown role.");
       if (account.id === self && role !== account.role) throw new AccountError("You can't change your own role.");
+      if (!account.is_admin && role !== "operator") throw new AccountError(STAFF_ONLY_MESSAGE);
       const updated = await updateAccount(account.id, { role: role as Role });
       if (updated.role !== account.role) await revokeAccountSessions(account.id);
       return { user: adminUserView(updated) };
@@ -103,6 +112,7 @@ export async function runAdminUserAction(
       const account = await mustGet(input.id);
       const isAdmin = input.is_admin === true;
       if (account.id === self && !isAdmin) throw new AccountError("You can't remove your own admin access.");
+      if (!isAdmin && account.role !== "operator") throw new AccountError(STAFF_ONLY_MESSAGE);
       const updated = await updateAccount(account.id, { is_admin: isAdmin, ...(isAdmin ? { email_verified: true } : {}) });
       return { user: adminUserView(updated) };
     }

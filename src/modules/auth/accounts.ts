@@ -144,10 +144,39 @@ export async function listAccounts(): Promise<Account[]> {
   return found.map(toAccount);
 }
 
+/**
+ * Password accounts are for Synapse staff only (KAN-28): an admin, or the
+ * operator role. Anything else (a pre-KAN-28 self sign-up) can no longer sign
+ * in, and its sessions stop working.
+ */
+export function isStaffAccount(account: Pick<Account, "is_admin" | "role" | "disabled">): boolean {
+  return !account.disabled && (account.is_admin || account.role === "operator");
+}
+
+/** Whether a password session's account may still use it: it exists, is enabled and is staff. */
+export async function passwordSessionValid(accountId: string): Promise<boolean> {
+  const found = await rows(sql`select is_admin, role, disabled from user_accounts where id = ${accountId} limit 1`);
+  const row = found[0];
+  if (!row) return false;
+  const role = String(row.role);
+  return isStaffAccount({ is_admin: row.is_admin === true, role: isRole(role) ? role : "contributor", disabled: row.disabled === true });
+}
+
 /** Whether this password session's account is an enabled admin (the owner check). */
 export async function isAdminAccount(accountId: string): Promise<boolean> {
   const found = await rows(sql`select is_admin, disabled from user_accounts where id = ${accountId} limit 1`);
   return found[0]?.is_admin === true && found[0]?.disabled !== true;
+}
+
+/**
+ * Whether this verified email belongs to an enabled, verified admin account:
+ * a platform admin signing in with SSO needs no customer seat.
+ */
+export async function isAdminEmail(email: string): Promise<boolean> {
+  const found = await rows(sql`
+    select 1 as ok from user_accounts
+    where email = ${normalizeEmail(email)} and is_admin and email_verified and not disabled limit 1`);
+  return Boolean(found[0]);
 }
 
 export class AccountError extends Error {

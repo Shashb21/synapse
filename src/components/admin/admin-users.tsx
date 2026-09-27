@@ -33,7 +33,8 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
   const [secret, setSecret] = useState<{ email: string; password: string } | null>(null);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<Role>("contributor");
+  const [role, setRole] = useState<Role>("operator");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [fn, setFn] = useState<string>("medical_affairs");
 
   function replace(user: AdminUserView) {
@@ -78,10 +79,10 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
 
       <form
         aria-label="Create a user"
-        className="grid gap-2 border border-border bg-card/40 p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-end"
+        className="grid gap-2 border border-border bg-card/40 p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto_auto] sm:items-end"
         onSubmit={async (event) => {
           event.preventDefault();
-          const ok = await run("create", { action: "create", email, name, role, actor_function: fn });
+          const ok = await run("create", { action: "create", email, name, role, actor_function: fn, is_admin: isAdmin });
           if (ok) {
             setEmail("");
             setName("");
@@ -123,6 +124,10 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
               </option>
             ))}
           </select>
+        </label>
+        <label className="flex h-8 items-center gap-1.5 text-[12px] text-foreground">
+          <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+          Admin
         </label>
         <Button type="submit" disabled={busy !== null || !email.trim() || !name.trim()}>
           {busy === "create" ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" aria-hidden />}
