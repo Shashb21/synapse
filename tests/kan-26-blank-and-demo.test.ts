@@ -195,7 +195,8 @@ describe("KAN-26: demo data on request", () => {
     expect(state.objectives.map((o) => o.id).sort()).toEqual(seed.objectives.map((o) => o.id).sort());
     expect(state.sources).toHaveLength(seed.sources.length);
     expect(state.gaps).toHaveLength(seed.gaps.length);
-    expect(state.tactics).toHaveLength(seed.tactics.length);
+    // The demo plan adds one proposed activity (the CNS sub-study) on top of the seed tactics.
+    expect(state.tactics).toHaveLength(seed.tactics.length + 1);
 
     // The list reports the flag, for the Demo badge.
     const listed = await json(await workspacesGet());
@@ -265,5 +266,35 @@ describe("KAN-26: demo data on request", () => {
       expect(refused.status).toBe(403);
     }
     expect((await getWorkspace(workspace.id))?.demo).toBe(false);
+  }, 60_000);
+});
+
+describe("KAN-26: the demo opens with a prioritized plan and a timeline", () => {
+  it("validates the demo bands and dates the mapped tactics, with one working dependency", async () => {
+    const { replaceContentsOf } = await import("@/modules/workspaces/contents");
+    const { gapTimelineView } = await import("@/modules/stages/s10-timeline/gap-view");
+    const { timelineModel } = await import("@/modules/stages/s10-timeline/module");
+    const { listPlacements } = await import("@/modules/stages/s8-prioritization/module");
+    const owner = `demo-plan-${Math.random().toString(36).slice(2, 8)}@example.com`;
+    const ws = await createWorkspace({ name: "Demo plan", owner });
+    await replaceContentsOf(ws.id, "demo");
+    await withWorkspace(ws.id, async () => {
+      const placements = await listPlacements();
+      expect(placements.filter((row) => row.validated).map((row) => [row.gap_id, row.band]).sort()).toEqual(
+        [["GAP-CAREGIVER", "low"], ["GAP-CNS", "high"], ["GAP-IRA", "medium"], ["GAP-PERSIST", "high"]],
+      );
+      const [state, model] = await Promise.all([loadState(), timelineModel()]);
+      const view = gapTimelineView({ state, placements, model });
+      expect(view.prioritized.map((group) => group.gap_id)).toEqual(["GAP-CNS", "GAP-PERSIST", "GAP-IRA", "GAP-CAREGIVER"]);
+      const dated = view.prioritized.flatMap((group) => group.items).filter((item) => item.activity);
+      expect(dated.length).toBeGreaterThanOrEqual(3);
+      expect(view.conflicts).toEqual([]);
+      expect(model.activities.some((activity) => activity.depends_on.length > 0)).toBe(true);
+    });
+    // Only the full demo gets the plan: the setup-only fixture stays unprioritized.
+    await replaceContentsOf(ws.id, "demo_setup");
+    await withWorkspace(ws.id, async () => {
+      expect((await listPlacements()).length).toBe(0);
+    });
   }, 60_000);
 });
