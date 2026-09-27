@@ -520,7 +520,7 @@ export default async function GapDetailPage({
                 {ai ? (
                   <>
                     No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
-                    have the S6 model propose the addressed slice and the open leftover, or write the
+                    have the AI propose the addressed slice and the open leftover, or write the
                     leftover yourself.
                   </>
                 ) : (

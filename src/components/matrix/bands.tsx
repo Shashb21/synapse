@@ -43,7 +43,7 @@ export function BandLegend({ counts }: { counts: Record<Band, number> }) {
       ))}
       <li className="flex items-center gap-1.5">
         <span className="size-2.5 rounded-full border border-dashed border-muted-foreground" aria-hidden />
-        A dashed edge means the band is still only an S8 suggestion
+        A dashed edge means the band is still only an AI suggestion
       </li>
     </ul>
   );

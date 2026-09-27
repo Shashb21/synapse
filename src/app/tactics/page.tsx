@@ -49,7 +49,7 @@ export default async function TacticsPage() {
       <section className="mt-8">
         <h2 className="mb-2 text-[13px] text-muted-foreground">Rejected by the AI ({pending.length})</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
-          Tactic candidates the S3 judge rejected. If a real study was dropped, promote it: it is
+          Tactic candidates the AI rejected while extracting tactics. If a real study was dropped, promote it: it is
           recorded by hand with its source quote, and can be mapped onto a gap at once.
         </p>
         {pending.length === 0 ? (

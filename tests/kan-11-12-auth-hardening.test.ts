@@ -281,13 +281,16 @@ describe("KAN-12: Microsoft tenant", () => {
 });
 
 describe("KAN-12: demo sign-in cannot choose its privileges", () => {
-  it("outside the test stub, body role and email are ignored: a contributor at the demo address", async () => {
+  it("outside the test stub, body role is ignored and an OWNER_EMAILS address is refused", async () => {
     vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "0");
     vi.stubEnv("OWNER_EMAILS", "boss@kernel.example");
     const name = `Demo ${unique()}`;
-    const res = await loginPost(
+    const refused = await loginPost(
       req("/api/auth/login", { demo: true, actor_name: name, role: "operator", email: "boss@kernel.example" }),
     );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/can't use it/);
+    const res = await loginPost(req("/api/auth/login", { demo: true, actor_name: name, role: "operator" }));
     expect(res.status).toBe(200);
     const session = (await currentSession())!;
     expect(session.role).toBe("contributor");

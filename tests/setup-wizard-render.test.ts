@@ -65,13 +65,13 @@ describe("setup wizard steps", () => {
       "Evidence landscape",
       "Stakeholders",
       "Treatment settings",
-      "Connect models",
+      "AI models",
       "Review & finish",
     ]);
     const manual = wizardSteps({ ai: false, isNew: false }).map((s) => s.label);
     expect(manual[0]).toBe("Asset");
     expect(manual).toContain("Work by hand");
-    expect(manual).not.toContain("Connect models");
+    expect(manual).not.toContain("AI models");
   });
 
   it("a new workspace opens on the welcome step", () => {

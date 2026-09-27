@@ -44,7 +44,7 @@ const designSchema = z.object({
 });
 
 const inputSchema = z.object({
-  /** Defaults to every open gap validated as High. */
+  /** Defaults to every open gap whose priority band a human validated (High, Medium or Low). */
   gap_ids: z.array(z.string()).optional(),
   /** Most ideas the judge may keep for one gap. */
   per_gap: z.number().int().min(1).max(5).default(2),
@@ -82,6 +82,27 @@ type Design = z.infer<typeof designSchema>;
 type Proposal = z.infer<typeof proposalSchema>;
 
 type IdeationGap = { id: string; name: string; statement: string; domain: EvidenceDomain };
+
+/** Listing order of the validated bands: High first, then Medium, then Low. */
+export const BAND_RANK = { high: 0, medium: 1, low: 2 } as const;
+
+/**
+ * The gaps S9 (and "Add idea by hand") serves by default: every gap whose
+ * priority band a human validated, whatever the band, mapped to its listing
+ * rank. No rule decides eligibility beyond the human's validation.
+ */
+export function ideationBandOrder(
+  placements: { gap_id: string; validated: boolean; band: "high" | "medium" | "low" | null }[],
+): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const placement of placements) {
+    if (!placement.validated || !placement.band) continue;
+    const rank = BAND_RANK[placement.band];
+    // A gap placed in several treatment settings lists under its highest band.
+    order.set(placement.gap_id, Math.min(rank, order.get(placement.gap_id) ?? rank));
+  }
+  return order;
+}
 type LibraryTactic = {
   id: string;
   name: string;
@@ -96,7 +117,7 @@ type LibraryTactic = {
 
 const DESIGN_FIELDS = `"population":"","comparator":"","outcomes":"","data_source":"","study_design":"","duration_months":0,"readout_lag_months":0,"timing_rationale":""`;
 
-const IDEATION_SYSTEM = `You design evidence tactics that would close a high-priority evidence gap in a pharma Integrated Evidence Generation Plan.
+const IDEATION_SYSTEM = `You design evidence tactics that would close a prioritized evidence gap in a pharma Integrated Evidence Generation Plan.
 
 Each tactic must be a runnable study, analysis or publication with a population, comparator, outcomes, a data source and a design. Do not restate the gap. Do not propose a tactic that already exists in the library you are given.
 
@@ -109,7 +130,7 @@ When a gap carries revise requests, answer each one: return that tactic with its
 
 Return JSON only: {"tactics":[{"id":"","gap_id":"","name":"","type":"","evidence_question":"","rationale":"",${DESIGN_FIELDS},"withdraw":false,"withdraw_reason":""}]}`;
 
-const CRITIC_SYSTEM = `You critique proposed evidence tactics for high-priority evidence gaps in a pharma Integrated Evidence Generation Plan.
+const CRITIC_SYSTEM = `You critique proposed evidence tactics for prioritized evidence gaps in a pharma Integrated Evidence Generation Plan.
 
 For each tactic, judge whether it would actually close its gap: is the design runnable, are the population, comparator and outcomes the right ones for this gap, are the data source, duration and readout lag credible for this design, and does the rationale hold. Check it against the tactic library you are given: if an existing tactic already answers the same evidence question for the same population, set duplicate_of to that tactic's id.
 
@@ -428,7 +449,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     version: "2.0.0",
     title: "Tactics ideation (proposer → critic → judge)",
     summary:
-      "A model designs candidate tactics, timing included, for high-priority open gaps; a model critic challenges them against the gap and the tactic library over three exchanges; a model judge keeps and ranks up to the per-gap cap. Needs a connected LLM.",
+      "A model designs candidate tactics, timing included, for open gaps whose priority band a human validated; a model critic challenges them against the gap and the tactic library over three exchanges; a model judge keeps and ranks up to the per-gap cap. Needs a connected LLM.",
     contract: 1,
     agentic: true,
     capabilities: ["llm-proposer", "llm-critic", "llm-judge", "per-gap-cap"],
@@ -439,19 +460,17 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     requireLlm(ctx, "Ideation");
     const [state, placements] = await Promise.all([loadState(), listPlacements()]);
     const planContext = prioritizationContextFromState(state);
-    // Ideation is for high-priority open gaps, and only after a human validated the band.
-    const highGapIds = new Set(
-      placements
-        .filter((placement) => placement.validated && placement.band === "high")
-        .map((placement) => placement.gap_id),
-    );
+    // Ideation is for open gaps whose band a human validated, whatever the band;
+    // High comes first, then Medium, then Low. Explicit gap_ids pick among open gaps.
+    const order = ideationBandOrder(placements);
     const gaps: IdeationGap[] = state.gaps
       .filter(
         (gap) =>
           isLiveGap(gap) &&
           displayedGapStatus(gap) === "validated_open" &&
-          (input.gap_ids?.length ? input.gap_ids.includes(gap.id) : highGapIds.has(gap.id)),
+          (input.gap_ids?.length ? input.gap_ids.includes(gap.id) : order.has(gap.id)),
       )
+      .sort((a, b) => (order.get(a.id) ?? BAND_RANK.low + 1) - (order.get(b.id) ?? BAND_RANK.low + 1))
       .map((gap) => ({
         id: gap.id,
         name: gap.name,
@@ -462,7 +481,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     if (gaps.length === 0) {
       return {
         output: { mode: isTestStub() ? "deterministic" : "llm", proposals: [], rejected: [], gaps_considered: 0 },
-        summary: "No high-priority open gaps to ideate for",
+        summary: "No open gaps with a validated priority band to ideate for",
       };
     }
 
@@ -821,7 +840,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         rejected: outcome.rejected.map((item) => item.candidate),
         gaps_considered: gaps.length,
       },
-      summary: `${outcome.accepted.length} tactic proposal(s) for ${gaps.length} high-priority gap(s)${
+      summary: `${outcome.accepted.length} tactic proposal(s) for ${gaps.length} prioritized gap(s)${
         input.dry_run ? " (dry run)" : ""
       }`,
       evals: [
@@ -842,11 +861,11 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
 
 ideationModule.evals = {
   async cases() {
-    return [{ name: "high-priority-open-gaps", input: { per_gap: 2, dry_run: true } }];
+    return [{ name: "prioritized-open-gaps", input: { per_gap: 2, dry_run: true } }];
   },
   score({ output }) {
     const proposals = output.proposals;
-    // Nothing left to propose (every High gap already has its tactics) is not a
+    // Nothing left to propose (every prioritized gap already has its tactics) is not a
     // quality failure, so that case carries no target.
     if (proposals.length === 0) {
       return [

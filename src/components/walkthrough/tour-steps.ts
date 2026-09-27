@@ -75,8 +75,8 @@ export const TOUR_STEPS: TourStep[] = [
     place: "Ideation",
     href: "/ideation",
     title: "Ideate new tactics",
-    ai: "For each High-priority Open gap the model proposes candidate studies, critiqued and ranked. Accept the ones worth doing; they become proposed tactics.",
-    manual: "AI is off, so no candidates are proposed. Add proposed tactics for each High-priority Open gap by hand.",
+    ai: "For each Open gap whose priority band you validated (High first, then Medium, then Low) the model proposes candidate studies, critiqued and ranked. Accept the ones worth doing; they become proposed tactics.",
+    manual: "AI is off, so no candidates are proposed. Add proposed tactics by hand for each Open gap whose priority band you validated.",
     targets: [{ selector: "button", text: /propose|ideate|generate/i }, heading],
   },
   {

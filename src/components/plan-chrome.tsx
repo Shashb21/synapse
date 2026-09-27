@@ -131,7 +131,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
           id: "upload",
           href: "/?place=upload",
           label: "Upload",
-          hint: "Demo pack and ingest",
+          hint: "Upload and ingest sources",
           icon: Upload,
           ready: true,
         }

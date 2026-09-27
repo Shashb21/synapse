@@ -99,7 +99,7 @@ export const STAGES: Record<StageId, StageDescriptor> = {
   S9: {
     id: "S9",
     title: "Tactics ideation",
-    purpose: "Propose tactics for high-priority open gaps (proposer → critic → judge).",
+    purpose: "Propose tactics for open gaps with a validated priority band (proposer → critic → judge).",
     kind: "agentic",
     upstream: ["S8"],
   },
