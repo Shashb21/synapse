@@ -79,6 +79,22 @@ test("signed out, every customer page and API sends you to sign in", async ({ pa
   expect(api.status()).toBe(401);
 });
 
+test("signed out, the login page does not ask for walkthrough progress", async ({ page }) => {
+  const walkthroughCalls: number[] = [];
+  const consoleErrors: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/api/walkthrough") walkthroughCalls.push(response.status());
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Synapse IEGP" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(walkthroughCalls).toEqual([]);
+  expect(consoleErrors.filter((text) => /401|walkthrough/i.test(text))).toEqual([]);
+});
+
 test("first sign-in asks for a workspace; the tag shows it; switching changes the data", async ({ page }) => {
   const id = unique();
   const email = `ws.${id}@example.com`;
