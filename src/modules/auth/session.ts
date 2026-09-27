@@ -8,7 +8,7 @@ import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
 import { ROLE_LABELS, isRole, ownerEmails, roleForFunction, testOwnerBypass, type Role } from "./roles";
-import { isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER } from "./accounts";
+import { findAccountByEmail, isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER } from "./accounts";
 import { hasActiveSeat } from "./customers";
 import {
   configuredIdentityProviders,
@@ -359,11 +359,14 @@ export function demoEmail(actorName: string): string {
  * Never available in a production build, identity provider or not.
  *
  * The caller cannot choose its privileges. Outside the test stub
- * (SYNAPSE_TEST_STUB_LLM=1, never production) a supplied `role` and `email`
- * are ignored: a demo user is a "contributor" known as `<name>@demo.synapse.local`.
- * Under the test stub the role (never "operator") and email are honoured, and
- * without a role it follows the function, so the Playwright/Vitest suites keep
- * their Medical Affairs demo user.
+ * (SYNAPSE_TEST_STUB_LLM=1, never production) a supplied `role` is ignored: a
+ * demo user is a "contributor". Under the test stub the role (never
+ * "operator") is honoured, and without a role it follows the function, so the
+ * Playwright/Vitest suites keep their Medical Affairs demo user.
+ *
+ * A typed email becomes the session's email (and so its workspace principal)
+ * only when it is safe to: see demoEmailFor. Otherwise sign-in is refused with
+ * the reason; nothing is silently swapped for a generated address.
  */
 export async function signInDemo(args: {
   actor_name: string;
@@ -380,7 +383,7 @@ export async function signInDemo(args: {
   return createSession({
     provider_id: "demo",
     subject: `demo:${name}`,
-    email: demoEmailFor(name, args.email),
+    email: await demoEmailFor(name, args.email),
     actor_name: name,
     actor_function: fn,
     role: demoRole(fn, args.role),
@@ -394,10 +397,54 @@ export function demoRole(fn: ActorFunction, requested?: string | null): Role {
   return roleForFunction(fn);
 }
 
-/** The email a demo sign-in is known by: the supplied one only under the test stub. */
-export function demoEmailFor(name: string, requested?: string | null): string {
+/** Top-level domains no real mailbox can have (RFC 2606, RFC 6761; .local is mDNS). */
+const TEST_ONLY_TLDS = ["test", "example", "invalid", "localhost", "local"];
+/** Second-level domains reserved for documentation (RFC 2606). */
+const TEST_ONLY_DOMAINS = ["example.com", "example.net", "example.org"];
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Whether an address is on a domain reserved for testing, so no real person can hold it. */
+export function testOnlyAddress(email: string): boolean {
+  const address = email.trim().toLowerCase();
+  if (!EMAIL_SHAPE.test(address)) return false;
+  const domain = address.slice(address.lastIndexOf("@") + 1);
+  const tld = domain.slice(domain.lastIndexOf(".") + 1);
+  return (
+    TEST_ONLY_TLDS.includes(tld) ||
+    TEST_ONLY_DOMAINS.some((reserved) => domain === reserved || domain.endsWith(`.${reserved}`))
+  );
+}
+
+export const DEMO_EMAIL_DOMAIN_MESSAGE =
+  "A demo email must be on a test-only domain, such as name@team.test or name@example.com, so it can never be a real person's address. Leave it empty to use a generated one.";
+export const DEMO_EMAIL_TAKEN_MESSAGE =
+  "That address belongs to a Synapse account or a customer seat, so a demo user can't use it. Pick another test address, or leave it empty.";
+
+/**
+ * The email a demo sign-in is known by. Empty: `<name>@demo.synapse.local`.
+ * Typed: used as-is (so invites sent to it reach this demo user), but only when
+ *
+ * - it is on a test-only domain (testOnlyAddress), so it cannot be a real
+ *   customer's address and so cannot take over their workspaces or invites
+ *   (workspace membership is keyed by email, see principalOf); and
+ * - it is not an OWNER_EMAILS address, an email + password account's email
+ *   (staff or admin) or a seat holder's email (KAN-28), even a test-only one.
+ *
+ * Either failure refuses the sign-in. Owner status never comes from it:
+ * ownerDecision ignores the email of every demo session.
+ */
+export async function demoEmailFor(name: string, requested?: string | null): Promise<string> {
   const supplied = requested?.trim().toLowerCase();
-  return testOwnerBypass() && supplied ? supplied : demoEmail(name);
+  if (!supplied) return demoEmail(name);
+  if (!testOnlyAddress(supplied)) throw new Error(DEMO_EMAIL_DOMAIN_MESSAGE);
+  if (
+    ownerEmails().includes(supplied) ||
+    (await findAccountByEmail(supplied).then(Boolean, () => true)) ||
+    (await hasActiveSeat(supplied).catch(() => true))
+  ) {
+    throw new Error(DEMO_EMAIL_TAKEN_MESSAGE);
+  }
+  return supplied;
 }
 
 export async function activeSessions(): Promise<Session[]> {

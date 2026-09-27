@@ -13,9 +13,11 @@ export const dynamic = "force-dynamic";
  * demo user, which only a non-production build accepts. Either way the person
  * then chooses a workspace.
  *
- * A demo body's `role` and `email` are requests, not grants: signInDemo honours
- * them only under the test stub (SYNAPSE_TEST_STUB_LLM=1); otherwise a demo user
- * is a contributor at `<name>@demo.synapse.local`.
+ * A demo body's `role` is a request, not a grant: signInDemo honours it only
+ * under the test stub (SYNAPSE_TEST_STUB_LLM=1); otherwise a demo user is a
+ * contributor. A typed `email` is used only on a test-only domain that no
+ * account, seat or OWNER_EMAILS entry holds (see demoEmailFor); otherwise the
+ * sign-in is refused. With no email the user is `<name>@demo.synapse.local`.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

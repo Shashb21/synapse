@@ -241,3 +241,24 @@ test("staff email and password: your account, sign out, sign back in; a wrong pa
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 });
 
+test("demo sign-in keeps the typed test email, and refuses a real-world one", async ({ page }) => {
+  const id = unique();
+  const email = `priya.shah.${id}@runthrough.test`;
+  await demoSignInThroughLoginPage(page, `Priya Shah ${id}`, email);
+  await page.goto("/account");
+  const profile = page.getByTestId("account-profile");
+  await expect(profile).toContainText(email);
+  await expect(profile).not.toContainText("@demo.synapse.local");
+
+  await clickUntilUrl(page, page.getByRole("button", { name: /sign out/i }), /\/login/);
+  const form = page.getByRole("form", { name: "Demo sign-in" });
+  const submit = form.getByRole("button", { name: /continue as a demo user \(development only\)/i });
+  await fillUntilEnabled(async () => {
+    await refill(form.getByLabel("Your name"), `Real ${id}`);
+    await refill(form.getByLabel(/Email/), `real.${id}@pfizer.com`);
+  }, submit);
+  await submit.click();
+  await expect(page.getByTestId("login-error")).toContainText("test-only domain");
+  await expect(page).toHaveURL(/\/login/);
+});
+

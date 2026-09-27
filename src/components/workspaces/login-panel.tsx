@@ -129,10 +129,15 @@ export function LoginPanel({
             <Input
               type="email"
               value={email}
-              placeholder="alex@example.com"
+              placeholder="alex@team.test"
+              aria-describedby="demo-email-hint"
               onChange={(event) => setEmail(event.target.value)}
             />
           </label>
+          <p id="demo-email-hint" className="text-[11px] text-muted-foreground">
+            Use a test-only address (ending .test, .example or @example.com) that no real account or seat holds.
+            Leave it empty to be known as a generated name@demo.synapse.local address.
+          </p>
           <Button type="submit" variant="secondary" disabled={pending !== null || !name.trim()}>
             {pending === "demo" ? <Loader2 className="size-4 animate-spin" /> : null}
             Continue as a demo user (development only)
