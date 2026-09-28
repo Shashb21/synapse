@@ -46,6 +46,7 @@ import {
   validateGap,
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
+import { EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
@@ -85,6 +86,10 @@ function idList(...values: (string | undefined)[]): string[] {
 }
 
 const RATIONALE_REQUIRED = "A short rationale is required for every edit.";
+/** A hand-made gap's domain is the person's pick; nothing is assumed (KAN-16). */
+const DOMAIN_REQUIRED = "Choose the gap's evidence domain.";
+const isEvidenceDomain = (value: unknown): value is EvidenceDomain =>
+  typeof value === "string" && (EVIDENCE_DOMAINS as readonly string[]).includes(value);
 
 function rationaleOf(body: Record<string, string>): string {
   return (body.rationale || body.note || "").trim();
@@ -567,6 +572,7 @@ export async function POST(request: Request) {
         });
         break;
       case "create_gap":
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
         await createGap({
           name: body.name,
           statement: body.statement,
@@ -670,6 +676,7 @@ export async function POST(request: Request) {
         });
         break;
       case "create_addressed_gap":
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
         await createAddressedGap({
           name: body.name,
           statement: body.statement,

@@ -24,7 +24,7 @@ test.describe("Place by hand", () => {
       ["Hand gap one", "No comparative persistence data versus the standard of care in routine practice."],
       ["Hand gap two", "No caregiver burden evidence for the HTA submission in the EU5."],
     ]) {
-      await iegpAction(request, { action: "create_gap", name, statement });
+      await iegpAction(request, { action: "create_gap", name, statement, domain: "unmet_need" });
     }
     for (const gap_id of ["GAP-001", "GAP-002"]) {
       await iegpAction(request, { action: "validate_gap", gap_id });

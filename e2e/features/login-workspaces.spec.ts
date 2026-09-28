@@ -116,6 +116,7 @@ test("first sign-in asks for a workspace; the tag shows it; switching changes th
   const created = await page.request.post("/api/iegp", {
     data: {
       action: "create_gap",
+      domain: "unmet_need",
       name: statement,
       statement: `${statement}: no head-to-head data versus standard of care.`,
       actor_name: "Workspace Tester",
