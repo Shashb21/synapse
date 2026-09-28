@@ -91,9 +91,12 @@ export default async function TacticsPage() {
                           name: "status",
                           label: "Status",
                           type: "select",
+                          // The candidate's own status when it has one; otherwise the person picks.
                           defaultValue: (CATCH_UP_TACTIC_STATUSES as readonly string[]).includes(row.status)
                             ? row.status
-                            : "planned",
+                            : undefined,
+                          placeholder: "Choose a status",
+                          required: true,
                           options: CATCH_UP_TACTIC_STATUSES.map((status) => ({ value: status, label: CREATE_TACTIC_STATUS_LABELS[status] })),
                         },
                         {

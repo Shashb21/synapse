@@ -40,7 +40,8 @@ describe("LockForm note field", () => {
         .map(({ tag }) => actionOf(tag)),
     );
     expect([...withNote].sort()).toEqual(
-      ["assign_tactic", "confirm_coverage_review", "lock_need", "lock_priority", "validate_gap"].sort(),
+      // lock_gap (exclude) and unpark_gap store theirs as the rationale on the lock, audit and edit record (KAN-16).
+      ["assign_tactic", "confirm_coverage_review", "lock_gap", "lock_need", "lock_priority", "unpark_gap", "validate_gap"].sort(),
     );
     for (const { file, tag } of lockFormTags()) {
       const action = actionOf(tag);

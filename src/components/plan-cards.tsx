@@ -57,9 +57,13 @@ function CreateGapFields() {
         Domain
         <select
           name="domain"
-          defaultValue="unmet_need"
+          required
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
         >
+          <option value="" disabled>
+            Choose a domain
+          </option>
           {EVIDENCE_DOMAINS.map((domain) => (
             <option key={domain} value={domain}>
               {DOMAIN_LABELS[domain]}
@@ -105,7 +109,16 @@ function CreateTacticFields() {
         placeholder="Tactic name"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
-      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+      <select
+        name="type"
+        required
+        defaultValue=""
+        aria-label="Tactic type"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      >
+        <option value="" disabled>
+          Choose a type
+        </option>
         {TACTIC_TYPES.map((type) => (
           <option key={type} value={type}>
             {TACTIC_TYPE_LABELS[type]}
@@ -178,7 +191,16 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
         placeholder="Study, programme, or publication name"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
-      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+      <select
+        name="type"
+        required
+        defaultValue=""
+        aria-label="Tactic type"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      >
+        <option value="" disabled>
+          Choose a type
+        </option>
         {TACTIC_TYPES.map((type) => (
           <option key={type} value={type}>
             {TACTIC_TYPE_LABELS[type]}
@@ -190,9 +212,12 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
         <select
           name="status"
           required
-          defaultValue="ongoing"
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
         >
+          <option value="" disabled>
+            Choose a status
+          </option>
           {CATCH_UP_TACTIC_STATUSES.map((status) => (
             <option key={status} value={status}>
               {CREATE_TACTIC_STATUS_LABELS[status]}

@@ -28,6 +28,9 @@ test.describe("Create tactic", () => {
     const status = dialog.getByLabel("Status");
     await expect(status).toHaveValue("proposed");
     await dialog.getByPlaceholder("Tactic name").fill("E2E ongoing registry");
+    // No type is assumed: the person picks it.
+    await expect(dialog.getByLabel("Tactic type")).toHaveValue("");
+    await dialog.getByLabel("Tactic type").selectOption("registry");
     await dialog.getByPlaceholder("Evidence question").fill("What is 12-month persistence in routine care?");
     await status.selectOption("ongoing");
     await dialog.getByLabel("Start date (optional)").fill("2026-02-01");

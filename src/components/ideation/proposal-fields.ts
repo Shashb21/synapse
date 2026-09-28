@@ -32,7 +32,10 @@ export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionFiel
       name: "type",
       label: "Type",
       type: "select",
-      defaultValue: defaults.type ?? TACTIC_TYPES[0],
+      // A new idea's type is the person's pick; an edit starts from the idea's own type.
+      defaultValue: defaults.type,
+      placeholder: defaults.type ? undefined : "Choose a type",
+      required: true,
       options: TACTIC_TYPES.map((value) => ({ value, label: TACTIC_TYPE_LABELS[value as TacticType] ?? value })),
     },
     {

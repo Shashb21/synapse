@@ -44,8 +44,12 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
         <select
           name={type}
           required={!prefix}
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         >
+          <option value="" disabled={!prefix}>
+            Choose a type
+          </option>
           {TACTIC_TYPES.map((row) => (
             <option key={row} value={row}>
               {TACTIC_TYPE_LABELS[row]}
@@ -58,9 +62,12 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
         <select
           name={status}
           required={!prefix}
-          defaultValue="ongoing"
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         >
+          <option value="" disabled={!prefix}>
+            Choose a status
+          </option>
           {CATCH_UP_TACTIC_STATUSES.map((row) => (
             <option key={row} value={row}>
               {CREATE_TACTIC_STATUS_LABELS[row]}
@@ -140,9 +147,10 @@ export function TacticDetailFields() {
           Owner function
           <select
             name="function"
-            defaultValue="evidence_lead"
+            defaultValue=""
             className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
           >
+            <option value="">Blank: your function</option>
             {ACTOR_FUNCTIONS.map((fn) => (
               <option key={fn} value={fn}>
                 {FUNCTION_LABELS[fn]}
