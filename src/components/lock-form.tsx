@@ -1,9 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -14,13 +13,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
-
-const DEFAULT_FUNCTION: ActorFunction = "evidence_lead";
-const FUNCTION_OPTIONS: ActorFunction[] = [
-  DEFAULT_FUNCTION,
-  ...ACTOR_FUNCTIONS.filter((fn) => fn !== DEFAULT_FUNCTION),
-];
 
 function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
   for (const el of Array.from(form.elements)) {
@@ -30,7 +22,7 @@ function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
       continue;
     }
     if (el.disabled || el.type === "hidden" || el.type === "submit" || el.type === "button") continue;
-    if (el.name === "actor_name" || el.name === "actor_function" || el.name === "note") continue;
+    if (el.name === "note") continue;
     if (!el.required) continue;
     if (!String(el.value || "").trim()) return el;
   }
@@ -45,8 +37,6 @@ export function LockForm({
   confirmLabel,
   description,
   variant = "outline",
-  defaultActorName,
-  defaultActorFunction,
 }: {
   label: string;
   action: string;
@@ -56,45 +46,24 @@ export function LockForm({
   description?: string;
   /** Visual weight of the trigger button. Defaults to secondary ("outline"); pass "default" for a hero/primary action. */
   variant?: "default" | "outline";
-  /** Pre-fills name/function from a signed-in session (e.g. in a breakout room). Still editable. */
-  defaultActorName?: string;
-  defaultActorFunction?: ActorFunction;
 }) {
   const router = useRouter();
-  const nameId = useId();
-  const functionId = useId();
-  const nameRef = useRef<HTMLInputElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [actorName, setActorName] = useState(defaultActorName ?? "");
-  const [actorFunction, setActorFunction] = useState<ActorFunction>(
-    defaultActorFunction ?? DEFAULT_FUNCTION,
-  );
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
       setError(null);
-      setNameError(null);
-      setActorName(defaultActorName ?? "");
-      setActorFunction(defaultActorFunction ?? DEFAULT_FUNCTION);
       setPending(false);
     }
   }
 
   async function onSubmit(form: HTMLFormElement) {
     const formData = new FormData(form);
-    const name = String(formData.get("actor_name") || actorName || "").trim();
-    const fn = String(formData.get("actor_function") || actorFunction || "").trim();
     setError(null);
-    setNameError(null);
-    if (!name) {
-      setNameError("Type your name. “Your name” is a placeholder, not a filled value.");
-      nameRef.current?.focus();
-      return;
-    }
     const missing = firstMissingRequired(form);
     if (missing) {
       setError("Fill every required field in this dialog, then try again.");
@@ -102,15 +71,14 @@ export function LockForm({
       return;
     }
     setPending(true);
+    // The actor is the signed-in person; the server takes it from the session.
     const payload: Record<string, unknown> = {
       action,
-      actor_name: name,
-      actor_function: fn,
       note: String(formData.get("note") || ""),
       ...extra,
     };
     for (const [k, v] of formData.entries()) {
-      if (k === "actor_name" || k === "actor_function" || k === "note") continue;
+      if (k === "note") continue;
       payload[k] = v;
     }
     const res = await fetch("/api/iegp", {
@@ -121,7 +89,7 @@ export function LockForm({
     const json = (await res.json()) as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(json.error ?? "Lock failed");
+      setError(json.error ?? "Could not save. Try again.");
       return;
     }
     setOpen(false);
@@ -133,7 +101,7 @@ export function LockForm({
       <DialogTrigger render={<Button size="sm" variant={variant} />}>
         {label}
       </DialogTrigger>
-      <DialogContent className="z-[60] sm:max-w-md" initialFocus={nameRef}>
+      <DialogContent className="z-[60] sm:max-w-md" initialFocus={noteRef}>
         <form
           noValidate
           onSubmit={(e) => {
@@ -144,60 +112,14 @@ export function LockForm({
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
-              {description ?? "Type your name and function. No login. Every IEGP gate records an actor."}
+              {description ?? "Recorded in the audit trail under your name."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {children}
-            <div className="grid gap-1">
-              <label htmlFor={nameId} className="text-[12px] text-muted-foreground">
-                Name
-              </label>
-              <Input
-                ref={nameRef}
-                id={nameId}
-                name="actor_name"
-                value={actorName}
-                autoComplete="name"
-                placeholder="Your name"
-                aria-required="true"
-                aria-invalid={nameError ? true : undefined}
-                className="placeholder:italic placeholder:text-muted-foreground/70"
-                onChange={(e) => {
-                  setActorName(e.target.value);
-                  if (nameError) setNameError(null);
-                }}
-              />
-              {nameError ? (
-                <p className="text-[12px] text-destructive">{nameError}</p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Empty until you type. Example: A. Rao
-                </p>
-              )}
-            </div>
-            <div className="grid gap-1">
-              <label htmlFor={functionId} className="text-[12px] text-muted-foreground">
-                Function
-              </label>
-              <select
-                id={functionId}
-                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-                value={actorFunction}
-                onChange={(e) => setActorFunction(e.target.value as ActorFunction)}
-              >
-                {FUNCTION_OPTIONS.map((fn) => (
-                  <option key={fn} value={fn}>
-                    {FUNCTION_LABELS[fn]}
-                  </option>
-                ))}
-              </select>
-              <input type="hidden" name="actor_function" value={actorFunction} />
-              <p className="text-[11px] text-muted-foreground">Defaults to Evidence lead.</p>
-            </div>
             <label className="grid gap-1 text-[12px] text-muted-foreground">
               Note (required to override Addressed)
-              <Textarea name="note" rows={3} />
+              <Textarea ref={noteRef} name="note" rows={3} />
             </label>
             {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
           </div>

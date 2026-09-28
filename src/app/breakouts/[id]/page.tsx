@@ -63,8 +63,6 @@ export default async function BreakoutRoomPage({
         <AddGapsDialog
           groupId={group.id}
           availableGaps={available}
-          defaultActorName={session.signed_in ? session.actor.name : undefined}
-          defaultActorFunction={session.signed_in ? session.actor.function : undefined}
         />
       </div>
       <p className="mb-4 text-[11px] text-muted-foreground">
@@ -74,8 +72,6 @@ export default async function BreakoutRoomPage({
       <BreakoutBoard
         groupId={group.id}
         cards={assigned}
-        defaultActorName={session.signed_in ? session.actor.name : undefined}
-        defaultActorFunction={session.signed_in ? session.actor.function : undefined}
       />
     </AppShell>
   );

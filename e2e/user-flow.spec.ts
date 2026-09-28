@@ -17,7 +17,6 @@ async function resetBlank(page: Page) {
 async function ingestFirstDemo(page: Page) {
   await page.goto("/?place=upload");
   await page.getByRole("button", { name: /ingest this file/i }).first().click();
-  await page.getByLabel(/^name$/i).fill("A. Rao");
   await page.getByRole("button", { name: /^ingest$/i }).click();
   await expect(page.getByText(/^ingested$/i).first()).toBeVisible();
 }

@@ -76,7 +76,7 @@ export function MappingTableWorkbench({
         ))}
         <span className="text-[11px] text-muted-foreground">
           {ai
-            ? "Accept, reject or edit any row — a saved row wins over later S4 runs, and a removed or rejected tactic is never mapped again by S4. Rationale feeds S4 hillclimb."
+            ? "Accept, reject or edit any row — a saved row wins over later S4 runs, and a removed or rejected tactic is never mapped again by S4.."
             : "AI is off: pick the tactics and a status for each row and save it with a rationale."}
         </span>
       </div>
