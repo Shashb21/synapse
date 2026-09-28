@@ -396,11 +396,6 @@ export function SetupWizard({
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {step.id !== "welcome" ? (
-            <Button type="button" variant="outline" disabled={busy} onClick={() => void save(false)}>
-              Save &amp; continue later
-            </Button>
-          ) : null}
           {step.id === "review" ? (
             complete ? (
               <Button type="button" disabled={busy} onClick={() => void finish(false)}>
