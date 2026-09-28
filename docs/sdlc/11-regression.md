@@ -1,5 +1,7 @@
 # Regression matrix
 
+> **Retired — v1 insights engine.** This page describes the retired Velmara Insights Engine (flat insight records, theme catalog, knowledge graph, local hill-climb). It is kept for lineage only and does not describe the current product. Its code (`src/lib/pipeline.ts`, `src/lib/store.ts`, the LlamaParse ingest) was removed in KAN-21, and most of the tests and customer routes it cites (for example `/insights`, `/graph`, `/ingest`) no longer exist. The owner tool's current eval gold is `src/modules/eval-gold/`. Current specs: [01-requirements.md](./01-requirements.md), [02-architecture.md](./02-architecture.md), [09-flow-high-level.md](./09-flow-high-level.md), [10-flow-technical.md](./10-flow-technical.md).
+
 Lock table for REQ-REG-001 / REQ-REG-002 / REQ-REG-004. Every **Must** requirement maps to a named test. User-flow IDs (REQ-UX-*) are the screens a brand analyst actually walks.
 
 Commands:

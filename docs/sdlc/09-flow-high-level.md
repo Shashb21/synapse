@@ -1,94 +1,64 @@
 # Application flow — high-level process
 
-This is the **business loop**: how a brand team’s decks become a growing knowledge base. The engineering SDLC (Origin, tests, hill-climb) is [05-process.md](./05-process.md). The module-level version is [10-flow-technical.md](./10-flow-technical.md).
+This is the **business loop**: how a Medical Affairs consultant and a client team build an Integrated Evidence Generation Plan (IEGP) for one asset. The module-level version is [10-flow-technical.md](./10-flow-technical.md). The engineering process is [05-process.md](./05-process.md).
 
-Synapse is not a file cabinet of PPTX. Each readout adds **notes**. Themes are **maps of content**. The graph is **associative memory**. Humans name themes; the engine never auto-promotes.
+AI drafts; people decide. Every step has a manual path, and with AI off the whole loop is done by hand.
 
 ```mermaid
 flowchart TD
-  subgraph sources["Functions produce readouts"]
-    com["Commercial"]
-    acc["Market access"]
-    med["Medical affairs"]
-    ops["ClinOps"]
-    mkt["Marketing"]
-  end
-
-  sources --> ingest["Ingest a deck into Synapse"]
-  ingest --> extract["Extract atomic insights"]
-  extract --> classify["Classify known / unknown / opportunity"]
-  classify --> score["Score against the current catalog"]
-
-  score -->|"clears the floor"| join["Link the CIR onto one or more named themes"]
-  score -->|"weak max"| residual["Hold once in Unassigned"]
-
-  join --> monitor["Theme monitor: situation, known, unknown, opportunity"]
-  residual --> emergeQ{"Do two or more Unassigned claims share a decision?"}
-  emergeQ -->|no| wait["Wait for the next deck"]
-  emergeQ -->|yes| emerge["Emerge proposal on Catalog"]
-
-  join --> splitQ{"Is this named theme briefing two decisions?"}
-  splitQ -->|no| kg
-  splitQ -->|yes| split["Split proposal on Catalog"]
-
-  emerge --> human["Human accepts or rejects"]
-  split --> human
-  human -->|"accept emerge"| grow["Catalog appends a new theme"]
-  human -->|"accept split"| child["Catalog appends a child, parent stays"]
-  human -->|reject| wait
-  grow --> join
-  child --> join
-
-  join --> kg["Knowledge graph walks joins"]
-  residual --> kg
-  kg --> reveal["Revelations: blend, bridge, new implication"]
-  reveal --> monitor
-  monitor --> next["Next readout arrives"]
-  next --> ingest
-  wait --> ingest
+  owner["Owner sells seats in /admin/customers"] --> signin["Seat holder signs in with SSO"]
+  staff["Staff sign in with email and password"] --> ws
+  signin --> ws{"Has a workspace invite?"}
+  ws -->|no| ask["Ask the workspace owner, or create a workspace"]
+  ws -->|yes| open["Open the workspace"]
+  ask --> create["Create: Start blank or Start with demo data"]
+  create --> open
+  open --> setup["Setup wizard: asset, plan, objectives, landscape, settings"]
+  setup --> ai{"AI on? master switch AND workspace setting"}
+  ai -->|yes| upload["Upload sources; the routed LLM parses them"]
+  ai -->|no| start["Start: add gaps and tactics by hand"]
+  upload --> extract["AI proposes gaps, tactics and coverage"]
+  extract --> gaps["Gaps: review status, edit, split or rewrite Partially Addressed"]
+  start --> gaps
+  gaps --> prioritize["Prioritize: place open gaps on the matrix, validate bands"]
+  prioritize --> tactics["Tactics: map existing tactics, create new ones, ideate"]
+  tactics --> timeline["Timeline: create, date, drag and sequence activities by hand"]
+  timeline --> final["Medical Affairs saves the plan as final; export the chart as an image"]
+  final --> room["Room: present and decide with the audience window"]
+  room --> gaps
 ```
 
 ## What each box means
 
 | Step | What happens | Who decides |
 | --- | --- | --- |
-| Ingest | A PPTX / DOCX / XLSX / PDF from one function is parsed into source blocks. | Analyst uploads on `/ingest`. |
-| Extract | One claim per CIR. Double-barreled bullets split. Evidence quote + location stay on the row. | Engine. |
-| Classify | Supported fact → **known**. Explicit gap → **unknown**. Concrete close-the-gap action → **opportunity**. | Engine. |
-| Score | Match the statement to the catalog (keywords, patterns, function prior). | Engine. |
-| Join | Membership is a `theme_links` row. The sentence is never copied onto Access and Evidence. | Engine. |
-| Unassigned | Weak matches wait. They are not mashed into the nearest theme. | Engine. |
-| Emerge | Unassigned cluster (≥2 CIR, shared language) → proposal. | Human names it on `/catalog`. |
-| Split | One theme is two decision objects → child proposal. Parent is kept. | Human accepts on `/catalog`. |
-| Graph | Blends, entity bridges, gap-closures that no single deck wrote. | Computed; nothing is extracted twice. |
-| Monitor | Leadership brief: what we know, what we don’t, what we should do. | Humans read `/`. |
-
-## Three ways the knowledge base grows
-
-```
-more decks ──► more CIR (known / unknown / opportunity)
-                    │
-                    ├── more catalog  (emerge or split, human accept, append-only)
-                    └── more links    (joins and revelations, even when no theme is renamed)
-```
-
-1. **More CIR** — ingest another function’s readout. Questions and opportunities are insight classes, not a second database.
-2. **More catalog** — a new named decision, or a child split from a parent. IDs never recycle. Parents are never deleted.
-3. **More links** — Aetna RWE sitting on Access *and* Evidence; CNS in Medical next to a message gap in Marketing. That intersection is the new insight.
+| Seats | The owner records each customer, its seats and optional email domains, and assigns seats by email. | Owner, in `/admin/customers`. |
+| Sign-in | Customers use SSO and need a seat; staff use a password account. There is no self sign-up. | Identity provider verifies the email; Synapse checks the seat. |
+| Workspace | One workspace holds one IEGP. A new one starts blank; demo data only when chosen, with a Demo badge. | Workspace owner. |
+| Setup | The plan's context, which prioritization, ideation and the timeline use. | The team. |
+| AI switch | AI runs only when the owner's master switch and the workspace's AI assistance setting are both on. | Owner (master), workspace owner (setting). |
+| Upload | PDF, PPTX, DOCX, XLSX and text files are parsed into blocks by the LLM routed to the parse stage. | Model proposes; people edit blocks. |
+| Gaps | Each gap has needs with verbatim quotes. Status is Open, Partially Addressed or Addressed, from recorded coverage or a person's override with a reason. | Model proposes; people validate. |
+| Prioritize | Open gaps sit on a two-axis matrix per treatment setting; the quadrant is the band. | Model suggests scores; a person validates the band. |
+| Tactics | Existing tactics are mapped with coverage; new tactics are created or ideated for validated open gaps. | Model proposes; people accept, edit or reject. |
+| Timeline | Every prioritized gap with its activities beneath it; dated, moved and sequenced by hand, with broken dependencies flagged. | The team; Medical Affairs saves final. |
+| Room | A presenter view whose slides are the real pages, with an audience window. | The team. |
 
 ## What this loop refuses
 
-- Embeddings naming themes (IDs would drift every week).
-- Ingest auto-creating a theme.
-- Copying the same sentence onto two theme cards.
-- Deleting a parent when a child splits off.
+- Rules deciding anything an LLM or a person should decide.
+- A later AI run overwriting a person's edit.
+- Customers signing up by themselves, or signing in without a seat.
+- Demo data appearing in a workspace nobody asked for it in.
+- A PowerPoint export (removed; the timeline exports as an image).
 
 ## Where to look in the app
 
 | You want | Route |
 | --- | --- |
-| Situation by theme | `/` Monitor |
-| Every CIR | `/insights` |
-| Emerge / split decisions | `/catalog` |
-| Connections nobody typed | `/graph` |
-| Upload the next deck | `/ingest` |
+| Upload or Start, Gaps, Prioritize, Tactics | `/?place=upload`, `gaps`, `plan`, `tactics` |
+| The timeline | `/timeline` |
+| Ideas for open gaps | `/ideation` |
+| Present | `/room` |
+| Workspaces and settings | `/workspaces` |
+| Owner console | `/admin` |
