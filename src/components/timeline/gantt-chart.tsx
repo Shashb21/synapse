@@ -28,7 +28,7 @@ const LEGEND_LABELS: Record<TimelineBand, string> = {
  * rest of the UI, but they are written onto the SVG as literal attributes: the
  * PNG export serialises this node on its own, with no stylesheet attached.
  */
-const FALLBACK = {
+export const FALLBACK = {
   high: "#fb7185",
   medium: "#fbbf24",
   low: "#38bdf8",
@@ -41,9 +41,10 @@ const FALLBACK = {
   background: "#181818",
   foreground: "#e4e4e4",
   muted: "#8c8c8c",
+  conflict: "#f87171",
 };
 
-type Palette = typeof FALLBACK;
+export type Palette = typeof FALLBACK;
 
 const TOKENS: Record<keyof Palette, string> = {
   high: "--chart-5",
@@ -58,13 +59,14 @@ const TOKENS: Record<keyof Palette, string> = {
   background: "--background",
   foreground: "--foreground",
   muted: "--muted-foreground",
+  conflict: "--destructive",
 };
 
 /**
  * Read once at render. The fallbacks mirror the token values in `globals.css`, so
  * the server and client agree; a retheme only changes what the browser paints.
  */
-function readPalette(): Palette {
+export function readPalette(): Palette {
   if (typeof document === "undefined") return FALLBACK;
   const computed = getComputedStyle(document.documentElement);
   const next = { ...FALLBACK };
@@ -75,37 +77,37 @@ function readPalette(): Palette {
   return next;
 }
 
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function parts(iso: string) {
+export function parts(iso: string) {
   const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
   return { year: year ?? 2026, month: month ?? 1, day: day ?? 1 };
 }
 
-function daysInMonth(year: number, month: number) {
+export function daysInMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 /** Position of a date in months (fractional) from the first day of the window month. */
-function monthPos(originIso: string, iso: string) {
+export function monthPos(originIso: string, iso: string) {
   const origin = parts(originIso);
   const target = parts(iso);
   const whole = (target.year - origin.year) * 12 + (target.month - origin.month);
   return whole + (target.day - 1) / daysInMonth(target.year, target.month);
 }
 
-function monthAt(originIso: string, index: number) {
+export function monthAt(originIso: string, index: number) {
   const origin = parts(originIso);
   const zero = origin.month - 1 + index;
   return { year: origin.year + Math.floor(zero / 12), month: (((zero % 12) + 12) % 12) + 1 };
 }
 
-function truncate(value: string, max: number) {
+export function truncate(value: string, max: number) {
   if (value.length <= max) return value;
   return `${value.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
 }
 
-function monthWidthFor(months: number) {
+export function monthWidthFor(months: number) {
   if (months <= 8) return 94;
   if (months <= 14) return 72;
   if (months <= 24) return 52;

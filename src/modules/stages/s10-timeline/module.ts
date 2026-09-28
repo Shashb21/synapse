@@ -8,8 +8,8 @@ import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
-import { loadState } from "@/lib/iegp/store";
-import type { IegpState } from "@/lib/iegp/types";
+import { createProposedTactic, loadState } from "@/lib/iegp/store";
+import type { IegpState, Tactic } from "@/lib/iegp/types";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
@@ -869,6 +869,79 @@ export async function addTimelineActivity(args: {
     actor: args.actor,
   });
   return values;
+}
+
+/**
+ * A user adds a new activity under a gap straight from the timeline (KAN-25):
+ * a proposed tactic mapped to that gap, plus its dates when they give them.
+ * With no dates it shows under the gap as "Unscheduled" until someone dates it.
+ * No model is involved; the tactic and every date are the person's.
+ */
+export async function createTimelineActivity(args: {
+  gap_id: string;
+  name: string;
+  type: string;
+  evidence_question: string;
+  start_date?: string;
+  end_date?: string;
+  readout_date?: string | null;
+  schedule_rationale?: string | null;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  if (!args.name.trim()) throw new Error("A name is required.");
+  if (!args.evidence_question.trim()) throw new Error("An evidence question is required.");
+  if (Boolean(args.start_date) !== Boolean(args.end_date)) {
+    throw new Error("Give both a start and an end date, or neither to leave it unscheduled.");
+  }
+  if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date);
+  const state = await loadState();
+  const gap = state.gaps.find((row) => row.id === args.gap_id);
+  if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);
+  const tacticId = await createProposedTactic({
+    name: args.name.trim(),
+    type: args.type as Tactic["type"],
+    description: args.name.trim(),
+    evidence_question: args.evidence_question.trim(),
+    population: "",
+    intervention: "",
+    comparator: "",
+    outcomes: "",
+    owner: args.actor.name,
+    function: args.actor.function,
+    residual_ids: [],
+    gap_id: gap.id,
+    actor_name: args.actor.name,
+    actor_function: args.actor.function,
+  });
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S10",
+    entity_type: "tactic",
+    entity_id: tacticId,
+    field: "created",
+    action: "add",
+    before: null,
+    after: `${args.name.trim()} → ${gap.id}`,
+    rationale,
+    actor: args.actor,
+  });
+  if (!args.start_date || !args.end_date) {
+    return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: false };
+  }
+  await addTimelineActivity({
+    tactic_id: tacticId,
+    start_date: args.start_date,
+    end_date: args.end_date,
+    readout_date: args.readout_date ?? null,
+    schedule_rationale: args.schedule_rationale ?? null,
+    rationale,
+    actor: args.actor,
+    workspace_id: args.workspace_id,
+  });
+  return { tactic_id: tacticId, activity_id: activityId(tacticId), scheduled: true };
 }
 
 /**

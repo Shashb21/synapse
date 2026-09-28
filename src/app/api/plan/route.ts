@@ -19,8 +19,12 @@ import {
   listIdeationProposals,
   type ProposalFields,
 } from "@/modules/stages/s9-ideation/module";
+import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
+import { loadState } from "@/lib/iegp/store";
+import { TACTIC_TYPES } from "@/lib/iegp/enums";
 import {
   addTimelineActivity,
+  createTimelineActivity,
   latestPlan,
   planHistory,
   removeTimelineActivity,
@@ -39,15 +43,18 @@ export async function GET() {
   } catch (error) {
     return apiErrorResponse(error);
   }
-  const [placements, axes, proposals, timeline, plan, history] = await Promise.all([
+  const [placements, axes, proposals, timeline, plan, history, state] = await Promise.all([
     listPlacements(),
     loadAxes(),
     listIdeationProposals(),
     timelineModel(),
     latestPlan(),
     planHistory(5),
+    loadState(),
   ]);
-  return NextResponse.json({ placements, axes, proposals, timeline, plan, history });
+  // The gap-grouped view the /timeline page draws (KAN-25).
+  const timeline_view = gapTimelineView({ model: timeline, state, placements });
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history });
 }
 
 const bandSchema = z.enum(["high", "medium", "low"]);
@@ -55,6 +62,14 @@ const decisionSchema = z.enum(["accept", "reject"]);
 const planStatusSchema = z.enum(["draft", "final"]);
 const laneSchema = z.enum(["high", "medium", "low", "unprioritized", "addressed"]);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+const tacticTypeSchema = z.enum(TACTIC_TYPES);
+
+/** An optional YYYY-MM-DD: absent stays undefined, empty is null. */
+function optionalDate(value: unknown, name: string): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  return field(dateSchema, value, name);
+}
 
 /** Rejects an unknown value with the field name, so the dialog can show why. */
 function field<T>(schema: z.ZodType<T>, value: unknown, name: string): T {
@@ -246,6 +261,7 @@ export async function POST(request: Request) {
             body.schedule_rationale === undefined ? undefined : String(body.schedule_rationale ?? ""),
           rationale,
           actor: identity.actor,
+          workspace_id: identity.workspace?.id,
         });
         return NextResponse.json({ ok: true, activity: next });
       }
@@ -265,12 +281,32 @@ export async function POST(request: Request) {
           schedule_rationale: body.schedule_rationale ? String(body.schedule_rationale) : undefined,
           rationale,
           actor: identity.actor,
+          workspace_id: identity.workspace?.id,
         });
         return NextResponse.json({ ok: true, activity });
       }
+      case "create_activity": {
+        // A new tactic under a gap, made from the timeline: an edit and an idea.
+        assertCan(identity.role, "validate");
+        assertCan(identity.role, "ideate");
+        const created = await createTimelineActivity({
+          gap_id: String(body.gap_id ?? ""),
+          name: String(body.name ?? ""),
+          type: field(tacticTypeSchema, body.type, "type"),
+          evidence_question: String(body.evidence_question ?? ""),
+          start_date: optionalDate(body.start_date, "start_date") ?? undefined,
+          end_date: optionalDate(body.end_date, "end_date") ?? undefined,
+          readout_date: optionalDate(body.readout_date, "readout_date") ?? null,
+          schedule_rationale: body.schedule_rationale ? String(body.schedule_rationale) : null,
+          rationale,
+          actor: identity.actor,
+          workspace_id: identity.workspace?.id,
+        });
+        return NextResponse.json({ ok: true, ...created });
+      }
       case "remove_activity": {
         assertCan(identity.role, "validate");
-        const removed = await removeTimelineActivity({ id: String(body.id ?? ""), rationale, actor: identity.actor });
+        const removed = await removeTimelineActivity({ id: String(body.id ?? ""), rationale, actor: identity.actor, workspace_id: identity.workspace?.id });
         return NextResponse.json({ ok: true, ...removed });
       }
       case "set_dependencies": {
@@ -283,6 +319,7 @@ export async function POST(request: Request) {
           reasons,
           rationale,
           actor: identity.actor,
+          workspace_id: identity.workspace?.id,
         });
         return NextResponse.json({ ok: true, activity });
       }
@@ -291,7 +328,7 @@ export async function POST(request: Request) {
         // A draft is an edit to the plan; only Medical Affairs saves it as final.
         assertCan(identity.role, status === "final" ? "save_final" : "validate");
         try {
-          const plan = await savePlan({ status, note: rationale, actor: identity.actor });
+          const plan = await savePlan({ status, note: rationale, actor: identity.actor, workspace_id: identity.workspace?.id });
           return NextResponse.json({ ok: true, plan });
         } catch (error) {
           // With AI off nothing rebuilds or estimates: the remedy is by hand.
