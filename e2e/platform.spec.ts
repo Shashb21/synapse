@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { fillNameIfAsked } from "./support/session";
+import { fillNameIfAsked, freshWorkspace } from "./support/session";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -16,26 +16,36 @@ async function runStage(page: Page, stage: string, input: Record<string, unknown
 test.describe.configure({ mode: "serial" });
 
 test.describe("platform surfaces", () => {
-  test.beforeAll(async ({ request }) => {
-    const res = await request.post("/api/iegp", {
-      headers: { "content-type": "application/json" },
-      data: JSON.stringify({ action: "load_demo", scope: "setup", ...ACTOR }),
-    });
-    if (!res.ok()) throw new Error(`reset failed: ${res.status()}`);
+  // Its own workspace, starting from the Velmara demo's asset and objectives.
+  freshWorkspace({
+    name: "Platform",
+    seed: async (request) => {
+      const res = await request.post("/api/iegp", {
+        headers: { "content-type": "application/json" },
+        data: JSON.stringify({ action: "load_demo", scope: "setup", ...ACTOR }),
+      });
+      if (!res.ok()) throw new Error(`reset failed: ${res.status()}`);
+    },
   });
 
   test("pipeline page lists every stage with its module and route", async ({ page }) => {
+    // The pipeline lives in the owner console; the suite's demo user is the owner.
     await page.goto("/admin/pipeline");
     await expect(page.getByRole("heading", { name: /^pipeline$/i })).toBeVisible();
     for (const heading of [
       "S0 · File upload",
       "S1 · File parse",
       "S2 · Evidence gap extraction",
-      "S4 · Mapping table",
+      "S3 · Tactic extraction",
+      "S4 · LLM mapping table",
+      "S5 · Gap classification & validation",
+      "S6 · Partial gap split",
+      "S7 · Open / addressed consolidation",
       "S8 · Prioritization",
+      "S9 · Tactics ideation",
       "S10 · Interactive Gantt timeline",
     ]) {
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     }
     await expect(page.getByText("s2-gap-extract.pcj v1.0.0")).toBeVisible();
     await expect(page.getByRole("button", { name: /upload and parse/i })).toBeVisible();
