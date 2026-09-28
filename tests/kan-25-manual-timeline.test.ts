@@ -18,7 +18,7 @@ import { ensurePlatformSchema, wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { isLiveGap, displayedGapStatus } from "@/lib/iegp/engine";
-import { loadState, resetWorkedExample } from "@/lib/iegp/store";
+import { loadState, resetDemo } from "@/lib/iegp/store";
 import { GET as planGet, POST as planPost } from "@/app/api/plan/route";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { timelineModel, timelineModule } from "@/modules/stages/s10-timeline/module";
@@ -119,7 +119,7 @@ describe("KAN-25 manual timeline, no stage run, AI off", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetWorkedExample();
+    await resetDemo();
     await wipePlatform();
     await ensurePlatformSchema();
     const state = await loadState();

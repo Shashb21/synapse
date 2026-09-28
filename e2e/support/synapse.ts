@@ -67,8 +67,12 @@ async function postJson(request: APIRequestContext, url: string, body: Record<st
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+/**
+ * Starts a spec from the Velmara demo's asset and objectives, with no sources,
+ * gaps or tactics (load_demo, scope "setup"). A plain "reset" is truly blank.
+ */
 export async function resetWorkspace(request: APIRequestContext) {
-  await postJson(request, "/api/iegp", { action: "reset" });
+  await postJson(request, "/api/iegp", { action: "load_demo", scope: "setup" });
 }
 
 export async function runStage<O = unknown>(

@@ -13,7 +13,7 @@ import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { isLiveGap } from "@/lib/iegp/engine";
-import { commitExtractedRecords, createGap, loadState, resetSeed } from "@/lib/iegp/store";
+import { commitExtractedRecords, createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { gapExtractModule } from "@/modules/stages/s2-gap-extract/module";
 
@@ -104,7 +104,7 @@ describe("S2 on the model path", () => {
   const L2 = () => `${documentId}-L002`;
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform(["source_files", "parsed_documents", "gap_candidates"]);
     const lead = { actor: ACTOR, role: "medical_affairs" as const };
     await runStage({ stage: "S0", input: { demo_ids: ["heor-interview"] }, ...lead });

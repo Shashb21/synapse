@@ -57,6 +57,15 @@ export async function clearWorkspaceSelection(): Promise<void> {
   (await cookies()).delete(WORKSPACE_COOKIE);
 }
 
+/** Whether the open workspace holds the Velmara demo data. False when none is open or it cannot be read. */
+export async function currentWorkspaceIsDemo(): Promise<boolean> {
+  try {
+    return (await currentWorkspace())?.demo === true;
+  } catch {
+    return false;
+  }
+}
+
 /** The workspace this request works in, if one is selected and the person is still a member. */
 export async function currentWorkspace(): Promise<WorkspaceWithRole | null> {
   const id = await selectedWorkspaceId();

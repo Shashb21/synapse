@@ -17,7 +17,7 @@ import {
   loadState,
   recordMissedTactic,
   rejectMapping,
-  resetSeed,
+  resetDemoSetup,
   saveMappingTableRow,
   unassignTacticFromGap,
   validateGap,
@@ -29,7 +29,7 @@ const HUMAN = { actor_name: "A. Rao", actor_function: "heor" as const };
 const MODEL = { actor_name: "S4 model", actor_function: "medical_affairs" as const };
 
 async function workspace(tacticCount = 2) {
-  await resetSeed();
+  await resetDemoSetup();
   await resetWorkspaceModules();
   const gapId = await createGap({
     statement: "No comparative effectiveness data versus standard of care for the payer dossier.",

@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { DemoBadge } from "./demo-badge";
 import { sendJson, WORKSPACE_ROLE_LABELS, type WorkspaceTagModel } from "./model";
 
 /**
@@ -55,8 +56,8 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
       <DropdownMenu>
         <DropdownMenuTrigger
           data-testid="workspace-tag"
-          aria-label={`Workspace: ${tag.current.name}. Switch workspace`}
-          title={`Workspace: ${tag.current.name}`}
+          aria-label={`Workspace: ${tag.current.name}${tag.current.demo ? " (demo data)" : ""}. Switch workspace`}
+          title={`Workspace: ${tag.current.name}${tag.current.demo ? " (demo data)" : ""}`}
           className={cn(
             "flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 text-left text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
             dense ? "h-8 justify-center px-1 md:h-9 md:justify-start md:px-2" : "h-9 px-2",
@@ -69,7 +70,10 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
             {initial}
           </span>
           <span className={cn("min-w-0 flex-1", dense && "hidden md:block")}>
-            <span className="block text-[10px] uppercase tracking-wide text-sidebar-foreground/60">Workspace</span>
+            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-sidebar-foreground/60">
+              Workspace
+              {tag.current.demo ? <DemoBadge testId="workspace-tag-demo" /> : null}
+            </span>
             <span className="block truncate text-[12px] font-medium" data-testid="workspace-tag-name">
               {tag.current.name}
             </span>
@@ -88,6 +92,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
               >
                 <FolderKanban aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{ws.name}</span>
+                {ws.demo ? <DemoBadge /> : null}
                 <span className="text-[10px] text-muted-foreground">{WORKSPACE_ROLE_LABELS[ws.role]}</span>
                 {pending === ws.id ? (
                   <Loader2 className="animate-spin" aria-hidden />

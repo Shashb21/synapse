@@ -7,13 +7,26 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { WorkspaceRole } from "@/modules/workspaces/store";
+import { DemoBadge } from "./demo-badge";
 import { formatCreated, sendJson, WORKSPACE_ROLE_LABELS } from "./model";
 
-export type WorkspaceRow = { id: string; name: string; role: WorkspaceRole; created_at: string };
+export type WorkspaceRow = { id: string; name: string; role: WorkspaceRole; created_at: string; demo: boolean };
+
+type Start = "blank" | "demo";
+
+const START_OPTIONS: { value: Start; label: string; hint: string }[] = [
+  { value: "blank", label: "Start blank", hint: "An empty plan. The setup wizard asks for the asset, objectives and decisions." },
+  {
+    value: "demo",
+    label: "Start with demo data (Velmara)",
+    hint: "The full Velmara worked example: sources, gaps, tactics and plan. Marked Demo; reset it to blank any time.",
+  },
+];
 
 /** Name a new workspace; it opens straight into setup. */
 export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boolean; onCancel?: () => void }) {
   const [name, setName] = useState("");
+  const [start, setStart] = useState<Start>("blank");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +39,7 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
         setPending(true);
         setError(null);
         try {
-          const json = await sendJson<{ redirect: string }>("/api/workspaces", { name });
+          const json = await sendJson<{ redirect: string }>("/api/workspaces", { name, start });
           window.location.assign(json.redirect);
         } catch (err) {
           setPending(false);
@@ -40,13 +53,35 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
           name="workspace-name"
           value={name}
           autoFocus={autoFocus}
-          placeholder="e.g. Velmara · EU launch"
+          placeholder="e.g. Brand X · EU launch"
           onChange={(event) => setName(event.target.value)}
         />
       </label>
       <p className="text-[11px] text-muted-foreground">
         One workspace per client, product or plan. Its gaps, tactics and sources are kept apart from every other workspace.
       </p>
+      <fieldset className="grid gap-1.5" aria-label="Start with">
+        <legend className="mb-1 text-[12px] text-muted-foreground">Start with</legend>
+        {START_OPTIONS.map((option) => (
+          <label
+            key={option.value}
+            className="flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2 text-[13px] text-foreground has-[:checked]:border-primary"
+          >
+            <input
+              type="radio"
+              name="workspace-start"
+              value={option.value}
+              checked={start === option.value}
+              onChange={() => setStart(option.value)}
+              className="mt-0.5"
+            />
+            <span className="grid gap-0.5">
+              <span>{option.label}</span>
+              <span className="text-[11px] text-muted-foreground">{option.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending || name.trim().length < 2}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" aria-hidden />}
@@ -131,7 +166,10 @@ export function WorkspacesView({
             >
               <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-medium text-foreground">{ws.name}</p>
+                <p className="flex min-w-0 items-center gap-2 text-[14px] font-medium text-foreground">
+                  <span className="truncate">{ws.name}</span>
+                  {ws.demo ? <DemoBadge /> : null}
+                </p>
                 <p className="text-[11px] text-muted-foreground">
                   {WORKSPACE_ROLE_LABELS[ws.role]} · created {formatCreated(ws.created_at)}
                 </p>

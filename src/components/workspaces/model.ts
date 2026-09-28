@@ -2,8 +2,9 @@ import type { WorkspaceRole } from "@/modules/workspaces/store";
 
 /** What the workspace tag needs: the open workspace, the others, and who is signed in. */
 export type WorkspaceTagModel = {
-  current: { id: string; name: string; role: WorkspaceRole };
-  workspaces: { id: string; name: string; role: WorkspaceRole }[];
+  /** `demo`: the workspace holds the Velmara demo data (badged "Demo"). */
+  current: { id: string; name: string; role: WorkspaceRole; demo: boolean };
+  workspaces: { id: string; name: string; role: WorkspaceRole; demo: boolean }[];
   /** `owner`: the platform owner (sees the Admin link). */
   person: { name: string; email: string | null; owner?: boolean };
 };

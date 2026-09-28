@@ -328,8 +328,9 @@ export function sectionIssues(ctx: PlanningContext, section: SetupSection): Setu
 /**
  * The context the wizard starts from. A saved context wins; otherwise an
  * existing plan (seeded or built before the wizard existed) prefills from the
- * asset row and objectives. A brand-new workspace starts empty rather than
- * showing the template asset every blank workspace is created with.
+ * asset row and objectives. A brand-new workspace starts empty: its asset row
+ * holds empty strings and it has no objectives (lib/iegp/blank.ts), so nothing
+ * is prefilled that the person did not enter.
  */
 export function setupContextFromState(state: IegpState, opts: { fresh?: boolean } = {}): PlanningContext {
   const parsed = parsePlanningContext(state.asset.planning_context);

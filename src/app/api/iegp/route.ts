@@ -36,7 +36,6 @@ import {
   rejectMapping,
   rejectResidualGap,
   requireMappingRowStatus,
-  resetSeed,
   saveMappingTableRow,
   overrideGapStatus,
   rewritePartialGap,
@@ -48,7 +47,7 @@ import {
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
-import { resetWorkspaceModules } from "@/modules/kernel/db";
+import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
 import type { StageId } from "@/modules/kernel/contracts";
 import {
@@ -64,6 +63,9 @@ import { ingestThroughStages } from "./ingest-pipeline";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
 
 export const runtime = "nodejs";
+
+/** Actions that replace the whole workspace: its owner only, on top of the reset_workspace capability. */
+const WORKSPACE_OWNER_ACTIONS = new Set(["reset", "load_demo"]);
 
 function idList(...values: (string | undefined)[]): string[] {
   return [
@@ -168,6 +170,12 @@ export async function POST(request: Request) {
     const capability = iegpActionCapability(String(body.action ?? ""));
     if (!capability) return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     requireCapability(identity, capability);
+    if (WORKSPACE_OWNER_ACTIONS.has(String(body.action)) && identity.workspace && identity.workspace.role !== "owner") {
+      return NextResponse.json(
+        { error: "Only the workspace owner can replace its contents.", code: "forbidden" },
+        { status: 403 },
+      );
+    }
   } catch (error) {
     return apiErrorResponse(error);
   }
@@ -177,8 +185,13 @@ export async function POST(request: Request) {
   try {
     switch (body.action) {
       case "reset":
-        await resetSeed();
-        await resetWorkspaceModules();
+        // Reset to blank: empties the plan and clears the workspace's demo flag.
+        await replaceContents(identity.workspace?.id ?? null, "blank");
+        break;
+      case "load_demo":
+        // Replaces everything with the Velmara demo and flags the workspace as demo.
+        // scope "setup" loads only the demo's asset and objectives (the stage tests' start).
+        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo");
         break;
       case "lock_need":
         await lockNeed({

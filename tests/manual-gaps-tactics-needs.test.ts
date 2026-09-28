@@ -18,7 +18,7 @@ import {
   parkGap,
   persistSourceAndBlocks,
   recordMissedTactic,
-  resetSeed,
+  resetDemoSetup,
   unlinkNeedFromGap,
 } from "@/lib/iegp/store";
 import { db, resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
@@ -40,7 +40,7 @@ import {
 const who = { actor_name: "S. Iyer", actor_function: "evidence_lead" as const };
 
 async function fresh() {
-  await resetSeed();
+  await resetDemoSetup();
   await resetWorkspaceModules();
 }
 

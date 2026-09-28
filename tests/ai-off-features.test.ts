@@ -24,7 +24,7 @@ import { setAiEnabled } from "@/modules/kernel/ai-switch";
 import { wipePlatform } from "@/modules/kernel/db";
 import { listRuns } from "@/modules/kernel/observability";
 import { runStage } from "@/modules/kernel/run";
-import { loadState, resetSeed } from "@/lib/iegp/store";
+import { loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { displayedGapStatus, gapsReadyForPrioritize, isLiveGap } from "@/lib/iegp/engine";
 import {
   buildMappingTableView,
@@ -184,7 +184,7 @@ describe("a whole plan by hand with AI off", () => {
   let ideaTactic = "";
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform();
   }, 60_000);
 

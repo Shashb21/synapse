@@ -69,8 +69,8 @@ export function AssetStep({ form, set, errors }: StepProps) {
       intro="What this IEGP is for. Name and indication appear on every stage; lifecycle stage and markets shape how gaps are prioritized."
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <TextField label="Asset / brand name" required value={form.asset_name} onChange={(v) => set("asset_name", v)} error={errors.asset_name} placeholder="e.g. Velmara" />
-        <TextField label="INN / generic name" value={form.inn} onChange={(v) => set("inn", v)} placeholder="e.g. velmaratinib" />
+        <TextField label="Asset / brand name" required value={form.asset_name} onChange={(v) => set("asset_name", v)} error={errors.asset_name} placeholder="The brand or asset code" />
+        <TextField label="INN / generic name" value={form.inn} onChange={(v) => set("inn", v)} placeholder="The generic name, if it has one" />
         <TextField label="Mechanism of action" value={form.mechanism} onChange={(v) => set("mechanism", v)} placeholder="e.g. third-generation EGFR TKI" />
         <TextField label="Modality" value={form.modality} onChange={(v) => set("modality", v)} list="setup-modalities" placeholder="e.g. Small molecule" />
         <datalist id="setup-modalities">
@@ -152,7 +152,7 @@ export function CompanyStep({ form, set, errors }: StepProps) {
         placeholder="Portfolio position, what leadership already knows about evidence risk, budget constraints…"
       />
       <div className="grid gap-4 md:grid-cols-2">
-        <TextField label="Plan owner" required value={form.plan_owner} onChange={(v) => set("plan_owner", v)} error={errors.plan_owner} placeholder="e.g. T. Okonkwo, Global Medical Lead" />
+        <TextField label="Plan owner" required value={form.plan_owner} onChange={(v) => set("plan_owner", v)} error={errors.plan_owner} placeholder="Name, role" />
         <TextField
           label="Sponsoring function"
           required

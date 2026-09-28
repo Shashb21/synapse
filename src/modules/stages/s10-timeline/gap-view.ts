@@ -1,4 +1,4 @@
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { displayedGapStatus, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
 import { setupContextFromState } from "@/lib/iegp/planning-context";
 import type { IegpState } from "@/lib/iegp/types";
 import type { PlacementRecord } from "@/modules/stages/s8-prioritization/module";
@@ -178,9 +178,10 @@ export function gapTimelineView(args: {
 
   const shown = new Set<string>();
   const groupFor = (gap: IegpState["gaps"][number], band: PriorityBand | null): GapTimelineGroup => {
-    const tacticIds = [
-      ...new Set(state.coverages.filter((coverage) => coverage.gap_id === gap.id).map((coverage) => coverage.tactic_id)),
-    ];
+    // The same tactics the Tactics place lists under this gap: mapped by coverage,
+    // plus roadmap tactics planned against its residual.
+    const residual = state.residuals.find((row) => row.gap_id === gap.id);
+    const tacticIds = [...new Set(mappedTactics(state, gap.id, residual?.id).map((tactic) => tactic.id))];
     const items = tacticIds
       .map((tacticId) => itemFor(gap.id, tacticId))
       .filter((item): item is GapTimelineItem => item !== null)

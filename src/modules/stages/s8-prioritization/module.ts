@@ -11,6 +11,7 @@ import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { loadState, lockPriority } from "@/lib/iegp/store";
 import type { IegpState } from "@/lib/iegp/types";
@@ -155,12 +156,8 @@ function promptContext(args: {
 }) {
   return {
     reviewer_corrections: args.hints || undefined,
-    asset: {
-      name: args.asset.name,
-      inn: args.asset.inn,
-      indication: args.asset.indication,
-      geography: args.asset.geography,
-    },
+    // Only what setup has entered: a blank plan sends no asset rather than empty strings.
+    asset: enteredAssetDetails(args.asset),
     setting: args.setting || "All treatment settings",
     context: args.context,
     axes: args.axes.map((axis) => ({

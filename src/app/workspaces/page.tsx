@@ -31,7 +31,7 @@ export default async function WorkspacesPage({
         </p>
       </div>
       <WorkspacesView
-        workspaces={mine.workspaces.map(({ id, name, role, created_at }) => ({ id, name, role, created_at }))}
+        workspaces={mine.workspaces.map(({ id, name, role, created_at, demo }) => ({ id, name, role, created_at, demo }))}
         currentId={mine.workspaces.some((ws) => ws.id === selected) ? selected : null}
         startCreating={params.new === "1"}
         next={safeNext(params.next)}

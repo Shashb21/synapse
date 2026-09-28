@@ -26,13 +26,23 @@ const DDL = [
     added_at text NOT NULL,
     PRIMARY KEY (workspace_id, principal)
   )`,
+  // KAN-26: a workspace holding the Velmara demo is flagged, so it is badged everywhere.
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo boolean NOT NULL DEFAULT false`,
 ];
 
 /** The workspace that holds the data from before workspaces existed. */
 export const DEFAULT_WORKSPACE_ID = "default";
 
 export type WorkspaceRole = "owner" | "member";
-export type Workspace = { id: string; name: string; schema_name: string; created_by: string; created_at: string };
+export type Workspace = {
+  id: string;
+  name: string;
+  schema_name: string;
+  created_by: string;
+  created_at: string;
+  /** Holds the Velmara demo data (loaded on request), not the team's own plan. */
+  demo: boolean;
+};
 export type WorkspaceWithRole = Workspace & { role: WorkspaceRole };
 export type WorkspaceMember = { principal: string; role: WorkspaceRole; added_by: string; added_at: string };
 
@@ -74,6 +84,7 @@ function toWorkspace(row: Row): Workspace {
     schema_name: String(row.schema_name),
     created_by: String(row.created_by),
     created_at: String(row.created_at),
+    demo: row.demo === true,
   };
 }
 
@@ -105,20 +116,30 @@ async function addMember(args: { workspace_id: string; principal: string; role: 
     on conflict (workspace_id, principal) do nothing`);
 }
 
-/** Creates a workspace, its schema and every table in it; the creator owns it. */
-export async function createWorkspace(args: { name: string; owner: string }): Promise<Workspace> {
+/**
+ * Creates a workspace, its schema and every table in it; the creator owns it.
+ * `demo` only records the flag; the caller loads the demo contents
+ * (modules/workspaces/contents.ts).
+ */
+export async function createWorkspace(args: { name: string; owner: string; demo?: boolean }): Promise<Workspace> {
   const name = args.name.trim();
   if (name.length < 2) throw new Error("Give the workspace a name.");
   const id = `w${randomBytes(6).toString("hex")}`;
   const schemaName = `ws_${id}`;
   await ensureWorkspaceSchema(schemaName);
   const created_at = nowIso();
+  const demo = args.demo === true;
   await rows(sql`
-    insert into workspaces (id, name, schema_name, created_by, created_at)
-    values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at})`);
+    insert into workspaces (id, name, schema_name, created_by, created_at, demo)
+    values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo})`);
   await addMember({ workspace_id: id, principal: args.owner, role: "owner", added_by: args.owner });
   schemaCache.set(id, schemaName);
-  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at };
+  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo };
+}
+
+/** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
+export async function setWorkspaceDemo(workspaceId: string, demo: boolean): Promise<void> {
+  await rows(sql`update workspaces set demo = ${demo} where id = ${workspaceId}`);
 }
 
 /**

@@ -7,6 +7,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
+import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { createProposedTactic, loadState } from "@/lib/iegp/store";
 import type { IegpState, Tactic } from "@/lib/iegp/types";
@@ -196,12 +197,8 @@ function describeActivity(candidate: TimelineCandidate) {
 function planningPrompt(state: IegpState, anchor: string) {
   return {
     anchor,
-    asset: {
-      name: state.asset.name,
-      inn: state.asset.inn,
-      indication: state.asset.indication,
-      geography: state.asset.geography,
-    },
+    // Only what setup has entered: a blank plan sends no asset rather than empty strings.
+    asset: enteredAssetDetails(state.asset),
     context: prioritizationContextFromState(state),
     decisions: state.objectives
       .filter((objective) => objective.key_decision || objective.decision_date)

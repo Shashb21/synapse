@@ -17,7 +17,7 @@ import type { ActorFunction } from "@/lib/iegp/enums";
 import { POST as iegpPost } from "@/app/api/iegp/route";
 import { GET as planGet, POST as planPost } from "@/app/api/plan/route";
 import { listEdits } from "@/modules/kernel/edit-records";
-import { resetWorkedExample } from "@/lib/iegp/store";
+import { resetDemo } from "@/lib/iegp/store";
 import type { Role } from "@/modules/auth/roles";
 import { createSession } from "@/modules/auth/session";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
@@ -73,7 +73,7 @@ beforeAll(async () => {
   await inviteMember({ workspace_id: workspace.id, email: VIEWER.email, by: OWNER });
   await signIn(LEAD);
   // The worked example: open gaps with mapped tactics, in this workspace only.
-  await inWorkspace(() => resetWorkedExample());
+  await inWorkspace(() => resetDemo());
 }, 60_000);
 
 afterAll(() => {

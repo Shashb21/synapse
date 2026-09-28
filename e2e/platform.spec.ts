@@ -19,7 +19,7 @@ test.describe("platform surfaces", () => {
   test.beforeAll(async ({ request }) => {
     const res = await request.post("/api/iegp", {
       headers: { "content-type": "application/json" },
-      data: JSON.stringify({ action: "reset", ...ACTOR }),
+      data: JSON.stringify({ action: "load_demo", scope: "setup", ...ACTOR }),
     });
     if (!res.ok()) throw new Error(`reset failed: ${res.status()}`);
   });

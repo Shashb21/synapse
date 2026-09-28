@@ -6,7 +6,7 @@ import { NoRouteError } from "@/modules/llm/provider";
 import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 import { buildMappingTableView } from "@/lib/iegp/mapping-table";
-import { createGap, loadState, recordMissedTactic, resetSeed } from "@/lib/iegp/store";
+import { createGap, loadState, recordMissedTactic, resetDemoSetup } from "@/lib/iegp/store";
 import { kgMappingModule } from "@/modules/stages/s4-kg-mapping/module";
 
 /**
@@ -86,7 +86,7 @@ describe("S4 on the model path", () => {
   let savedStub: string | undefined;
 
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform();
     for (const statement of [
       "No comparative effectiveness data versus standard of care for the payer dossier.",

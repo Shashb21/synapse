@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
-import { buildBlankWorkspace } from "./blank";
+import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { PlanningContext, SetupObjective } from "./planning-context";
@@ -316,14 +316,40 @@ export async function persistState(state: IegpState) {
   }
 }
 
-export async function resetSeed() {
-  await persistState(buildBlankWorkspace());
+/**
+ * What a workspace's contents can be replaced with:
+ * - `blank`: an empty asset and nothing else (a new workspace's default);
+ * - `demo`: the full Velmara demo from seed.ts (sources, gaps, tactics, plan);
+ * - `demo_setup`: the Velmara demo's asset and objectives only, setup not done
+ *   (what the stage tests start from).
+ */
+export type WorkspaceContents = "blank" | "demo" | "demo_setup";
+
+export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
+  if (contents === "demo") return buildSeed();
+  if (contents === "demo_setup") return buildDemoSetupWorkspace();
+  return buildBlankWorkspace();
+}
+
+/** Replaces every IEGP row in the current workspace with `contents`. */
+export async function replaceWorkspaceContents(contents: WorkspaceContents) {
+  await persistState(buildWorkspaceContents(contents));
   return loadState();
 }
 
-export async function resetWorkedExample() {
-  await persistState(buildSeed());
-  return loadState();
+/** Empties the workspace: no asset details, objectives, sources, gaps or tactics. */
+export function resetBlank() {
+  return replaceWorkspaceContents("blank");
+}
+
+/** Loads the full Velmara demo (seed.ts). */
+export function resetDemo() {
+  return replaceWorkspaceContents("demo");
+}
+
+/** Loads the Velmara demo's asset and objectives only (test fixture). */
+export function resetDemoSetup() {
+  return replaceWorkspaceContents("demo_setup");
 }
 
 function now() {
@@ -419,8 +445,8 @@ async function insertNeedForGap(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gapId);
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!obj) throw new Error("No strategic objective to attach this need to.");
   if (!gap) throw new Error("Gap not found");
   const statement = args.statement.trim();
   if (!statement) return;
@@ -452,7 +478,8 @@ async function insertNeedRow(args: {
   domain: EvidenceDomain;
   stakeholder: ActorFunction;
   source_id: string;
-  objective: IegpState["objectives"][0];
+  /** Undefined in a plan with no objectives yet: the need is stored unlinked. */
+  objective: IegpState["objectives"][0] | undefined;
   geography: string;
 }) {
   await db().insert(t.needs).values({
@@ -460,8 +487,8 @@ async function insertNeedRow(args: {
     statement: args.statement,
     domain: args.domain,
     stakeholder: args.stakeholder,
-    objective_id: args.objective.id,
-    decision_supported: args.objective.key_decision,
+    objective_id: args.objective?.id ?? "",
+    decision_supported: args.objective?.key_decision ?? "",
     geography: args.geography,
     population: "",
     intervention: "",
@@ -2373,8 +2400,8 @@ export async function createGap(args: {
   if (!statement) throw new Error("Statement is required.");
   const domain = args.domain && EVIDENCE_DOMAINS.includes(args.domain) ? args.domain : "unmet_need";
   const state = await loadState();
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!obj) throw new Error("No strategic objective to attach this gap to.");
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
   if (args.parent_gap_id) {
@@ -2392,7 +2419,7 @@ export async function createGap(args: {
     name,
     statement,
     domain,
-    objective_id: obj.id,
+    objective_id: obj?.id ?? "",
     status: "validated_open",
     exclusion_reason: null,
     exclusion_note: null,
@@ -2662,8 +2689,8 @@ export async function commitExtractedRecords(args: {
 }> {
   const state = await loadState();
   const sourceId = args.source_id;
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!obj) throw new Error("No strategic objective to attach these records to.");
   if (!state.sources.some((s) => s.id === sourceId)) {
     throw new Error(`Source ${sourceId} not found. Nothing was saved.`);
   }
@@ -2752,7 +2779,7 @@ export async function commitExtractedRecords(args: {
         name: gapRow.name,
         statement: gapRow.statement,
         domain: gapRow.domain,
-        objectiveId: obj.id,
+        objectiveId: obj?.id ?? "",
       });
       createdGapIds.push(gapId);
     }

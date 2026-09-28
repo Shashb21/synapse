@@ -8,7 +8,7 @@ vi.mock("next/headers", () => ({
 import "@/modules";
 import { POST as iegpPost } from "@/app/api/iegp/route";
 import { GET as walkthroughGet, POST as walkthroughPost } from "@/app/api/walkthrough/route";
-import { loadState, resetWorkedExample, saveProductSetup } from "@/lib/iegp/store";
+import { loadState, resetDemo, saveProductSetup } from "@/lib/iegp/store";
 import { settingOptions } from "@/lib/iegp/engine";
 import {
   parsePlanningContext,
@@ -200,7 +200,7 @@ describe("setup context: saved per workspace", () => {
     const draft = await withWorkspace(ws.id, () => saveSetup(context({ asset_name: "", plan_owner: "" }), false));
     expect(draft.status).toBe(200);
 
-    await withWorkspace(ws.id, resetWorkedExample);
+    await withWorkspace(ws.id, resetDemo);
     const seeded = await withWorkspace(ws.id, loadState);
     const used = seeded.objectives.find((objective) => seeded.gaps.some((gap) => gap.objective_id === objective.id))!;
     const others = setupContextFromState(seeded).objectives.filter((objective) => objective.id !== used.id);

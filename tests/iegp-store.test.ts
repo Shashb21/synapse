@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { persistState, resetSeed, resetWorkedExample, loadState, lockGapStatus, lockPriority, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
+import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, lockPriority, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
@@ -10,7 +10,7 @@ import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
 const PIPE_ACTOR = { actor: { name: "A. Rao", function: "heor" as const }, role: "medical_affairs" as const };
 
 async function freshWorkspace() {
-  await resetSeed();
+  await resetDemoSetup();
   await resetWorkspaceModules();
 }
 
@@ -35,8 +35,8 @@ async function ingestNeedFromText(args: {
 }
 
 describe("IEGP postgres store", () => {
-  it("starts from a blank Velmara workspace", async () => {
-    const state = await resetSeed();
+  it("the demo setup fixture holds the Velmara asset and objectives only", async () => {
+    const state = await resetDemoSetup();
     expect(state.asset.id).toBe("ASSET-VELMARA");
     expect(state.objectives.length).toBeGreaterThan(0);
     expect(state.asset.wizard_complete).toBe(false);
@@ -48,7 +48,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("seeds the worked example and refuses to lock a Partial as Addressed", async () => {
-    const state = await resetWorkedExample();
+    const state = await resetDemo();
     expect(state.gaps.length).toBeGreaterThan(8);
     await expect(
       lockGapStatus({
@@ -267,7 +267,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("creates a human gap as validated_open without a residual", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const id = await createGap({
       statement: "Need ILD characterisation in community oncology clinics after month six.",
       actor_name: "A. Rao",
@@ -457,7 +457,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("repairs a live gap that lost its constituent need links", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const id = await createGap({
       statement: "Need pneumonitis characterisation in community clinics.",
       actor_name: "A. Rao",
@@ -517,7 +517,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "White-space leftover after mapping",
       actor_name: "A. Rao",
@@ -598,7 +598,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("parks a gap out of Prioritize/Tactics with a reason, and unparks it back in", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "Stakeholder mentioned this once; unclear it is a real gap",
       actor_name: "A. Rao",
@@ -640,7 +640,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("refuses to park an excluded or retired gap, and clears park on exclude", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "Communication issue, not an evidence gap",
       actor_name: "A. Rao",
@@ -670,7 +670,7 @@ describe("IEGP postgres store", () => {
   });
 
   it("creates a breakout group, assigns and unassigns gaps, and deletes cleanly", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapA = await createGap({
       statement: "Elderly comparator gap",
       actor_name: "A. Rao",
