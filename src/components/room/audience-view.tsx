@@ -105,6 +105,13 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // After the channel, poll and key effects above: from here on the window
+  // follows the presenter. `data-ready` says so to tests and tools.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    rootRef.current?.setAttribute("data-ready", "true");
+  }, []);
+
   function onFrameLoad(frame: Frame) {
     const el = frames.current.get(frame.key) ?? null;
     wireFrame(el);
@@ -118,7 +125,7 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
   const list = pending ? [shown, pending] : [shown];
 
   return (
-    <div className="fixed inset-0 z-50 bg-background" data-testid="audience-view">
+    <div ref={rootRef} className="fixed inset-0 z-50 bg-background" data-testid="audience-view">
       {list.map((frame) => {
         const visible = frame.key === shown.key;
         return (
