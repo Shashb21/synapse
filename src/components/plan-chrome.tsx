@@ -7,7 +7,7 @@ import {
   ClipboardList,
   Columns3,
   ListChecks,
-  Lock,
+  Hourglass,
   Menu,
   PencilLine,
   Rocket,
@@ -69,7 +69,8 @@ type PlaceItem = {
   hint: string;
   icon: typeof Upload;
   count?: number;
-  unlocked: boolean;
+  /** False while an earlier step is unfinished. The place still opens; it just can't do much yet. */
+  ready: boolean;
 };
 
 type SecondaryId = "needs" | "residuals" | "roadmap" | "mappings" | "setup";
@@ -114,7 +115,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
           label: "Upload",
           hint: "Demo pack and ingest",
           icon: Upload,
-          unlocked: true,
+          ready: true,
         }
       : {
           id: "upload",
@@ -122,32 +123,32 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
           label: "Start",
           hint: "Add gaps and tactics by hand",
           icon: PencilLine,
-          unlocked: true,
+          ready: true,
         },
     {
       id: "gaps",
       href: "/?place=gaps",
       label: "Gaps",
-      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Ingest a source first",
+      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Waiting on Upload: ingest a source first",
       icon: ClipboardList,
       count: nav.unvalidatedCount || nav.gapsCount,
-      unlocked: gapsUnlocked,
+      ready: gapsUnlocked,
     },
     {
       id: "plan",
       href: "/?place=plan",
       label: "Prioritize",
-      hint: nav.planUnlocked ? "Priority bands for open gaps" : "Validate every gap first",
+      hint: nav.planUnlocked ? "Priority bands for open gaps" : "Waiting on Gaps: validate every gap first",
       icon: Columns3,
-      unlocked: nav.planUnlocked,
+      ready: nav.planUnlocked,
     },
     {
       id: "tactics",
       href: "/?place=tactics",
       label: "Tactics",
-      hint: nav.tacticsUnlocked ? "Create and assign tactics for open gaps" : "Prioritize first",
+      hint: nav.tacticsUnlocked ? "Create and assign tactics for open gaps" : "Waiting on Prioritize: validate every Open gap's band first",
       icon: ListChecks,
-      unlocked: nav.tacticsUnlocked,
+      ready: nav.tacticsUnlocked,
     },
     {
       id: "timeline",
@@ -155,7 +156,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       label: "Timeline",
       hint: "The living IEGP as an interactive Gantt",
       icon: ChartGantt,
-      unlocked: true,
+      ready: true,
     },
   ];
 }
@@ -175,7 +176,7 @@ function NavButton({
 }) {
   const Icon = item.icon;
   const isActive = itemActive(active, item.id);
-  const unlocked = "unlocked" in item ? item.unlocked : true;
+  const ready = "ready" in item ? item.ready : true;
   const count = "count" in item ? item.count : undefined;
   const className = cn(
     "flex w-full items-center gap-2 rounded-md px-2 text-left no-underline transition-colors",
@@ -183,7 +184,7 @@ function NavButton({
     isActive
       ? "bg-sidebar-accent text-sidebar-accent-foreground"
       : "text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
-    !unlocked && "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-sidebar-foreground/70",
+    !ready && !isActive && "text-sidebar-foreground/55",
   );
   const body = (
     <>
@@ -201,19 +202,18 @@ function NavButton({
           {count}
         </span>
       ) : null}
-      {!unlocked ? (
-        <Lock className={cn("size-3 shrink-0 text-muted-foreground", dense && "hidden md:inline")} />
+      {!ready ? (
+        <>
+          <Hourglass
+            className={cn("size-3 shrink-0 text-[var(--unknown)]", dense && "hidden md:inline")}
+            aria-hidden
+            data-testid={`nav-waiting-${item.id}`}
+          />
+          <span className="sr-only">(waiting on an earlier step)</span>
+        </>
       ) : null}
     </>
   );
-
-  if (!unlocked) {
-    return (
-      <span className={className} title={"hint" in item ? item.hint : item.label} aria-disabled>
-        {body}
-      </span>
-    );
-  }
 
   return (
     <Link href={item.href} className={className} title={"hint" in item ? item.hint : item.label}>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { OpenGapsQueue, TacticLibrary } from "@/components/plan-cards";
+import { StepWaiting } from "@/components/step-waiting";
 import { planColumn, type OpenGapCard, type PlanColumn, type TacticLibraryItem } from "@/lib/iegp/engine";
 
 const GROUPS: { id: PlanColumn; title: string }[] = [
@@ -9,28 +10,27 @@ const GROUPS: { id: PlanColumn; title: string }[] = [
 ];
 
 export function TacticsPlace({
-  unlocked,
+  ready,
   openGaps,
   availableTactics,
 }: {
-  unlocked: boolean;
+  /** False until Prioritize is finished. The place still shows; the banner says what it waits on. */
+  ready: boolean;
   openGaps: OpenGapCard[];
   availableTactics: TacticLibraryItem[];
 }) {
-  if (!unlocked) {
-    return (
-      <section className="border border-border bg-card/40 p-4">
-        <h2 className="text-[15px] font-medium text-foreground">Tactics is locked</h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
-          Validate gaps, then prioritize Open gaps. Tactics is the next stage.
-        </p>
-      </section>
-    );
-  }
   const open = openGaps.filter((c) => c.gap_status === "validated_open");
   const unbanded = open.filter((c) => !c.band);
   return (
     <div className="grid gap-10">
+      {!ready ? (
+        <StepWaiting
+          title="Waiting on Prioritize"
+          body="Tactics is for Open gaps that have a validated priority band. Finish Prioritize and choose Continue to tactics; until then there is little to assign here, but you can look through the tactic library below."
+          href="/?place=plan"
+          cta="Go to Prioritize"
+        />
+      ) : null}
       <section>
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-[15px] font-medium">Open gaps</h2>

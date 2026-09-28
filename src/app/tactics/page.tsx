@@ -40,7 +40,7 @@ export default async function TacticsPage() {
         real studies happens on Gaps.
       </PageIntro>
       <TacticsPlace
-        unlocked={gates.tacticsUnlocked}
+        ready={gates.tacticsUnlocked}
         openGaps={workspace.openGaps}
         availableTactics={workspace.availableTactics}
       />
