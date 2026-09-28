@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { ownerEmails } from "@/modules/auth/roles";
 import { currentSession, SESSION_COOKIE, type Session } from "@/modules/auth/session";
 import { selectedWorkspaceId, WORKSPACE_COOKIE, WORKSPACE_COOKIE_TTL_MS, workspaceCookieValue } from "./context";
 import { claimDefaultWorkspace, getWorkspace, listWorkspacesFor, memberRole, type WorkspaceWithRole } from "./store";
@@ -24,12 +25,23 @@ export function principalOf(
   return subject;
 }
 
-/** The signed-in person's workspaces. The very first sign-in claims the Default workspace. */
+/**
+ * Whether this session may claim the Default workspace (the pre-workspaces
+ * data): Synapse staff (password), OWNER_EMAILS and the development demo only.
+ * A customer's seat holder signing in first never takes it over (KAN-28).
+ */
+export function mayClaimDefault(session: Pick<Session, "provider_id" | "email">): boolean {
+  if (session.provider_id === "password" || session.provider_id === "demo") return true;
+  const email = session.email?.trim().toLowerCase();
+  return Boolean(email && ownerEmails().includes(email));
+}
+
+/** The signed-in person's workspaces. The very first staff sign-in claims the Default workspace. */
 export async function myWorkspaces(): Promise<{ session: Session; workspaces: WorkspaceWithRole[] } | null> {
   const session = await currentSession();
   if (!session) return null;
   const principal = principalOf(session);
-  await claimDefaultWorkspace(principal);
+  if (mayClaimDefault(session)) await claimDefaultWorkspace(principal);
   return { session, workspaces: await listWorkspacesFor(principal) };
 }
 

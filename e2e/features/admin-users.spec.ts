@@ -56,6 +56,15 @@ test("create-admin, sign in, manage users; a created user signs in with the temp
     await create.getByLabel("Name").fill(`Made ${id}`);
     await expect(submit).toBeEnabled({ timeout: 1_000 });
   }).toPass({ timeout: 60_000 });
+
+  // KAN-28: passwords are for staff only; a customer-style role without Admin is refused.
+  await create.getByLabel("Role").selectOption({ label: "Contributing function" });
+  await submit.click();
+  await expect(page.getByTestId("users-error")).toContainText("only for your own staff");
+  await expect(page.getByTestId("user-row").filter({ hasText: userEmail })).toHaveCount(0);
+
+  // A Platform operator (the default) is created.
+  await create.getByLabel("Role").selectOption({ label: "Platform operator" });
   await submit.click();
   const secret = page.getByTestId("temporary-password");
   await expect(secret).toContainText(userEmail);
@@ -64,12 +73,16 @@ test("create-admin, sign in, manage users; a created user signs in with the temp
   const row = page.getByTestId("user-row").filter({ hasText: userEmail });
   await expect(row).toContainText("Active");
 
-  // The new user signs in (own browser context) and is not an owner.
+  // The new staff user signs in (own browser context); an operator is an owner.
   const other = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   const userPage = await other.newPage();
   await passwordSignIn(userPage, userEmail, temp);
-  const denied = await userPage.request.get("/api/admin/users");
-  expect(denied.status()).toBe(403);
+  expect((await userPage.request.get("/api/admin/users")).status()).toBe(200);
+  // A signed-out browser is refused.
+  const anon = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  await anon.addCookies([{ name: "synapse_test_as", value: "customer", url: new URL(page.url()).origin }]);
+  expect((await anon.request.get(`${new URL(page.url()).origin}/api/admin/users`)).status()).toBe(403);
+  await anon.close();
   await other.close();
 
   // Disable, then the user can't sign in.

@@ -2,6 +2,7 @@
 export type AdminSectionId =
   | "overview"
   | "control"
+  | "customers"
   | "users"
   | "accuracy"
   | "pipeline"
@@ -23,10 +24,16 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     summary: "The AI on/off switch, provider logins and per-stage model routing.",
   },
   {
+    id: "customers",
+    href: "/admin/customers",
+    label: "Customers",
+    summary: "Customers, the seats they bought, and who holds them. Only seat holders can sign in with SSO.",
+  },
+  {
     id: "users",
     href: "/admin/users",
     label: "Users",
-    summary: "Email and password accounts: create, reset passwords, roles, verify, disable, unlock.",
+    summary: "Your staff's email and password accounts: create, reset passwords, roles, verify, disable, unlock.",
   },
   {
     id: "accuracy",

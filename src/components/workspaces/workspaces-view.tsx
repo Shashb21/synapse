@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { FolderKanban, Loader2, Plus, Settings } from "lucide-react";
+import { FolderKanban, Inbox, Loader2, Plus, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,15 +131,31 @@ export function WorkspacesView({
 
   if (workspaces.length === 0) {
     return (
-      <section className="border border-border bg-card/40 p-5" aria-labelledby="first-workspace">
-        <h2 id="first-workspace" className="text-[15px] font-medium text-foreground">
-          Create your first workspace
-        </h2>
-        <p className="mb-4 mt-1 text-[13px] text-muted-foreground">
-          You are not in any workspace yet. Create one to start a plan, or ask a colleague to invite you to theirs.
-        </p>
-        <CreateWorkspaceForm autoFocus />
-      </section>
+      <div className="grid gap-4">
+        <section
+          className="flex gap-3 border border-border bg-card/40 p-5"
+          aria-labelledby="no-workspaces"
+          data-testid="no-workspaces"
+        >
+          <Inbox className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+          <div>
+            <h2 id="no-workspaces" className="text-[15px] font-medium text-foreground">
+              You&apos;re not in a workspace yet
+            </h2>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Ask your workspace owner to invite you with this email address. Their workspace appears here as soon as
+              they do.
+            </p>
+          </div>
+        </section>
+        <section className="border border-border bg-card/40 p-5" aria-labelledby="first-workspace">
+          <h2 id="first-workspace" className="text-[15px] font-medium text-foreground">
+            Or create your first workspace
+          </h2>
+          <p className="mb-4 mt-1 text-[13px] text-muted-foreground">Start a new plan of your own and invite your team.</p>
+          <CreateWorkspaceForm />
+        </section>
+      </div>
     );
   }
 

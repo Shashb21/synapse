@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { FlaskConical, Loader2, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,22 +7,20 @@ import { Input } from "@/components/ui/input";
 import { sendJson } from "./model";
 
 /**
- * Sign-in choices: email and password first (everyone can have an account),
- * then one button per configured identity provider, and — only outside
- * production — a demo sign-in so local preview and tests work without SSO
- * credentials.
+ * Sign-in choices: one button per configured identity provider (customers
+ * sign in with SSO and a seat their organisation assigned), then email and
+ * password for Synapse staff accounts, and — only outside production — a demo
+ * sign-in so local preview and tests work without SSO credentials. There is
+ * no self sign-up.
  */
 export function LoginPanel({
   providers,
   demo,
-  signup,
   next,
   initialError,
 }: {
   providers: { id: string; label: string }[];
   demo: boolean;
-  /** Self sign-up is open (ALLOW_SIGNUP is not "0"). */
-  signup: boolean;
   next: string;
   initialError: string | null;
 }) {
@@ -54,14 +51,34 @@ export function LoginPanel({
         </p>
       ) : null}
 
+      {providers.length > 0 ? (
+        <div className="grid gap-2">
+          <p className="text-[11px] text-muted-foreground">Sign in with your organisation&apos;s single sign-on</p>
+          {providers.map((provider) => (
+            <Button
+              key={provider.id}
+              size="lg"
+              variant="outline"
+              className="w-full justify-center"
+              disabled={pending !== null}
+              onClick={() => void signIn({ provider_id: provider.id }, provider.id)}
+            >
+              {pending === provider.id ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" aria-hidden />}
+              Continue with {provider.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
       <form
-        className="grid gap-2"
+        className={providers.length > 0 ? "grid gap-2 border-t border-border pt-4" : "grid gap-2"}
         aria-label="Sign in with email"
         onSubmit={(event) => {
           event.preventDefault();
           void signIn({ email: loginEmail, password }, "password", "/api/auth/password/login");
         }}
       >
+        <p className="text-[11px] text-muted-foreground">Synapse staff: email and password</p>
         <label className="grid gap-1 text-[11px] text-muted-foreground">
           Email
           <Input
@@ -88,34 +105,7 @@ export function LoginPanel({
           {pending === "password" ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" aria-hidden />}
           Sign in
         </Button>
-        {signup ? (
-          <p className="text-center text-[12px] text-muted-foreground">
-            New to Synapse?{" "}
-            <Link href={next ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} className="text-foreground underline underline-offset-2">
-              Create an account
-            </Link>
-          </p>
-        ) : null}
       </form>
-
-      {providers.length > 0 ? (
-        <div className="grid gap-2 border-t border-border pt-4">
-          <p className="text-[11px] text-muted-foreground">Or use your organisation&apos;s single sign-on</p>
-          {providers.map((provider) => (
-            <Button
-              key={provider.id}
-              size="lg"
-              variant="outline"
-              className="w-full justify-center"
-              disabled={pending !== null}
-              onClick={() => void signIn({ provider_id: provider.id }, provider.id)}
-            >
-              {pending === provider.id ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" aria-hidden />}
-              Continue with {provider.label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
 
       {demo ? (
         <form

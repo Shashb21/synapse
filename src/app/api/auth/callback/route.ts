@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { afterSignIn, LOGIN_NEXT_COOKIE } from "@/modules/auth/redirect";
-import { completeLogin } from "@/modules/auth/session";
+import { completeLogin, NO_SEAT_ERROR, NoSeatError } from "@/modules/auth/session";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
 
 export const runtime = "nodejs";
@@ -9,7 +9,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * OAuth redirect target for user sign-in. Success lands on the workspace
- * picker; a failure goes back to /login with the reason shown.
+ * picker; a failure goes back to /login with the reason shown. A verified
+ * email without a seat on an active customer gets no session and
+ * `/login?error=no_seat` (KAN-28).
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -28,6 +30,9 @@ export async function GET(request: Request) {
   try {
     await completeLogin({ code, state });
   } catch (error) {
+    // No seat (none assigned, unassigned, or the customer deactivated): a bare
+    // code, so /login shows one message and nothing about which part failed.
+    if (error instanceof NoSeatError) return failed(NO_SEAT_ERROR);
     return failed(error instanceof Error ? error.message : "Sign-in failed.");
   }
   const jar = await cookies();

@@ -6,7 +6,6 @@ import {
   temporaryPassword,
   verifyPassword,
 } from "@/modules/auth/password";
-import { signupAllowed } from "@/modules/auth/signup-policy";
 import { ownerDecision } from "@/modules/auth/roles";
 import { gateFor } from "@/modules/auth/gate";
 import { principalOf } from "@/modules/workspaces/session";
@@ -77,17 +76,10 @@ describe("KAN-22 identity rules", () => {
     expect(ownerDecision({ ...base, email: "boss@example.com" }, { emails: ["boss@example.com"] }).owner).toBe(true);
   });
 
-  it("ALLOW_SIGNUP defaults to open; 0 closes it", () => {
-    expect(signupAllowed({})).toBe(true);
-    expect(signupAllowed({ ALLOW_SIGNUP: "1" })).toBe(true);
-    expect(signupAllowed({ ALLOW_SIGNUP: "0" })).toBe(false);
-    expect(signupAllowed({ ALLOW_SIGNUP: "false" })).toBe(false);
-  });
-
-  it("gate: sign-up and password APIs are public, /account needs a session, /api/admin gates itself", () => {
-    expect(gateFor("/signup")).toBe("open");
+  it("gate: the password sign-in API is public, /account needs a session, /api/admin gates itself", () => {
+    // KAN-28: there is no /signup; it is an ordinary (workspace-gated) path now.
+    expect(gateFor("/signup")).toBe("workspace");
     expect(gateFor("/api/auth/password/login")).toBe("open");
-    expect(gateFor("/api/auth/password/signup")).toBe("open");
     expect(gateFor("/account")).toBe("session");
     expect(gateFor("/api/account/password")).toBe("session");
     expect(gateFor("/api/admin/users")).toBe("open");

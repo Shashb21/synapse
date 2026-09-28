@@ -35,7 +35,7 @@ App: [http://127.0.0.1:43217](http://127.0.0.1:43217) (local dev port; Vercel us
 
 ### Sign-in and the admin account
 
-Everyone can sign in with an **email and password** on `/login`; Google, Microsoft or GitHub single sign-on buttons appear alongside when configured, and a demo sign-in is offered in development only. New people create an account on `/signup` (a contributor whose email is unverified until an admin verifies it); set `ALLOW_SIGNUP=0` to close self sign-up. `/account` shows who you are and changes your password.
+There is no self sign-up. Customers sign in on `/login` with their organisation's **single sign-on** (Google, Microsoft or GitHub, when configured), and only when their verified email holds a **seat** the owner assigned in **Admin → Customers** (`/admin/customers`); everyone else is refused. Email and password sign-in is for the owner's own staff. A demo sign-in is offered in development only. `/account` shows who you are and, for staff, changes your password. Setting up a provider: [`docs/deploy-checklist.md`](docs/deploy-checklist.md) §3a.
 
 The admin account that opens the owner control panel (`/admin`) is created from the command line — nothing secret goes in config:
 
@@ -45,7 +45,7 @@ npm run create-admin
 # non-interactive: printf '%s\n' "$ADMIN_PASSWORD" | npm run create-admin -- --email you@example.com --name "Your Name"
 ```
 
-It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login` with that email and password, then manage everyone else at **Admin → Users** (`/admin/users`): create users (a temporary password is shown once), reset passwords, change roles, verify, disable/enable and unlock.
+It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login` with that email and password. Sell and assign customer seats at **Admin → Customers** (`/admin/customers`); manage your own staff's password accounts (admins and Platform operators only) at **Admin → Users** (`/admin/users`): create (a temporary password is shown once), reset passwords, change roles, verify, disable/enable and unlock.
 
 Passwords: at least 12 characters, not your email, not a common password; stored only as scrypt hashes. Five wrong passwords in a row lock the account for 15 minutes (an admin can unlock it sooner).
 
@@ -70,8 +70,9 @@ Gap status after mapping (not the Plan High / Medium / Low bands):
 | `/pipeline` | Run any stage or the chain; module, route and last run per stage |
 | `/runs` | Observability: run traces, edit rationales, hillclimb signals, eval runs |
 | `/control` | Control panel: session and role, per-provider OAuth login, per-stage routing |
-| `/login`, `/signup`, `/account` | Email and password sign-in (plus SSO), self sign-up, your account and password |
-| `/admin/users` | Owner only: email and password accounts |
+| `/login`, `/account` | SSO sign-in for seat holders (plus staff email and password), your account and password |
+| `/admin/customers` | Owner only: customers, seats sold and assigned |
+| `/admin/users` | Owner only: staff email and password accounts |
 | `/evals` | View-only gold tape (needs + coverage; engine computes Addressed when evidence closes) |
 | `/sdlc` | Spec tape |
 
