@@ -3169,6 +3169,20 @@ export async function unlockTacticsStage(args: {
   if (!state.asset.wizard_complete) {
     throw new Error("Prioritize open gaps before tactics.");
   }
+  // The same rule the Prioritize footer applies before it offers "Continue to
+  // tactics": every live Open gap has a validated band. Loaded lazily because
+  // the S8 module imports this store.
+  const { prioritizationProgress } = await import("@/modules/stages/s8-prioritization/module");
+  const progress = await prioritizationProgress(state);
+  if (progress.open === 0) {
+    throw new Error("There are no Open gaps to prioritize yet, so Tactics can't open. Validate at least one gap as Open on Gaps.");
+  }
+  if (progress.validated < progress.open) {
+    const left = progress.open - progress.validated;
+    throw new Error(
+      `Validate every Open gap's band on Prioritize first: ${progress.validated} of ${progress.open} validated, ${left} to go.`,
+    );
+  }
   await db()
     .update(t.assets)
     .set({ tactics_unlocked: true })
