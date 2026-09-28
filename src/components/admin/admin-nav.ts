@@ -2,6 +2,7 @@
 export type AdminSectionId =
   | "overview"
   | "control"
+  | "users"
   | "accuracy"
   | "pipeline"
   | "runs"
@@ -20,6 +21,12 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/control",
     label: "AI & routing",
     summary: "The AI on/off switch, provider logins and per-stage model routing.",
+  },
+  {
+    id: "users",
+    href: "/admin/users",
+    label: "Users",
+    summary: "Email and password accounts: create, reset passwords, roles, verify, disable, unlock.",
   },
   {
     id: "accuracy",

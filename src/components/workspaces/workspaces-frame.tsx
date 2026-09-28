@@ -21,6 +21,9 @@ export function WorkspacesFrame({
             Signed in as <span className="text-foreground">{person.name}</span>
             {person.email ? <span className="hidden sm:inline"> · {person.email}</span> : null}
           </span>
+          <Link href="/account" className="text-foreground underline underline-offset-2">
+            Account
+          </Link>
           <SignOutButton />
         </div>
       </header>

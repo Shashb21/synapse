@@ -6,7 +6,7 @@
 export function safeNext(value: string | null | undefined, fallback = "/"): string {
   const next = (value ?? "").trim();
   if (!next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
-  if (/^\/(login|workspaces|api\/auth)(\/|\?|$)/.test(next)) return fallback;
+  if (/^\/(login|signup|workspaces|api\/auth)(\/|\?|$)/.test(next)) return fallback;
   return next;
 }
 

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Check, ChevronsUpDown, FolderKanban, Loader2, LogOut, Plus, Settings } from "lucide-react";
+import { Check, ChevronsUpDown, FolderKanban, Loader2, LogOut, Plus, Settings, ShieldCheck, UserRound } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -112,6 +112,16 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
               Signed in as <span className="font-medium text-foreground">{tag.person.name}</span>
               {tag.person.email ? <span className="block truncate">{tag.person.email}</span> : null}
             </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => router.push("/account")}>
+              <UserRound aria-hidden />
+              Your account
+            </DropdownMenuItem>
+            {tag.person.owner ? (
+              <DropdownMenuItem onClick={() => router.push("/admin")}>
+                <ShieldCheck aria-hidden />
+                Admin
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onClick={() => void signOut()} disabled={pending === "sign-out"}>
               <LogOut aria-hidden />
               Sign out

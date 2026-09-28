@@ -4,7 +4,8 @@ import type { WorkspaceRole } from "@/modules/workspaces/store";
 export type WorkspaceTagModel = {
   current: { id: string; name: string; role: WorkspaceRole };
   workspaces: { id: string; name: string; role: WorkspaceRole }[];
-  person: { name: string; email: string | null };
+  /** `owner`: the platform owner (sees the Admin link). */
+  person: { name: string; email: string | null; owner?: boolean };
 };
 
 export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {

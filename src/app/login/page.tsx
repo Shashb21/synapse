@@ -37,6 +37,7 @@ export default async function LoginPage({
           <LoginPanel
             providers={options.providers}
             demo={options.demo}
+            signup={options.signup}
             next={next}
             initialError={params.error?.trim() || null}
           />

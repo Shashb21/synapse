@@ -172,3 +172,49 @@ test("the customer app shows no owner or lab tools", async ({ page }) => {
   const toggle = page.getByRole("group", { name: /prep or room mode/i }).first();
   await expect(toggle.getByRole("link", { name: "Room" })).toHaveAttribute("href", "/room");
 });
+
+test("email and password: sign up, your account, sign out, sign back in; a wrong password is generic", async ({ page }) => {
+  const id = unique();
+  const email = `signup.${id}@example.com`;
+  const password = `lantern-harbour-${id}-9`;
+
+  // The login page leads with the email form and links to sign-up.
+  await page.goto("/login");
+  const signIn = page.getByRole("form", { name: "Sign in with email" });
+  await expect(signIn.getByLabel("Email")).toBeVisible();
+  await clickUntilUrl(page, page.getByRole("link", { name: "Create an account" }), /\/signup/);
+
+  const form = page.getByRole("form", { name: "Create an account" });
+  const create = form.getByRole("button", { name: "Create account" });
+  await fillUntilEnabled(async () => {
+    await refill(form.getByLabel("Your name"), `Signup ${id}`);
+    await refill(form.getByLabel("Work email"), email);
+    await refill(form.getByLabel("Password", { exact: true }), password);
+    await refill(form.getByLabel("Confirm password"), password);
+  }, create);
+  await create.click();
+  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+
+  // A self sign-up is a contributor whose email is not verified yet.
+  await page.goto("/account");
+  const profile = page.getByTestId("account-profile");
+  await expect(profile).toContainText(email);
+  await expect(profile).toContainText("Contributing function");
+  await expect(profile).toContainText("Email and password");
+  await expect(profile).toContainText("Not yet");
+  await expect(page.getByTestId("account-admin-link")).toHaveCount(0);
+
+  await clickUntilUrl(page, page.getByRole("button", { name: /sign out/i }), /\/login/);
+
+  const submit = signIn.getByRole("button", { name: "Sign in", exact: true });
+  await fillUntilEnabled(async () => {
+    await refill(signIn.getByLabel("Email"), email);
+    await refill(signIn.getByLabel("Password"), "definitely-not-it");
+  }, submit);
+  await submit.click();
+  await expect(page.getByTestId("login-error")).toHaveText("Email or password is incorrect.");
+
+  await refill(signIn.getByLabel("Password"), password);
+  await submit.click();
+  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+});
