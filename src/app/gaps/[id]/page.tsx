@@ -265,7 +265,7 @@ export default async function GapDetailPage({
           Tactic mappings (many-to-many, dimensional)
         </h2>
         <p className="mb-3 text-[12px] text-muted-foreground">
-          Each row shows the recorded coverage verdict (S4 model or a person) and its ten
+          Each row shows the recorded coverage verdict (from AI mapping or a person) and its ten
           dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -330,6 +330,7 @@ export default async function GapDetailPage({
                     action="confirm_coverage_review"
                     extra={{ coverage_id: c.id }}
                     confirmLabel="Confirm coverage"
+                    note={{ label: "Note (optional)" }}
                     description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
                   />
                 </div>
@@ -517,7 +518,7 @@ export default async function GapDetailPage({
                 {ai ? (
                   <>
                     No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
-                    have the S6 model propose the addressed slice and the open leftover, or write the
+                    have the AI propose the addressed slice and the open leftover, or write the
                     leftover yourself.
                   </>
                 ) : (

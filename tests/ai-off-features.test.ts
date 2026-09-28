@@ -114,7 +114,8 @@ describe("the first screen with AI off", () => {
   it("wires the home page: IngestPanel only with AI on, ManualStart with AI off", () => {
     const page = src("src/app/page.tsx");
     expect(page).toContain("await aiEnabled()");
-    expect(page).toMatch(/\{ai \? \(\s*<IngestPanel/);
+    // The pane follows the client AI status (AiOnly), so the workspace switch swaps it at once.
+    expect(page).toMatch(/<AiOnly\s+fallback=\{\s*<ManualStart[\s\S]*?>\s*<IngestPanel/);
     expect(page).toContain("<ManualStart");
     // Gaps never waits for an ingested source with AI off.
     expect(page).toContain("gates.gapsUnlocked || !ai");

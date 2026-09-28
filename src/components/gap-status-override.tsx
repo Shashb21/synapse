@@ -34,7 +34,7 @@ export function GapStatusDisagreement({
   if (!override.stale) {
     return (
       <p className="text-[12px] leading-5 text-muted-foreground">
-        Human override: {GAP_STATUS_LABELS[override.status]} (
+        Status set by hand: {GAP_STATUS_LABELS[override.status]} (
         {GAP_STATUS_LABELS[override.from]} → {GAP_STATUS_LABELS[override.to]}
         ). {override.actor_name}. Reason: {override.reason}
       </p>
@@ -42,10 +42,9 @@ export function GapStatusDisagreement({
   }
   return (
     <p className="text-[12px] leading-5 text-amber-300" role="status">
-      Override disagrees with the engine. Showing {GAP_STATUS_LABELS[override.status]} (human, kept).
-      Engine now computes {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"} after
-      ingest, a model run or a coverage refresh. Not silent-clobbered: keep your status, or open the status
-      dialog and use the computed one.
+      This gap was set to {GAP_STATUS_LABELS[override.status]} by hand, but the status computed from its mapped tactics is now{" "}
+      {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"}. The hand-set status is kept. To use the
+      computed status instead, open the status dialog.
     </p>
   );
 }

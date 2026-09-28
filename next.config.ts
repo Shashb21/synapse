@@ -22,7 +22,7 @@ export const ADMIN_REDIRECTS: { source: string; destination: string }[] = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["mammoth", "xlsx", "jszip", "pptxgenjs", "docx"],
+  serverExternalPackages: ["mammoth", "xlsx", "jszip", "docx"],
   experimental: {
     // forbidden() renders the Owner only page (403) for /admin.
     authInterrupts: true,

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  consolidate,
   evalValue,
   expectRouteIsHonest,
   expectThreeExchanges,
@@ -38,22 +39,49 @@ type IdeationOutput = {
 test.describe.configure({ mode: "serial" });
 
 test.describe("S9 tactics ideation", () => {
+  let lowGap: { gap_id: string; name: string } | null = null;
+
   test.beforeAll(async ({ request }) => {
     await seedMapped(request);
     await runStage(request, "S8");
     const gap = await firstOpenGap(request);
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 submission, so it is High");
+    // A Low-priority open gap is eligible too.
+    lowGap = (await consolidate(request)).open.find((row) => row.gap_id !== gap.gap_id) ?? null;
+    if (lowGap) {
+      await planAction(request, {
+        action: "validate_band",
+        gap_id: lowGap.gap_id,
+        band: "low",
+        rationale: "A later-cycle question, so it is Low",
+      });
+    }
   });
 
-  test("only ideates for gaps a human validated as High", async ({ page, request }) => {
+  test("a Low-priority open gap can get ideas, including one added by hand", async ({ page }) => {
+    test.skip(!lowGap, "the seed has only one open gap");
+    await page.goto("/ideation");
+    const waiting = page.getByTestId("ideation-without-proposal");
+    const item = waiting.getByRole("listitem").filter({ hasText: lowGap!.name });
+    await expect(item).toBeVisible();
+    await expect(item).toContainText("Low priority");
+    await expect(item.getByRole("button", { name: /add idea by hand/i })).toBeVisible();
+    // High is listed before Low.
+    await expect(waiting.getByRole("listitem").first()).toContainText("High priority");
+  });
+
+  test("ideates for every gap a human validated, whatever the band", async ({ page, request }) => {
     await page.goto("/ideation");
     await expect(page.getByRole("heading", { name: /ideation/i }).first()).toBeVisible();
 
     const result = await runStage<IdeationOutput>(request, "S9", { per_gap: 2 });
     expect(result.output.gaps_considered).toBeGreaterThan(0);
     const validated = (await planState(request)).placements.filter(
-      (placement) => placement.validated && placement.band === "high",
+      (placement) => placement.validated && placement.band !== null,
     );
+    if (lowGap) {
+      expect(result.output.proposals.some((proposal) => proposal.gap_id === lowGap!.gap_id)).toBe(true);
+    }
     expect(result.output.gaps_considered).toBeLessThanOrEqual(validated.length);
     for (const proposal of result.output.proposals) {
       expect(validated.some((placement) => placement.gap_id === proposal.gap_id)).toBe(true);
@@ -102,7 +130,7 @@ test.describe("S9 tactics ideation", () => {
       decision: "maybe",
       rationale: "Undecided",
     });
-    expect(badDecision.error).toMatch(/decision: Invalid option/i);
+    expect(badDecision.error).toBe("Decision must be one of: accept, reject.");
 
     const accepted = (await planAction(request, {
       action: "decide_proposal",

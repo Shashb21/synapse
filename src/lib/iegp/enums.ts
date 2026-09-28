@@ -240,6 +240,17 @@ export const TACTIC_STATUS_HELPERS: Record<TacticStatus, string> = {
 export const CATCH_UP_TACTIC_STATUSES = ["completed", "ongoing", "planned"] as const;
 export type CatchUpTacticStatus = (typeof CATCH_UP_TACTIC_STATUSES)[number];
 
+/** Statuses a person can give a tactic they create on Tactics. Cancelled is set later, not at creation. */
+export const CREATE_TACTIC_STATUSES = ["proposed", "planned", "ongoing", "completed"] as const;
+export type CreateTacticStatus = (typeof CREATE_TACTIC_STATUSES)[number];
+
+export const CREATE_TACTIC_STATUS_LABELS: Record<CreateTacticStatus, string> = {
+  proposed: "Proposed",
+  planned: "Planned",
+  ongoing: "Ongoing",
+  completed: "Completed",
+};
+
 export const CATCH_UP_REASONS = [
   "missed_at_ingest",
   "source_not_uploaded",

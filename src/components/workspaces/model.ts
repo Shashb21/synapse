@@ -4,6 +4,8 @@ import type { WorkspaceRole } from "@/modules/workspaces/store";
 export type WorkspaceTagModel = {
   /** `demo`: the workspace holds the Velmara demo data (badged "Demo"). */
   current: { id: string; name: string; role: WorkspaceRole; demo: boolean };
+  /** AI assistance: the open workspace's own setting and the platform master switch. */
+  ai?: { workspace: boolean; platform: boolean };
   workspaces: { id: string; name: string; role: WorkspaceRole; demo: boolean }[];
   /** `owner`: the platform owner (sees the Admin link). */
   person: { name: string; email: string | null; owner?: boolean };

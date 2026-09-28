@@ -406,6 +406,9 @@ export async function POST(request: Request) {
           function: body.function as ActorFunction,
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
           gap_id: body.gap_id || undefined,
+          status: body.status,
+          start_date: body.start_date || null,
+          evidence_available: body.evidence_available || null,
           actor_name,
           actor_function,
         });

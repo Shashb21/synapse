@@ -120,7 +120,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
       start_date: "next spring",
       rationale: "Vague date",
     });
-    expect(badDate.error).toMatch(/start_date: expected YYYY-MM-DD/i);
+    expect(badDate.error).toBe("Start date must be a date (YYYY-MM-DD).");
 
     await planAction(request, {
       action: "move_activity",

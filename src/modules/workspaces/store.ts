@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { ensureWorkspaceSchema, setWorkspaceSchemaLookup, sharedDb } from "@/lib/iegp/db";
 import { nowIso } from "@/modules/kernel/ids";
-import { DEFAULT_SCHEMA, runInWorkspace } from "./context";
+import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace } from "./context";
 
 /**
  * Workspaces are shared records (public schema); each one's IEGP data lives in
@@ -28,10 +28,13 @@ const DDL = [
   )`,
   // KAN-26: a workspace holding the Velmara demo is flagged, so it is badged everywhere.
   `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo boolean NOT NULL DEFAULT false`,
+  // AI assistance for this workspace, set by its owner. The platform switch
+  // (modules/kernel/ai-switch.ts) still overrides it for every workspace.
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true`,
 ];
 
 /** The workspace that holds the data from before workspaces existed. */
-export const DEFAULT_WORKSPACE_ID = "default";
+export { DEFAULT_WORKSPACE_ID };
 
 export type WorkspaceRole = "owner" | "member";
 export type Workspace = {
@@ -42,6 +45,8 @@ export type Workspace = {
   created_at: string;
   /** Holds the Velmara demo data (loaded on request), not the team's own plan. */
   demo: boolean;
+  /** The owner's AI assistance setting (on until they turn it off). Effective AI also needs the platform switch. */
+  ai_enabled: boolean;
 };
 export type WorkspaceWithRole = Workspace & { role: WorkspaceRole };
 export type WorkspaceMember = { principal: string; role: WorkspaceRole; added_by: string; added_at: string };
@@ -85,6 +90,7 @@ function toWorkspace(row: Row): Workspace {
     created_by: String(row.created_by),
     created_at: String(row.created_at),
     demo: row.demo === true,
+    ai_enabled: row.ai_enabled !== false,
   };
 }
 
@@ -134,7 +140,7 @@ export async function createWorkspace(args: { name: string; owner: string; demo?
     values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo})`);
   await addMember({ workspace_id: id, principal: args.owner, role: "owner", added_by: args.owner });
   schemaCache.set(id, schemaName);
-  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo };
+  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled: true };
 }
 
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
@@ -168,6 +174,11 @@ export async function claimDefaultWorkspace(principal: string): Promise<Workspac
     returning workspace_id`);
   if (!won[0]) return null;
   return getWorkspace(DEFAULT_WORKSPACE_ID);
+}
+
+/** Stores the workspace's AI assistance setting. Callers check ownership (modules/workspaces/ai-setting.ts). */
+export async function setWorkspaceAiColumn(workspaceId: string, enabled: boolean): Promise<void> {
+  await rows(sql`update workspaces set ai_enabled = ${enabled} where id = ${workspaceId}`);
 }
 
 export async function renameWorkspace(args: { workspace_id: string; name: string; by: string }): Promise<void> {

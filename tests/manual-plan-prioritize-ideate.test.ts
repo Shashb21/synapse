@@ -21,6 +21,7 @@ import {
 import {
   addIdeationProposal,
   editIdeationProposal,
+  ideationBandOrder,
   listIdeationProposals,
 } from "@/modules/stages/s9-ideation/module";
 import { splitPayload } from "@/components/split-gap-dialog";
@@ -210,6 +211,45 @@ describe("S9 manual ideas and edits", () => {
     expect(stored.map((proposal) => proposal.rank).sort()).toEqual([1, 2]);
     expect(stored.every((proposal) => proposal.origin === "ai")).toBe(true);
   }, 60_000);
+
+  it("every validated band is eligible, not just High, listed High → Medium → Low", async () => {
+    const [high, low, medium] = [ids[1]!, ids[2]!, ids[3]!];
+    await validatePlacement({ gap_id: low, band: "low", rationale: "Later-cycle question", actor: ACTOR });
+    const order = ideationBandOrder(await listPlacements());
+    expect(order.get(high)).toBe(0);
+    expect(order.get(medium)).toBe(1);
+    expect(order.get(low)).toBe(2);
+    // An unvalidated placement is not eligible.
+    expect(order.has(ids[0]!)).toBe(false);
+
+    const result = await runStage<{ proposals: { gap_id: string }[]; gaps_considered: number }>({
+      stage: "S9",
+      input: { per_gap: 1, dry_run: true },
+      actor: ACTOR,
+      role: "medical_affairs",
+    });
+    const gapIds = result.output.proposals.map((proposal) => proposal.gap_id);
+    for (const id of [high, medium, low]) expect(gapIds).toContain(id);
+    expect(gapIds).not.toContain(ids[0]!);
+    expect(gapIds.indexOf(high)).toBeLessThan(gapIds.indexOf(medium));
+    expect(gapIds.indexOf(medium)).toBeLessThan(gapIds.indexOf(low));
+    expect(result.summary).toMatch(/prioritized gap/);
+  }, 60_000);
+
+  it("orders by band and ignores unvalidated or band-less placements", () => {
+    const order = ideationBandOrder([
+      { gap_id: "a", validated: true, band: "low" },
+      { gap_id: "b", validated: false, band: "high" },
+      { gap_id: "c", validated: true, band: null },
+      { gap_id: "d", validated: true, band: "medium" },
+      // A gap placed in two settings lists under its higher band.
+      { gap_id: "a", validated: true, band: "high" },
+    ]);
+    expect([...order.entries()].sort()).toEqual([
+      ["a", 0],
+      ["d", 1],
+    ]);
+  });
 
   it("adds an idea by hand for an Open gap, audited, with timing left for S10", async () => {
     const proposal = await addIdeationProposal({

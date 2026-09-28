@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-/** One click flips AI for everyone. No dialog and no reason to type. */
+/** One click flips the platform master switch for every workspace. No dialog and no reason to type. */
 export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -31,7 +31,7 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
         type="button"
         role="switch"
         aria-checked={enabled}
-        aria-label="AI"
+        aria-label="AI for all workspaces (master switch)"
         disabled={pending}
         onClick={flip}
         data-testid="ai-toggle"

@@ -8,12 +8,10 @@ import { WalkthroughCard } from "./walkthrough-card";
 import {
   fetchWalkthrough,
   updateWalkthrough,
+  walkthroughApplies,
   WALKTHROUGH_EVENT,
   type WalkthroughProgress,
 } from "./walkthrough-client";
-
-/** Pages where the tour never shows (signing in, choosing a workspace). */
-const HIDDEN_PREFIXES = ["/login", "/signin", "/auth", "/workspaces", "/select-workspace"];
 
 type Box = { top: number; left: number; width: number; height: number };
 
@@ -65,22 +63,27 @@ function Host() {
   const pathname = usePathname() ?? "/";
   const search = useSearchParams();
   const [progress, setProgress] = useState<WalkthroughProgress | null>(null);
+  // Signed out (or on a page with no workspace) there is no progress to load.
+  const applies = walkthroughApplies(pathname);
 
   useEffect(() => {
+    if (!applies) return;
     let live = true;
     void fetchWalkthrough().then((loaded) => {
       if (live && loaded) setProgress((prev) => prev ?? loaded);
     });
-    const onChange = (event: Event) => setProgress((event as CustomEvent<WalkthroughProgress>).detail);
-    window.addEventListener(WALKTHROUGH_EVENT, onChange);
     return () => {
       live = false;
-      window.removeEventListener(WALKTHROUGH_EVENT, onChange);
     };
+  }, [applies]);
+
+  useEffect(() => {
+    const onChange = (event: Event) => setProgress((event as CustomEvent<WalkthroughProgress>).detail);
+    window.addEventListener(WALKTHROUGH_EVENT, onChange);
+    return () => window.removeEventListener(WALKTHROUGH_EVENT, onChange);
   }, []);
 
-  const hidden = HIDDEN_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  const active = progress?.status === "active" && !hidden;
+  const active = progress?.status === "active" && applies;
   const stepIndex = Math.min(progress?.step ?? 0, TOUR_STEPS.length - 1);
   const step = TOUR_STEPS[stepIndex]!;
   const onPage = onStepPage(step, pathname, new URLSearchParams(search?.toString() ?? ""));

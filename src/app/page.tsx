@@ -7,6 +7,7 @@ import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
 import { ManualStart } from "@/components/plan-cards";
+import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
@@ -50,8 +51,9 @@ function PlaceIntro({
         kicker={wizardComplete ? "Living plan · ingest" : "First visit · ingest"}
         title="Upload sources"
       >
-        Demo files and notes extract gaps and tactics already mapped, with engine-computed status.
-        After you enter Prioritize, ingest stays here.
+        Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
+        them and computes each gap&apos;s status for you to confirm on Gaps. You can come back here to
+        add sources at any time.
       </PageIntro>
     );
   }
@@ -115,21 +117,24 @@ export default async function HomePage({
     const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
-        {ai ? (
+        {/* Follows the client AI status, so flipping the workspace switch swaps Upload and Start at once. */}
+        <AiOnly
+          fallback={
+            <ManualStart
+              gapCount={workspace.review.length}
+              tacticCount={workspace.availableTactics.length}
+            />
+          }
+        >
           <IngestPanel sources={state.sources} demoFiles={demo} />
-        ) : (
-          <ManualStart
-            gapCount={workspace.review.length}
-            tacticCount={workspace.availableTactics.length}
-          />
-        )}
+        </AiOnly>
         {workspace.review.length > 0 ? (
           <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
             <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
               Prep readiness
             </h2>
             <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
-              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} mapped</li>
+              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} so far</li>
               <li>{readiness.partial} partial — must resolve before Prioritize</li>
               <li>{readiness.needs_validation} unconfirmed</li>
             </ul>

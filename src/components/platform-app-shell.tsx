@@ -11,6 +11,7 @@ import {
   reviewGapFilterCounts,
 } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
+import { prioritizationProgress } from "@/modules/stages/s8-prioritization/module";
 
 const EMPTY_NAV: PlanNavModel = {
   gapsCount: 0,
@@ -55,6 +56,7 @@ export async function PlatformAppShell({
       tacticsUnlocked: gates.tacticsUnlocked,
       setupComplete: state.asset.setup_complete,
       readyForPrioritize: gapsReadyForPrioritize(state),
+      prioritized: await prioritizationProgress(state),
     };
   } catch {
     // Control panel must load even before DATABASE_URL is configured.

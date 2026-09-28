@@ -56,7 +56,7 @@ test.describe("S8 prioritization matrix", () => {
     await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     await expect(page.locator("svg").first()).toBeVisible();
     await expect(page.getByText(/band\(s\) validated/)).toBeVisible();
-    await expect(page.getByText(/dashed edge means the band is still only an S8 suggestion/)).toBeVisible();
+    await expect(page.getByText(/dashed edge means the band is still only an AI suggestion/)).toBeVisible();
     // Gaps are placed as cards; where several share a slot they collapse into one
     // cluster card that opens into the individual ones.
     await expect(page.getByText(/Suggested (High|Medium|Low)|Validated (High|Medium|Low)/).first()).toBeAttached();
@@ -128,7 +128,7 @@ test.describe("S8 prioritization matrix", () => {
       band: "urgent",
       rationale: "Not a band",
     });
-    expect(badBand.error).toMatch(/band: Invalid option/i);
+    expect(badBand.error).toBe("Band must be one of: high, medium, low.");
 
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 reimbursement dossier");
     const after = await planState(request);

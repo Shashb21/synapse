@@ -79,6 +79,22 @@ test("signed out, every customer page and API sends you to sign in", async ({ pa
   expect(api.status()).toBe(401);
 });
 
+test("signed out, the login page does not ask for walkthrough progress", async ({ page }) => {
+  const walkthroughCalls: number[] = [];
+  const consoleErrors: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/api/walkthrough") walkthroughCalls.push(response.status());
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Synapse IEGP" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(walkthroughCalls).toEqual([]);
+  expect(consoleErrors.filter((text) => /401|walkthrough/i.test(text))).toEqual([]);
+});
+
 test("first sign-in asks for a workspace; the tag shows it; switching changes the data", async ({ page }) => {
   const id = unique();
   const email = `ws.${id}@example.com`;
@@ -239,5 +255,26 @@ test("staff email and password: your account, sign out, sign back in; a wrong pa
   await refill(signIn.getByLabel("Password"), password);
   await submit.click();
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+});
+
+test("demo sign-in keeps the typed test email, and refuses a real-world one", async ({ page }) => {
+  const id = unique();
+  const email = `priya.shah.${id}@runthrough.test`;
+  await demoSignInThroughLoginPage(page, `Priya Shah ${id}`, email);
+  await page.goto("/account");
+  const profile = page.getByTestId("account-profile");
+  await expect(profile).toContainText(email);
+  await expect(profile).not.toContainText("@demo.synapse.local");
+
+  await clickUntilUrl(page, page.getByRole("button", { name: /sign out/i }), /\/login/);
+  const form = page.getByRole("form", { name: "Demo sign-in" });
+  const submit = form.getByRole("button", { name: /continue as a demo user \(development only\)/i });
+  await fillUntilEnabled(async () => {
+    await refill(form.getByLabel("Your name"), `Real ${id}`);
+    await refill(form.getByLabel(/Email/), `real.${id}@pfizer.com`);
+  }, submit);
+  await submit.click();
+  await expect(page.getByTestId("login-error")).toContainText("test-only domain");
+  await expect(page).toHaveURL(/\/login/);
 });
 

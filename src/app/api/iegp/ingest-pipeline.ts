@@ -3,6 +3,7 @@ import { assertAiEnabled } from "@/modules/kernel/ai-switch";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
 import { resolveRoute } from "@/modules/kernel/routing";
+import { NoRouteError } from "@/modules/llm/provider";
 import type { Actor, StageId } from "@/modules/kernel/contracts";
 import type { Role } from "@/modules/auth/roles";
 import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
@@ -38,7 +39,7 @@ async function requireLlmStages(): Promise<void> {
       await resolveRoute(stage);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(
+      throw new NoRouteError(
         `Ingest runs gap extraction (S2), tactic extraction (S3) and mapping (S4) on an LLM, and ${stage} has no connected model: ${reason}`,
       );
     }

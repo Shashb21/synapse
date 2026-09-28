@@ -284,6 +284,7 @@ function GapDetailPane({
             label="Confirm status"
             action="validate_gap"
             extra={{ gap_id: card.gap_id }}
+            note={{ label: "Note (optional)" }}
             confirmLabel={`Confirm ${GAP_STATUS_LABELS[card.gap_status]}`}
             variant="default"
           />

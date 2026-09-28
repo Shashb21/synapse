@@ -22,7 +22,6 @@ import { createGap, loadState, resetBlank, resetDemo, resetDemoSetup } from "@/l
 import { POST as iegpPost } from "@/app/api/iegp/route";
 import { iegpActionCapability } from "@/app/api/iegp/capabilities";
 import { GET as workspacesGet, POST as workspacesPost } from "@/app/api/workspaces/route";
-import { exportFileName } from "@/components/room/export-pack";
 import type { Role } from "@/modules/auth/roles";
 import { createSession, type Session } from "@/modules/auth/session";
 import { timelineMarkers } from "@/modules/stages/s10-timeline/gap-view";
@@ -104,8 +103,6 @@ describe("KAN-26: a blank workspace is truly blank", () => {
     });
     expect(assetSubtitle({ inn: "", indication: "", geography: "" })).toBe("");
     expect(assetSubtitle({ inn: "novamab", indication: "", geography: "US" })).toBe("novamab · US");
-    expect(exportFileName("")).toBe("IEGP.pptx");
-    expect(exportFileName("Nova Brand")).toBe("Nova-Brand-IEGP.pptx");
   });
 
   it("stores a blank plan with nothing in it, and a gap can still be added by hand", async () => {
