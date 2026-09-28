@@ -264,6 +264,10 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
       axisById(input.y_axis) ?? axisById(axesConfig.y_axis) ?? axesConfig.axes.find((axis) => axis !== xAxis)!;
     if (xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
     const pairOnly = Boolean(input.x_axis && input.y_axis);
+    // A pair a person picked (in this run or saved), or only the catalog's
+    // fallback? With no chosen pair the model still scores every axis, but its
+    // quadrant on an unchosen pair never becomes the working band (KAN-16).
+    const pairChosen = pairOnly || axesConfig.updated_by !== "default";
     const scoredAxes = pairOnly ? [xAxis, yAxis] : axesConfig.axes;
     const place = (scores: Record<string, number>) => ({
       score: quadrantScore({ xAxis, yAxis, scores }),
@@ -474,7 +478,12 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
               suggested_band: placement.suggested_band,
               suggested_rationale: placement.rationale,
               // The working band: the quadrant until someone drags, sets or validates it.
-              band: humanBand && current?.band ? current.band : placement.suggested_band,
+              band:
+                humanBand && current?.band
+                  ? current.band
+                  : pairChosen
+                    ? placement.suggested_band
+                    : (current?.band ?? null),
               validated: false,
               rationale: humanBand ? (current?.rationale ?? null) : null,
               actor_name: humanBand ? (current?.actor_name ?? null) : null,
@@ -497,9 +506,11 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         placements: outcome.accepted,
         skipped: outcome.rejected.length,
       },
-      summary: `${outcome.accepted.length} open gap(s) placed on ${xAxis.label} × ${yAxis.label}${
-        input.dry_run ? " (dry run)" : ""
-      }`,
+      summary: `${outcome.accepted.length} open gap(s) ${
+        pairChosen
+          ? `placed on ${xAxis.label} × ${yAxis.label}`
+          : `scored on every axis; no axis pair was chosen, so no working band was set (suggestion shown on ${xAxis.label} × ${yAxis.label})`
+      }${input.dry_run ? " (dry run)" : ""}`,
       evals: [
         ...outcome.metrics,
         {
