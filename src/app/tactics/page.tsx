@@ -3,7 +3,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { TacticsPlace } from "@/components/tactics-place";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { buildPlanWorkspace, planGates } from "@/lib/iegp/engine";
-import { CATCH_UP_TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/lib/iegp/enums";
+import { CATCH_UP_TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES, CREATE_TACTIC_STATUS_LABELS } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
 import { listRejectedTacticCandidates } from "@/app/api/iegp/promote-candidates";
@@ -92,7 +92,7 @@ export default async function TacticsPage() {
                           defaultValue: (CATCH_UP_TACTIC_STATUSES as readonly string[]).includes(row.status)
                             ? row.status
                             : "planned",
-                          options: CATCH_UP_TACTIC_STATUSES.map((status) => ({ value: status, label: status })),
+                          options: CATCH_UP_TACTIC_STATUSES.map((status) => ({ value: status, label: CREATE_TACTIC_STATUS_LABELS[status] })),
                         },
                         {
                           name: "evidence_question",

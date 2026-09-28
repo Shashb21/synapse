@@ -195,7 +195,7 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
         >
           {CATCH_UP_TACTIC_STATUSES.map((status) => (
             <option key={status} value={status}>
-              {status}
+              {CREATE_TACTIC_STATUS_LABELS[status]}
             </option>
           ))}
         </select>

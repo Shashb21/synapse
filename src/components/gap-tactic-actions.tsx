@@ -7,6 +7,8 @@ import {
   CATCH_UP_REASON_LABELS,
   CATCH_UP_REASONS,
   CATCH_UP_TACTIC_STATUSES,
+  CREATE_TACTIC_STATUS_LABELS,
+  ASSESSED_COVERAGE,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
@@ -61,7 +63,7 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
         >
           {CATCH_UP_TACTIC_STATUSES.map((row) => (
             <option key={row} value={row}>
-              {row}
+              {CREATE_TACTIC_STATUS_LABELS[row]}
             </option>
           ))}
         </select>
@@ -171,6 +173,7 @@ export function MapExistingTactic({
       extra={{ gap_id: gapId }}
       confirmLabel="Map tactic"
       description="Attach a library tactic onto this gap. The tactic is not copied."
+      note={{ label: "Rationale (needed when you set coverage)" }}
     >
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         From tactic library
@@ -185,6 +188,25 @@ export function MapExistingTactic({
             </option>
           ))}
         </select>
+      </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        How well it covers this gap
+        <select
+          name="overall"
+          defaultValue=""
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          <option value="">Not assessed yet</option>
+          {ASSESSED_COVERAGE.map((value) => (
+            <option key={value} value={value}>
+              {value === "not_relevant" ? "Not relevant" : value[0]!.toUpperCase() + value.slice(1)}
+            </option>
+          ))}
+        </select>
+        <span className="text-[11px] text-muted-foreground/80">
+          A planned, ongoing or completed tactic that is not assessed leaves the gap Partially Addressed.
+          With AI on, AI mapping can assess it; otherwise set it here or later on the gap page.
+        </span>
       </label>
     </LockForm>
   );

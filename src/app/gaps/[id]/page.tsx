@@ -265,7 +265,7 @@ export default async function GapDetailPage({
           Tactic mappings (many-to-many, dimensional)
         </h2>
         <p className="mb-3 text-[12px] text-muted-foreground">
-          Each row shows the recorded coverage verdict (S4 model or a person) and its ten
+          Each row shows the recorded coverage verdict (from AI mapping or a person) and its ten
           dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -363,7 +363,6 @@ export default async function GapDetailPage({
                               action="lock_dimension"
                               extra={{ coverage_id: c.id, dimension: dim }}
                               confirmLabel="Change dimension"
-                              note={{ label: "Rationale (required)", required: true }}
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
                               <label className="grid gap-1 text-[12px] text-muted-foreground">
@@ -409,7 +408,6 @@ export default async function GapDetailPage({
                   action="lock_overall"
                   extra={{ coverage_id: c.id }}
                   confirmLabel="Change overall coverage"
-                  note={{ label: "Rationale (required)", required: true }}
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >
                   <label className="grid gap-1 text-[12px] text-muted-foreground">

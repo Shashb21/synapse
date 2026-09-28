@@ -50,13 +50,13 @@ export function aiConfirmCopy(next: boolean, workspaceName: string) {
     ? {
         title: `Turn on AI assistance for ${workspaceName}?`,
         body:
-          "Models can suggest again in this workspace. Upload replaces Start, so sources can be uploaded and parsed, and the AI buttons (Generate ideas, Prioritize with the model, Re-suggest) come back. People still decide, nothing already entered changes, and other workspaces are not affected.",
+          "Models can suggest again in this workspace. Upload replaces Start, so sources can be uploaded and parsed, and the AI buttons (Generate ideas, the model's first placement on the matrix, Re-suggest) come back. People still decide, nothing already entered changes, and other workspaces are not affected.",
         confirm: "Turn AI on",
       }
     : {
         title: `Turn off AI assistance for ${workspaceName}?`,
         body:
-          "No model is called for anyone in this workspace. Nothing is uploaded or parsed: work starts at Start with Add gaps and Add tactics, the AI buttons (Generate ideas, Prioritize with the model, Re-suggest) are hidden, and every step is done by hand. Your plan stays as it is, you can turn AI back on at any time, and other workspaces are not affected.",
+          "No model is called for anyone in this workspace. Nothing is uploaded or parsed: work starts at Start with Add gaps and Add tactics, the AI buttons (Generate ideas, the model's first placement on the matrix, Re-suggest) are hidden, and every step is done by hand. Your plan stays as it is, you can turn AI back on at any time, and other workspaces are not affected.",
         confirm: "Turn AI off",
       };
 }

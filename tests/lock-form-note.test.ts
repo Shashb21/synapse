@@ -40,19 +40,22 @@ describe("LockForm note field", () => {
         .map(({ tag }) => actionOf(tag)),
     );
     expect([...withNote].sort()).toEqual(
-      ["confirm_coverage_review", "lock_dimension", "lock_need", "lock_overall", "lock_priority", "validate_gap"].sort(),
+      ["assign_tactic", "confirm_coverage_review", "lock_need", "lock_priority", "validate_gap"].sort(),
     );
     for (const { file, tag } of lockFormTags()) {
       const action = actionOf(tag);
-      if (["create_tactic", "create_gap", "assign_tactic", "record_missed_tactic", "unlock_tactics"].includes(action)) {
+      if (["create_tactic", "create_gap", "record_missed_tactic", "unlock_tactics"].includes(action)) {
         expect(tag, `${file} ${action}`).not.toMatch(/\bnote=\{\{/);
       }
     }
   });
 
-  it("the coverage locks the API rejects without a rationale mark the note required", () => {
+  it("the coverage locks ask for one required rationale, not a second note", () => {
     const tags = lockFormTags().filter(({ tag }) => ["lock_dimension", "lock_overall"].includes(actionOf(tag)));
     expect(tags.length).toBe(2);
-    for (const { tag } of tags) expect(tag).toContain("required: true");
+    // Their own "Your rationale (required)" textarea is the rationale; a note would duplicate it.
+    for (const { tag } of tags) expect(tag).not.toMatch(/\bnote=\{\{/);
+    const page = readFileSync(path.join(process.cwd(), "src/app/gaps/[id]/page.tsx"), "utf8");
+    expect(page.match(/name="rationale"\s+required/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });

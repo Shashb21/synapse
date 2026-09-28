@@ -134,7 +134,7 @@ export default async function HomePage({
               Prep readiness
             </h2>
             <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
-              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} mapped</li>
+              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} so far</li>
               <li>{readiness.partial} partial — must resolve before Prioritize</li>
               <li>{readiness.needs_validation} unconfirmed</li>
             </ul>

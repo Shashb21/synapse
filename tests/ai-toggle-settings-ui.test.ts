@@ -65,7 +65,7 @@ describe("AI toggle in settings: the switch", () => {
     const off = aiConfirmCopy(false, "Velmara EU");
     expect(off.title).toMatch(/turn off ai assistance for velmara eu/i);
     expect(off.body).toMatch(/Start with Add gaps and Add tactics/);
-    expect(off.body).toMatch(/Generate ideas, Prioritize with the model, Re-suggest/);
+    expect(off.body).toMatch(/Generate ideas, the model's first placement on the matrix, Re-suggest/);
     expect(off.body).toMatch(/other workspaces are not affected/i);
     const on = aiConfirmCopy(true, "Velmara EU");
     expect(on.body).toMatch(/Upload replaces Start/);
