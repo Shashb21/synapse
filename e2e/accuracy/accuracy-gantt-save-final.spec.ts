@@ -1,12 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import { workspaceUrl } from "../support/accuracy";
 
 test.use({
   video: { mode: "on", size: { width: 1280, height: 720 } },
 });
-
-const ARTIFACTS = "/opt/cursor/artifacts";
 
 async function seedDatedGantt(request: APIRequestContext) {
   const wsRes = await request.post("/api/accuracy/workspaces", {
@@ -77,9 +74,11 @@ async function seedDatedGantt(request: APIRequestContext) {
   return workspace_id;
 }
 
+/** Evidence screenshots land in this test's own output folder and are attached to the report. */
 async function shot(page: Page, name: string) {
-  mkdirSync(ARTIFACTS, { recursive: true });
-  await page.screenshot({ path: `${ARTIFACTS}/${name}`, fullPage: true });
+  const path = test.info().outputPath(name);
+  await page.screenshot({ path, fullPage: true });
+  await test.info().attach(name, { path, contentType: "image/png" });
 }
 
 test.describe("accuracy Gantt save-final truth", () => {
