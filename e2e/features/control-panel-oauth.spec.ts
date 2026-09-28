@@ -3,8 +3,6 @@ import {
   controlAction,
   controlActionExpectingError,
   controlState,
-  runStageExpectingError,
-  seedParsed,
 } from "../support/synapse";
 
 const LOCKED_PROVIDERS = [
@@ -104,17 +102,35 @@ test.describe("Control panel OAuth routing", () => {
     expect(started.authorize_url).toContain("code_challenge=");
   });
 
-  test("an unconnected agentic stage is blocked; the owner is pointed at /admin/control", async ({ request }) => {
+  /*
+   * The 409 no_llm itself cannot happen here: under SYNAPSE_TEST_STUB_LLM every
+   * run is handed the stub model (a test build must never be blocked on OAuth),
+   * so the API side is locked in vitest (tests/no-llm-message.test.ts:
+   * NoRouteError -> 409 no_llm, owner detail + /admin/control, plain text for a
+   * customer). What the running app does show without a model is the route
+   * preview, which is resolved for real, with no stub: the owner's pipeline
+   * says the stage has no connected model and where to connect one.
+   */
+  test("an unconnected agentic stage says so; the owner is pointed at /admin/control", async ({ page, request }) => {
     await controlAction(request, {
       action: "set_default_provider",
       provider_id: "xai-grok",
     });
-    await seedParsed(request);
-    const failed = await runStageExpectingError(request, "S2", { dry_run: true });
-    // 409 no_llm. The suite runs as the owner, so it gets the provider detail and
-    // the /admin/control link; a customer gets the plain text (tests/no-llm-message.test.ts).
-    expect(failed.status).toBe(409);
-    expect(failed.error).toMatch(/\/admin\/control/);
-    expect(failed.error).not.toMatch(/\(\/control\)/);
+    // Nothing is connected in the test environment (no OAuth tokens; the
+    // Playwright web server blanks the provider API keys).
+    const state = await controlState(request);
+    for (const provider of LOCKED_PROVIDERS) {
+      expect(state.connections.find((row) => row.provider_id === provider)!.status).not.toBe("connected");
+    }
+
+    await page.goto("/admin/pipeline");
+    const s2 = page
+      .getByRole("article")
+      .filter({ has: page.getByRole("heading", { name: "S2 · Evidence gap extraction", exact: true }) });
+    await expect(s2.getByText("xAI · Grok · ", { exact: false })).toBeVisible();
+    const reason = s2.getByText(/^xAI · Grok: /);
+    await expect(reason).toBeVisible();
+    await expect(reason).toContainText("(/admin/control)");
+    await expect(reason).not.toContainText("(/control)");
   });
 });
