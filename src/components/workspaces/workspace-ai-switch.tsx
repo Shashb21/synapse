@@ -100,11 +100,13 @@ export function useWorkspaceAiChange(model: WorkspaceAiModel) {
       await sendJson(`/api/workspaces/${encodeURIComponent(model.workspaceId)}/ai`, { enabled: next });
       setEnabled(next);
       setConfirming(null);
-      if (model.isCurrent) {
-        setAi({ enabled: next && model.platformEnabled, offBy: next ? null : "workspace" });
-        if (!next && pageNeedsAi(pathname ?? "")) router.push("/?place=upload");
-      }
-      router.refresh();
+      // The client status changes first, so the nav and AI buttons follow at once.
+      if (model.isCurrent) setAi({ enabled: next && model.platformEnabled, offBy: next ? null : "workspace" });
+      // A page that no longer applies goes to Start (a push fetches it fresh);
+      // anywhere else the page refreshes in place. A refresh right after a
+      // push would cancel the push, so it is one or the other.
+      if (model.isCurrent && !next && pageNeedsAi(pathname ?? "")) router.push("/?place=upload");
+      else router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change AI assistance.");
     } finally {

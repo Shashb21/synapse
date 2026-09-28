@@ -7,6 +7,7 @@ import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
 import { ManualStart } from "@/components/plan-cards";
+import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
@@ -116,14 +117,17 @@ export default async function HomePage({
     const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
-        {ai ? (
+        {/* Follows the client AI status, so flipping the workspace switch swaps Upload and Start at once. */}
+        <AiOnly
+          fallback={
+            <ManualStart
+              gapCount={workspace.review.length}
+              tacticCount={workspace.availableTactics.length}
+            />
+          }
+        >
           <IngestPanel sources={state.sources} demoFiles={demo} />
-        ) : (
-          <ManualStart
-            gapCount={workspace.review.length}
-            tacticCount={workspace.availableTactics.length}
-          />
-        )}
+        </AiOnly>
         {workspace.review.length > 0 ? (
           <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
             <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
