@@ -123,6 +123,23 @@ export function ProposalCard({
               Tactic {proposal.tactic_id}
             </Link>
           ) : null}
+          {proposal.status === "rejected" && mayIdeate ? (
+            <div>
+              <ActionDialog
+                endpoint="/api/plan"
+                payload={{ action: "restore_proposal", id: proposal.id }}
+                label="Restore"
+                title={`Restore ${proposal.name}`}
+                description="Puts the idea back to Proposed so you can edit, accept or reject it again. The earlier rejection stays on the record."
+                confirmLabel="Restore proposal"
+                rationaleLabel="Why restore it? (required)"
+                requireRationale
+                identity={identity}
+                variant="outline"
+                size="sm"
+              />
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
