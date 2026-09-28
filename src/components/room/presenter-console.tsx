@@ -25,7 +25,6 @@ import {
   stepSlide,
 } from "@/lib/room/slides";
 import type { RoomState } from "@/lib/room/store";
-import { ExportPackButton, type ExportPackData } from "./export-pack";
 import { keyStep } from "./keys";
 import { isTypingTarget } from "./present-frame";
 import { openRoomChannel, postRoom, type RoomMessage } from "./room-channel";
@@ -39,7 +38,6 @@ export type PresenterConsoleProps = {
   initialState: RoomState;
   initialNotes: Record<string, string>;
   breakouts: BreakoutSummary[];
-  exportPack?: ExportPackData;
 };
 
 export const AUDIENCE_WINDOW_NAME = "synapse-room-audience";
@@ -155,7 +153,6 @@ export function PresenterConsole({
   initialState,
   initialNotes,
   breakouts,
-  exportPack,
 }: PresenterConsoleProps) {
   const ai = useAiEnabled();
   const [slideId, setSlideId] = useState(slideById(initialState.slide_id)?.id ?? ROOM_SLIDES[0].id);
@@ -383,7 +380,6 @@ export function PresenterConsole({
         </nav>
         <SlideTimer />
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {exportPack ? <ExportPackButton data={exportPack} /> : null}
           <Button size="sm" variant="outline" onClick={openAudience}>
             <MonitorUp aria-hidden /> Open audience window
           </Button>

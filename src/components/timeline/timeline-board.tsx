@@ -491,7 +491,7 @@ function EmptyTimeline({
       <h2 className="text-[13px] font-medium text-foreground">No activities to plot yet</h2>
       <p className="mt-1 text-[12px] text-muted-foreground">
         {ai
-          ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Run the chain on the Pipeline page — upload and parse, extract gaps and tactics, map them, then prioritize — and rebuild here."
+          ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources on Upload, confirm the gaps and their tactics on Gaps, validate their bands on Prioritize, then build the timeline here."
           : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. AI is off: add gaps and tactics by hand, map them on Gaps, validate their bands on Prioritize, then lay out dates here or add an activity by hand."}
       </p>
       {unscheduled.length > 0 ? (

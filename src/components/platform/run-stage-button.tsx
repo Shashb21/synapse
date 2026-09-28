@@ -12,6 +12,8 @@ export type StageRunResponse = {
   ok?: boolean;
   code?: string;
   error?: string;
+  /** Owner only: where to connect a model when the run failed with no_llm. */
+  admin_href?: string;
   run_id?: string;
   summary?: string;
   mode?: "llm" | "deterministic";
@@ -84,7 +86,9 @@ function StageButton({
     });
     const json = (await res.json()) as StageRunResponse;
     setPending(false);
-    setResult(res.ok ? json : { error: json.error ?? "Stage run failed" });
+    setResult(
+      res.ok ? json : { code: json.code, error: json.error ?? "Stage run failed", admin_href: json.admin_href },
+    );
     onDone?.(json);
     if (res.ok) router.refresh();
   }
@@ -100,7 +104,17 @@ function StageButton({
         {label ?? `Run ${stage}`}
       </Button>
       {result?.error ? (
-        <p className="text-[11px] text-destructive">{result.error}</p>
+        <p className="text-[11px] text-destructive">
+          {result.error}
+          {result.admin_href ? (
+            <>
+              {" "}
+              <a href={result.admin_href} className="underline">
+                Open the control panel
+              </a>
+            </>
+          ) : null}
+        </p>
       ) : result?.summary ? (
         <p className="text-[11px] text-muted-foreground">
           {result.summary}

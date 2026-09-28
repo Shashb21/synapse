@@ -33,9 +33,9 @@ export function IngestPanel({
           Demo source files
         </h2>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Nothing is ingested until you do it. Ingest runs the stage pipeline: upload, parse, then
-          gap extraction, tactic extraction and mapping on your connected LLM. Without a connected
-          model it stops and says so.
+          Nothing is ingested until you do it. Ingesting a file reads it, pulls out its evidence gaps
+          and tactics and maps them, using the connected AI model. If no model is connected it stops
+          and says so.
         </p>
         <div className="grid gap-3">
           {DEMO_PACK.map((file) => {

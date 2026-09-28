@@ -19,9 +19,13 @@ export default async function SourcesPage() {
     <AppShell active="sources">
       {ai ? (
         <>
-          <PageIntro kicker="Deep link — ingest also lives on the plan" title="Sources">
-            First visit uses the stepper on the plan. After that, new files ingest on the Upload
-            place.
+          <PageIntro kicker="Upload and review sources" title="Sources">
+            Upload source files here or on the plan&apos;s{" "}
+            <Link href="/?place=upload" className="text-foreground">
+              Upload
+            </Link>{" "}
+            page; both do the same thing. Synapse reads each file, pulls out the evidence gaps and
+            tactics it contains, and you review them on Gaps.
           </PageIntro>
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </>

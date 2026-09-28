@@ -2,6 +2,7 @@ import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
 import { SessionPanel } from "@/components/platform/session-panel";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
+import { AiStatusProvider } from "@/components/platform/ai-status";
 import { aiSwitch, type AiSwitch } from "@/modules/kernel/ai-switch";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
@@ -68,7 +69,8 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     updated_at: null,
     rationale: null,
   }));
-  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
+  // Platform configuration follows the master switch, not the owner's open workspace.
+  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage, ai.enabled)));
   // The owner holds every platform capability, whatever their plan role.
   const owner = (await ownerAccess()).owner;
   const may = (capability: Parameters<typeof can>[1]) => owner || can(identity.role, capability);
@@ -142,6 +144,8 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
           capabilities={capabilitiesOf(identity.role)}
         />
 
+        {/* Providers and routes follow the master switch, not the owner's open workspace. */}
+        <AiStatusProvider enabled={ai.enabled} offBy={ai.enabled ? null : "platform"}>
         <ProviderPanel
           connections={connections.map((connection) => ({
               provider_id: connection.provider_id,
@@ -176,6 +180,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
           canRoute={may("configure_routing")}
           canActivate={may("activate_module")}
         />
+        </AiStatusProvider>
       </div>
     </>
   );

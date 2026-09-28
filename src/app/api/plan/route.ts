@@ -22,6 +22,7 @@ import {
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { loadState } from "@/lib/iegp/store";
 import { TACTIC_TYPES } from "@/lib/iegp/enums";
+import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
 import {
   addTimelineActivity,
   createTimelineActivity,
@@ -61,7 +62,7 @@ const bandSchema = z.enum(["high", "medium", "low"]);
 const decisionSchema = z.enum(["accept", "reject"]);
 const planStatusSchema = z.enum(["draft", "final"]);
 const laneSchema = z.enum(["high", "medium", "low", "unprioritized", "addressed"]);
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date (YYYY-MM-DD)");
 const tacticTypeSchema = z.enum(TACTIC_TYPES);
 
 /** An optional YYYY-MM-DD: absent stays undefined, empty is null. */
@@ -71,31 +72,6 @@ function optionalDate(value: unknown, name: string): string | null | undefined {
   return field(dateSchema, value, name);
 }
 
-/** Rejects an unknown value with the field name, so the dialog can show why. */
-function field<T>(schema: z.ZodType<T>, value: unknown, name: string): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
-    throw new Error(`${name}: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
-  }
-  return parsed.data;
-}
-
-/** An optional 0–100 score: empty or absent is "not given". */
-function optionalScore(value: unknown, name: string): number | undefined {
-  if (value === undefined || value === null || String(value).trim() === "") return undefined;
-  const score = Number(value);
-  if (!Number.isFinite(score) || score < 0 || score > 100) throw new Error(`${name}: expected a number from 0 to 100`);
-  return score;
-}
-
-/** Months for an idea's timing: empty is null (left for S10), absent is unchanged. */
-function optionalMonths(value: unknown, name: string): number | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || String(value).trim() === "") return null;
-  const months = Number(value);
-  if (!Number.isFinite(months)) throw new Error(`${name}: expected a number of months`);
-  return months;
-}
 
 const PROPOSAL_TEXT_FIELDS = [
   "name",
@@ -157,21 +133,27 @@ export async function POST(request: Request) {
         assertCan(identity.role, "prioritize");
         const xAxis = String(body.x_axis ?? "").trim() || undefined;
         const yAxis = String(body.y_axis ?? "").trim() || undefined;
+        // Errors name a score by its axis ("Payer / HTA relevance score …"), not the request field.
+        const catalog = await loadAxes();
+        const scoreLabel = (axisId: string | undefined, fallback: string) => {
+          const axis = catalog.axes.find((candidate) => candidate.id === axisId);
+          return axis ? `${axis.label} score` : fallback;
+        };
         const axis_scores: Record<string, number> = {};
         if (body.axis_scores && typeof body.axis_scores === "object") {
           for (const [id, value] of Object.entries(body.axis_scores as Record<string, unknown>)) {
-            const score = optionalScore(value, id);
+            const score = optionalScore(value, scoreLabel(id, `${fieldLabel(id)} score`));
             if (score !== undefined) axis_scores[id] = score;
           }
         }
-        const xScore = optionalScore(body.x_score, "x_score");
-        const yScore = optionalScore(body.y_score, "y_score");
+        const xScore = optionalScore(body.x_score, scoreLabel(xAxis, fieldLabel("x_score")));
+        const yScore = optionalScore(body.y_score, scoreLabel(yAxis, fieldLabel("y_score")));
         if (xScore !== undefined) {
-          if (!xAxis) throw new Error("x_score needs x_axis");
+          if (!xAxis) throw new Error("Pick the horizontal axis before scoring it.");
           axis_scores[xAxis] = xScore;
         }
         if (yScore !== undefined) {
-          if (!yAxis) throw new Error("y_score needs y_axis");
+          if (!yAxis) throw new Error("Pick the vertical axis before scoring it.");
           axis_scores[yAxis] = yScore;
         }
         const placement = await setPlacement({

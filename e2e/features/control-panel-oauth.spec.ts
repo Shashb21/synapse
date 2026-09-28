@@ -104,14 +104,17 @@ test.describe("Control panel OAuth routing", () => {
     expect(started.authorize_url).toContain("code_challenge=");
   });
 
-  test("an unconnected agentic stage is blocked with a control-panel prompt", async ({ request }) => {
+  test("an unconnected agentic stage is blocked; the owner is pointed at /admin/control", async ({ request }) => {
     await controlAction(request, {
       action: "set_default_provider",
       provider_id: "xai-grok",
     });
     await seedParsed(request);
     const failed = await runStageExpectingError(request, "S2", { dry_run: true });
-    expect(failed.status).toBe(400);
-    expect(failed.error).toMatch(/control panel|\/control/i);
+    // 409 no_llm. The suite runs as the owner, so it gets the provider detail and
+    // the /admin/control link; a customer gets the plain text (tests/no-llm-message.test.ts).
+    expect(failed.status).toBe(409);
+    expect(failed.error).toMatch(/\/admin\/control/);
+    expect(failed.error).not.toMatch(/\(\/control\)/);
   });
 });

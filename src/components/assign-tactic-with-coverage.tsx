@@ -95,7 +95,7 @@ export function UnassignTactic({ gapId, tacticId }: { gapId: string; tacticId: s
       action="unassign_tactic"
       extra={{ gap_id: gapId, tactic_id: tacticId }}
       confirmLabel="Remove mapping"
-      description="Unmaps this tactic from this gap and records it as rejected, so a later S4 run does not map it again. You can map it again by hand."
+      description="Unmaps this tactic from this gap and records it as rejected, so a later AI mapping run does not map it again. You can map it again by hand."
     >
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Rationale (required)

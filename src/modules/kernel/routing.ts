@@ -108,7 +108,7 @@ export async function setRouteConfig(args: {
 }
 
 const CONNECT_PROMPT =
-  "Connect an LLM provider in the control panel (/control) — log in with Grok, Claude, or another provider — then retry.";
+  "Connect an LLM provider in the owner control panel (/admin/control) — log in with Grok, Claude, or another provider — then retry.";
 
 /**
  * Turns the control-panel configuration into the route a run will actually use.
@@ -200,7 +200,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
   return async ({ system, user, purpose, maxTokens }) => {
     if (!canPrompt(route)) {
       throw new NoRouteError(
-        `${route.provider_label} cannot serve ${purpose}: connect it in the control panel`,
+        `${route.provider_label} cannot serve ${purpose}: connect it in the owner control panel (/admin/control)`,
       );
     }
     const provider = findProvider(route.provider_id)!;
@@ -229,11 +229,14 @@ export function stageLabel(stage: StageId): string {
   return STAGES[stage].title;
 }
 
-/** UI preview when no provider is connected yet (does not throw). */
-export async function previewRoute(stage: StageId): Promise<ResolvedRoute> {
+/**
+ * UI preview when no provider is connected yet (does not throw). `ai` overrides
+ * the effective switch: the control panel passes the platform master switch.
+ */
+export async function previewRoute(stage: StageId, ai?: boolean): Promise<ResolvedRoute> {
   try {
-    // The preview says why nothing will be prompted when an admin has AI off.
-    if (!(await aiEnabled().catch(() => true))) throw new Error(AI_OFF_MESSAGE);
+    // The preview says why nothing will be prompted when AI is off.
+    if (!(ai ?? (await aiEnabled().catch(() => true)))) throw new Error(AI_OFF_MESSAGE);
     return await resolveRoute(stage);
   } catch (error) {
     let config = defaultConfig(stage);

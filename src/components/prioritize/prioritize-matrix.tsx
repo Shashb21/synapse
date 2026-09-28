@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { SettingChips } from "@/components/gap-settings-editor";
+import { placementGapError, scoreError } from "@/components/prioritize/score-input";
 import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, type Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
@@ -391,6 +392,7 @@ function GapDetail({
                 typeof gap.axis_scores?.[yAxis.id] === "number" ? String(gap.axis_scores[yAxis.id]) : "",
               placeholder: "0–100",
               hint: `0 = ${yAxis.low_label}, 100 = ${yAxis.high_label}. Leave empty to keep it unscored.`,
+              validate: (value) => scoreError(yAxis.label, value),
             },
             {
               name: "x_score",
@@ -399,6 +401,7 @@ function GapDetail({
                 typeof gap.axis_scores?.[xAxis.id] === "number" ? String(gap.axis_scores[xAxis.id]) : "",
               placeholder: "0–100",
               hint: `0 = ${xAxis.low_label}, 100 = ${xAxis.high_label}. Leave empty to keep it unscored.`,
+              validate: (value) => scoreError(xAxis.label, value),
             },
             {
               name: "band",
@@ -422,6 +425,13 @@ function GapDetail({
               ],
             },
           ]}
+          validateForm={(values) =>
+            placementGapError({
+              x: { label: xAxis.label, typed: values.x_score ?? "", saved: gap.axis_scores?.[xAxis.id] },
+              y: { label: yAxis.label, typed: values.y_score ?? "", saved: gap.axis_scores?.[yAxis.id] },
+              band: values.band ?? "",
+            })
+          }
           label={point ? "Edit scores" : "Place by hand"}
           title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
           description="Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."

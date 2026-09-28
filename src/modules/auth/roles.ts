@@ -19,7 +19,7 @@ export const ROLE_SUMMARIES: Record<Role, string> = {
   medical_affairs: "Owns the plan: ingest, validate, prioritize, ideate, save the IEGP as final.",
   contributor: "Other functions: ingest, propose, comment and edit with rationale; cannot save final.",
   operator: "Platform: routing, provider connections, module versions, plus everything a lead can do.",
-  viewer: "Read-only across the plan. Can still route their own API calls in the control panel.",
+  viewer: "Read-only across the plan.",
 };
 
 export const CAPABILITIES = [

@@ -24,6 +24,8 @@ import {
   CATCH_UP_REASON_LABELS,
   CATCH_UP_REASONS,
   CATCH_UP_TACTIC_STATUSES,
+  CREATE_TACTIC_STATUSES,
+  type CreateTacticStatus,
   COVERAGE_DIMENSIONS,
   DIMENSION_VALUES,
   EVIDENCE_DOMAINS,
@@ -1507,17 +1509,47 @@ type LibraryTacticDraft = {
   data_source?: string;
   study_design?: string;
   source_quote?: string;
+  /** YYYY-MM or YYYY-MM-DD, or blank. They feed the timeline. */
+  start_date?: string | null;
+  evidence_available?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
   audit_action: string;
   note?: string;
 };
 
+const TACTIC_DATE_LABELS = { start_date: "Start date", evidence_available: "Evidence available" } as const;
+
+/** A tactic date as stored: YYYY-MM or YYYY-MM-DD, or null when blank. */
+export function optionalTacticDate(
+  field: keyof typeof TACTIC_DATE_LABELS,
+  value: string | null | undefined,
+): string | null {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return null;
+  if (!/^\d{4}-\d{2}(-\d{2})?$/.test(trimmed)) {
+    throw new Error(`${TACTIC_DATE_LABELS[field]} must be a date (YYYY-MM-DD) or blank.`);
+  }
+  return trimmed;
+}
+
+/** A blank status keeps the default, proposed. Anything else must be a known creatable status. */
+export function createTacticStatus(value: string | null | undefined): CreateTacticStatus {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "proposed";
+  if (!(CREATE_TACTIC_STATUSES as readonly string[]).includes(trimmed)) {
+    throw new Error("Status must be Proposed, Planned, Ongoing or Completed.");
+  }
+  return trimmed as CreateTacticStatus;
+}
+
 async function insertLibraryTactic(args: LibraryTacticDraft) {
   const state = await loadState();
   if (!args.name.trim()) throw new Error("Tactic name is required.");
   if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
   if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
+  const start_date = optionalTacticDate("start_date", args.start_date);
+  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
   const id = nextId("TAC", state.tactics.map((x) => x.id));
   const reasonNote = args.note?.trim() || null;
   await db().insert(t.tactics).values({
@@ -1538,8 +1570,8 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
-    start_date: null,
-    evidence_available: null,
+    start_date,
+    evidence_available,
     owner: args.owner || args.actor_name,
     function: args.function || "evidence_lead",
     budget: null,
@@ -1573,9 +1605,17 @@ export async function createProposedTactic(args: {
   function: ActorFunction;
   residual_ids: string[];
   gap_id?: string;
+  /**
+   * Proposed (the default) is an idea and does not count toward addressing.
+   * Planned, ongoing and completed enter an existing real study as it stands.
+   */
+  status?: string;
+  start_date?: string | null;
+  evidence_available?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
+  const status = createTacticStatus(args.status);
   const id = await insertLibraryTactic({
     name: args.name,
     type: args.type,
@@ -1591,11 +1631,13 @@ export async function createProposedTactic(args: {
     owner: args.owner,
     function: args.function,
     residual_ids: args.residual_ids,
-    status: "proposed",
-    lifecycle_stage: "proposed",
+    status,
+    lifecycle_stage: status === "proposed" ? "proposed" : "recorded",
+    start_date: args.start_date,
+    evidence_available: args.evidence_available,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
-    audit_action: "create_proposed",
+    audit_action: status === "proposed" ? "create_proposed" : "create",
   });
   if (args.gap_id) {
     await assignTacticToGap({
