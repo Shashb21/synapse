@@ -87,16 +87,26 @@ through the same domain code.
 
 - **LLM routing** — `src/modules/llm/`. Five OAuth providers: xAI Grok (default
   route), Anthropic Claude (one-click alternate), OpenAI, Google Gemini,
-  OpenRouter. There is no API-key path for an end user. Operators set OAuth
-  client ids in env (see `docs/deployment-live.md`); users log in per provider on
-  `/control`. `deterministic-local` is
-  the offline route: agentic stages fall back to their local proposer, critic and
-  judge, so the pipeline is end-to-end before anyone logs in.
-- **Identity and roles** — `src/modules/auth/`. OAuth sign-in (Google, Microsoft
-  Entra ID, GitHub) when configured; otherwise demo mode, where the typed-name
-  gate the app already uses is the actor. Roles: Medical Affairs (primary),
-  contributing function, platform operator, viewer. Control-panel routing is open
-  to every role by product decision; saving the IEGP as final is not.
+  OpenRouter, plus optional server-side API keys (`XAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). There is no API-key path for an end
+  user. The owner logs in per provider and sets per-stage routing on
+  `/admin/control` (see `docs/deployment-live.md`). With no model connected an
+  agentic stage fails with a clear `no_llm` error; there is no offline rule
+  fallback (the removed `deterministic-local` route id is stripped from stored
+  routing). S1 parse is an LLM stage too: every file type is parsed by the model
+  routed to it.
+- **AI switch** — `src/modules/kernel/ai-switch.ts` and
+  `src/modules/workspaces/ai-setting.ts`. AI runs only when the owner's master
+  switch (`/admin/control`) and the workspace's own AI assistance setting (its
+  owner changes it) are both on. With AI off every entry point refuses and the UI
+  shows only the hand-entry paths.
+- **Identity and roles** — `src/modules/auth/`. Customers sign in with SSO
+  (Google, Microsoft Entra ID, GitHub) and need a seat (`customers.ts`,
+  `/admin/customers`); staff use email and password accounts (`accounts.ts`,
+  `npm run create-admin`, `/admin/users`). There is no self sign-up. Roles:
+  Medical Affairs (primary), contributing function, platform operator, viewer.
+  Routing and the owner console are owner only; saving the IEGP as final is
+  Medical Affairs only.
 - **Rationale on every edit** — `recordEdit` refuses an empty rationale, stores
   before/after, and files the same rationale as a hillclimb signal for the stage
   that owns the edit.
@@ -106,12 +116,13 @@ through the same domain code.
 | Route | Binds to |
 | --- | --- |
 | `/` (Upload → Gaps → Prioritize → Tactics) | existing domain flow, S5/S6 gates |
-| `/pipeline` | S0–S10: run a stage or a chain, see module, route and last run |
-| `/runs`, `/runs/[id]` | observability: stage health, run traces, edit rationales, signals, eval runs |
-| `/control` | control panel: session and role, per-provider OAuth login, per-stage routing, module versions |
-| `/matrix` | S8 matrix with configurable axes |
-| `/ideation` | S9 proposal review |
-| `/timeline` | S10 Gantt: the final IEGP, saved as final and exportable |
+| `/?place=plan` | S8 prioritization matrix with configurable axes (`/matrix` redirects here) |
+| `/ideation` | S9 proposal review and ideas added by hand |
+| `/timeline` | S10 timeline, built by hand or from a run: the final IEGP, saved as final and exportable as an image |
+| `/admin/pipeline` | owner only: run a stage S0–S10 or a chain, see module, route and last run |
+| `/admin/runs`, `/admin/runs/[id]` | owner only: stage health, run traces, edit rationales, signals, eval runs |
+| `/admin/control` | owner only: AI master switch, per-provider OAuth login, per-stage routing |
+| `/admin/modules` | owner only: module versions |
 
 ## Testing
 
@@ -143,9 +154,9 @@ through the same domain code.
 | `hillclimb-rationale.spec.ts` | Edit rationale → signal → next proposer brief |
 
 Specs seed their own state through the module API (`e2e/support/synapse.ts`) and assert on the run
-ledger rather than page text, so a click that lands before hydration cannot produce a false pass. With
-no OAuth client configured the specs assert that the trace says the route degraded to
-`deterministic-local`, rather than skipping the feature.
+ledger rather than page text, so a click that lands before hydration cannot produce a false pass. Under the
+test LLM stub (`SYNAPSE_TEST_STUB_LLM=1`, never set in production) the agentic stages use local
+proposers so the specs run without a live model.
 
 ## Adding or upgrading a module
 
