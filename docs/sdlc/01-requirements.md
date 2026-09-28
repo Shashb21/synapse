@@ -1,6 +1,8 @@
 # Requirements — Synapse IEGP
 
-Status: **v2, 26 Sep 2026** (replaces the v1 "Velmara Insights Engine" requirements, archived in [archive-01-requirements-insights-engine.md](archive-01-requirements-insights-engine.md)).
+Status: **v2.1, 28 Sep 2026** (replaces the v1 "Velmara Insights Engine" requirements, archived in [archive-01-requirements-insights-engine.md](archive-01-requirements-insights-engine.md)).
+
+v2.1 ([KAN-21](https://synapse21.atlassian.net/browse/KAN-21)) records owner decisions made since v2: customers sign in with SSO only and need a seat; staff use password accounts; there is no self sign-up (KAN-22, KAN-28); AI has a per-workspace setting under the owner's master switch; workspaces start blank, with demo data only by choice (KAN-26); the timeline is built by hand (KAN-25); the PowerPoint export is removed. New IDs: REQ-AUTH-008, REQ-AUTH-009, REQ-WS-008, REQ-AI-006, REQ-TIM-004.
 
 IDs are stable: tests, the audit and the [compliance check](requirements-compliance.md) cite them. Priorities are **Must**, **Should** and **Could**.
 
@@ -24,25 +26,28 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 
 | ID | Requirement | Pri |
 |---|---|---|
-| REQ-AUTH-001 | People sign in with SSO (Google, Microsoft, GitHub) on a `/login` page. | Must |
+| REQ-AUTH-001 | Customers sign in only with SSO (Google, Microsoft, GitHub) on `/login`, and only when their verified email holds a seat (REQ-AUTH-008). There is no self sign-up. | Must |
 | REQ-AUTH-002 | Demo sign-in exists only outside production and is never offered to customers. | Must |
 | REQ-AUTH-003 | A signed-in identity is trusted only when verified. It is keyed on a stable subject or a verified email, never on an unverified, user-editable claim. | Must |
 | REQ-AUTH-004 | Every customer page and API requires a valid, unexpired session. Signing out ends access immediately. | Must |
 | REQ-AUTH-005 | The name recorded on every edit, lock and audit row is the signed-in person's. It is never taken from the request body. | Must |
 | REQ-AUTH-006 | Roles govern what a person may do: Medical Affairs (owns the plan, can save final), Contributor (edits, cannot save final), Viewer (read and export only). Every mutating API enforces them server-side. | Must |
 | REQ-AUTH-007 | Secrets needed for security (the session/workspace signing secret) are required in production; the app refuses to start without them. | Must |
+| REQ-AUTH-008 | The owner records each customer in `/admin/customers` with the seats they bought and, optionally, their email domains, and assigns seats by email. Assignment never exceeds the seats sold, and an email holds a seat at one customer only. Unassigning a seat or deactivating the customer ends those people's sessions at once. | Must |
+| REQ-AUTH-009 | Email and password sign-in is only for the owner's own staff (admins and platform operators). The first admin is created with `npm run create-admin`; further staff accounts are managed in `/admin/users`. Customers never get a password. | Must |
 
 ## 2. Workspaces
 
 | ID | Requirement | Pri |
 |---|---|---|
 | REQ-WS-001 | Each workspace holds exactly one IEGP. Its data is isolated from every other workspace. | Must |
-| REQ-WS-002 | After sign-in a person with no workspace is prompted to create one. The workspace is saved and they land in its setup. | Must |
+| REQ-WS-002 | After sign-in a person with no workspace is told to ask their workspace owner for an invite, and can also create one. A created workspace is saved and they land in its setup. | Must |
 | REQ-WS-003 | A person's existing workspaces are listed, and they can open any of them. | Must |
 | REQ-WS-004 | A visible workspace tag switches between workspaces from anywhere in the app. | Must |
 | REQ-WS-005 | Workspaces are shared by invitation by email. The owner can rename the workspace and remove members. A removed member loses all access at once. | Must |
-| REQ-WS-006 | The data that existed before workspaces becomes the Default workspace, owned by the first person to sign in. | Must |
+| REQ-WS-006 | The data that existed before workspaces becomes the Default workspace, owned by the first staff member (password account, `OWNER_EMAILS`, or the development demo) to sign in. A customer's seat holder never claims it. | Must |
 | REQ-WS-007 | Workspace creation is rate-limited, and each person's number of workspaces is capped. | Should |
+| REQ-WS-008 | A new workspace starts blank (no asset, sources, gaps or tactics). Demo data (the Velmara example) is loaded only when chosen at creation, and such a workspace carries a Demo badge. The workspace owner can load the demo or reset to blank later; both replace everything in that workspace only. | Must |
 
 ## 3. Setup wizard and walkthrough
 
@@ -58,7 +63,7 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 | ID | Requirement | Pri |
 |---|---|---|
 | REQ-SRC-001 | Upload PDF, PPTX, DOCX, XLSX and text files (only while AI is on). | Must |
-| REQ-SRC-002 | Parsing is done by the chosen LLM. Text is extracted mechanically, then the model decides blocks, kinds and headings. LlamaParse is disabled. | Must |
+| REQ-SRC-002 | Parsing is done by the LLM routed to the parse stage, for every file type. Text is extracted mechanically, then the model decides blocks, kinds and headings. There is no separate parser service. | Must |
 | REQ-SRC-003 | Every block is a verbatim span of the source. Noise dropped by the model carries a reason. The stakeholder function is classified by the model, not guessed from the filename. | Must |
 | REQ-SRC-004 | A person can edit, split, merge, add, delete and restore blocks, and override the stakeholder function. Human blocks survive a re-parse. Edits that would orphan a cited quote are refused. | Must |
 | REQ-SRC-005 | Upload size and parse volume are capped. | Should |
@@ -90,12 +95,13 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 |---|---|---|
 | REQ-PRI-001 | There is one prioritization system. Open gaps sit on a two-axis matrix per treatment setting, and the band (High, Medium or Low) is the quadrant. The model suggests the scores; a person validates the band. | Must |
 | REQ-PRI-002 | A person can place, score and validate any gap by hand without an AI run. Drags and hand-set values survive re-runs. | Must |
-| REQ-PRI-003 | Every view, export and downstream stage (Tactics, Room, PPTX) uses the same validated band. | Must |
+| REQ-PRI-003 | Every view, export and downstream stage (Tactics, Room, timeline) uses the same validated band. | Must |
 | REQ-IDE-001 | The model proposes new tactics (S9) with full designs and timing for validated High gaps, with a critic and a judge. | Must |
 | REQ-IDE-002 | A person can add ideas by hand for any open gap, and edit any idea before accepting it. Edited or decided ideas are never replaced. | Must |
 | REQ-TIM-001 | The timeline (S10) lays activities out from human dates first, then designed dates, then model estimates. Dependencies are inferred by the model. Unvalidated gaps sit in a "Not yet prioritized" lane. | Must |
 | REQ-TIM-002 | A person can date, add, remove and restore activities, and set dependencies, lanes and reasons, all without AI. Human values survive rebuilds. | Must |
 | REQ-TIM-003 | The plan is saved as final only by Medical Affairs, and only when every activity is dated. Changes since the last save are flagged accurately. | Must |
+| REQ-TIM-004 | The timeline can be built entirely by hand: every prioritized gap is a group with its activities beneath it, and a person creates, dates, drags and sequences activities with no stage run and no model. A dependency that the dates break is shown as a warning. Viewers cannot change it. The timeline exports as an image; there is no PowerPoint export. | Must |
 
 ## 8. AI governance
 
@@ -104,8 +110,9 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 | REQ-AI-001 | Every judgement is made by an LLM, never by hard-coded rules (keywords, thresholds, similarity, defaults). | Must |
 | REQ-AI-002 | If no LLM is connected, an AI stage fails with a clear error. It never falls back to rules. | Must |
 | REQ-AI-003 | Incomplete or invalid model output is re-asked, then fails. Nothing is filled in by rule. | Must |
-| REQ-AI-004 | An admin can switch AI on or off with one click, with no reason required. With AI off:<br>• no model is called and no automatic AI step runs;<br>• AI controls are hidden;<br>• there is no upload or parsing, and the first screen is Add gaps and Add tactics;<br>• everything else still works by hand. | Must |
+| REQ-AI-004 | The owner can switch AI on or off for every workspace (the master switch in `/admin/control`) with one click, with no reason required. With AI off:<br>• no model is called and no automatic AI step runs;<br>• AI controls are hidden;<br>• there is no upload or parsing, and the first screen is Add gaps and Add tactics;<br>• everything else still works by hand. | Must |
 | REQ-AI-005 | With AI **on**, every manual path is still available. A person can start by adding gaps and tactics by hand without ingesting anything. | Must |
+| REQ-AI-006 | Each workspace has its own AI assistance setting. Only the workspace owner changes it (members see it read only); the change is audited in that workspace and never affects another. AI runs only when both the master switch and the workspace setting are on, and the UI says which switch turned it off. | Must |
 
 ## 9. Manual control and audit
 
@@ -128,7 +135,7 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 
 | ID | Requirement | Pri |
 |---|---|---|
-| REQ-ADM-001 | A separate `/admin` console holds the AI switch, model routing and provider logins, the accuracy lab, pipeline, runs, evals, catalog, module versions and docs. It is reachable only by the owner (the operator role or `OWNER_EMAILS`). | Must |
+| REQ-ADM-001 | A separate `/admin` console holds the AI master switch, model routing and provider logins, customers and seats, staff users, the accuracy lab, pipeline, runs, evals, catalog, module versions and docs. It is reachable only by the owner (the operator role, an admin account or `OWNER_EMAILS`). Old top-level URLs (`/control`, `/pipeline`, `/runs`, …) redirect into it. | Must |
 | REQ-ADM-002 | The customer app never links to or shows owner surfaces. | Must |
 
 ## 12. User experience (Jira-inspired)
