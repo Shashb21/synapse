@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 /** Where the signed-in, workspace-selected browser state for the suite is saved. */
 export const STORAGE_STATE = "e2e/.auth/user.json";
@@ -69,4 +69,45 @@ export async function fillNameIfAsked(scope: Locator | Page, name: string): Prom
   await scope.getByRole("textbox").first().waitFor();
   const field = scope.getByRole("textbox", { name: /^name$/i });
   if (await field.count()) await field.first().fill(name);
+}
+
+export type FreshWorkspace = {
+  /** The workspace id. Read it inside a hook or test, once beforeAll has run. */
+  readonly id: string;
+};
+
+/**
+ * Gives the calling spec file (or describe block) its own new, blank
+ * workspace, so nothing another spec left behind leaks in and nothing this
+ * spec does leaks out. Call it at the top of a describe (or of the file):
+ *
+ *   const ws = freshWorkspace({ name: "S5", seed: seedMapped });
+ *
+ * beforeAll creates the workspace (a new schema; creating also selects it) and
+ * runs `seed` in it. beforeEach selects it again for the test's own `request`
+ * and for the browser `context`: every test starts from the suite's saved
+ * storage state, which points at the shared suite workspace. A retry re-runs
+ * beforeAll, so a retried serial block gets a new clean workspace too.
+ *
+ * Platform-wide settings (the AI master switch, model routes) are not per
+ * workspace; specs that change them still restore them in afterAll.
+ */
+export function freshWorkspace(
+  opts: { name?: string; seed?: (request: APIRequestContext) => Promise<unknown> } = {},
+): FreshWorkspace {
+  let workspace: WorkspaceSummary | null = null;
+  test.beforeAll(async ({ request }) => {
+    workspace = await createWorkspace(request, `E2E ${opts.name ?? "fresh"} ${Date.now().toString(36)}`);
+    await opts.seed?.(request);
+  });
+  test.beforeEach(async ({ request, context }) => {
+    await selectWorkspace(request, workspace!.id);
+    await selectWorkspace(context.request, workspace!.id);
+  });
+  return {
+    get id() {
+      if (!workspace) throw new Error("freshWorkspace: the workspace is created in beforeAll; read id inside a hook or test.");
+      return workspace.id;
+    },
+  };
 }
