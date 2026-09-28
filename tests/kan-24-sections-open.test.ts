@@ -39,7 +39,7 @@ describe("KAN-24: every section opens, and says what it waits on", () => {
     expect(html).not.toContain("aria-disabled");
     for (const id of ["gaps", "plan", "tactics"]) expect(html).toContain(`data-testid="nav-waiting-${id}"`);
     expect(html).not.toContain('data-testid="nav-waiting-upload"');
-    expect(html).toContain("Waiting on Upload: ingest a source first");
+    expect(html).toContain("Waiting on Upload: ingest a source or add a gap by hand");
   });
 
   it("drops the waiting marks once each step is done", () => {

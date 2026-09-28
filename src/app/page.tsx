@@ -6,7 +6,7 @@ import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
-import { ManualStart } from "@/components/plan-cards";
+import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
 import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
@@ -52,8 +52,9 @@ function PlaceIntro({
         title="Upload sources"
       >
         Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
-        them and computes each gap&apos;s status for you to confirm on Gaps. You can come back here to
-        add sources at any time.
+        them and computes each gap&apos;s status for you to confirm on Gaps. Or start by hand: add
+        gaps and tactics yourself, with or without a source. You can come back here to add sources
+        at any time.
       </PageIntro>
     );
   }
@@ -126,6 +127,10 @@ export default async function HomePage({
             />
           }
         >
+          <ManualStartAlongsideUpload
+            gapCount={workspace.review.length}
+            tacticCount={workspace.availableTactics.length}
+          />
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </AiOnly>
         {workspace.review.length > 0 ? (
