@@ -188,6 +188,7 @@ test("the customer app shows no owner or lab tools", async ({ page }) => {
     await expect(page.locator(`aside a[href="${href}"]`)).toHaveCount(0);
   }
   await expect(page.locator('aside a[href^="/accuracy"]')).toHaveCount(0);
+  await page.locator("aside").first().hover();
   const toggle = page.getByRole("group", { name: /prep or room mode/i }).first();
   await expect(toggle.getByRole("link", { name: "Room" })).toHaveAttribute("href", "/room");
 });
