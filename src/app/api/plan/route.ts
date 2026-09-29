@@ -11,7 +11,7 @@ import {
   validatePlacement,
 } from "@/modules/stages/s8-prioritization/module";
 import { loadAxes, saveScopeAxes } from "@/modules/stages/s8-prioritization/axes";
-import { setGapSettings } from "@/lib/iegp/store";
+import { setGapMetadata, setGapSettings } from "@/lib/iegp/store";
 import {
   addIdeationProposal,
   decideIdeationProposal,
@@ -188,6 +188,25 @@ export async function POST(request: Request) {
           actor_function: identity.actor.function,
         });
         return NextResponse.json({ ok: true, settings });
+      }
+      case "set_gap_metadata": {
+        assertCan(identity.role, "validate");
+        const metadata = await setGapMetadata({
+          gap_id: String(body.gap_id ?? ""),
+          // A metadata object, or the flat fields a dialog form posts (stakeholders comma-separated).
+          metadata:
+            body.metadata && typeof body.metadata === "object"
+              ? body.metadata
+              : {
+                  stakeholders: String(body.stakeholders ?? "").split(/[,\n]/),
+                  geography: body.geography,
+                  regional_nuances: body.regional_nuances,
+                  notes: body.notes,
+                },
+          actor_name: identity.actor.name,
+          actor_function: identity.actor.function,
+        });
+        return NextResponse.json({ ok: true, metadata });
       }
       case "decide_proposal": {
         assertCan(identity.role, "ideate");

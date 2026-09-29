@@ -18,6 +18,7 @@ import type {
   EvidenceGap,
   IegpState,
   Tactic,
+  GapMetadata,
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
 import { plannedSettings } from "./planning-context";
@@ -912,6 +913,7 @@ export type ReviewGapCard = {
   needs: ReviewNeedSnippet[];
   needs_review: boolean;
   settings: string[];
+  metadata: GapMetadata;
 };
 
 export type OpenGapCard = {
@@ -920,6 +922,7 @@ export type OpenGapCard = {
   statement: string;
   domain: EvidenceDomain;
   settings: string[];
+  metadata: GapMetadata;
   gap_status: GapStatus;
   computed_status: MappedGapStatus;
   suggested_status: GapStatus;
@@ -1128,6 +1131,7 @@ export function buildPlanWorkspace(state: IegpState): {
       needs: linkedNeeds,
       needs_review: coverages.some((c) => c.needs_review),
       settings: gap.settings ?? [],
+      metadata: gap.metadata,
     });
   }
   review.sort(compareReviewGapCards);
@@ -1147,6 +1151,7 @@ export function buildPlanWorkspace(state: IegpState): {
       statement: gap.statement,
       domain: gap.domain,
       settings: gap.settings ?? [],
+      metadata: gap.metadata,
       gap_status: shown,
       computed_status: computed,
       suggested_status: computed,

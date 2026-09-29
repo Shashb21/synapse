@@ -5,6 +5,7 @@ import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
+import { sessionContext } from "@/modules/auth/session";
 import { TacticsPlace } from "@/components/tactics-place";
 import { loadTacticIdeation } from "@/components/tactic-ideation/data";
 import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
@@ -153,6 +154,12 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
+    const session = await sessionContext();
+    const identity = {
+      signed_in: session.signed_in,
+      actor_name: session.actor.name,
+      actor_function: session.actor.function,
+    };
     // Each gap's priority on the matrix: the band, and whether a person validated it.
     const priorities = Object.fromEntries(
       (await listPlacements())
@@ -176,6 +183,7 @@ export default async function HomePage({
           initialFilter={gapFilter}
           settingOptions={settingOptions(state)}
           priorities={priorities}
+          identity={identity}
         />
         <SetAsideGaps gaps={state.gaps} />
       </>

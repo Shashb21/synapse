@@ -7,6 +7,8 @@ import { LockForm } from "@/components/lock-form";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
+import { GapMetadataDialog, GapMetadataView } from "@/components/gap-metadata";
+import type { ActionIdentity } from "@/components/platform/action-dialog";
 import {
   GAPS_TACTIC_HELPER,
   MapExistingTactic,
@@ -201,11 +203,14 @@ function GapDetailPane({
   card,
   availableTactics,
   settingOptions,
+  identity,
   inline = false,
 }: {
   card: ReviewGapCard;
   availableTactics: TacticLibraryItem[];
   settingOptions: string[];
+  /** Who is acting, for the details dialog; without it the details are read-only. */
+  identity?: ActionIdentity;
   /** Opened inside its table row: the row already shows the id and title. */
   inline?: boolean;
 }) {
@@ -254,6 +259,14 @@ function GapDetailPane({
           settings={card.settings}
           options={settingOptions}
         />
+      </div>
+      <div className="mt-4 grid gap-2">
+        <GapMetadataView metadata={card.metadata} />
+        {identity ? (
+          <div>
+            <GapMetadataDialog gapId={card.gap_id} gapName={card.gap_name} metadata={card.metadata} identity={identity} />
+          </div>
+        ) : null}
       </div>
       <div className="mt-4">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
@@ -376,6 +389,7 @@ export function GapsWorkbench({
   initialFilter,
   settingOptions = [],
   priorities = {},
+  identity,
 }: {
   cards: ReviewGapCard[];
   availableTactics: TacticLibraryItem[];
@@ -384,6 +398,7 @@ export function GapsWorkbench({
   settingOptions?: string[];
   /** Each gap's band on the Prioritization Matrix, when it has one. */
   priorities?: Record<string, GapPriority>;
+  identity?: ActionIdentity;
 }) {
   const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
   const [query, setQuery] = useState("");
@@ -603,7 +618,13 @@ export function GapsWorkbench({
                       {open ? (
                         <tr className="border-b border-border">
                           <td colSpan={7} className="bg-muted/30 px-3 py-3">
-                            <GapDetailPane card={card} availableTactics={availableTactics} settingOptions={settingOptions} inline />
+                            <GapDetailPane
+                              card={card}
+                              availableTactics={availableTactics}
+                              settingOptions={settingOptions}
+                              identity={identity}
+                              inline
+                            />
                           </td>
                         </tr>
                       ) : null}

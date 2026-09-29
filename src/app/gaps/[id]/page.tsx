@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GapMetadataDialog, GapMetadataView } from "@/components/gap-metadata";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
@@ -149,7 +150,11 @@ export default async function GapDetailPage({
               ]}
             />
           )}
+          {gap.retired ? null : (
+            <GapMetadataDialog gapId={gap.id} gapName={gap.name} metadata={gap.metadata} identity={identity} />
+          )}
         </div>
+        <GapMetadataView metadata={gap.metadata} className="mt-3 border-t border-border pt-3" />
       </div>
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
         {GAP_STATUS_DEFINITIONS[shown]}{" "}
