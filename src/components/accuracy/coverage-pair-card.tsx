@@ -52,7 +52,7 @@ export function CoveragePairCard({
   }
 
   return (
-    <article className="grid gap-3 border border-border bg-card/40 p-3">
+    <article className="grid gap-3 border border-border bg-card p-3 rounded-lg">
       <div className="grid gap-2 md:grid-cols-2">
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Gap</p>

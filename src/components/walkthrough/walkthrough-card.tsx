@@ -44,7 +44,7 @@ export function WalkthroughCard({
             {ai ? <Sparkles className="size-3" aria-hidden /> : <Hand className="size-3" aria-hidden />}
             Walkthrough · {step + 1} of {TOUR_STEPS.length} · {current.place}
           </p>
-          <h2 id="walkthrough-title" className="text-[14px] font-medium">
+          <h2 id="walkthrough-title" className="text-[13px] font-medium">
             {current.title}
           </h2>
         </div>

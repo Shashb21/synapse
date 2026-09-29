@@ -166,7 +166,7 @@ export function TimelineBoard({
 
   return (
     <div className="grid gap-4">
-      <section className="flex flex-wrap items-start justify-between gap-3 border border-border bg-card/40 p-3">
+      <section className="flex flex-wrap items-start justify-between gap-3 border border-border bg-card p-3 rounded-lg">
         <div className="min-w-0">
           <p className="text-[12px] text-foreground">
             {plan ? (
@@ -251,7 +251,7 @@ export function TimelineBoard({
 
       {view.conflicts.length > 0 ? (
         <section role="alert" className="grid gap-1 border border-destructive/50 bg-destructive/10 p-3">
-          <h2 className="flex items-center gap-1 text-[13px] font-medium text-destructive">
+          <h2 className="flex items-center gap-1 text-[12px] font-semibold text-destructive">
             <AlertTriangle className="size-4" /> {view.conflicts.length} broken dependenc
             {view.conflicts.length === 1 ? "y" : "ies"}
           </h2>
@@ -374,8 +374,8 @@ export function TimelineBoard({
       ) : null}
 
       {model.removed.length > 0 ? (
-        <section className="border border-border bg-card/40 p-3">
-          <h2 className="text-[13px] font-medium text-foreground">Removed by hand</h2>
+        <section className="border border-border bg-card p-3 rounded-lg">
+          <h2 className="text-[12px] font-semibold text-foreground">Removed by hand</h2>
           <ul className="mt-2 grid gap-2">
             {model.removed.map((row) => (
               <li key={row.activity_id} className="flex flex-wrap items-center justify-between gap-2">
@@ -601,8 +601,8 @@ function EmptyTimeline({
   canRun: boolean;
 }) {
   return (
-    <section className="border border-border bg-card/40 p-4">
-      <h2 className="text-[13px] font-medium text-foreground">No activities to plot yet</h2>
+    <section className="border border-border bg-card p-4 rounded-lg">
+      <h2 className="text-[12px] font-semibold text-foreground">No activities to plot yet</h2>
       <p className="mt-1 text-[12px] text-muted-foreground">
         {ai
           ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources on Upload, confirm the gaps and their tactics on Gaps, validate their bands on Prioritize, then build the timeline here."

@@ -33,10 +33,10 @@ export default async function RoadmapPage() {
       ) : (
       <ol className="grid gap-3">
         {items.map(({ tactic, item }) => (
-          <li key={tactic.id} className="border border-border bg-card p-4">
+          <li key={tactic.id} className="border border-border bg-card p-4 rounded-lg">
             <div className="flex flex-wrap items-center gap-2">
               <TacticBadge status={tactic.status} />
-              <Link href={`/tactics/${tactic.id}`} className="text-[14px] text-foreground">
+              <Link href={`/tactics/${tactic.id}`} className="text-[13px] text-foreground">
                 {tactic.name}
               </Link>
             </div>

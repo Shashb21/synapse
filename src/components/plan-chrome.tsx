@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
 import { useState } from "react";
 import {
   ChartGantt,
@@ -227,7 +228,7 @@ function NavButton({
       {!ready ? (
         <>
           <Hourglass
-            className={cn("size-3 shrink-0 text-[var(--unknown)]", reveal)}
+            className={cn("size-3 shrink-0 text-[var(--unknown-foreground)]", reveal)}
             aria-hidden
             data-testid={`nav-waiting-${item.id}`}
           />
@@ -382,9 +383,7 @@ export function PlanChrome({
             className="flex h-10 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[15px] no-underline"
             aria-label="Synapse IEGP"
           >
-            <span aria-hidden className="flex size-[22px] shrink-0 items-center justify-center rounded-[5px] bg-gradient-to-br from-indigo-600 to-violet-600 text-[10px] font-bold text-white shadow-sm">
-              S
-            </span>
+            <BrandMark />
             <span className="grid leading-tight opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">
               <span className="text-[12px] font-bold tracking-tight text-foreground">Synapse</span>
               <span className="text-[9.5px] text-muted-foreground">IEGP Workspace</span>

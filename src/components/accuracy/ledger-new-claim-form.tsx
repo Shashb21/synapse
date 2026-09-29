@@ -78,9 +78,9 @@ export function LedgerNewClaimForm({
   }
 
   return (
-    <section className="mb-6 grid gap-2 border border-border bg-card/40 p-3" aria-labelledby="new-claim">
+    <section className="mb-6 grid gap-2 border border-border bg-card p-3 rounded-lg" aria-labelledby="new-claim">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="new-claim" className="text-[13px] font-medium text-foreground">
+        <h2 id="new-claim" className="text-[12px] font-semibold text-foreground">
           {aiOn ? "New claim (manual entry)" : "Add gaps and tactics"}
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -106,7 +106,7 @@ export function LedgerNewClaimForm({
           here; every entry is a draft until you validate it below.
         </p>
       ) : null}
-      {message ? <p className="text-[11px] text-[var(--known)]">{message}</p> : null}
+      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
       {open ? (
         <form onSubmit={submit} className="grid gap-2" data-testid="new-claim-form">
           <fieldset className="flex flex-wrap gap-2">

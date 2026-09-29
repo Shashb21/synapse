@@ -136,7 +136,7 @@ export default async function AccuracyAuditPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
@@ -155,17 +155,17 @@ export default async function AccuracyAuditPage({
             Workspace · {active?.name ?? workspaceId} · {rows.length} event(s)
           </p>
           {planId && !plan ? (
-            <p className="mb-3 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+            <p className="mb-3 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
               Save-final plan {planId} was not found in this workspace.
             </p>
           ) : null}
           {plan ? (
             <section
-              className="mb-4 border border-border bg-card/40 p-3"
+              className="mb-4 border border-border bg-card p-3 rounded-lg"
               data-testid="gantt-audit-bundle"
               aria-labelledby="save-final-bundle"
             >
-              <h2 id="save-final-bundle" className="text-[13px] font-medium text-foreground">
+              <h2 id="save-final-bundle" className="text-[12px] font-semibold text-foreground">
                 Save-final Gantt snapshot
               </h2>
               <p className="mt-1 text-[12px] text-muted-foreground">
@@ -205,7 +205,7 @@ export default async function AccuracyAuditPage({
           ) : (
             <ul className="grid gap-2">
               {rows.slice(0, 80).map((row, index) => (
-                <li key={`${row.kind}-${row.at}-${index}`} className="border border-border bg-card/40 p-3">
+                <li key={`${row.kind}-${row.at}-${index}`} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="text-[12px] font-medium text-foreground">{row.title}</p>
                     <span className="font-mono text-[10px] text-muted-foreground">{row.at}</span>

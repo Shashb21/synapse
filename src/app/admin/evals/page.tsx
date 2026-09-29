@@ -56,12 +56,12 @@ export default async function EvalsPage() {
         engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))} (must be
         true). Computed addressed without override: {autoClose.length === 0 ? "none" : autoClose.map((g) => g.id).join(", ")}.
       </p>
-      <h2 className="mb-2 text-[13px] text-muted-foreground">Committed needs (S2 gap extraction)</h2>
+      <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Committed needs (S2 gap extraction)</h2>
       <div className="grid gap-2">
         {extracted.map((row) => {
           const pair = pairs.find((p) => p.extract_id === row.id);
           return (
-            <p key={row.id} className="border border-border bg-card p-3 text-[12px]">
+            <p key={row.id} className="border border-border bg-card p-3 text-[12px] rounded-lg">
               <span className="text-muted-foreground">{pair?.kind ?? "—"} · {row.source_id}</span>
               <br />
               {row.statement}
@@ -77,7 +77,7 @@ export default async function EvalsPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-border bg-card p-4">
+    <div className="border border-border bg-card p-4 rounded-lg">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg text-foreground">{value}</p>
     </div>

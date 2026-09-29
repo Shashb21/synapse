@@ -45,7 +45,7 @@ function MergedRow({ row, workspaceId }: { row: MergedClaimModel; workspaceId: s
   }
 
   return (
-    <li className="border border-border bg-card/40 p-3" data-testid={`merged-claim-${row.id}`}>
+    <li className="border border-border bg-card p-3 rounded-lg" data-testid={`merged-claim-${row.id}`}>
       <p className="text-[12px] text-foreground">{row.statement}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         {row.claim_type} {row.id} · merged into{" "}
@@ -89,7 +89,7 @@ export function LedgerMergedList({
   return (
     <section className="mt-8 grid gap-2" aria-labelledby="merged-section">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="merged-section" className="text-[15px] font-medium text-foreground">
+        <h2 id="merged-section" className="text-[13px] font-semibold text-foreground">
           Merged duplicates ({rows.length})
         </h2>
         <Button size="sm" variant="outline" onClick={() => setOpen(!open)}>

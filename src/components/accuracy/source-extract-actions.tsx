@@ -17,7 +17,7 @@ export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
   }
   return (
     <div
-      className="mb-3 border border-border bg-card/40 p-3"
+      className="mb-3 border border-border bg-card p-3 rounded-lg"
       data-testid="extract-oauth-gate"
       role="status"
     >

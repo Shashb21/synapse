@@ -41,6 +41,8 @@
   --color-card: var(--card);
   --color-known: var(--known);
   --color-unknown: var(--unknown);
+  --color-known-foreground: var(--known-foreground);
+  --color-unknown-foreground: var(--unknown-foreground);
   --color-opportunity: var(--opportunity);
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -82,6 +84,9 @@
   /* Gap status: addressed / partial / open-accent. */
   --known: #059669;
   --unknown: #d97706;
+  /* Text on light surfaces: the fills above are under 4.5:1 on white. */
+  --known-foreground: #047857;
+  --unknown-foreground: #b45309;
   --opportunity: #2563eb;
   --radius: 6px;
   --sidebar: #ffffff;
@@ -120,6 +125,8 @@
   --chart-5: #fb7185;
   --known: #34d399;
   --unknown: #fbbf24;
+  --known-foreground: #34d399;
+  --unknown-foreground: #fbbf24;
   --opportunity: #60a5fa;
   --sidebar: #12151b;
   --sidebar-foreground: #d1d5db;

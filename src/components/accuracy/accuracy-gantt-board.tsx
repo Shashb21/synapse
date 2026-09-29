@@ -268,7 +268,7 @@ export function AccuracyGanttBoard({
         />
       </label>
       {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
-      {message ? <p className="text-[11px] text-[var(--known)]">{message}</p> : null}
+      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
 
       {activities.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -352,13 +352,13 @@ export function AccuracyGanttBoard({
 
       {detail ? (
         <section
-          className="border border-foreground/40 bg-card p-4"
+          className="border border-foreground/40 bg-card p-4 rounded-lg"
           aria-labelledby="activity-detail-title"
           data-testid="gantt-activity-detail"
         >
           <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 id="activity-detail-title" className="text-[15px] font-medium text-foreground">
+              <h2 id="activity-detail-title" className="text-[13px] font-semibold text-foreground">
                 {detail.tactic?.statement ?? detail.activity.tactic_id}
               </h2>
               <p className="text-[12px] text-muted-foreground">
@@ -436,7 +436,7 @@ export function AccuracyGanttBoard({
       ) : null}
       {unscheduled.length > 0 ? (
         <section className="grid gap-2" aria-labelledby="gantt-unscheduled" data-testid="gantt-unscheduled">
-          <h2 id="gantt-unscheduled" className="text-[13px] font-medium text-foreground">
+          <h2 id="gantt-unscheduled" className="text-[12px] font-semibold text-foreground">
             Validated tactics without a bar ({unscheduled.length})
           </h2>
           <p className="text-[11px] text-muted-foreground">
@@ -445,7 +445,7 @@ export function AccuracyGanttBoard({
           </p>
           <ul className="grid gap-2">
             {unscheduled.map((row) => (
-              <li key={row.id} className="border border-border bg-card/40 p-3">
+              <li key={row.id} className="border border-border bg-card p-3 rounded-lg">
                 <p className="mb-2 text-[12px] text-foreground">
                   {row.statement} <span className="text-muted-foreground">{row.id}</span>
                 </p>

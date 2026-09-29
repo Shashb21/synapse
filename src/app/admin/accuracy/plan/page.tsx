@@ -67,7 +67,7 @@ export default async function AccuracyPlanPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}

@@ -158,14 +158,14 @@ export default async function AccuracyLedgerPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
         <section className="grid gap-2" aria-labelledby="ledger-empty">
-          <h2 id="ledger-empty" className="text-[15px] font-medium text-foreground">
+          <h2 id="ledger-empty" className="text-[13px] font-semibold text-foreground">
             Choose a workspace
           </h2>
           <p className="text-[12px] text-muted-foreground">
@@ -193,7 +193,7 @@ export default async function AccuracyLedgerPage({
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
-            <h2 id="workspace-picker" className="text-[15px] font-medium text-foreground">
+            <h2 id="workspace-picker" className="text-[13px] font-semibold text-foreground">
               Workspace
               {activeWorkspace ? (
                 <span className="ml-2 text-[12px] font-normal text-muted-foreground">
@@ -249,7 +249,7 @@ export default async function AccuracyLedgerPage({
           <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
 
           <section className="mb-8 grid gap-2" aria-labelledby="gaps-section">
-            <h2 id="gaps-section" className="text-[15px] font-medium text-foreground">
+            <h2 id="gaps-section" className="text-[13px] font-semibold text-foreground">
               Gaps
             </h2>
             {gaps.length === 0 ? (
@@ -274,7 +274,7 @@ export default async function AccuracyLedgerPage({
           </section>
 
           <section className="grid gap-2" aria-labelledby="tactics-section">
-            <h2 id="tactics-section" className="text-[15px] font-medium text-foreground">
+            <h2 id="tactics-section" className="text-[13px] font-semibold text-foreground">
               Tactics
             </h2>
             {tactics.length === 0 ? (

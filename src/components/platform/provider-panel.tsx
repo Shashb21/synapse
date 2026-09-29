@@ -79,14 +79,14 @@ export function ProviderPanel({
     <section className="grid gap-3" aria-labelledby="providers">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="providers" className="text-[15px] font-medium text-foreground">
+          <h2 id="providers" className="text-[13px] font-semibold text-foreground">
             LLM providers
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">
             Every provider is reached by OAuth login. Synapse never asks you for an API key.
           </p>
           {ai ? null : (
-            <p className="mt-1 text-[12px] text-[var(--unknown)]" data-testid="providers-ai-off">
+            <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
               AI is off, so no provider is called. Connections are kept for when AI is turned back on.
             </p>
           )}
@@ -134,14 +134,14 @@ export function ProviderPanel({
             <article
               key={connection.provider_id}
               className={cn(
-                "grid gap-2 border bg-card/40 p-3",
+                "grid min-w-0 gap-2 border bg-card p-3 rounded-lg",
                 connected ? "border-[var(--known)]/40" : "border-border",
               )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="truncate text-[13px] font-medium text-foreground">{connection.label}</h3>
+                    <h3 className="truncate text-[12px] font-semibold text-foreground">{connection.label}</h3>
                     {connection.tier === "default" ? (
                       <Badge variant="outline" className="border-[var(--chart-1)]/50 text-[10px]">
                         Default route
@@ -157,7 +157,7 @@ export function ProviderPanel({
                 <Icon
                   className={cn(
                     "size-4 shrink-0",
-                    connected ? "text-[var(--known)]" : connection.status === "error" ? "text-destructive" : "text-muted-foreground",
+                    connected ? "text-[var(--known-foreground)]" : connection.status === "error" ? "text-destructive" : "text-muted-foreground",
                   )}
                   aria-hidden
                 />
@@ -175,7 +175,7 @@ export function ProviderPanel({
                 {connection.auth === "oauth" ? (
                   <div className="flex justify-between gap-2">
                     <dt>OAuth client</dt>
-                    <dd className={connection.configured ? "text-foreground" : "text-[var(--unknown)]"}>
+                    <dd className={connection.configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}>
                       {connection.configured ? "built-in (PKCE)" : "unavailable"}
                     </dd>
                   </div>
@@ -189,7 +189,7 @@ export function ProviderPanel({
               </dl>
 
               {connection.detail ? (
-                <p className="text-[11px] text-[var(--unknown)]">{connection.detail}</p>
+                <p className="break-all text-[11px] text-amber-800 dark:text-amber-300">{connection.detail}</p>
               ) : null}
 
               {connection.auth === "oauth" ? (

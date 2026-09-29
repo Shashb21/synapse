@@ -57,7 +57,7 @@ export default async function BreakoutRoomPage({
       </div>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[15px] font-medium text-foreground">
+        <h2 className="text-[13px] font-semibold text-foreground">
           Assigned gaps <span className="font-normal text-muted-foreground">({assigned.length})</span>
         </h2>
         <AddGapsDialog

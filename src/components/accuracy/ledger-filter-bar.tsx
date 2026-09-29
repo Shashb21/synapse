@@ -78,7 +78,7 @@ export function LedgerFilterBar({
 
   return (
     <section className="mb-6 grid gap-3" aria-labelledby="ledger-filters">
-      <h2 id="ledger-filters" className="text-[15px] font-medium text-foreground">
+      <h2 id="ledger-filters" className="text-[13px] font-semibold text-foreground">
         Filters
       </h2>
       <p className="text-[12px] text-muted-foreground">

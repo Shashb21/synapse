@@ -90,7 +90,7 @@ function Chain({
                 {status === "running" ? (
                   <Loader2 className="mt-0.5 size-3 animate-spin text-muted-foreground" aria-hidden />
                 ) : status === "ok" ? (
-                  <CircleCheck className="mt-0.5 size-3 text-[var(--known)]" aria-hidden />
+                  <CircleCheck className="mt-0.5 size-3 text-[var(--known-foreground)]" aria-hidden />
                 ) : status === "error" ? (
                   <TriangleAlert className="mt-0.5 size-3 text-destructive" aria-hidden />
                 ) : (

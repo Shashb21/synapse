@@ -207,7 +207,7 @@ export function PlanPriorityCard({
   }
 
   return (
-    <article className="border border-border bg-card/40 p-3">
+    <article className="border border-border bg-card p-3 rounded-lg">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-[13px] text-foreground">{statement}</p>
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">

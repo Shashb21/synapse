@@ -105,22 +105,22 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
   return (
     <>
       {params.connected ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card/40 p-2 text-[12px] text-foreground">
+        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
           {params.connected} is connected.
         </p>
       ) : null}
       {params.connect_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           Connection failed: {params.connect_error}
         </p>
       ) : null}
       {params.signed_in ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card/40 p-2 text-[12px] text-foreground">
+        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
           Signed in as {params.signed_in}.
         </p>
       ) : null}
       {params.sign_in_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           Sign-in failed: {params.sign_in_error}
         </p>
       ) : null}

@@ -147,7 +147,7 @@ function AccuracyChromeInner({
       <aside className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
         <Link
           href="/admin/accuracy"
-          className="mb-1 hidden px-2 text-[13px] font-medium text-sidebar-foreground no-underline md:block"
+          className="mb-1 hidden px-2 text-[12px] font-semibold text-sidebar-foreground no-underline md:block"
         >
           Accuracy lab
         </Link>
@@ -217,7 +217,7 @@ function AccuracyChromeInner({
               </div>
             </SheetContent>
           </Sheet>
-          <p className="text-[13px] font-medium text-foreground">{current}</p>
+          <p className="text-[12px] font-semibold text-foreground">{current}</p>
           {planStatus ? (
             <span
               className="ml-auto text-[11px] text-muted-foreground"

@@ -52,8 +52,8 @@ export function SeedFromGoldForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card/40 p-3">
-      <h3 className="text-[13px] font-medium text-foreground">Seed from BeOne reference gold</h3>
+    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card p-3 rounded-lg">
+      <h3 className="text-[12px] font-semibold text-foreground">Seed from BeOne reference gold</h3>
       <p className="text-[12px] text-muted-foreground">
         {aiOn
           ? "Creates a workspace, loads gold gap/tactic statements, and has the parse route’s LLM parse the reference source when present."

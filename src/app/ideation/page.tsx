@@ -149,7 +149,7 @@ export default async function IdeationPage() {
         </div>
 
         {withoutProposal.length > 0 ? (
-          <section className="grid gap-2 rounded-md border border-[color:var(--unknown)]/40 bg-card/40 p-3">
+          <section className="grid gap-2 rounded-md border border-[color:var(--unknown)]/40 bg-card p-3">
             <h2 className="text-[13px] text-foreground">
               Prioritized gaps with no proposal ({withoutProposal.length})
             </h2>
@@ -160,7 +160,7 @@ export default async function IdeationPage() {
             </p>
             <ul className="flex flex-wrap gap-2" data-testid="ideation-without-proposal">
               {withoutProposal.map((gap) => (
-                <li key={gap.gap_id} className="rounded-md border border-border bg-background p-2">
+                <li key={gap.gap_id} className="rounded-md border border-border bg-card p-2">
                   <Link
                     href={`/gaps/${gap.gap_id}`}
                     className="text-[12px] text-foreground no-underline hover:underline"
@@ -193,7 +193,7 @@ export default async function IdeationPage() {
         ) : null}
 
         {groups.length === 0 ? (
-          <section className="grid gap-3 rounded-md border border-border bg-card/40 p-4">
+          <section className="grid gap-3 rounded-md border border-border bg-card p-4">
             <h2 className="text-[13px] text-foreground">No proposal to review yet</h2>
             <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
               {ai ? "Ideas are generated" : "Ideas are added"} for open gaps whose priority band (High,

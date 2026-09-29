@@ -44,7 +44,7 @@ export default async function GapsPage() {
             <Link
               key={g.id}
               href={`/gaps/${g.id}`}
-              className="border border-border bg-card p-4 no-underline"
+              className="border border-border bg-card p-4 no-underline rounded-lg"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <GapBadge status={displayedGapStatus(g)} />

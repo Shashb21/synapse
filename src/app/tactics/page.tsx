@@ -46,7 +46,7 @@ export default async function TacticsPage() {
       {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
       {ai || rejected.length > 0 ? (
       <section className="mt-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">Rejected by the AI ({pending.length})</h2>
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Rejected by the AI ({pending.length})</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
           Tactic candidates the AI rejected while extracting tactics. If a real study was dropped, promote it: it is
           recorded by hand with its source quote, and can be mapped onto a gap at once.
@@ -58,7 +58,7 @@ export default async function TacticsPage() {
             {pending.map((row) => {
               const source = state.sources.find((s) => s.id === row.source_id);
               return (
-                <article key={row.id} className="border border-border bg-card/40 p-4">
+                <article key={row.id} className="border border-border bg-card p-4 rounded-lg">
                   <p className="text-[13px] text-foreground">{row.name}</p>
                   <p className="mt-1 text-[12px] text-foreground">{row.evidence_question}</p>
                   <p className="mt-1 text-[12px] text-muted-foreground">

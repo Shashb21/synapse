@@ -153,9 +153,9 @@ export function MissFlagInbox({
         </div>
       </div>
 
-      <article className="border border-border bg-card/40 p-4" aria-labelledby="miss-flag-title">
+      <article className="border border-border bg-card p-4 rounded-lg" aria-labelledby="miss-flag-title">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <h2 id="miss-flag-title" className="text-[15px] font-medium text-foreground">
+          <h2 id="miss-flag-title" className="text-[13px] font-semibold text-foreground">
             Miss flag
           </h2>
           <Badge variant="outline" className="text-[11px]">

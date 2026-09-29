@@ -25,7 +25,7 @@ export default async function WorkspacesPage({
   return (
     <WorkspacesFrame person={{ name: mine.session.actor.name, email: mine.session.email }}>
       <div className="mb-6">
-        <h1 className="text-lg font-medium text-foreground">Workspaces</h1>
+        <h1 className="text-base font-bold tracking-tight text-foreground">Workspaces</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           Each workspace holds one plan — its sources, gaps, tactics and timeline — shared with the people you invite.
         </p>

@@ -24,9 +24,9 @@ function statusLabel(status: string, parked: boolean): string {
 
 function statusClass(status: string, parked: boolean): string {
   if (parked) return "text-muted-foreground";
-  if (status === "addressed") return "text-[var(--known)]";
+  if (status === "addressed") return "text-[var(--known-foreground)]";
   if (status === "partial") return "text-[var(--opportunity)]";
-  return "text-[var(--unknown)]";
+  return "text-[var(--unknown-foreground)]";
 }
 
 export function WorkshopStage({
@@ -278,7 +278,7 @@ export function WorkshopStage({
             value={tagLabel}
             onChange={(event) => setTagLabel(event.target.value)}
             placeholder="New facilitator board"
-            className="min-w-56 border border-border bg-transparent px-3 py-2 text-[14px]"
+            className="min-w-56 border border-border bg-transparent px-3 py-2 text-[13px]"
             aria-label="New facilitator tag"
           />
           <button
@@ -333,7 +333,7 @@ export function WorkshopStage({
                 <button
                   type="button"
                   onClick={() => openMenu(gap)}
-                  className="w-full border border-border bg-card/30 px-5 py-6 text-left hover:border-foreground"
+                  className="w-full border border-border bg-card px-5 py-6 text-left hover:border-foreground rounded-lg"
                 >
                   <p className="text-2xl leading-snug sm:text-3xl">{gap.statement}</p>
                   <p className="mt-3 flex flex-wrap gap-4 text-[13px]">
@@ -359,14 +359,14 @@ export function WorkshopStage({
           aria-modal="true"
           aria-labelledby="workshop-gap-title"
         >
-          <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto border border-border bg-background p-6 sm:p-8">
+          <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto border border-border bg-card p-6 sm:p-8 rounded-lg">
             <p className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
               Adapt · rationale required
             </p>
             <h3 id="workshop-gap-title" className="mt-2 text-3xl leading-snug">
               {selectedView.statement}
             </h3>
-            <p className={`mt-2 text-[14px] ${statusClass(selectedView.coverage_status, selectedView.parked)}`}>
+            <p className={`mt-2 text-[13px] ${statusClass(selectedView.coverage_status, selectedView.parked)}`}>
               {statusLabel(selectedView.coverage_status, selectedView.parked)}
               {selectedView.priority ? ` · ${selectedView.priority}` : ""}
             </p>
@@ -400,7 +400,7 @@ export function WorkshopStage({
               <label className="mt-5 grid gap-1 text-[13px] text-muted-foreground">
                 Move to board
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[14px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
                   value={
                     snapshot.payload.facilitator_tags.assignments[selected.id] ?? UNASSIGNED_BOARD_ID
                   }
@@ -427,7 +427,7 @@ export function WorkshopStage({
               <label className="mt-5 grid gap-1 text-[13px] text-muted-foreground">
                 Tactic in this freeze
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[14px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
                   value={tacticId}
                   onChange={(event) => setTacticId(event.target.value)}
                 >
@@ -445,7 +445,7 @@ export function WorkshopStage({
               <label className="mt-4 grid gap-1 text-[13px] text-muted-foreground">
                 Coverage overall
                 <select
-                  className="border border-border bg-background px-3 py-2 text-[14px] text-foreground"
+                  className="border border-border bg-background px-3 py-2 text-[13px] text-foreground"
                   value={overall}
                   onChange={(event) => setOverall(event.target.value as CoverageOverallWrite)}
                 >

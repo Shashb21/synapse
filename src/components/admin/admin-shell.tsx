@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "@/components/brand-mark";
 import { ADMIN_SECTIONS, adminSectionFor } from "@/components/admin/admin-nav";
 
 /**
@@ -23,16 +24,17 @@ export function AdminShell({
   const active = adminSectionFor(usePathname() ?? "/admin");
   return (
     <div className="flex min-h-full flex-1 flex-col" data-testid="admin-shell">
-      <header className="border-b border-amber-500/30 border-t-2 border-t-amber-500 bg-card/60">
+      <header className="border-b border-amber-500/30 border-t-2 border-t-amber-500 bg-card">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-2">
           <Link
             href="/admin"
             className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground no-underline"
           >
-            <ShieldCheck className="size-4 text-amber-500" aria-hidden />
+            <BrandMark />
+            <ShieldCheck className="size-4 text-amber-600 dark:text-amber-400" aria-hidden />
             Synapse Admin
           </Link>
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-500">
+          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800 dark:text-amber-300">
             Owner only
           </span>
           <p className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">

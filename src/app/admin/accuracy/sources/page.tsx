@@ -105,7 +105,7 @@ export default async function AccuracySourcesPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
@@ -125,7 +125,7 @@ export default async function AccuracySourcesPage({
           </p>
           {!aiOn ? (
             <div
-              className="mb-3 grid gap-1 border border-border bg-card/40 p-3"
+              className="mb-3 grid gap-1 border border-border bg-card p-3 rounded-lg"
               role="status"
               data-testid="sources-ai-off"
             >
@@ -146,7 +146,7 @@ export default async function AccuracySourcesPage({
           {extractGate ? <ExtractOauthGateBanner gate={extractGate} /> : null}
           {aiOn ? <SourceUploadForm workspaceId={workspaceId} /> : null}
           {aiOn ? (
-            <details className="mb-3 border border-border bg-card/40 p-3">
+            <details className="mb-3 border border-border bg-card p-3 rounded-lg">
               <summary className="cursor-pointer text-[12px] text-foreground">
                 Type or paste a source by hand (no AI)
               </summary>
@@ -189,9 +189,9 @@ export default async function AccuracySourcesPage({
           ) : (
             <ul className="grid gap-2">
               {sources.map((source) => (
-                <li key={source.id} className="border border-border bg-card/40 p-3">
+                <li key={source.id} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-[13px] font-medium text-foreground">{source.filename}</p>
+                    <p className="text-[12px] font-semibold text-foreground">{source.filename}</p>
                     <span className="text-[11px] text-muted-foreground">{source.doc_role}</span>
                   </div>
                   <p className="mt-1 text-[11px] text-muted-foreground">

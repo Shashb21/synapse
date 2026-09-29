@@ -20,7 +20,7 @@ export default async function CatalogPage() {
       </PageIntro>
 
       <section className="mb-8 grid gap-2" aria-labelledby="modules">
-        <h2 id="modules" className="text-[15px] font-medium text-foreground">
+        <h2 id="modules" className="text-[13px] font-semibold text-foreground">
           Modules ({all.length})
         </h2>
         <div className="overflow-x-auto">
@@ -56,7 +56,7 @@ export default async function CatalogPage() {
       </section>
 
       <section className="grid gap-2" aria-labelledby="prompts">
-        <h2 id="prompts" className="text-[15px] font-medium text-foreground">
+        <h2 id="prompts" className="text-[13px] font-semibold text-foreground">
           Prompt variants
         </h2>
         <p className="text-[11px] text-muted-foreground">
@@ -64,7 +64,7 @@ export default async function CatalogPage() {
         </p>
         <ul className="grid gap-2">
           {promptVersionsFor(HILLCLIMB_STAGES[0]!).map((version) => (
-            <li key={version} className="border border-border bg-card/40 p-2">
+            <li key={version} className="border border-border bg-card p-2 rounded-lg">
               <p className="text-[12px] text-foreground">{version}</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {promptVariantInstruction(version) || "The baseline prompt, unchanged."}

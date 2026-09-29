@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BrandLockup } from "@/components/brand-mark";
 import { SignOutButton } from "./sign-out-button";
 
 /** Page frame for choosing and managing workspaces (outside any one workspace). */
@@ -12,9 +13,9 @@ export function WorkspacesFrame({
 }) {
   return (
     <div className="flex min-h-dvh flex-col bg-background">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5 sm:px-6">
-        <Link href="/workspaces" className="text-[13px] font-medium text-foreground no-underline">
-          Synapse IEGP
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2 sm:px-6">
+        <Link href="/workspaces" className="no-underline" aria-label="Synapse IEGP">
+          <BrandLockup />
         </Link>
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
           <span data-testid="signed-in-as">

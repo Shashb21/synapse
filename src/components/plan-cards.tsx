@@ -288,8 +288,8 @@ export function ManualStart({ gapCount, tacticCount }: { gapCount: number; tacti
   return (
     <section aria-labelledby="manual-start" className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="border border-border bg-card/40 p-4">
-          <h2 id="manual-start" className="text-[15px] font-medium text-foreground">
+        <div className="border border-border bg-card p-4 rounded-lg">
+          <h2 id="manual-start" className="text-[13px] font-semibold text-foreground">
             Gaps
           </h2>
           <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
@@ -298,8 +298,8 @@ export function ManualStart({ gapCount, tacticCount }: { gapCount: number; tacti
           </p>
           <CreateGapButton label="Add gaps" variant="default" />
         </div>
-        <div className="border border-border bg-card/40 p-4">
-          <h2 className="text-[15px] font-medium text-foreground">Tactics</h2>
+        <div className="border border-border bg-card p-4 rounded-lg">
+          <h2 className="text-[13px] font-semibold text-foreground">Tactics</h2>
           <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
             Record the studies and programmes you already have.{" "}
             {tacticCount > 0 ? `${tacticCount} in the library.` : "None yet."}
@@ -332,10 +332,10 @@ export function ManualStartAlongsideUpload({ gapCount, tacticCount }: { gapCount
     <section
       aria-labelledby="manual-start-ai-on"
       data-testid="manual-start-ai-on"
-      className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4"
+      className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card p-4 rounded-lg"
     >
       <div className="min-w-0 flex-1">
-        <h2 id="manual-start-ai-on" className="text-[15px] font-medium text-foreground">
+        <h2 id="manual-start-ai-on" className="text-[13px] font-semibold text-foreground">
           Start by hand
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
@@ -426,7 +426,7 @@ export function PrioritizeCard({
   availableTactics: AvailableTactic[];
 }) {
   return (
-    <article className="border border-border bg-background p-4">
+    <article className="border border-border bg-card p-4 rounded-lg">
       <div className="flex flex-wrap items-center gap-1.5">
         <GapStatusOverride
           gapId={card.gap_id}
@@ -486,7 +486,7 @@ export function GapPlanCard({
   availableTactics: AvailableTactic[];
 }) {
   return (
-    <article className="border border-border bg-background p-3">
+    <article className="border border-border bg-card p-3 rounded-lg">
       <div className="flex flex-wrap items-center gap-1.5">
         {card.band ? <PriorityBadge band={card.band} /> : null}
         <GapStatusOverride

@@ -96,11 +96,11 @@ export default async function PipelinePage() {
 
       {ai ? null : (
         <section
-          className="mb-8 border border-border bg-card/40 p-3"
+          className="mb-8 border border-border bg-card p-3 rounded-lg"
           aria-labelledby="manual"
           data-testid="pipeline-ai-off"
         >
-          <h2 id="manual" className="text-[13px] font-medium text-foreground">
+          <h2 id="manual" className="text-[12px] font-semibold text-foreground">
             AI is off — done by hand
           </h2>
           <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
@@ -122,8 +122,8 @@ export default async function PipelinePage() {
 
       {ai ? (
       <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="border border-border bg-card/40 p-3" aria-labelledby="ingest">
-          <h2 id="ingest" className="text-[13px] font-medium text-foreground">
+        <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="ingest">
+          <h2 id="ingest" className="text-[12px] font-semibold text-foreground">
             S0 · Upload sources
           </h2>
           <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
@@ -132,8 +132,8 @@ export default async function PipelinePage() {
           <ModularUploadForm demoOptions={DEMO_FILE_OPTIONS} identity={actionIdentity} />
         </section>
 
-        <section className="border border-border bg-card/40 p-3" aria-labelledby="chain">
-          <h2 id="chain" className="text-[13px] font-medium text-foreground">
+        <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="chain">
+          <h2 id="chain" className="text-[12px] font-semibold text-foreground">
             Run the chain
           </h2>
           <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
@@ -173,10 +173,10 @@ export default async function PipelinePage() {
           const route = routes[index]!;
           const lastRun = runs.find((run) => run.stage === stage);
           return (
-            <article key={stage} className="grid content-start gap-2 border border-border bg-card/40 p-3">
+            <article key={stage} className="grid content-start gap-2 border border-border bg-card p-3 rounded-lg">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="text-[13px] font-medium text-foreground">
+                  <h2 className="text-[12px] font-semibold text-foreground">
                     {stage} · {descriptor.title}
                   </h2>
                   <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{descriptor.purpose}</p>
@@ -210,7 +210,7 @@ export default async function PipelinePage() {
               </dl>
 
               {ai && route.degraded && wired.active?.agentic ? (
-                <p className="text-[11px] text-[var(--unknown)]">{route.reason}</p>
+                <p className="text-[11px] text-[var(--unknown-foreground)]">{route.reason}</p>
               ) : null}
 
               {lastRun?.summary ? (

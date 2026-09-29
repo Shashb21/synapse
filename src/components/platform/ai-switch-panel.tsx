@@ -17,10 +17,10 @@ export function AiSwitchPanel({
   identity: ActionIdentity;
 }) {
   return (
-    <section className="border border-border bg-card/40 p-4" data-testid="ai-switch-panel" aria-labelledby="ai-switch">
+    <section className="border border-border bg-card p-4 rounded-lg" data-testid="ai-switch-panel" aria-labelledby="ai-switch">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="ai-switch" className="text-[15px] font-medium text-foreground">
+          <h2 id="ai-switch" className="text-[13px] font-semibold text-foreground">
             AI for all workspaces (master switch)
           </h2>
           <p className="mt-1 text-[13px] text-foreground" data-testid="ai-switch-state">
