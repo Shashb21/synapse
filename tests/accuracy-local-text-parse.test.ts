@@ -1,9 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
 
 describe("local text parse", () => {
-  it("parses utf8 text without a Llama key", async () => {
-    vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
+  it("parses utf8 text locally", async () => {
     const document = await parseLocalDocument({
       filename: "memo.txt",
       mime: "text/plain",
@@ -14,6 +13,5 @@ describe("local text parse", () => {
       "Need OS evidence",
       "Registry gap remains",
     ]);
-    vi.unstubAllEnvs();
   });
 });

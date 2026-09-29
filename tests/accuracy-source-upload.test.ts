@@ -5,13 +5,8 @@ import { countParseBlocks, listSourceFiles } from "@/accuracy/store/source-store
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 
-const mockIngestBuffer = vi.fn();
 const mockParseLocal = vi.fn();
 const mockExtractUnits = vi.fn();
-
-vi.mock("@/lib/ingest/llamaparse", () => ({
-  ingestBuffer: (...args: unknown[]) => mockIngestBuffer(...args),
-}));
 
 vi.mock("@/lib/ingest/local-parse", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ingest/local-parse")>();
@@ -39,7 +34,6 @@ async function freshWorkspace(label: string) {
 
 describe("accuracy source upload API", () => {
   beforeEach(() => {
-    mockIngestBuffer.mockReset();
     mockParseLocal.mockReset();
     mockExtractUnits.mockReset();
   });
@@ -116,15 +110,13 @@ describe("accuracy source upload API", () => {
     expect(body.parser).toMatch(/local/i);
     expect(body.parse_error).toBeNull();
     expect(mockParseLocal).toHaveBeenCalledOnce();
-    expect(mockIngestBuffer).not.toHaveBeenCalled();
 
     const sources = await listSourceFiles(workspace_id);
     expect(sources.some((s) => s.id === body.source_file_id)).toBe(true);
     expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(1);
   });
 
-  it("accepts a PDF with no LlamaParse key and parses it on the parse route", async () => {
-    vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
+  it("accepts a PDF and parses it on the LLM parse route", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("pdf-llm");
     mockExtractUnits.mockResolvedValue([
@@ -145,13 +137,10 @@ describe("accuracy source upload API", () => {
     expect(body.ok).toBe(true);
     expect(body.parse_error).toBeNull();
     expect(body.block_count).toBe(2);
-    expect(mockIngestBuffer).not.toHaveBeenCalled();
     expect(await countParseBlocks(workspace_id, body.source_file_id)).toBe(2);
-    vi.unstubAllEnvs();
   });
 
-  it("accepts a PPTX with no LlamaParse key and never calls LlamaParse", async () => {
-    vi.stubEnv("LLAMA_CLOUD_API_KEY", "");
+  it("accepts a PPTX and parses it without a separate parser service", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("pptx-llm");
     mockParseLocal.mockResolvedValue({
@@ -184,7 +173,5 @@ describe("accuracy source upload API", () => {
     expect(body.ok).toBe(true);
     expect(body.parse_error).toBeNull();
     expect(body.block_count).toBe(1);
-    expect(mockIngestBuffer).not.toHaveBeenCalled();
-    vi.unstubAllEnvs();
   });
 });

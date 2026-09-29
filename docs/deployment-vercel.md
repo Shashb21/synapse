@@ -1,6 +1,6 @@
 # Deploy Synapse on Vercel
 
-Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is **OAuth-only** from `/control` — no API keys in the UI. Server env keys still unlock providers when no OAuth session is connected.
+Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is set up by the owner in the owner console (`/admin/control`, OAuth) — no API keys in the UI. Server env keys still unlock providers when no OAuth session is connected.
 
 **Operator checklist:** [`deploy-checklist.md`](./deploy-checklist.md) (env, smoke, post-deploy hygiene).
 
@@ -70,8 +70,6 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | `ALLOWED_EMAIL_DOMAINS` | Optional | Comma-separated domains (exact match). When set, only verified emails on these domains may sign in |
 | `AZURE_TENANT_ID` | Microsoft sign-in | Your Entra ID directory id. `common` / `organizations` / `consumers` are refused unless `MICROSOFT_ALLOW_MULTI_TENANT=1` |
 | `MICROSOFT_ALLOW_MULTI_TENANT` | Optional | `1` deliberately allows the multi-tenant endpoint. Not recommended |
-| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field). Missing key gates PDF/PPTX on `/accuracy/sources`. |
-| `LLAMA_PARSE_TIER` | Optional | Default `agentic` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Claude keys | Required when the Anthropic key is org-scoped |
 | `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Live extract without OAuth | Server-only; never shown in the UI |
 | `XAI_OAUTH_CLIENT_ID` | Grok login | OAuth **client** id (operator); public client ships if unset |
@@ -80,7 +78,7 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | `OPENAI_OAUTH_CLIENT_ID` | OpenAI login | |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Gemini | |
 | `OPENROUTER_OAUTH_CLIENT_ID` | OpenRouter | Optional (PKCE can be client-less) |
-| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | App sign-in | Omit for demo mode (typed-name gate) |
+| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | Customer sign-in | SSO for seat holders only (seats in `/admin/customers`). With none set, customers cannot sign in; staff use password accounts (`npm run create-admin`, `/admin/users`) |
 
 ```bash
 vercel env add SESSION_SECRET   # paste the output of: openssl rand -base64 48
@@ -124,15 +122,16 @@ Open:
 
 | URL | Expect |
 | --- | --- |
-| `/` | Upload / IEGP home |
-| `/control` | Control panel — five OAuth providers, Grok default, no API-key fields |
-| `/accuracy` | Workspaces (create, seed, archive, delete) |
-| `/accuracy/control` | Per call-kind routing + live price table |
-| `/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
-| `/timeline` | Gantt surface |
-| `/matrix` | Prioritization matrix |
+| `/login` | SSO buttons, then the staff email + password form; no sign-up link |
+| `/` | Upload (AI on) or Start (AI off) in the open workspace |
+| `/admin/control` | AI master switch; five OAuth providers, Grok default, no API-key fields |
+| `/admin/customers`, `/admin/users` | Customers and seats; staff password accounts |
+| `/admin/accuracy` | Accuracy lab workspaces (create, seed, archive, delete) |
+| `/admin/accuracy/routing` | Per call-kind routing + live price table |
+| `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
+| `/timeline` | Hand-built IEGP timeline |
 
-Connect Grok on `/control` after `XAI_OAUTH_CLIENT_ID` is set and xAI redirect URI matches.
+The full list is in [`deploy-checklist.md`](./deploy-checklist.md) §6. Connect Grok on `/admin/control` after `XAI_OAUTH_CLIENT_ID` is set and the xAI redirect URI matches.
 
 ## 6. Build notes
 

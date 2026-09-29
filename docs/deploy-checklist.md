@@ -1,10 +1,8 @@
 # Deploy checklist
 
-Practical operator list for shipping Synapse (legacy IEGP + `/accuracy` stack) to **Vercel + Postgres**. Details and OAuth redirect URIs live in [`deployment-vercel.md`](./deployment-vercel.md) and [`deployment-live.md`](./deployment-live.md). Copy env names from [`.env.example`](../.env.example) — never commit values.
+Practical operator list for shipping Synapse (the customer IEGP app plus the owner console at `/admin`) to **Vercel + Postgres**. Details and OAuth redirect URIs live in [`deployment-vercel.md`](./deployment-vercel.md) and [`deployment-live.md`](./deployment-live.md). Copy env names from [`.env.example`](../.env.example) — never commit values.
 
-This is a checklist. Copy env names from [`.env.example`](../.env.example) — never commit values.
-
-PDF/PPTX uploads on `/accuracy/sources` are **gated in-app** until `LLAMA_CLOUD_API_KEY` is set (message in the Sources form; the key is never an end-user field). DOCX/text/XLSX still parse locally. Live extract OAuth is a separate gate.
+What the deployment gives customers: SSO sign-in for seat holders only (no self sign-up), blank workspaces by default (demo data only when chosen), AI that the owner and each workspace owner can switch off, a timeline built by hand, and no PowerPoint export. Every uploaded file is parsed by the LLM routed to the parse stage; there is no separate parser service or parser key.
 
 ## 1. Code and CI
 
@@ -30,19 +28,19 @@ Set in **Vercel → Project → Settings → Environment Variables**. Documented
 | `OWNER_EMAILS` | Platform owner(s), comma-separated. Matched only against an IdP-**verified** email |
 | `ALLOWED_EMAIL_DOMAINS` | Optional. Comma-separated domains; only verified emails on them may sign in with SSO (and on non-admin staff password sign-in). Per-customer domains live on each customer in **Admin → Customers** |
 | `AZURE_TENANT_ID` | **Required with Microsoft sign-in.** Your directory id; `common`/`organizations` refused unless `MICROSOFT_ALLOW_MULTI_TENANT=1` |
-| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse via LlamaParse. Missing → Sources upload gate |
-| `LLAMA_PARSE_TIER` | Optional; default `agentic` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Anthropic API keys (not workspace-scoped) |
 | `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Server-side fallback when no OAuth session is connected |
-| `XAI_OAUTH_CLIENT_ID` (+ secret if issued) | Grok login on `/control` (public client ships if unset) |
+| `XAI_OAUTH_CLIENT_ID` (+ secret if issued) | Grok login on `/admin/control` (public client ships if unset) |
 | Other `*_OAUTH_CLIENT_ID` | Claude / OpenAI / Gemini / OpenRouter overrides |
-| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | Customer sign-in (SSO, seat holders only; see §3a). **None set** = demo typed-name gate, and customers cannot sign in |
+| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | Customer sign-in (SSO, seat holders only; see §3a). **None set** = customers cannot sign in; only staff password accounts can |
 
 - [ ] `SESSION_SECRET` set on **Production** (and Preview) — generate a fresh value per environment; rotating it signs everyone out of their workspace selection.
 - [ ] `OWNER_EMAILS` lists the owner's IdP email (the owner must sign in with an account whose email the IdP verifies).
 - [ ] Microsoft: `AZURE_TENANT_ID` pinned; `xms_edov` optional claim added to the ID token so verified emails are used (otherwise people are known by their Microsoft subject and email invites won't match).
 - [ ] Optional: `ALLOWED_EMAIL_DOMAINS` restricts sign-in to your organisation's domains.
 - [ ] At least one SSO provider configured for customers (§3a). There is no self sign-up.
+
+AI is not an environment setting. After deploy, the owner turns the **master switch** ("AI for all workspaces") on or off in `/admin/control` with one click; each workspace owner then has an **AI assistance** setting for their own workspace (workspace menu or settings page). AI runs only when both are on. With AI off there is no upload or parsing and every step is done by hand.
 
 ### Admin account (email and password)
 
@@ -111,25 +109,26 @@ Local: `http://localhost:43217` with the same paths.
 
 | URL | Expect |
 | --- | --- |
-| `/` | Legacy Upload / IEGP home |
-| `/control` | LLM OAuth providers; Grok default; no API-key fields |
-| `/accuracy` | Workspace list; create / seed / archive / delete |
-| `/accuracy/control` | Per call-kind routing + live price table |
-| `/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
-| `/accuracy/runs?workspace_id=…` | Module runs; stale `running` rows can be swept |
 | `/login` | SSO buttons first, then the staff email + password form; no demo option; no sign-up link |
 | `/login?error=no_seat` | "Your organisation hasn't assigned you a Synapse seat. Ask your administrator." |
 | `/admin/users` | After signing in as the `create-admin` account: the staff Users table |
 | `/admin/customers` | Customers with seats used / total; assign and unassign seats |
-| `/timeline` | Legacy Gantt |
-| `/accuracy/timeline?workspace_id=…` | Accuracy Gantt |
+| `/admin/control` | AI master switch; LLM OAuth providers (Grok default); per-stage routing; no API-key fields |
+| `/control`, `/pipeline`, `/runs`, `/accuracy` | Redirect to the matching `/admin/...` page (owner only) |
+| `/workspaces` | Create a workspace: **Start blank** (default) or **Start with demo data (Velmara)**; a demo workspace shows a **Demo** badge |
+| `/` | Blank workspace: Upload (AI on) or Start (AI off) |
+| `/timeline` | Every prioritized gap with its activities; create, date, drag and sequence by hand; PNG export; save as final (Medical Affairs only) |
+| `/admin/accuracy` | Accuracy lab (owner only): workspace list; create / seed / archive / delete |
+| `/admin/accuracy/routing` | Per call-kind routing + live price table |
+| `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
+| `/admin/accuracy/runs?workspace_id=…` | Module runs; stale `running` rows can be swept |
 
-Connect Grok on `/control` if you need a live extract. Confirm LlamaParse with a PDF/PPTX on `/accuracy/sources` when `LLAMA_CLOUD_API_KEY` is set. Without the key, that page blocks PDF/PPTX and still accepts DOCX/text.
+Connect a provider on `/admin/control` if you need live AI. Upload a PDF or PPTX on `/sources` with AI on to confirm the parse stage's LLM parses it; with AI off, `/sources` is read only and nothing is uploaded or parsed.
 
 ## 7. Post-deploy hygiene
 
-- [ ] Archive or delete leftover gold-seed workspaces on `/accuracy`.
-- [ ] On `/accuracy/runs`, **Sweep stale runs** (or wait — listing auto-abandons `running` rows older than 30 minutes).
+- [ ] Archive or delete leftover gold-seed workspaces on `/admin/accuracy`.
+- [ ] On `/admin/accuracy/runs`, **Sweep stale runs** (or wait — listing auto-abandons `running` rows older than 30 minutes).
 - [ ] Check **Audit → Estimated spend** after a live extract so cost rollup is non-zero.
 
 ## Related
