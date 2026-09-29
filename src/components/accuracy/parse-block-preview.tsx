@@ -75,7 +75,7 @@ export function ParseBlockPreview({
         {blocks.map((block, index) => (
           <li
             key={block.id}
-            className="border border-border/60 bg-card/30 p-2"
+            className="border border-border/60 bg-card p-2 rounded-lg"
             data-testid="parse-block-item"
             data-block-id={block.id}
             data-source-file-id={block.source_file_id}

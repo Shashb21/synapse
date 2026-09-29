@@ -123,7 +123,7 @@ export default async function GapDetailPage({
         )}
       </div>
       <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
-      <div className="mb-4 border border-border bg-card/40 p-3">
+      <div className="mb-4 border border-border bg-card p-3 rounded-lg">
         <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
@@ -159,7 +159,7 @@ export default async function GapDetailPage({
       </p>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs — sources</h2>
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
           Where this gap comes from. Constituent needs are the sourced statements extracted from
           documents or interviews. If the same gap was identified in several sources, every source
@@ -199,7 +199,7 @@ export default async function GapDetailPage({
             needs.map(({ need, link }) => {
               const source = state.sources.find((s) => s.id === need.source_id);
               return (
-                <div key={need.id} className="border border-border bg-card p-3 text-[13px]">
+                <div key={need.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <span className="text-[11px] capitalize text-muted-foreground">
                     {link.role} · {source?.title || need.source_id} · {need.id}
                   </span>
@@ -262,7 +262,7 @@ export default async function GapDetailPage({
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Tactic mappings (many-to-many, dimensional)
         </h2>
         <p className="mb-3 text-[12px] text-muted-foreground">
@@ -286,7 +286,7 @@ export default async function GapDetailPage({
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
           const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);
           return (
-            <article key={c.id} className="mb-4 border border-border bg-card p-4">
+            <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
               <div className="flex flex-wrap items-center gap-2">
                 <Link href={`/tactics/${c.tactic_id}`} className="text-[13px] text-foreground">
                   {tactic?.name}
@@ -321,7 +321,7 @@ export default async function GapDetailPage({
                 </div>
               ) : null}
               {c.needs_review ? (
-                <div className="mt-3 border border-border bg-card/40 p-3">
+                <div className="mt-3 border border-border bg-card p-3 rounded-lg">
                   <p className="mb-2 text-[12px] text-muted-foreground">
                     Another live gap that uses this tactic changed a dimension or overall. Confirm
                     or edit this gap&apos;s own coverage. Status is not auto-flipped until you do.
@@ -458,13 +458,13 @@ export default async function GapDetailPage({
 
       {children.length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[13px] text-muted-foreground">Leftover child gaps</h2>
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover child gaps</h2>
           <div className="grid gap-2">
             {children.map((child) => (
               <Link
                 key={child.id}
                 href={`/gaps/${child.id}`}
-                className="border border-border bg-card p-3 text-[13px] no-underline"
+                className="border border-border bg-card p-3 text-[13px] no-underline rounded-lg"
               >
                 {child.name}
               </Link>
@@ -474,8 +474,8 @@ export default async function GapDetailPage({
       ) : null}
 
       {shown === "validated_partial" ? (
-        <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Leftover (right side of split)</h2>
+        <section className="mb-8 border border-border bg-card p-4 rounded-lg">
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover (right side of split)</h2>
           {leftover ? (
             <>
               <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
@@ -549,12 +549,12 @@ export default async function GapDetailPage({
 
       {state.gap_versions.filter((row) => row.live_gap_id === gap.id).length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[13px] text-muted-foreground">Version history</h2>
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Version history</h2>
           <ul className="grid gap-2">
             {state.gap_versions
               .filter((row) => row.live_gap_id === gap.id)
               .map((row) => (
-                <li key={row.id} className="border border-border bg-card p-3 text-[13px]">
+                <li key={row.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                     {row.event} · {row.retired_gap_id} · {row.at.slice(0, 10)} · {row.actor_name}
                   </p>
@@ -567,7 +567,7 @@ export default async function GapDetailPage({
 
       {!gap.retired && gap.status === "excluded" ? (
         <section
-          className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-border bg-card/40 p-4"
+          className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-border bg-card p-4 rounded-lg"
           data-testid="gap-excluded"
         >
           <div>
@@ -598,7 +598,7 @@ export default async function GapDetailPage({
           <UnparkGapButton gapId={gap.id} />
         </section>
       ) : (
-        <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4">
+        <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card p-4 rounded-lg">
           <p className="flex-1 text-[12px] text-muted-foreground">
             Not sure this is a real gap yet? Park it instead of excluding it — parked gaps stay
             listed but drop out of Prioritize and Tactics until you unpark them.

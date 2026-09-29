@@ -13,7 +13,7 @@ function typeLabel(type: string): string {
 function StatusChip({ status }: { status: string }) {
   const tone =
     status === "accepted"
-      ? "border-[color:var(--known)] text-[color:var(--known)]"
+      ? "border-[color:var(--known)] text-[color:var(--known-foreground)]"
       : status === "rejected"
         ? "border-border text-muted-foreground"
         : "border-[color:var(--opportunity)] text-[color:var(--opportunity)]";
@@ -46,10 +46,10 @@ export function ProposalCard({
     <article
       className={`grid gap-2 rounded-md border p-3 ${
         proposal.status === "accepted"
-          ? "border-[color:var(--known)]/40 bg-card/70"
+          ? "border-[color:var(--known)]/40 bg-card"
           : proposal.status === "rejected"
-            ? "border-border bg-card/20 opacity-70"
-            : "border-border bg-card/40"
+            ? "border-border bg-card opacity-70"
+            : "border-border bg-card"
       }`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
@@ -118,7 +118,7 @@ export function ProposalCard({
           {proposal.tactic_id ? (
             <Link
               href={`/tactics/${proposal.tactic_id}`}
-              className="text-[11px] text-[color:var(--known)] no-underline hover:underline"
+              className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
             >
               Tactic {proposal.tactic_id}
             </Link>

@@ -139,7 +139,7 @@ function RoomGapCard({
   return (
     <article
       className={cn(
-        "border bg-card p-5 transition-colors",
+        "border bg-card p-5 transition-colors rounded-lg",
         focused ? "border-foreground ring-2 ring-foreground/25" : "border-border",
       )}
     >
@@ -158,7 +158,7 @@ function RoomGapCard({
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <h3 className="mt-2 text-[20px] font-medium leading-7 text-foreground">{card.gap_name}</h3>
-      <p className="mt-2 text-[14px] text-muted-foreground">
+      <p className="mt-2 text-[13px] text-muted-foreground">
         {card.tactics.length} tactic{card.tactics.length === 1 ? "" : "s"} mapped
         {!card.human_validated ? " · unconfirmed" : ""}
       </p>

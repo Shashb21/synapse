@@ -136,8 +136,8 @@ export default async function HomePage({
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </AiOnly>
         {workspace.review.length > 0 ? (
-          <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
-            <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
+          <section className="mt-8 border border-border bg-card p-4 rounded-lg" aria-labelledby="upload-readiness">
+            <h2 id="upload-readiness" className="text-[12px] font-semibold text-foreground">
               Prep readiness
             </h2>
             <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">

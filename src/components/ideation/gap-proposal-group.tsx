@@ -55,7 +55,7 @@ export function GapProposalGroupCard({
   const accepted = group.proposals.filter((p) => p.status === "accepted").length;
   const open = group.proposals.filter((p) => p.status === "proposed").length;
   return (
-    <section className="grid gap-3 rounded-md border border-border bg-card/40 p-3">
+    <section className="grid gap-3 rounded-md border border-border bg-card p-3">
       <header className="grid gap-1">
         <div className="flex flex-wrap items-center gap-1.5">
           {group.band ? (

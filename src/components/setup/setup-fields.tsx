@@ -199,7 +199,7 @@ export function TagField({
           {values.map((value) => (
             <li
               key={value}
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-card/60 py-0.5 pl-2 pr-1 text-[12px] text-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-card py-0.5 pl-2 pr-1 text-[12px] text-foreground"
             >
               {value}
               <button
@@ -288,7 +288,7 @@ export function ListField<T>({
             <li
               key={index}
               aria-label={`${label} ${index + 1}`}
-              className="relative grid gap-2 rounded-md border border-border bg-card/40 p-3 pr-9"
+              className="relative grid gap-2 rounded-md border border-border bg-card p-3 pr-9"
             >
               {renderItem(
                 item,

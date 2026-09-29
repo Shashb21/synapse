@@ -155,7 +155,7 @@ export function ManualSourceForm({
       {blocks.length > 0 ? (
         <ol className="grid gap-2">
           {blocks.map((block, index) => (
-            <li key={block.key} className="grid gap-1 border border-border/60 bg-card/30 p-2">
+            <li key={block.key} className="grid gap-1 border border-border/60 bg-card p-2 rounded-lg">
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                 <span>Block {index + 1} · human-entered</span>
                 <Input

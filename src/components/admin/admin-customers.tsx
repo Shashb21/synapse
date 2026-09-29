@@ -51,7 +51,7 @@ function CreateCustomerForm({ onCreated }: { onCreated: (customer: Customer) => 
   return (
     <form
       aria-label="Create a customer"
-      className="grid gap-2 border border-border bg-card/40 p-4"
+      className="grid gap-2 border border-border bg-card p-4 rounded-lg"
       onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true);
@@ -183,11 +183,11 @@ function CustomerPanel({
     <section
       aria-labelledby="customer-heading"
       data-testid="customer-panel"
-      className="grid gap-4 border border-border bg-card/40 p-4"
+      className="grid gap-4 border border-border bg-card p-4 rounded-lg"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="customer-heading" className="flex items-center gap-2 text-[15px] font-medium text-foreground">
+          <h2 id="customer-heading" className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
             <Building2 className="size-4 text-muted-foreground" aria-hidden />
             {customer.name}
             {customer.active ? null : <Badge variant="secondary">Inactive</Badge>}

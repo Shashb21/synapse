@@ -147,7 +147,7 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
         );
       })}
       {ended ? (
-        <div className="absolute inset-0 grid place-items-center bg-black text-[14px] text-white/70" data-testid="audience-ended">
+        <div className="absolute inset-0 grid place-items-center bg-black text-[13px] text-white/70" data-testid="audience-ended">
           End of slide show.
         </div>
       ) : null}

@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 function Json({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-80 overflow-auto border border-border bg-background p-2 text-[11px] leading-4 text-muted-foreground">
+    <pre className="max-h-80 overflow-auto border border-border bg-card p-2 text-[11px] leading-4 text-muted-foreground rounded-lg">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -40,8 +40,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       </Link>
 
       <section className="mt-4 grid gap-3 md:grid-cols-2">
-        <article className="border border-border bg-card/40 p-3">
-          <h2 className="text-[13px] font-medium text-foreground">Run</h2>
+        <article className="border border-border bg-card p-3 rounded-lg">
+          <h2 className="text-[12px] font-semibold text-foreground">Run</h2>
           <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
             <div className="flex justify-between gap-2">
               <dt>Status</dt>
@@ -69,8 +69,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           {run.error ? <p className="mt-2 text-[12px] text-destructive">{run.error}</p> : null}
         </article>
 
-        <article className="border border-border bg-card/40 p-3">
-          <h2 className="text-[13px] font-medium text-foreground">Route</h2>
+        <article className="border border-border bg-card p-3 rounded-lg">
+          <h2 className="text-[12px] font-semibold text-foreground">Route</h2>
           {run.route ? (
             <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
               <div className="flex justify-between gap-2">
@@ -92,7 +92,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                 <dd className="text-foreground">{run.route.params.temperature}</dd>
               </div>
               {run.route.degraded ? (
-                <p className="mt-1 text-[11px] text-[var(--unknown)]">{run.route.reason}</p>
+                <p className="mt-1 text-[11px] text-[var(--unknown-foreground)]">{run.route.reason}</p>
               ) : null}
             </dl>
           ) : (
@@ -113,14 +113,14 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
       {exchanges.length > 0 ? (
         <section className="mt-6 grid gap-2">
-          <h2 className="text-[15px] font-medium text-foreground">
+          <h2 className="text-[13px] font-semibold text-foreground">
             Proposer ↔ critic exchanges
           </h2>
           <p className="text-[11px] text-muted-foreground">
             Locked: three exchanges before the judge sees anything. Each row is one critic response and
             the revision the proposer made in answer to it.
           </p>
-          <div className="overflow-x-auto border border-border bg-card/40">
+          <div className="overflow-x-auto border border-border bg-card rounded-lg">
             <table className="w-full text-[11px]">
               <thead className="text-muted-foreground">
                 <tr className="border-b border-border">
@@ -156,13 +156,13 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       ) : null}
 
       <section className="mt-6 grid gap-2">
-        <h2 className="text-[15px] font-medium text-foreground">Steps</h2>
+        <h2 className="text-[13px] font-semibold text-foreground">Steps</h2>
         {run.steps.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">No steps recorded.</p>
         ) : (
           <ol className="grid gap-2">
             {run.steps.map((step, index) => (
-              <li key={`${step.name}-${index}`} className="border border-border bg-card/40 p-3">
+              <li key={`${step.name}-${index}`} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="text-[13px] text-foreground">{step.name}</h3>
                   <span className="text-[11px] text-muted-foreground">
@@ -184,11 +184,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
         <div>
-          <h2 className="mb-2 text-[15px] font-medium text-foreground">Input</h2>
+          <h2 className="mb-2 text-[13px] font-semibold text-foreground">Input</h2>
           <Json value={run.input} />
         </div>
         <div>
-          <h2 className="mb-2 text-[15px] font-medium text-foreground">Output</h2>
+          <h2 className="mb-2 text-[13px] font-semibold text-foreground">Output</h2>
           <Json value={run.output} />
         </div>
       </section>

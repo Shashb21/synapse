@@ -33,7 +33,7 @@ export function MappingTableWorkbench({
   if (rows.length === 0) {
     if (!ai) {
       return (
-        <section className="border border-border bg-card/40 p-4 text-[13px] text-muted-foreground">
+        <section className="border border-border bg-card p-4 text-[13px] text-muted-foreground rounded-lg">
           No gaps to map yet. AI is off: add gaps and tactics by hand on{" "}
           <Link href="/?place=upload" className="text-foreground underline-offset-2 hover:underline">
             Start
@@ -43,7 +43,7 @@ export function MappingTableWorkbench({
       );
     }
     return (
-      <section className="border border-border bg-card/40 p-4 text-[13px] text-muted-foreground">
+      <section className="border border-border bg-card p-4 text-[13px] text-muted-foreground rounded-lg">
         Upload and ingest sources on{" "}
         <Link href="/sources" className="text-foreground underline-offset-2 hover:underline">
           Sources
@@ -81,7 +81,7 @@ export function MappingTableWorkbench({
         </span>
       </div>
 
-      <div className="overflow-x-auto border border-border bg-card/30">
+      <div className="overflow-x-auto border border-border bg-card rounded-lg">
         <table className="w-full min-w-[720px] border-collapse text-left text-[12px]">
           <thead>
             <tr className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -236,7 +236,7 @@ function MappingRowEditor({
       </td>
       <td className="px-3 py-3">
         <select
-          className="h-8 w-full max-w-[10rem] rounded-md border border-input bg-transparent px-2 text-[12px]"
+          className="h-8 w-full min-w-[9.5rem] max-w-[12rem] rounded-md border border-input bg-card px-2 text-[12px]"
           value={status ?? ""}
           onChange={(event) => setStatus(event.target.value as MappingTableViewRow["mapping_status"])}
         >

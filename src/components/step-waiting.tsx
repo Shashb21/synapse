@@ -23,9 +23,9 @@ export function StepWaiting({
       data-testid="step-waiting"
       className="mb-6 flex flex-wrap items-start gap-3 border border-[var(--unknown)]/40 bg-[var(--unknown)]/5 p-4"
     >
-      <Hourglass className="mt-0.5 size-4 shrink-0 text-[var(--unknown)]" aria-hidden />
+      <Hourglass className="mt-0.5 size-4 shrink-0 text-[var(--unknown-foreground)]" aria-hidden />
       <div className="min-w-0 flex-1">
-        <h2 className="text-[14px] font-medium text-foreground">{title}</h2>
+        <h2 className="text-[13px] font-medium text-foreground">{title}</h2>
         <p className="mt-1 text-[12px] text-muted-foreground">{body}</p>
       </div>
       <Link href={href} className={buttonVariants({ size: "sm", variant: "outline" })}>

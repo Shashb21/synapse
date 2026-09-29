@@ -343,8 +343,8 @@ export function SplitGapDialog({
         ) : null}
         {mode === "split" ? (
           <div className="grid gap-4 md:grid-cols-2">
-            <section className="border border-border bg-card/40 p-3">
-              <h3 className="text-[13px] font-medium">Addressed</h3>
+            <section className="border border-border bg-card p-3 rounded-lg">
+              <h3 className="text-[12px] font-semibold">Addressed</h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Covered slice plus the mapped tactics that close it. At least one tactic is required.
               </p>
@@ -384,8 +384,8 @@ export function SplitGapDialog({
                 empty="No mapped tactics on this gap."
               />
             </section>
-            <section className="border border-border bg-card/40 p-3">
-              <h3 className="text-[13px] font-medium">Open</h3>
+            <section className="border border-border bg-card p-3 rounded-lg">
+              <h3 className="text-[12px] font-semibold">Open</h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Residual evidence need. Remaining tactics are optional (usually none until Tactics).
               </p>

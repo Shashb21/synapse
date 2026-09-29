@@ -29,7 +29,7 @@ export function IngestPanel({
     <div>
       {demoFiles ? (
       <section aria-labelledby="demo-pack">
-        <h2 id="demo-pack" className="text-[15px] font-medium text-foreground">
+        <h2 id="demo-pack" className="text-[13px] font-semibold text-foreground">
           Demo source files
         </h2>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
@@ -41,7 +41,7 @@ export function IngestPanel({
           {DEMO_PACK.map((file) => {
             const ingested = ingestedTitles.has(file.title);
             return (
-              <article key={file.id} className="border border-border bg-card p-4">
+              <article key={file.id} className="border border-border bg-card p-4 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-[13px] text-foreground">{file.title}</p>
                   <span className="text-[11px] text-muted-foreground">
@@ -79,7 +79,7 @@ export function IngestPanel({
       </section>
       ) : null}
 
-      <div className={demoFiles ? "mt-6 border border-border bg-card p-4" : "border border-border bg-card p-4"}>
+      <div className={demoFiles ? "mt-6 border border-border bg-card p-4 rounded-lg" : "border border-border bg-card p-4 rounded-lg"}>
         <h2 className="mb-3 text-[13px] text-foreground">Upload your own note</h2>
         <LockForm label="Ingest gaps and tactics" action="ingest" confirmLabel="Ingest">
           <IngestFileField />
@@ -126,7 +126,7 @@ export function IngestPanel({
           ) : (
             <div className="grid gap-3">
               {sources.map((s) => (
-                <article key={s.id} className="border border-border bg-card p-4">
+                <article key={s.id} className="border border-border bg-card p-4 rounded-lg">
                   <p className="text-[13px] text-foreground">{s.title}</p>
                   <p className="mt-1 text-[12px] text-muted-foreground">
                     {SOURCE_TYPE_LABELS[s.source_type]} · {FUNCTION_LABELS[s.stakeholder_function]}

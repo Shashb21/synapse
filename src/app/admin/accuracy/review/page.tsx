@@ -77,18 +77,18 @@ export default async function AccuracyReviewPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {workspaceId && !aiOn ? (
         <section
-          className="grid gap-2 border border-border bg-card/40 p-3"
+          className="grid gap-2 border border-border bg-card p-3 rounded-lg"
           aria-labelledby="review-ai-off"
           data-testid="review-ai-off"
         >
-          <h2 id="review-ai-off" className="text-[15px] font-medium text-foreground">
+          <h2 id="review-ai-off" className="text-[13px] font-semibold text-foreground">
             AI is off — the completeness audit is an AI step
           </h2>
           <p className="text-[12px] text-muted-foreground">
@@ -108,7 +108,7 @@ export default async function AccuracyReviewPage({
         </section>
       ) : !workspaceId ? (
         <section className="grid gap-2" aria-labelledby="review-empty">
-          <h2 id="review-empty" className="text-[15px] font-medium text-foreground">
+          <h2 id="review-empty" className="text-[13px] font-semibold text-foreground">
             Choose a workspace
           </h2>
           <p className="text-[12px] text-muted-foreground">

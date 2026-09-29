@@ -57,7 +57,7 @@ export function WorkspaceSettings({
   return (
     <div className="grid gap-6">
       <section aria-labelledby="ws-name" className="grid gap-2">
-        <h2 id="ws-name" className="text-[15px] font-medium text-foreground">
+        <h2 id="ws-name" className="text-[13px] font-semibold text-foreground">
           Name
         </h2>
         {owner ? (
@@ -106,7 +106,7 @@ export function WorkspaceSettings({
       {owner ? <WorkspaceContents workspaceId={workspace.id} demo={workspace.demo} isCurrent={isCurrent} /> : null}
 
       <section aria-labelledby="ws-members" className="grid gap-2">
-        <h2 id="ws-members" className="text-[15px] font-medium text-foreground">
+        <h2 id="ws-members" className="text-[13px] font-semibold text-foreground">
           Members
         </h2>
         <ul className="grid gap-1" aria-label="Members">
@@ -114,7 +114,7 @@ export function WorkspaceSettings({
             <li
               key={member.principal}
               data-testid="member-row"
-              className="flex flex-wrap items-center gap-2 border border-border bg-card/40 px-3 py-2"
+              className="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2 rounded-lg"
             >
               <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                 {member.principal}

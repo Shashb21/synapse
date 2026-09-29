@@ -204,15 +204,15 @@ export function SetupWizard({
   const SectionView = isSection(step.id) ? SECTION_VIEWS[step.id] : null;
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-8" data-testid="setup-wizard">
+    <div className="mx-auto grid max-w-5xl gap-6" data-testid="setup-wizard">
       <header className="grid gap-3">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           IEGP setup{workspaceName ? ` · ${workspaceName}` : ""}
         </p>
-        <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">
+        <h2 className="text-[15px] font-bold tracking-tight text-foreground">
           {form.asset_name ? `${form.asset_name} evidence plan` : "Set up this Integrated Evidence Generation Plan"}
-        </h1>
-        <p className="max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
+        </h2>
+        <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
           {ai
             ? "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. Prioritization, ideation and the timeline use it throughout."
             : "Capture this plan's context: asset, objectives and decisions, evidence landscape and people. AI is off, so there is no upload: after setup you start with Add gaps and Add tactics and do every step by hand."}
@@ -260,7 +260,7 @@ export function SetupWizard({
           <div className="flex items-start gap-3">
             <Rocket className="mt-0.5 size-6 shrink-0 text-[var(--chart-1)]" aria-hidden />
             <div className="grid gap-1">
-              <h2 className="text-lg font-medium">Welcome to your new workspace</h2>
+              <h2 className="text-[15px] font-bold tracking-tight">Welcome to your new workspace</h2>
               <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
                 This workspace holds one Integrated Evidence Generation Plan. The next six short steps capture its context:
                 the asset, the company and plan, strategic objectives and key decisions, the evidence landscape, the people
@@ -273,9 +273,9 @@ export function SetupWizard({
             {journey.map((item) => {
               const Icon = item.icon;
               return (
-                <article key={item.title} className="grid content-start gap-1 border border-border bg-card/50 p-3">
+                <article key={item.title} className="grid content-start gap-1 border border-border bg-card p-3 rounded-lg">
                   <Icon className="size-4 text-[var(--chart-1)]" aria-hidden />
-                  <h3 className="text-[13px] font-medium text-foreground">{item.title}</h3>
+                  <h3 className="text-[12px] font-semibold text-foreground">{item.title}</h3>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
                 </article>
               );
@@ -287,9 +287,9 @@ export function SetupWizard({
       {SectionView ? <SectionView form={form} set={set} errors={errorsFor(step.id)} /> : null}
 
       {step.id === "models" && !ai ? (
-        <section className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]" data-testid="setup-ai-off">
+        <section className="grid gap-4 rounded-lg border border-border bg-card p-5 md:grid-cols-[1fr_280px]" data-testid="setup-ai-off">
           <div className="grid gap-3">
-            <h2 className="flex items-center gap-2 text-[15px] font-medium">
+            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
               <Hand className="size-4 text-[var(--chart-1)]" aria-hidden />
               AI is off — you work by hand
             </h2>
@@ -325,11 +325,11 @@ export function SetupWizard({
 
       {step.id === "models" && ai ? (
         <section
-          className="grid gap-4 rounded-lg border border-border bg-card/40 p-5 md:grid-cols-[1fr_280px]"
+          className="grid gap-4 rounded-lg border border-border bg-card p-5 md:grid-cols-[1fr_280px]"
           data-testid="setup-ai-on"
         >
           <div className="grid gap-3">
-            <h2 className="flex items-center gap-2 text-[15px] font-medium">
+            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
               <Brain className="size-4 text-[var(--chart-1)]" aria-hidden />
               AI models
             </h2>
@@ -341,7 +341,7 @@ export function SetupWizard({
           </div>
           <aside className="grid content-start gap-2 border border-dashed border-border p-3 text-[11px] text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground" data-testid="setup-ai-status">
-              <CheckCircle2 className="size-3.5 text-[var(--known)]" aria-hidden />
+              <CheckCircle2 className="size-3.5 text-[var(--known-foreground)]" aria-hidden />
               AI is on for this workspace
             </p>
             <p>Models suggest; people decide. Every step that uses AI can also be done by hand.</p>
@@ -354,11 +354,11 @@ export function SetupWizard({
           <div
             className={cn(
               "grid gap-2 rounded-lg border p-5",
-              complete ? "border-[var(--known)]/30 bg-[var(--known)]/5" : "border-border bg-card/40",
+              complete ? "border-[var(--known)]/30 bg-[var(--known)]/5" : "border-border bg-card",
             )}
           >
-            <h2 className="flex items-center gap-2 text-[15px] font-medium">
-              {complete ? <CheckCircle2 className="size-5 text-[var(--known)]" aria-hidden /> : null}
+            <h2 className="flex items-center gap-2 text-[13px] font-semibold">
+              {complete ? <CheckCircle2 className="size-5 text-[var(--known-foreground)]" aria-hidden /> : null}
               {complete ? "This plan is set up" : "Review and finish"}
             </h2>
             <p className="max-w-2xl text-[12px] leading-relaxed text-muted-foreground">

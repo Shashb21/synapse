@@ -49,18 +49,18 @@ export default async function AccuracyWorkspacesPage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!aiOn ? (
         <section
-          className="mb-6 grid gap-3 border border-border bg-card/40 p-3"
+          className="mb-6 grid gap-3 border border-border bg-card p-3 rounded-lg"
           aria-labelledby="manual-start"
           data-testid="accuracy-manual-start"
         >
-          <h2 id="manual-start" className="text-[15px] font-medium text-foreground">
+          <h2 id="manual-start" className="text-[13px] font-semibold text-foreground">
             Add gaps and tactics
           </h2>
           <p className="text-[12px] text-muted-foreground">
@@ -107,7 +107,7 @@ export default async function AccuracyWorkspacesPage({
 
       <section className="grid gap-2" aria-labelledby="workspace-list">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="workspace-list" className="text-[15px] font-medium text-foreground">
+          <h2 id="workspace-list" className="text-[13px] font-semibold text-foreground">
             Registered workspaces
           </h2>
           <Link
@@ -124,9 +124,9 @@ export default async function AccuracyWorkspacesPage({
         ) : (
           <ul className="grid gap-2">
             {workspaces.map((workspace) => (
-              <li key={workspace.id} className="border border-border bg-card/40 p-3">
+              <li key={workspace.id} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[13px] font-medium text-foreground">
+                  <p className="text-[12px] font-semibold text-foreground">
                     {workspace.name}
                     {workspacePlanLabel(workspace) ? (
                       <span className="ml-2 text-[11px] font-normal text-muted-foreground">

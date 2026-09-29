@@ -32,7 +32,7 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
       <Link href="/workspaces" className="text-[12px] text-muted-foreground no-underline hover:text-foreground">
         ← All workspaces
       </Link>
-      <h1 className="mb-6 mt-2 text-lg font-medium text-foreground">{workspace.name}</h1>
+      <h1 className="mb-6 mt-2 text-base font-bold tracking-tight text-foreground">{workspace.name}</h1>
       <WorkspaceSettings
         workspace={{ id: workspace.id, name: workspace.name, role, created_at: workspace.created_at, demo: workspace.demo }}
         ai={{ workspace: workspace.ai_enabled, platform: platformAi }}

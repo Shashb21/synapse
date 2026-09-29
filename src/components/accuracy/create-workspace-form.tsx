@@ -41,8 +41,8 @@ export function CreateWorkspaceForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card/40 p-3">
-      <h3 className="text-[13px] font-medium text-foreground">Create workspace</h3>
+    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card p-3 rounded-lg">
+      <h3 className="text-[12px] font-semibold text-foreground">Create workspace</h3>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Name</span>
         <input

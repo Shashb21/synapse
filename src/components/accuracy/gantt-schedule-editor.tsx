@@ -115,7 +115,7 @@ export function GanttScheduleEditor({
           {error}
         </p>
       ) : null}
-      {message ? <p className="text-[11px] text-[var(--known)]">{message}</p> : null}
+      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
       <div>
         <Button size="sm" disabled={pending} onClick={() => void save()}>
           {pending ? "Saving…" : "Save schedule"}

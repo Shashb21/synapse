@@ -23,8 +23,8 @@ export default async function BreakoutsPage() {
         to facilitate it.
       </PageIntro>
 
-      <div className="mb-8 border border-border bg-card p-4">
-        <h2 className="mb-3 text-[13px] font-medium text-foreground">New breakout group</h2>
+      <div className="mb-8 border border-border bg-card p-4 rounded-lg">
+        <h2 className="mb-3 text-[12px] font-semibold text-foreground">New breakout group</h2>
         <LockForm label="Create group" action="create_breakout_group" confirmLabel="Create group">
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Name
@@ -58,10 +58,10 @@ export default async function BreakoutsPage() {
               (row) => row.group_id === group.id,
             ).length;
             return (
-              <article key={group.id} className="border border-border bg-card p-4">
+              <article key={group.id} className="border border-border bg-card p-4 rounded-lg">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-[13px] font-medium text-foreground">{group.name}</p>
+                    <p className="text-[12px] font-semibold text-foreground">{group.name}</p>
                     {group.note ? (
                       <p className="mt-0.5 text-[12px] text-muted-foreground">{group.note}</p>
                     ) : null}

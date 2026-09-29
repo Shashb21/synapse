@@ -55,8 +55,8 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
         </Link>
       </PageIntro>
 
-      <section className="mb-4 border border-border bg-card/40 p-3" aria-labelledby="stakeholder">
-        <h2 id="stakeholder" className="text-[13px] font-medium text-foreground">
+      <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="stakeholder">
+        <h2 id="stakeholder" className="text-[12px] font-semibold text-foreground">
           Stakeholder function
         </h2>
         <p className="mt-1 text-[12px] text-foreground">
@@ -92,9 +92,9 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
         </div>
       </section>
 
-      <section className="mb-4 border border-border bg-card/40 p-3" aria-labelledby="blocks">
+      <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="blocks" className="text-[13px] font-medium text-foreground">
+          <h2 id="blocks" className="text-[12px] font-semibold text-foreground">
             {blocks.length} block(s) · {humanCount} human
           </h2>
           <ActionDialog
@@ -182,8 +182,8 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
       </section>
 
       {dropped.length > 0 ? (
-        <section className="mb-4 border border-border bg-card/40 p-3" aria-labelledby="dropped">
-          <h2 id="dropped" className="text-[13px] font-medium text-foreground">
+        <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="dropped">
+          <h2 id="dropped" className="text-[12px] font-semibold text-foreground">
             Dropped by the model as noise
           </h2>
           <ul className="mt-2 grid gap-2">
@@ -208,8 +208,8 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
         </section>
       ) : null}
 
-      <section className="border border-border bg-card/40 p-3" aria-labelledby="trail">
-        <h2 id="trail" className="text-[13px] font-medium text-foreground">
+      <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="trail">
+        <h2 id="trail" className="text-[12px] font-semibold text-foreground">
           Edit trail
         </h2>
         {edits.length === 0 ? (

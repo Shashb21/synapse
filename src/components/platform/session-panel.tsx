@@ -62,10 +62,10 @@ export function SessionPanel({
   }
 
   return (
-    <section className="grid gap-3 border border-border bg-card/40 p-3" aria-labelledby="session">
+    <section className="grid gap-3 border border-border bg-card p-3 rounded-lg" aria-labelledby="session">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="session" className="text-[15px] font-medium text-foreground">
+          <h2 id="session" className="text-[13px] font-semibold text-foreground">
             Who is acting
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">

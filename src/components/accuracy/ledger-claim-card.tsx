@@ -46,9 +46,9 @@ function validationLabel(claim: LedgerClaimCardModel): string {
 }
 
 function validationTone(claim: LedgerClaimCardModel): string {
-  if (claim.validated) return "text-[var(--known)]";
+  if (claim.validated) return "text-[var(--known-foreground)]";
   if (claim.status === "rejected") return "text-destructive";
-  return "text-[var(--unknown)]";
+  return "text-[var(--unknown-foreground)]";
 }
 
 type Panel = "edit" | "merge" | null;
@@ -171,7 +171,7 @@ export function LedgerClaimCard({
   const humanEdited = (claim.human_locked?.length ?? 0) > 0;
 
   return (
-    <li className="border border-border bg-card/40 p-3" data-testid={`ledger-claim-${claim.id}`}>
+    <li className="border border-border bg-card p-3 rounded-lg" data-testid={`ledger-claim-${claim.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="min-w-0 flex-1 text-[13px] text-foreground">
           {claim.external_id ? (

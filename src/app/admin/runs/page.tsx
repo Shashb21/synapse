@@ -15,9 +15,9 @@ import { aiEnabled } from "@/modules/kernel/ai-switch";
 export const dynamic = "force-dynamic";
 
 function statusTone(status: string): string {
-  if (status === "ok") return "text-[var(--known)]";
+  if (status === "ok") return "text-[var(--known-foreground)]";
   if (status === "error") return "text-destructive";
-  return "text-[var(--unknown)]";
+  return "text-[var(--unknown-foreground)]";
 }
 
 export default async function RunsPage() {
@@ -39,7 +39,7 @@ export default async function RunsPage() {
       </PageIntro>
 
       <section className="mb-8 grid gap-3" aria-labelledby="health">
-        <h2 id="health" className="text-[15px] font-medium text-foreground">
+        <h2 id="health" className="text-[13px] font-semibold text-foreground">
           Stage health
         </h2>
         {health.length === 0 ? (
@@ -49,8 +49,8 @@ export default async function RunsPage() {
         ) : (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {health.map((row) => (
-              <article key={row.stage} className="border border-border bg-card/40 p-3">
-                <h3 className="text-[13px] font-medium text-foreground">
+              <article key={row.stage} className="border border-border bg-card p-3 rounded-lg">
+                <h3 className="text-[12px] font-semibold text-foreground">
                   {row.stage} · {STAGES[row.stage as StageId]?.title ?? ""}
                 </h3>
                 <dl className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
@@ -78,7 +78,7 @@ export default async function RunsPage() {
       </section>
 
       <section className="mb-8 grid gap-2" aria-labelledby="recent">
-        <h2 id="recent" className="text-[15px] font-medium text-foreground">
+        <h2 id="recent" className="text-[13px] font-semibold text-foreground">
           Recent runs
         </h2>
         {runs.length === 0 ? (
@@ -86,7 +86,7 @@ export default async function RunsPage() {
         ) : (
           <ul className="grid gap-2">
             {runs.map((run) => (
-              <li key={run.id} className="border border-border bg-card/40 p-3">
+              <li key={run.id} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <Link href={`/admin/runs/${run.id}`} className="text-[13px] text-foreground no-underline hover:underline">
                     {run.stage} · {run.module_id} v{run.module_version}
@@ -126,7 +126,7 @@ export default async function RunsPage() {
 
       <div className="grid gap-8 lg:grid-cols-3">
         <section className="grid gap-2" aria-labelledby="edits">
-          <h2 id="edits" className="text-[15px] font-medium text-foreground">
+          <h2 id="edits" className="text-[13px] font-semibold text-foreground">
             Edit rationales
           </h2>
           <p className="text-[11px] text-muted-foreground">
@@ -137,7 +137,7 @@ export default async function RunsPage() {
           ) : (
             <ul className="grid gap-2">
               {edits.map((edit) => (
-                <li key={edit.id} className="border border-border bg-card/40 p-2">
+                <li key={edit.id} className="border border-border bg-card p-2 rounded-lg">
                   <p className="text-[12px] text-foreground">{edit.rationale}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {edit.stage} · {edit.entity_type} {edit.entity_id} · {edit.field} · {edit.action} ·{" "}
@@ -155,7 +155,7 @@ export default async function RunsPage() {
         </section>
 
         <section className="grid gap-2" aria-labelledby="hillclimb-loop">
-          <h2 id="hillclimb-loop" className="text-[15px] font-medium text-foreground">
+          <h2 id="hillclimb-loop" className="text-[13px] font-semibold text-foreground">
             Hillclimb loop
           </h2>
           <p className="text-[11px] text-muted-foreground">
@@ -176,7 +176,7 @@ export default async function RunsPage() {
         </section>
 
         <section className="grid gap-2" aria-labelledby="signals">
-          <h2 id="signals" className="text-[15px] font-medium text-foreground">
+          <h2 id="signals" className="text-[13px] font-semibold text-foreground">
             Hillclimb signals
           </h2>
           <p className="text-[11px] text-muted-foreground">
@@ -187,7 +187,7 @@ export default async function RunsPage() {
           ) : (
             <ul className="grid gap-2">
               {signals.map((signal) => (
-                <li key={signal.id} className="border border-border bg-card/40 p-2">
+                <li key={signal.id} className="border border-border bg-card p-2 rounded-lg">
                   <p className="text-[12px] text-foreground">{signal.rationale}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {signal.stage} · {signal.kind.replaceAll("_", " ")} · {signal.subject}
@@ -199,7 +199,7 @@ export default async function RunsPage() {
         </section>
 
         <section className="grid gap-2" aria-labelledby="evals">
-          <h2 id="evals" className="text-[15px] font-medium text-foreground">
+          <h2 id="evals" className="text-[13px] font-semibold text-foreground">
             Eval runs
           </h2>
           <p className="text-[11px] text-muted-foreground">
@@ -210,7 +210,7 @@ export default async function RunsPage() {
           ) : (
             <ul className="grid gap-2">
               {evals.map((run) => (
-                <li key={run.id} className="border border-border bg-card/40 p-2">
+                <li key={run.id} className="border border-border bg-card p-2 rounded-lg">
                   <p className="text-[12px] text-foreground">
                     {run.stage} · {run.module_id} v{run.module_version}
                   </p>

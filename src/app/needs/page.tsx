@@ -45,7 +45,7 @@ export default async function NeedsPage() {
           const rows = state.needs.filter((n) => n.status === status);
           return (
             <section key={status}>
-              <h2 className="mb-2 text-[13px] capitalize text-muted-foreground">
+              <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 {status} ({rows.length})
               </h2>
               {rows.length === 0 ? (
@@ -62,7 +62,7 @@ export default async function NeedsPage() {
                   const source = state.sources.find((s) => s.id === n.source_id);
                   const links = state.need_gap_links.filter((l) => l.need_id === n.id);
                   return (
-                    <article key={n.id} className="border border-border bg-card p-4">
+                    <article key={n.id} className="border border-border bg-card p-4 rounded-lg">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline">{DOMAIN_LABELS[n.domain]}</Badge>
                         <Badge variant="outline">{FUNCTION_LABELS[n.stakeholder]}</Badge>
@@ -188,7 +188,7 @@ export default async function NeedsPage() {
         {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
         {ai || rejected.length > 0 ? (
         <section>
-          <h2 className="mb-2 text-[13px] text-muted-foreground">
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             Rejected by the AI ({pendingRejected.length})
           </h2>
           <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
@@ -202,7 +202,7 @@ export default async function NeedsPage() {
               {pendingRejected.map((row) => {
                 const source = state.sources.find((s) => s.id === row.source_id);
                 return (
-                  <article key={row.id} className="border border-border bg-card/40 p-4">
+                  <article key={row.id} className="border border-border bg-card p-4 rounded-lg">
                     <p className="text-[13px] text-foreground">{row.name}</p>
                     <p className="mt-1 text-[12px] leading-5 text-foreground">{row.statement}</p>
                     <p className="mt-1 text-[12px] text-muted-foreground">

@@ -192,10 +192,10 @@ export function WorkspaceAiSetting({ model }: { model: WorkspaceAiModel }) {
   const noteId = useId();
   return (
     <section aria-labelledby="ws-ai" className="grid gap-2" data-testid="workspace-ai-setting">
-      <h2 id="ws-ai" className="text-[15px] font-medium text-foreground">
+      <h2 id="ws-ai" className="text-[13px] font-semibold text-foreground">
         AI assistance
       </h2>
-      <div className="flex flex-wrap items-center justify-between gap-3 border border-border bg-card/40 px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 border border-border bg-card px-3 py-2 rounded-lg">
         <div className="min-w-0 flex-1">
           <p className="text-[13px] text-foreground" data-testid="workspace-ai-state">
             AI assistance {change.effective ? "is on" : "is off"}

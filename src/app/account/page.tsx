@@ -40,7 +40,7 @@ export default async function AccountPage() {
     <WorkspacesFrame person={{ name: session.actor.name, email: session.email }}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h1 className="text-lg font-medium text-foreground">Your account</h1>
+          <h1 className="text-base font-bold tracking-tight text-foreground">Your account</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">How Synapse knows you.</p>
         </div>
         <div className="flex gap-3 text-[12px]">
@@ -54,8 +54,8 @@ export default async function AccountPage() {
           ) : null}
         </div>
       </div>
-      <section className="border border-border bg-card/40 p-5" aria-labelledby="profile">
-        <h2 id="profile" className="mb-3 text-[15px] font-medium text-foreground">
+      <section className="border border-border bg-card p-5 rounded-lg" aria-labelledby="profile">
+        <h2 id="profile" className="mb-3 text-[13px] font-semibold text-foreground">
           Profile
         </h2>
         <dl className="grid gap-2 text-[13px]" data-testid="account-profile">
@@ -67,8 +67,8 @@ export default async function AccountPage() {
           ))}
         </dl>
       </section>
-      <section className="mt-6 border border-border bg-card/40 p-5" aria-labelledby="password">
-        <h2 id="password" className="mb-3 text-[15px] font-medium text-foreground">
+      <section className="mt-6 border border-border bg-card p-5 rounded-lg" aria-labelledby="password">
+        <h2 id="password" className="mb-3 text-[13px] font-semibold text-foreground">
           Password
         </h2>
         {account ? (

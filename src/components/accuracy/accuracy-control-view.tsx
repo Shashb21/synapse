@@ -43,11 +43,11 @@ export async function AccuracyControlView() {
   return (
     <div className="grid gap-8">
       <section
-        className="grid gap-1 border border-border bg-card/40 p-3"
+        className="grid gap-1 border border-border bg-card p-3 rounded-lg"
         aria-labelledby="ai-switch-state"
         data-testid="accuracy-ai-switch-state"
       >
-        <h2 id="ai-switch-state" className="text-[15px] font-medium text-foreground">
+        <h2 id="ai-switch-state" className="text-[13px] font-semibold text-foreground">
           AI switch · {ai.enabled ? "on" : "off"}
         </h2>
         <p className="text-[12px] text-muted-foreground">
@@ -77,7 +77,7 @@ export async function AccuracyControlView() {
         canRoute={can(identity.role, "configure_routing")}
       />
       <section className="grid gap-2" aria-labelledby="live-prices">
-        <h2 id="live-prices" className="text-[15px] font-medium text-foreground">
+        <h2 id="live-prices" className="text-[13px] font-semibold text-foreground">
           Live price table
         </h2>
         <p className="text-[12px] text-muted-foreground">
@@ -86,7 +86,7 @@ export async function AccuracyControlView() {
         </p>
         <div className="overflow-x-auto border border-border">
           <table className="w-full text-left text-[12px]">
-            <thead className="bg-card/60 text-muted-foreground">
+            <thead className="bg-card text-muted-foreground">
               <tr>
                 <th className="px-2 py-1.5 font-medium">Provider</th>
                 <th className="px-2 py-1.5 font-medium">Model</th>

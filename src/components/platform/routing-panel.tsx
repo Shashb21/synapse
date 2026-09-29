@@ -50,7 +50,7 @@ export function RoutingPanel({
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
-        <h2 id="routing" className="text-[15px] font-medium text-foreground">
+        <h2 id="routing" className="text-[13px] font-semibold text-foreground">
           Per-stage routing
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
@@ -58,7 +58,7 @@ export function RoutingPanel({
           connected LLM — log in on this page first, or the run blocks with a link back here.
         </p>
         {ai ? null : (
-          <p className="mt-1 text-[12px] text-[var(--unknown)]" data-testid="routing-ai-off">
+          <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
             AI is off, so these routes are not used. You can still edit them; they take effect when
             an admin turns AI back on.
           </p>
@@ -146,10 +146,10 @@ function StageRouteCard({
   }
 
   return (
-    <article className="grid gap-2 border border-border bg-card/40 p-3">
+    <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[13px] font-medium text-foreground">{route.stage_title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground">{route.stage_title}</h3>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {route.module_id ?? "no module registered"}
             {route.module_version ? ` · v${route.module_version}` : ""}

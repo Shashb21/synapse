@@ -133,13 +133,13 @@ export function WorkspacesView({
     return (
       <div className="grid gap-4">
         <section
-          className="flex gap-3 border border-border bg-card/40 p-5"
+          className="flex gap-3 border border-border bg-card p-5 rounded-lg"
           aria-labelledby="no-workspaces"
           data-testid="no-workspaces"
         >
           <Inbox className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
           <div>
-            <h2 id="no-workspaces" className="text-[15px] font-medium text-foreground">
+            <h2 id="no-workspaces" className="text-[13px] font-semibold text-foreground">
               You&apos;re not in a workspace yet
             </h2>
             <p className="mt-1 text-[13px] text-muted-foreground">
@@ -148,8 +148,8 @@ export function WorkspacesView({
             </p>
           </div>
         </section>
-        <section className="border border-border bg-card/40 p-5" aria-labelledby="first-workspace">
-          <h2 id="first-workspace" className="text-[15px] font-medium text-foreground">
+        <section className="border border-border bg-card p-5 rounded-lg" aria-labelledby="first-workspace">
+          <h2 id="first-workspace" className="text-[13px] font-semibold text-foreground">
             Or create your first workspace
           </h2>
           <p className="mb-4 mt-1 text-[13px] text-muted-foreground">Start a new plan of your own and invite your team.</p>
@@ -163,7 +163,7 @@ export function WorkspacesView({
     <div className="grid gap-4">
       <section aria-labelledby="your-workspaces" className="grid gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="your-workspaces" className="text-[15px] font-medium text-foreground">
+          <h2 id="your-workspaces" className="text-[13px] font-semibold text-foreground">
             Your workspaces
           </h2>
           {!creating ? (
@@ -178,11 +178,11 @@ export function WorkspacesView({
             <li
               key={ws.id}
               data-testid="workspace-row"
-              className="flex flex-wrap items-center gap-3 border border-border bg-card/40 px-3 py-2.5"
+              className="flex flex-wrap items-center gap-3 border border-border bg-card px-3 py-2.5 rounded-lg"
             >
               <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <div className="min-w-0 flex-1">
-                <p className="flex min-w-0 items-center gap-2 text-[14px] font-medium text-foreground">
+                <p className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-foreground">
                   <span className="truncate">{ws.name}</span>
                   {ws.demo ? <DemoBadge /> : null}
                 </p>
@@ -214,8 +214,8 @@ export function WorkspacesView({
       </section>
 
       {creating ? (
-        <section className="border border-border bg-card/40 p-4" aria-labelledby="new-workspace">
-          <h2 id="new-workspace" className="mb-3 text-[15px] font-medium text-foreground">
+        <section className="border border-border bg-card p-4 rounded-lg" aria-labelledby="new-workspace">
+          <h2 id="new-workspace" className="mb-3 text-[13px] font-semibold text-foreground">
             New workspace
           </h2>
           <CreateWorkspaceForm autoFocus onCancel={() => setCreating(false)} />

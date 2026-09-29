@@ -79,7 +79,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
 
       <form
         aria-label="Create a user"
-        className="grid gap-2 border border-border bg-card/40 p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto_auto] sm:items-end"
+        className="grid gap-2 border border-border bg-card p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto_auto] sm:items-end rounded-lg"
         onSubmit={async (event) => {
           event.preventDefault();
           const ok = await run("create", { action: "create", email, name, role, actor_function: fn, is_admin: isAdmin });

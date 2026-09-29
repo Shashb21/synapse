@@ -72,16 +72,16 @@ export function CoverageManualPairForm({
   if (gaps.length === 0 || tactics.length === 0) return null;
 
   return (
-    <section className="mb-4 grid gap-2 border border-border bg-card/40 p-3" aria-labelledby="manual-pair">
+    <section className="mb-4 grid gap-2 border border-border bg-card p-3 rounded-lg" aria-labelledby="manual-pair">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="manual-pair" className="text-[13px] font-medium text-foreground">
+        <h2 id="manual-pair" className="text-[12px] font-semibold text-foreground">
           Decide any pair
         </h2>
         <Button size="sm" variant={open ? "default" : "outline"} onClick={() => setOpen(!open)}>
           {open ? "Close" : "Pick a pair"}
         </Button>
       </div>
-      {message ? <p className="text-[11px] text-[var(--known)]">{message}</p> : null}
+      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
       {open ? (
         <form onSubmit={submit} className="grid gap-2" data-testid="coverage-manual-pair">
           <label className="grid gap-1 text-[11px] text-muted-foreground">

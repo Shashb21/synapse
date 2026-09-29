@@ -74,14 +74,14 @@ export default async function AccuracyTimelinePage({
       </PageIntro>
 
       {loadError ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           {loadError}
         </p>
       ) : null}
 
       {!workspaceId ? (
         <section className="grid gap-2" aria-labelledby="timeline-empty">
-          <h2 id="timeline-empty" className="text-[15px] font-medium text-foreground">
+          <h2 id="timeline-empty" className="text-[13px] font-semibold text-foreground">
             Choose a workspace
           </h2>
           <p className="text-[12px] text-muted-foreground">
@@ -109,7 +109,7 @@ export default async function AccuracyTimelinePage({
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
-            <h2 id="workspace-picker" className="text-[15px] font-medium text-foreground">
+            <h2 id="workspace-picker" className="text-[13px] font-semibold text-foreground">
               Workspace
               {activeWorkspace ? (
                 <span className="ml-2 text-[12px] font-normal text-muted-foreground">

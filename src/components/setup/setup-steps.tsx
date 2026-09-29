@@ -51,7 +51,7 @@ function Section({ title, intro, children, id }: { title: string; intro: string;
       className="grid gap-5 rounded-lg border border-border bg-gradient-to-br from-card/80 via-card/40 to-transparent p-5"
     >
       <header className="grid gap-1">
-        <h2 id={`setup-${id}-title`} className="text-[15px] font-medium text-foreground">
+        <h2 id={`setup-${id}-title`} className="text-[13px] font-semibold text-foreground">
           {title}
         </h2>
         <p className="max-w-2xl text-[12px] leading-relaxed text-muted-foreground">{intro}</p>
@@ -399,9 +399,9 @@ export function SetupSummary({
   issues: Partial<Record<SetupSection, string[]>>;
 }) {
   const block = (section: SetupSection, title: string, rows: ReactNode) => (
-    <div key={section} className="grid content-start gap-1 rounded-md border border-border bg-card/40 p-4" data-testid={`setup-summary-${section}`}>
+    <div key={section} className="grid content-start gap-1 rounded-md border border-border bg-card p-4" data-testid={`setup-summary-${section}`}>
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
+        <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
         <button type="button" className="text-[11px] text-[var(--chart-1)] hover:underline" onClick={() => onEdit(section)}>
           Edit
         </button>

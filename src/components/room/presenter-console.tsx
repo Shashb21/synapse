@@ -130,7 +130,7 @@ function SlidePreview({ href, rev, title }: { href: string; rev: number; title: 
   }, []);
 
   return (
-    <div ref={boxRef} className="relative aspect-[16/10] w-full overflow-hidden border border-border bg-card">
+    <div ref={boxRef} className="relative aspect-[16/10] w-full overflow-hidden border border-border bg-card rounded-lg">
       <iframe
         key={`${href}#${rev}`}
         ref={frameRef}
@@ -374,7 +374,7 @@ export function PresenterConsole({
     >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2">
         <div className="flex items-baseline gap-2">
-          <Link href="/" className="text-[13px] font-medium text-foreground no-underline" title="Back to Prep">
+          <Link href="/" className="text-[12px] font-semibold text-foreground no-underline" title="Back to Prep">
             Synapse IEGP
           </Link>
           <span className="text-[12px] text-muted-foreground">
@@ -415,7 +415,7 @@ export function PresenterConsole({
               <span data-testid="room-slide-position" className="font-medium">
                 {index + 1} / {ROOM_SLIDES.length}
               </span>
-              <span className="ml-2 text-[15px] font-medium" data-testid="room-slide-title">
+              <span className="ml-2 text-[13px] font-semibold" data-testid="room-slide-title">
                 {slide.title}
               </span>
               {location !== slide.href ? (
@@ -445,7 +445,7 @@ export function PresenterConsole({
             {next ? (
               <SlidePreview href={next.href} rev={previewRev} title={next.title} />
             ) : (
-              <div className="grid aspect-[16/10] place-items-center border border-border bg-card text-[12px] text-muted-foreground">
+              <div className="grid aspect-[16/10] place-items-center border border-border bg-card text-[12px] text-muted-foreground rounded-lg">
                 End of slides
               </div>
             )}
@@ -474,7 +474,7 @@ export function PresenterConsole({
               onChange={(event) => onNotesChange(event.target.value)}
               onBlur={() => void flushNote()}
               placeholder="Only you see these. Saved for this workspace."
-              className="min-h-40 flex-1 resize-none rounded-lg border border-input bg-transparent p-2.5 text-[14px] leading-6 text-foreground outline-none focus-visible:border-ring"
+              className="min-h-40 flex-1 resize-none rounded-lg border border-input bg-transparent p-2.5 text-[13px] leading-6 text-foreground outline-none focus-visible:border-ring"
             />
           </label>
           <p className="text-[11px] text-muted-foreground">
@@ -487,7 +487,7 @@ export function PresenterConsole({
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-[15px] font-medium">Breakout groups</h2>
+              <h2 className="text-[13px] font-semibold">Breakout groups</h2>
               <p className="text-[12px] text-muted-foreground">
                 Open each group&apos;s room in its own window — one per screen.
               </p>
@@ -510,9 +510,9 @@ export function PresenterConsole({
           ) : (
             <ul className="grid gap-2">
               {breakouts.map((group) => (
-                <li key={group.id} className="flex flex-wrap items-center justify-between gap-2 border border-border bg-card p-3">
+                <li key={group.id} className="flex flex-wrap items-center justify-between gap-2 border border-border bg-card p-3 rounded-lg">
                   <div>
-                    <p className="text-[14px] font-medium">{group.name}</p>
+                    <p className="text-[13px] font-medium">{group.name}</p>
                     {group.note ? <p className="text-[12px] text-muted-foreground">{group.note}</p> : null}
                     <p className="text-[11px] text-muted-foreground">
                       {group.gapCount} gap{group.gapCount === 1 ? "" : "s"}

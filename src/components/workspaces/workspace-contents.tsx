@@ -76,7 +76,7 @@ export function WorkspaceContents({
 
   return (
     <section aria-labelledby="ws-contents" className="grid gap-2">
-      <h2 id="ws-contents" className="flex items-center gap-2 text-[15px] font-medium text-foreground">
+      <h2 id="ws-contents" className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
         Contents
         {demo ? <DemoBadge testId="settings-demo-badge" /> : null}
       </h2>

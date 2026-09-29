@@ -87,9 +87,9 @@ export function SetAsideGaps({ gaps }: { gaps: IegpState["gaps"] }) {
     <section
       aria-labelledby="set-aside-gaps"
       data-testid="set-aside-gaps"
-      className="mt-8 border border-border bg-card/40 p-4"
+      className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="set-aside-gaps" className="text-[13px] font-medium text-foreground">
+      <h2 id="set-aside-gaps" className="text-[12px] font-semibold text-foreground">
         Set aside ({excluded.length + parked.length})
       </h2>
       <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
@@ -97,7 +97,7 @@ export function SetAsideGaps({ gaps }: { gaps: IegpState["gaps"] }) {
       </p>
       <ul className="grid gap-2">
         {excluded.map((gap) => (
-          <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-background p-3">
+          <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
               <Link href={`/gaps/${gap.id}`} className="text-[13px] text-foreground no-underline hover:underline">
                 {gap.name}
@@ -113,7 +113,7 @@ export function SetAsideGaps({ gaps }: { gaps: IegpState["gaps"] }) {
           </li>
         ))}
         {parked.map((gap) => (
-          <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-background p-3">
+          <li key={gap.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
               <Link href={`/gaps/${gap.id}`} className="text-[13px] text-foreground no-underline hover:underline">
                 {gap.name}
@@ -138,9 +138,9 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
     <section
       aria-labelledby="rejected-tactics"
       data-testid="rejected-tactics"
-      className="mt-8 border border-border bg-card/40 p-4"
+      className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="rejected-tactics" className="text-[13px] font-medium text-foreground">
+      <h2 id="rejected-tactics" className="text-[12px] font-semibold text-foreground">
         Rejected tactics ({rejected.length})
       </h2>
       <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
@@ -148,7 +148,7 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
       </p>
       <ul className="grid gap-2">
         {rejected.map((tactic) => (
-          <li key={tactic.id} className="flex flex-wrap items-center gap-3 border border-border bg-background p-3">
+          <li key={tactic.id} className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg">
             <div className="min-w-0 flex-1">
               <Link href={`/tactics/${tactic.id}`} className="text-[13px] text-foreground no-underline hover:underline">
                 {tactic.name}
@@ -185,9 +185,9 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
     <section
       aria-labelledby="rejected-mappings"
       data-testid="rejected-mappings"
-      className="mt-8 border border-border bg-card/40 p-4"
+      className="mt-8 border border-border bg-card p-4 rounded-lg"
     >
-      <h2 id="rejected-mappings" className="text-[13px] font-medium text-foreground">
+      <h2 id="rejected-mappings" className="text-[12px] font-semibold text-foreground">
         Rejected mappings ({rows.length})
       </h2>
       <p className="mt-0.5 mb-3 text-[12px] text-muted-foreground">
@@ -200,7 +200,7 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
           {rows.map((row) => (
             <li
               key={`${row.gap_id}::${row.tactic_id}`}
-              className="flex flex-wrap items-center gap-3 border border-border bg-background p-3"
+              className="flex flex-wrap items-center gap-3 border border-border bg-card p-3 rounded-lg"
             >
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] text-foreground">

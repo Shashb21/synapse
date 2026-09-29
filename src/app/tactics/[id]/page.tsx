@@ -109,7 +109,7 @@ export default async function TacticDetailPage({
         <Item k="Owner" v={`${tactic.owner} · ${tactic.function.replaceAll("_", " ")}`} />
         <Item k="Budget" v={tactic.budget ?? "—"} />
       </dl>
-      <h2 className="mb-2 text-[13px] text-muted-foreground">Gaps this tactic is mapped to</h2>
+      <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">
         {maps.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">No mappings yet.</p>
@@ -117,7 +117,7 @@ export default async function TacticDetailPage({
           maps.map((c) => {
             const gap = state.gaps.find((g) => g.id === c.gap_id);
             return (
-              <Link key={c.id} href={`/gaps/${c.gap_id}`} className="flex justify-between border border-border bg-card p-3 no-underline">
+              <Link key={c.id} href={`/gaps/${c.gap_id}`} className="flex justify-between border border-border bg-card p-3 no-underline rounded-lg">
                 <span>{gap?.name}</span>
                 <CoverageBadge overall={c.overall} />
               </Link>

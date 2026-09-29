@@ -40,9 +40,9 @@ export default async function SourcesPage() {
         </PageIntro>
       )}
 
-      <section className="mt-4 border border-border bg-card/40 p-3" aria-labelledby="source-blocks">
+      <section className="mt-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="source-blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="source-blocks" className="text-[13px] font-medium text-foreground">
+          <h2 id="source-blocks" className="text-[12px] font-semibold text-foreground">
             Source blocks
           </h2>
           {ai ? (

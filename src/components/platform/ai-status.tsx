@@ -79,7 +79,7 @@ export function AiOffBanner() {
     <p
       role="status"
       data-testid="ai-off-banner"
-      className="border-b border-border bg-card/60 px-4 py-1.5 text-center text-[12px] text-muted-foreground"
+      className="border-b border-border bg-card px-4 py-1.5 text-center text-[12px] text-muted-foreground"
     >
       {offBy === "workspace"
         ? "AI assistance is off for this workspace. Everything is entered and edited by hand; no suggestions or automatic AI steps run."

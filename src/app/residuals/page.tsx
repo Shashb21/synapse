@@ -36,7 +36,7 @@ export default async function ResidualsPage() {
       ) : (
       <div className="grid gap-4">
         {rows.map(({ r, gap, pri }) => (
-          <article key={r.id} className="border border-border bg-card p-4">
+          <article key={r.id} className="border border-border bg-card p-4 rounded-lg">
             <div className="flex flex-wrap items-center gap-2">
               {pri?.lock.locked ? (
                 <PriorityBadge band={pri.band} />
