@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { freshWorkspace } from "../support/session";
 
 /**
  * The admin AI switch, end to end: with AI off the app is fully manual. The
@@ -14,6 +15,10 @@ async function setAi(request: APIRequestContext, enabled: boolean) {
 }
 
 test.describe.serial("AI switched off by an admin", () => {
+  // A new, empty workspace: what the first screen shows depends on whether the
+  // plan already has gaps, so it must not see what other specs left behind.
+  freshWorkspace({ name: "AI off" });
+
   test.afterAll(async ({ request }) => {
     await setAi(request, true);
   });
