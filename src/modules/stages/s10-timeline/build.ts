@@ -227,8 +227,8 @@ export function timelineCandidates(args: {
       if (displayedGapStatus(gap) === "validated_addressed") continue;
       sawOpen = true;
       const placement = placementByGap.get(gapId);
-      // Only a band a human validated places the activity.
-      if (!placement?.validated || !placement.band) continue;
+      // Only a band a human validated places the activity; a deferred gap is out of this cycle.
+      if (!placement?.validated || !placement.band || placement.band === "defer") continue;
       if (!best || RANK[placement.band] > RANK[best]) best = placement.band;
     }
     if (!sawOpen) return "addressed";

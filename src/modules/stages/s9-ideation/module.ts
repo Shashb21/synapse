@@ -83,23 +83,22 @@ type Proposal = z.infer<typeof proposalSchema>;
 
 type IdeationGap = { id: string; name: string; statement: string; domain: EvidenceDomain };
 
-/** Listing order of the validated bands: High first, then Medium, then Low. */
+/** Listing order of the validated bands. Ideation itself serves High only. */
 export const BAND_RANK = { high: 0, medium: 1, low: 2 } as const;
 
 /**
- * The gaps S9 (and "Add idea by hand") serves by default: every gap whose
- * priority band a human validated, whatever the band, mapped to its listing
- * rank. No rule decides eligibility beyond the human's validation.
+ * The gaps S9 (and "Add idea by hand") serves: open gaps whose priority a human
+ * validated as High, as in the owner's Figma design (KAN-8, 2026-09-29). Medium,
+ * Low and Defer gaps are not ideated here; their tactics come from the Tactic
+ * Library or the gap. No rule decides beyond the human's validated band.
  */
 export function ideationBandOrder(
-  placements: { gap_id: string; validated: boolean; band: "high" | "medium" | "low" | null }[],
+  placements: { gap_id: string; validated: boolean; band: "high" | "medium" | "low" | "defer" | null }[],
 ): Map<string, number> {
   const order = new Map<string, number>();
   for (const placement of placements) {
-    if (!placement.validated || !placement.band) continue;
-    const rank = BAND_RANK[placement.band];
-    // A gap placed in several treatment settings lists under its highest band.
-    order.set(placement.gap_id, Math.min(rank, order.get(placement.gap_id) ?? rank));
+    if (!placement.validated || placement.band !== "high") continue;
+    order.set(placement.gap_id, BAND_RANK.high);
   }
   return order;
 }
@@ -460,8 +459,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
     requireLlm(ctx, "Ideation");
     const [state, placements] = await Promise.all([loadState(), listPlacements()]);
     const planContext = prioritizationContextFromState(state);
-    // Ideation is for open gaps whose band a human validated, whatever the band;
-    // High comes first, then Medium, then Low. Explicit gap_ids pick among open gaps.
+    // Ideation is for open gaps a human validated as High (KAN-8). Explicit gap_ids pick among them.
     const order = ideationBandOrder(placements);
     const gaps: IdeationGap[] = state.gaps
       .filter(

@@ -55,9 +55,11 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(cards).not.toContain("Accept tactic");
     const chrome = readFileSync(path.join(process.cwd(), "src/components/plan-chrome.tsx"), "utf8");
     expect(chrome).toContain('label: "Upload"');
-    expect(chrome).toContain('label: "Gaps"');
-    expect(chrome).toContain('label: "Prioritize"');
-    expect(chrome).toContain('label: "Tactics"');
+    // KAN-8: the Figma design's place names.
+    expect(chrome).toContain('label: "Evidence Inventory"');
+    expect(chrome).toContain('label: "Prioritization Matrix"');
+    expect(chrome).toContain('label: "Tactic Ideation"');
+    expect(chrome).toContain('label: "Gantt Timeline"');
     expect(chrome).toContain('href: "/?place=upload"');
     expect(chrome).toContain('href: "/?place=gaps"');
     expect(chrome).toContain('href: "/?place=plan"');

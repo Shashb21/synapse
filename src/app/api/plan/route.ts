@@ -59,7 +59,7 @@ export async function GET() {
   return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history });
 }
 
-const bandSchema = z.enum(["high", "medium", "low"]);
+const bandSchema = z.enum(["high", "medium", "low", "defer"]);
 const decisionSchema = z.enum(["accept", "reject"]);
 const planStatusSchema = z.enum(["draft", "final"]);
 const laneSchema = z.enum(["high", "medium", "low", "unprioritized", "addressed"]);

@@ -118,7 +118,8 @@ describe("S8 manual placement", () => {
 
   it("drops a gap no model has placed straight onto the matrix", async () => {
     const placement = await movePlacement({ gap_id: ids[2]!, x_axis: X, y_axis: Y, x: 10, y: 10, actor: ACTOR });
-    expect(placement.band).toBe("low");
+    // Unfavourable on both axes: the Defer quadrant (KAN-8).
+    expect(placement.band).toBe("defer");
     expect(placement.human_axes?.sort()).toEqual([Y, X].sort());
   });
 
@@ -145,12 +146,12 @@ describe("S8 manual placement", () => {
   });
 
   it("a re-run keeps every human score and band, and only refreshes its own suggestion", async () => {
-    const dragged = ids[2]!; // dragged to Low above
+    const dragged = ids[2]!; // dragged to Defer above
     const banded = ids[4]!;
     await setPlacement({ gap_id: banded, band: "low", rationale: "Sequencing is a later-cycle question", actor: ACTOR });
     const typed = ids[0]!; // typed 20/85 above
 
-    // The test stub scores every axis 50, which lands top-left: High.
+    // The test stub scores every axis 50, which lands in Prioritize (top-right): High.
     await runStage({
       stage: "S8",
       input: { gap_ids: [dragged, banded, typed], x_axis: X, y_axis: Y, only_missing: false },
@@ -159,7 +160,7 @@ describe("S8 manual placement", () => {
     });
 
     const draggedAfter = (await placementOf(dragged))!;
-    expect(draggedAfter.band).toBe("low");
+    expect(draggedAfter.band).toBe("defer");
     expect(draggedAfter.axis_scores[X]).toBe(90);
     expect(draggedAfter.axis_scores[Y]).toBe(10);
     expect(draggedAfter.suggested_band).toBe("high");
@@ -212,13 +213,13 @@ describe("S9 manual ideas and edits", () => {
     expect(stored.every((proposal) => proposal.origin === "ai")).toBe(true);
   }, 60_000);
 
-  it("every validated band is eligible, not just High, listed High → Medium → Low", async () => {
+  it("ideation serves validated High gaps only, as in the Figma design (KAN-8)", async () => {
     const [high, low, medium] = [ids[1]!, ids[2]!, ids[3]!];
     await validatePlacement({ gap_id: low, band: "low", rationale: "Later-cycle question", actor: ACTOR });
     const order = ideationBandOrder(await listPlacements());
     expect(order.get(high)).toBe(0);
-    expect(order.get(medium)).toBe(1);
-    expect(order.get(low)).toBe(2);
+    expect(order.has(medium)).toBe(false);
+    expect(order.has(low)).toBe(false);
     // An unvalidated placement is not eligible.
     expect(order.has(ids[0]!)).toBe(false);
 
@@ -229,26 +230,21 @@ describe("S9 manual ideas and edits", () => {
       role: "medical_affairs",
     });
     const gapIds = result.output.proposals.map((proposal) => proposal.gap_id);
-    for (const id of [high, medium, low]) expect(gapIds).toContain(id);
-    expect(gapIds).not.toContain(ids[0]!);
-    expect(gapIds.indexOf(high)).toBeLessThan(gapIds.indexOf(medium));
-    expect(gapIds.indexOf(medium)).toBeLessThan(gapIds.indexOf(low));
-    expect(result.summary).toMatch(/prioritized gap/);
+    expect(gapIds).toContain(high);
+    for (const id of [medium, low, ids[0]!]) expect(gapIds).not.toContain(id);
   }, 60_000);
 
-  it("orders by band and ignores unvalidated or band-less placements", () => {
+  it("ignores unvalidated, band-less, Medium, Low and Defer placements", () => {
     const order = ideationBandOrder([
       { gap_id: "a", validated: true, band: "low" },
       { gap_id: "b", validated: false, band: "high" },
       { gap_id: "c", validated: true, band: null },
       { gap_id: "d", validated: true, band: "medium" },
-      // A gap placed in two settings lists under its higher band.
+      { gap_id: "e", validated: true, band: "defer" },
+      // A gap placed in two settings is eligible when one of them is High.
       { gap_id: "a", validated: true, band: "high" },
     ]);
-    expect([...order.entries()].sort()).toEqual([
-      ["a", 0],
-      ["d", 1],
-    ]);
+    expect([...order.entries()].sort()).toEqual([["a", 0]]);
   });
 
   it("adds an idea by hand for an Open gap, audited, with timing left for S10", async () => {

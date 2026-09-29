@@ -6,6 +6,9 @@ import { nowIso } from "@/modules/kernel/ids";
 import type { PriorityAxis } from "./axis-math";
 
 export {
+  MATRIX_BANDS,
+  MATRIX_BAND_LABELS,
+  QUADRANT_LABELS,
   favourability,
   favourableLabel,
   quadrantBand,
@@ -14,6 +17,7 @@ export {
   unfavourableLabel,
 } from "./axis-math";
 
+export type { MatrixBand } from "./axis-math";
 export type { PriorityAxis };
 
 export type AxesConfig = {

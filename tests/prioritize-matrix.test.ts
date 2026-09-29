@@ -29,13 +29,13 @@ describe("matrix geometry", () => {
   const impact = axis("decision_impact");
   const effort = axis("effort_cost");
 
-  it("puts favourable-on-both top-left as High, neither as Low, the rest Medium", () => {
+  it("names the four quadrants as in the design: Prioritize, Plan, Monitor, Defer (KAN-8)", () => {
     const band = (y: number, x: number) =>
       quadrantBand({ xAxis: impact, yAxis: axis("time_pressure"), scores: { decision_impact: x, time_pressure: y } });
-    expect(band(80, 80)).toBe("high");
-    expect(band(20, 20)).toBe("low");
-    expect(band(80, 20)).toBe("medium");
-    expect(band(20, 80)).toBe("medium");
+    expect(band(80, 80)).toBe("high"); // favourable on both: Prioritize
+    expect(band(80, 20)).toBe("medium"); // vertical only: Plan
+    expect(band(20, 80)).toBe("low"); // horizontal only: Monitor
+    expect(band(20, 20)).toBe("defer"); // neither: Defer
   });
 
   it("flips a cost-style axis so low effort is the favourable end", () => {
@@ -45,7 +45,7 @@ describe("matrix geometry", () => {
       "high",
     );
     expect(quadrantBand({ xAxis: effort, yAxis: impact, scores: { effort_cost: 90, decision_impact: 10 } })).toBe(
-      "low",
+      "defer",
     );
   });
 });
@@ -135,9 +135,10 @@ describe("Prioritize on a setting's matrix", () => {
     expect(nudge.validated).toBe(true);
     expect(nudge.band).toBe("high");
 
-    const bottomRight = await drag(10, 10);
-    expect(bottomRight.band).toBe("low");
-    expect(bottomRight.validated).toBe(false);
+    // Unfavourable on both axes is the Defer quadrant (KAN-8).
+    const bottomLeft = await drag(10, 10);
+    expect(bottomLeft.band).toBe("defer");
+    expect(bottomLeft.validated).toBe(false);
   });
 
   it("a first placement run leaves already-placed gaps where the user put them", async () => {
@@ -150,7 +151,7 @@ describe("Prioritize on a setting's matrix", () => {
     });
     const after = (await listPlacements()).find((row) => row.gap_id === openIds[0])!;
     expect(after.axis_scores).toEqual(before.axis_scores);
-    expect(after.band).toBe("low");
+    expect(after.band).toBe("defer");
   }, 60_000);
 
   it("a validated gap placed on new axes gains a position but keeps its band", async () => {

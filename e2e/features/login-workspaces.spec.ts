@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
+import { openRail } from "../support/rail";
 
 /**
  * Login → workspaces → a workspace tag on every page. These specs start signed
@@ -188,6 +189,7 @@ test("the customer app shows no owner or lab tools", async ({ page }) => {
     await expect(page.locator(`aside a[href="${href}"]`)).toHaveCount(0);
   }
   await expect(page.locator('aside a[href^="/accuracy"]')).toHaveCount(0);
+  await openRail(page);
   const toggle = page.getByRole("group", { name: /prep or room mode/i }).first();
   await expect(toggle.getByRole("link", { name: "Room" })).toHaveAttribute("href", "/room");
 });

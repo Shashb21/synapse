@@ -208,7 +208,7 @@ function MappingRowEditor({
           </span>
         ) : null}
         {row.source === "human" && row.unreviewed_tactic_ids.length > 0 ? (
-          <p className="mt-1 text-[10px] text-amber-300" role="status">
+          <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300" role="status">
             Mapped after your save, not yet reviewed:{" "}
             {row.unreviewed_tactic_ids.map((id) => tacticLabel(id, tactics)).join(", ")}
           </p>

@@ -8,7 +8,7 @@ export type GapProposalGroup = {
   gap_name: string;
   statement: string;
   domain_label: string;
-  band: "high" | "medium" | "low" | null;
+  band: "high" | "medium" | "low" | "defer" | null;
   band_validated: boolean;
   mapped_tactic_count: number;
   proposals: ProposalCardModel[];
@@ -67,7 +67,7 @@ export function GapProposalGroupCard({
                 borderStyle: group.band_validated ? "solid" : "dashed",
               }}
             >
-              {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : "Low"}
+              {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : group.band === "low" ? "Low" : "Defer"}
               {group.band_validated ? " · validated" : " · suggested"}
             </span>
           ) : null}

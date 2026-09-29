@@ -37,15 +37,16 @@ function BadgeHelp({ help, children }: { help: string; children: ReactNode }) {
 
 export function GapBadge({ status }: { status: GapStatus }) {
   const tone =
+    // Figma design (KAN-8): addressed emerald, partial amber, open rose.
     status === "validated_addressed"
-      ? "bg-emerald-500/15 text-emerald-300"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
       : status === "validated_open"
-        ? "bg-amber-500/15 text-amber-300"
+        ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
         : status === "validated_partial"
-          ? "bg-sky-500/15 text-sky-300"
+          ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
           : status === "excluded"
-            ? "bg-zinc-500/20 text-zinc-400"
-            : "bg-violet-500/15 text-violet-300";
+            ? "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400"
+            : "bg-violet-500/15 text-violet-700 dark:text-violet-300";
   return (
     <BadgeHelp help={GAP_STATUS_DEFINITIONS[status]}>
       <Badge variant="outline" className={tone}>
@@ -86,12 +87,12 @@ export function CoverageBadge({ overall }: { overall: OverallCoverage }) {
 export function PriorityBadge({ band }: { band: PriorityBand }) {
   const tone =
     band === "critical"
-      ? "bg-red-500/15 text-red-300"
+      ? "bg-red-500/15 text-red-700 dark:text-red-300"
       : band === "high"
-        ? "bg-orange-500/15 text-orange-300"
+        ? "bg-orange-500/15 text-orange-700 dark:text-orange-300"
         : band === "medium"
-          ? "bg-yellow-500/15 text-yellow-200"
-          : "bg-zinc-500/20 text-zinc-400";
+          ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-200"
+          : "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400";
   return (
     <BadgeHelp help={PRIORITY_BAND_HELPERS[band]}>
       <Badge variant="outline" className={`capitalize ${tone}`}>
@@ -114,10 +115,10 @@ export function TacticBadge({ status }: { status: TacticStatus }) {
 export function TacticReviewBadge({ status }: { status: TacticReviewStatus }) {
   const tone =
     status === "accepted"
-      ? "bg-emerald-500/15 text-emerald-300"
+      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
       : status === "rejected"
-        ? "bg-zinc-500/20 text-zinc-400"
-        : "bg-violet-500/15 text-violet-300";
+        ? "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400"
+        : "bg-violet-500/15 text-violet-700 dark:text-violet-300";
   const help =
     status === "accepted"
       ? "This tactic is in the living plan."
@@ -135,7 +136,7 @@ export function TacticReviewBadge({ status }: { status: TacticReviewStatus }) {
 
 export function LockMeta({ lock }: { lock: Lock }) {
   if (!lock.locked) {
-    return <span className="text-[11px] text-amber-300">Unlocked — human gate open</span>;
+    return <span className="text-[11px] text-amber-700 dark:text-amber-300">Unlocked — human gate open</span>;
   }
   return (
     <span className="text-[11px] text-muted-foreground">
@@ -155,7 +156,7 @@ export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
     <BadgeHelp help="Another live gap that uses this tactic changed a dimension or overall. Confirm or edit this gap’s own coverage. Values were not copied.">
       <Badge
         variant="outline"
-        className="h-auto max-w-full whitespace-normal border-amber-500/40 bg-amber-500/15 text-left text-amber-200"
+        className="h-auto max-w-full whitespace-normal border-amber-500/40 bg-amber-500/15 text-left text-amber-700 dark:text-amber-200"
       >
         Review coverage — also mapped elsewhere
       </Badge>

@@ -52,7 +52,7 @@ export default async function RoadmapPage() {
               </p>
             ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              {item ? <LockMeta lock={item.lock} /> : <span className="text-[11px] text-amber-300">Not yet on locked roadmap</span>}
+              {item ? <LockMeta lock={item.lock} /> : <span className="text-[11px] text-amber-700 dark:text-amber-300">Not yet on locked roadmap</span>}
               <LockForm
                 label={item ? "Re-lock roadmap row" : "Accept onto roadmap"}
                 action="lock_roadmap"

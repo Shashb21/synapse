@@ -38,7 +38,7 @@ export default async function IdeationPage() {
     (gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open",
   );
 
-  // Every open gap whose band a human validated is eligible, High first, then Medium, then Low.
+  // Open gaps a human validated as High are eligible (KAN-8: the Figma design ideates High only).
   const bandOrder = ideationBandOrder(placements);
   const rankOf = (gapId: string) => bandOrder.get(gapId) ?? BAND_RANK.low + 1;
   const BAND_NAMES = ["High", "Medium", "Low"] as const;

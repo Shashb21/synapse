@@ -44,9 +44,12 @@ test.describe("S3 tactic extraction", () => {
     expect(dry.output.proposed).toBeGreaterThan(0);
 
     await page.goto("/?place=gaps");
-    await page.getByRole("button", { name: /map existing tactic/i }).first().click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    // Retry until the page has hydrated; a click before that does nothing.
+    await expect(async () => {
+      await page.getByRole("button", { name: /map existing tactic/i }).first().click({ timeout: 5_000 });
+      await expect(dialog).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
     await expect(dialog.getByRole("combobox").first()).toBeVisible();
     const options = await dialog.getByRole("combobox").first().locator("option").allTextContents();
     expect(options.join(" ").length, "the library should offer extracted tactics").toBeGreaterThan(0);

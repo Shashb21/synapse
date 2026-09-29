@@ -108,7 +108,7 @@ test.describe("platform surfaces", () => {
     await runStage(page, "S10", { persist: true });
 
     await page.goto("/timeline");
-    await expect(page.getByRole("heading", { name: /^iegp timeline$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
     await expect(page.locator("svg[role='img']")).toBeVisible();
 
     await page.getByRole("button", { name: /save as final/i }).click();

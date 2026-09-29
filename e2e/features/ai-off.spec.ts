@@ -35,7 +35,9 @@ test.describe.serial("AI switched off by an admin", () => {
 
   test("the first screen is Add gaps and Add tactics, with no upload or ingest", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: /add gaps/i }).first()).toBeVisible();
+    // KAN-8: with AI off the flow opens on Evidence Inventory, which leads with both.
+    await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /add open gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /add tactics/i }).first()).toBeVisible();
     await expect(page.getByText(/ingest this file|ingest gaps and tactics/i)).toHaveCount(0);
     await expect(page.locator('input[type="file"]')).toHaveCount(0);

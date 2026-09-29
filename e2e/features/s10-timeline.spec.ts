@@ -67,14 +67,16 @@ test.describe("S10 interactive Gantt IEGP", () => {
 
   test("renders the Gantt with lanes and a readout legend", async ({ page }) => {
     await page.goto("/timeline");
-    await expect(page.getByRole("heading", { name: /^iegp timeline$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
     const chart = page.locator("svg[role='img']");
     await expect(chart).toBeVisible();
     await expect(chart).toHaveAttribute("aria-label", /Gantt timeline with \d+ activities/);
     await expect(page.getByText("HIGH PRIORITY", { exact: true })).toBeVisible();
     await expect(page.getByText("Readout", { exact: true })).toBeVisible();
     await expect(page.getByText("Depends on", { exact: true })).toBeVisible();
-    await expect(page.getByText("Dashed bar outline = proposed tactic")).toBeVisible();
+    // KAN-8: bars are coloured by tactic type and patterned by status, as the legend says.
+    await expect(page.getByText("Real-world data", { exact: true })).toBeVisible();
+    await expect(page.getByText("Proposed", { exact: true })).toBeVisible();
   });
 
   test("opens an activity's full record on click", async ({ page, request }) => {

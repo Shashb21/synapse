@@ -1,21 +1,21 @@
 "use client";
 
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import {
   daysInMonth,
-  MONTH_NAMES,
   monthAt,
   monthPos,
   monthWidthFor,
   parts,
-  readPalette,
+  usePalette,
   truncate,
 } from "@/components/timeline/gantt-chart";
 import { CreateActivityDialog, ManualDatesDialog, type DragChange } from "@/components/timeline/timeline-dialogs";
 import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
+import { TACTIC_TYPE_FAMILIES, tacticTypeColor } from "@/lib/iegp/tactic-type-colors";
 import type { TimelineActivity, TimelineBand } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineGroup, GapTimelineItem, GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 
@@ -30,7 +30,7 @@ const EMPTY_H = 24;
 const BAR_H = 14;
 const PAD_R = 28;
 const PAD_B = 10;
-const LEGEND_H = 30;
+const LEGEND_H = 46;
 const HANDLE_W = 7;
 
 const BAND_TITLES: Record<"high" | "medium" | "low", string> = {
@@ -39,23 +39,54 @@ const BAND_TITLES: Record<"high" | "medium" | "low", string> = {
   low: "Low priority",
 };
 
-const LEGEND: { band: TimelineBand; label: string }[] = [
-  { band: "high", label: "High priority" },
-  { band: "medium", label: "Medium priority" },
-  { band: "low", label: "Low priority" },
-  { band: "unprioritized", label: "Not yet prioritized" },
+/** Which prioritized gaps the chart shows, as in the design: all, High, or High + Medium. */
+export type TimelinePriorityFilter = "all" | "high" | "high_medium";
+
+/**
+ * The view narrowed to a priority filter and a setting tag. "All" with no setting is
+ * the view as it is; any narrowing drops the sections outside the prioritized bands.
+ */
+export function filterView(view: GapTimelineView, filter: TimelinePriorityFilter, setting: string | null): GapTimelineView {
+  if (filter === "all" && !setting) return view;
+  const wanted = setting?.trim().toLowerCase() ?? null;
+  const inSetting = (group: GapTimelineGroup) =>
+    !wanted || group.settings.some((tag) => tag.trim().toLowerCase() === wanted);
+  const inBand = (group: GapTimelineGroup) =>
+    filter === "all" || group.band === "high" || (filter === "high_medium" && group.band === "medium");
+  const narrowed = filter !== "all";
+  return {
+    ...view,
+    prioritized: view.prioritized.filter((group) => inBand(group) && inSetting(group)),
+    not_prioritized: narrowed ? [] : view.not_prioritized.filter(inSetting),
+    deferred: narrowed ? [] : view.deferred.filter(inSetting),
+    other: narrowed || wanted ? [] : view.other,
+  };
+}
+
+/** Bar fill patterns by tactic status (the design's hatching); proposed also has a dashed outline. */
+const STATUS_PATTERN: Record<string, string | undefined> = {
+  planned: "url(#synapse-status-planned)",
+  completed: "url(#synapse-status-completed)",
+  proposed: "url(#synapse-status-proposed)",
+};
+
+const STATUS_LEGEND: { status: string; label: string }[] = [
+  { status: "ongoing", label: "Ongoing" },
+  { status: "planned", label: "Planned" },
+  { status: "completed", label: "Completed" },
+  { status: "proposed", label: "Proposed" },
 ];
 
 type Row =
   | { kind: "band"; key: string; y: number; h: number; band: "high" | "medium" | "low"; count: number }
-  | { kind: "section"; key: string; y: number; h: number; section: "not_prioritized" | "other"; label: string; count: number }
+  | { kind: "section"; key: string; y: number; h: number; section: "not_prioritized" | "deferred" | "other"; label: string; count: number }
   | { kind: "gap"; key: string; y: number; h: number; group: GapTimelineGroup; tone: TimelineBand }
   | { kind: "item"; key: string; y: number; h: number; item: GapTimelineItem; group: GapTimelineGroup | null; tone: TimelineBand }
   | { kind: "empty"; key: string; y: number; h: number; label: string };
 
 type WithoutY<T> = T extends unknown ? Omit<T, "y"> : never;
 
-function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boolean): Row[] {
+function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boolean, showDeferred: boolean): Row[] {
   const rows: Row[] = [];
   let y = top;
   const push = (row: WithoutY<Row>) => {
@@ -86,6 +117,11 @@ function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boole
       count: view.not_prioritized.length,
     });
     if (showNotPrioritized) for (const group of view.not_prioritized) pushGroup(group, "unprioritized");
+  }
+  // Validated as Defer on the matrix: out of this cycle, but never hidden (KAN-8).
+  if (view.deferred.length > 0) {
+    push({ kind: "section", key: "section:deferred", h: SECTION_H, section: "deferred", label: "Deferred", count: view.deferred.length });
+    if (showDeferred) for (const group of view.deferred) pushGroup(group, "unprioritized");
   }
   if (view.other.length > 0) {
     push({ kind: "section", key: "section:other", h: SECTION_H, section: "other", label: "Other activities", count: view.other.length });
@@ -137,6 +173,9 @@ export function GapGantt({
   canCreate,
   identity,
   onDragCommit,
+  filter = "all",
+  setting = null,
+  showDependencies = true,
 }: {
   view: GapTimelineView;
   activities: TimelineActivity[];
@@ -150,9 +189,14 @@ export function GapGantt({
   canCreate: boolean;
   identity: ActionIdentity;
   onDragCommit: (change: DragChange) => void;
+  filter?: TimelinePriorityFilter;
+  /** Show only gaps tagged with this setting; null for every setting. */
+  setting?: string | null;
+  showDependencies?: boolean;
 }) {
-  const palette = useMemo(() => readPalette(), []);
+  const palette = usePalette();
   const [showNotPrioritized, setShowNotPrioritized] = useState(false);
+  const [showDeferred, setShowDeferred] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragged = useRef(false);
 
@@ -160,9 +204,28 @@ export function GapGantt({
   const months = Math.max(1, view.window.months);
   const monthWidth = monthWidthFor(months);
   const top = HEADER_H + (view.markers.length > 0 ? MARKER_H : 0);
-  const rows = useMemo(() => buildRows(view, top, showNotPrioritized), [view, top, showNotPrioritized]);
+  const shown = useMemo(() => filterView(view, filter, setting), [view, filter, setting]);
+  const rows = useMemo(
+    () => buildRows(shown, top, showNotPrioritized, showDeferred),
+    [shown, top, showNotPrioritized, showDeferred],
+  );
   const bodyBottom = rows.length > 0 ? rows[rows.length - 1]!.y + rows[rows.length - 1]!.h : top;
   const trackW = months * monthWidth;
+  const spans = useMemo(() => {
+    const years: { year: number; from: number; span: number }[] = [];
+    const quarters: { key: string; q: number; from: number; span: number }[] = [];
+    for (let index = 0; index < months; index += 1) {
+      const { year, month } = monthAt(origin, index);
+      const q = Math.floor((month - 1) / 3) + 1;
+      const lastYear = years[years.length - 1];
+      if (lastYear?.year === year) lastYear.span += 1;
+      else years.push({ year, from: index, span: 1 });
+      const lastQuarter = quarters[quarters.length - 1];
+      if (lastQuarter?.key === `${year}-${q}`) lastQuarter.span += 1;
+      else quarters.push({ key: `${year}-${q}`, q, from: index, span: 1 });
+    }
+    return { years, quarters };
+  }, [origin, months]);
   const width = LABEL_W + trackW + PAD_R;
   const height = bodyBottom + PAD_B + LEGEND_H;
 
@@ -194,7 +257,7 @@ export function GapGantt({
     geometry.set(row.item.activity_id, { x1, x2: Math.max(x1 + 6, x(end)), cy: row.y + row.h / 2 });
   }
   const arrows: { key: string; d: string; broken: boolean }[] = [];
-  for (const activity of activities) {
+  for (const activity of showDependencies ? activities : []) {
     const target = geometry.get(activity.id);
     if (!target) continue;
     for (const upstreamId of activity.depends_on) {
@@ -214,6 +277,75 @@ export function GapGantt({
   const todayX = x(today);
   const todayVisible = todayX >= LABEL_W && todayX <= LABEL_W + trackW;
   const legendY = bodyBottom + PAD_B + 12;
+  // Type families, then statuses, then markers, laid out left to right (the PNG export keeps it).
+  const legendEntries: { key: string; label: string; labelX: number; mark: ReactNode }[] = [
+    ...TACTIC_TYPE_FAMILIES.map((family) => ({
+      key: `type-${family.label}`,
+      label: family.label,
+      labelX: 14,
+      mark: <rect x={0} y={-7} width={9} height={9} rx={2} fill={family.color} />,
+    })),
+    ...STATUS_LEGEND.map((entry) => ({
+      key: `status-${entry.status}`,
+      label: entry.label,
+      labelX: 23,
+      mark: (
+        <>
+          <rect
+            x={0}
+            y={-7}
+            width={18}
+            height={9}
+            rx={2}
+            fill={palette.muted}
+            fillOpacity={entry.status === "proposed" ? 0.45 : 0.88}
+            stroke={palette.muted}
+            strokeDasharray={entry.status === "proposed" ? "3 2" : undefined}
+          />
+          {STATUS_PATTERN[entry.status] ? (
+            <rect x={0} y={-7} width={18} height={9} rx={2} fill={STATUS_PATTERN[entry.status]} />
+          ) : null}
+        </>
+      ),
+    })),
+    { key: "readout", label: "Readout", labelX: 16, mark: <polygon points="5,-8 10,-3 5,2 0,-3" fill={palette.readout} /> },
+    {
+      key: "depends",
+      label: "Depends on",
+      labelX: 26,
+      mark: <path d="M 0 -3 H 16" stroke={palette.muted} strokeWidth={1} strokeDasharray="4 3" markerEnd="url(#synapse-gap-arrow)" />,
+    },
+    {
+      key: "broken",
+      label: "Broken dependency",
+      labelX: 26,
+      mark: (
+        <path
+          d="M 0 -3 H 16"
+          stroke={palette.conflict}
+          strokeWidth={1.4}
+          strokeDasharray="4 3"
+          markerEnd="url(#synapse-gap-arrow-broken)"
+        />
+      ),
+    },
+    { key: "decision", label: "Key decision", labelX: 16, mark: <polygon points="5,-9 10,-4 5,1 0,-4" fill={palette.today} /> },
+  ];
+  // Tactic types on the first line; statuses and markers on the second.
+  const legendX = [12, 12];
+  const legend = legendEntries.map((entry) => {
+    const line = entry.key.startsWith("type-") ? 0 : 1;
+    const at = legendX[line]!;
+    legendX[line] = at + entry.labelX + entry.label.length * 5.4 + 14;
+    return (
+      <g key={`legend-${entry.key}`} transform={`translate(${at}, ${legendY + line * 16})`}>
+        {entry.mark}
+        <text x={entry.labelX} y={1} fill={palette.muted} fontSize={9.5}>
+          {entry.label}
+        </text>
+      </g>
+    );
+  });
   const colour = (band: TimelineBand) => palette[band];
 
   function beginDrag(event: ReactPointerEvent<SVGElement>, activity: TimelineActivity, mode: Drag["mode"]) {
@@ -280,45 +412,94 @@ export function GapGantt({
           <marker id="synapse-gap-arrow-broken" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
             <path d="M 0 0 L 7 3.5 L 0 7 z" fill={palette.conflict} />
           </marker>
+          <pattern id="synapse-status-planned" width="10" height="10" patternUnits="userSpaceOnUse">
+            <rect x={0} y={0} width={2} height={10} fill="#ffffff" opacity={0.35} />
+          </pattern>
+          <pattern id="synapse-status-completed" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect x={0} y={0} width={3} height={9} fill="#ffffff" opacity={0.25} />
+          </pattern>
+          <pattern id="synapse-status-proposed" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+            <rect x={0} y={0} width={2} height={8} fill="#ffffff" opacity={0.45} />
+          </pattern>
         </defs>
         <rect x={0} y={0} width={width} height={height} fill={palette.background} />
 
-        {Array.from({ length: months }, (_, index) => {
-          const month = monthAt(origin, index);
-          const left = LABEL_W + index * monthWidth;
-          const quarterStart = (month.month - 1) % 3 === 0;
-          return (
-            <g key={`ruler-${index}`}>
-              <line
-                x1={left}
-                y1={quarterStart ? 4 : 22}
-                x2={left}
-                y2={bodyBottom}
-                stroke={palette.grid}
-                strokeWidth={quarterStart ? 1 : 0.5}
-                opacity={quarterStart ? 0.9 : 0.55}
+        {/* Year and quarter header, as in the design; months stay as faint ticks for day-level drags. */}
+        {spans.quarters.map((quarter, index) => (
+          <g key={`q-${quarter.key}`}>
+            {index % 2 === 1 ? (
+              <rect
+                x={LABEL_W + quarter.from * monthWidth}
+                y={HEADER_H}
+                width={quarter.span * monthWidth}
+                height={Math.max(0, bodyBottom - HEADER_H)}
+                fill={palette.foreground}
+                opacity={0.025}
+                pointerEvents="none"
               />
-              {quarterStart ? (
-                <text x={left + 5} y={15} fill={palette.muted} fontSize={10} letterSpacing={0.4}>
-                  {`Q${Math.floor((month.month - 1) / 3) + 1} ${month.year}`}
-                </text>
-              ) : null}
+            ) : null}
+            <line
+              x1={LABEL_W + quarter.from * monthWidth}
+              y1={22}
+              x2={LABEL_W + quarter.from * monthWidth}
+              y2={bodyBottom}
+              stroke={palette.grid}
+              strokeWidth={1}
+            />
+            {quarter.span * monthWidth >= 22 ? (
               <text
-                x={left + monthWidth / 2}
-                y={37}
-                fill={month.month === 1 ? palette.foreground : palette.muted}
-                fontSize={monthWidth < 40 ? 9 : 10}
+                x={LABEL_W + (quarter.from + quarter.span / 2) * monthWidth}
+                y={36}
+                fill={palette.muted}
+                fontSize={10}
                 textAnchor="middle"
               >
-                {monthWidth < 40 ? MONTH_NAMES[month.month - 1]!.slice(0, 1) : MONTH_NAMES[month.month - 1]}
+                {`Q${quarter.q}`}
               </text>
-            </g>
-          );
-        })}
+            ) : null}
+          </g>
+        ))}
+        {spans.years.map((year) => (
+          <g key={`y-${year.year}`}>
+            <line
+              x1={LABEL_W + year.from * monthWidth}
+              y1={4}
+              x2={LABEL_W + year.from * monthWidth}
+              y2={22}
+              stroke={palette.grid}
+              strokeWidth={1}
+            />
+            <text
+              x={LABEL_W + (year.from + year.span / 2) * monthWidth}
+              y={16}
+              fill={palette.foreground}
+              fontSize={10.5}
+              fontWeight={600}
+              textAnchor="middle"
+            >
+              {year.span * monthWidth >= 34 ? String(year.year) : `’${String(year.year).slice(2)}`}
+            </text>
+          </g>
+        ))}
+        {Array.from({ length: months }, (_, index) =>
+          (monthAt(origin, index).month - 1) % 3 === 0 ? null : (
+            <line
+              key={`m-${index}`}
+              x1={LABEL_W + index * monthWidth}
+              y1={HEADER_H}
+              x2={LABEL_W + index * monthWidth}
+              y2={bodyBottom}
+              stroke={palette.grid}
+              strokeWidth={0.5}
+              opacity={0.45}
+            />
+          ),
+        )}
+        <line x1={LABEL_W} y1={22} x2={width} y2={22} stroke={palette.grid} strokeWidth={0.75} />
         <line x1={0} y1={HEADER_H - 2} x2={width} y2={HEADER_H - 2} stroke={palette.grid} strokeWidth={1} />
         <line x1={LABEL_W} y1={4} x2={LABEL_W} y2={bodyBottom} stroke={palette.grid} strokeWidth={1} />
         <text x={8} y={37} fill={palette.muted} fontSize={10}>
-          Gap · activity
+          Evidence gap · tactic
         </text>
 
         {rows.map((row, index) => {
@@ -360,14 +541,14 @@ export function GapGantt({
             return (
               <g key={row.key} aria-label={`Gap ${group.gap_name}`}>
                 <title>{`${group.gap_name} · ${group.statement}`}</title>
-                <rect x={0} y={row.y} width={width} height={row.h} fill={palette.background} />
-                <line x1={0} y1={row.y} x2={width} y2={row.y} stroke={palette.grid} strokeWidth={0.5} />
-                <rect x={6} y={row.y + 9} width={4} height={14} rx={1} fill={tone} />
-                <text x={16} y={row.y + 14} fill={palette.foreground} fontSize={11.5} fontWeight={600}>
+                <rect x={0} y={row.y} width={width} height={row.h} fill={palette.grid} opacity={0.45} />
+                <line x1={0} y1={row.y} x2={width} y2={row.y} stroke={palette.grid} strokeWidth={0.75} />
+                <circle cx={11} cy={row.y + 11} r={3.5} fill={tone} />
+                <text x={20} y={row.y + 14} fill={palette.foreground} fontSize={11.5} fontWeight={600}>
                   {truncate(group.gap_name, canCreate && editable ? 30 : 42)}
                 </text>
-                <text x={16} y={row.y + 26} fill={palette.muted} fontSize={9.5}>
-                  {`${group.gap_id} · ${group.items.length} activit${group.items.length === 1 ? "y" : "ies"}`}
+                <text x={20} y={row.y + 26} fill={palette.primary} fontSize={9.5}>
+                  {`${group.gap_id} · ${group.items.length} tactic${group.items.length === 1 ? "" : "s"}`}
                 </text>
                 {group.start && group.end ? (
                   <rect
@@ -409,7 +590,7 @@ export function GapGantt({
           const barWidth = Math.max(6, x(end) - x1);
           const cy = row.y + row.h / 2;
           const selected = selectedId === activity.id;
-          const tone = colour(row.tone);
+          const tone = tacticTypeColor(activity.tactic_type);
           const broken = conflicted.has(activity.id);
           const readoutX = activity.readout_date ? x(activity.readout_date) : null;
           const insideChars = Math.floor((barWidth - 12) / 5.6);
@@ -439,8 +620,8 @@ export function GapGantt({
                 y={row.y}
                 width={width}
                 height={row.h}
-                fill={selected ? tone : palette.background}
-                opacity={selected ? 0.09 : index % 2 === 0 ? 0.35 : 0}
+                fill={selected ? palette.primary : palette.card}
+                opacity={selected ? 0.1 : index % 2 === 0 ? 0.5 : 0}
               />
               <text x={indent} y={row.y + 13} fill={palette.foreground} fontSize={11}>
                 {truncate(activity.tactic_name, 40)}
@@ -456,15 +637,26 @@ export function GapGantt({
                 height={BAR_H}
                 rx={3}
                 fill={tone}
-                fillOpacity={activity.meta.counts_toward_addressing ? 0.28 : 0.14}
+                fillOpacity={activity.tactic_status === "proposed" ? 0.45 : 0.88}
                 stroke={broken ? palette.conflict : tone}
                 strokeWidth={selected || dragging ? 1.8 : broken ? 1.4 : 1}
                 strokeDasharray={activity.tactic_status === "proposed" ? "3 2" : undefined}
                 style={editable ? { cursor: dragging ? "grabbing" : "grab" } : undefined}
                 onPointerDown={(event) => beginDrag(event, activity, "move")}
               />
+              {STATUS_PATTERN[activity.tactic_status] ? (
+                <rect
+                  x={x1}
+                  y={cy - BAR_H / 2}
+                  width={barWidth}
+                  height={BAR_H}
+                  rx={3}
+                  fill={STATUS_PATTERN[activity.tactic_status]}
+                  pointerEvents="none"
+                />
+              ) : null}
               {barLabel ? (
-                <text x={x1 + 6} y={cy + 3.5} fill={palette.foreground} fontSize={9.5} pointerEvents="none">
+                <text x={x1 + 6} y={cy + 3.5} fill="#ffffff" fontSize={9.5} fontWeight={500} pointerEvents="none">
                   {barLabel}
                 </text>
               ) : null}
@@ -560,43 +752,7 @@ export function GapGantt({
           </g>
         ) : null}
 
-        <g>
-          {LEGEND.map((entry, index) => (
-            <g key={`legend-${entry.band}`} transform={`translate(${12 + index * 116}, ${legendY})`}>
-              <rect x={0} y={-7} width={14} height={9} rx={2} fill={colour(entry.band)} fillOpacity={0.28} stroke={colour(entry.band)} />
-              <text x={20} y={1} fill={palette.muted} fontSize={9.5}>
-                {entry.label}
-              </text>
-            </g>
-          ))}
-          <g transform={`translate(${12 + LEGEND.length * 116}, ${legendY})`}>
-            <polygon points="5,-8 10,-3 5,2 0,-3" fill={palette.readout} />
-            <text x={16} y={1} fill={palette.muted} fontSize={9.5}>
-              Readout
-            </text>
-          </g>
-          <g transform={`translate(${12 + LEGEND.length * 116 + 72}, ${legendY})`}>
-            <path d="M 0 -3 H 16" stroke={palette.muted} strokeWidth={1} strokeDasharray="4 3" markerEnd="url(#synapse-gap-arrow)" />
-            <text x={26} y={1} fill={palette.muted} fontSize={9.5}>
-              Depends on
-            </text>
-          </g>
-          <g transform={`translate(${12 + LEGEND.length * 116 + 164}, ${legendY})`}>
-            <path d="M 0 -3 H 16" stroke={palette.conflict} strokeWidth={1.4} strokeDasharray="4 3" markerEnd="url(#synapse-gap-arrow-broken)" />
-            <text x={26} y={1} fill={palette.muted} fontSize={9.5}>
-              Broken dependency
-            </text>
-          </g>
-          <g transform={`translate(${12 + LEGEND.length * 116 + 286}, ${legendY})`}>
-            <polygon points="5,-9 10,-4 5,1 0,-4" fill={palette.today} />
-            <text x={16} y={1} fill={palette.muted} fontSize={9.5}>
-              Key decision
-            </text>
-          </g>
-          <text x={12 + LEGEND.length * 116 + 380} y={legendY + 1} fill={palette.muted} fontSize={9.5}>
-            Dashed bar outline = proposed tactic
-          </text>
-        </g>
+        <g>{legend}</g>
       </svg>
 
       {/* Controls sit over the chart, row-aligned, so the PNG export carries none of them. */}
@@ -613,6 +769,21 @@ export function GapGantt({
                   onClick={() => setShowNotPrioritized((open) => !open)}
                 >
                   {showNotPrioritized ? <ChevronDown /> : <ChevronRight />}
+                </Button>
+              </div>
+            );
+          }
+          if (row.kind === "section" && row.section === "deferred") {
+            return (
+              <div key={row.key} className="pointer-events-auto absolute left-1" style={{ top: row.y + 3 }}>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-expanded={showDeferred}
+                  aria-label={showDeferred ? "Collapse deferred gaps" : "Show deferred gaps"}
+                  onClick={() => setShowDeferred((open) => !open)}
+                >
+                  {showDeferred ? <ChevronDown /> : <ChevronRight />}
                 </Button>
               </div>
             );

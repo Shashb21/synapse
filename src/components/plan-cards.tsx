@@ -8,7 +8,6 @@ import { LockForm } from "@/components/lock-form";
 import { TacticDetailFields } from "@/components/gap-tactic-actions";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import type {
-  OpenGapCard,
   PlanGapCard,
   PlanTactic,
   TacticLibraryItem,
@@ -20,7 +19,6 @@ import {
   CREATE_TACTIC_STATUSES,
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
-  GAP_STATUS_LABELS,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
@@ -96,6 +94,52 @@ export function CreateTacticButton() {
     >
       <input type="hidden" name="origin" value="tactics" />
       <CreateTacticFields />
+    </LockForm>
+  );
+}
+
+/** A new proposed tactic written by hand for one gap, mapped onto it at once (Tactic Ideation). */
+export function CustomTacticButton({ gapId, gapName }: { gapId: string; gapName: string }) {
+  return (
+    <LockForm
+      label="+ Custom tactic"
+      action="create_tactic"
+      extra={{ gap_id: gapId }}
+      confirmLabel="Add tactic"
+      variant="default"
+      description={`Write a tactic for ${gapName}. It goes into the library mapped onto this gap. A proposed tactic is an idea and does not count as addressing.`}
+    >
+      <input type="hidden" name="origin" value="tactics" />
+      <CreateTacticFields />
+    </LockForm>
+  );
+}
+
+/** Tag a library tactic onto one gap; the tactic is shared, not copied. */
+export function AssignTacticButton({
+  gapId,
+  tactics,
+}: {
+  gapId: string;
+  tactics: TacticLibraryItem[];
+}) {
+  if (tactics.length === 0) return null;
+  return (
+    <LockForm label="Assign from library" action="assign_tactic" extra={{ gap_id: gapId }} confirmLabel="Assign">
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        From tactic library
+        <select
+          name="tactic_id"
+          required
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          {tactics.map((tactic) => (
+            <option key={tactic.id} value={tactic.id}>
+              {tacticOptionLabel(tactic)}
+            </option>
+          ))}
+        </select>
+      </label>
     </LockForm>
   );
 }
@@ -310,15 +354,6 @@ export function ManualStartAlongsideUpload({ gapCount, tacticCount }: { gapCount
   );
 }
 
-function CreateActions() {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <CreateGapButton />
-      <CreateTacticButton />
-    </div>
-  );
-}
-
 function GapTacticsBlock({
   gapId,
   tactics,
@@ -399,7 +434,7 @@ export function PrioritizeCard({
           computedStatus={card.computed_status}
           override={card.status_override}
         />
-        <span className="text-[11px] text-amber-300">Priority unlocked</span>
+        <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked</span>
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <Link
@@ -495,101 +530,6 @@ export function PrioritizeQueue({
     <div className="grid gap-3">
       {cards.map((card) => (
         <PrioritizeCard key={card.gap_id} card={card} availableTactics={availableTactics} />
-      ))}
-    </div>
-  );
-}
-
-export function TacticLibrary({ items }: { items: TacticLibraryItem[] }) {
-  return (
-    <section aria-labelledby="tactic-library">
-      <p id="tactic-library" className="mb-4 text-[12px] text-muted-foreground">
-        Tag the same tactic onto as many gaps as you need — it is not copied.
-      </p>
-      {items.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          Empty. Create a tactic here, or add sources or tactics on the first screen.
-        </p>
-      ) : (
-        <ul className="grid gap-2">
-          {items.map((item) => (
-            <li key={item.id} className="border border-border bg-background p-3">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <Link
-                  href={`/tactics/${item.id}`}
-                  className="text-[13px] font-medium text-foreground no-underline hover:underline"
-                >
-                  {item.name}
-                </Link>
-                <span className="text-[11px] text-muted-foreground">
-                  {TACTIC_TYPE_LABELS[item.type]}
-                </span>
-              </div>
-              <p className="mt-1 text-[12px] text-muted-foreground">
-                {item.gaps.length === 0
-                  ? "Not tagged to a gap yet."
-                  : `Tagged on ${item.gaps.map((g) => g.name).join(" · ")}`}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="mt-3">
-        <CreateActions />
-      </div>
-    </section>
-  );
-}
-
-export function OpenGapsQueue({
-  cards,
-  availableTactics,
-}: {
-  cards: OpenGapCard[];
-  availableTactics: AvailableTactic[];
-}) {
-  if (cards.length === 0) {
-    return (
-      <p className="text-[12px] text-muted-foreground">
-        Prioritize Open gaps first, then assign tactics here.
-      </p>
-    );
-  }
-  return (
-    <div className="grid gap-3">
-      {cards.map((card) => (
-        <article key={card.gap_id} className="border border-border bg-background p-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <GapStatusOverride
-              gapId={card.gap_id}
-              status={card.gap_status}
-              computedStatus={card.computed_status}
-              override={card.status_override}
-            />
-            {card.parent_gap_id ? (
-              <span className="text-[11px] text-muted-foreground">Leftover of parent</span>
-            ) : null}
-          </div>
-          <Link
-            href={`/gaps/${card.gap_id}`}
-            className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
-          >
-            {card.gap_name}
-          </Link>
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            Engine computed {GAP_STATUS_LABELS[card.computed_status]}. Click the status to override
-            with a reason. Completed, ongoing, and planned tactics count; proposed does not.
-          </p>
-          <GapStatusDisagreement
-            computedStatus={card.computed_status}
-            override={card.status_override}
-          />
-          <GapTacticsBlock
-            gapId={card.gap_id}
-            tactics={card.tactics}
-            availableTactics={availableTactics}
-          />
-        </article>
       ))}
     </div>
   );

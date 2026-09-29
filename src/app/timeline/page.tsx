@@ -57,7 +57,7 @@ export default async function TimelinePage() {
   return (
     <AppShell active="timeline">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-2">
-        <PageIntro kicker="Timeline · the plan of record" title="IEGP timeline">
+        <PageIntro kicker="Schedule view" title="Gantt Timeline">
           Every prioritized gap, highest band first, with the activities that answer it beneath it. Date,
           drag, add and sequence activities by hand, no model needed; click an activity for its full record,
           export the chart as an image, and save the version you stand behind.

@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { SettingChips } from "@/components/gap-settings-editor";
 import { placementGapError, scoreError } from "@/components/prioritize/score-input";
-import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, type Band } from "@/components/matrix/bands";
+import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import {
@@ -43,9 +43,9 @@ export type PrioritizeGap = {
 
 type Point = { x: number; y: number };
 
-/** Favourable-scale point (100 = priority end) → CSS offsets. X is flipped so the priority end is left. */
+/** Favourable-scale point (100 = priority end) → CSS offsets: the priority corner is top-right, as in the design. */
 function toOffsets(point: Point) {
-  return { left: 100 - point.x, top: 100 - point.y };
+  return { left: point.x, top: 100 - point.y };
 }
 
 function pointOf(gap: PrioritizeGap, xAxis: PriorityAxis, yAxis: PriorityAxis): Point | null {
@@ -223,7 +223,7 @@ export function AxisChooser({
           {ai
             ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
             : "Pick the two axes for the matrix. AI is off, so you place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
-          Top-left is High, bottom-right is Low, the other two corners are Medium.
+          Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you confirm it with a rationale.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -232,8 +232,8 @@ export function AxisChooser({
       </div>
       {x && y ? (
         <p className="text-[11px] leading-4 text-muted-foreground">
-          High = <span className="text-foreground">{favourableLabel(y)}</span> and{" "}
-          <span className="text-foreground">{favourableLabel(x)}</span>. Low ={" "}
+          Prioritize = <span className="text-foreground">{favourableLabel(y)}</span> and{" "}
+          <span className="text-foreground">{favourableLabel(x)}</span>. Defer ={" "}
           {unfavourableLabel(y)} and {unfavourableLabel(x)}.
         </p>
       ) : null}
@@ -271,11 +271,11 @@ export function AxisChooser({
 }
 
 function QuadrantBackdrop() {
-  const cells: { band: Band; label: string; className: string }[] = [
-    { band: "high", label: "High", className: "left-0 top-0" },
-    { band: "medium", label: "Medium", className: "right-0 top-0" },
-    { band: "medium", label: "Medium", className: "left-0 bottom-0" },
-    { band: "low", label: "Low", className: "right-0 bottom-0" },
+  const cells: { band: Band; className: string }[] = [
+    { band: "medium", className: "left-0 top-0" },
+    { band: "high", className: "right-0 top-0" },
+    { band: "defer", className: "left-0 bottom-0" },
+    { band: "low", className: "right-0 bottom-0" },
   ];
   return (
     <>
@@ -296,7 +296,7 @@ function QuadrantBackdrop() {
             )}
             style={{ color: BAND_TOKENS[cell.band] }}
           >
-            {cell.label}
+            {QUADRANT_NAMES[cell.band]}
           </span>
         </div>
       ))}
@@ -364,7 +364,7 @@ function GapDetail({
         </p>
       ) : null}
       {quadrant && band && quadrant !== band ? (
-        <p className="text-[11px] leading-4 text-amber-300">
+        <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
           This gap&apos;s band ({BAND_LABELS[band]}) was set on a different pair of axes. It sits in the{" "}
           {BAND_LABELS[quadrant]} quadrant here — drag it to change its priority.
         </p>
@@ -410,7 +410,7 @@ function GapDetail({
               defaultValue: "",
               options: [
                 { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
-                ...(["high", "medium", "low"] as const).map((value) => ({ value, label: BAND_LABELS[value] })),
+                ...BANDS.map((value) => ({ value, label: BAND_LABELS[value] })),
               ],
               hint: "A band you set here is yours: a later model run keeps it and only updates its own suggestion.",
             },
@@ -537,6 +537,9 @@ export function PrioritizeMatrix({
   const selected = gaps.find((gap) => gap.gap_id === selectedId) ?? null;
   const selectedView = view.find((row) => row.gap.gap_id === selectedId);
   const validatedCount = view.filter((row) => row.validated).length;
+  // The design's priority chips: each counts its gaps and highlights them on the canvas.
+  const [highlight, setHighlight] = useState<Band | null>(null);
+  const bandCounts = Object.fromEntries(BANDS.map((b) => [b, view.filter((row) => row.band === b).length])) as Record<Band, number>;
 
   function pointFromEvent(event: PointerEvent): Point | null {
     const rect = plotRef.current?.getBoundingClientRect();
@@ -544,7 +547,7 @@ export function PrioritizeMatrix({
     const left = ((event.clientX - rect.left) / rect.width) * 100;
     const top = ((event.clientY - rect.top) / rect.height) * 100;
     return {
-      x: Math.max(0, Math.min(100, 100 - left)),
+      x: Math.max(0, Math.min(100, left)),
       y: Math.max(0, Math.min(100, 100 - top)),
     };
   }
@@ -612,10 +615,10 @@ export function PrioritizeMatrix({
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, gapId: string, point: Point) {
     const step = event.shiftKey ? 10 : 2;
-    // Arrow keys move on screen: left is the favourable end of X, up of Y.
+    // Arrow keys move on screen: right is the favourable end of X, up of Y.
     const delta: Record<string, Point> = {
-      ArrowLeft: { x: step, y: 0 },
-      ArrowRight: { x: -step, y: 0 },
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
       ArrowUp: { x: 0, y: step },
       ArrowDown: { x: 0, y: -step },
     };
@@ -669,6 +672,28 @@ export function PrioritizeMatrix({
 
   return (
     <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
+        {BANDS.map((b) => {
+          const on = highlight === b;
+          return (
+            <button
+              key={b}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setHighlight(on ? null : b)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-[11.5px] transition-colors",
+                on ? "border-current" : "border-border hover:bg-muted",
+              )}
+              style={on ? { color: BAND_TOKENS[b] } : undefined}
+            >
+              <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[b] }} aria-hidden />
+              <span className="font-medium text-foreground">{QUADRANT_NAMES[b]}</span>
+              <span className="font-bold" style={{ color: BAND_TOKENS[b] }}>{bandCounts[b]}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[12px] text-muted-foreground">
           <span className="text-foreground">{yAxis.label}</span> ×{" "}
@@ -704,7 +729,7 @@ export function PrioritizeMatrix({
       </div>
       {message ? <p className="text-[12px] text-muted-foreground">{message}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,760px)_minmax(300px,1fr)] xl:items-start">
         <div className="grid min-w-0 gap-2">
           <div className="flex items-stretch gap-2">
             <div className="flex w-5 shrink-0 flex-col items-center justify-between py-1 text-[11px] text-muted-foreground">
@@ -735,7 +760,8 @@ export function PrioritizeMatrix({
                     aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", validated" : ", not validated"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
-                      "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm",
+                      "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm transition-opacity",
+                      highlight && band !== highlight && !isSelected && "opacity-15",
                       mayPrioritize ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
                       isSelected ? "z-30 ring-2 ring-foreground/60" : "z-10 hover:z-20",
                     )}
@@ -767,9 +793,9 @@ export function PrioritizeMatrix({
             </div>
           </div>
           <div className="flex max-w-[748px] items-center justify-between pl-7 text-[11px] text-muted-foreground">
-            <span>{favourableLabel(xAxis)}</span>
-            <span className="text-foreground">{xAxis.label}</span>
             <span>{unfavourableLabel(xAxis)}</span>
+            <span className="text-foreground">{xAxis.label}</span>
+            <span>{favourableLabel(xAxis)}</span>
           </div>
           <p className="max-w-[748px] pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
@@ -777,7 +803,7 @@ export function PrioritizeMatrix({
           </p>
         </div>
 
-        <div className="grid gap-4 xl:sticky xl:top-5">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:sticky xl:top-5">
           {selected && selectedView ? (
             <GapDetail
               gap={{ ...selected, band: selectedView.band, validated: selectedView.validated }}
@@ -791,7 +817,7 @@ export function PrioritizeMatrix({
               Select a gap on the matrix to see why it sits there and validate its band.
             </p>
           )}
-          <div className="grid gap-3">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {BANDS.map((band) => {
               const rows = view.filter((row) => row.point && row.band === band);
               return (
@@ -804,7 +830,7 @@ export function PrioritizeMatrix({
                   {rows.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground">None</p>
                   ) : (
-                    <ul className="grid gap-0.5">
+                    <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                       {rows.map(({ gap, validated }) => (
                         <li key={gap.gap_id}>
                           <button
@@ -835,7 +861,7 @@ export function PrioritizeMatrix({
                 <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
                   Select one to type its scores or band by hand — no model run needed.
                 </p>
-                <ul className="grid gap-0.5">
+                <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                   {unplaced.map((gap) => (
                     <li key={gap.gap_id}>
                       <button

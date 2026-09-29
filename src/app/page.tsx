@@ -6,6 +6,7 @@ import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
+import { loadTacticIdeation } from "@/components/tactic-ideation/data";
 import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
 import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
@@ -61,27 +62,27 @@ function PlaceIntro({
   }
   if (place === "gaps") {
     return (
-      <PageIntro kicker="Status engine · human validation" title="Gaps">
-        Every extracted gap is shown with its mapped tactics and computed status. Confirm each one,
-        map existing library tactics, or record a missed real study. Add Open or Addressed gaps by
-        hand (Addressed needs a tactic). Partial gaps must be split or rewritten before Prioritize.
+      <PageIntro kicker="Gaps & metadata" title="Evidence Inventory">
+        Every evidence gap with its mapped tactics and computed status. Confirm each one, map
+        library tactics or record a missed study, and add gaps by hand. Partial gaps must be split or
+        rewritten before prioritization.
       </PageIntro>
     );
   }
   if (place === "tactics") {
     return (
-      <PageIntro kicker="Open gaps only" title="Tactics">
-        Create and assign proposed tactics for Open gaps after they are prioritized. Proposed tactics
-        do not change gap status until they are planned, ongoing, or completed. Recording missed
-        real studies happens on Gaps.
+      <PageIntro kicker="Gap tactics" title="Tactic Ideation">
+        {ai
+          ? "The High-priority Open gaps, each with its linked tactics and AI-assisted suggestions. Accept or reject each suggestion with a reason, or write a custom tactic. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."
+          : "The High-priority Open gaps, each with its linked tactics. Assign a tactic from the library or write a custom one. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."}
       </PageIntro>
     );
   }
   return (
-    <PageIntro kicker={wizardComplete ? "Living plan" : "Open gaps"} title="Prioritize">
+    <PageIntro kicker="Priority canvas" title="Prioritization Matrix">
       {ai
-        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set their priority, then validate each one."
-        : "Pick a setting and two axes, then place each Open gap by hand — type its scores or band, or drop it on the matrix — and validate each one."}
+        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft; drag them to set their priority, then validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."
+        : "Pick a setting and two axes, then place each Open gap by hand (type its scores or band, or drop it on the matrix) and validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."}
     </PageIntro>
   );
 }
@@ -105,9 +106,9 @@ export default async function HomePage({
   const requested =
     params.place === "review" || params.place === "library" ? "gaps" : params.place;
   const suggested = defaultPlanPlace(state, workspace);
-  // With AI off the first screen is Start (Add gaps / Add tactics) until there are gaps.
-  const fallback: PlanPlace =
-    !ai && suggested === "upload" && workspace.review.length > 0 ? "gaps" : suggested;
+  // With AI off there is no Upload place: the flow starts on Evidence Inventory.
+  const fallback: PlanPlace = !ai && suggested === "upload" ? "gaps" : suggested;
+  if (!ai && requested === "upload") redirect("/?place=gaps");
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);
   const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")
@@ -152,6 +153,12 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
+    // Each gap's priority on the matrix: the band, and whether a person validated it.
+    const priorities = Object.fromEntries(
+      (await listPlacements())
+        .filter((row) => row.band)
+        .map((row) => [row.gap_id, { band: row.band!, validated: row.validated }]),
+    );
     pane = (
       <>
         {!gapsUnlocked ? (
@@ -168,24 +175,17 @@ export default async function HomePage({
           readyForPrioritize={ready}
           initialFilter={gapFilter}
           settingOptions={settingOptions(state)}
+          priorities={priorities}
         />
         <SetAsideGaps gaps={state.gaps} />
       </>
     );
   } else if (place === "tactics") {
-    // The validated matrix band is the gap's priority.
-    const placements = new Map((await listPlacements()).map((row) => [row.gap_id, row]));
-    const openGaps = workspace.openGaps.map((card) => {
-      const placement = placements.get(card.gap_id);
-      return placement?.validated && placement.band ? { ...card, band: placement.band } : card;
-    });
+    // Only gaps validated as High on the matrix are ideated (KAN-8); Defer is out of this cycle.
+    const ideation = await loadTacticIdeation(workspace.openGaps);
     pane = (
       <>
-        <TacticsPlace
-          ready={gates.tacticsUnlocked}
-          openGaps={openGaps}
-          availableTactics={workspace.availableTactics}
-        />
+        <TacticsPlace ready={gates.tacticsUnlocked} availableTactics={workspace.availableTactics} {...ideation} />
         <RejectedTactics tactics={state.tactics} />
       </>
     );

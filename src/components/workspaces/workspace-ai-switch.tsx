@@ -105,7 +105,7 @@ export function useWorkspaceAiChange(model: WorkspaceAiModel) {
       // A page that no longer applies goes to Start (a push fetches it fresh);
       // anywhere else the page refreshes in place. A refresh right after a
       // push would cancel the push, so it is one or the other.
-      if (model.isCurrent && !next && pageNeedsAi(pathname ?? "")) router.push("/?place=upload");
+      if (model.isCurrent && !next && pageNeedsAi(pathname ?? "")) router.push("/?place=gaps");
       else router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change AI assistance.");

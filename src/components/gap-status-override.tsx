@@ -41,7 +41,7 @@ export function GapStatusDisagreement({
     );
   }
   return (
-    <p className="text-[12px] leading-5 text-amber-300" role="status">
+    <p className="text-[12px] leading-5 text-amber-700 dark:text-amber-300" role="status">
       This gap was set to {GAP_STATUS_LABELS[override.status]} by hand, but the status computed from its mapped tactics is now{" "}
       {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"}. The hand-set status is kept. To use the
       computed status instead, open the status dialog.

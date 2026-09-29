@@ -39,6 +39,8 @@ test.describe("S6 partial gap split", () => {
     expect(partial, "the demo corpus should produce a partially addressed gap").toBeTruthy();
 
     await page.goto("/?place=gaps");
+    // The inventory's row actions are client components: wait until they are live.
+    await page.waitForLoadState("networkidle");
     const card = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /resolve this partially addressed gap/i }) })
@@ -70,6 +72,7 @@ test.describe("S6 partial gap split", () => {
     const partial = await firstPartialGap(request);
     expect(partial).toBeTruthy();
     await page.goto("/?place=gaps");
+    await page.waitForLoadState("networkidle");
     const card = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /resolve this partially addressed gap/i }) })
