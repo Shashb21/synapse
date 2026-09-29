@@ -11,10 +11,10 @@ const items = [{ item_kind: "gap" as const, item_ref: "gap-a", statement: "Regis
 const finding = { item_kind: "gap", summary: "Comparative effectiveness in elderly patients", source_ref: { source_file_id: "source", block_id: "b" }, evidence_quote: "Comparative effectiveness remains unknown in elderly patients.", basis: "explicit", reason: "Current gap only covers registry outcomes", suggested_action: "Add a comparative effectiveness gap" } as const;
 const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
-function completion(response: unknown, onPrompt?: (prompt: string) => void): JsonCompletion {
+function completion(response: Record<string, unknown>, onPrompt?: (prompt: string) => void, includeCoverage = true): JsonCompletion {
   return async ({ user }) => {
     onPrompt?.(user);
-    return { raw: JSON.stringify(response), usage };
+    return { raw: JSON.stringify(includeCoverage ? { checked_block_ids: ["a", "b"], ...response } : response), usage };
   };
 }
 
@@ -81,5 +81,20 @@ describe("snapshot completeness inspector", () => {
       expect(result).toMatchObject({ risk_level: "check_failed", checked_block_ids: [], unchecked_block_ids: ["a", "b"], suspected_omissions: [prior] });
       expect(result.prior_issue_resolutions).toEqual([{ issue_id: "issue-old", outcome: "unresolved", reason: expect.any(String) }]);
     }
+  });
+
+  it("does not report no risk when the model omits its checked-block declaration", async () => {
+    const result = await inspectSnapshotCompleteness({
+      blocks,
+      items,
+      prior_open_issues: [],
+      complete: completion({ suspected_omissions: [], prior_issue_resolutions: [] }, undefined, false),
+    });
+    expect(result).toMatchObject({
+      risk_level: "check_failed",
+      checked_block_ids: [],
+      unchecked_block_ids: ["a", "b"],
+      suspected_omissions: [],
+    });
   });
 });

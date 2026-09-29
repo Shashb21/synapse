@@ -56,7 +56,7 @@ const findingSchema = z.object({
 const responseSchema = z.object({
   suspected_omissions: z.array(findingSchema),
   prior_issue_resolutions: z.array(z.unknown()),
-  checked_block_ids: z.array(z.string()).optional(),
+  checked_block_ids: z.array(z.string()),
 });
 const dispositionSchema = z.object({
   issue_id: nonempty,
@@ -113,7 +113,7 @@ export async function inspectSnapshotCompleteness(args: {
   }
 
   const bySourceBlock = new Map(scope.map((block) => [JSON.stringify([block.source_file_id, block.id]), block]));
-  const checkedIds = parsed.checked_block_ids ?? allIds;
+  const checkedIds = parsed.checked_block_ids;
   if (new Set(checkedIds).size !== checkedIds.length || checkedIds.some((id) => !allIds.includes(id))) return failed();
   const checked = new Set(checkedIds);
   for (const finding of parsed.suspected_omissions) {
