@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { AgentEvent } from "@/accuracy/kernel/agent-events";
+
+vi.mock("@/accuracy/store/parse-store", () => ({
+  readParseBlocks: vi.fn(async () => [{ id: "blk-1", source_file_id: "src-1",
+    heading: null, text: "Actual source says survival evidence is needed." }]),
+  readParseBlocksByIds: vi.fn(async () => [{ id: "blk-1", source_file_id: "src-1",
+    heading: null, text: "Actual source says survival evidence is needed." }]),
+}));
 import {
   needExtractModule,
   needExtractOutputSchema,
@@ -18,6 +26,8 @@ function stubCtx(): AccuracyModuleContext {
       note: () => {},
       step: async (_name, fn) => await fn(),
       steps: () => [],
+      recordAgentEvent: async () => {},
+      usageSummary: () => ({ token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 }),
     },
     route: {
       call_kind: "need_extract",
@@ -40,6 +50,29 @@ function stubCtx(): AccuracyModuleContext {
 }
 
 describe("need extract module", () => {
+  it("flags an invalid source quote with its file and block reference", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      const ctx = stubCtx();
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async (event) => { events.push(event); };
+      ctx.complete = async () => ({ raw: JSON.stringify({ gaps: [{ statement: "Need OS evidence",
+        external_id: "G1", provenance: [{ source_file_id: "src-1", block_id: "blk-1",
+          quote: "Invented quote" }] }] }),
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
+      const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
+        block_ids: ["blk-1"] }, ctx);
+      expect(result.output.gaps[0]?.provenance[0]?.quote).toBe("Invented quote");
+      expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
+        signals: { quote_validity: { invalid_count: 1 } },
+      });
+      expect(events.find((event) => event.event_type === "critique")).toMatchObject({
+        issues: [expect.objectContaining({ code: "quote_not_substring",
+          source_ref: { source_file_id: "src-1", block_id: "blk-1" } })],
+      });
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
   it("returns empty gaps under SYNAPSE_TEST_STUB_LLM", async () => {
     expect(process.env.SYNAPSE_TEST_STUB_LLM).toBe("1");
     const result = await needExtractModule.run(

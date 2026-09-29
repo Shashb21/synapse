@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import type { ActorFunction } from "@/lib/iegp/enums";
+import type { AgentEvent } from "./agent-events";
 
 /** Accuracy-first pipeline slots (not S0–S10). */
 export const CALL_KINDS = [
@@ -217,6 +218,8 @@ export type JsonCompletion = (args: {
 
 export type RunHandle = {
   id: string;
+  recordAgentEvent(event: AgentEvent): Promise<void>;
+  usageSummary(): { token_usage: TokenUsage; cost_usd: number };
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;
   note(name: string, data?: unknown, detail?: string): void;
   steps(): RunStep[];

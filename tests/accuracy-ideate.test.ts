@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+import type { AgentEvent } from "@/accuracy/kernel/agent-events";
 import {
   critiqueIdeationDraft,
   ideateModule,
@@ -20,6 +21,8 @@ function mockCtx(connected: boolean): AccuracyModuleContext {
       note: () => {},
       step: async (_name, fn) => await fn(),
       steps: () => [],
+      recordAgentEvent: async () => {},
+      usageSummary: () => ({ token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 }),
     },
     route: {
       call_kind: "ideate",
@@ -86,6 +89,8 @@ describe("ideate module", () => {
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {
       const ctx = mockCtx(true);
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async (event) => { events.push(event); };
       ctx.complete = vi.fn(async () => ({
         raw: JSON.stringify({
           proposals: [
@@ -144,6 +149,11 @@ describe("ideate module", () => {
       expect(result.output.proposals[0]?.origin).toBe("ideated");
       expect(result.output.proposals[0]?.status).toBe("proposed");
       expect(result.output.proposals[0]?.not_from_reference).toBe(true);
+      expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
+        evaluation_context: "production",
+        signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 },
+          invariant_failures: expect.arrayContaining([expect.stringContaining("ineligible_gap")]) },
+      });
       expect(ctx.complete).toHaveBeenCalled();
       const call = vi.mocked(ctx.complete).mock.calls[0]?.[0];
       expect(call?.system).toBe(IDEATE_PROPOSER_SYSTEM);

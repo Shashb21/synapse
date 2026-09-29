@@ -9,6 +9,8 @@ describe("accuracyCompletionFor api_key auth", () => {
       note: () => {},
       step: async (_n, fn) => await fn(),
       steps: () => [],
+      recordAgentEvent: async () => {},
+      usageSummary: () => ({ token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 }),
     };
     const base = {
       call_kind: "need_extract" as const,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agenticModule } from "../_factory";
-import { runShallowAgenticCycle } from "../../kernel/agentic";
+import { inspectQuoteSpans, runShallowAgenticCycle } from "../../kernel/agentic";
+import type { CriticIssue, ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
 import { provenanceSpanSchema } from "../../store/quote-validator";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
@@ -46,33 +47,41 @@ type InventoryDraft = {
   tactics: z.infer<typeof proposerTacticSchema>[];
 };
 
-function critiqueDraft(draft: InventoryDraft, source_file_id: string): { score: number; issues: string[] } {
-  const issues: string[] = [];
+function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[] } {
+  const issues: CriticIssue[] = [];
+  const add = (claim: string, code: string, source_ref?: CriticIssue["source_ref"]) => {
+    issues.push({ issue_id: `inventory:${issues.length}`, category: "inventory_extract", code,
+      severity: "medium", claim, suggested_action: claim, ...(source_ref ? { source_ref } : {}) });
+  };
   if (draft.tactics.length === 0) {
-    issues.push("no_tactics_proposed");
+    add("no_tactics_proposed", "no_tactics_proposed");
   }
   const names = new Set<string>();
   for (const [index, tactic] of draft.tactics.entries()) {
     const subject = tactic.name?.trim() || `tactic_${index}`;
-    if (!tactic.name?.trim()) issues.push(`${subject}:missing_name`);
+    if (!tactic.name?.trim()) add(`${subject}:missing_name`, "missing_name");
     if (tactic.origin && tactic.origin !== "inventory") {
-      issues.push(`${subject}:wrong_origin`);
+      add(`${subject}:wrong_origin`, "wrong_origin");
     }
     if (!tactic.provenance?.length) {
-      issues.push(`${subject}:no_quote`);
+      add(`${subject}:no_quote`, "no_quote");
     } else {
       for (const span of tactic.provenance) {
-        if (span.source_file_id !== source_file_id) {
-          issues.push(`${subject}:source_file_mismatch`);
-        }
-        if (!span.quote?.trim()) issues.push(`${subject}:empty_quote`);
+        const ref = span.source_file_id && span.block_id ? { source_file_id: span.source_file_id, block_id: span.block_id } : undefined;
+        if (span.source_file_id !== source_file_id) add(`${subject}:source_file_mismatch`, "source_file_mismatch", ref);
+        if (!span.quote?.trim()) add(`${subject}:empty_quote`, "empty_quote", ref);
       }
     }
     const key = tactic.name?.trim().toLowerCase();
     if (key) {
-      if (names.has(key)) issues.push(`${subject}:duplicate`);
+      if (names.has(key)) add(`${subject}:duplicate`, "duplicate");
       names.add(key);
     }
+  }
+  const checked = inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks });
+  for (const finding of checked.findings) {
+    add(`${finding.span.block_id}:${finding.code}`, finding.code,
+      { source_file_id: finding.span.source_file_id, block_id: finding.span.block_id });
   }
   const score = draft.tactics.length === 0 ? 0 : Math.max(0, 1 - issues.length * 0.15);
   return { score, issues };
@@ -173,13 +182,19 @@ export const inventoryExtractModule = agenticModule({
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const blocks = stub ? [] : await readParseBlocks(input.workspace_id, input.source_file_id);
 
     const cycle = await runShallowAgenticCycle<InventoryDraft>({
+      run: ctx.run,
+      onSnapshot: async (draft): Promise<ProductionSignals> => ({
+        quote_validity: inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks }).signals,
+        invariant_failures: [], completeness: "not_checked",
+      }),
       proposer: (round, prior, critiques) =>
         proposeInventory(ctx, input, round, prior, critiques),
       critic: async (draft) => {
         if (stub) return { score: 1, issues: [] };
-        return critiqueDraft(draft, input.source_file_id);
+        return critiqueDraft(draft, input.source_file_id, blocks);
       },
       judge: async (draft) => draft,
     });

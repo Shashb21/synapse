@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agenticModule } from "../_factory";
-import { runShallowAgenticCycle } from "../../kernel/agentic";
+import { inspectQuoteSpans, runShallowAgenticCycle } from "../../kernel/agentic";
+import type { CriticIssue, ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
 import { provenanceSpanSchema } from "../../store/quote-validator";
 import { newId } from "@/modules/kernel/ids";
@@ -36,26 +37,36 @@ type NeedDraft = {
   gaps: z.infer<typeof proposerGapSchema>[];
 };
 
-function critiqueDraft(draft: NeedDraft, source_file_id: string): { score: number; issues: string[] } {
-  const issues: string[] = [];
-  if (draft.gaps.length === 0) issues.push("no_gaps_proposed");
+function critiqueDraft(draft: NeedDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[] } {
+  const issues: CriticIssue[] = [];
+  const add = (claim: string, code: string, source_ref?: CriticIssue["source_ref"]) => {
+    issues.push({ issue_id: `need:${issues.length}`, category: "need_extract", code,
+      severity: "medium", claim, suggested_action: claim, ...(source_ref ? { source_ref } : {}) });
+  };
+  if (draft.gaps.length === 0) add("no_gaps_proposed", "no_gaps_proposed");
   const seen = new Set<string>();
   for (const [index, gap] of draft.gaps.entries()) {
     const subject = gap.external_id || gap.statement?.slice(0, 40) || `gap_${index}`;
-    if (!gap.statement?.trim()) issues.push(`${subject}:missing_statement`);
+    if (!gap.statement?.trim()) add(`${subject}:missing_statement`, "missing_statement");
     if (!gap.provenance?.length) {
-      issues.push(`${subject}:no_quote`);
+      add(`${subject}:no_quote`, "no_quote");
     } else {
       for (const span of gap.provenance) {
-        if (span.source_file_id !== source_file_id) issues.push(`${subject}:source_file_mismatch`);
-        if (!span.quote?.trim()) issues.push(`${subject}:empty_quote`);
+        const ref = span.source_file_id && span.block_id ? { source_file_id: span.source_file_id, block_id: span.block_id } : undefined;
+        if (span.source_file_id !== source_file_id) add(`${subject}:source_file_mismatch`, "source_file_mismatch", ref);
+        if (!span.quote?.trim()) add(`${subject}:empty_quote`, "empty_quote", ref);
       }
     }
     const key = (gap.external_id || gap.statement).trim().toLowerCase();
     if (key) {
-      if (seen.has(key)) issues.push(`${subject}:duplicate`);
+      if (seen.has(key)) add(`${subject}:duplicate`, "duplicate");
       seen.add(key);
     }
+  }
+  const checked = inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => gap.provenance ?? []), blocks });
+  for (const finding of checked.findings) {
+    add(`${finding.span.block_id}:${finding.code}`, finding.code,
+      { source_file_id: finding.span.source_file_id, block_id: finding.span.block_id });
   }
   const score = draft.gaps.length === 0 ? 0 : Math.max(0, 1 - issues.length * 0.15);
   return { score, issues };
@@ -159,12 +170,18 @@ export const needExtractModule = agenticModule({
   outputSchema: needExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const blocks = stub ? [] : await readParseBlocks(input.workspace_id, input.source_file_id);
 
     const cycle = await runShallowAgenticCycle<NeedDraft>({
+      run: ctx.run,
+      onSnapshot: async (draft): Promise<ProductionSignals> => ({
+        quote_validity: inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => gap.provenance ?? []), blocks }).signals,
+        invariant_failures: [], completeness: "not_checked",
+      }),
       proposer: (round, prior, critiques) => proposeNeeds(ctx, input, round, prior, critiques),
       critic: async (draft) => {
         if (stub) return { score: 1, issues: [] };
-        return critiqueDraft(draft, input.source_file_id);
+        return critiqueDraft(draft, input.source_file_id, blocks);
       },
       judge: async (draft) => draft,
     });

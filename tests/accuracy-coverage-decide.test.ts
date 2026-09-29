@@ -20,6 +20,8 @@ function mockCtx(connected: boolean): AccuracyModuleContext {
       step: async (_name, fn) => fn(),
       note: () => {},
       steps: () => [],
+      recordAgentEvent: async () => {},
+      usageSummary: () => ({ token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 }),
     },
     route: {
       call_kind: "coverage_decide",

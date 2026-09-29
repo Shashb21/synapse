@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
+import type { ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import {
@@ -228,9 +229,22 @@ export const ideateModule = agenticModule({
     }
 
     const cycle = await runShallowAgenticCycle<IdeationDraft>({
+      run: ctx.run,
+      onSnapshot: async (draft): Promise<ProductionSignals> => ({
+        quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 },
+        invariant_failures: critiqueIdeationDraft(draft, { eligibleIds, existingNames }).issues,
+        completeness: "not_checked",
+      }),
       proposer: (round, prior, critiques) =>
         proposeIdeation(ctx, input, eligible, round, prior, critiques),
-      critic: async (draft) => critiqueIdeationDraft(draft, { eligibleIds, existingNames }),
+      critic: async (draft) => {
+        const critique = critiqueIdeationDraft(draft, { eligibleIds, existingNames });
+        return { score: critique.score, issues: critique.issues.map((claim, index) => ({
+          issue_id: `ideate:${index}`, category: "ideate_invariant",
+          code: claim.split(":").at(-1) ?? "invariant_failure", severity: "medium" as const,
+          claim, suggested_action: claim,
+        })) };
+      },
       judge: async (draft) => draft,
     });
 

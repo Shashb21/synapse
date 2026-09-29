@@ -3,6 +3,7 @@ import { accuracyDb, ensureAccuracySchema } from "../store/db";
 import * as t from "../store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { rollupAccuracyRunCost, type AccuracyCostRollup } from "./cost-rollup";
+import { appendAgentEvent, type AgentEvent } from "./agent-events";
 import type {
   Actor,
   AgentRole,
@@ -101,6 +102,11 @@ export class AccuracyRunRecorder implements RunHandle {
 
   usageSummary() {
     return { token_usage: this.totalUsage, cost_usd: this.totalCostUsd };
+  }
+
+  /** Persist an observation using this recorder's run and workspace identities. */
+  async recordAgentEvent(event: AgentEvent): Promise<void> {
+    await appendAgentEvent({ run_id: this.id, workspace_id: this.meta.workspace_id, event });
   }
 
   durationMs() {
