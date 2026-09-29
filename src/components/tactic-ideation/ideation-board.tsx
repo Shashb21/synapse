@@ -8,6 +8,7 @@ import { AssignTacticButton, CustomTacticButton, CreateTacticButton } from "@/co
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { GapMetadataView } from "@/components/gap-metadata";
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
 import { DOMAIN_LABELS, TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
 import { tacticTypeColor } from "@/lib/iegp/tactic-type-colors";
@@ -133,6 +134,7 @@ function GapIdeationCard({
               {card.settings.length > 0 ? (
                 <span className="ml-1 text-[11px]">· {card.settings.join(" · ")}</span>
               ) : null}
+              <GapMetadataView metadata={card.metadata} compact className="block" />
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Link href={`/gaps/${card.gap_id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">

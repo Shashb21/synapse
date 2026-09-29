@@ -90,6 +90,7 @@ export const gaps = pgTable("gaps", {
   parked_at: text("parked_at"),
   parked_reason: text("parked_reason"),
   settings: jsonb("settings").notNull().default([]),
+  metadata: jsonb("metadata").notNull().default({}),
 });
 
 export const gapVersions = pgTable("gap_versions", {

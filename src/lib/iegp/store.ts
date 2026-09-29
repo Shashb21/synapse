@@ -7,7 +7,7 @@ import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import type { IegpState, Lock, GapStatusOverride } from "./types";
+import type { GapMetadata, IegpState, Lock, GapStatusOverride } from "./types";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
   ActorFunction,
@@ -90,6 +90,21 @@ export function normalizeSettings(value: unknown): string[] {
     out.push(tag);
   }
   return out;
+}
+
+const METADATA_TEXT_MAX = 2000;
+
+/** A gap's metadata as stored, cleaned: tags like settings, texts trimmed and capped. */
+export function normalizeGapMetadata(value: unknown): GapMetadata {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const text = (key: string, max = METADATA_TEXT_MAX) =>
+    typeof raw[key] === "string" ? (raw[key] as string).trim().slice(0, max) : "";
+  return {
+    stakeholders: normalizeSettings(raw.stakeholders),
+    geography: text("geography", 200),
+    regional_nuances: text("regional_nuances"),
+    notes: text("notes"),
+  };
 }
 
 export async function loadState(): Promise<IegpState> {
@@ -184,6 +199,7 @@ async function readState(): Promise<IegpState> {
       parked_at: g.parked_at ?? null,
       parked_reason: g.parked_reason ?? null,
       settings: normalizeSettings(g.settings),
+      metadata: normalizeGapMetadata(g.metadata),
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -1243,6 +1259,36 @@ export async function setGapSettings(args: {
     settings.length ? settings.join(", ") : "No setting",
   );
   return settings;
+}
+
+/** The design's gap metadata (KAN-49), edited by a person and kept on the audit trail. */
+export async function setGapMetadata(args: {
+  gap_id: string;
+  metadata: unknown;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<GapMetadata> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be edited.");
+  const metadata = normalizeGapMetadata(args.metadata);
+  await db().update(t.gaps).set({ metadata }).where(eq(t.gaps.id, args.gap_id));
+  const summary = [
+    metadata.stakeholders.length ? `Stakeholders: ${metadata.stakeholders.join(", ")}` : null,
+    metadata.geography ? `Geography: ${metadata.geography}` : null,
+    metadata.regional_nuances ? "Regional nuances set" : null,
+    metadata.notes ? "Notes set" : null,
+  ].filter(Boolean);
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "set_metadata",
+    summary.length ? summary.join(" · ") : "Metadata cleared",
+  );
+  return metadata;
 }
 
 export async function unparkGap(args: {
@@ -2448,10 +2494,13 @@ export async function createGap(args: {
   const obj = state.objectives[0];
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
+  let metadata = normalizeGapMetadata({});
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
     if (!parent) throw new Error("Parent gap not found");
     if (!args.settings) settings = parent.settings;
+    // …and its metadata (KAN-49): who it affects and where do not change on a split.
+    metadata = parent.metadata;
   }
   const name = args.name?.trim() || gapNameFromStatement(statement);
   const id = nextId(
@@ -2476,6 +2525,7 @@ export async function createGap(args: {
     parked_at: null,
     parked_reason: null,
     settings,
+    metadata,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   if (args.need_id) {

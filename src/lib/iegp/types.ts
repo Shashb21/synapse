@@ -136,6 +136,17 @@ export type EvidenceGap = {
    * tags a human adds; a gap can carry several. Prioritize scopes on them.
    */
   settings: string[];
+  /** The design's gap metadata (KAN-49): who it affects, where, and notes. Written by a person. */
+  metadata: GapMetadata;
+};
+
+export type GapMetadata = {
+  /** Impacted stakeholders as tags: payers, HTA bodies, KOLs, patients… */
+  stakeholders: string[];
+  geography: string;
+  /** How the gap differs by country or region. */
+  regional_nuances: string;
+  notes: string;
 };
 
 export type GapVersionEvent = "split" | "rewrite";
