@@ -582,6 +582,7 @@ export async function POST(request: Request) {
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
+          ...gapExtrasOf(body),
           actor_name,
           actor_function,
           note: body.note,
@@ -687,6 +688,7 @@ export async function POST(request: Request) {
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
+          ...gapExtrasOf(body),
           tactic_id: body.tactic_id,
           missed_name: body.tactic_name,
           missed_type: (body.tactic_type || undefined) as never,
@@ -795,6 +797,28 @@ export async function POST(request: Request) {
 function customTypeOf(body: Record<string, string>): CustomTacticType | null | undefined {
   if (typeof body.custom_type_label !== "string") return undefined;
   return customTypeFromFields(body.custom_type_label, body.custom_type_color);
+}
+
+/**
+ * The rest of the create-gap form (KAN-52): treatment settings and the gap's details, each
+ * comma-separated where it is a list. Fields left out of the form leave the defaults.
+ */
+function gapExtrasOf(body: Record<string, string>) {
+  const list = (value: unknown) => String(value ?? "").split(/[,\n]/).map((row) => row.trim()).filter(Boolean);
+  const hasDetails = ["stakeholders", "geography", "regional_nuances", "notes"].some((key) => typeof body[key] === "string");
+  return {
+    ...(typeof body.settings === "string" && body.settings.trim() ? { settings: list(body.settings) } : {}),
+    ...(hasDetails
+      ? {
+          metadata: {
+            stakeholders: list(body.stakeholders),
+            geography: body.geography ?? "",
+            regional_nuances: body.regional_nuances ?? "",
+            notes: body.notes ?? "",
+          },
+        }
+      : {}),
+  };
 }
 
 function tacticFieldsOf(body: Record<string, string>) {

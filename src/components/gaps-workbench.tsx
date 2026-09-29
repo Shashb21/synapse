@@ -4,12 +4,12 @@ import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { GapFormFields } from "@/components/gap-form-fields";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
-import { GapMetadataDialog, GapMetadataView } from "@/components/gap-metadata";
+import { GapDetailsEditor } from "@/components/gap-metadata";
 import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
-import type { ActionIdentity } from "@/components/platform/action-dialog";
 import {
   GAPS_TACTIC_HELPER,
   MapExistingTactic,
@@ -18,7 +18,6 @@ import {
 } from "@/components/gap-tactic-actions";
 import {
   DOMAIN_LABELS,
-  EVIDENCE_DOMAINS,
   GAP_STATUS_LABELS,
 } from "@/lib/iegp/enums";
 import {
@@ -53,78 +52,28 @@ const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
 
 function CreateOpenGap() {
   return (
-    <LockForm label="Add open gap" action="create_gap" confirmLabel="Add open gap">
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Title
-        <input
-          name="name"
-          placeholder="Comparative effectiveness in elderly patients, including SoC outcomes"
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Statement
-        <textarea
-          name="statement"
-          required
-          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Domain
-        <select
-          name="domain"
-          required
-          defaultValue=""
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        >
-          <option value="" disabled>
-            Choose a domain
-          </option>
-          {EVIDENCE_DOMAINS.map((domain) => (
-            <option key={domain} value={domain}>
-              {DOMAIN_LABELS[domain]}
-            </option>
-          ))}
-        </select>
-      </label>
+    <LockForm
+      label="Add open gap"
+      action="create_gap"
+      confirmLabel="Add open gap"
+      size="lg"
+      description="A gap no tactic answers yet. Everything here can be changed later on the gap."
+    >
+      <GapFormFields />
     </LockForm>
   );
 }
 
 function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
   return (
-    <LockForm label="Add addressed gap" action="create_addressed_gap" confirmLabel="Add addressed gap">
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Title
-        <input name="name" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Statement
-        <textarea
-          name="statement"
-          required
-          className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Domain
-        <select
-          name="domain"
-          required
-          defaultValue=""
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        >
-          <option value="" disabled>
-            Choose a domain
-          </option>
-          {EVIDENCE_DOMAINS.map((domain) => (
-            <option key={domain} value={domain}>
-              {DOMAIN_LABELS[domain]}
-            </option>
-          ))}
-        </select>
-      </label>
+    <LockForm
+      label="Add addressed gap"
+      action="create_addressed_gap"
+      confirmLabel="Add addressed gap"
+      size="lg"
+      description="A gap an existing study already answers. Name the study below."
+    >
+      <GapFormFields />
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Accompanying library tactic
         <select name="tactic_id" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
@@ -204,14 +153,11 @@ function GapDetailPane({
   card,
   availableTactics,
   settingOptions,
-  identity,
   inline = false,
 }: {
   card: ReviewGapCard;
   availableTactics: TacticLibraryItem[];
   settingOptions: string[];
-  /** Who is acting, for the details dialog; without it the details are read-only. */
-  identity?: ActionIdentity;
   /** Opened inside its table row: the row already shows the id and title. */
   inline?: boolean;
 }) {
@@ -261,13 +207,9 @@ function GapDetailPane({
           options={settingOptions}
         />
       </div>
-      <div className="mt-4 grid gap-2">
-        <GapMetadataView metadata={card.metadata} />
-        {identity ? (
-          <div>
-            <GapMetadataDialog gapId={card.gap_id} gapName={card.gap_name} metadata={card.metadata} identity={identity} />
-          </div>
-        ) : null}
+      <div className="mt-4">
+        {/* Keyed by gap so switching rows starts from that gap's own details. */}
+        <GapDetailsEditor key={card.gap_id} gapId={card.gap_id} metadata={card.metadata} />
       </div>
       <div className="mt-4">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
@@ -390,7 +332,6 @@ export function GapsWorkbench({
   initialFilter,
   settingOptions = [],
   priorities = {},
-  identity,
 }: {
   cards: ReviewGapCard[];
   availableTactics: TacticLibraryItem[];
@@ -399,7 +340,6 @@ export function GapsWorkbench({
   settingOptions?: string[];
   /** Each gap's band on the Prioritization Matrix, when it has one. */
   priorities?: Record<string, GapPriority>;
-  identity?: ActionIdentity;
 }) {
   const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
   const [query, setQuery] = useState("");
@@ -623,7 +563,6 @@ export function GapsWorkbench({
                               card={card}
                               availableTactics={availableTactics}
                               settingOptions={settingOptions}
-                              identity={identity}
                               inline
                             />
                           </td>

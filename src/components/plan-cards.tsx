@@ -5,6 +5,7 @@ import {
   TacticBadge,
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { GapFormFields } from "@/components/gap-form-fields";
 import { CustomTypeFields } from "@/components/custom-type-fields";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { TacticDetailFields } from "@/components/gap-tactic-actions";
@@ -19,8 +20,6 @@ import {
   CATCH_UP_TACTIC_STATUSES,
   CREATE_TACTIC_STATUS_LABELS,
   CREATE_TACTIC_STATUSES,
-  DOMAIN_LABELS,
-  EVIDENCE_DOMAINS,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
@@ -33,55 +32,13 @@ function tacticOptionLabel(tactic: TacticLibraryItem) {
   return `${tactic.name} · ${tactic.gaps.length} gaps`;
 }
 
-function CreateGapFields() {
-  return (
-    <>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Name (optional — derived as an evidence-topic title if blank)
-        <input
-          name="name"
-          placeholder="Comparative effectiveness in elderly patients, including SoC outcomes"
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-        />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Statement
-        <textarea
-          name="statement"
-          required
-          placeholder="What evidence is missing."
-          className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground"
-        />
-      </label>
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        Domain
-        <select
-          name="domain"
-          required
-          defaultValue=""
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-        >
-          <option value="" disabled>
-            Choose a domain
-          </option>
-          {EVIDENCE_DOMAINS.map((domain) => (
-            <option key={domain} value={domain}>
-              {DOMAIN_LABELS[domain]}
-            </option>
-          ))}
-        </select>
-      </label>
-    </>
-  );
-}
-
 export function CreateGapButton({
   label = "Create gap",
   variant,
 }: { label?: string; variant?: "default" | "outline" } = {}) {
   return (
-    <LockForm label={label} action="create_gap" confirmLabel="Add gap" variant={variant}>
-      <CreateGapFields />
+    <LockForm label={label} action="create_gap" confirmLabel="Add gap" variant={variant} size="lg">
+      <GapFormFields />
     </LockForm>
   );
 }

@@ -2504,34 +2504,37 @@ export async function rejectResidualGap(args: {
 
 export async function createGap(args: {
   name?: string;
-  statement: string;
+  statement?: string;
   domain?: EvidenceDomain;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
   parent_gap_id?: string | null;
   settings?: string[];
+  /** Who it affects and where (KAN-49), entered with the gap (KAN-52). A split child inherits its parent's. */
+  metadata?: unknown;
   /** An existing need to become this gap's primary need (a need moved out of another gap). */
   need_id?: string;
   /** Provenance for a gap promoted from a rejected S2 candidate: its source and quote. */
   source_id?: string;
   source_quote?: string;
 }) {
-  const statement = args.statement.trim();
-  if (!statement) throw new Error("Statement is required.");
+  // The description is what evidence is missing; a person may give only the title (KAN-52).
+  const statement = (args.statement ?? "").trim() || (args.name ?? "").trim();
+  if (!statement) throw new Error("Give the gap a title or a description.");
   const domain = args.domain && EVIDENCE_DOMAINS.includes(args.domain) ? args.domain : "unmet_need";
   const state = await loadState();
   // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
-  let metadata = normalizeGapMetadata({});
+  let metadata = normalizeGapMetadata(args.metadata ?? {});
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
     if (!parent) throw new Error("Parent gap not found");
     if (!args.settings) settings = parent.settings;
     // …and its metadata (KAN-49): who it affects and where do not change on a split.
-    metadata = parent.metadata;
+    if (args.metadata === undefined) metadata = parent.metadata;
   }
   const name = args.name?.trim() || gapNameFromStatement(statement);
   const id = nextId(
@@ -3656,7 +3659,9 @@ export async function rewritePartialGap(args: {
 
 export async function createAddressedGap(args: {
   name?: string;
-  statement: string;
+  statement?: string;
+  settings?: string[];
+  metadata?: unknown;
   domain?: EvidenceDomain;
   tactic_id?: string;
   missed_name?: string;
@@ -3692,6 +3697,8 @@ export async function createAddressedGap(args: {
     name: args.name,
     statement: args.statement,
     domain: args.domain,
+    settings: args.settings,
+    metadata: args.metadata,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note,
