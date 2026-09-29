@@ -369,9 +369,10 @@ export function PlanChrome({
           aria-label="Synapse navigation"
           data-open={railOpen}
           onPointerMove={(event) => {
-            // Only a pointer that really moves opens it: a resting pointer (a headless browser's
-            // starts at 0,0) must not leave the rail open over the page, swallowing clicks.
-            if (event.pointerType === "mouse" && (event.movementX !== 0 || event.movementY !== 0)) setRailOpen(true);
+            // A pointer that moves over the rail opens it. CSS :hover would also open it for a
+            // resting pointer (a headless browser's starts at 0,0), which fires no pointermove,
+            // and leave it open over the page, swallowing clicks up to 220px from the left.
+            if (event.pointerType === "mouse" && !railOpen) setRailOpen(true);
           }}
           onPointerLeave={() => setRailOpen(false)}
           className="group/rail sticky top-0 z-30 flex h-dvh w-[52px] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width,box-shadow] duration-200 ease-out data-[open=true]:w-[220px] data-[open=true]:shadow-xl has-[:focus-visible]:w-[220px] has-[:focus-visible]:shadow-xl"
