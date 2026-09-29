@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
 
 /** Multi-tenant accuracy stack — one workspace = one IEGP. */
 
@@ -115,6 +115,24 @@ export const accuracyModuleRuns = pgTable("accuracy_module_runs", {
   cost_usd: numeric("cost_usd"),
   evals: jsonb("evals"),
 });
+
+/** Immutable snapshots, critiques, and judgments for one accuracy call run. */
+export const accuracyAgentEvents = pgTable(
+  "accuracy_agent_events",
+  {
+    id: text("id").primaryKey(),
+    run_id: text("run_id").notNull(),
+    workspace_id: text("workspace_id").notNull(),
+    event_type: text("event_type").notNull(),
+    iteration: integer("iteration"),
+    payload: jsonb("payload").notNull(),
+    recorded_at: text("recorded_at").notNull(),
+  },
+  (table) => ({
+    runWorkspace: index("accuracy_agent_events_run_workspace_idx").on(table.run_id, table.workspace_id),
+    onePerIteration: unique("accuracy_agent_events_run_type_iteration_key").on(table.run_id, table.event_type, table.iteration),
+  }),
+);
 
 export const accuracyRoutingConfig = pgTable(
   "accuracy_routing_config",
@@ -270,6 +288,17 @@ export const ACCURACY_DDL = [
     cost_usd numeric,
     evals jsonb
   )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_agent_events (
+    id text PRIMARY KEY,
+    run_id text NOT NULL,
+    workspace_id text NOT NULL,
+    event_type text NOT NULL,
+    iteration integer,
+    payload jsonb NOT NULL,
+    recorded_at text NOT NULL,
+    CONSTRAINT accuracy_agent_events_run_type_iteration_key UNIQUE (run_id, event_type, iteration)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_agent_events_run_workspace_idx ON accuracy_agent_events (run_id, workspace_id)`,
   `CREATE TABLE IF NOT EXISTS accuracy_routing_config (
     call_kind text NOT NULL,
     agent_role text NOT NULL,
