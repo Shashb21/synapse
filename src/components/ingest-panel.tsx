@@ -1,16 +1,14 @@
 import { LockForm } from "@/components/lock-form";
-import { IngestFileField } from "@/components/ingest-file-field";
+import { AddSourceForm } from "@/components/add-source-form";
 import {
-  SOURCE_TYPES,
   SOURCE_TYPE_LABELS,
-  ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
 } from "@/lib/iegp/enums";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { SourceDocument } from "@/lib/iegp/types";
 
 /**
- * Upload: your own note, plus the Velmara demo source files in a demo
+ * Upload: add a source of your own, plus the Velmara demo source files in a demo
  * workspace only. A team's own workspace never offers demo content unasked.
  */
 export function IngestPanel({
@@ -79,43 +77,8 @@ export function IngestPanel({
       </section>
       ) : null}
 
-      <div className={demoFiles ? "mt-6 border border-border bg-card p-4 rounded-lg" : "border border-border bg-card p-4 rounded-lg"}>
-        <h2 className="mb-3 text-[13px] text-foreground">Upload your own note</h2>
-        <LockForm label="Ingest gaps and tactics" action="ingest" confirmLabel="Ingest">
-          <IngestFileField />
-          <input
-            name="title"
-            required
-            placeholder="Title"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          />
-          <select
-            name="source_type"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          >
-            {SOURCE_TYPES.map((s) => (
-              <option key={s} value={s}>
-                {SOURCE_TYPE_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <select
-            name="stakeholder_function"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          >
-            {ACTOR_FUNCTIONS.map((fn) => (
-              <option key={fn} value={fn}>
-                {FUNCTION_LABELS[fn]}
-              </option>
-            ))}
-          </select>
-          <textarea
-            name="text"
-            required
-            placeholder={`Paste interview notes or drop a ${demoFiles ? "downloaded demo " : ""}file above. The LLM stages extract evidence gaps and existing tactics from it, then map them.`}
-            className="min-h-28 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
-          />
-        </LockForm>
+      <div className={demoFiles ? "mt-6" : undefined}>
+        <AddSourceForm demoFiles={demoFiles} />
       </div>
 
       {compact ? null : (

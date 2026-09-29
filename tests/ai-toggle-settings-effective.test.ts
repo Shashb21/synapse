@@ -39,15 +39,19 @@ async function setWorkspaceAi(workspace: Workspace, enabled: boolean) {
 describe("AI toggle in settings: effective AI", () => {
   beforeAll(async () => {
     await setAiEnabled({ enabled: true, actor_name: ACTOR.name });
-    a = await createWorkspace({ name: `AI toggle A ${unique}`, owner: OWNER });
-    b = await createWorkspace({ name: `AI toggle B ${unique}`, owner: OWNER });
+    a = await createWorkspace({ name: `AI toggle A ${unique}`, owner: OWNER, ai_enabled: true });
+    b = await createWorkspace({ name: `AI toggle B ${unique}`, owner: OWNER, ai_enabled: true });
   }, 60_000);
   afterAll(async () => {
     // Leave AI on for every other test file.
     await setAiEnabled({ enabled: true, actor_name: ACTOR.name });
   });
 
-  it("a new workspace has AI assistance on", async () => {
+  it("a new workspace starts with AI assistance off unless asked for (KAN-52)", async () => {
+    const plain = await createWorkspace({ name: `AI default ${unique}`, owner: OWNER });
+    expect(plain.ai_enabled).toBe(false);
+    expect(await workspaceAiEnabled(plain.id)).toBe(false);
+    expect(await withWorkspace(plain.id, aiEnabled)).toBe(false);
     expect(a.ai_enabled).toBe(true);
     expect(await workspaceAiEnabled(a.id)).toBe(true);
     expect(await withWorkspace(a.id, aiEnabled)).toBe(true);

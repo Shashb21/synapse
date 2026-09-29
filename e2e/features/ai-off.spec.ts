@@ -39,7 +39,7 @@ test.describe.serial("AI switched off by an admin", () => {
     await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /add open gap/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /add tactics/i }).first()).toBeVisible();
-    await expect(page.getByText(/ingest this file|ingest gaps and tactics/i)).toHaveCount(0);
+    await expect(page.getByText(/ingest this file|add and read source/i)).toHaveCount(0);
     await expect(page.locator('input[type="file"]')).toHaveCount(0);
   });
 
