@@ -12,6 +12,7 @@ import {
   Menu,
   Rocket,
   Upload,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,7 +80,7 @@ export function readinessText(nav: PlanNavModel): string {
   return `Prioritizing · ${counted}`;
 }
 
-type PlaceId = PlanPlace | "timeline";
+type PlaceId = PlanPlace | "timeline" | "setup" | "mappings" | "breakouts";
 
 type PlaceItem = {
   id: PlaceId;
@@ -94,7 +95,7 @@ type PlaceItem = {
   ready: boolean;
 };
 
-type SecondaryId = "needs" | "residuals" | "roadmap" | "mappings" | "setup";
+type SecondaryId = "needs" | "residuals" | "roadmap";
 
 type SecondaryItem = {
   id: SecondaryId;
@@ -110,16 +111,13 @@ type SecondaryItem = {
 const TOOL_LABELS: Partial<Record<ShellId, string>> = {
   matrix: "Matrix",
   ideation: "Ideation",
-  breakouts: "Breakout groups",
   presentation: "Presentation",
 };
 
 const SECONDARY: SecondaryItem[] = [
-  { id: "setup", href: "/setup", label: "Get started", icon: Rocket },
   { id: "needs", href: "/needs", label: "Needs", icon: ListChecks },
   { id: "residuals", href: "/residuals", label: "Residuals", icon: ClipboardList },
   { id: "roadmap", href: "/roadmap", label: "Roadmap", icon: ChartGantt },
-  { id: "mappings", href: "/mappings", label: "Mapping table", icon: Columns3 },
 ];
 
 /**
@@ -129,6 +127,17 @@ const SECONDARY: SecondaryItem[] = [
  */
 function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
   const gapsUnlocked = nav.gapsUnlocked || !ai;
+  // Owner feedback (KAN-52): Room is out for now, so its context, mapping table and
+  // breakouts live here in Prep, in plan order.
+  const context: PlaceItem = {
+    id: "setup",
+    href: "/setup",
+    label: "Plan context",
+    sub: "Asset, objectives & people",
+    hint: "The asset, objectives, decisions, landscape and people behind this plan",
+    icon: Rocket,
+    ready: true,
+  };
   const places: PlaceItem[] = [
     {
       id: "gaps",
@@ -150,6 +159,15 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       ready: nav.planUnlocked,
     },
     {
+      id: "mappings",
+      href: "/mappings",
+      label: "Mapping table",
+      sub: "Gap ↔ tactic",
+      hint: "One row per gap with its tactics and mapping status",
+      icon: Columns3,
+      ready: gapsUnlocked,
+    },
+    {
       id: "tactics",
       href: "/?place=tactics",
       label: "Tactic Ideation",
@@ -167,9 +185,19 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       icon: ChartGantt,
       ready: true,
     },
+    {
+      id: "breakouts",
+      href: "/breakouts",
+      label: "Breakout groups",
+      sub: "Workshop groups & gaps",
+      hint: "Group gaps by theme and assign them for the workshop",
+      icon: Users,
+      ready: true,
+    },
   ];
   return ai
     ? [
+        context,
         {
           id: "upload",
           href: "/?place=upload",
@@ -181,7 +209,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
         },
         ...places,
       ]
-    : places;
+    : [context, ...places];
 }
 
 function itemActive(active: ShellId, id: PlaceItem["id"] | SecondaryItem["id"]) {
@@ -298,9 +326,6 @@ function NavLists({
   const openOnly = dense ? "hidden group-data-[open=true]/rail:block group-has-[:focus-visible]/rail:block" : "";
   return (
     <>
-      <div className={openOnly}>
-        <PrepRoomToggle dense={dense} />
-      </div>
       <p className={cn("px-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70", openOnly)}>
         Workspace
       </p>

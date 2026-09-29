@@ -12,15 +12,9 @@ export default async function BreakoutsPage() {
 
   return (
     <AppShell active="breakouts">
-      <div className="mb-2 flex justify-end">
-        <Link href="/room" className="text-[12px] text-muted-foreground no-underline hover:underline">
-          Back to the Room presenter view →
-        </Link>
-      </div>
       <PageIntro kicker="Workshop day" title="Breakout groups">
-        Group gaps by theme, then open each group&apos;s room in its own browser window — one per
-        screen. A different consultant can open the same room on their own device and sign in there
-        to facilitate it.
+        Group gaps by theme for the workshop: create a group, then open it to assign its gaps. A group
+        can be opened in its own window, so another consultant can facilitate it on their own device.
       </PageIntro>
 
       <div className="mb-8 border border-border bg-card p-4 rounded-lg">

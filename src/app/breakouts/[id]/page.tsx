@@ -39,8 +39,8 @@ export default async function BreakoutRoomPage({
       <RoomAutoRefresh />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <PageIntro kicker="Breakout room" title={group.name} />
-        <Link href="/room" className="text-[12px] text-muted-foreground no-underline hover:underline">
-          Switch to presentation →
+        <Link href="/breakouts" className="text-[12px] text-muted-foreground no-underline hover:underline">
+          All breakout groups →
         </Link>
       </div>
       {group.note ? <p className="-mt-4 mb-6 text-[13px] text-muted-foreground">{group.note}</p> : null}

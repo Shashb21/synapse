@@ -2,6 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import { iegpAction } from "../support/synapse";
 
+// Room is out of the app for now (owner, KAN-52; src/lib/room/enabled.ts). These specs
+// come back with it.
+test.skip(true, "Room is turned off for now (ROOM_ENABLED = false)");
+
 /**
  * Room is a PowerPoint-style presenter view over the real app pages: the
  * consultant drives (and edits) the live page, the audience window follows.
