@@ -143,7 +143,8 @@ test("turning AI off while on Sources lands on Evidence Inventory", async ({ pag
   await page.goto("/sources");
   await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
   await flipFromMenu(page, "off");
-  await expect(page).toHaveURL(/\/\?place=gaps$/);
+  // The dev server may compile the plan page on this first visit.
+  await expect(page).toHaveURL(/\/\?place=gaps$/, { timeout: 30_000 });
   await expect(nav(page).getByRole("link", { name: "Upload" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /add open gap/i }).first()).toBeVisible();
 

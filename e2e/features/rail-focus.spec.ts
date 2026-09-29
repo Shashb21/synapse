@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openRail } from "../support/rail";
 
 // KAN-8: the rail opens on hover or keyboard focus, and never stays open over the page
 // after a mouse click (it used to keep focus-within and swallow clicks under it).
@@ -8,7 +9,7 @@ test("the rail collapses after a click once the pointer leaves, and opens for ke
   const rail = page.getByRole("complementary", { name: "Synapse navigation" });
   const width = async () => (await rail.boundingBox())!.width;
 
-  await rail.hover();
+  await openRail(page);
   await expect.poll(width).toBeGreaterThan(200);
   await rail.getByRole("link", { name: /^tactic ideation/i }).click();
   await expect(page).toHaveURL(/place=tactics/);

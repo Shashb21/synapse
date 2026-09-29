@@ -203,7 +203,7 @@ function NavButton({
   const count = "count" in item ? item.count : undefined;
   const sub = "sub" in item ? item.sub : null;
   // In the rail (`dense`) labels are hidden until the rail opens on hover or focus.
-  const reveal = dense ? "opacity-0 transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
+  const reveal = dense ? "opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
   const className = cn(
     "relative flex w-full items-center gap-2.5 rounded-md border px-2.5 text-left no-underline transition-colors",
     sub ? "min-h-10 py-1.5" : "h-8",
@@ -215,7 +215,7 @@ function NavButton({
   const body = (
     <>
       {isActive && dense ? (
-        <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-sidebar-primary group-hover/rail:hidden group-has-[:focus-visible]/rail:hidden" />
+        <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-sidebar-primary group-data-[open=true]/rail:hidden group-has-[:focus-visible]/rail:hidden" />
       ) : null}
       <Icon className={cn("size-4 shrink-0", isActive ? "text-sidebar-primary" : "text-muted-foreground")} aria-hidden />
       <span className={cn("grid min-w-0 flex-1", reveal)}>
@@ -293,9 +293,9 @@ function NavLists({
   label: string;
 }) {
   const places = placesOf(nav, useAiEnabled());
-  const reveal = dense ? "opacity-0 transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
+  const reveal = dense ? "opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
   // Rail-only extras take no room until the rail opens.
-  const openOnly = dense ? "hidden group-hover/rail:block group-has-[:focus-visible]/rail:block" : "";
+  const openOnly = dense ? "hidden group-data-[open=true]/rail:block group-has-[:focus-visible]/rail:block" : "";
   return (
     <>
       <div className={openOnly}>
@@ -347,6 +347,7 @@ export function PlanChrome({
   present?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
   const ai = useAiEnabled();
   const places = placesOf(nav, ai);
   const current =
@@ -363,11 +364,19 @@ export function PlanChrome({
       // The rail keeps its 52px slot in the layout; the panel widens over the
       // page on hover or keyboard focus, so the content never shifts.
       <div data-app-chrome className="relative hidden w-[52px] shrink-0 md:block">
-        {/* Opens on hover or keyboard focus only: a mouse click leaves focus on the link, and
-            focus-within would keep the rail open over the page and swallow clicks under it. */}
+        {/* Opens while the pointer moves over it, or for keyboard focus. Not focus-within: a mouse
+            click leaves focus on the link and would keep the rail open over the page. */}
         <aside
           aria-label="Synapse navigation"
-          className="group/rail sticky top-0 z-30 flex h-dvh w-[52px] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width,box-shadow] duration-200 ease-out hover:w-[220px] hover:shadow-xl has-[:focus-visible]:w-[220px] has-[:focus-visible]:shadow-xl"
+          data-open={railOpen}
+          onPointerMove={(event) => {
+            // A pointer that moves over the rail opens it. CSS :hover would also open it for a
+            // resting pointer (a headless browser's starts at 0,0), which fires no pointermove,
+            // and leave it open over the page, swallowing clicks up to 220px from the left.
+            if (event.pointerType === "mouse" && !railOpen) setRailOpen(true);
+          }}
+          onPointerLeave={() => setRailOpen(false)}
+          className="group/rail sticky top-0 z-30 flex h-dvh w-[52px] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width,box-shadow] duration-200 ease-out data-[open=true]:w-[220px] data-[open=true]:shadow-xl has-[:focus-visible]:w-[220px] has-[:focus-visible]:shadow-xl"
         >
           <Link
             href="/"
@@ -375,7 +384,7 @@ export function PlanChrome({
             aria-label="Synapse IEGP"
           >
             <BrandMark />
-            <span className="grid leading-tight opacity-0 transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">
+            <span className="grid leading-tight opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100">
               <span className="text-[12px] font-bold tracking-tight text-foreground">Synapse</span>
               <span className="text-[9.5px] text-muted-foreground">IEGP Workspace</span>
             </span>
