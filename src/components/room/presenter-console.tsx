@@ -342,6 +342,14 @@ export function PresenterConsole({
     [flushNote],
   );
 
+  // Declared after the key and channel effects, so by the time this runs the
+  // console answers keys and audience windows. `data-ready` says so to tests
+  // and tools (a key pressed before hydration does nothing).
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    rootRef.current?.setAttribute("data-ready", "true");
+  }, []);
+
   function onNotesChange(value: string) {
     setNotes((all) => ({ ...all, [slideId]: value }));
     pendingNote.current = { slide_id: slideId, notes: value };
@@ -359,7 +367,11 @@ export function PresenterConsole({
     noteStatus === "saving" ? "Saving…" : noteStatus === "saved" ? "Saved" : noteStatus === "error" ? "Not saved — retry by typing" : "";
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-background text-foreground" data-testid="presenter-console">
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-40 flex flex-col bg-background text-foreground"
+      data-testid="presenter-console"
+    >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2">
         <div className="flex items-baseline gap-2">
           <Link href="/" className="text-[13px] font-medium text-foreground no-underline" title="Back to Prep">
