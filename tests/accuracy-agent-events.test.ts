@@ -103,4 +103,16 @@ describe("agent event persistence", () => {
     expect(result.deleted.agent_events).toBe(1);
     expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, ids.workspace_id))).toEqual([]);
   });
+
+  it("removes an event appended between event cleanup and parent run deletion", async () => {
+    const ids = await fixture();
+    const db = accuracyDb();
+    // Force the dangerous order of a concurrent append and workspace deletion.
+    await db.delete(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, ids.workspace_id));
+    await appendAgentEvent({ ...ids, event: v0 });
+    await db.delete(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.id, ids.run_id));
+
+    expect(await db.select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, ids.run_id))).toEqual([]);
+    await expect(appendAgentEvent({ ...ids, event: v0 })).rejects.toThrow();
+  });
 });

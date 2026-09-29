@@ -145,6 +145,7 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   const db = accuracyDb();
 
   const deleted: WorkspaceDeleteCounts = {
+    // The parent-run foreign key also cascades events inserted after this cleanup statement.
     agent_events: await deletedCount(
       await db
         .delete(t.accuracyAgentEvents)

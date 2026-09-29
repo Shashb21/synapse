@@ -121,7 +121,7 @@ export const accuracyAgentEvents = pgTable(
   "accuracy_agent_events",
   {
     id: text("id").primaryKey(),
-    run_id: text("run_id").notNull(),
+    run_id: text("run_id").notNull().references(() => accuracyModuleRuns.id, { onDelete: "cascade" }),
     workspace_id: text("workspace_id").notNull(),
     event_type: text("event_type").notNull(),
     iteration: integer("iteration"),
@@ -296,6 +296,7 @@ export const ACCURACY_DDL = [
     iteration integer,
     payload jsonb NOT NULL,
     recorded_at text NOT NULL,
+    CONSTRAINT accuracy_agent_events_run_fk FOREIGN KEY (run_id) REFERENCES accuracy_module_runs(id) ON DELETE CASCADE,
     CONSTRAINT accuracy_agent_events_run_type_iteration_key UNIQUE (run_id, event_type, iteration)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_agent_events_run_workspace_idx ON accuracy_agent_events (run_id, workspace_id)`,
@@ -343,4 +344,17 @@ export const ACCURACY_DDL = [
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
+  `DO $$ BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'accuracy_agent_events_run_fk'
+        AND conrelid = 'accuracy_agent_events'::regclass
+    ) THEN
+      ALTER TABLE accuracy_agent_events ADD CONSTRAINT accuracy_agent_events_run_fk
+        FOREIGN KEY (run_id) REFERENCES accuracy_module_runs(id) ON DELETE CASCADE NOT VALID;
+    END IF;
+  END $$`,
+  `DELETE FROM accuracy_agent_events AS event
+   WHERE NOT EXISTS (SELECT 1 FROM accuracy_module_runs AS run WHERE run.id = event.run_id)`,
+  `ALTER TABLE accuracy_agent_events VALIDATE CONSTRAINT accuracy_agent_events_run_fk`,
 ];
