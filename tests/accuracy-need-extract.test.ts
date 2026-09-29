@@ -57,19 +57,44 @@ describe("need extract module", () => {
       const ctx = stubCtx();
       const events: AgentEvent[] = [];
       ctx.run.recordAgentEvent = async (event) => { events.push(event); };
-      ctx.complete = async () => ({ raw: JSON.stringify({ gaps: [{ statement: "Need OS evidence",
+      ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ gaps: [{ statement: "Need OS evidence",
         external_id: "G1", provenance: [{ source_file_id: "src-1", block_id: "blk-1",
           quote: "Invented quote" }] }] }),
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
       const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
         block_ids: ["blk-1"] }, ctx);
       expect(result.output.gaps[0]?.provenance[0]?.quote).toBe("Invented quote");
+      expect(ctx.complete).toHaveBeenCalledOnce();
+      expect(events.find((event) => event.event_type === "judgment")).toMatchObject({ selected_iteration: 0 });
       expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
         signals: { quote_validity: { invalid_count: 1 } },
       });
       expect(events.find((event) => event.event_type === "critique")).toMatchObject({
         issues: [expect.objectContaining({ code: "quote_not_substring",
           source_ref: { source_file_id: "src-1", block_id: "blk-1" } })],
+      });
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
+  it("keeps observation-only quote findings out of revision feedback", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      const ctx = stubCtx();
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async (event) => { events.push(event); };
+      ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ gaps: [
+        { statement: "Need OS evidence", external_id: "G1", provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Invented quote" }] },
+        { statement: "Need PFS evidence", external_id: "G2", provenance: [] },
+      ] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+      await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
+        block_ids: ["blk-1"] }, ctx);
+      expect(ctx.complete).toHaveBeenCalledTimes(2);
+      const revisionPrompt = vi.mocked(ctx.complete).mock.calls[1]?.[0].user ?? "";
+      expect(revisionPrompt).toContain("G2:no_quote");
+      expect(revisionPrompt).not.toContain("quote_not_substring");
+      expect(events.find((event) => event.event_type === "critique")).toMatchObject({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "quote_not_substring" })]),
       });
     } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
   });

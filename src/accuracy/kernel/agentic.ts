@@ -36,7 +36,7 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   onSnapshot: (draft: T, iteration: number) => Promise<ProductionSignals>;
   maxExchanges?: number;
   proposer: (round: number, prior: T | null, critiques: string[]) => Promise<T>;
-  critic: (draft: T) => Promise<{ score: number; issues: CriticIssue[] }>;
+  critic: (draft: T) => Promise<{ score: number; issues: CriticIssue[]; observationIssues?: CriticIssue[] }>;
   judge: (draft: T) => Promise<T>;
 }): Promise<AgenticExchangeResult<T>> {
   const max = args.maxExchanges ?? 1;
@@ -69,7 +69,7 @@ export async function runShallowAgenticCycle<T extends object>(args: {
     const critiqued = await measure(() => args.critic(draft));
     const critique = critiqued.value;
     await args.run.recordAgentEvent({ event_type: "critique", iteration: exchange,
-      score: critique.score, issues: critique.issues, latency_ms: critiqued.latency_ms,
+      score: critique.score, issues: [...critique.issues, ...(critique.observationIssues ?? [])], latency_ms: critiqued.latency_ms,
       token_usage: critiqued.token_usage, cost_usd: critiqued.cost_usd });
     trace.push(`round${exchange + 1}:critic`);
     if (critique.issues.length === 0 && critique.score >= 0.85) break;

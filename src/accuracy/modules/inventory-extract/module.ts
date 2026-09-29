@@ -47,8 +47,9 @@ type InventoryDraft = {
   tactics: z.infer<typeof proposerTacticSchema>[];
 };
 
-function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[] } {
+function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[]; observationIssues: CriticIssue[] } {
   const issues: CriticIssue[] = [];
+  const observationIssues: CriticIssue[] = [];
   const add = (claim: string, code: string, source_ref?: CriticIssue["source_ref"]) => {
     issues.push({ issue_id: `inventory:${issues.length}`, category: "inventory_extract", code,
       severity: "medium", claim, suggested_action: claim, ...(source_ref ? { source_ref } : {}) });
@@ -80,11 +81,14 @@ function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { 
   }
   const checked = inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks });
   for (const finding of checked.findings) {
-    add(`${finding.span.block_id}:${finding.code}`, finding.code,
-      { source_file_id: finding.span.source_file_id, block_id: finding.span.block_id });
+    observationIssues.push({ issue_id: `inventory:observed:${observationIssues.length}`,
+      category: "quote_validity", code: finding.code, severity: "medium",
+      claim: `${finding.span.block_id}:${finding.code}`,
+      suggested_action: "Check the quote against its source block",
+      source_ref: { source_file_id: finding.span.source_file_id, block_id: finding.span.block_id } });
   }
   const score = draft.tactics.length === 0 ? 0 : Math.max(0, 1 - issues.length * 0.15);
-  return { score, issues };
+  return { score, issues, observationIssues };
 }
 
 function normalizeDraft(raw: unknown, source_file_id: string): InventoryDraft {

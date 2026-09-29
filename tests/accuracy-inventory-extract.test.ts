@@ -56,20 +56,47 @@ describe("inventory extract module", () => {
       const ctx = stubCtx();
       const events: AgentEvent[] = [];
       ctx.run.recordAgentEvent = async (event) => { events.push(event); };
-      ctx.complete = async () => ({ raw: JSON.stringify({ tactics: [{
+      ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ tactics: [{
         name: "Phase 3 registrational trial", type: "phase3_trial", status: "ongoing",
         evidence_question: "Does it improve OS?", origin: "inventory",
         provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote: "Invented study" }],
-      }] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
+      }] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
       const result = await inventoryExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
         block_ids: ["blk-1"] }, ctx);
       expect(result.output.tactics[0]?.provenance[0]?.quote).toBe("Invented study");
+      expect(ctx.complete).toHaveBeenCalledOnce();
+      expect(events.find((event) => event.event_type === "judgment")).toMatchObject({ selected_iteration: 0 });
       expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
         signals: { quote_validity: { invalid_count: 1 } },
       });
       expect(events.find((event) => event.event_type === "critique")).toMatchObject({
         issues: [expect.objectContaining({ code: "quote_not_substring",
           source_ref: { source_file_id: "src-1", block_id: "blk-1" } })],
+      });
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
+  it("keeps observation-only quote findings out of revision feedback", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      const ctx = stubCtx();
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async (event) => { events.push(event); };
+      ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ tactics: [
+        { name: "Phase 3 registrational trial", type: "phase3_trial", status: "ongoing",
+          evidence_question: "Does it improve OS?", origin: "inventory", provenance: [
+            { source_file_id: "src-1", block_id: "blk-1", quote: "Invented study" }] },
+        { name: "Registry study", type: "registry", status: "ongoing",
+          evidence_question: "What is real-world OS?", origin: "inventory", provenance: [] },
+      ] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+      await inventoryExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
+        block_ids: ["blk-1"] }, ctx);
+      expect(ctx.complete).toHaveBeenCalledTimes(2);
+      const revisionPrompt = vi.mocked(ctx.complete).mock.calls[1]?.[0].user ?? "";
+      expect(revisionPrompt).toContain("Registry study:no_quote");
+      expect(revisionPrompt).not.toContain("quote_not_substring");
+      expect(events.find((event) => event.event_type === "critique")).toMatchObject({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "quote_not_substring" })]),
       });
     } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
   });
