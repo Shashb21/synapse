@@ -15,6 +15,17 @@ const FAMILY_COLORS = {
   communication: "#6b7280",
 } as const;
 
+/** The families in legend order, with the label the legend shows. */
+export const TACTIC_TYPE_FAMILIES: { label: string; color: string }[] = [
+  { label: "Trial & follow-up", color: FAMILY_COLORS.trial },
+  { label: "Real-world data", color: FAMILY_COLORS.rwe },
+  { label: "Evidence synthesis", color: FAMILY_COLORS.synthesis },
+  { label: "Patient voice", color: FAMILY_COLORS.patient },
+  { label: "Economics", color: FAMILY_COLORS.economics },
+  { label: "Collaboration", color: FAMILY_COLORS.collaboration },
+  { label: "Communication", color: FAMILY_COLORS.communication },
+];
+
 const FAMILY: Record<TacticType, keyof typeof FAMILY_COLORS> = {
   phase3_trial: "trial",
   long_term_followup: "trial",

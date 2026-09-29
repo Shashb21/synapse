@@ -43,6 +43,7 @@ export const FALLBACK = {
   foreground: "#111827",
   muted: "#6b7280",
   conflict: "#e11d48",
+  primary: "#4f46e5",
 };
 
 export type Palette = typeof FALLBACK;
@@ -61,6 +62,7 @@ const TOKENS: Record<keyof Palette, string> = {
   foreground: "--foreground",
   muted: "--muted-foreground",
   conflict: "--destructive",
+  primary: "--primary",
 };
 
 /**

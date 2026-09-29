@@ -43,7 +43,7 @@ async function setAi(request: APIRequestContext, enabled: boolean) {
 /** Waits for the client to hydrate, so the first click is not swallowed. */
 async function openTimeline(page: Page) {
   await page.goto("/timeline");
-  await expect(page.getByRole("heading", { name: /^iegp timeline$/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
   await expect(page.locator("svg[role='img']")).toBeVisible();
   await page.waitForLoadState("networkidle");
 }

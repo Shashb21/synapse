@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -15,7 +15,8 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import { ExportImageButton } from "@/components/timeline/export-image-button";
 import { AlertTriangle } from "lucide-react";
 import { DependencyDialog } from "@/components/timeline/dependency-dialog";
-import { GapGantt } from "@/components/timeline/gap-gantt";
+import { GapGantt, type TimelinePriorityFilter } from "@/components/timeline/gap-gantt";
+import { cn } from "@/lib/utils";
 import {
   ConflictList,
   DragRescheduleDialog,
@@ -148,6 +149,19 @@ export function TimelineBoard({
   const selectedConflicts = selected
     ? view.conflicts.filter((row) => row.successor_id === selected.id || row.predecessor_id === selected.id)
     : [];
+  const [priorityFilter, setPriorityFilter] = useState<TimelinePriorityFilter>("all");
+  const [setting, setSetting] = useState<string | null>(null);
+  const [showDependencies, setShowDependencies] = useState(true);
+  const settingTags = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const group of [...view.prioritized, ...view.not_prioritized, ...view.deferred]) {
+      for (const tag of group.settings) {
+        const key = tag.trim().toLowerCase();
+        if (key && !seen.has(key)) seen.set(key, tag.trim());
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }, [view]);
   const hasRows = view.prioritized.length + view.not_prioritized.length + view.deferred.length + view.other.length > 0;
 
   return (
@@ -252,8 +266,82 @@ export function TimelineBoard({
       {!hasRows ? (
         <EmptyTimeline identity={identity} unscheduled={model.unscheduled} ai={ai} canRun={canRun} />
       ) : (
+        <>
+        <div
+          role="toolbar"
+          aria-label="Timeline filters"
+          className="-mb-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5"
+        >
+          <button
+            type="button"
+            aria-pressed={showDependencies}
+            onClick={() => setShowDependencies((on) => !on)}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+              showDependencies
+                ? "border-primary/40 bg-primary/10 text-indigo-800 dark:text-indigo-300"
+                : "border-border bg-background text-muted-foreground",
+            )}
+          >
+            ⤳ Dependencies
+          </button>
+          <span className="h-5 w-px bg-border" aria-hidden />
+          <div role="group" aria-label="Priority" className="flex flex-wrap items-center gap-1">
+            {(
+              [
+                { id: "all", label: "All gaps" },
+                { id: "high", label: "High priority" },
+                { id: "high_medium", label: "High + Medium" },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={priorityFilter === option.id}
+                onClick={() => setPriorityFilter(option.id)}
+                className={cn(
+                  "rounded-md border px-2.5 py-1 text-[11px] font-medium",
+                  priorityFilter === option.id
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {settingTags.length > 0 ? (
+            <>
+              <span className="h-5 w-px bg-border" aria-hidden />
+              <div role="group" aria-label="Setting" className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Setting</span>
+                {[null, ...settingTags].map((tag) => (
+                  <button
+                    key={tag ?? "all"}
+                    type="button"
+                    aria-pressed={setting === tag}
+                    onClick={() => setSetting(tag === setting ? null : tag)}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-[11px] font-medium",
+                      setting === tag
+                        ? tag === null
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {tag ?? "All"}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
         <div className="overflow-x-auto border border-border bg-background">
           <GapGantt
+            filter={priorityFilter}
+            setting={setting}
+            showDependencies={showDependencies}
             view={view}
             activities={model.activities}
             today={today}
@@ -266,6 +354,7 @@ export function TimelineBoard({
             onDragCommit={setDragChange}
           />
         </div>
+        </>
       )}
       {canReschedule && hasRows ? (
         <p className="-mt-2 text-[11px] text-muted-foreground">

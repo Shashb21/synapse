@@ -97,3 +97,30 @@ test.describe("Tactic Ideation place", () => {
     await expect(library.getByText("No tactics match.")).toBeVisible();
   });
 });
+
+// KAN-8: the Gantt Timeline toolbar from the design; the chart stays editable.
+test.describe("Gantt Timeline toolbar", () => {
+  test("filters by priority and toggles dependency arrows", async ({ page }) => {
+    await page.goto("/timeline");
+    await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
+    const toolbar = page.getByRole("toolbar", { name: /timeline filters/i });
+    await expect(toolbar).toBeVisible();
+    const chart = page.locator('svg[role="img"]').first();
+    const all = toolbar.getByRole("button", { name: /^all gaps$/i });
+    const high = toolbar.getByRole("button", { name: /^high priority$/i });
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    await expect(async () => {
+      await high.click();
+      await expect(high).toHaveAttribute("aria-pressed", "true", { timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+    await expect(chart).not.toContainText(/NOT PRIORITIZED|MEDIUM PRIORITY|LOW PRIORITY/);
+    await expect(chart).toContainText("HIGH PRIORITY");
+    await all.click();
+
+    const deps = toolbar.getByRole("button", { name: /dependencies/i });
+    await expect(deps).toHaveAttribute("aria-pressed", "true");
+    await deps.click();
+    await expect(deps).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("[data-dependency]")).toHaveCount(0);
+  });
+});

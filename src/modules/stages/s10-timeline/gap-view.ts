@@ -40,6 +40,8 @@ export type GapTimelineGroup = {
   gap_name: string;
   statement: string;
   domain: string;
+  /** The gap's setting tags (1L, Perioperative…), for the timeline's setting filter. */
+  settings: string[];
   /** The validated S8 band; null for a gap not prioritized yet. */
   band: PriorityBand | null;
   /** Span of its dated tactics; null when none is dated ("Unscheduled"). */
@@ -201,6 +203,7 @@ export function gapTimelineView(args: {
       gap_name: gap.name,
       statement: gap.statement,
       domain: gap.domain,
+      settings: gap.settings ?? [],
       band,
       start: starts[0] ?? null,
       end: ends[ends.length - 1] ?? null,
