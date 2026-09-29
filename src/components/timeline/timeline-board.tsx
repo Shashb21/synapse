@@ -17,6 +17,7 @@ import { AlertTriangle } from "lucide-react";
 import { DependencyDialog } from "@/components/timeline/dependency-dialog";
 import { GapGantt, type TimelinePriorityFilter } from "@/components/timeline/gap-gantt";
 import { cn } from "@/lib/utils";
+import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import {
   ConflictList,
   DragRescheduleDialog,
@@ -28,11 +29,9 @@ import {
   DOMAIN_LABELS,
   FUNCTION_LABELS,
   TACTIC_STATUS_HELPERS,
-  TACTIC_TYPE_LABELS,
   type ActorFunction,
   type EvidenceDomain,
   type TacticStatus,
-  type TacticType,
 } from "@/lib/iegp/enums";
 import {
   LANE_LABELS,
@@ -404,7 +403,7 @@ export function TimelineBoard({
               <SheetHeader>
                 <SheetTitle className="text-[15px]">{selected.tactic_name}</SheetTitle>
                 <SheetDescription className="text-[12px]">
-                  {TACTIC_TYPE_LABELS[selected.tactic_type as TacticType]} ·{" "}
+                  {tacticTypeLabel({ type: selected.tactic_type, custom_type: selected.tactic_custom_type })} ·{" "}
                   {selected.tactic_status.replaceAll("_", " ")}
                 </SheetDescription>
               </SheetHeader>

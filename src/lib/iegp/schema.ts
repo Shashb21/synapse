@@ -159,6 +159,7 @@ export const tactics = pgTable("tactics", {
   intended_use: text("intended_use").notNull(),
   lock: jsonb("lock").notNull(),
   source_quote: text("source_quote").notNull().default(""),
+  custom_type: jsonb("custom_type"),
 });
 
 export const coverages = pgTable("coverages", {

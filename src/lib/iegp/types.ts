@@ -1,3 +1,4 @@
+import type { CustomTacticType } from "./custom-tactic-type";
 import type {
   ActorFunction,
   CoverageDimension,
@@ -215,6 +216,8 @@ export type Tactic = {
   lock: Lock;
   /** The source sentence S3 extracted this tactic from. Empty for hand-created tactics. */
   source_quote?: string;
+  /** A person's own type name and colour, shown over the standard type (KAN-51). */
+  custom_type?: CustomTacticType | null;
 };
 
 export type GapTacticCoverage = {

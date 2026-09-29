@@ -14,8 +14,8 @@ import {
   truncate,
 } from "@/components/timeline/gantt-chart";
 import { CreateActivityDialog, ManualDatesDialog, type DragChange } from "@/components/timeline/timeline-dialogs";
-import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
-import { TACTIC_TYPE_FAMILIES, tacticTypeColor } from "@/lib/iegp/tactic-type-colors";
+import { TACTIC_TYPE_FAMILIES, tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
+import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import type { TimelineActivity, TimelineBand } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineGroup, GapTimelineItem, GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 
@@ -279,12 +279,14 @@ export function GapGantt({
   const legendY = bodyBottom + PAD_B + 12;
   // Type families, then statuses, then markers, laid out left to right (the PNG export keeps it).
   const legendEntries: { key: string; label: string; labelX: number; mark: ReactNode }[] = [
-    ...TACTIC_TYPE_FAMILIES.map((family) => ({
-      key: `type-${family.label}`,
-      label: family.label,
-      labelX: 14,
-      mark: <rect x={0} y={-7} width={9} height={9} rx={2} fill={family.color} />,
-    })),
+    ...[...TACTIC_TYPE_FAMILIES, ...customTypesInUse(activities.map((row) => ({ custom_type: row.tactic_custom_type })))].map(
+      (family) => ({
+        key: `type-${family.label}`,
+        label: family.label,
+        labelX: 14,
+        mark: <rect x={0} y={-7} width={9} height={9} rx={2} fill={"color" in family ? family.color : "#6b7280"} />,
+      }),
+    ),
     ...STATUS_LEGEND.map((entry) => ({
       key: `status-${entry.status}`,
       label: entry.label,
@@ -590,11 +592,12 @@ export function GapGantt({
           const barWidth = Math.max(6, x(end) - x1);
           const cy = row.y + row.h / 2;
           const selected = selectedId === activity.id;
-          const tone = tacticTypeColor(activity.tactic_type);
+          const typed = { type: activity.tactic_type, custom_type: activity.tactic_custom_type };
+          const tone = tacticColor(typed);
           const broken = conflicted.has(activity.id);
           const readoutX = activity.readout_date ? x(activity.readout_date) : null;
           const insideChars = Math.floor((barWidth - 12) / 5.6);
-          const barLabel = insideChars >= 6 ? truncate(TACTIC_TYPE_LABELS[activity.tactic_type], insideChars) : "";
+          const barLabel = insideChars >= 6 ? truncate(tacticTypeLabel(typed), insideChars) : "";
           const dragging = drag?.id === activity.id;
           return (
             <g

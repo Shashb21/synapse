@@ -1,4 +1,5 @@
-import type { TacticType } from "@/lib/iegp/enums";
+import { TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
+import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 
 /**
  * One colour per family of tactic type, as in the design (KAN-8): trials indigo,
@@ -50,6 +51,18 @@ const FAMILY: Record<TacticType, keyof typeof FAMILY_COLORS> = {
   congress_abstract: "communication",
   evidence_dissemination: "communication",
 };
+
+type Typed = { type: string; custom_type?: CustomTacticType | null };
+
+/** A tactic's colour: its custom type's when it has one, else its type family's (KAN-51). */
+export function tacticColor(tactic: Typed): string {
+  return tactic.custom_type?.color ?? tacticTypeColor(tactic.type);
+}
+
+/** A tactic's type as people read it: the custom name when set, else the standard label. */
+export function tacticTypeLabel(tactic: Typed): string {
+  return tactic.custom_type?.label ?? TACTIC_TYPE_LABELS[tactic.type as TacticType] ?? tactic.type.replaceAll("_", " ");
+}
 
 export function tacticTypeColor(type: string): string {
   const family = FAMILY[type as TacticType];
