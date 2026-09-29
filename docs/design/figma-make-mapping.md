@@ -73,9 +73,14 @@ This is a Jira "List" view.
 - **Gap:** impacted stakeholders, source(s), geography, regional nuances, impact areas, gap rationale, priority rationale, tactic objectives, notes, and a priority of `na`.
 - **Tactic:** budget, lead function, vendor, geographies, assumptions, risks, impact summary, publication plan, milestones (readout, submission, interim, completion), and dependency types (finish-to-start, start-to-start, data-input, informs) each with a rationale. Also custom tactic types with a colour, and quarter-based dates.
 
-## Conflicts with decisions already made (need the owner)
-1. **Ideation scope:** the design shows High only. We changed ideation to cover every validated band after the run-through.
-2. **Priority levels:** the design has 4 (adds Defer / N/A). We have 3.
-3. **Quadrant auto-suggest:** the design suggests a priority from the quadrant, and the human confirms it with a rationale. That fits the "human decides" rule as long as it stays a suggestion that has to be confirmed.
-4. **Timeline:** the design is read-only and uses quarters. We keep editing and day-level dates, and can show a quarter scale.
-5. **"AI-assisted" suggestions** must come from the LLM (S9), never from a hard-coded table like the prototype's `DOMAIN_SUGGESTIONS`. With AI off they're hidden and only Custom Tactic remains.
+## Decisions (owner, 2026-09-29)
+1. **Ideation scope:** follow the design. Tactic Ideation lists validated High gaps only; Medium and Low gaps get tactics mapped on Evidence Inventory.
+2. **Priority levels:** four. Defer / N/A is the fourth band; deferred gaps drop out of Tactic Ideation and sit in a collapsed "Deferred" section of the timeline.
+3. **Quadrant auto-suggest:** the quadrant suggests Prioritize, Plan, Monitor or Defer; a person confirms it with a rationale.
+4. **Timeline:** styled from the design (type colours, status patterns, year/quarter header, filter toolbar) but keeps drag, resize, day-level dates and dependency editing.
+5. **Build:** screen by screen in this session, starting with Evidence Inventory.
+
+## Not taken from the design yet
+- Gap fields the design has and we do not: impacted stakeholders, geography, regional nuances, budget, lead function.
+- The tactic edit side panel: tactics open their full page (`/tactics/[id]`) instead.
+- Custom tactic types with their own colour.
