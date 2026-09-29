@@ -45,7 +45,7 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(places(page).getByRole("link", { name: /^upload/i })).not.toContainText(/waiting/i);
 
     await places(page).getByRole("link", { name: /^evidence inventory/i }).click();
-    await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(page.getByTestId("step-waiting")).toContainText(/waiting on upload/i);
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
 
@@ -61,16 +61,16 @@ test.describe("gaps then prioritize then tactics", () => {
   test("ingest presents mapped gaps with computed status, not accept/reject", async ({ page }) => {
     await ingestFirstDemo(page);
     await places(page).getByRole("link", { name: /^evidence inventory/i }).click();
-    await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /accept tactic/i })).toHaveCount(0);
     await expect(
-      page.getByText(/Every extracted gap is shown with its mapped tactics and computed status/i),
+      page.getByText(/Every evidence gap with its mapped tactics and computed status/i),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
-    await expect(page.getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
+    await expect(page.getByTestId("evidence-inventory").getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     await expect(
       page
         .getByRole("button", { name: /confirm status|resolve this partially addressed gap/i })

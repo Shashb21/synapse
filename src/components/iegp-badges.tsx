@@ -37,12 +37,13 @@ function BadgeHelp({ help, children }: { help: string; children: ReactNode }) {
 
 export function GapBadge({ status }: { status: GapStatus }) {
   const tone =
+    // Figma design (KAN-8): addressed emerald, partial amber, open rose.
     status === "validated_addressed"
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
       : status === "validated_open"
-        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+        ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
         : status === "validated_partial"
-          ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+          ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
           : status === "excluded"
             ? "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400"
             : "bg-violet-500/15 text-violet-700 dark:text-violet-300";

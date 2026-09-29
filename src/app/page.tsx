@@ -61,10 +61,10 @@ function PlaceIntro({
   }
   if (place === "gaps") {
     return (
-      <PageIntro kicker="Status engine · human validation" title="Gaps">
-        Every extracted gap is shown with its mapped tactics and computed status. Confirm each one,
-        map existing library tactics, or record a missed real study. Add Open or Addressed gaps by
-        hand (Addressed needs a tactic). Partial gaps must be split or rewritten before Prioritize.
+      <PageIntro kicker="Gaps & metadata" title="Evidence Inventory">
+        Every evidence gap with its mapped tactics and computed status. Confirm each one, map
+        library tactics or record a missed study, and add gaps by hand. Partial gaps must be split or
+        rewritten before prioritization.
       </PageIntro>
     );
   }
@@ -152,6 +152,12 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
+    // Each gap's priority on the matrix: the band, and whether a person validated it.
+    const priorities = Object.fromEntries(
+      (await listPlacements())
+        .filter((row) => row.band)
+        .map((row) => [row.gap_id, { band: row.band!, validated: row.validated }]),
+    );
     pane = (
       <>
         {!gapsUnlocked ? (
@@ -168,6 +174,7 @@ export default async function HomePage({
           readyForPrioritize={ready}
           initialFilter={gapFilter}
           settingOptions={settingOptions(state)}
+          priorities={priorities}
         />
         <SetAsideGaps gaps={state.gaps} />
       </>

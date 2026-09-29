@@ -15,9 +15,9 @@ test.describe("S5 classification and validation gate", () => {
 
   test("shows every mapped gap with its computed status and no accept/reject inbox", async ({ page }) => {
     await page.goto("/?place=gaps");
-    await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(
-      page.getByText(/Every extracted gap is shown with its mapped tactics and computed status/),
+      page.getByText(/Every evidence gap with its mapped tactics and computed status/),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();

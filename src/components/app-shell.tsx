@@ -77,13 +77,13 @@ export function PageIntro({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-4">
       {kicker ? (
-        <p className="mb-1 text-[11px] text-muted-foreground">{kicker}</p>
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{kicker}</p>
       ) : null}
-      <h1 className="text-lg font-medium text-foreground">{title}</h1>
+      <h1 className="text-base font-bold tracking-tight text-foreground">{title}</h1>
       {children ? (
-        <div className="mt-2 max-w-3xl text-[13px] leading-5 text-muted-foreground">
+        <div className="mt-1 max-w-4xl text-[12px] leading-5 text-muted-foreground">
           {children}
         </div>
       ) : null}

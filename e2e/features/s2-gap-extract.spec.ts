@@ -56,7 +56,7 @@ test.describe("S2 evidence gap extraction", () => {
     }
 
     await page.goto("/?place=gaps");
-    await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /view constituent needs/i }).first()).toBeVisible();
   });
