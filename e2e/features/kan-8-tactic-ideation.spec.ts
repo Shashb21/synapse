@@ -83,7 +83,8 @@ test.describe("Tactic Ideation place", () => {
     await expect(dialog).toBeHidden();
 
     const card = page.getByTestId("ideation-gap").filter({ hasText: high.gap_id });
-    await expect(card.getByRole("link", { name: new RegExp(name) })).toBeVisible();
+    // Linked tactics open the side panel (KAN-50), so the row is a button.
+    await expect(card.getByRole("button", { name: new RegExp(name) })).toBeVisible();
   });
 
   test("the library opens, searches, and marks unassigned tactics", async ({ page }) => {

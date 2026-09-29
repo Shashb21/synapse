@@ -9,6 +9,7 @@ import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { GapMetadataView } from "@/components/gap-metadata";
+import { TacticEditPanel, type TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
@@ -50,13 +51,11 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-function LinkedTacticRow({ tactic }: { tactic: PlanTactic }) {
-  return (
-    <li>
-      <Link
-        href={`/tactics/${tactic.id}`}
-        className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5 text-foreground no-underline hover:bg-muted/60"
-      >
+function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () => void }) {
+  const className =
+    "flex w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5 text-left text-foreground no-underline hover:bg-muted/60";
+  const body = (
+    <>
         <span className="font-mono text-[10px]" style={{ color: tacticColor(tactic) }}>
           {tactic.id}
         </span>
@@ -67,7 +66,19 @@ function LinkedTacticRow({ tactic }: { tactic: PlanTactic }) {
           ✎
         </span>
         <span className="sr-only">Edit {tactic.name}</span>
-      </Link>
+    </>
+  );
+  return (
+    <li>
+      {onEdit ? (
+        <button type="button" onClick={onEdit} className={className}>
+          {body}
+        </button>
+      ) : (
+        <Link href={`/tactics/${tactic.id}`} className={className}>
+          {body}
+        </Link>
+      )}
     </li>
   );
 }
@@ -80,6 +91,7 @@ function GapIdeationCard({
   library,
   identity,
   mayIdeate,
+  onEditTactic,
 }: {
   card: OpenGapCard;
   expanded: boolean;
@@ -88,6 +100,8 @@ function GapIdeationCard({
   library: TacticLibraryItem[];
   identity: ActionIdentity;
   mayIdeate: boolean;
+  /** Opens the side panel for a tactic; returns false when it has no editable record. */
+  onEditTactic?: (tacticId: string) => boolean;
 }) {
   const ai = useAiEnabled();
   const linked = card.tactics;
@@ -155,7 +169,11 @@ function GapIdeationCard({
             ) : (
               <ul className="grid gap-1.5">
                 {linked.map((tactic) => (
-                  <LinkedTacticRow key={tactic.id} tactic={tactic} />
+                  <LinkedTacticRow
+                    key={tactic.id}
+                    tactic={tactic}
+                    onEdit={onEditTactic ? () => void onEditTactic(tactic.id) : undefined}
+                  />
                 ))}
               </ul>
             )}
@@ -202,7 +220,7 @@ function GapIdeationCard({
   );
 }
 
-function LibraryPanel({ items }: { items: TacticLibraryItem[] }) {
+function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: (tacticId: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const shown = useMemo(() => {
@@ -296,9 +314,19 @@ function LibraryPanel({ items }: { items: TacticLibraryItem[] }) {
                     </span>
                   )}
                   <StatusChip status={item.status} />
-                  <Link href={`/tactics/${item.id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
-                    ✎ Edit<span className="sr-only"> {item.name}</span>
-                  </Link>
+                  {onEdit ? (
+                    <button
+                      type="button"
+                      onClick={() => onEdit(item.id)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      ✎ Edit<span className="sr-only"> {item.name}</span>
+                    </button>
+                  ) : (
+                    <Link href={`/tactics/${item.id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
+                      ✎ Edit<span className="sr-only"> {item.name}</span>
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
@@ -320,13 +348,24 @@ export function IdeationBoard({
   library,
   identity,
   mayIdeate,
+  tactics = {},
 }: {
   gaps: OpenGapCard[];
   proposals: ProposalCardModel[];
   library: TacticLibraryItem[];
   identity: ActionIdentity;
   mayIdeate: boolean;
+  /** Editable tactic records for the side panel (KAN-50); a tactic without one opens its page. */
+  tactics?: Record<string, TacticEditModel>;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const openEditor = (tacticId: string) => {
+    if (!tactics[tacticId]) return false;
+    setEditingId(tacticId);
+    return true;
+  };
+  const inUse = useMemo(() => customTypesInUse(Object.values(tactics)), [tactics]);
+  const canEdit = identity.signed_in && Object.keys(tactics).length > 0;
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState("");
   const [coverage, setCoverage] = useState<Coverage>("");
@@ -417,6 +456,7 @@ export function IdeationBoard({
             library={library}
             identity={identity}
             mayIdeate={mayIdeate}
+            onEditTactic={canEdit ? openEditor : undefined}
           />
         ))}
         {gaps.length === 0 ? (
@@ -434,7 +474,13 @@ export function IdeationBoard({
         ) : null}
       </div>
 
-      <LibraryPanel items={library} />
+      <LibraryPanel items={library} onEdit={canEdit ? (id) => void openEditor(id) : undefined} />
+      <TacticEditPanel
+        tactic={editingId ? (tactics[editingId] ?? null) : null}
+        identity={identity}
+        inUse={inUse}
+        onClose={() => setEditingId(null)}
+      />
     </div>
   );
 }

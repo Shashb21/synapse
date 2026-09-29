@@ -32,6 +32,7 @@ import {
   EVIDENCE_DOMAINS,
   OVERALL_COVERAGE,
   TACTIC_TYPES,
+  ACTOR_FUNCTIONS,
 } from "./enums";
 import {
   computeGapStatus,
@@ -3039,6 +3040,10 @@ export const TACTIC_EDIT_FIELDS = [
   "geography",
   "start_date",
   "evidence_available",
+  // KAN-50: the design's side panel also edits the budget and who leads the tactic.
+  "budget",
+  "owner",
+  "function",
 ] as const;
 export type TacticEditField = (typeof TACTIC_EDIT_FIELDS)[number];
 
@@ -3089,6 +3094,15 @@ export async function modifyTactic(args: {
     }
     if (field === "type" && !TACTIC_TYPES.includes(value as IegpState["tactics"][0]["type"])) {
       throw new Error("Tactic type is required.");
+    }
+    if (field === "function" && !ACTOR_FUNCTIONS.includes(value as ActorFunction)) {
+      throw new Error("Lead function must be one of the listed functions.");
+    }
+    if (field === "owner" && !value) throw new Error("Lead (owner) is required.");
+    if (field === "budget") {
+      if (value.length > 60) throw new Error("Budget can be at most 60 characters.");
+      clean[field] = value || null;
+      continue;
     }
     clean[field] = value;
   }
