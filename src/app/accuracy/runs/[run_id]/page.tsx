@@ -21,22 +21,25 @@ export default async function AccuracyRunDetailPage({
   searchParams,
 }: {
   params: Promise<{ run_id: string }>;
-  searchParams: Promise<{ workspace_id?: string }>;
+  searchParams: Promise<{ workspace_id?: string | string[] }>;
 }) {
   const session = await sessionContext();
   const { run_id } = await params;
-  const { workspace_id = "" } = await searchParams;
-  const listHref = `/accuracy/runs?workspace_id=${encodeURIComponent(workspace_id)}`;
+  const { workspace_id } = await searchParams;
+  const workspaceId = typeof workspace_id === "string" ? workspace_id.trim() : "";
+  const listHref = `/accuracy/runs?workspace_id=${encodeURIComponent(workspaceId)}`;
 
   let error: string | null = null;
   let progression: Awaited<ReturnType<typeof readAgentProgression>> = null;
   if (!session.signed_in) {
     error = "Sign in to inspect run progression.";
-  } else if (!workspace_id.trim() || !run_id?.trim()) {
-    error = "A workspace and run are required.";
+  } else if (!workspaceId) {
+    error = "One workspace_id is required.";
+  } else if (!run_id?.trim()) {
+    error = "A run is required.";
   } else {
     try {
-      progression = await readAgentProgression({ run_id: run_id.trim(), workspace_id: workspace_id.trim() });
+      progression = await readAgentProgression({ run_id: run_id.trim(), workspace_id: workspaceId });
       if (!progression) error = "Run not found in this workspace.";
     } catch {
       error = "Could not load this run. Try again.";

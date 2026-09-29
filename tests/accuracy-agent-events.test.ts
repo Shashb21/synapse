@@ -132,6 +132,19 @@ describe("agent event persistence", () => {
 });
 
 describe("run progression detail", () => {
+  it("shows an input error for repeated workspace IDs without reading snapshots", async () => {
+    auth.signed_in = true;
+    const ids = await fixture();
+    await appendAgentEvent({ ...ids, event: v0 });
+
+    const html = renderPageContent(await AccuracyRunDetailPage({
+      params: Promise.resolve({ run_id: ids.run_id }),
+      searchParams: Promise.resolve({ workspace_id: [ids.workspace_id, "other-workspace"] }),
+    }));
+    expect(html).toContain("One workspace_id is required");
+    expect(html).not.toContain("Exact V0");
+  });
+
   it("returns exact V0 and V1, critique, and selected version for a signed-in user", async () => {
     auth.signed_in = true;
     const ids = await fixture();
