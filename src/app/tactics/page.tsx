@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { TacticsPlace } from "@/components/tactics-place";
+import { RejectedTactics } from "@/components/restore-actions";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { buildPlanWorkspace, planGates } from "@/lib/iegp/engine";
 import { CATCH_UP_TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES, CREATE_TACTIC_STATUS_LABELS } from "@/lib/iegp/enums";
@@ -44,6 +45,7 @@ export default async function TacticsPage() {
         openGaps={workspace.openGaps}
         availableTactics={workspace.availableTactics}
       />
+      <RejectedTactics tactics={state.tactics} />
       {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
       {ai || rejected.length > 0 ? (
       <section className="mt-8">
@@ -89,9 +91,12 @@ export default async function TacticsPage() {
                           name: "status",
                           label: "Status",
                           type: "select",
+                          // The candidate's own status when it has one; otherwise the person picks.
                           defaultValue: (CATCH_UP_TACTIC_STATUSES as readonly string[]).includes(row.status)
                             ? row.status
-                            : "planned",
+                            : undefined,
+                          placeholder: "Choose a status",
+                          required: true,
                           options: CATCH_UP_TACTIC_STATUSES.map((status) => ({ value: status, label: CREATE_TACTIC_STATUS_LABELS[status] })),
                         },
                         {

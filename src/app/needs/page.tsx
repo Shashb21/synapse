@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { LockForm } from "@/components/lock-form";
+import { RestoreNeedButton } from "@/components/restore-actions";
 import { LockMeta } from "@/components/iegp-badges";
 import { Badge } from "@/components/ui/badge";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
@@ -101,7 +102,7 @@ export default async function NeedsPage() {
                                       name: "to_gap_id",
                                       label: "Move onto",
                                       type: "select",
-                                      defaultValue: targets[0]?.value,
+                                      placeholder: "Choose where it goes",
                                       options: targets,
                                       required: true,
                                     },
@@ -151,8 +152,12 @@ export default async function NeedsPage() {
                                 <select
                                   name="gap_id"
                                   className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-                                  defaultValue={gapOptions[0]?.value}
+                                  defaultValue=""
+                                  required
                                 >
+                                  <option value="" disabled>
+                                    Choose a gap
+                                  </option>
                                   {gapOptions.map((g) => (
                                     <option key={g.value} value={g.value}>
                                       {g.label}
@@ -168,6 +173,8 @@ export default async function NeedsPage() {
                               note={{ label: "Reason (optional)" }}
                             />
                           </>
+                        ) : status === "rejected" ? (
+                          <RestoreNeedButton needId={n.id} />
                         ) : null}
                       </div>
                     </article>

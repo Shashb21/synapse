@@ -68,7 +68,15 @@ function CreateOpenGap() {
       </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Domain
-        <select name="domain" defaultValue="unmet_need" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+        <select
+          name="domain"
+          required
+          defaultValue=""
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        >
+          <option value="" disabled>
+            Choose a domain
+          </option>
           {EVIDENCE_DOMAINS.map((domain) => (
             <option key={domain} value={domain}>
               {DOMAIN_LABELS[domain]}
@@ -94,6 +102,24 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
           required
           className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         />
+      </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Domain
+        <select
+          name="domain"
+          required
+          defaultValue=""
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+        >
+          <option value="" disabled>
+            Choose a domain
+          </option>
+          {EVIDENCE_DOMAINS.map((domain) => (
+            <option key={domain} value={domain}>
+              {DOMAIN_LABELS[domain]}
+            </option>
+          ))}
+        </select>
       </label>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Accompanying library tactic

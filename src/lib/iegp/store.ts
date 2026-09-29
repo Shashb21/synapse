@@ -1573,7 +1573,8 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
     start_date,
     evidence_available,
     owner: args.owner || args.actor_name,
-    function: args.function || "evidence_lead",
+    // Blank owner and function mean the person recording it, as the form says.
+    function: args.function || args.actor_function,
     budget: null,
     intended_use: args.intended_use || (args.residual_ids || []).join(", "),
     lock: reasonNote ? makeLock(args.actor_name, args.actor_function, reasonNote) : unlocked(),
@@ -1696,7 +1697,8 @@ export async function recordMissedTactic(args: {
     status,
     lifecycle_stage: "recorded",
     intended_use: reasonLabel || (args.residual_ids || []).join(", "),
-    data_source: args.data_source?.trim() || reasonLabel || "Recorded while reviewing gaps",
+    // A blank data source stays blank; the catch-up reason is kept in intended_use and the lock note.
+    data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
     actor_name: args.actor_name,
@@ -3169,6 +3171,20 @@ export async function unlockTacticsStage(args: {
   if (!state.asset.wizard_complete) {
     throw new Error("Prioritize open gaps before tactics.");
   }
+  // The same rule the Prioritize footer applies before it offers "Continue to
+  // tactics": every live Open gap has a validated band. Loaded lazily because
+  // the S8 module imports this store.
+  const { prioritizationProgress } = await import("@/modules/stages/s8-prioritization/module");
+  const progress = await prioritizationProgress(state);
+  if (progress.open === 0) {
+    throw new Error("There are no Open gaps to prioritize yet, so Tactics can't open. Validate at least one gap as Open on Gaps.");
+  }
+  if (progress.validated < progress.open) {
+    const left = progress.open - progress.validated;
+    throw new Error(
+      `Validate every Open gap's band on Prioritize first: ${progress.validated} of ${progress.open} validated, ${left} to go.`,
+    );
+  }
   await db()
     .update(t.assets)
     .set({ tactics_unlocked: true })
@@ -3553,11 +3569,14 @@ export async function createAddressedGap(args: {
     if (!args.missed_name?.trim()) {
       throw new Error("Addressed gaps need an accompanying tactic.");
     }
+    // The missed study's type and question are the person's; none is assumed.
+    if (!args.missed_type) throw new Error("Choose the missed tactic's type.");
+    if (!args.missed_evidence_question?.trim()) throw new Error("Enter the missed tactic's evidence question.");
     tacticId = await recordMissedTactic({
       name: args.missed_name,
-      type: args.missed_type || "rwe_study",
+      type: args.missed_type,
       description: args.missed_description,
-      evidence_question: args.missed_evidence_question || args.statement,
+      evidence_question: args.missed_evidence_question,
       status: args.missed_status || "",
       catch_up_reason: args.catch_up_reason,
       actor_name: args.actor_name,

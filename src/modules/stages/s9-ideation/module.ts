@@ -19,7 +19,7 @@ import {
   type EvidenceDomain,
   type TacticType,
 } from "@/lib/iegp/enums";
-import { createProposedTactic, loadState } from "@/lib/iegp/store";
+import { appendAudit, createProposedTactic, loadState } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -1305,4 +1305,46 @@ export async function decideIdeationProposal(args: {
   });
 
   return { tactic_id };
+}
+
+/**
+ * Undo a rejection (KAN-16): a rejected proposal goes back to "proposed" so a
+ * person can edit, accept or reject it again. The earlier decision stays in the
+ * edit records; the restore is audited with its own rationale. An accepted
+ * proposal already became a tactic and is changed on that tactic instead.
+ */
+export async function restoreIdeationProposal(args: {
+  id: string;
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}): Promise<IdeationProposalRecord> {
+  await ensurePlatformSchema();
+  const rationale = requireRationale(args.rationale);
+  const proposal = await proposalRow(args.id);
+  if (proposal.status !== "rejected") {
+    throw new Error(
+      proposal.status === "accepted"
+        ? `${args.id} was accepted and is now a tactic; change that tactic instead.`
+        : `${args.id} is not rejected.`,
+    );
+  }
+  await db()
+    .update(t.ideationProposals)
+    .set({ status: "proposed", decided_by: null, decided_at: null, decision_rationale: null, tactic_id: null })
+    .where(eq(t.ideationProposals.id, args.id));
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S9",
+    entity_type: "ideation_proposal",
+    entity_id: args.id,
+    field: "status",
+    action: "edit",
+    before: "rejected",
+    after: "proposed",
+    rationale,
+    actor: args.actor,
+  });
+  await appendAudit(args.actor.name, args.actor.function, "ideation_proposal", args.id, "restore", `rejected → proposed: ${rationale}`);
+  return recordById(args.id);
 }

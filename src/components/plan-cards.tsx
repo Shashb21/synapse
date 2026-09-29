@@ -57,9 +57,13 @@ function CreateGapFields() {
         Domain
         <select
           name="domain"
-          defaultValue="unmet_need"
+          required
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
         >
+          <option value="" disabled>
+            Choose a domain
+          </option>
           {EVIDENCE_DOMAINS.map((domain) => (
             <option key={domain} value={domain}>
               {DOMAIN_LABELS[domain]}
@@ -105,7 +109,16 @@ function CreateTacticFields() {
         placeholder="Tactic name"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
-      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+      <select
+        name="type"
+        required
+        defaultValue=""
+        aria-label="Tactic type"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      >
+        <option value="" disabled>
+          Choose a type
+        </option>
         {TACTIC_TYPES.map((type) => (
           <option key={type} value={type}>
             {TACTIC_TYPE_LABELS[type]}
@@ -178,7 +191,16 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
         placeholder="Study, programme, or publication name"
         className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
       />
-      <select name="type" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+      <select
+        name="type"
+        required
+        defaultValue=""
+        aria-label="Tactic type"
+        className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+      >
+        <option value="" disabled>
+          Choose a type
+        </option>
         {TACTIC_TYPES.map((type) => (
           <option key={type} value={type}>
             {TACTIC_TYPE_LABELS[type]}
@@ -190,9 +212,12 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
         <select
           name="status"
           required
-          defaultValue="ongoing"
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
         >
+          <option value="" disabled>
+            Choose a status
+          </option>
           {CATCH_UP_TACTIC_STATUSES.map((status) => (
             <option key={status} value={status}>
               {CREATE_TACTIC_STATUS_LABELS[status]}
@@ -249,6 +274,38 @@ export function ManualStart({ gapCount, tacticCount }: { gapCount: number; tacti
         </Link>
         .
       </p>
+    </section>
+  );
+}
+
+/**
+ * The first screen with AI on: uploading is one way in, typing is the other.
+ * A plan can start by hand before anything is ingested, and a model never has
+ * to run first.
+ */
+export function ManualStartAlongsideUpload({ gapCount, tacticCount }: { gapCount: number; tacticCount: number }) {
+  return (
+    <section
+      aria-labelledby="manual-start-ai-on"
+      data-testid="manual-start-ai-on"
+      className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4"
+    >
+      <div className="min-w-0 flex-1">
+        <h2 id="manual-start-ai-on" className="text-[15px] font-medium text-foreground">
+          Start by hand
+        </h2>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          You don&apos;t have to upload first. Type the gaps you know and record the studies you
+          already have; anything you ingest later joins them.{" "}
+          {gapCount > 0 || tacticCount > 0
+            ? `${gapCount} gap${gapCount === 1 ? "" : "s"} and ${tacticCount} tactic${tacticCount === 1 ? "" : "s"} so far.`
+            : "Nothing added yet."}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <CreateGapButton label="Add gaps" variant="outline" />
+        <AddTacticsButton variant="outline" />
+      </div>
     </section>
   );
 }

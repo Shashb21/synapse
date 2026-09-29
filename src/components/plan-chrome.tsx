@@ -131,7 +131,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
           id: "upload",
           href: "/?place=upload",
           label: "Upload",
-          hint: "Upload and ingest sources",
+          hint: "Upload sources, or add gaps and tactics by hand",
           icon: Upload,
           ready: true,
         }
@@ -147,7 +147,7 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       id: "gaps",
       href: "/?place=gaps",
       label: "Gaps",
-      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Waiting on Upload: ingest a source first",
+      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Waiting on Upload: ingest a source or add a gap by hand",
       icon: ClipboardList,
       count: nav.unvalidatedCount || nav.gapsCount,
       ready: gapsUnlocked,

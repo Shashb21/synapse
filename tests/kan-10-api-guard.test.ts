@@ -221,7 +221,7 @@ describe("KAN-10: roles are enforced server-side", () => {
   it("a contributor can edit but cannot save final or reset", async () => {
     await signIn(CONTRIBUTOR);
     const created = await json(
-      await inWorkspace(() => iegpPost(post("/api/iegp", { action: "create_gap", statement: `Contributor gap ${unique}.` }))),
+      await inWorkspace(() => iegpPost(post("/api/iegp", { action: "create_gap", statement: `Contributor gap ${unique}.`, domain: "unmet_need" }))),
     );
     expect(created.status).toBe(200);
     expect((await json(await iegpPost(post("/api/iegp", { action: "reset" })))).status).toBe(403);
@@ -245,6 +245,7 @@ describe("KAN-10: roles are enforced server-side", () => {
           post("/api/iegp", {
             action: "create_gap",
             statement,
+            domain: "unmet_need",
             actor_name: "Forged Name",
             actor_function: "evidence_lead",
           }),
