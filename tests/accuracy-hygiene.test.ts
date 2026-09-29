@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { POST as hygienePost } from "@/app/api/accuracy/hygiene/route";
 import { GET as workspacesGet } from "@/app/api/accuracy/workspaces/route";
 import { GET as runsGet } from "@/app/api/accuracy/runs/route";
+import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import {
@@ -180,6 +181,19 @@ describe("stale-run sweep", () => {
 });
 
 describe("hygiene API", () => {
+  it("keeps snapshot bodies out of the general runs response", async () => {
+    const { org_id, workspace_id } = await freshWorkspace("compact-runs");
+    const run_id = await insertRun({ org_id, workspace_id, started_at: new Date().toISOString() });
+    await appendAgentEvent({ run_id, workspace_id, event: {
+      event_type: "snapshot", iteration: 0, output: { marker: "private-snapshot-body" },
+      evaluation_context: "production",
+      signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" },
+      latency_ms: 1, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0,
+    } });
+    const response = await runsGet(new Request(`http://localhost/api/accuracy/runs?workspace_id=${workspace_id}`));
+    expect(await response.text()).not.toContain("private-snapshot-body");
+  });
+
   it("archives via POST then hides from default workspace GET", async () => {
     const { workspace_id } = await freshWorkspace("api-archive");
     const res = await postHygiene({ action: "archive_workspace", workspace_id });

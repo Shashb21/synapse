@@ -42,6 +42,8 @@ export function registerAccuracyStack() {
 
 export * from "./kernel/contracts";
 export { runAccuracyModule } from "./kernel/run";
+export { readAgentProgression } from "./kernel/agent-events";
+export type { AgentProgression, AgentEventRecord } from "./kernel/agent-events";
 export { listAccuracyModules, activeAccuracyModuleId } from "./kernel/registry";
 export {
   accuracyRouteConfigs,

@@ -1,11 +1,25 @@
 /** Persistence and tenant boundaries for agent loop events. */
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement, ReactNode } from "react";
+import { vi } from "vitest";
+import { GET as detailGet } from "@/app/api/accuracy/runs/[run_id]/route";
+import AccuracyRunDetailPage from "@/app/accuracy/runs/[run_id]/page";
 import { appendAgentEvent, readAgentProgression } from "@/accuracy/kernel/agent-events";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { newId, nowIso } from "@/modules/kernel/ids";
+
+const auth = vi.hoisted(() => ({ signed_in: true }));
+vi.mock("@/modules/auth/session", () => ({
+  sessionContext: async () => ({ signed_in: auth.signed_in, demo: true }),
+}));
+
+function renderPageContent(page: ReactElement): string {
+  return renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
+}
 
 async function fixture(status = "ok") {
   await ensureAccuracySchema();
@@ -114,5 +128,61 @@ describe("agent event persistence", () => {
 
     expect(await db.select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, ids.run_id))).toEqual([]);
     await expect(appendAgentEvent({ ...ids, event: v0 })).rejects.toThrow();
+  });
+});
+
+describe("run progression detail", () => {
+  it("returns exact V0 and V1, critique, and selected version for a signed-in user", async () => {
+    auth.signed_in = true;
+    const ids = await fixture();
+    const v1 = { ...v0, iteration: 1, output: { gaps: [{ statement: "Exact V1" }] } };
+    const judgment = {
+      event_type: "judgment" as const, selected_iteration: 1, reason: "Source-backed revision",
+      latency_ms: 25, token_usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 }, cost_usd: 0.0002,
+    };
+    for (const event of [v0, critique, v1, judgment]) await appendAgentEvent({ ...ids, event });
+
+    const response = await detailGet(
+      new Request(`http://localhost/api/accuracy/runs/${ids.run_id}?workspace_id=${ids.workspace_id}`),
+      { params: Promise.resolve({ run_id: ids.run_id }) },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.progression.events.map((row: { event: unknown }) => row.event)).toEqual([v0, critique, v1, judgment]);
+
+    const html = renderPageContent(await AccuracyRunDetailPage({
+      params: Promise.resolve({ run_id: ids.run_id }),
+      searchParams: Promise.resolve({ workspace_id: ids.workspace_id }),
+    }));
+    expect(html).toContain("V0");
+    expect(html).toContain("V1");
+    expect(html).toContain("Exact V0");
+    expect(html).toContain("Exact V1");
+    expect(html).toContain("Source-backed revision");
+    expect(html).toContain("Selected version");
+  });
+
+  it("requires a session even in demo mode and hides wrong-workspace runs", async () => {
+    const ids = await fixture();
+    const other = await fixture();
+    await appendAgentEvent({ ...ids, event: v0 });
+    const request = new Request(`http://localhost/api/accuracy/runs/${ids.run_id}?workspace_id=${ids.workspace_id}`);
+    auth.signed_in = false;
+    try {
+      expect((await detailGet(request, { params: Promise.resolve({ run_id: ids.run_id }) })).status).toBe(401);
+      const html = renderPageContent(await AccuracyRunDetailPage({
+        params: Promise.resolve({ run_id: ids.run_id }),
+        searchParams: Promise.resolve({ workspace_id: ids.workspace_id }),
+      }));
+      expect(html).toContain("Sign in");
+      expect(html).not.toContain("Exact V0");
+    } finally {
+      auth.signed_in = true;
+    }
+    const wrong = await detailGet(
+      new Request(`http://localhost/api/accuracy/runs/${ids.run_id}?workspace_id=${other.workspace_id}`),
+      { params: Promise.resolve({ run_id: ids.run_id }) },
+    );
+    expect(wrong.status).toBe(404);
   });
 });

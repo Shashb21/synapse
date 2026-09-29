@@ -136,6 +136,14 @@ export default async function AccuracyRunsPage({
                   <p className="mt-1 text-[12px] text-muted-foreground">
                     {run.summary ?? run.error ?? "no summary"}
                   </p>
+                  {run.agent_role !== "none" ? (
+                    <Link
+                      href={`/accuracy/runs/${encodeURIComponent(run.id)}?workspace_id=${encodeURIComponent(workspaceId)}`}
+                      className="mt-1 inline-block text-[12px] text-foreground underline-offset-2 hover:underline"
+                    >
+                      Inspect progression
+                    </Link>
+                  ) : null}
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{run.started_at.slice(0, 16).replace("T", " ")}</span>
                     <span>·</span>
