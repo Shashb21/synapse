@@ -68,6 +68,36 @@ export function layoutLabel(ai: boolean, empty: boolean): string {
 }
 
 /**
+ * Rebuild / lay out with the plan's start date in view. Model start offsets
+ * count from this date; it is prefilled with today and the person can change
+ * it before running (KAN-16: nothing is assumed out of sight).
+ */
+export function AnchoredLayoutButton({ label, identity }: { label: string; identity: ActionIdentity }) {
+  const [anchor, setAnchor] = useState(() => new Date().toISOString().slice(0, 10));
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        Plan starts
+        <input
+          type="date"
+          value={anchor}
+          onChange={(event) => setAnchor(event.target.value)}
+          title="Model start estimates count from this date"
+          data-testid="timeline-anchor"
+          className="h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px] text-foreground"
+        />
+      </label>
+      <RunStageButton
+        stage="S10"
+        input={anchor ? { persist: true, anchor } : { persist: true }}
+        label={label}
+        identity={identity}
+      />
+    </span>
+  );
+}
+
+/**
  * The saved-final IEGP: the Gantt, one activity's full record on click, and the
  * two actions that make it the truth artifact — save as final, export as an image.
  */
@@ -148,12 +178,7 @@ export function TimelineBoard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canRun ? (
-            <RunStageButton
-              stage="S10"
-              input={{ persist: true }}
-              label={layoutLabel(ai, false)}
-              identity={identity}
-            />
+            <AnchoredLayoutButton label={layoutLabel(ai, false)} identity={identity} />
           ) : null}
           {canReschedule && addable.length > 0 ? (
             <ManualDatesDialog
@@ -501,7 +526,7 @@ function EmptyTimeline({
       ) : null}
       {canRun ? (
         <div className="mt-3">
-          <RunStageButton stage="S10" input={{ persist: true }} label={layoutLabel(ai, true)} identity={identity} />
+          <AnchoredLayoutButton label={layoutLabel(ai, true)} identity={identity} />
         </div>
       ) : null}
     </section>

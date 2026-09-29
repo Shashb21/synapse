@@ -3,15 +3,18 @@ import { MappingTableWorkbench } from "@/components/mapping-table-workbench";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildMappingTableView, latestS4MappingRows } from "@/lib/iegp/mapping-table";
 import { loadState } from "@/lib/iegp/store";
+import { listRejectedMappings } from "@/lib/iegp/restore";
+import { RejectedMappings } from "@/components/restore-actions";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function MappingsPage() {
-  const [state, proposed, ai] = await Promise.all([
+  const [state, proposed, ai, rejected] = await Promise.all([
     loadState(),
     latestS4MappingRows(),
     aiEnabled().catch(() => true),
+    listRejectedMappings(),
   ]);
   const workspace = buildPlanWorkspace(state);
   const rows = buildMappingTableView(state, proposed, { ai });
@@ -25,6 +28,7 @@ export default async function MappingsPage() {
           : " Pick the tactics and a status for each row and save it with a short rationale."}
       </PageIntro>
       <MappingTableWorkbench rows={rows} tactics={workspace.availableTactics} />
+      <RejectedMappings rows={rejected} />
     </AppShell>
   );
 }

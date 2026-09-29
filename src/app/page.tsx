@@ -6,9 +6,10 @@ import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
-import { ManualStart } from "@/components/plan-cards";
+import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
 import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
+import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
@@ -52,8 +53,9 @@ function PlaceIntro({
         title="Upload sources"
       >
         Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
-        them and computes each gap&apos;s status for you to confirm on Gaps. You can come back here to
-        add sources at any time.
+        them and computes each gap&apos;s status for you to confirm on Gaps. Or start by hand: add
+        gaps and tactics yourself, with or without a source. You can come back here to add sources
+        at any time.
       </PageIntro>
     );
   }
@@ -126,6 +128,10 @@ export default async function HomePage({
             />
           }
         >
+          <ManualStartAlongsideUpload
+            gapCount={workspace.review.length}
+            tacticCount={workspace.availableTactics.length}
+          />
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </AiOnly>
         {workspace.review.length > 0 ? (
@@ -163,6 +169,7 @@ export default async function HomePage({
           initialFilter={gapFilter}
           settingOptions={settingOptions(state)}
         />
+        <SetAsideGaps gaps={state.gaps} />
       </>
     );
   } else if (place === "tactics") {
@@ -173,11 +180,14 @@ export default async function HomePage({
       return placement?.validated && placement.band ? { ...card, band: placement.band } : card;
     });
     pane = (
-      <TacticsPlace
-        ready={gates.tacticsUnlocked}
-        openGaps={openGaps}
-        availableTactics={workspace.availableTactics}
-      />
+      <>
+        <TacticsPlace
+          ready={gates.tacticsUnlocked}
+          openGaps={openGaps}
+          availableTactics={workspace.availableTactics}
+        />
+        <RejectedTactics tactics={state.tactics} />
+      </>
     );
   } else {
     pane = (

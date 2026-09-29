@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
+import { RestoreGapButton, UnparkGapButton } from "@/components/restore-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
 import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
@@ -231,7 +232,7 @@ export default async function GapDetailPage({
                           name: "to_gap_id",
                           label: "Move onto",
                           type: "select",
-                          defaultValue: moveTargets[0]?.value,
+                          placeholder: "Choose where it goes",
                           options: moveTargets,
                           required: true,
                         },
@@ -564,6 +565,26 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
+      {!gap.retired && gap.status === "excluded" ? (
+        <section
+          className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-border bg-card/40 p-4"
+          data-testid="gap-excluded"
+        >
+          <div>
+            <p className="text-[12px] text-foreground">
+              Excluded
+              {gap.exclusion_reason ? `: ${EXCLUSION_LABELS[gap.exclusion_reason as keyof typeof EXCLUSION_LABELS] ?? gap.exclusion_reason}` : ""}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {gap.status_lock.actor_name ? `By ${gap.status_lock.actor_name}. ` : ""}
+              {gap.status_lock.note ? `“${gap.status_lock.note}” ` : ""}
+              Out of Prioritize and Tactics. Restore it to bring it back as an unconfirmed gap.
+            </p>
+          </div>
+          <RestoreGapButton gapId={gap.id} />
+        </section>
+      ) : null}
+
       {gap.retired || gap.status === "excluded" ? null : gap.parked_at ? (
         <section className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-fuchsia-500/30 bg-fuchsia-500/10 p-4">
           <div>
@@ -574,13 +595,7 @@ export default async function GapDetailPage({
               Hidden from Prioritize and Tactics mapping while parked. Unpark to bring it back.
             </p>
           </div>
-          <LockForm
-            label="Unpark gap"
-            action="unpark_gap"
-            extra={{ gap_id: gap.id }}
-            confirmLabel="Unpark"
-            description="This brings the gap back into Prioritize and Tactics mapping."
-          />
+          <UnparkGapButton gapId={gap.id} />
         </section>
       ) : (
         <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4">
@@ -609,15 +624,20 @@ export default async function GapDetailPage({
           action="lock_gap"
           extra={{ gap_id: gap.id, status: "excluded" }}
           confirmLabel="Exclude"
+          description="Takes the gap out of Prioritize and Tactics. It stays listed under Set aside on Gaps and can be restored."
+          note={{ label: "Rationale (required)", required: true }}
         >
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Exclusion reason
             <select
               name="exclusion_reason"
               className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-              defaultValue={gap.exclusion_reason ?? "not_defined"}
+              defaultValue={gap.exclusion_reason ?? ""}
               required
             >
+              <option value="" disabled>
+                Choose a reason
+              </option>
               {EXCLUSION_REASONS.map((r) => (
                 <option key={r} value={r}>
                   {EXCLUSION_LABELS[r]}

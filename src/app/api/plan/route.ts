@@ -17,6 +17,7 @@ import {
   decideIdeationProposal,
   editIdeationProposal,
   listIdeationProposals,
+  restoreIdeationProposal,
   type ProposalFields,
 } from "@/modules/stages/s9-ideation/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
@@ -198,6 +199,16 @@ export async function POST(request: Request) {
           fields: proposalFieldsOf(body),
         });
         return NextResponse.json({ ok: true, ...result });
+      }
+      case "restore_proposal": {
+        assertCan(identity.role, "ideate");
+        const proposal = await restoreIdeationProposal({
+          id: String(body.id ?? ""),
+          rationale,
+          actor: identity.actor,
+          workspace_id: identity.workspace?.id,
+        });
+        return NextResponse.json({ ok: true, proposal });
       }
       case "edit_proposal": {
         assertCan(identity.role, "ideate");

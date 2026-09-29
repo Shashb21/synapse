@@ -46,6 +46,7 @@ import {
   validateGap,
 } from "@/lib/iegp/store";
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
+import { EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
@@ -58,6 +59,12 @@ import {
   type CustomerContext,
 } from "@/modules/auth/api-guard";
 import { iegpActionCapability } from "./capabilities";
+import {
+  restoreExcludedGap,
+  restoreRejectedMapping,
+  restoreRejectedNeed,
+  restoreRejectedTactic,
+} from "@/lib/iegp/restore";
 import type { SourceType } from "@/lib/iegp/enums";
 import { ingestThroughStages } from "./ingest-pipeline";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
@@ -79,6 +86,10 @@ function idList(...values: (string | undefined)[]): string[] {
 }
 
 const RATIONALE_REQUIRED = "A short rationale is required for every edit.";
+/** A hand-made gap's domain is the person's pick; nothing is assumed (KAN-16). */
+const DOMAIN_REQUIRED = "Choose the gap's evidence domain.";
+const isEvidenceDomain = (value: unknown): value is EvidenceDomain =>
+  typeof value === "string" && (EVIDENCE_DOMAINS as readonly string[]).includes(value);
 
 function rationaleOf(body: Record<string, string>): string {
   return (body.rationale || body.note || "").trim();
@@ -134,6 +145,7 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
   split_partial_gap: { stage: "S6", entity: "gap", field: "split", action: "split" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
+  lock_gap: { stage: "S5", entity: "gap", field: "status", action: "edit" },
   park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
   unpark_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
   lock_priority: { stage: "S8", entity: "residual", field: "priority_band", action: "edit" },
@@ -312,6 +324,26 @@ export async function POST(request: Request) {
           actor_name,
           actor_function,
           note: body.note,
+        });
+        break;
+      // KAN-16: undo an exclusion or a rejection. Each needs a rationale, is
+      // audited and files its own edit record.
+      case "restore_gap":
+        await restoreExcludedGap({ gap_id: body.gap_id, rationale: rationaleOf(body), actor_name, actor_function });
+        break;
+      case "restore_need":
+        await restoreRejectedNeed({ need_id: body.need_id, rationale: rationaleOf(body), actor_name, actor_function });
+        break;
+      case "restore_tactic":
+        await restoreRejectedTactic({ tactic_id: body.tactic_id, rationale: rationaleOf(body), actor_name, actor_function });
+        break;
+      case "restore_mapping":
+        await restoreRejectedMapping({
+          gap_id: body.gap_id,
+          tactic_id: body.tactic_id,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
         });
         break;
       case "lock_dimension":
@@ -540,6 +572,7 @@ export async function POST(request: Request) {
         });
         break;
       case "create_gap":
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
         await createGap({
           name: body.name,
           statement: body.statement,
@@ -643,6 +676,7 @@ export async function POST(request: Request) {
         });
         break;
       case "create_addressed_gap":
+        if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
         await createAddressedGap({
           name: body.name,
           statement: body.statement,

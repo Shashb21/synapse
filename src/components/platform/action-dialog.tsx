@@ -174,9 +174,15 @@ export function ActionDialog({
                 ) : field.type === "select" ? (
                   <select
                     name={field.name}
-                    defaultValue={field.defaultValue}
+                    defaultValue={field.defaultValue ?? (field.placeholder ? "" : undefined)}
                     className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
                   >
+                    {/* A placeholder means nothing is picked until the person picks it. */}
+                    {field.placeholder ? (
+                      <option value="" disabled>
+                        {field.placeholder}
+                      </option>
+                    ) : null}
                     {(field.options ?? []).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}

@@ -41,7 +41,10 @@ export function ManualSourceForm({
   const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
   const [actorFunction, setActorFunction] = useState<ActorFunction>(identity.actor_function);
   const [meta, setMeta] = useState<Record<string, string>>(
-    Object.fromEntries(fields.map((f) => [f.name, f.defaultValue ?? f.options?.[0]?.value ?? ""])),
+    // A select with a placeholder starts unpicked; nothing is chosen for the person.
+    Object.fromEntries(
+      fields.map((f) => [f.name, f.defaultValue ?? (f.placeholder ? "" : f.options?.[0]?.value) ?? ""]),
+    ),
   );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -109,6 +112,11 @@ export function ManualSourceForm({
                 value={meta[field.name]}
                 onChange={(e) => setMeta({ ...meta, [field.name]: e.target.value })}
               >
+                {field.placeholder ? (
+                  <option value="" disabled>
+                    {field.placeholder}
+                  </option>
+                ) : null}
                 {(field.options ?? []).map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
