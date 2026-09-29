@@ -1,6 +1,8 @@
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
 import type { OpenGapCard } from "@/lib/iegp/engine";
+import { loadState } from "@/lib/iegp/store";
+import type { TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -14,13 +16,16 @@ export type TacticIdeationData = {
   proposals: ProposalCardModel[];
   identity: ActionIdentity;
   mayIdeate: boolean;
+  /** Each library tactic's editable fields, for the side panel (KAN-50). */
+  tactics: Record<string, TacticEditModel>;
 };
 
 export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<TacticIdeationData> {
-  const [placements, proposals, session] = await Promise.all([
+  const [placements, proposals, session, state] = await Promise.all([
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
+    loadState(),
   ]);
   const byGap = new Map(placements.map((row) => [row.gap_id, row]));
   const highGaps: OpenGapCard[] = [];
@@ -42,5 +47,23 @@ export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<Tacti
       actor_function: session.actor.function,
     },
     mayIdeate: can(session.role, "ideate"),
+    tactics: Object.fromEntries(
+      state.tactics.map((tactic): [string, TacticEditModel] => [
+        tactic.id,
+        {
+          id: tactic.id,
+          name: tactic.name,
+          type: tactic.type,
+          custom_type: tactic.custom_type ?? null,
+          status: tactic.status,
+          evidence_question: tactic.evidence_question,
+          start_date: tactic.start_date,
+          evidence_available: tactic.evidence_available,
+          budget: tactic.budget,
+          owner: tactic.owner,
+          function: tactic.function,
+        },
+      ]),
+    ),
   };
 }

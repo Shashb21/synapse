@@ -44,12 +44,15 @@ test.describe("custom tactic types", () => {
     await dialog.getByRole("button", { name: /^add tactic$/i }).click();
     await expect(dialog).toBeHidden();
 
-    const row = card.getByRole("link", { name: /Caregiver advisory board/ });
+    const row = card.getByRole("button", { name: /Caregiver advisory board/ });
     await expect(row).toBeVisible();
     await expect(row).toContainText("Advisory board");
     await expect(row).not.toContainText("Patient / caregiver survey");
 
     await row.click();
+    const panel = page.getByTestId("tactic-panel");
+    await expect(panel.getByLabel("Custom type name")).toHaveValue("Advisory board");
+    await panel.getByRole("link", { name: /open full page/i }).click();
     await expect(page.getByText(/Advisory board · counts as Patient \/ caregiver survey/i)).toBeVisible();
   });
 });

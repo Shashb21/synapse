@@ -41,7 +41,9 @@ test.describe("Create tactic", () => {
     // The library is a collapsed panel on Tactic Ideation (KAN-8): open it to find the new tactic.
     const library = page.getByRole("region", { name: /^tactic library$/i });
     await library.getByRole("button", { name: /tactic library/i }).click();
-    await library.getByRole("link", { name: /E2E ongoing registry/ }).first().click();
+    // "Edit" opens the side panel (KAN-50); the panel links to the full tactic page.
+    await library.getByRole("button", { name: /edit E2E ongoing registry/i }).first().click();
+    await page.getByTestId("tactic-panel").getByRole("link", { name: /open full page/i }).click();
     await expect(page).toHaveURL(/\/tactics\/TAC-/);
     await expect(page.getByText("ongoing", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("2026-02-01").first()).toBeVisible();
