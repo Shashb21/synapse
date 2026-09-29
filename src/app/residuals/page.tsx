@@ -41,7 +41,7 @@ export default async function ResidualsPage() {
               {pri?.lock.locked ? (
                 <PriorityBadge band={pri.band} />
               ) : (
-                <span className="text-[11px] text-amber-300">Priority unlocked — human gate</span>
+                <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked — human gate</span>
               )}
               <Link href={`/gaps/${gap.id}`} className="text-[12px] text-muted-foreground">
                 Parent: {gap.name}

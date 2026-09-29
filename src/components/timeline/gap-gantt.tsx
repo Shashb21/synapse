@@ -11,7 +11,7 @@ import {
   monthPos,
   monthWidthFor,
   parts,
-  readPalette,
+  usePalette,
   truncate,
 } from "@/components/timeline/gantt-chart";
 import { CreateActivityDialog, ManualDatesDialog, type DragChange } from "@/components/timeline/timeline-dialogs";
@@ -151,7 +151,7 @@ export function GapGantt({
   identity: ActionIdentity;
   onDragCommit: (change: DragChange) => void;
 }) {
-  const palette = useMemo(() => readPalette(), []);
+  const palette = usePalette();
   const [showNotPrioritized, setShowNotPrioritized] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragged = useRef(false);

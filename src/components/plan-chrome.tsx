@@ -415,7 +415,7 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
       data-app-chrome
       className={cn(
         "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5 text-[11px] sm:px-6",
-        blocked ? "bg-amber-500/10 text-amber-200" : "bg-emerald-500/10 text-emerald-200",
+        blocked ? "bg-amber-500/10 text-amber-700 dark:text-amber-200" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
       )}
       role="status"
       aria-label="Prep readiness"

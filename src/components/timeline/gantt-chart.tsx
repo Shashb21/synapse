@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type RefObject } from "react";
+import { useIsDark } from "@/components/theme-toggle";
 import type { TimelineActivity, TimelineBand, TimelineModel } from "@/modules/stages/s10-timeline/build";
 import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 
@@ -29,19 +30,19 @@ const LEGEND_LABELS: Record<TimelineBand, string> = {
  * PNG export serialises this node on its own, with no stylesheet attached.
  */
 export const FALLBACK = {
-  high: "#fb7185",
-  medium: "#fbbf24",
-  low: "#38bdf8",
-  unprioritized: "#8c8c8c",
-  addressed: "#4ade80",
-  readout: "#60a5fa",
-  today: "#c084fc",
-  grid: "#2e2e2e",
-  card: "#1e1e1e",
-  background: "#181818",
-  foreground: "#e4e4e4",
-  muted: "#8c8c8c",
-  conflict: "#f87171",
+  high: "#e11d48",
+  medium: "#d97706",
+  low: "#2563eb",
+  unprioritized: "#6b7280",
+  addressed: "#059669",
+  readout: "#2563eb",
+  today: "#e11d48",
+  grid: "#e5e7eb",
+  card: "#ffffff",
+  background: "#f4f5f7",
+  foreground: "#111827",
+  muted: "#6b7280",
+  conflict: "#e11d48",
 };
 
 export type Palette = typeof FALLBACK;
@@ -75,6 +76,14 @@ export function readPalette(): Palette {
     if (value) next[key] = value;
   }
   return next;
+}
+
+/** The palette, re-read whenever the light/dark theme on <html> changes. */
+export function usePalette(): Palette {
+  const dark = useIsDark();
+  // `dark` is the trigger: the tokens behind the palette change with the theme.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => readPalette(), [dark]);
 }
 
 export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -168,7 +177,7 @@ export function GanttChart({
   onSelect: (activity: TimelineActivity) => void;
   svgRef: RefObject<SVGSVGElement | null>;
 }) {
-  const palette = useMemo(() => readPalette(), []);
+  const palette = usePalette();
   const origin = model.window.start;
   const months = Math.max(1, model.window.months);
   const monthWidth = monthWidthFor(months);

@@ -399,7 +399,7 @@ export function PrioritizeCard({
           computedStatus={card.computed_status}
           override={card.status_override}
         />
-        <span className="text-[11px] text-amber-300">Priority unlocked</span>
+        <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked</span>
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <Link

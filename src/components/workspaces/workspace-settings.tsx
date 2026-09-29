@@ -185,7 +185,7 @@ export function WorkspaceSettings({
       </section>
 
       {notice ? (
-        <p role="status" className="text-[12px] text-emerald-300">
+        <p role="status" className="text-[12px] text-emerald-700 dark:text-emerald-300">
           {notice}
         </p>
       ) : null}
