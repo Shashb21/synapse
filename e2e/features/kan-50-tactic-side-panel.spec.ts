@@ -63,7 +63,8 @@ test.describe("tactic side panel", () => {
     await panel.getByRole("combobox", { name: "Status" }).selectOption("planned");
     await panel.getByLabel(/why\? \(required\)/i).fill("Budget approved at the Q3 review");
     await panel.getByRole("button", { name: /^save changes$/i }).click();
-    await expect(panel).toBeHidden();
+    // The panel closes once the refreshed page data is in, which a dev server can take a while to render.
+    await expect(panel).toBeHidden({ timeout: 30_000 });
     await expect(page).toHaveURL(/place=tactics/);
 
     // Planned counts toward addressing, so the gap may leave Tactic Ideation; the library keeps the tactic.
