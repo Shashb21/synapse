@@ -89,10 +89,12 @@ test.describe("Tactic Ideation place", () => {
   test("the library opens, searches, and marks unassigned tactics", async ({ page }) => {
     await page.goto("/?place=tactics");
     const library = page.getByRole("region", { name: /^tactic library$/i });
+    const toggle = library.getByRole("button", { name: /tactic library/i });
+    // Click only while closed: a slow retry must not close what the last click opened.
     await expect(async () => {
-      await library.getByRole("button", { name: /tactic library/i }).click();
-      await expect(library.getByRole("searchbox", { name: /search library/i })).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 15_000 });
+      if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+      await expect(library.getByRole("searchbox", { name: /search library/i })).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
     await library.getByRole("searchbox", { name: /search library/i }).fill("zzz-no-such-tactic");
     await expect(library.getByText("No tactics match.")).toBeVisible();
   });
