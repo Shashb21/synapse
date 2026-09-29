@@ -4,8 +4,8 @@ import { createWorkspace, demoSignIn, selectWorkspace } from "../support/session
 /**
  * AI assistance in the workspace settings menu: the workspace owner turns AI
  * off for their workspace and the flow changes at once, with no reload. The
- * nav's first place becomes Start, the Upload page shows Add gaps / Add
- * tactics, /sources goes to Start, and the AI buttons are gone. Turning it
+ * nav loses Upload and starts at Evidence Inventory, the Upload page shows Add gaps / Add
+ * tactics, /sources goes to Evidence Inventory, and the AI buttons are gone. Turning it
  * back on brings the AI flow back. A member sees the switch read only.
  */
 
@@ -92,9 +92,10 @@ test("the owner turns AI off from the settings menu and the flow changes at once
 
   await flipFromMenu(page, "off");
 
-  // No reload: the nav's first place is Start and the Upload page is Start.
-  await expect(nav(page).getByRole("link", { name: "Start" })).toBeVisible();
+  // No reload: Upload leaves the nav (KAN-8: the manual flow starts on Evidence
+  // Inventory) and the page in front of the user offers the manual start.
   await expect(nav(page).getByRole("link", { name: "Upload" })).toHaveCount(0);
+  await expect(nav(page).getByRole("link").first()).toContainText("Evidence Inventory");
   await expect(page.getByRole("button", { name: /add gaps/i }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /add tactics/i }).first()).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
@@ -135,22 +136,20 @@ test("turning it back on from the settings page brings the AI flow back", async 
   await expect(page.getByRole("button", { name: /generate (more )?ideas/i }).first()).toBeVisible();
 });
 
-test("turning AI off while on Sources lands on Start", async ({ page }) => {
+test("turning AI off while on Sources lands on Evidence Inventory", async ({ page }) => {
   await demoSignIn(page.request, OWNER);
   await selectWorkspace(page.request, workspaceId);
 
   await page.goto("/sources");
   await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
   await flipFromMenu(page, "off");
-  await expect(page).toHaveURL(/\/\?place=upload$/);
-  await expect(nav(page).getByRole("link", { name: "Start" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /add gaps/i }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /add tactics/i }).first()).toBeVisible();
+  await expect(page).toHaveURL(/\/\?place=gaps$/);
+  await expect(nav(page).getByRole("link", { name: "Upload" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /add open gap/i }).first()).toBeVisible();
 
   // And back on from the menu: the first place is Upload again, without a reload.
   await flipFromMenu(page, "on");
   await expect(nav(page).getByRole("link", { name: "Upload" })).toBeVisible();
-  await expect(nav(page).getByRole("link", { name: "Start" })).toHaveCount(0);
 });
 
 test("a member sees the switch read only and cannot change it", async ({ page }) => {

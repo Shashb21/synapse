@@ -124,15 +124,15 @@ describe("the first screen with AI off", () => {
     expect(sources).toMatch(/\{ai \? \(\s*<Link href="\/sources\/new"/);
   });
 
-  it("names the first place Start and unlocks Gaps in the nav", () => {
+  it("with AI off there is no Upload place: the nav starts at Evidence Inventory (KAN-8)", () => {
     const off = renderChrome(false);
-    expect(off).toContain("Start");
-    expect(off).not.toContain(">Upload<");
+    expect(off).not.toContain('href="/?place=upload"');
+    expect(off).toContain("Evidence Inventory");
     expect(off).toMatch(/href="\/\?place=gaps"/);
     // No readiness strip on an empty manual plan.
     expect(off).not.toContain('aria-label="Prep readiness"');
     const on = renderChrome(true);
-    expect(on).toContain("Upload");
+    expect(on).toContain('href="/?place=upload"');
     // KAN-24: Gaps still opens with AI on and no source, but shows it is waiting.
     expect(on).toMatch(/href="\/\?place=gaps"/);
     expect(on).toContain('data-testid="nav-waiting-gaps"');

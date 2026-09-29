@@ -105,9 +105,9 @@ export default async function HomePage({
   const requested =
     params.place === "review" || params.place === "library" ? "gaps" : params.place;
   const suggested = defaultPlanPlace(state, workspace);
-  // With AI off the first screen is Start (Add gaps / Add tactics) until there are gaps.
-  const fallback: PlanPlace =
-    !ai && suggested === "upload" && workspace.review.length > 0 ? "gaps" : suggested;
+  // With AI off there is no Upload place: the flow starts on Evidence Inventory.
+  const fallback: PlanPlace = !ai && suggested === "upload" ? "gaps" : suggested;
+  if (!ai && requested === "upload") redirect("/?place=gaps");
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);
   const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")

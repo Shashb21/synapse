@@ -22,7 +22,7 @@ export function useIsDark(): boolean {
 }
 
 /** Light by default; this flips to dark and remembers the choice on this device. */
-export function ThemeToggle({ className, compact }: { className?: string; compact?: boolean }) {
+export function ThemeToggle({ className, compact, labelClassName }: { className?: string; compact?: boolean; labelClassName?: string }) {
   const dark = useIsDark();
 
   function toggle() {
@@ -45,13 +45,13 @@ export function ThemeToggle({ className, compact }: { className?: string; compac
       title={label}
       onClick={toggle}
       className={cn(
-        "flex items-center gap-2 rounded-md px-2 text-[11px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-[11px] text-[11px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         compact ? "h-8 w-8 justify-center" : "h-8",
         className,
       )}
     >
       {dark ? <Sun className="size-3.5" aria-hidden /> : <Moon className="size-3.5" aria-hidden />}
-      {compact ? null : <span>{dark ? "Light theme" : "Dark theme"}</span>}
+      {compact ? null : <span className={labelClassName}>{dark ? "Light theme" : "Dark theme"}</span>}
     </button>
   );
 }

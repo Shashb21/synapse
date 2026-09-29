@@ -9,7 +9,6 @@ import {
   ListChecks,
   Hourglass,
   Menu,
-  PencilLine,
   Rocket,
   Upload,
 } from "lucide-react";
@@ -26,6 +25,7 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
 import { RestartWalkthroughButton } from "@/components/walkthrough";
 import { WorkspaceTag } from "@/components/workspaces/workspace-tag";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { WorkspaceTagModel } from "@/components/workspaces/model";
 
 export type ShellId =
@@ -84,6 +84,8 @@ type PlaceItem = {
   id: PlaceId;
   href: string;
   label: string;
+  /** Second line in the expanded rail (the Figma design's place subtitle). */
+  sub: string;
   hint: string;
   icon: typeof Upload;
   count?: number;
@@ -120,34 +122,19 @@ const SECONDARY: SecondaryItem[] = [
 ];
 
 /**
- * With AI off nothing is uploaded or parsed: the first place is Start (add
- * gaps and tactics by hand) and Gaps never waits for an ingested source.
+ * The four places of the owner's Figma design (KAN-8), in plan order. With AI
+ * on, Upload comes first; with AI off nothing is uploaded or parsed, so the
+ * flow starts on Evidence Inventory (add gaps and tactics by hand there).
  */
 function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
   const gapsUnlocked = nav.gapsUnlocked || !ai;
-  return [
-    ai
-      ? {
-          id: "upload",
-          href: "/?place=upload",
-          label: "Upload",
-          hint: "Upload sources, or add gaps and tactics by hand",
-          icon: Upload,
-          ready: true,
-        }
-      : {
-          id: "upload",
-          href: "/?place=upload",
-          label: "Start",
-          hint: "Add gaps and tactics by hand",
-          icon: PencilLine,
-          ready: true,
-        },
+  const places: PlaceItem[] = [
     {
       id: "gaps",
       href: "/?place=gaps",
-      label: "Gaps",
-      hint: gapsUnlocked ? "Mapped gaps with computed status" : "Waiting on Upload: ingest a source or add a gap by hand",
+      label: "Evidence Inventory",
+      sub: "Gaps & metadata",
+      hint: gapsUnlocked ? "Every gap with its tactics and computed status" : "Waiting on Upload: ingest a source or add a gap by hand",
       icon: ClipboardList,
       count: nav.unvalidatedCount || nav.gapsCount,
       ready: gapsUnlocked,
@@ -155,28 +142,45 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
     {
       id: "plan",
       href: "/?place=plan",
-      label: "Prioritize",
-      hint: nav.planUnlocked ? "Priority bands for open gaps" : "Waiting on Gaps: validate every gap first",
+      label: "Prioritization Matrix",
+      sub: "Priority canvas",
+      hint: nav.planUnlocked ? "Place Open gaps and validate their priority" : "Waiting on Evidence Inventory: validate every gap first",
       icon: Columns3,
       ready: nav.planUnlocked,
     },
     {
       id: "tactics",
       href: "/?place=tactics",
-      label: "Tactics",
-      hint: nav.tacticsUnlocked ? "Create and assign tactics for open gaps" : "Waiting on Prioritize: validate every Open gap's band first",
+      label: "Tactic Ideation",
+      sub: "Gap tactics",
+      hint: nav.tacticsUnlocked ? "Ideate and assign tactics for High-priority gaps" : "Waiting on the Prioritization Matrix: validate every Open gap's priority first",
       icon: ListChecks,
       ready: nav.tacticsUnlocked,
     },
     {
       id: "timeline",
       href: "/timeline",
-      label: "Timeline",
+      label: "Gantt Timeline",
+      sub: "Schedule view",
       hint: "The living IEGP as an interactive Gantt",
       icon: ChartGantt,
       ready: true,
     },
   ];
+  return ai
+    ? [
+        {
+          id: "upload",
+          href: "/?place=upload",
+          label: "Upload",
+          sub: "Sources & parsing",
+          hint: "Upload sources, or add gaps and tactics by hand",
+          icon: Upload,
+          ready: true,
+        },
+        ...places,
+      ]
+    : places;
 }
 
 function itemActive(active: ShellId, id: PlaceItem["id"] | SecondaryItem["id"]) {
@@ -196,34 +200,34 @@ function NavButton({
   const isActive = itemActive(active, item.id);
   const ready = "ready" in item ? item.ready : true;
   const count = "count" in item ? item.count : undefined;
+  const sub = "sub" in item ? item.sub : null;
+  // In the rail (`dense`) labels are hidden until the rail opens on hover or focus.
+  const reveal = dense ? "opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "";
   const className = cn(
-    "flex w-full items-center gap-2 rounded-md px-2 text-left no-underline transition-colors",
-    dense ? "h-9 justify-center md:justify-start md:h-8" : "h-8",
+    "relative flex w-full items-center gap-2.5 rounded-md border px-2.5 text-left no-underline transition-colors",
+    sub ? "min-h-10 py-1.5" : "h-8",
     isActive
-      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+      ? "border-sidebar-ring/60 bg-sidebar-accent text-sidebar-accent-foreground"
+      : "border-transparent text-sidebar-foreground/75 hover:bg-muted hover:text-sidebar-foreground",
     !ready && !isActive && "text-sidebar-foreground/55",
   );
   const body = (
     <>
-      <Icon className="size-4 shrink-0" aria-hidden />
-      <span className={cn("min-w-0 flex-1 truncate text-[13px]", dense && "hidden md:inline")}>
-        {item.label}
+      {isActive && dense ? (
+        <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-sidebar-primary group-hover/rail:hidden group-focus-within/rail:hidden" />
+      ) : null}
+      <Icon className={cn("size-4 shrink-0", isActive ? "text-sidebar-primary" : "text-muted-foreground")} aria-hidden />
+      <span className={cn("grid min-w-0 flex-1", reveal)}>
+        <span className={cn("truncate text-[11.5px] tracking-tight", isActive && "font-semibold")}>{item.label}</span>
+        {sub ? <span className="truncate text-[10px] text-muted-foreground">{sub}</span> : null}
       </span>
       {typeof count === "number" && count > 0 ? (
-        <span
-          className={cn(
-            "text-[11px] text-muted-foreground",
-            dense && "hidden md:inline",
-          )}
-        >
-          {count}
-        </span>
+        <span className={cn("text-[10px] text-muted-foreground", reveal)}>{count}</span>
       ) : null}
       {!ready ? (
         <>
           <Hourglass
-            className={cn("size-3 shrink-0 text-[var(--unknown)]", dense && "hidden md:inline")}
+            className={cn("size-3 shrink-0 text-[var(--unknown)]", reveal)}
             aria-hidden
             data-testid={`nav-waiting-${item.id}`}
           />
@@ -288,15 +292,23 @@ function NavLists({
   label: string;
 }) {
   const places = placesOf(nav, useAiEnabled());
+  const reveal = dense ? "opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100" : "";
+  // Rail-only extras take no room until the rail opens.
+  const openOnly = dense ? "hidden group-hover/rail:block group-focus-within/rail:block" : "";
   return (
     <>
-      <PrepRoomToggle dense={dense} />
+      <div className={openOnly}>
+        <PrepRoomToggle dense={dense} />
+      </div>
+      <p className={cn("px-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70", openOnly)}>
+        Workspace
+      </p>
       <nav aria-label={label} className="grid gap-0.5">
         {places.map((item) => (
           <NavButton key={item.id} item={item} active={active} dense={dense} />
         ))}
       </nav>
-      <details className="mt-auto border-t border-sidebar-border pt-3" aria-label={dense ? "More" : "More places"}>
+      <details className={cn("mt-auto border-t border-sidebar-border pt-3", reveal)} aria-label={dense ? "More" : "More places"}>
         <summary
           className={cn(
             "cursor-pointer list-none text-[11px] text-sidebar-foreground/60 marker:content-none",
@@ -310,12 +322,10 @@ function NavLists({
           {SECONDARY.map((item) => (
             <NavButton key={item.id} item={item} active={active} dense={dense} />
           ))}
-          <RestartWalkthroughButton
-            variant="link"
-            className={cn("h-8 px-2 text-sidebar-foreground/70", dense && "hidden md:inline-flex")}
-          />
+          <RestartWalkthroughButton variant="link" className="h-8 px-2 text-sidebar-foreground/70" />
         </div>
       </details>
+      <ThemeToggle className="mt-1" labelClassName={reveal} />
     </>
   );
 }
@@ -349,29 +359,36 @@ export function PlanChrome({
   return (
     <div className="flex min-h-full bg-background">
       {present ? null : (
-      <aside data-app-chrome className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
-        <Link
-          href="/"
-          className="mb-4 hidden px-2 text-[13px] font-medium text-sidebar-foreground no-underline md:block"
+      // The rail keeps its 52px slot in the layout; the panel widens over the
+      // page on hover or keyboard focus, so the content never shifts.
+      <div data-app-chrome className="relative hidden w-[52px] shrink-0 md:block">
+        <aside
+          aria-label="Synapse navigation"
+          className="group/rail sticky top-0 z-30 flex h-dvh w-[52px] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width,box-shadow] duration-200 ease-out hover:w-[220px] hover:shadow-xl focus-within:w-[220px] focus-within:shadow-xl"
         >
-          Synapse IEGP
-        </Link>
-        <Link
-          href="/"
-          className="mb-3 flex items-center justify-center text-[11px] font-medium text-sidebar-foreground no-underline md:hidden"
-          aria-label="Synapse IEGP"
-        >
-          S
-        </Link>
-        {workspace ? (
-          <div className="mb-3 px-1 md:px-0">
-            <WorkspaceTag tag={workspace} dense />
+          <Link
+            href="/"
+            className="flex h-10 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[15px] no-underline"
+            aria-label="Synapse IEGP"
+          >
+            <span aria-hidden className="flex size-[22px] shrink-0 items-center justify-center rounded-[5px] bg-gradient-to-br from-indigo-600 to-violet-600 text-[10px] font-bold text-white shadow-sm">
+              S
+            </span>
+            <span className="grid leading-tight opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100">
+              <span className="text-[12px] font-bold tracking-tight text-foreground">Synapse</span>
+              <span className="text-[9.5px] text-muted-foreground">IEGP Workspace</span>
+            </span>
+          </Link>
+          {workspace ? (
+            <div className="shrink-0 border-b border-sidebar-border px-[9px] py-2">
+              <WorkspaceTag tag={workspace} dense />
+            </div>
+          ) : null}
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-[6px] py-2">
+            <NavLists nav={nav} active={active} dense label="Places" />
           </div>
-        ) : null}
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 px-1 md:px-0">
-          <NavLists nav={nav} active={active} dense label="Places" />
-        </div>
-      </aside>
+        </aside>
+      </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {present ? null : (
@@ -397,7 +414,7 @@ export function PlanChrome({
         </header>
         )}
         {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
-        <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-5 sm:px-6">{children}</main>
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-6">{children}</main>
       </div>
     </div>
   );

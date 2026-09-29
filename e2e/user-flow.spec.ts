@@ -38,18 +38,18 @@ test.describe("gaps then prioritize then tactics", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: /upload sources/i })).toBeVisible();
     await expect(places(page).getByRole("link", { name: /^upload/i })).toBeVisible();
-    for (const name of [/^gaps/i, /^prioritize/i, /^tactics/i]) {
+    for (const name of [/^evidence inventory/i, /^prioritization matrix/i, /^tactic ideation/i]) {
       await expect(places(page).getByRole("link", { name })).toBeVisible();
       await expect(places(page).getByRole("link", { name })).toContainText(/waiting on an earlier step/i);
     }
     await expect(places(page).getByRole("link", { name: /^upload/i })).not.toContainText(/waiting/i);
 
-    await places(page).getByRole("link", { name: /^gaps/i }).click();
+    await places(page).getByRole("link", { name: /^evidence inventory/i }).click();
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
     await expect(page.getByTestId("step-waiting")).toContainText(/waiting on upload/i);
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
 
-    await places(page).getByRole("link", { name: /^prioritize/i }).click();
+    await places(page).getByRole("link", { name: /^prioritization matrix/i }).click();
     await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
     await expect(page.getByTestId("step-waiting")).toContainText(/waiting on gaps/i);
     await page.getByTestId("step-waiting").getByRole("link", { name: /go to gaps/i }).click();
@@ -60,7 +60,7 @@ test.describe("gaps then prioritize then tactics", () => {
 
   test("ingest presents mapped gaps with computed status, not accept/reject", async ({ page }) => {
     await ingestFirstDemo(page);
-    await places(page).getByRole("link", { name: /^gaps/i }).click();
+    await places(page).getByRole("link", { name: /^evidence inventory/i }).click();
     await expect(page.getByRole("heading", { name: /^gaps$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
