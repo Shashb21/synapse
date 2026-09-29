@@ -5,6 +5,7 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { TokenUsage } from "./contracts";
+import type { SnapshotCompletenessAssessment } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 
 const nonnegativeInt = z.number().int().nonnegative();
 const nonnegativeNumber = z.number().finite().nonnegative();
@@ -35,6 +36,30 @@ const productionSignalsSchema = z.strictObject({
   invariant_failures: z.array(z.string().min(1)),
   completeness: z.literal("not_checked"),
 });
+const omissionSchema = z.strictObject({
+  issue_id: z.string().min(1),
+  item_kind: z.enum(["gap", "tactic"]),
+  summary: z.string().min(1),
+  source_ref: sourceRefSchema,
+  evidence_quote: z.string().min(1),
+  basis: z.enum(["explicit", "inferred"]),
+  importance: z.enum(["important", "advisory"]),
+  reason: z.string().min(1),
+  suggested_action: z.string().min(1),
+});
+const resolutionSchema = z.strictObject({
+  issue_id: z.string().min(1),
+  outcome: z.enum(["unresolved", "partly_resolved", "resolved", "invalid"]),
+  reason: z.string().min(1),
+  matched_item_ref: z.string().min(1).optional(),
+});
+const completenessSchema: z.ZodType<SnapshotCompletenessAssessment> = z.strictObject({
+  risk_level: z.enum(["not_applicable", "none_detected", "advisory", "important", "check_failed"]),
+  checked_block_ids: z.array(z.string().min(1)),
+  unchecked_block_ids: z.array(z.string().min(1)),
+  suspected_omissions: z.array(omissionSchema),
+  prior_issue_resolutions: z.array(resolutionSchema),
+});
 const metering = {
   latency_ms: nonnegativeNumber,
   token_usage: tokenUsageSchema,
@@ -51,8 +76,9 @@ const snapshotSchema = z.strictObject({
 const critiqueSchema = z.strictObject({
   event_type: z.literal("critique"),
   iteration: nonnegativeInt,
-  score: z.number().finite().min(0).max(1),
+  score: z.number().finite().min(0).max(1).nullable(),
   issues: z.array(criticIssueSchema),
+  completeness: completenessSchema,
   ...metering,
 });
 const judgmentSchema = z.strictObject({

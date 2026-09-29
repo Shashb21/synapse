@@ -1,6 +1,32 @@
 import type { JsonCompletion, RunHandle, TokenUsage } from "../kernel/contracts";
 import type { CriticIssue, ProductionSignals } from "./agent-events";
 import { validateProvenance, type ProvenanceSpan } from "../store/quote-validator";
+import type { SnapshotCompletenessAssessment, SuspectedOmission } from "../modules/completeness-audit/snapshot-inspector";
+
+const notApplicable: SnapshotCompletenessAssessment = {
+  risk_level: "not_applicable", checked_block_ids: [], unchecked_block_ids: [],
+  suspected_omissions: [], prior_issue_resolutions: [],
+};
+
+/** Preserve open omissions when an assessment cannot be completed. */
+function failedAssessment(prior: SuspectedOmission[]): SnapshotCompletenessAssessment {
+  return {
+    risk_level: "check_failed", checked_block_ids: [], unchecked_block_ids: [],
+    suspected_omissions: prior,
+    prior_issue_resolutions: prior.map((issue) => ({ issue_id: issue.issue_id,
+      outcome: "unresolved", reason: "Completeness assessment failed." })),
+  };
+}
+
+/** Keep source evidence and requested action in revision feedback and the critique event. */
+function omissionIssue(omission: SuspectedOmission): CriticIssue {
+  return {
+    issue_id: omission.issue_id, category: "omission", code: `missing_${omission.item_kind}`,
+    severity: "high",
+    claim: `Missing ${omission.item_kind}: ${omission.summary}. Source ${omission.source_ref.source_file_id}/${omission.source_ref.block_id}: "${omission.evidence_quote}". ${omission.reason}`,
+    source_ref: omission.source_ref, suggested_action: omission.suggested_action,
+  };
+}
 
 /** Check available source blocks while keeping missing blocks explicitly unchecked. */
 export function inspectQuoteSpans(args: {
@@ -37,9 +63,11 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   maxExchanges?: number;
   proposer: (round: number, prior: T | null, critiques: string[]) => Promise<T>;
   critic: (draft: T) => Promise<{ score: number; issues: CriticIssue[]; observationIssues?: CriticIssue[] }>;
+  onCompleteness?: (draft: T, prior_open_issues: SuspectedOmission[]) => Promise<SnapshotCompletenessAssessment>;
   judge: (draft: T) => Promise<T>;
 }): Promise<AgenticExchangeResult<T>> {
   const max = args.maxExchanges ?? 1;
+  if (!Number.isInteger(max) || max < 0) throw new RangeError("maxExchanges must be a nonnegative integer");
   const trace: string[] = [];
   const measure = async <V>(fn: () => Promise<V>) => {
     const before = args.run.usageSummary();
@@ -65,19 +93,42 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   await snapshot(draft, 0, initial);
   trace.push("round0:proposer");
   let selectedIteration = 0;
-  for (let exchange = 0; exchange < max; exchange++) {
-    const critiqued = await measure(() => args.critic(draft));
-    const critique = critiqued.value;
-    await args.run.recordAgentEvent({ event_type: "critique", iteration: exchange,
-      score: critique.score, issues: [...critique.issues, ...(critique.observationIssues ?? [])], latency_ms: critiqued.latency_ms,
-      token_usage: critiqued.token_usage, cost_usd: critiqued.cost_usd });
-    trace.push(`round${exchange + 1}:critic`);
-    if (critique.issues.length === 0 && critique.score >= 0.85) break;
-    const revised = await measure(() => args.proposer(exchange + 1, draft, critique.issues.map((issue) => issue.claim)));
+  let priorOpenIssues: SuspectedOmission[] = [];
+  for (let iteration = 0; iteration <= max; iteration++) {
+    // A terminal version still needs an assessment, but has no revision-eligible structural pass.
+    const assessed = await measure(async () => {
+      const structural = iteration < max ? await args.critic(draft) : null;
+      let completeness = notApplicable;
+      if (args.onCompleteness) {
+        try {
+          completeness = await args.onCompleteness(draft, [...priorOpenIssues]);
+        } catch {
+          completeness = failedAssessment(priorOpenIssues);
+        }
+      }
+      return { structural, completeness };
+    });
+    const { structural, completeness } = assessed.value;
+    const importantIssues = completeness.suspected_omissions
+      .filter((issue) => issue.importance === "important").map(omissionIssue);
+    await args.run.recordAgentEvent({ event_type: "critique", iteration,
+      score: structural?.score ?? null,
+      issues: [...(structural?.issues ?? []), ...(structural?.observationIssues ?? []), ...importantIssues],
+      completeness, latency_ms: assessed.latency_ms,
+      token_usage: assessed.token_usage, cost_usd: assessed.cost_usd });
+    priorOpenIssues = completeness.suspected_omissions;
+    if (structural) trace.push(`round${iteration + 1}:critic`);
+    if (iteration === max || !structural) break;
+    if (structural.issues.length === 0 && structural.score >= 0.85 && importantIssues.length === 0) break;
+    const feedback = [
+      ...structural.issues.map((issue) => issue.claim),
+      ...importantIssues.map((issue) => `${issue.claim} Action: ${issue.suggested_action}`),
+    ];
+    const revised = await measure(() => args.proposer(iteration + 1, draft, feedback));
     draft = revised.value;
-    selectedIteration = exchange + 1;
+    selectedIteration = iteration + 1;
     await snapshot(draft, selectedIteration, revised);
-    trace.push(`round${exchange + 1}:reviser`);
+    trace.push(`round${iteration + 1}:reviser`);
   }
   const judged = await measure(() => args.judge(draft));
   const final = judged.value;

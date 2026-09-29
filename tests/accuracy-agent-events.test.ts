@@ -53,6 +53,18 @@ const critique = {
   event_type: "critique" as const,
   iteration: 0,
   score: 0.7,
+  completeness: {
+    risk_level: "important" as const,
+    checked_block_ids: ["block-2"], unchecked_block_ids: [],
+    suspected_omissions: [{
+      issue_id: "issue-1", item_kind: "gap" as const, summary: "Regional evidence need omitted",
+      source_ref: { source_file_id: "source-1", block_id: "block-2" },
+      evidence_quote: "Regional evidence need", basis: "explicit" as const,
+      importance: "important" as const, reason: "No matching gap",
+      suggested_action: "Add the source-backed gap",
+    }],
+    prior_issue_resolutions: [],
+  },
   issues: [{
     issue_id: "issue-1", category: "omission", code: "missing_gap", severity: "high" as const,
     claim: "Regional evidence need omitted",
@@ -92,6 +104,12 @@ describe("agent event persistence", () => {
     await appendAgentEvent({ ...ids, event: v0 });
     await expect(appendAgentEvent({ ...ids, event: v0 })).rejects.toThrow();
     await expect(appendAgentEvent({ ...ids, event: { ...v0, precision: 0.99 } as never })).rejects.toThrow();
+    await expect(appendAgentEvent({ ...ids, event: { ...critique, recall: 0.99 } as never })).rejects.toThrow();
+    await expect(appendAgentEvent({ ...ids, event: { ...critique, completeness: {
+      ...critique.completeness, f1: 0.99 }, iteration: 1 } as never })).rejects.toThrow();
+    await expect(appendAgentEvent({ ...ids, event: { ...critique, completeness: {
+      ...critique.completeness, suspected_omissions: [{ ...critique.completeness.suspected_omissions[0],
+        precision: 0.99 }] }, iteration: 1 } as never })).rejects.toThrow();
     await expect(appendAgentEvent({ ...ids, event: { ...v0, iteration: 1, output: undefined } as never })).rejects.toThrow();
     expect((await readAgentProgression(ids))?.events).toHaveLength(1);
   });
