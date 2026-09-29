@@ -50,7 +50,7 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByRole("button", { name: /add open gap/i })).toBeVisible();
 
     await places(page).getByRole("link", { name: /^prioritization matrix/i }).click();
-    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     await expect(page.getByTestId("step-waiting")).toContainText(/waiting on gaps/i);
     await page.getByTestId("step-waiting").getByRole("link", { name: /go to gaps/i }).click();
     await expect(page).toHaveURL(/place=gaps/);

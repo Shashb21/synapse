@@ -48,14 +48,14 @@ const LEGEND: { band: TimelineBand; label: string }[] = [
 
 type Row =
   | { kind: "band"; key: string; y: number; h: number; band: "high" | "medium" | "low"; count: number }
-  | { kind: "section"; key: string; y: number; h: number; section: "not_prioritized" | "other"; label: string; count: number }
+  | { kind: "section"; key: string; y: number; h: number; section: "not_prioritized" | "deferred" | "other"; label: string; count: number }
   | { kind: "gap"; key: string; y: number; h: number; group: GapTimelineGroup; tone: TimelineBand }
   | { kind: "item"; key: string; y: number; h: number; item: GapTimelineItem; group: GapTimelineGroup | null; tone: TimelineBand }
   | { kind: "empty"; key: string; y: number; h: number; label: string };
 
 type WithoutY<T> = T extends unknown ? Omit<T, "y"> : never;
 
-function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boolean): Row[] {
+function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boolean, showDeferred: boolean): Row[] {
   const rows: Row[] = [];
   let y = top;
   const push = (row: WithoutY<Row>) => {
@@ -86,6 +86,11 @@ function buildRows(view: GapTimelineView, top: number, showNotPrioritized: boole
       count: view.not_prioritized.length,
     });
     if (showNotPrioritized) for (const group of view.not_prioritized) pushGroup(group, "unprioritized");
+  }
+  // Validated as Defer on the matrix: out of this cycle, but never hidden (KAN-8).
+  if (view.deferred.length > 0) {
+    push({ kind: "section", key: "section:deferred", h: SECTION_H, section: "deferred", label: "Deferred", count: view.deferred.length });
+    if (showDeferred) for (const group of view.deferred) pushGroup(group, "unprioritized");
   }
   if (view.other.length > 0) {
     push({ kind: "section", key: "section:other", h: SECTION_H, section: "other", label: "Other activities", count: view.other.length });
@@ -153,6 +158,7 @@ export function GapGantt({
 }) {
   const palette = usePalette();
   const [showNotPrioritized, setShowNotPrioritized] = useState(false);
+  const [showDeferred, setShowDeferred] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragged = useRef(false);
 
@@ -160,7 +166,10 @@ export function GapGantt({
   const months = Math.max(1, view.window.months);
   const monthWidth = monthWidthFor(months);
   const top = HEADER_H + (view.markers.length > 0 ? MARKER_H : 0);
-  const rows = useMemo(() => buildRows(view, top, showNotPrioritized), [view, top, showNotPrioritized]);
+  const rows = useMemo(
+    () => buildRows(view, top, showNotPrioritized, showDeferred),
+    [view, top, showNotPrioritized, showDeferred],
+  );
   const bodyBottom = rows.length > 0 ? rows[rows.length - 1]!.y + rows[rows.length - 1]!.h : top;
   const trackW = months * monthWidth;
   const width = LABEL_W + trackW + PAD_R;
@@ -613,6 +622,21 @@ export function GapGantt({
                   onClick={() => setShowNotPrioritized((open) => !open)}
                 >
                   {showNotPrioritized ? <ChevronDown /> : <ChevronRight />}
+                </Button>
+              </div>
+            );
+          }
+          if (row.kind === "section" && row.section === "deferred") {
+            return (
+              <div key={row.key} className="pointer-events-auto absolute left-1" style={{ top: row.y + 3 }}>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-expanded={showDeferred}
+                  aria-label={showDeferred ? "Collapse deferred gaps" : "Show deferred gaps"}
+                  onClick={() => setShowDeferred((open) => !open)}
+                >
+                  {showDeferred ? <ChevronDown /> : <ChevronRight />}
                 </Button>
               </div>
             );

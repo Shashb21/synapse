@@ -58,33 +58,30 @@ test.describe("S9 tactics ideation", () => {
     }
   });
 
-  test("a Low-priority open gap can get ideas, including one added by hand", async ({ page }) => {
+  test("ideation lists only High-priority gaps; a Low gap is not offered (KAN-8)", async ({ page }) => {
     test.skip(!lowGap, "the seed has only one open gap");
     await page.goto("/ideation");
     const waiting = page.getByTestId("ideation-without-proposal");
-    const item = waiting.getByRole("listitem").filter({ hasText: lowGap!.name });
-    await expect(item).toBeVisible();
-    await expect(item).toContainText("Low priority");
-    await expect(item.getByRole("button", { name: /add idea by hand/i })).toBeVisible();
-    // High is listed before Low.
     await expect(waiting.getByRole("listitem").first()).toContainText("High priority");
+    await expect(waiting.getByRole("listitem").filter({ hasText: lowGap!.name })).toHaveCount(0);
+    await expect(waiting).not.toContainText("Low priority");
   });
 
-  test("ideates for every gap a human validated, whatever the band", async ({ page, request }) => {
+  test("ideates for gaps a human validated as High only", async ({ page, request }) => {
     await page.goto("/ideation");
     await expect(page.getByRole("heading", { name: /ideation/i }).first()).toBeVisible();
 
     const result = await runStage<IdeationOutput>(request, "S9", { per_gap: 2 });
     expect(result.output.gaps_considered).toBeGreaterThan(0);
-    const validated = (await planState(request)).placements.filter(
-      (placement) => placement.validated && placement.band !== null,
+    const high = (await planState(request)).placements.filter(
+      (placement) => placement.validated && placement.band === "high",
     );
     if (lowGap) {
-      expect(result.output.proposals.some((proposal) => proposal.gap_id === lowGap!.gap_id)).toBe(true);
+      expect(result.output.proposals.some((proposal) => proposal.gap_id === lowGap!.gap_id)).toBe(false);
     }
-    expect(result.output.gaps_considered).toBeLessThanOrEqual(validated.length);
+    expect(result.output.gaps_considered).toBeLessThanOrEqual(high.length);
     for (const proposal of result.output.proposals) {
-      expect(validated.some((placement) => placement.gap_id === proposal.gap_id)).toBe(true);
+      expect(high.some((placement) => placement.gap_id === proposal.gap_id)).toBe(true);
     }
   });
 

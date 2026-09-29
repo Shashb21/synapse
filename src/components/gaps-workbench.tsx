@@ -298,12 +298,12 @@ function GapDetailPane({
   );
 }
 
-export type GapPriority = { band: "high" | "medium" | "low"; validated: boolean };
+export type GapPriority = { band: "high" | "medium" | "low" | "defer"; validated: boolean };
 
 type SortKey = "id" | "name" | "domain" | "status" | "priority" | "tactics";
 
-const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
-const PRIORITY_LABELS: Record<GapPriority["band"], string> = { high: "High", medium: "Medium", low: "Low" };
+const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, defer: 3 };
+const PRIORITY_LABELS: Record<GapPriority["band"], string> = { high: "High", medium: "Medium", low: "Low", defer: "Defer" };
 
 function PriorityChip({ priority }: { priority?: GapPriority }) {
   if (!priority) return <span className="text-[11px] text-muted-foreground">—</span>;
@@ -312,7 +312,9 @@ function PriorityChip({ priority }: { priority?: GapPriority }) {
       ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
       : priority.band === "medium"
         ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-        : "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300";
+        : priority.band === "low"
+          ? "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+          : "border-stone-200 bg-stone-100 text-stone-600 dark:border-stone-500/30 dark:bg-stone-500/10 dark:text-stone-300";
   return (
     <span
       className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10.5px] font-medium", tone)}
@@ -482,6 +484,7 @@ export function GapsWorkbench({
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
+                <option value="defer">Defer</option>
                 <option value="none">Not prioritized</option>
               </select>
               <select aria-label="Filter by setting" value={setting} onChange={(e) => setSetting(e.target.value)} className={selectClass}>

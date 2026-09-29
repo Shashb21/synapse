@@ -71,6 +71,8 @@ export type GapTimelineView = {
   prioritized: GapTimelineGroup[];
   /** Open gaps with no validated band yet, by name. */
   not_prioritized: GapTimelineGroup[];
+  /** Gaps a person validated as Defer: out of this cycle, still listed. */
+  deferred: GapTimelineGroup[];
   /** Activities that sit under none of the gaps above (addressed gaps, hand-added tactics). */
   other: GapTimelineItem[];
   conflicts: DependencyConflict[];
@@ -209,11 +211,14 @@ export function gapTimelineView(args: {
   const liveGaps = state.gaps.filter(isLiveGap);
   const prioritized: GapTimelineGroup[] = [];
   const notPrioritized: GapTimelineGroup[] = [];
+  const deferred: GapTimelineGroup[] = [];
   for (const gap of liveGaps) {
     const placement = placementByGap.get(gap.id);
-    // Only a band a human validated makes a gap prioritized.
-    if (placement?.validated && placement.band) {
-      prioritized.push(groupFor(gap, placement.band));
+    // Only a band a human validated makes a gap prioritized; Defer keeps it out of this cycle.
+    if (placement?.validated && placement.band === "defer") {
+      deferred.push(groupFor(gap, null));
+    } else if (placement?.validated && placement.band) {
+      prioritized.push(groupFor(gap, placement.band as PriorityBand));
     } else if (displayedGapStatus(gap) === "validated_open") {
       notPrioritized.push(groupFor(gap, null));
     }
@@ -222,6 +227,7 @@ export function gapTimelineView(args: {
     (a, b) => BAND_RANK[a.band!] - BAND_RANK[b.band!] || a.gap_name.localeCompare(b.gap_name),
   );
   notPrioritized.sort((a, b) => a.gap_name.localeCompare(b.gap_name));
+  deferred.sort((a, b) => a.gap_name.localeCompare(b.gap_name));
 
   // Nothing silently disappears: whatever no group shows is listed on its own.
   const other: GapTimelineItem[] = [];
@@ -265,6 +271,7 @@ export function gapTimelineView(args: {
   return {
     prioritized,
     not_prioritized: notPrioritized,
+    deferred,
     other,
     conflicts: dependencyConflicts(model.activities),
     markers,

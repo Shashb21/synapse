@@ -148,7 +148,7 @@ export function TimelineBoard({
   const selectedConflicts = selected
     ? view.conflicts.filter((row) => row.successor_id === selected.id || row.predecessor_id === selected.id)
     : [];
-  const hasRows = view.prioritized.length + view.not_prioritized.length + view.other.length > 0;
+  const hasRows = view.prioritized.length + view.not_prioritized.length + view.deferred.length + view.other.length > 0;
 
   return (
     <div className="grid gap-4">

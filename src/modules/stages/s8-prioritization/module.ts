@@ -20,6 +20,7 @@ import {
   quadrantBand,
   quadrantScore,
   scoreFromFavourability,
+  type MatrixBand,
   type PriorityAxis,
   type StoredAxes,
 } from "./axes";
@@ -90,7 +91,7 @@ const placementSchema = z.object({
   gap_name: z.string(),
   axis_scores: z.record(z.string(), z.number()),
   score: z.number(),
-  suggested_band: z.enum(["high", "medium", "low"]),
+  suggested_band: z.enum(["high", "medium", "low", "defer"]),
   rationale: z.string(),
 });
 
@@ -567,10 +568,11 @@ registerModule(prioritizationModule);
 export type PlacementRecord = {
   gap_id: string;
   axis_scores: Record<string, number>;
-  suggested_band: "high" | "medium" | "low";
+  suggested_band: MatrixBand;
   /** Empty when no model has suggested a placement (a hand-placed gap). */
   suggested_rationale: string;
-  band: "high" | "medium" | "low" | null;
+  /** "defer" is a deliberate, validated choice to leave the gap out of this cycle. */
+  band: MatrixBand | null;
   validated: boolean;
   rationale: string | null;
   actor_name: string | null;
@@ -665,6 +667,8 @@ async function insertManualPlacement(values: {
 }
 
 async function mirrorLegacyBand(gapId: string, band: Band, rationale: string, actor: Actor) {
+  // The legacy residual-keyed board has no Defer; it keeps its last band.
+  if (band === "defer") return;
   // Keep the legacy residual-keyed board in step when the gap has a residual.
   const state = await loadState();
   const residual = state.residuals.find((row) => row.gap_id === gapId);

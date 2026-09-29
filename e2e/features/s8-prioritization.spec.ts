@@ -71,7 +71,7 @@ test.describe("S8 prioritization matrix", () => {
     await page.goto("/matrix");
     await expect(page).toHaveURL(/\/\?place=plan$/);
     await page.goto("/?place=plan&setting=all");
-    await expect(page.getByRole("heading", { name: /^prioritize$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
     await expect(matrix).toBeVisible();
     await expect(page.getByText(new RegExp(`\\b0 of ${open.length} validated`))).toBeVisible();
@@ -146,7 +146,7 @@ test.describe("S8 prioritization matrix", () => {
       band: "urgent",
       rationale: "Not a band",
     });
-    expect(badBand.error).toBe("Band must be one of: high, medium, low.");
+    expect(badBand.error).toBe("Band must be one of: high, medium, low, defer.");
 
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 reimbursement dossier");
     const after = await planState(request);

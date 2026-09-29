@@ -78,10 +78,10 @@ function PlaceIntro({
     );
   }
   return (
-    <PageIntro kicker={wizardComplete ? "Living plan" : "Open gaps"} title="Prioritize">
+    <PageIntro kicker="Priority canvas" title="Prioritization Matrix">
       {ai
-        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft — drag them to set their priority, then validate each one."
-        : "Pick a setting and two axes, then place each Open gap by hand — type its scores or band, or drop it on the matrix — and validate each one."}
+        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft; drag them to set their priority, then validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."
+        : "Pick a setting and two axes, then place each Open gap by hand (type its scores or band, or drop it on the matrix) and validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."}
     </PageIntro>
   );
 }
@@ -182,9 +182,11 @@ export default async function HomePage({
   } else if (place === "tactics") {
     // The validated matrix band is the gap's priority.
     const placements = new Map((await listPlacements()).map((row) => [row.gap_id, row]));
-    const openGaps = workspace.openGaps.map((card) => {
+    // A gap validated as Defer is out of this cycle, so it drops out of Tactics (KAN-8).
+    const openGaps = workspace.openGaps.flatMap((card) => {
       const placement = placements.get(card.gap_id);
-      return placement?.validated && placement.band ? { ...card, band: placement.band } : card;
+      if (!placement?.validated || !placement.band) return [card];
+      return placement.band === "defer" ? [] : [{ ...card, band: placement.band }];
     });
     pane = (
       <>

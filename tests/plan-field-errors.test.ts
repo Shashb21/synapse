@@ -33,8 +33,8 @@ describe("plan API field errors name what the person sees", () => {
     expect(fieldLabel("some_new_field")).toBe("Some new field");
     const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date (YYYY-MM-DD)");
     expect(() => field(date, "next spring", "start_date")).toThrow("Start date must be a date (YYYY-MM-DD).");
-    expect(() => field(z.enum(["high", "medium", "low"]), "urgent", "band")).toThrow(
-      "Band must be one of: high, medium, low.",
+    expect(() => field(z.enum(["high", "medium", "low", "defer"]), "urgent", "band")).toThrow(
+      "Band must be one of: high, medium, low, defer.",
     );
     expect(() => optionalScore(150, "Payer / HTA relevance score")).toThrow(
       "Payer / HTA relevance score must be a number from 0 to 100.",
