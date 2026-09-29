@@ -863,6 +863,7 @@ export function planColumn(band: PriorityBand): PlanColumn {
 export type PlanTactic = {
   id: string;
   name: string;
+  type: Tactic["type"];
   status: TacticStatus;
   overall: OverallCoverage | null;
   stale: boolean;
@@ -917,6 +918,7 @@ export type OpenGapCard = {
   gap_id: string;
   gap_name: string;
   statement: string;
+  domain: EvidenceDomain;
   settings: string[];
   gap_status: GapStatus;
   computed_status: MappedGapStatus;
@@ -978,6 +980,7 @@ function asPlanTactic(
   return {
     id: tactic.id,
     name: tactic.name,
+    type: tactic.type,
     status: tactic.status,
     overall,
     stale,
@@ -1064,6 +1067,7 @@ export type TacticLibraryItem = {
   id: string;
   name: string;
   type: Tactic["type"];
+  status: TacticStatus;
   gaps: { id: string; name: string }[];
 };
 
@@ -1079,7 +1083,7 @@ export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
         .filter((row): row is NonNullable<typeof row> => Boolean(row))
         .filter((row) => row.status !== "excluded")
         .map((row) => ({ id: row.id, name: row.name }));
-      return { id: t.id, name: t.name, type: t.type, gaps };
+      return { id: t.id, name: t.name, type: t.type, status: t.status, gaps };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -1141,6 +1145,7 @@ export function buildPlanWorkspace(state: IegpState): {
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
+      domain: gap.domain,
       settings: gap.settings ?? [],
       gap_status: shown,
       computed_status: computed,

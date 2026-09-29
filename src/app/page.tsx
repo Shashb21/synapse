@@ -6,6 +6,7 @@ import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
+import { loadTacticIdeation } from "@/components/tactic-ideation/data";
 import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
 import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
@@ -70,10 +71,10 @@ function PlaceIntro({
   }
   if (place === "tactics") {
     return (
-      <PageIntro kicker="Open gaps only" title="Tactics">
-        Create and assign proposed tactics for Open gaps after they are prioritized. Proposed tactics
-        do not change gap status until they are planned, ongoing, or completed. Recording missed
-        real studies happens on Gaps.
+      <PageIntro kicker="Gap tactics" title="Tactic Ideation">
+        {ai
+          ? "The High-priority Open gaps, each with its linked tactics and AI-assisted suggestions. Accept or reject each suggestion with a reason, or write a custom tactic. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."
+          : "The High-priority Open gaps, each with its linked tactics. Assign a tactic from the library or write a custom one. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."}
       </PageIntro>
     );
   }
@@ -180,21 +181,11 @@ export default async function HomePage({
       </>
     );
   } else if (place === "tactics") {
-    // The validated matrix band is the gap's priority.
-    const placements = new Map((await listPlacements()).map((row) => [row.gap_id, row]));
-    // A gap validated as Defer is out of this cycle, so it drops out of Tactics (KAN-8).
-    const openGaps = workspace.openGaps.flatMap((card) => {
-      const placement = placements.get(card.gap_id);
-      if (!placement?.validated || !placement.band) return [card];
-      return placement.band === "defer" ? [] : [{ ...card, band: placement.band }];
-    });
+    // Only gaps validated as High on the matrix are ideated (KAN-8); Defer is out of this cycle.
+    const ideation = await loadTacticIdeation(workspace.openGaps);
     pane = (
       <>
-        <TacticsPlace
-          ready={gates.tacticsUnlocked}
-          openGaps={openGaps}
-          availableTactics={workspace.availableTactics}
-        />
+        <TacticsPlace ready={gates.tacticsUnlocked} availableTactics={workspace.availableTactics} {...ideation} />
         <RejectedTactics tactics={state.tactics} />
       </>
     );

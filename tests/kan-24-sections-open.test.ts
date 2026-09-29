@@ -58,11 +58,11 @@ describe("KAN-24: every section opens, and says what it waits on", () => {
   });
 
   it("Tactics renders its content with a waiting banner instead of a lock", () => {
-    const waiting = renderToStaticMarkup(createElement(TacticsPlace, { ready: false, openGaps: [], availableTactics: [] }));
+    const waiting = renderToStaticMarkup(createElement(TacticsPlace, { ready: false, highGaps: [], availableTactics: [] }));
     expect(waiting).toContain("Waiting on Prioritize");
     expect(waiting).toContain('aria-labelledby="tactic-library"');
     expect(waiting).not.toMatch(/is locked/i);
-    const ready = renderToStaticMarkup(createElement(TacticsPlace, { ready: true, openGaps: [], availableTactics: [] }));
+    const ready = renderToStaticMarkup(createElement(TacticsPlace, { ready: true, highGaps: [], availableTactics: [] }));
     expect(ready).not.toContain("Waiting on Prioritize");
   });
 });

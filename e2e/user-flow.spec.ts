@@ -81,13 +81,13 @@ test.describe("gaps then prioritize then tactics", () => {
   test("tactics place URLs open and say they wait on Prioritize", async ({ page }) => {
     const query = await page.goto("/?place=tactics");
     expect(query?.ok()).toBe(true);
-    await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^tactic ideation$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /waiting on prioritize/i })).toBeVisible();
-    await expect(page.getByRole("region", { name: /tag the same tactic/i })).toBeVisible();
+    await expect(page.getByRole("region", { name: /^tactic library$/i })).toBeVisible();
 
     const dedicated = await page.goto("/tactics");
     expect(dedicated?.ok()).toBe(true);
-    await expect(page.getByRole("heading", { name: /^tactics$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^tactic ideation$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /waiting on prioritize/i })).toBeVisible();
   });
 });

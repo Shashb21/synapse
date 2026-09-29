@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { TacticsPlace } from "@/components/tactics-place";
+import { loadTacticIdeation } from "@/components/tactic-ideation/data";
 import { RejectedTactics } from "@/components/restore-actions";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { buildPlanWorkspace, planGates } from "@/lib/iegp/engine";
@@ -32,19 +33,15 @@ export default async function TacticsPage() {
       .filter((g) => !g.retired && g.status !== "excluded" && !g.parked_at)
       .map((g) => ({ value: g.id, label: `${g.id} · ${g.name}` })),
   ];
+  const ideation = await loadTacticIdeation(workspace.openGaps);
   const pending = rejected.filter((row) => !row.promoted_tactic_id);
   return (
     <AppShell active="tactics">
-      <PageIntro kicker="Open gaps only" title="Tactics">
-        Create and assign proposed tactics for Open gaps after they are prioritized. Proposed tactics
-        do not change gap status until they are planned, ongoing, or completed. Recording missed
-        real studies happens on Gaps.
+      <PageIntro kicker="Gap tactics" title="Tactic Ideation">
+        The High-priority Open gaps with their linked tactics. Assign a library tactic or write a custom
+        one. Proposed tactics do not change a gap&apos;s status until they are planned, ongoing or completed.
       </PageIntro>
-      <TacticsPlace
-        ready={gates.tacticsUnlocked}
-        openGaps={workspace.openGaps}
-        availableTactics={workspace.availableTactics}
-      />
+      <TacticsPlace ready={gates.tacticsUnlocked} availableTactics={workspace.availableTactics} {...ideation} />
       <RejectedTactics tactics={state.tactics} />
       {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
       {ai || rejected.length > 0 ? (
