@@ -865,6 +865,7 @@ export type PlanTactic = {
   id: string;
   name: string;
   type: Tactic["type"];
+  custom_type: Tactic["custom_type"];
   status: TacticStatus;
   overall: OverallCoverage | null;
   stale: boolean;
@@ -984,6 +985,7 @@ function asPlanTactic(
     id: tactic.id,
     name: tactic.name,
     type: tactic.type,
+    custom_type: tactic.custom_type ?? null,
     status: tactic.status,
     overall,
     stale,
@@ -1070,6 +1072,7 @@ export type TacticLibraryItem = {
   id: string;
   name: string;
   type: Tactic["type"];
+  custom_type: Tactic["custom_type"];
   status: TacticStatus;
   gaps: { id: string; name: string }[];
 };
@@ -1086,7 +1089,7 @@ export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
         .filter((row): row is NonNullable<typeof row> => Boolean(row))
         .filter((row) => row.status !== "excluded")
         .map((row) => ({ id: row.id, name: row.name }));
-      return { id: t.id, name: t.name, type: t.type, status: t.status, gaps };
+      return { id: t.id, name: t.name, type: t.type, custom_type: t.custom_type ?? null, status: t.status, gaps };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }

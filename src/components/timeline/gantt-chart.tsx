@@ -1,9 +1,9 @@
 "use client";
 
+import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import { useMemo, type RefObject } from "react";
 import { useIsDark } from "@/components/theme-toggle";
 import type { TimelineActivity, TimelineBand, TimelineModel } from "@/modules/stages/s10-timeline/build";
-import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 
 const LABEL_W = 184;
 const HEADER_H = 46;
@@ -322,7 +322,7 @@ export function GanttChart({
         const barWidth = Math.max(6, geo.x2 - geo.x1);
         const readoutX = activity.readout_date ? x(activity.readout_date) : null;
         const insideChars = Math.floor((barWidth - 12) / 5.6);
-        const barLabel = insideChars >= 6 ? truncate(TACTIC_TYPE_LABELS[activity.tactic_type], insideChars) : "";
+        const barLabel = insideChars >= 6 ? truncate(tacticTypeLabel({ type: activity.tactic_type, custom_type: activity.tactic_custom_type }), insideChars) : "";
         return (
           <g
             key={activity.id}

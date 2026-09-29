@@ -43,6 +43,7 @@ const activitySchema = z.object({
   tactic_id: z.string(),
   tactic_name: z.string(),
   tactic_type: z.string(),
+  tactic_custom_type: z.object({ label: z.string(), color: z.string() }).nullable().optional(),
   tactic_status: z.string(),
   lane: z.string(),
   band: z.string(),

@@ -8,6 +8,7 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { GapMetadataDialog, GapMetadataView } from "@/components/gap-metadata";
+import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import {
   GAPS_TACTIC_HELPER,
@@ -465,7 +466,7 @@ export function GapsWorkbench({
       <div className="flex flex-wrap items-center gap-2">
         <CreateOpenGap />
         <CreateAddressedGap tactics={availableTactics} />
-        <AddTacticsButton variant="outline" />
+        <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
       {cards.length === 0 ? (

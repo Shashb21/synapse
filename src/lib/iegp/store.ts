@@ -8,6 +8,7 @@ import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { GapMetadata, IegpState, Lock, GapStatusOverride } from "./types";
+import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
   ActorFunction,
@@ -212,6 +213,7 @@ async function readState(): Promise<IegpState> {
       review_status: (x.review_status as IegpState["tactics"][0]["review_status"]) || "accepted",
       function: x.function as ActorFunction,
       lock: asLock(x.lock),
+      custom_type: readCustomType(x.custom_type),
     })),
     coverages: coverages.map((c) => ({
       ...c,
@@ -1562,6 +1564,8 @@ type LibraryTacticDraft = {
   actor_function: ActorFunction;
   audit_action: string;
   note?: string;
+  /** A person's own type name and colour (KAN-51); the standard type still decides mapping. */
+  custom_type?: CustomTacticType | null;
 };
 
 const TACTIC_DATE_LABELS = { start_date: "Start date", evidence_available: "Evidence available" } as const;
@@ -1589,8 +1593,28 @@ export function createTacticStatus(value: string | null | undefined): CreateTact
   return trimmed as CreateTacticStatus;
 }
 
+/**
+ * One label keeps one colour across the workspace (KAN-51): saving a custom type recolours
+ * every other tactic already carrying that label, so the legend never shows it twice.
+ */
+async function applyCustomTypeColour(custom: CustomTacticType | null, state: IegpState, exceptId?: string) {
+  if (!custom) return;
+  for (const tactic of state.tactics) {
+    if (tactic.id === exceptId || !tactic.custom_type) continue;
+    if (tactic.custom_type.label.toLowerCase() !== custom.label.toLowerCase()) continue;
+    if (tactic.custom_type.color === custom.color && tactic.custom_type.label === custom.label) continue;
+    await db().update(t.tactics).set({ custom_type: custom }).where(eq(t.tactics.id, tactic.id));
+  }
+}
+
+/** A custom type from a form's flat fields; a blank name means none. */
+export function customTypeFromFields(label: unknown, color: unknown): CustomTacticType | null {
+  return normalizeCustomType({ label, color });
+}
+
 async function insertLibraryTactic(args: LibraryTacticDraft) {
   const state = await loadState();
+  const custom_type = args.custom_type ?? null;
   if (!args.name.trim()) throw new Error("Tactic name is required.");
   if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
   if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
@@ -1624,7 +1648,9 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
     budget: null,
     intended_use: args.intended_use || (args.residual_ids || []).join(", "),
     lock: reasonNote ? makeLock(args.actor_name, args.actor_function, reasonNote) : unlocked(),
+    custom_type,
   });
+  await applyCustomTypeColour(custom_type, state, id);
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1659,6 +1685,7 @@ export async function createProposedTactic(args: {
   status?: string;
   start_date?: string | null;
   evidence_available?: string | null;
+  custom_type?: CustomTacticType | null;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
@@ -1682,6 +1709,7 @@ export async function createProposedTactic(args: {
     lifecycle_stage: status === "proposed" ? "proposed" : "recorded",
     start_date: args.start_date,
     evidence_available: args.evidence_available,
+    custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: status === "proposed" ? "create_proposed" : "create",
@@ -1719,6 +1747,7 @@ export async function recordMissedTactic(args: {
   data_source?: string;
   /** The source sentence, when the tactic is promoted from a rejected S3 candidate. */
   source_quote?: string;
+  custom_type?: CustomTacticType | null;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
@@ -1747,6 +1776,7 @@ export async function recordMissedTactic(args: {
     data_source: args.data_source?.trim() ?? "",
     study_design: args.study_design,
     source_quote: args.source_quote,
+    custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
@@ -3026,6 +3056,8 @@ export async function modifyTactic(args: {
   /** Legacy shape: name and evidence question at the top level. */
   name?: string;
   evidence_question?: string;
+  /** A custom type to set (null clears it); omitted leaves it as it is (KAN-51). */
+  custom_type?: CustomTacticType | null;
   rationale?: string;
   actor_name: string;
   actor_function: ActorFunction;
@@ -3061,13 +3093,22 @@ export async function modifyTactic(args: {
     clean[field] = value;
   }
   const changes = diffFields(tactic, clean);
+  const customLabel = (value: CustomTacticType | null | undefined) =>
+    value ? `${value.label} (${value.color})` : null;
+  const customChanged =
+    args.custom_type !== undefined && customLabel(args.custom_type) !== customLabel(tactic.custom_type);
+  if (customChanged) {
+    changes.push({ field: "custom_type", before: customLabel(tactic.custom_type), after: customLabel(args.custom_type) });
+  }
   if (changes.length === 0) throw new Error("Nothing changed.");
-  const set: Record<string, string | null> = {};
-  for (const change of changes) set[change.field] = change.after;
+  const set: Record<string, unknown> = {};
+  for (const change of changes) if (change.field !== "custom_type") set[change.field] = change.after;
+  if (customChanged) set.custom_type = args.custom_type ?? null;
   await db()
     .update(t.tactics)
     .set({ ...set, lock: makeLock(args.actor_name, args.actor_function, rationale) })
     .where(eq(t.tactics.id, args.tactic_id));
+  if (customChanged) await applyCustomTypeColour(args.custom_type ?? null, state, args.tactic_id);
   await appendAudit(
     args.actor_name,
     args.actor_function,

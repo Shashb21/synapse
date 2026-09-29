@@ -28,7 +28,10 @@ export default async function TacticDetailPage({
 
   return (
     <AppShell active="tactics">
-      <PageIntro kicker={TACTIC_TYPE_LABELS[tactic.type]} title={tactic.name}>
+      <PageIntro
+        kicker={tactic.custom_type ? `${tactic.custom_type.label} · counts as ${TACTIC_TYPE_LABELS[tactic.type]}` : TACTIC_TYPE_LABELS[tactic.type]}
+        title={tactic.name}
+      >
         {tactic.description}
       </PageIntro>
       <div className="mb-4 flex flex-wrap items-center gap-2">

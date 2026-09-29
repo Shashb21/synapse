@@ -5,6 +5,8 @@ import {
   TacticBadge,
 } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
+import { CustomTypeFields } from "@/components/custom-type-fields";
+import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { TacticDetailFields } from "@/components/gap-tactic-actions";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import type {
@@ -84,7 +86,7 @@ export function CreateGapButton({
   );
 }
 
-export function CreateTacticButton() {
+export function CreateTacticButton({ inUse = [] }: { inUse?: CustomTacticType[] } = {}) {
   return (
     <LockForm
       label="Create tactic"
@@ -93,13 +95,21 @@ export function CreateTacticButton() {
       description="Add a tactic to the library. A proposed tactic is an idea and does not count as addressing; planned, ongoing and completed ones do."
     >
       <input type="hidden" name="origin" value="tactics" />
-      <CreateTacticFields />
+      <CreateTacticFields inUse={inUse} />
     </LockForm>
   );
 }
 
 /** A new proposed tactic written by hand for one gap, mapped onto it at once (Tactic Ideation). */
-export function CustomTacticButton({ gapId, gapName }: { gapId: string; gapName: string }) {
+export function CustomTacticButton({
+  gapId,
+  gapName,
+  inUse = [],
+}: {
+  gapId: string;
+  gapName: string;
+  inUse?: CustomTacticType[];
+}) {
   return (
     <LockForm
       label="+ Custom tactic"
@@ -110,7 +120,7 @@ export function CustomTacticButton({ gapId, gapName }: { gapId: string; gapName:
       description={`Write a tactic for ${gapName}. It goes into the library mapped onto this gap. A proposed tactic is an idea and does not count as addressing.`}
     >
       <input type="hidden" name="origin" value="tactics" />
-      <CreateTacticFields />
+      <CreateTacticFields inUse={inUse} />
     </LockForm>
   );
 }
@@ -144,7 +154,7 @@ export function AssignTacticButton({
   );
 }
 
-function CreateTacticFields() {
+function CreateTacticFields({ inUse = [] }: { inUse?: CustomTacticType[] }) {
   return (
     <>
       <input
@@ -169,6 +179,7 @@ function CreateTacticFields() {
           </option>
         ))}
       </select>
+      <CustomTypeFields inUse={inUse} />
       <input
         name="evidence_question"
         required
@@ -220,7 +231,10 @@ function CreateTacticFields() {
  * An existing study or programme entered by hand (completed, ongoing, or
  * planned). It goes into the tactic library, ready to map onto gaps.
  */
-export function AddTacticsButton({ variant }: { variant?: "default" | "outline" } = {}) {
+export function AddTacticsButton({
+  variant,
+  inUse = [],
+}: { variant?: "default" | "outline"; inUse?: CustomTacticType[] } = {}) {
   return (
     <LockForm
       label="Add tactics"
@@ -251,6 +265,7 @@ export function AddTacticsButton({ variant }: { variant?: "default" | "outline" 
           </option>
         ))}
       </select>
+      <CustomTypeFields inUse={inUse} />
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         Status
         <select

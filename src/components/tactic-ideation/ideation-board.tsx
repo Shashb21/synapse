@@ -10,8 +10,9 @@ import { RunStageButton } from "@/components/platform/run-stage-button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { GapMetadataView } from "@/components/gap-metadata";
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
-import { DOMAIN_LABELS, TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
-import { tacticTypeColor } from "@/lib/iegp/tactic-type-colors";
+import { DOMAIN_LABELS } from "@/lib/iegp/enums";
+import { tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
+import { customTypesInUse, type CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { cn } from "@/lib/utils";
 
 type Coverage = "" | "unlinked" | "linked";
@@ -19,18 +20,16 @@ type Coverage = "" | "unlinked" | "linked";
 const FIELD =
   "h-7 rounded-md border border-input bg-background px-2 text-[11px] text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
-function typeLabel(type: string) {
-  return TACTIC_TYPE_LABELS[type as TacticType] ?? type.replaceAll("_", " ");
-}
+type Typed = { type: string; custom_type?: CustomTacticType | null };
 
-function TypeChip({ type }: { type: string }) {
-  const color = tacticTypeColor(type);
+function TypeChip({ tactic }: { tactic: Typed }) {
+  const color = tacticColor(tactic);
   return (
     <span
       className="inline-flex items-center rounded-sm border-l-[3px] px-1.5 py-px text-[10px] font-medium text-foreground"
       style={{ borderLeftColor: color, backgroundColor: `${color}1a` }}
     >
-      {typeLabel(type)}
+      {tacticTypeLabel(tactic)}
     </span>
   );
 }
@@ -58,11 +57,11 @@ function LinkedTacticRow({ tactic }: { tactic: PlanTactic }) {
         href={`/tactics/${tactic.id}`}
         className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5 text-foreground no-underline hover:bg-muted/60"
       >
-        <span className="font-mono text-[10px]" style={{ color: tacticTypeColor(tactic.type) }}>
+        <span className="font-mono text-[10px]" style={{ color: tacticColor(tactic) }}>
           {tactic.id}
         </span>
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{tactic.name}</span>
-        <TypeChip type={tactic.type} />
+        <TypeChip tactic={tactic} />
         <StatusChip status={tactic.status} />
         <span className="text-[10px] text-muted-foreground" aria-hidden>
           ✎
@@ -141,7 +140,7 @@ function GapIdeationCard({
                 Open gap ↗
               </Link>
               <AssignTacticButton gapId={card.gap_id} tactics={assignable} />
-              <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} />
+              <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} inUse={customTypesInUse(library)} />
             </div>
           </div>
 
@@ -213,7 +212,7 @@ function LibraryPanel({ items }: { items: TacticLibraryItem[] }) {
       (item) =>
         item.name.toLowerCase().includes(q) ||
         item.id.toLowerCase().includes(q) ||
-        typeLabel(item.type).toLowerCase().includes(q),
+        tacticTypeLabel(item).toLowerCase().includes(q),
     );
   }, [items, query]);
   const unassigned = items.filter((item) => item.gaps.length === 0).length;
@@ -243,7 +242,7 @@ function LibraryPanel({ items }: { items: TacticLibraryItem[] }) {
           </span>
         ) : null}
         <div className="ml-auto">
-          <CreateTacticButton />
+          <CreateTacticButton inUse={customTypesInUse(items)} />
         </div>
       </div>
       {open ? (
@@ -273,11 +272,11 @@ function LibraryPanel({ items }: { items: TacticLibraryItem[] }) {
                     item.gaps.length === 0 ? "bg-amber-50/60 dark:bg-amber-950/20" : "bg-background",
                   )}
                 >
-                  <span className="font-mono text-[10px]" style={{ color: tacticTypeColor(item.type) }}>
+                  <span className="font-mono text-[10px]" style={{ color: tacticColor(item) }}>
                     {item.id}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{item.name}</span>
-                  <TypeChip type={item.type} />
+                  <TypeChip tactic={item} />
                   {item.gaps.length === 0 ? (
                     <span className="rounded-sm bg-orange-50 px-1.5 py-px text-[10px] text-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
                       Unassigned

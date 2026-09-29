@@ -1,3 +1,4 @@
+import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { NextResponse } from "next/server";
 import {
   acceptMapping,
@@ -30,6 +31,7 @@ import {
   lockTacticReview,
   modifyGap,
   modifyTactic,
+  customTypeFromFields,
   modifyResidualGap,
   parkGap,
   unparkGap,
@@ -417,6 +419,7 @@ export async function POST(request: Request) {
             gap_id: body.gap_id || undefined,
             status: body.status,
             catch_up_reason: body.catch_up_reason,
+            custom_type: customTypeOf(body) ?? null,
             actor_name,
             actor_function,
           });
@@ -439,6 +442,7 @@ export async function POST(request: Request) {
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
           gap_id: body.gap_id || undefined,
           status: body.status,
+          custom_type: customTypeOf(body) ?? null,
           start_date: body.start_date || null,
           evidence_available: body.evidence_available || null,
           actor_name,
@@ -463,6 +467,7 @@ export async function POST(request: Request) {
           residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
           gap_id: body.gap_id || undefined,
           status: body.status,
+          custom_type: customTypeOf(body) ?? null,
           catch_up_reason: body.catch_up_reason,
           actor_name,
           actor_function,
@@ -606,6 +611,7 @@ export async function POST(request: Request) {
         await modifyTactic({
           tactic_id: body.tactic_id,
           fields: tacticFieldsOf(body),
+          custom_type: customTypeOf(body),
           rationale: rationaleOf(body),
           actor_name,
           actor_function,
@@ -782,6 +788,15 @@ export async function POST(request: Request) {
 }
 
 /** Tactic fields present in the body; a field absent from the form is left unchanged. */
+/**
+ * A custom tactic type from a form (KAN-51). The field left out means "leave it"; a blank
+ * name means "none". Invalid colours are refused by the store's normalizer.
+ */
+function customTypeOf(body: Record<string, string>): CustomTacticType | null | undefined {
+  if (typeof body.custom_type_label !== "string") return undefined;
+  return customTypeFromFields(body.custom_type_label, body.custom_type_color);
+}
+
 function tacticFieldsOf(body: Record<string, string>) {
   const fields: Partial<Record<(typeof TACTIC_EDIT_FIELDS)[number], string>> = {};
   for (const field of TACTIC_EDIT_FIELDS) {

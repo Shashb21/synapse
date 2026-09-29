@@ -1,3 +1,4 @@
+import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import type { TacticStatus, TacticType } from "@/lib/iegp/enums";
 import type { IegpState, Tactic } from "@/lib/iegp/types";
 import { countingCoverages, displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
@@ -40,6 +41,8 @@ export type TimelineActivity = {
   tactic_id: string;
   tactic_name: string;
   tactic_type: TacticType;
+  /** A person's own type name and colour, drawn instead of the type's family colour (KAN-51). */
+  tactic_custom_type?: CustomTacticType | null;
   tactic_status: TacticStatus;
   lane: TimelineBand;
   band: TimelineBand;
@@ -442,6 +445,7 @@ export function buildTimeline(args: {
       tactic_id: tactic.id,
       tactic_name: tactic.name,
       tactic_type: tactic.type,
+      tactic_custom_type: tactic.custom_type ?? null,
       tactic_status: tactic.status,
       lane: laneLocked && savedLane && TIMELINE_LANES.includes(savedLane) ? savedLane : candidate.band,
       band: candidate.band,
