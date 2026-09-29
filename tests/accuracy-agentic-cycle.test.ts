@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { inspectQuoteSpans, runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
 import type { AgentEvent, ProductionSignals } from "@/accuracy/kernel/agent-events";
 import type { RunHandle, TokenUsage } from "@/accuracy/kernel/contracts";
@@ -56,20 +56,30 @@ describe("agentic version capture", () => {
   });
 
   it("records a revision and passes human-readable claims to proposer", async () => {
-    const { run, events } = recordingRun();
+    const { run, events, charge } = recordingRun();
+    const now = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(11)
+      .mockReturnValueOnce(20).mockReturnValueOnce(27)
+      .mockReturnValueOnce(30).mockReturnValueOnce(43)
+      .mockReturnValueOnce(50).mockReturnValueOnce(55);
     const received: string[][] = [];
-    const result = await runShallowAgenticCycle<{ round: number }>({
-      run, onSnapshot: async () => signals,
-      proposer: async (round, _prior, claims) => { received.push(claims); return { round }; },
-      critic: async (draft) => ({ score: draft.round ? 1 : 0.4,
-        issues: draft.round ? [] : [{ issue_id: "i1", category: "structure", code: "missing",
-          severity: "medium" as const, claim: "Add source quote", suggested_action: "Add quote" }] }),
-      judge: async (draft) => draft,
-    });
-    expect(received).toEqual([[], ["Add source quote"]]);
-    expect(events.map((event) => event.event_type)).toEqual(["snapshot", "critique", "snapshot", "judgment"]);
-    expect(events[3]).toMatchObject({ selected_iteration: 1 });
-    expect(result.final).toEqual({ round: 1 });
+    try {
+      const result = await runShallowAgenticCycle<{ round: number }>({
+        run, onSnapshot: async () => signals,
+        proposer: async (round, _prior, claims) => { received.push(claims); charge(round ? 5 : 3, round ? 0.05 : 0.03); return { round }; },
+        critic: async (draft) => { charge(2, 0.02); return { score: draft.round ? 1 : 0.4,
+          issues: draft.round ? [] : [{ issue_id: "i1", category: "structure", code: "missing",
+            severity: "medium" as const, claim: "Add source quote", suggested_action: "Add quote" }] }; },
+        judge: async (draft) => { charge(1, 0.01); return draft; },
+      });
+      expect(received).toEqual([[], ["Add source quote"]]);
+      expect(events.map((event) => event.event_type)).toEqual(["snapshot", "critique", "snapshot", "judgment"]);
+      expect(events[0]).toMatchObject({ latency_ms: 11, token_usage: { total_tokens: 3 }, cost_usd: 0.03 });
+      expect(events[1]).toMatchObject({ latency_ms: 7, token_usage: { total_tokens: 2 }, cost_usd: 0.02 });
+      expect(events[2]).toMatchObject({ latency_ms: 13, token_usage: { total_tokens: 5 }, cost_usd: 0.05 });
+      expect(events[3]).toMatchObject({ latency_ms: 5, token_usage: { total_tokens: 1 }, cost_usd: 0.01 });
+      expect(events[3]).toMatchObject({ selected_iteration: 1 });
+      expect(result.final).toEqual({ round: 1 });
+    } finally { now.mockRestore(); }
   });
 
   it("keeps V0 when the critic fails", async () => {

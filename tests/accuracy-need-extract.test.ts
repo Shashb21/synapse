@@ -93,6 +93,10 @@ describe("need extract module", () => {
       const revisionPrompt = vi.mocked(ctx.complete).mock.calls[1]?.[0].user ?? "";
       expect(revisionPrompt).toContain("G2:no_quote");
       expect(revisionPrompt).not.toContain("quote_not_substring");
+      expect(events.filter((event) => event.event_type === "snapshot").map((event) => event.signals.invariant_failures)).toEqual([
+        ["G2:no_quote"],
+        ["G2:no_quote"],
+      ]);
       expect(events.find((event) => event.event_type === "critique")).toMatchObject({
         issues: expect.arrayContaining([expect.objectContaining({ code: "quote_not_substring" })]),
       });

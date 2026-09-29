@@ -148,7 +148,8 @@ describe("run progression detail", () => {
   it("returns exact V0 and V1, critique, and selected version for a signed-in user", async () => {
     auth.signed_in = true;
     const ids = await fixture();
-    const v1 = { ...v0, iteration: 1, output: { gaps: [{ statement: "Exact V1" }] } };
+    const v1 = { ...v0, iteration: 1, output: { gaps: [{ statement: "Exact V1" }] },
+      signals: { ...v0.signals, quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 } } };
     const judgment = {
       event_type: "judgment" as const, selected_iteration: 1, reason: "Source-backed revision",
       latency_ms: 25, token_usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 }, cost_usd: 0.0002,
@@ -173,6 +174,9 @@ describe("run progression detail", () => {
     expect(html).toContain("Exact V1");
     expect(html).toContain("Source-backed revision");
     expect(html).toContain("Selected version");
+    expect(html).toContain("No invariant failures recorded");
+    expect(html).not.toContain("Invariant failures: none");
+    expect(html).toContain("No source quote spans to check");
   });
 
   it("requires a session even in demo mode and hides wrong-workspace runs", async () => {

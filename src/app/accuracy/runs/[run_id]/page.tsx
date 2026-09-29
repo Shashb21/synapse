@@ -73,10 +73,14 @@ export default async function AccuracyRunDetailPage({
                   </h2>
                   <p className="mt-1 text-[12px] text-muted-foreground">{eventMetering(record)}</p>
                   <p className="mt-2 text-[12px] text-foreground">
-                    Quote checks: {event.signals.quote_validity.valid_count} valid, {event.signals.quote_validity.invalid_count} invalid, {event.signals.quote_validity.unchecked_count} unchecked.
+                    {event.signals.quote_validity.valid_count + event.signals.quote_validity.invalid_count + event.signals.quote_validity.unchecked_count === 0
+                      ? "Quote checks: No source quote spans to check."
+                      : `Quote checks: ${event.signals.quote_validity.valid_count} valid, ${event.signals.quote_validity.invalid_count} invalid, ${event.signals.quote_validity.unchecked_count} unchecked.`}
                   </p>
                   <p className="text-[12px] text-foreground">
-                    Invariant failures: {event.signals.invariant_failures.length ? event.signals.invariant_failures.join("; ") : "none"}. Completeness: not checked.
+                    {event.signals.invariant_failures.length
+                      ? `Invariant failures: ${event.signals.invariant_failures.join("; ")}.`
+                      : "No invariant failures recorded."} Completeness: not checked.
                   </p>
                   <h3 className="mt-3 text-[13px] font-medium text-foreground">Exact output</h3>
                   <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words border border-border bg-background p-3 text-[12px] text-foreground">{JSON.stringify(event.output, null, 2)}</pre>

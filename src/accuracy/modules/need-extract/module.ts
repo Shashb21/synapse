@@ -180,7 +180,8 @@ export const needExtractModule = agenticModule({
       run: ctx.run,
       onSnapshot: async (draft): Promise<ProductionSignals> => ({
         quote_validity: inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => gap.provenance ?? []), blocks }).signals,
-        invariant_failures: [], completeness: "not_checked",
+        invariant_failures: critiqueDraft(draft, input.source_file_id, blocks).issues.map((issue) => issue.claim),
+        completeness: "not_checked",
       }),
       proposer: (round, prior, critiques) => proposeNeeds(ctx, input, round, prior, critiques),
       critic: async (draft) => {

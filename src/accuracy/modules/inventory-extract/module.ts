@@ -192,7 +192,8 @@ export const inventoryExtractModule = agenticModule({
       run: ctx.run,
       onSnapshot: async (draft): Promise<ProductionSignals> => ({
         quote_validity: inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks }).signals,
-        invariant_failures: [], completeness: "not_checked",
+        invariant_failures: critiqueDraft(draft, input.source_file_id, blocks).issues.map((issue) => issue.claim),
+        completeness: "not_checked",
       }),
       proposer: (round, prior, critiques) =>
         proposeInventory(ctx, input, round, prior, critiques),
