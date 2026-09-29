@@ -70,7 +70,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
           title={`Workspace: ${tag.current.name}${tag.current.demo ? " (demo data)" : ""}`}
           className={cn(
             "flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 text-left text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
-            dense ? "h-9 border-transparent bg-transparent px-[3px] group-hover/rail:border-sidebar-border group-hover/rail:bg-sidebar-accent/40 group-focus-within/rail:border-sidebar-border" : "h-9 px-2",
+            dense ? "h-9 border-transparent bg-transparent px-[3px] group-hover/rail:border-sidebar-border group-hover/rail:bg-sidebar-accent/40 group-has-[:focus-visible]/rail:border-sidebar-border" : "h-9 px-2",
           )}
         >
           <span
@@ -79,7 +79,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
           >
             {initial}
           </span>
-          <span className={cn("min-w-0 flex-1", dense && "opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100")}>
+          <span className={cn("min-w-0 flex-1", dense && "opacity-0 transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100")}>
             <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-sidebar-foreground/60">
               Workspace
               {tag.current.demo ? <DemoBadge testId="workspace-tag-demo" /> : null}
@@ -88,7 +88,7 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
               {tag.current.name}
             </span>
           </span>
-          <ChevronsUpDown className={cn("size-3.5 shrink-0 opacity-60", dense && "opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100 group-hover/rail:opacity-60")} aria-hidden />
+          <ChevronsUpDown className={cn("size-3.5 shrink-0 opacity-60", dense && "opacity-0 transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100 group-hover/rail:opacity-60")} aria-hidden />
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-64 min-w-64" align="start">
           <DropdownMenuGroup>
