@@ -1,3 +1,4 @@
+import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ingestFile } from "@/accuracy/modules/parse/ingest-file";
 import { blocksFromParsedDocument, readParseBlocks } from "@/accuracy/store/parse-store";
@@ -124,7 +125,8 @@ describe("accuracy parse module persistence", () => {
       parserUsed: "llamaparse",
     });
     registerAccuracyStack();
-    const workspace_id = `ws-parse-${Date.now()}`;
+    const org_id = await createOrganization("Parse persistence test");
+    const workspace_id = await createWorkspace({ org_id, name: "Parse persistence", slug: `parse-${Date.now()}` });
     const source_file_id = `src-parse-${Date.now()}`;
 
     const result = await runAccuracyModule({
@@ -137,7 +139,7 @@ describe("accuracy parse module persistence", () => {
         content_base64: Buffer.from("fake-pdf").toString("base64"),
       },
       actor: { name: "test", function: "medical_affairs" },
-      org_id: "org-test",
+      org_id,
       workspace_id,
     });
 

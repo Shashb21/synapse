@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     if (!org_id) {
       return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
     }
+    await assertAccuracyCanProgress(body.workspace_id, "validation_gate");
     const result = await runAccuracyModule({
       call_kind: "validation_gate",
       agent_role: "none",
@@ -42,6 +44,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Validation failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }

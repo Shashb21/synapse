@@ -1,3 +1,4 @@
+import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 
@@ -45,7 +46,8 @@ describe("accuracy module run", () => {
 
   it("runs mechanical parse module without LLM", async () => {
     registerAccuracyStack();
-    const workspace_id = `ws-policy-${Date.now()}`;
+    const org_id = await createOrganization("Parse policy test");
+    const workspace_id = await createWorkspace({ org_id, name: "Parse policy", slug: `policy-${Date.now()}` });
     const result = await runAccuracyModule({
       call_kind: "parse",
       input: {
@@ -56,7 +58,7 @@ describe("accuracy module run", () => {
         content_base64: Buffer.from("fake").toString("base64"),
       },
       actor: { name: "test", function: "medical_affairs" },
-      org_id: "org-test",
+      org_id,
       workspace_id,
     });
     expect((result.output as { parser: string }).parser).toBe("llamaparse");

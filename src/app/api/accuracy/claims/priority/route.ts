@@ -1,3 +1,5 @@
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -18,6 +20,9 @@ const bodySchema = z.object({
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+    await assertAccuracyCanProgress(body.workspace_id, "prioritize");
     const claim = await getClaim(body.workspace_id, body.claim_id);
     if (!claim) {
       return NextResponse.json({ ok: false, error: "Claim not found" }, { status: 404 });
@@ -34,6 +39,9 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Priority update failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

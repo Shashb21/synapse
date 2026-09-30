@@ -1,3 +1,4 @@
+import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import {
@@ -69,6 +70,7 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   tactic_count: number;
   catalog: GanttCatalogEntry[];
 }> {
+  await assertAccuracyCanProgress(workspace_id, "gantt_project");
   const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
   const tactics = tacticsForGantt(claims);
   const gaps = gapsForGantt(claims);

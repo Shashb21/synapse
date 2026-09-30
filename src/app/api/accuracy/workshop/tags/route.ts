@@ -1,3 +1,5 @@
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -20,6 +22,9 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = bodySchema.parse(await request.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
+    await assertAccuracyCanProgress(body.workspace_id, "prioritize");
     if (body.action === "add_tag") {
       const snapshot = await addFacilitatorTag({
         workspace_id: body.workspace_id,
@@ -36,6 +41,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, snapshot });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Could not update facilitator tags";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -100,6 +101,12 @@ async function persistProposal(args: {
 export async function POST(req: Request) {
   try {
     const body = bodySchema.parse(await req.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) {
+      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+    }
+
+    await assertAccuracyCanProgress(body.workspace_id, "ideate");
     const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
     const tactics = await listClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
     const isManual = Boolean(body.title?.trim() && body.rationale?.trim());
@@ -136,11 +143,6 @@ export async function POST(req: Request) {
         tactic_ids: [tactic.id],
         tactics_inserted: 1,
       });
-    }
-
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
     }
 
     let targetGaps = gaps;
@@ -223,6 +225,9 @@ export async function POST(req: Request) {
       summary: result.summary,
     });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Ideate failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

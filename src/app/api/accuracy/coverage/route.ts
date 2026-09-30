@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -40,8 +41,10 @@ const decideSchema = z.object({
 export async function POST(req: Request) {
   try {
     const body = decideSchema.parse(await req.json());
-    await upsertCoverageDecision(body);
     const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
+    await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
+    await upsertCoverageDecision(body);
     let statuses: unknown = null;
     if (org_id) {
       const derived = await runAccuracyModule({
@@ -56,6 +59,9 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ ok: true, statuses });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Coverage decide failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

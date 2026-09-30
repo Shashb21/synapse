@@ -1,3 +1,4 @@
+import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { AccuracyGanttBoard } from "@/components/accuracy/accuracy-gantt-board";
@@ -37,7 +38,9 @@ export default async function AccuracyTimelinePage({
       plan = await workspaceLatestPlan(workspaceId);
     }
   } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load timeline";
+    loadError = error instanceof AccuracyPausedError
+      ? "Timeline is paused until important source omissions are resolved."
+      : error instanceof Error ? error.message : "Could not load timeline";
   }
 
   const activeWorkspace = workspaces.find((row) => row.id === workspaceId);

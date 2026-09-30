@@ -1,3 +1,4 @@
+import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { describe, expect, it } from "vitest";
 import {
   activityIdForTactic,
@@ -95,17 +96,19 @@ describe("gantt project engine", () => {
 describe("gantt project module run", () => {
   it("runs through accuracy kernel without LLM", async () => {
     registerAccuracyStack();
+    const org_id = await createOrganization("Gantt projection test");
+    const workspace_id = await createWorkspace({ org_id, name: "Gantt projection", slug: `gantt-${Date.now()}` });
     const result = await runAccuracyModule({
       call_kind: "gantt_project",
       input: {
-        workspace_id: "ws-gantt",
+        workspace_id,
         tactics: [
           { id: "T1", validated: true, start: "2026-01-01", end: "2026-06-01", depends_on: [] },
         ],
       },
       actor: { name: "test", function: "medical_affairs" },
-      org_id: "org-test",
-      workspace_id: "ws-gantt",
+      org_id,
+      workspace_id,
     });
     const output = result.output as { activities: { tactic_id: string }[] };
     expect(output.activities).toHaveLength(1);

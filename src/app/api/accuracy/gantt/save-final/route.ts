@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
     if (!org_id) {
       return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
     }
+    await assertAccuracyCanProgress(body.workspace_id, "gantt_project");
     const result = await saveFinalGanttPlan({
       workspace_id: body.workspace_id,
       status: body.status ?? "final",
@@ -42,6 +44,9 @@ export async function POST(request: Request) {
       audit_bundle: result.audit_bundle,
     });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Save final failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }

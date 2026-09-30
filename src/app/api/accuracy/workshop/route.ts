@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     if (!org_id) {
       return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
     }
+    await assertAccuracyCanProgress(body.workspace_id, "gantt_project");
     const snapshot = await createWorkshopSnapshot({
       workspace_id: body.workspace_id,
       actor: actorFrom(body),
@@ -69,6 +71,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, snapshot });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Could not save workshop state";
     const status = /not ready|Partial|validated|No live gaps/i.test(message) ? 409 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
@@ -84,9 +89,15 @@ const sceneSchema = z.object({
 export async function PATCH(request: Request) {
   try {
     const body = sceneSchema.parse(await request.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
+    await assertAccuracyCanProgress(body.workspace_id, "prioritize");
     const snapshot = await setWorkshopScene(body);
     return NextResponse.json({ ok: true, snapshot });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Could not update workshop scene";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

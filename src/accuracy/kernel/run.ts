@@ -1,3 +1,4 @@
+/** Execute accuracy modules after input, tenant ownership, and omission pause checks. */
 import { activeAccuracyModule } from "./registry";
 import { ensureAccuracySchema } from "../store/db";
 import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun } from "./observability";
@@ -14,6 +15,8 @@ import type {
   Actor,
 } from "./contracts";
 import { estimateCostUsd } from "./cost";
+import { getWorkspaceOrgId } from "../store/tenant";
+import { assertAccuracyCanProgress } from "./omission-pause";
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -27,6 +30,13 @@ export type AccuracyRunResult<O> = {
   token_usage: CostEstimate["usage"];
 };
 
+/**
+ * Run a registered module within its verified workspace and record execution evidence.
+ * @param args - Operation, module input, trusted workspace/organization, and actor.
+ * @returns Validated output with the recorded run identity, costs, and evaluation.
+ * @throws Error for invalid input or conflicting workspace/organization identity.
+ * @throws AccuracyPausedError for downstream work with unresolved important omissions.
+ */
 export async function runAccuracyModule<O = unknown>(args: {
   call_kind: CallKind;
   agent_role?: AgentRole | "none";
@@ -38,6 +48,21 @@ export async function runAccuracyModule<O = unknown>(args: {
   const agent_role = args.agent_role ?? "proposer";
   const implementation = await activeAccuracyModule(args.call_kind);
   await ensureAccuracySchema(implementation.migrations ?? []);
+
+  const parsedInput = implementation.inputSchema.safeParse(args.input);
+  if (!parsedInput.success) {
+    throw new Error(parsedInput.error.issues.map((issue) => issue.message).join("; "));
+  }
+  const inputWorkspace = parsedInput.data && typeof parsedInput.data === "object"
+    ? (parsedInput.data as Record<string, unknown>).workspace_id : undefined;
+  if (inputWorkspace !== args.workspace_id) {
+    throw new Error("Module input workspace_id must match the trusted workspace_id.");
+  }
+  const workspaceOrg = await getWorkspaceOrgId(args.workspace_id);
+  if (!workspaceOrg || workspaceOrg !== args.org_id) {
+    throw new Error("Workspace does not belong to the trusted organization.");
+  }
+  await assertAccuracyCanProgress(args.workspace_id, args.call_kind);
 
   const recorder = new AccuracyRunRecorder({
     org_id: args.org_id,
@@ -51,12 +76,6 @@ export async function runAccuracyModule<O = unknown>(args: {
   });
   await openAccuracyRun(recorder);
 
-  const parsedInput = implementation.inputSchema.safeParse(args.input);
-  if (!parsedInput.success) {
-    const message = parsedInput.error.issues.map((i) => i.message).join("; ");
-    await closeAccuracyRun({ recorder, status: "error", error: message });
-    throw new Error(message);
-  }
   recorder.note("input:accepted", parsedInput.data);
 
   let route = null;

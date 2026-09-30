@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -34,6 +35,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
     }
 
+    await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
     const claims = await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id]);
     const gap = claims.find((c) => c.id === body.gap_id);
     const tactic = claims.find((c) => c.id === body.tactic_id);
@@ -90,6 +92,9 @@ export async function POST(req: Request) {
       stub: mode === "stub",
     });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Coverage assist failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

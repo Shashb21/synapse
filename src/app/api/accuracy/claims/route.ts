@@ -1,3 +1,5 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
@@ -35,6 +37,9 @@ const insertSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = insertSchema.parse(await request.json());
+    const org_id = await getWorkspaceOrgId(body.workspace_id);
+    if (!org_id) return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+    await assertAccuracyCanProgress(body.workspace_id, "validation_gate");
     const claim = await insertClaim({
       workspace_id: body.workspace_id,
       claim_type: body.claim_type,
@@ -46,6 +51,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, claim });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Could not insert claim";
     return NextResponse.json({ error: message }, { status: 400 });
   }

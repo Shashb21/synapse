@@ -1,3 +1,5 @@
+import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
 import {
@@ -19,6 +21,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
   }
   try {
+    const org_id = await getWorkspaceOrgId(workspace_id);
+    if (!org_id) return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+    await assertAccuracyCanProgress(workspace_id, "gantt_project");
     const [projection, plan] = await Promise.all([
       projectWorkspaceGantt(workspace_id),
       workspaceLatestPlan(workspace_id),
@@ -30,6 +35,9 @@ export async function GET(request: Request) {
       audit_bundle: plan ? auditBundleFromPlan(plan) : null,
     });
   } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Gantt projection failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }
