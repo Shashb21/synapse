@@ -3817,3 +3817,71 @@ export async function unassignGapFromBreakoutGroup(args: {
     args.gap_id,
   );
 }
+
+/** Renames a breakout group or changes its focus note (KAN-55). */
+export async function updateBreakoutGroup(args: {
+  group_id: string;
+  name?: string;
+  note?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  const name = args.name === undefined ? group.name : args.name.trim();
+  if (!name) throw new Error("A breakout group needs a name.");
+  const note = args.note === undefined ? group.note : args.note.trim() || null;
+  await db().update(t.breakoutGroups).set({ name, note }).where(eq(t.breakoutGroups.id, args.group_id));
+  await appendAudit(args.actor_name, args.actor_function, "breakout_group", args.group_id, "update", name);
+}
+
+/** Adds several gaps to one group in one call; gaps already in it are skipped (KAN-55). */
+export async function assignGapsToBreakoutGroup(args: {
+  group_id: string;
+  gap_ids: string[];
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<number> {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  const already = new Set(state.breakout_group_gaps.filter((row) => row.group_id === args.group_id).map((row) => row.gap_id));
+  const known = new Set(state.gaps.map((gap) => gap.id));
+  const fresh = [...new Set(args.gap_ids)].filter((id) => known.has(id) && !already.has(id));
+  if (args.gap_ids.some((id) => !known.has(id))) throw new Error("Gap not found");
+  if (fresh.length === 0) return 0;
+  await db().insert(t.breakoutGroupGaps).values(fresh.map((gap_id) => ({ group_id: args.group_id, gap_id })));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "breakout_group",
+    args.group_id,
+    "assign_gaps",
+    `${fresh.length} gap${fresh.length === 1 ? "" : "s"} → ${group.name}`,
+  );
+  return fresh.length;
+}
+
+/** Moves a gap from one group to another (KAN-55). */
+export async function moveGapToBreakoutGroup(args: {
+  gap_id: string;
+  from_group_id: string;
+  to_group_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  if (args.from_group_id === args.to_group_id) return;
+  await assignGapToBreakoutGroup({
+    group_id: args.to_group_id,
+    gap_id: args.gap_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await unassignGapFromBreakoutGroup({
+    group_id: args.from_group_id,
+    gap_id: args.gap_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+}

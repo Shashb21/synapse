@@ -1,4 +1,5 @@
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
+import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
 import { NextResponse } from "next/server";
 import {
   acceptMapping,
@@ -43,6 +44,9 @@ import {
   rewritePartialGap,
   splitPartialGap,
   unassignGapFromBreakoutGroup,
+  updateBreakoutGroup,
+  assignGapsToBreakoutGroup,
+  moveGapToBreakoutGroup,
   unassignTacticFromGap,
   unlockTacticsStage,
   validateGap,
@@ -748,14 +752,18 @@ export async function POST(request: Request) {
         });
         break;
       }
-      case "create_breakout_group":
-        await createBreakoutGroup({
+      case "create_breakout_group": {
+        const group_id = await createBreakoutGroup({
           name: body.name,
           note: body.note,
           actor_name,
           actor_function,
         });
+        // Optionally starts with a theme's gaps (KAN-55).
+        const gap_ids = String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+        if (gap_ids.length > 0) await assignGapsToBreakoutGroup({ group_id, gap_ids, actor_name, actor_function });
         break;
+      }
       case "delete_breakout_group":
         await deleteBreakoutGroup({
           group_id: body.group_id,
@@ -771,6 +779,44 @@ export async function POST(request: Request) {
           actor_function,
         });
         break;
+      case "update_breakout_group":
+        await updateBreakoutGroup({
+          group_id: body.group_id,
+          name: typeof body.name === "string" ? body.name : undefined,
+          note: typeof body.note === "string" ? body.note : undefined,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "assign_gaps_to_breakout":
+        await assignGapsToBreakoutGroup({
+          group_id: body.group_id,
+          gap_ids: String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "move_gap_to_breakout":
+        await moveGapToBreakoutGroup({
+          gap_id: body.gap_id,
+          from_group_id: body.from_group_id,
+          to_group_id: body.to_group_id,
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "create_breakout_groups_by_theme": {
+        if (!(BREAKOUT_THEMES as readonly string[]).includes(body.theme)) {
+          return NextResponse.json({ error: "Choose a theme: domain, setting or priority." }, { status: 400 });
+        }
+        await createBreakoutGroupsByTheme({
+          theme: body.theme as BreakoutTheme,
+          only_unassigned: body.only_unassigned === "true" || (body.only_unassigned as unknown) === true,
+          actor_name,
+          actor_function,
+        });
+        break;
+      }
       case "unassign_gap_from_breakout":
         await unassignGapFromBreakoutGroup({
           group_id: body.group_id,
