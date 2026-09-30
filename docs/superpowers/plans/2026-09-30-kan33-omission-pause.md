@@ -28,7 +28,7 @@
 2. Another workspace's run, issue, block, or claim ID is submitted: action is rejected without mutation (Task 2).
 3. A repeated request after a timeout: the same idempotency key returns the original decision and does not create another claim or provenance span (Task 2).
 4. A direct downstream module call bypasses the composed extraction route: the shared run guard still pauses it (Task 3).
-5. The last blocker is resolved: explicit resume runs merge/status once for that extraction set without re-extracting or inserting duplicate drafts (Task 3).
+5. The last blocker is resolved: explicit resume runs merge/status once for that extraction set without re-extracting or inserting duplicate drafts (Task 4).
 
 ---
 
@@ -69,28 +69,41 @@
 - [ ] **Step 3: Implement the action boundary.** Use `requestIdentity` and `assertCan(role, "validate")`; require signed-in identity outside demo. Derive the finding from the terminal persisted assessment, revalidate its source block and quote, and ignore actor/issue detail supplied by the body. Lock the parent run row in a database transaction; re-read current issue state under that lock. Make claim creation/provenance and action insertion use the same transaction executor. Keep `claims.metadata.provenance` canonical because the existing merge reader uses it. Compare the canonical request fingerprint on replay; reject key reuse with changed contents. `add` creates one draft with the finding's source span; `link_existing` appends that span only if absent to a workspace-owned active same-kind claim. Reuse merge/dedupe engine identity and lexical similarity rules: same-kind, compatible-pack strong ID or exact normalized statement must link; same-block Jaccard >=0.9 must link; same-block Jaccard >=0.5 and <0.9 is ambiguous and needs explicit distinct confirmation. Exclude inactive claims and surface tactic lifecycle conflicts rather than silently linking. Record a supplied statement in the created claim and action history as contributor-authored, never as model output. `add`, `link_existing`, `dismiss`, and reclassify-to-advisory close; reclassify-to-important stays open. A new action against a closed issue conflicts. Return 401/403/404/409 for the corresponding trust or conflict cases.
 - [ ] **Step 4: Run focused tests, typecheck, and commit.** `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-actions.test.ts`; `npm run typecheck`; commit `feat(kan-33): resolve omissions with audited actions`.
 
-### Task 3: Pause every downstream path and resume the composed pipeline
+### Task 3: Guard every downstream execution path
 
 **Files:**
 - Modify: `src/accuracy/kernel/run.ts` — shared downstream guard before module execution.
 - Create: `src/accuracy/kernel/omission-pause.ts` — guarded call-kind set and typed pause error, using Task 1 blockers.
-- Modify: `src/app/api/accuracy/extract/route.ts` — paused response after draft insertion, explicit resume without re-extraction.
 - Modify: downstream accuracy routes including coverage, coverage assist, validation, ideation, priority, and Gantt projection/save-final — preflight before any direct mutation or projection; map typed pause to HTTP 409.
-- Modify: `src/accuracy/kernel/observability.ts` — support a reserved stable run ID for recoverable resume stages.
-- Test: `tests/accuracy-omission-pause.test.ts`, `tests/accuracy-extract-api.test.ts`.
+- Test: `tests/accuracy-omission-pause.test.ts` and affected route tests.
 
 **Interfaces:**
 - Export `AccuracyPausedError` with structured blockers and `assertAccuracyCanProgress(workspace_id, call_kind)`. Guard merge, pair generation, coverage, validation, status, prioritization, ideation, and projection call kinds; allow extraction and completeness review.
 - Enumerate guarded call kinds: `merge_dedupe`, `pair_generate`, `coverage_decide`, `coverage_critic`, `validation_gate`, `status_derive`, `partial_split`, `prioritize`, `ideate`, `gantt_project`. Allow `upload`, `parse`, `need_extract`, `inventory_extract`, `completeness_audit`. Test the policy for every `CALL_KINDS` value.
+
+- [ ] **Step 1: Write failing gate and route tests.** Important unresolved finding blocks direct `runAccuracyModule` for downstream kinds; table-test all `CALL_KINDS`; conflicting outer/input workspace IDs or org ownership are rejected before any run. Direct coverage, manual ideation, priority, and projection routes make no mutation while paused. Advisory does not block. Existing no-blocker behavior remains.
+- [ ] **Step 2: Run `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-pause.test.ts` and confirm failure.**
+- [ ] **Step 3: Implement the central guard and route preflights.** Validate parsed module input workspace against the trusted outer workspace and its org before opening a run, then guard downstream calls at `runAccuracyModule`. Preflight routes whose direct writes or projections occur outside that runner; map `AccuracyPausedError` to 409 without leaking another workspace's findings. Read the installed Next route guide before editing route files.
+- [ ] **Step 4: Run focused tests, typecheck, targeted ESLint, and commit.** `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-pause.test.ts`; `npm run typecheck`; lint touched files; commit `feat(kan-33): guard downstream accuracy paths`.
+
+### Task 4: Apply extraction batches and safely resume
+
+**Files:**
+- Modify: `src/app/api/accuracy/extract/route.ts` — fully applied batch, paused response, explicit resume without re-extraction.
+- Modify: `src/accuracy/kernel/observability.ts` and `src/accuracy/kernel/run.ts` — reserved stable run ID for recoverable resume stages.
+- Create: `src/accuracy/store/extraction-batch-store.ts` — batch and resume journal state transitions.
+- Test: `tests/accuracy-extract-api.test.ts`, `tests/accuracy-omission-resume.test.ts`.
+
+**Interfaces:**
 - Extraction POST accepts today's request body or `{ action: "resume", workspace_id, source_file_id, extraction_batch_id, idempotency_key }`. A paused extraction returns HTTP 409 `{ ok:false, paused:true, blockers, extraction_batch_id, runs, gaps_inserted, tactics_inserted }`. The run-scoped GET response includes its server-owned `extraction_batch_id` for the review page. Resume loads its run IDs from that batch, skips extraction, checks blockers, then runs merge/status. Still blocked returns 409 with `paused:true`; stale/mismatched batch returns 409 with `code:"stale_batch"`; concurrent resume returns 409 with `code:"resume_in_progress"`; completed and replayed resume return the same stored 200 response.
 - `resume` uses the batch and journal from Task 1. Under a workspace/source database lock, it checks the stored batch belongs to the workspace/source, is fully applied, contains the requested run IDs and kinds, and remains the latest applied set. Reserve a stable operation/run ID before each merge/status stage and use it to find an already completed module run on recovery. A completed journal response is returned on retry; interrupted stages resume from their durable state without duplicating downstream effects.
 
-- [ ] **Step 1: Write failing gate and route tests.** Important unresolved finding blocks direct `runAccuracyModule` for downstream kinds and composed merge/status; table-test all `CALL_KINDS`; conflicting outer/input workspace IDs are rejected before any run. Direct coverage, manual ideation, priority, and projection routes make no mutation while paused. Advisory does not block. Paused extraction returns recorded run IDs/draft counts and server-owned batch ID, without merge/status. An OK extractor whose draft persistence fails does not supersede an older blocker. Resolve the final blocker and resume: merge/status run, no new extraction or draft insertion. A stale/mismatched batch or changed latest extraction set is rejected. A repeated or interrupted resume does not duplicate downstream effects. Preexisting tests with no blockers keep their response behavior.
-- [ ] **Step 2: Run `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-pause.test.ts tests/accuracy-extract-api.test.ts` and confirm failure.**
-- [ ] **Step 3: Implement the central guard and route flow.** Validate parsed module input workspace against the trusted outer workspace and its org before opening a run, then guard downstream calls at `runAccuracyModule`. Preflight routes whose direct writes or projections occur outside that runner. Create an extraction batch before running extractors; mark it fully applied only after all requested runs and drafts persist. Then call the gate before merge/status. Add an explicit resume branch bound to the latest applied batch, using the durable journal and lock above. A retry returns the stored result or recovers a stage without re-extraction. Map `AccuracyPausedError` to 409 without leaking another workspace's findings. Keep the no-blocker extraction response unchanged. Read the installed Next route guide before editing route files.
-- [ ] **Step 4: Run focused tests, typecheck, targeted ESLint, and commit.** `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-pause.test.ts tests/accuracy-extract-api.test.ts`; `npm run typecheck`; `npx eslint src/accuracy/kernel/run.ts src/accuracy/kernel/omission-pause.ts src/app/api/accuracy/extract/route.ts`; commit `feat(kan-33): pause downstream use until resolved`.
+- [ ] **Step 1: Write failing batch and resume tests.** Paused extraction returns run IDs, draft counts and a server-owned batch ID, without merge/status. An OK extractor whose draft persistence fails does not supersede an older blocker. Resolve the final blocker and resume: merge/status run, no new extraction or draft insertion. A stale/mismatched batch or changed latest extraction set is rejected. A repeated or interrupted resume does not duplicate downstream effects. Preexisting tests with no blockers keep their response behavior.
+- [ ] **Step 2: Run `npm test -- --silent --maxWorkers=2 tests/accuracy-extract-api.test.ts tests/accuracy-omission-resume.test.ts` and confirm failure.**
+- [ ] **Step 3: Implement batch and resume transitions.** Create a batch before running extractors; mark it fully applied only after all requested runs and drafts persist. Then call Task 3's gate before merge/status. Add the explicit resume branch bound to the latest applied batch, using the durable journal and lock above. A retry returns the stored result or recovers a stage without re-extraction. Keep the no-blocker extraction response unchanged. Read the installed Next route guide before editing.
+- [ ] **Step 4: Run focused tests, typecheck, targeted ESLint, and commit.** `npm test -- --silent --maxWorkers=2 tests/accuracy-extract-api.test.ts tests/accuracy-omission-resume.test.ts`; `npm run typecheck`; lint touched files; commit `feat(kan-33): pause and resume extraction batches`.
 
-### Task 4: Contributor review controls and visible pause state
+### Task 5: Contributor review controls and visible pause state
 
 **Files:**
 - Modify: `src/app/accuracy/runs/[run_id]/page.tsx` — show current action status and a contributor action entry point for each finding.
@@ -98,7 +111,7 @@
 - Test: `tests/accuracy-agent-events.test.ts` and `tests/accuracy-omission-actions.test.ts`.
 
 **Interfaces:**
-- Consume Task 2's run-scoped API, keyed by exact run/issue; show current versus superseded, blocking versus advisory, and the latest actor/reason. Use browser-generated idempotency key per submit attempt and retain it for retries. Read the server-owned extraction batch ID from the paused response or a run/batch lookup; do not reconstruct it from one run's events.
+- Consume Task 2's run-scoped API and Task 4's resume contract, keyed by exact run/issue; show current versus superseded, blocking versus advisory, and the latest actor/reason. Use browser-generated idempotency key per submit attempt and retain it for retries. Read the server-owned extraction batch ID from the run-scoped lookup; do not reconstruct it from one run's events.
 
 - [ ] **Step 1: Write failing rendering/interaction tests.** An important open issue shows paused state and four contributor actions; advisory remains visible without a pause label. A linked item shows its claim ID and recorded reason/actor. Viewer sees status but cannot submit. A conflict response asks for an explicit distinct-item confirmation and does not silently retry `add`. The original issue and later action can be matched by ID.
 - [ ] **Step 2: Run focused tests and confirm failure.** `npm test -- --silent --maxWorkers=2 tests/accuracy-agent-events.test.ts tests/accuracy-omission-actions.test.ts`.
