@@ -113,12 +113,13 @@
 ### Task 5: Contributor review controls and visible pause state
 
 **Files:**
+- Modify: `src/app/api/accuracy/omissions/route.ts` — include server-validated source_file_id in run-scoped GET for resume, including zero-finding runs.
 - Modify: `src/app/accuracy/runs/[run_id]/page.tsx` — show current action status and a contributor action entry point for each finding.
 - Create: `src/app/accuracy/runs/[run_id]/omission-actions.tsx` — small client form for add/link/dismiss/reclassify, reason, and ambiguous-identity confirmation.
 - Test: `tests/accuracy-agent-events.test.ts` and `tests/accuracy-omission-actions.test.ts`.
 
 **Interfaces:**
-- Consume Task 2's run-scoped API and Task 4's resume contract, keyed by exact run/issue; show current versus superseded, blocking versus advisory, and the latest actor/reason. Use browser-generated idempotency key per submit attempt and retain it for retries. Read the server-owned extraction batch ID from the run-scoped lookup; do not reconstruct it from one run's events.
+- Consume Task 2's run-scoped API and Task 4's resume contract, keyed by exact run/issue; show current versus superseded, blocking versus advisory, and the latest actor/reason. Use browser-generated idempotency key per submit attempt and retain it for retries. Read the server-owned extraction batch ID and source_file_id from the validated run-scoped lookup; do not reconstruct them from omission events, which can be empty.
 
 - [ ] **Step 1: Write failing rendering/interaction tests.** An important open issue shows paused state and four contributor actions; advisory remains visible without a pause label. A linked item shows its claim ID and recorded reason/actor. Viewer sees status but cannot submit. A conflict response asks for an explicit distinct-item confirmation and does not silently retry `add`. The original issue and later action can be matched by ID.
 - [ ] **Step 2: Run focused tests and confirm failure.** `npm test -- --silent --maxWorkers=2 tests/accuracy-agent-events.test.ts tests/accuracy-omission-actions.test.ts`.
