@@ -36,8 +36,9 @@
 
 **Files:**
 - Modify: `src/accuracy/store/schema.ts` — action, extraction batch, and resume journal tables with workspace-scoped keys, indexes, additive DDL/migration.
+- Modify: `src/accuracy/store/tenant.ts` — delete the new workspace-scoped rows in FK-safe order during workspace removal.
 - Create: `src/accuracy/store/omission-review-store.ts` — latest-run findings, latest actions, blocker calculation, typed history access.
-- Test: `tests/accuracy-omission-review-store.test.ts`.
+- Test: `tests/accuracy-omission-review-store.test.ts` and the existing workspace-deletion test.
 
 **Interfaces:**
 - Export `OmissionReviewItem = { workspace_id: string; source_file_id: string; run_id: string; call_kind: "need_extract" | "inventory_extract"; issue: SuspectedOmission; latest_action: OmissionAction | null; blocking: boolean }`.
@@ -47,7 +48,7 @@
 - `OmissionAction` stores action `add | link_existing | dismiss | reclassify`, optional claim ID or new importance, reason, actor name/function, timestamp, run/issue/workspace/source identity, and caller idempotency key. Keep an append-only history; latest action decides the effective block state.
 - Store a canonical request fingerprint alongside each action so an idempotency key cannot silently replay a different decision. The extraction batch records workspace/source, requested kinds, run IDs, created claim IDs, and `drafts_persisted` state. The resume journal has a unique batch ID and records a reserved stable operation ID for each merge/status stage, each stage's state, and its final response. Task 3 owns batch and journal writes.
 
-- [ ] **Step 1: Write failing database tests.** Persist KAN-32 terminal critiques for two same-block issues in applied batches; assert both appear and each can block independently. Assert an advisory finding stays visible/nonblocking. Assert a newer applied batch supersedes an older blocked run; an OK run whose drafts were not fully persisted does not. Assert unrelated workspace/source cannot appear. Assert reclassify-advisory and close actions remove only their issue from blockers, while reclassify-important remains blocking.
+- [ ] **Step 1: Write failing database tests.** Persist KAN-32 terminal critiques for two same-block issues in applied batches; assert both appear and each can block independently. Assert an advisory finding stays visible/nonblocking. Assert a newer applied batch supersedes an older blocked run; an OK run whose drafts were not fully persisted does not. Assert unrelated workspace/source cannot appear. Assert reclassify-advisory and close actions remove only their issue from blockers, while reclassify-important remains blocking. Deleting a workspace removes its new action/batch/journal records.
 - [ ] **Step 2: Run `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-review-store.test.ts` with local Postgres access and confirm the new tests fail before implementation.**
 - [ ] **Step 3: Add tables and read model.** Query only OK need/inventory runs named by applied batches, choose latest by finish time plus ID for each `(source_file_id, call_kind)`, select the highest critique iteration, and overlay the latest action per run/issue. Verify each persisted run input identifies the batch's workspace/source/kind. Treat `check_failed` as visible check state, retaining any explicit important findings rather than synthesizing new ones. Use one shared decision function for the `blocking` flag; source-linked issue identity comes from persisted KAN-32 evidence, not a client payload. Preserve historical actions when a newer extraction supersedes them. Add batch and resume journal schemas now for Task 3.
 - [ ] **Step 4: Run focused tests, typecheck, and commit.** `npm test -- --silent --maxWorkers=2 tests/accuracy-omission-review-store.test.ts`; `npm run typecheck`; commit `feat(kan-33): track current omission blockers`.
