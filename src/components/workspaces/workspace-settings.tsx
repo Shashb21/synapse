@@ -8,11 +8,10 @@ import { Input } from "@/components/ui/input";
 import type { WorkspaceMember, WorkspaceRole } from "@/modules/workspaces/store";
 import { DemoBadge } from "./demo-badge";
 import { formatCreated, sendJson, WORKSPACE_ROLE_LABELS } from "./model";
-import { WorkspaceAiSetting } from "./workspace-ai-switch";
 import { WorkspaceContents } from "./workspace-contents";
 
 /**
- * Rename (owner), turn AI assistance on or off (owner; members see it), see who is in, invite by email (any member), remove people
+ * Rename (owner), see who is in, invite by email (any member), remove people
  * (owner), and load the demo data or reset to blank (owner).
  */
 export function WorkspaceSettings({
@@ -20,15 +19,12 @@ export function WorkspaceSettings({
   members: initialMembers,
   me,
   isCurrent = false,
-  ai = { workspace: true, platform: true },
 }: {
   workspace: { id: string; name: string; role: WorkspaceRole; created_at: string; demo: boolean };
   members: WorkspaceMember[];
   me: string;
   /** This is the workspace the person has open. */
   isCurrent?: boolean;
-  /** The workspace's AI assistance setting and the platform master switch. */
-  ai?: { workspace: boolean; platform: boolean };
 }) {
   const owner = workspace.role === "owner";
   const [name, setName] = useState(workspace.name);
@@ -91,17 +87,6 @@ export function WorkspaceSettings({
           {!owner && workspace.demo ? <DemoBadge /> : null}
         </p>
       </section>
-
-      <WorkspaceAiSetting
-        model={{
-          workspaceId: workspace.id,
-          workspaceName: savedName,
-          enabled: ai.workspace,
-          platformEnabled: ai.platform,
-          owner,
-          isCurrent,
-        }}
-      />
 
       {owner ? <WorkspaceContents workspaceId={workspace.id} demo={workspace.demo} isCurrent={isCurrent} /> : null}
 

@@ -4,7 +4,7 @@ import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { setupContextFromState } from "@/lib/iegp/planning-context";
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext, type SessionContext } from "@/modules/auth/session";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspace } from "@/modules/workspaces/session";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const [state, identity, ai, workspace] = await Promise.all([
     loadSetupState(),
     loadSetupIdentity(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("ingestion").catch(() => false),
     currentWorkspace().catch(() => null),
   ]);
   const isNew = params.new === "1" && !state.asset.setup_complete;

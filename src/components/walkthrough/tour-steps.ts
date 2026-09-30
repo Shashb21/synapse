@@ -1,3 +1,4 @@
+import { ROOM_ENABLED } from "@/lib/room/enabled";
 /**
  * The guided tour of the customer app: one step per main place, in the order
  * a plan is built. Each step names the page it lives on and the control to
@@ -27,7 +28,7 @@ export type TourStep = {
 const nav = (href: string): TourTarget => ({ selector: `a[href="${href}"]` });
 const heading: TourTarget = { selector: "main h1, h1" };
 
-export const TOUR_STEPS: TourStep[] = [
+const ALL_TOUR_STEPS: TourStep[] = [
   {
     id: "gaps",
     place: "Gaps",
@@ -35,7 +36,7 @@ export const TOUR_STEPS: TourStep[] = [
     title: "Start with the evidence gaps",
     ai: "Gaps extracted from your uploaded sources land here with the tactics already mapped and a computed status. Validate each gap, tag its treatment settings, and split or rewrite any Partial gap.",
     manual:
-      "AI is off, so nothing is extracted for you. Use Add gap to enter each evidence gap by hand, tag its treatment settings, then validate it. Split or rewrite Partial gaps yourself.",
+      "Use Add gap to enter each evidence gap by hand, tag its treatment settings, then validate it. Split or rewrite Partial gaps yourself.",
     targets: [{ selector: "button", text: /^\s*add gaps?\s*$/i }, { selector: '[aria-label="Filter gaps"]' }, nav("/?place=gaps"), heading],
   },
   {
@@ -98,6 +99,9 @@ export const TOUR_STEPS: TourStep[] = [
     targets: [{ selector: '[aria-label="Prep or Room mode"]' }, heading],
   },
 ];
+
+/** The tour, without the Room step while Room is out of the app (KAN-52). */
+export const TOUR_STEPS: TourStep[] = ALL_TOUR_STEPS.filter((step) => ROOM_ENABLED || step.id !== "room");
 
 /** The first visible element for a step, if any is on the page. */
 export function findTourTarget(step: TourStep, root: ParentNode = document): HTMLElement | null {

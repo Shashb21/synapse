@@ -11,7 +11,8 @@ import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards
 import { AiOnly } from "@/components/platform/ai-status";
 import { StepWaiting } from "@/components/step-waiting";
 import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSections } from "@/modules/kernel/ai-switch";
+import { noAiSections, type AiSections } from "@/modules/kernel/ai-sections";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
@@ -33,17 +34,16 @@ export const dynamic = "force-dynamic";
 function PlaceIntro({
   place,
   wizardComplete,
-  ai,
+  sections,
 }: {
   place: PlanPlace;
   wizardComplete: boolean;
-  ai: boolean;
+  sections: AiSections;
 }) {
-  if (place === "upload" && !ai) {
+  if (place === "upload" && !sections.ingestion) {
     return (
-      <PageIntro kicker="AI is off · manual plan" title="Start">
-        Nothing is uploaded or parsed while AI is off. Add your gaps and the tactics you already
-        have by hand, then map, prioritize and date them yourself.
+      <PageIntro kicker="Manual plan" title="Start">
+        Add your gaps and the tactics you already have, then map, prioritize and date them.
       </PageIntro>
     );
   }
@@ -72,7 +72,7 @@ function PlaceIntro({
   if (place === "tactics") {
     return (
       <PageIntro kicker="Gap tactics" title="Tactic Ideation">
-        {ai
+        {sections.ideation
           ? "The High-priority Open gaps, each with its linked tactics and AI-assisted suggestions. Accept or reject each suggestion with a reason, or write a custom tactic. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."
           : "The High-priority Open gaps, each with its linked tactics. Assign a tactic from the library or write a custom one. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."}
       </PageIntro>
@@ -80,7 +80,7 @@ function PlaceIntro({
   }
   return (
     <PageIntro kicker="Priority canvas" title="Prioritization Matrix">
-      {ai
+      {sections.prioritization
         ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft; drag them to set their priority, then validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."
         : "Pick a setting and two axes, then place each Open gap by hand (type its scores or band, or drop it on the matrix) and validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."}
     </PageIntro>
@@ -96,7 +96,9 @@ export default async function HomePage({
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
-  const ai = await aiEnabled().catch(() => true);
+  // Each place follows its own AI section (KAN-53): Upload ingestion, Matrix prioritization, Ideation.
+  const sections = await aiSections().catch(() => noAiSections());
+  const ai = sections.ingestion;
   // Demo source files are offered only in a workspace that holds the Velmara demo.
   const demo = await currentWorkspaceIsDemo();
   // With AI off nothing is ingested, so Gaps never waits for a source.
@@ -120,8 +122,9 @@ export default async function HomePage({
     const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
-        {/* Follows the client AI status, so flipping the workspace switch swaps Upload and Start at once. */}
+        {/* Upload follows the admin's ingestion switch (KAN-53); with it off the plan starts by hand. */}
         <AiOnly
+          section="ingestion"
           fallback={
             <ManualStart
               gapCount={workspace.review.length}
@@ -212,7 +215,7 @@ export default async function HomePage({
 
   return (
     <AppShell active={place}>
-      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} ai={ai} />
+      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} sections={sections} />
       {pane}
       {place === "upload" ? (
         <div className="mt-8">

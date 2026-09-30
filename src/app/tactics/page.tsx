@@ -9,7 +9,7 @@ import { CATCH_UP_TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES, CREATE_TACT
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
 import { listRejectedTacticCandidates } from "@/app/api/iegp/promote-candidates";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default async function TacticsPage() {
     loadState(),
     sessionContext(),
     listRejectedTacticCandidates(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("tactic_extraction").catch(() => false),
   ]);
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);

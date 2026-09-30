@@ -26,6 +26,7 @@ import { RunEvalsButton } from "@/components/platform/run-evals-button";
 import { HillclimbSweepButton } from "@/components/platform/hillclimb-sweep-button";
 import { RoutingPanel } from "@/components/platform/routing-panel";
 import { ProviderPanel } from "@/components/platform/provider-panel";
+import { noAiSections } from "@/modules/kernel/ai-sections";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
 import { SetupWizard } from "@/components/setup/setup-wizard";
 import PipelinePage from "@/app/admin/pipeline/page";
@@ -155,6 +156,7 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     const panel = render(
       createElement(AiSwitchPanel, {
         ai: { enabled: false, updated_by: ACTOR, updated_at: "now", rationale: "test" },
+        sections: noAiSections(),
         mayToggle: false,
         identity: IDENTITY,
       }),
@@ -162,6 +164,9 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     );
     expect(panel).toContain("no upload or parsing");
     expect(panel).toContain("Add gaps and Add tactics");
+    // One row per AI section; gap status is named as not built (KAN-53).
+    expect(panel).toContain("High-priority tactic ideation");
+    expect(panel).toContain("No AI module developed yet");
   });
 
   it("the setup wizard points to Add gaps and Add tactics instead of upload and connecting models", () => {
@@ -174,7 +179,9 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     const off = render(createElement(SetupWizard, props), false);
     expect(off).toContain("Work by hand");
     expect(off).not.toContain("AI models");
-    expect(off).toContain("AI is off");
+    // The customer sees the manual path and is not told about AI (KAN-53).
+    expect(off).toContain("After setup you start with Add gaps and Add tactics");
+    expect(off).not.toContain("AI is off");
     expect(off).toContain('href="/?place=gaps"');
     expect(off).toContain('href="/tactics"');
     expect(off).not.toContain("Upload sources");

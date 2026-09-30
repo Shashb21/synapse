@@ -2,7 +2,8 @@ import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
 import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
-import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "./ai-switch";
+import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled, aiSectionEnabled } from "./ai-switch";
+import { sectionOfStage } from "./ai-sections";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
@@ -130,7 +131,9 @@ export async function runStage<O = unknown>(args: {
   const implementation = await activeModule(args.stage);
   await ensurePlatformSchema(implementation.migrations ?? []);
   // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
-  const ai = await aiEnabled();
+  // Each stage follows its section's admin switch (KAN-53); S7 and S10 have no section.
+  const section = sectionOfStage(args.stage);
+  const ai = section ? await aiSectionEnabled(section) : await aiEnabled();
   const manifest = implementation.manifest;
   if (!ai && ((manifest.agentic && !manifest.ai_optional) || manifest.needs_ai)) {
     throw new AiDisabledError(stageLabel(args.stage));

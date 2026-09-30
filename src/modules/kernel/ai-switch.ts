@@ -3,21 +3,19 @@ import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import { getWorkspace } from "@/modules/workspaces/store";
 import { sharedDb } from "./db";
 import { nowIso } from "./ids";
+import { AI_SECTION_IDS, isAiSectionId, noAiSections, type AiSectionId, type AiSections } from "./ai-sections";
 
 /**
  * Whether AI may run. With AI off the tool is fully manual: no model is
  * called, no suggestion or automatic AI action runs, and the UI shows only the
  * hand-entry paths.
  *
- * Two switches decide it, and both must be on:
- * - the platform switch (the owner's master kill-switch in /admin/control),
- *   stored in platform_settings and surviving workspace resets;
- * - the workspace's own "AI assistance" setting, set by that workspace's
- *   owner (workspaces.ai_enabled; modules/workspaces/ai-setting.ts).
- *
- * `aiEnabled()` resolves the workspace the way `db()` resolves the schema: a
- * `runInWorkspace` scope, else the signed workspace cookie. Outside a request
- * only the platform switch counts.
+ * The Synapse admin decides it, for every customer (KAN-53):
+ * - the platform master switch in /admin/control, which turns all AI off;
+ * - one switch per AI section (ingestion, extraction, mapping, split,
+ *   prioritization, ideation: ai-sections.ts). Every section starts off.
+ * Customers have no AI switch. The old per-workspace setting
+ * (workspaces.ai_enabled) no longer counts.
  */
 
 export const PLATFORM_SETTINGS_DDL = `CREATE TABLE IF NOT EXISTS platform_settings (
@@ -28,6 +26,7 @@ export const PLATFORM_SETTINGS_DDL = `CREATE TABLE IF NOT EXISTS platform_settin
 )`;
 
 const AI_KEY = "ai_enabled";
+const SECTIONS_KEY = "ai_sections";
 
 let settingsReady: Promise<unknown> | null = null;
 /** Platform settings are shared by every workspace, so they live in the public schema. */
@@ -95,34 +94,74 @@ export type AiState = {
   /** The workspace setting; true when no workspace is in scope. */
   workspace: boolean;
   workspace_id: string | null;
+  /** Per section: the master switch AND the section switch (KAN-53). */
+  sections: AiSections;
   /** Which switch turned AI off, or null while it is on. The platform wins when both are off. */
   off_by: "platform" | "workspace" | null;
 };
 
-/** Both switches for the workspace in scope (or `workspaceId` when given). */
+/** The admin's per-section switches as stored; a section never set is off. */
+export async function storedAiSections(): Promise<{ sections: AiSections; updated_by: string | null; updated_at: string | null }> {
+  await ensureSettingsTable();
+  const rows = (await sharedDb().execute(
+    sql`select value, updated_by, updated_at from platform_settings where key = ${SECTIONS_KEY} limit 1`,
+  )) as unknown as { value: Partial<Record<string, boolean>>; updated_by: string; updated_at: string }[];
+  const stored = rows[0]?.value ?? {};
+  const sections = noAiSections();
+  for (const id of AI_SECTION_IDS) sections[id] = stored[id] === true;
+  return { sections, updated_by: rows[0]?.updated_by ?? null, updated_at: rows[0]?.updated_at ?? null };
+}
+
+/** Effective per-section AI: the master switch AND the section's switch. */
+export async function aiSections(): Promise<AiSections> {
+  const [platform, stored] = await Promise.all([platformAiEnabled(), storedAiSections()]);
+  const sections = noAiSections();
+  for (const id of AI_SECTION_IDS) sections[id] = platform && stored.sections[id];
+  return sections;
+}
+
+/** Turns one section on or off for every customer (admin only; the caller checks). */
+export async function setAiSection(args: { section: AiSectionId; enabled: boolean; actor_name: string }): Promise<AiSections> {
+  if (!isAiSectionId(args.section)) throw new Error("Unknown AI section.");
+  const next = { ...(await storedAiSections()).sections, [args.section]: args.enabled };
+  const at = nowIso();
+  await sharedDb().execute(
+    sql`insert into platform_settings (key, value, updated_by, updated_at)
+        values (${SECTIONS_KEY}, ${JSON.stringify(next)}::jsonb, ${args.actor_name}, ${at})
+        on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+  );
+  return next;
+}
+
+/** The switches for the workspace in scope. `workspace` stays for callers that read it. */
 export async function aiState(workspaceId?: string | null): Promise<AiState> {
   const id = workspaceId === undefined ? await scopedWorkspaceId() : workspaceId;
-  const [platform, workspace] = await Promise.all([
-    platformAiEnabled(),
-    id ? workspaceAiEnabled(id) : Promise.resolve(true),
-  ]);
+  const [platform, sections] = await Promise.all([platformAiEnabled(), aiSections()]);
+  const any = AI_SECTION_IDS.some((section) => sections[section]);
   return {
-    enabled: platform && workspace,
+    enabled: platform && any,
     platform,
-    workspace,
+    workspace: true,
     workspace_id: id,
-    off_by: !platform ? "platform" : !workspace ? "workspace" : null,
+    sections,
+    off_by: platform && any ? null : "platform",
   };
 }
 
-/** Effective AI for the current workspace: the platform switch AND the workspace setting. */
+/** Whether any AI runs at all: the master switch AND at least one section on. */
 export async function aiEnabled(): Promise<boolean> {
   return (await aiState()).enabled;
 }
 
-/** Throws AiDisabledError when the switch is off. */
-export async function assertAiEnabled(what?: string): Promise<void> {
-  if (!(await aiEnabled())) throw new AiDisabledError(what);
+/** Whether one section's AI runs: the master switch AND that section's switch. */
+export async function aiSectionEnabled(section: AiSectionId): Promise<boolean> {
+  return (await aiSections())[section];
+}
+
+/** Throws AiDisabledError when the section (or, with none given, all AI) is off. */
+export async function assertAiEnabled(what?: string, section?: AiSectionId): Promise<void> {
+  const on = section ? await aiSectionEnabled(section) : await aiEnabled();
+  if (!on) throw new AiDisabledError(what);
 }
 
 /** The platform switch. A plain switch: no reason is asked for, and it is not an edit that feeds hillclimb. */

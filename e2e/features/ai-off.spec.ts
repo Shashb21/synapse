@@ -30,7 +30,8 @@ test.describe.serial("AI switched off by an admin", () => {
     await setAi(request, false);
     await page.reload();
     await expect(page.getByTestId("ai-switch-panel")).toContainText(/AI is off/);
-    await expect(page.getByTestId("ai-off-banner")).toBeVisible();
+    // Customers are not told about AI (KAN-53): no banner, just the manual flow.
+    await expect(page.getByTestId("ai-off-banner")).toHaveCount(0);
   });
 
   test("the first screen is Add gaps and Add tactics, with no upload or ingest", async ({ page }) => {

@@ -5,7 +5,7 @@ import { buildMappingTableView, latestS4MappingRows } from "@/lib/iegp/mapping-t
 import { loadState } from "@/lib/iegp/store";
 import { listRejectedMappings } from "@/lib/iegp/restore";
 import { RejectedMappings } from "@/components/restore-actions";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export default async function MappingsPage() {
   const [state, proposed, ai, rejected] = await Promise.all([
     loadState(),
     latestS4MappingRows(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("mapping").catch(() => false),
     listRejectedMappings(),
   ]);
   const workspace = buildPlanWorkspace(state);
@@ -21,7 +21,7 @@ export default async function MappingsPage() {
 
   return (
     <AppShell active="mappings">
-      <PageIntro kicker={ai ? "AI mapping · you decide" : "AI is off · map by hand"} title="Gap ↔ tactic mapping table">
+      <PageIntro kicker={ai ? "AI mapping · you decide" : "Map by hand"} title="Gap ↔ tactic mapping table">
         One row per gap: assigned tactic(s) and mapping status (open, addressed, partially addressed).
         {ai
           ? " Accept, reject or edit any row with a short rationale. A row you save wins over later AI mapping runs, and a tactic you remove or reject is never mapped to that gap again. Your notes guide the next AI mapping run."

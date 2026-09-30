@@ -29,8 +29,8 @@ export default async function RootLayout({
 }: {
   children: ReactNode;
 }) {
-  // The page must render before Postgres exists; AI counts as on until it is read.
-  // Effective AI: the platform master switch AND the open workspace's setting.
+  // The page must render before Postgres exists; AI counts as off until it is read.
+  // Effective AI, per section: the admin's master switch AND that section's switch (KAN-53).
   const ai = await aiState().catch(() => null);
   return (
     <html lang="en" className={`${jetbrainsMono.variable} h-full`} suppressHydrationWarning>
@@ -38,7 +38,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
-        <AiStatusProvider enabled={ai?.enabled ?? true} offBy={ai?.off_by ?? null}>
+        <AiStatusProvider enabled={ai?.enabled ?? false} offBy={ai?.off_by ?? null} sections={ai?.sections}>
           <AiOffBanner />
           <TooltipProvider>{children}</TooltipProvider>
           <WalkthroughHost />

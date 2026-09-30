@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["./tests/support/ai-on.ts"],
     fileParallelism: false,
     /** CI ingest/store tests exceed the default 5s under shared Postgres load. */
     testTimeout: 20_000,

@@ -14,7 +14,7 @@ import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { BAND_RANK, ideationBandOrder, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ export default async function IdeationPage() {
     listPlacements(),
     listIdeationProposals(),
     sessionContext(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("ideation").catch(() => false),
   ]);
 
   const identity = {
@@ -113,7 +113,7 @@ export default async function IdeationPage() {
       <PageIntro kicker="Tactics ideation" title="Tactics ideation review">
         {ai
           ? "The model designs candidate tactics for every open gap whose priority band you validated (High first, then Medium, then Low), critiques them against the tactic library and keeps the best per gap. Accepting a proposal creates a proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
-          : "AI is off, so no ideas are generated. Write ideas by hand for any open gap whose priority band was validated (High, Medium or Low). Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
+          : "Write ideas for any open gap whose priority band was validated (High, Medium or Low). Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
       </PageIntro>
 
       <div className="grid gap-4">
@@ -144,7 +144,7 @@ export default async function IdeationPage() {
               variant={total === 0 ? "default" : "outline"}
             />
           ) : (
-            <p className="text-[11px] text-muted-foreground">AI is off: add ideas by hand.</p>
+            <p className="text-[11px] text-muted-foreground">Add ideas by hand.</p>
           )}
         </div>
 

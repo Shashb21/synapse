@@ -320,7 +320,7 @@ function NavLists({
   dense?: boolean;
   label: string;
 }) {
-  const places = placesOf(nav, useAiEnabled());
+  const places = placesOf(nav, useAiEnabled("ingestion"));
   const reveal = dense ? "opacity-0 transition-opacity group-data-[open=true]/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100" : "";
   // Rail-only extras take no room until the rail opens.
   const openOnly = dense ? "hidden group-data-[open=true]/rail:block group-has-[:focus-visible]/rail:block" : "";
@@ -373,7 +373,8 @@ export function PlanChrome({
 }) {
   const [open, setOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const ai = useAiEnabled();
+  // Upload is a place only while the admin has ingestion on (KAN-53).
+  const ai = useAiEnabled("ingestion");
   const places = placesOf(nav, ai);
   const current =
     places.find((p) => p.id === active)?.label ??

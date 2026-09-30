@@ -103,7 +103,7 @@ function GapIdeationCard({
   /** Opens the side panel for a tactic; returns false when it has no editable record. */
   onEditTactic?: (tacticId: string) => boolean;
 }) {
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("ideation");
   const linked = card.tactics;
   const assignable = library.filter((item) => !linked.some((row) => row.id === item.id));
   const bodyId = `ideation-${card.gap_id}`;

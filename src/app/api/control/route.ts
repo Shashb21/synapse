@@ -14,7 +14,8 @@ import { requestIdentity } from "@/modules/auth/request";
 import { ownerAccess, ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
 import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
-import { aiSwitch, setAiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSwitch, setAiEnabled, setAiSection, storedAiSections } from "@/modules/kernel/ai-switch";
+import { AI_SECTION_IDS, isAiSectionId } from "@/modules/kernel/ai-sections";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,8 @@ export const dynamic = "force-dynamic";
  */
 const OWNER_ACTIONS = new Set([
   "set_ai_enabled",
+  "set_ai_section",
+  "set_ai_sections",
   "set_route",
   "set_default_provider",
   "activate_module",
@@ -37,15 +40,17 @@ const OWNER_ACTIONS = new Set([
 export async function GET() {
   const denied = await ownerGate();
   if (denied) return denied;
-  const [wiring, routes, connections, axes, ai] = await Promise.all([
+  const [wiring, routes, connections, axes, ai, sections] = await Promise.all([
     stageWiring(),
     routeConfigs(),
     listConnections(),
     loadAxes(),
     aiSwitch(),
+    storedAiSections(),
   ]);
   return NextResponse.json({
     ai,
+    ai_sections: sections.sections,
     wiring,
     routes,
     connections,
@@ -87,6 +92,22 @@ export async function POST(request: Request) {
           rationale: typeof body.rationale === "string" ? body.rationale : undefined,
         });
         return NextResponse.json({ ok: true, ai });
+      }
+      // One AI section on or off for every customer (KAN-53).
+      case "set_ai_section": {
+        if (!isAiSectionId(body.section)) throw new Error("Unknown AI section.");
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const sections = await setAiSection({ section: body.section, enabled: body.enabled, actor_name: identity.actor.name });
+        return NextResponse.json({ ok: true, ai_sections: sections });
+      }
+      // Every section at once (a fresh platform, or the e2e suite).
+      case "set_ai_sections": {
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        let sections = (await storedAiSections()).sections;
+        for (const section of AI_SECTION_IDS) {
+          sections = await setAiSection({ section, enabled: body.enabled, actor_name: identity.actor.name });
+        }
+        return NextResponse.json({ ok: true, ai_sections: sections });
       }
       case "set_route": {
         const stage = String(body.stage ?? "") as StageId;
