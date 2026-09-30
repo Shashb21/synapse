@@ -1,7 +1,8 @@
 /** Execute accuracy modules after input, tenant ownership, and omission pause checks. */
+import { isDeepStrictEqual } from "node:util";
 import { activeAccuracyModule } from "./registry";
 import { ensureAccuracySchema } from "../store/db";
-import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun } from "./observability";
+import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun, reservedAccuracyRun } from "./observability";
 import {
   accuracyCompletionFor,
   resolveAccuracyRoute,
@@ -39,6 +40,7 @@ export type AccuracyRunResult<O> = {
  */
 export async function runAccuracyModule<O = unknown>(args: {
   call_kind: CallKind;
+  reserved_run_id?: string;
   agent_role?: AgentRole | "none";
   input: unknown;
   actor: Actor;
@@ -64,6 +66,19 @@ export async function runAccuracyModule<O = unknown>(args: {
   }
   await assertAccuracyCanProgress(args.workspace_id, args.call_kind);
 
+  if (args.reserved_run_id) {
+    const existing = await reservedAccuracyRun(args.workspace_id, args.reserved_run_id);
+    if (existing) {
+      if (existing.call_kind !== args.call_kind || existing.org_id !== args.org_id
+        || !isDeepStrictEqual(existing.input, args.input) || existing.status !== "ok") {
+        throw new Error("Reserved run identity conflicts with this operation.");
+      }
+      return { run_id: existing.id, call_kind: args.call_kind, module_id: existing.module_id,
+        module_version: existing.module_version, summary: existing.summary ?? "", output: existing.output as O,
+        evals: (existing.evals ?? []) as EvalScore[], cost_usd: Number(existing.cost_usd ?? 0),
+        token_usage: (existing.token_usage as CostEstimate["usage"] | null) ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+    }
+  }
   const recorder = new AccuracyRunRecorder({
     org_id: args.org_id,
     workspace_id: args.workspace_id,
@@ -73,7 +88,7 @@ export async function runAccuracyModule<O = unknown>(args: {
     module_version: implementation.manifest.version,
     actor: args.actor,
     input: args.input,
-  });
+  }, args.reserved_run_id);
   await openAccuracyRun(recorder);
 
   recorder.note("input:accepted", parsedInput.data);

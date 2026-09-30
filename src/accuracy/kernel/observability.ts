@@ -249,3 +249,11 @@ export async function summarizeAccuracyRunCost(
     .limit(limit);
   return rollupAccuracyRunCost(runs);
 }
+
+/** Read a reserved operation only within its trusted workspace. */
+export async function reservedAccuracyRun(workspace_id: string, run_id: string) {
+  await ensureAccuracySchema();
+  const [run] = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(
+    eq(t.accuracyModuleRuns.workspace_id, workspace_id), eq(t.accuracyModuleRuns.id, run_id))).limit(1);
+  return run ?? null;
+}

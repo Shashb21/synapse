@@ -1,4 +1,5 @@
 /** Read current/historical extraction findings and record authorized contributor decisions. */
+import { extractionBatchForRun } from "@/accuracy/store/extraction-batch-store";
 import { NextResponse } from "next/server";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
@@ -30,7 +31,8 @@ export async function GET(request: Request) {
       const reviews = await getOmissionReviewsForRun({ workspace_id, run_id });
       if (!reviews) return NextResponse.json({ error: "Unknown applied run in workspace." }, { status: 404 });
       const actions = await listOmissionActionHistory({ workspace_id, run_id });
-      return NextResponse.json({ ...reviews, actions });
+      const extraction_batch_id = await extractionBatchForRun(workspace_id, run_id);
+      return NextResponse.json({ ...reviews, actions, extraction_batch_id });
     }
     return NextResponse.json({ items: await listCurrentOmissionReviews(workspace_id) });
   } catch (error) { return errorResponse(error); }
