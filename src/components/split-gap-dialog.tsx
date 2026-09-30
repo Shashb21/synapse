@@ -120,7 +120,7 @@ export function SplitGapDialog({
   const [openTacticIds, setOpenTacticIds] = useState<string[]>([]);
   const [rationale, setRationale] = useState("");
   const [proposing, setProposing] = useState(false);
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("partial_split");
   const [proposalNote, setProposalNote] = useState<string | null>(null);
   /**
    * Tracks whether the user edited the split themselves, as opposed to just
@@ -334,7 +334,7 @@ export function SplitGapDialog({
             </Button>
           ) : (
             <span className="self-center text-[11px] text-muted-foreground">
-              AI is off: fill the split in yourself.
+              Fill the split in yourself.
             </span>
           )}
         </div>

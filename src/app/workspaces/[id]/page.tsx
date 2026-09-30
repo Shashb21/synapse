@@ -4,7 +4,6 @@ import { notFound, redirect } from "next/navigation";
 import { WorkspaceSettings } from "@/components/workspaces/workspace-settings";
 import { WorkspacesFrame } from "@/components/workspaces/workspaces-frame";
 import { currentSession } from "@/modules/auth/session";
-import { platformAiEnabled } from "@/modules/kernel/ai-switch";
 import { selectedWorkspaceId } from "@/modules/workspaces/context";
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, listMembers, memberRole } from "@/modules/workspaces/store";
@@ -21,11 +20,7 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
   const me = principalOf(session);
   const [workspace, role] = await Promise.all([getWorkspace(id), memberRole(id, me)]);
   if (!workspace || !role) notFound();
-  const [members, selected, platformAi] = await Promise.all([
-    listMembers(id),
-    selectedWorkspaceId().catch(() => null),
-    platformAiEnabled().catch(() => true),
-  ]);
+  const [members, selected] = await Promise.all([listMembers(id), selectedWorkspaceId().catch(() => null)]);
 
   return (
     <WorkspacesFrame person={{ name: session.actor.name, email: session.email }}>
@@ -35,7 +30,6 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
       <h1 className="mb-6 mt-2 text-base font-bold tracking-tight text-foreground">{workspace.name}</h1>
       <WorkspaceSettings
         workspace={{ id: workspace.id, name: workspace.name, role, created_at: workspace.created_at, demo: workspace.demo }}
-        ai={{ workspace: workspace.ai_enabled, platform: platformAi }}
         isCurrent={selected === workspace.id}
         members={members}
         me={me.includes("@") ? me.toLowerCase() : me}

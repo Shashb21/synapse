@@ -3,7 +3,8 @@ import { RoutingPanel, type StageRouteView } from "@/components/platform/routing
 import { SessionPanel } from "@/components/platform/session-panel";
 import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
 import { AiStatusProvider } from "@/components/platform/ai-status";
-import { aiSwitch, type AiSwitch } from "@/modules/kernel/ai-switch";
+import { aiSwitch, storedAiSections, type AiSwitch } from "@/modules/kernel/ai-switch";
+import { noAiSections } from "@/modules/kernel/ai-sections";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
 import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
@@ -69,6 +70,9 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     updated_at: null,
     rationale: null,
   }));
+  const sections = await storedAiSections()
+    .then((row) => row.sections)
+    .catch(() => noAiSections());
   // Platform configuration follows the master switch, not the owner's open workspace.
   const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage, ai.enabled)));
   // The owner holds every platform capability, whatever their plan role.
@@ -128,6 +132,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       <div className="grid gap-8">
         <AiSwitchPanel
           ai={ai}
+          sections={sections}
           mayToggle={may("toggle_ai")}
           identity={{
             signed_in: identity.signed_in,

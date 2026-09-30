@@ -347,7 +347,7 @@ export function GapsWorkbench({
   const [setting, setSetting] = useState("");
   const [priority, setPriority] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("ingestion");
   const counts = reviewGapFilterCounts(cards);
   const domains = useMemo(() => [...new Set(cards.map((card) => card.domain))].sort(), [cards]);
   const settings = useMemo(
@@ -413,7 +413,7 @@ export function GapsWorkbench({
         <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">
           {ai
             ? "No gaps yet. Ingest a source on Upload, or add an Open or Addressed gap here."
-            : "No gaps yet. AI is off: add an Open or Addressed gap here by hand."}
+            : "No gaps yet. Add an Open or Addressed gap here."}
         </p>
       ) : (
         <>

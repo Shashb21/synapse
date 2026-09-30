@@ -169,7 +169,7 @@ export function AxisChooser({
   onCancel?: () => void;
 }) {
   const router = useRouter();
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("prioritization");
   const [xAxis, setXAxis] = useState(initialX);
   const [yAxis, setYAxis] = useState(initialY);
   const [pending, setPending] = useState(false);
@@ -222,7 +222,7 @@ export function AxisChooser({
         <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground">
           {ai
             ? "Pick the two axes for the matrix. The model places each Open gap as a first draft; you then drag gaps to change their priority and validate each one."
-            : "Pick the two axes for the matrix. AI is off, so you place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
+            : "Pick the two axes for the matrix. You place each Open gap yourself: type its scores or band, or drop it on the matrix, then validate it."}{" "}
           Top-right is Prioritize (High), top-left Plan (Medium), bottom-right Monitor (Low) and bottom-left Defer. The quadrant only suggests a priority: you confirm it with a rationale.
         </p>
       </div>
@@ -485,7 +485,7 @@ export function PrioritizeMatrix({
   mayPrioritize: boolean;
 }) {
   const router = useRouter();
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("prioritization");
   const plotRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     gapId: string;
@@ -846,7 +846,7 @@ export function PrioritizeMatrix({
                   {busy ??
                     (ai
                       ? "No gap is placed yet."
-                      : "No gap is placed yet. AI is off: pick one under Not placed yet and place it by hand.")}
+                      : "No gap is placed yet. Drag one from Not placed yet onto the matrix.")}
                 </p>
               ) : null}
             </div>

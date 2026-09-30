@@ -24,7 +24,7 @@ export default async function ControlPage({
   return (
     <AdminMain>
       <PageIntro kicker="Owner · platform-wide" title="Control panel">
-        Switch AI on or off for all workspaces (each workspace owner can also turn it off for their own), log in to each model provider with OAuth and route every stage where you want it. Grok is the
+        Switch AI on or off for every customer, as a whole and section by section; customers have no AI switch. Log in to each model provider with OAuth and route every stage where you want it. Grok is the
         locked default; Claude is one click away. Nothing here accepts an API key.
         {ai ? null : " AI is off right now, so providers and routes below are kept but not used."}
       </PageIntro>

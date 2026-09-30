@@ -14,7 +14,7 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { sessionContext } from "@/modules/auth/session";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import {
   DOMAIN_LABELS,
   EVIDENCE_DOMAINS,
@@ -52,7 +52,7 @@ export default async function GapDetailPage({
   const [state, session, ai] = await Promise.all([
     loadState(),
     sessionContext(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("partial_split").catch(() => false),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
@@ -535,7 +535,7 @@ export default async function GapDetailPage({
                   </>
                 ) : (
                   <>
-                    No leftover drafted. AI is off: open Partially Addressed to split the gap by hand,
+                    No leftover drafted. Open Partially Addressed to split the gap,
                     or write the leftover yourself.
                   </>
                 )}

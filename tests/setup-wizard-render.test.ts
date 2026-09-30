@@ -170,7 +170,7 @@ describe("setup wizard steps", () => {
 
 describe("walkthrough", () => {
   it("tours the main places in order", () => {
-    expect(TOUR_STEPS.map((s) => s.place)).toEqual(["Gaps", "Tactics", "Mapping table", "Prioritize", "Ideation", "Timeline", "Room"]);
+    expect(TOUR_STEPS.map((s) => s.place)).toEqual(["Gaps", "Tactics", "Mapping table", "Prioritize", "Ideation", "Timeline"]);
     expect(onStepPage(TOUR_STEPS[0]!, "/", new URLSearchParams("place=gaps"))).toBe(true);
     expect(onStepPage(TOUR_STEPS[0]!, "/", new URLSearchParams("place=plan"))).toBe(false);
     expect(onStepPage(TOUR_STEPS[2]!, "/mappings", new URLSearchParams())).toBe(true);
@@ -179,15 +179,17 @@ describe("walkthrough", () => {
   it("explains the AI path when AI is on and the manual path when it is off", () => {
     const props = { step: 0, onPage: true, highlighted: true, onBack: () => undefined, onNext: () => undefined, onGo: () => undefined, onDismiss: () => undefined };
     const on = render(createElement(WalkthroughCard, { ...props, ai: true }));
-    expect(on).toContain("1 of 7");
+    expect(on).toContain(`1 of ${TOUR_STEPS.length}`);
     expect(on).toContain(TOUR_STEPS[0]!.ai.slice(0, 40));
     expect(on).toContain("Next: Tactics");
+    // With AI off the customer sees the manual path and is not told about AI (KAN-53).
     const off = render(createElement(WalkthroughCard, { ...props, ai: false }), false);
-    expect(off).toContain("AI is off");
+    expect(off).not.toContain("AI is off");
     expect(off).toContain("Add gap");
-    const away = render(createElement(WalkthroughCard, { ...props, ai: true, step: 6, onPage: false }));
-    expect(away).toContain("Open Room");
-    const last = render(createElement(WalkthroughCard, { ...props, ai: true, step: 6 }));
+    const lastStep = TOUR_STEPS.length - 1;
+    const away = render(createElement(WalkthroughCard, { ...props, ai: true, step: lastStep, onPage: false }));
+    expect(away).toContain(`Open ${TOUR_STEPS[lastStep]!.place}`);
+    const last = render(createElement(WalkthroughCard, { ...props, ai: true, step: lastStep }));
     expect(last).toContain("Finish");
   });
 

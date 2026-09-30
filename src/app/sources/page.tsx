@@ -2,14 +2,14 @@ import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { loadState } from "@/lib/iegp/store";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const state = await loadState();
-  const ai = await aiEnabled().catch(() => true);
+  const ai = await aiSectionEnabled("ingestion").catch(() => false);
   // Demo source files are offered only in a workspace that holds the Velmara demo.
   const demo = await currentWorkspaceIsDemo();
   const blockCount = new Map<string, number>();
@@ -30,8 +30,8 @@ export default async function SourcesPage() {
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </>
       ) : (
-        <PageIntro kicker="AI is off · read only" title="Sources">
-          Nothing is uploaded or parsed while AI is off. Sources already here stay readable. Add
+        <PageIntro kicker="Read only" title="Sources">
+          No new sources are added in this plan. Sources already here stay readable. Add
           gaps and tactics by hand on{" "}
           <Link href="/?place=upload" className="text-foreground">
             Start
@@ -54,7 +54,7 @@ export default async function SourcesPage() {
         <p className="mt-1 text-[11px] text-muted-foreground">
           {ai
             ? "Review, edit, split, merge, delete or add blocks, restore text the model dropped, and set each source's stakeholder function. Human edits survive every re-parse."
-            : "Open a source to read its blocks. No new sources are added while AI is off."}
+            : "Open a source to read its blocks. No new sources are added in this plan."}
         </p>
         {state.sources.length === 0 ? (
           <p className="mt-2 text-[11px] text-muted-foreground">No sources yet.</p>

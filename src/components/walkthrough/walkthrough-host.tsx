@@ -58,7 +58,7 @@ function useHighlight(active: boolean, stepIndex: number) {
 }
 
 function Host() {
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("ingestion");
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const search = useSearchParams();

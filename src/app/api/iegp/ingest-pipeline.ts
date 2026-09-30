@@ -1,5 +1,6 @@
 import "@/modules";
-import { assertAiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSections, assertAiEnabled } from "@/modules/kernel/ai-switch";
+import { sectionOfStage, type AiSections } from "@/modules/kernel/ai-sections";
 import { runStage } from "@/modules/kernel/run";
 import { isTestStub } from "@/modules/kernel/llm";
 import { resolveRoute } from "@/modules/kernel/routing";
@@ -30,11 +31,14 @@ export type IngestResult = {
  * Refuses before anything is written when a judgement stage cannot reach a
  * model, so a source is never half-ingested and nothing falls back to rules.
  */
-async function requireLlmStages(): Promise<void> {
-  // The admin switch first: with AI off nothing is ingested; gaps and tactics are added by hand.
-  await assertAiEnabled("Ingest");
+async function requireLlmStages(sections: AiSections): Promise<void> {
+  // The admin switch first: with ingestion off nothing is ingested; gaps and tactics are added by hand.
+  await assertAiEnabled("Ingest", "ingestion");
   if (isTestStub()) return;
   for (const stage of LLM_STAGES) {
+    // A stage whose section the admin turned off is skipped, so it needs no model (KAN-53).
+    const section = sectionOfStage(stage);
+    if (section && !sections[section]) continue;
     try {
       await resolveRoute(stage);
     } catch (error) {
@@ -65,7 +69,8 @@ export async function ingestThroughStages(args: {
     if (!file.title?.trim()) throw new Error("A title is required.");
     if (!file.text?.trim()) throw new Error("Paste or drop the source text to ingest.");
   }
-  await requireLlmStages();
+  const sections = await aiSections();
+  await requireLlmStages(sections);
   const run = <O>(stage: StageId, input: unknown) =>
     runStage<O>({ stage, input, actor: args.actor, role: args.role });
 
@@ -89,14 +94,18 @@ export async function ingestThroughStages(args: {
   }
   const document_ids = parse.output.documents.map((document) => document.id);
 
-  const gaps = await run<{ committed_gap_ids: string[] }>("S2", { document_ids });
-  const tactics = await run<{ committed_tactic_ids: string[] }>("S3", { document_ids });
-  const mapping = await run<{ committed: { gap_id: string }[] }>("S4", {});
+  // Extraction and mapping run only where the admin has their section on; otherwise the
+  // source is read and the person adds its gaps, tactics or mappings by hand.
+  const gaps = sections.gap_extraction ? await run<{ committed_gap_ids: string[] }>("S2", { document_ids }) : null;
+  const tactics = sections.tactic_extraction
+    ? await run<{ committed_tactic_ids: string[] }>("S3", { document_ids })
+    : null;
+  const mapping = sections.mapping ? await run<{ committed: { gap_id: string }[] }>("S4", {}) : null;
 
   return {
     source_ids: parse.output.documents.map((document) => document.source_id),
-    gap_ids: gaps.output.committed_gap_ids,
-    tactic_ids: tactics.output.committed_tactic_ids,
-    mapped_gap_ids: mapping.output.committed.map((row) => row.gap_id),
+    gap_ids: gaps?.output.committed_gap_ids ?? [],
+    tactic_ids: tactics?.output.committed_tactic_ids ?? [],
+    mapped_gap_ids: mapping?.output.committed.map((row) => row.gap_id) ?? [],
   };
 }

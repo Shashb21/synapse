@@ -9,7 +9,7 @@ import { DOMAIN_LABELS, EVIDENCE_DOMAINS, FUNCTION_LABELS } from "@/lib/iegp/enu
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
 import { listRejectedGapCandidates } from "@/app/api/iegp/promote-candidates";
-import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default async function NeedsPage() {
     loadState(),
     sessionContext(),
     listRejectedGapCandidates(),
-    aiEnabled().catch(() => true),
+    aiSectionEnabled("gap_extraction").catch(() => false),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
@@ -53,7 +53,7 @@ export default async function NeedsPage() {
                   {status === "candidate"
                     ? ai
                       ? "Empty. Upload a source to extract candidate needs, or add one by hand on a gap."
-                      : "Empty. AI is off: add a need by hand on a gap."
+                      : "Empty. Add a need on a gap."
                     : "None."}
                 </p>
               ) : (

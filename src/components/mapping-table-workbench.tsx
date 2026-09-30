@@ -22,7 +22,7 @@ export function MappingTableWorkbench({
   tactics: TacticLibraryItem[];
 }) {
   const [filter, setFilter] = useState<"all" | "proposal" | "human" | "open">("all");
-  const ai = useAiEnabled();
+  const ai = useAiEnabled("mapping");
   const filtered = useMemo(() => {
     if (filter === "proposal") return rows.filter((row) => row.source === "proposal");
     if (filter === "human") return rows.filter((row) => row.source === "human");
@@ -34,7 +34,7 @@ export function MappingTableWorkbench({
     if (!ai) {
       return (
         <section className="border border-border bg-card p-4 text-[13px] text-muted-foreground rounded-lg">
-          No gaps to map yet. AI is off: add gaps and tactics by hand on{" "}
+          No gaps to map yet. Add gaps and tactics on{" "}
           <Link href="/?place=upload" className="text-foreground underline-offset-2 hover:underline">
             Start
           </Link>
@@ -77,7 +77,7 @@ export function MappingTableWorkbench({
         <span className="text-[11px] text-muted-foreground">
           {ai
             ? "Accept, reject or edit any row — a saved row wins over later AI mapping runs, and a removed or rejected tactic is never mapped to that gap again."
-            : "AI is off: pick the tactics and a status for each row and save it with a rationale."}
+            : "Pick the tactics and a status for each row and save it with a rationale."}
         </span>
       </div>
 

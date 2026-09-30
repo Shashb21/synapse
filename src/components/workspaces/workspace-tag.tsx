@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
-import { Check, ChevronsUpDown, FolderKanban, Loader2, LogOut, Plus, Settings, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronsUpDown, FolderKanban, Loader2, LogOut, Plus, Settings, ShieldCheck, UserRound } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +15,6 @@ import {
 import { cn } from "@/lib/utils";
 import { DemoBadge } from "./demo-badge";
 import { sendJson, WORKSPACE_ROLE_LABELS, type WorkspaceTagModel } from "./model";
-import { SwitchTrack, useWorkspaceAiChange, WorkspaceAiConfirm } from "./workspace-ai-switch";
 
 /**
  * The workspace you are working in. Press it to switch workspace, start a new
@@ -26,16 +25,6 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const aiNoteId = useId();
-  const ai = useWorkspaceAiChange({
-    workspaceId: tag.current.id,
-    workspaceName: tag.current.name,
-    enabled: tag.ai?.workspace ?? true,
-    platformEnabled: tag.ai?.platform ?? true,
-    owner: tag.current.role === "owner",
-    isCurrent: true,
-  });
-
   async function switchTo(id: string) {
     if (id === tag.current.id) return;
     setPending(id);
@@ -115,32 +104,6 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuLabel>Workspace settings</DropdownMenuLabel>
-            <DropdownMenuItem
-              data-testid="workspace-menu-ai"
-              // Read only for members and while the platform switch is off; still focusable so its state is read out.
-              disabled={!ai.mayChange}
-              onClick={ai.ask}
-              render={(props) => (
-                <div
-                  {...props}
-                  role="switch"
-                  aria-checked={ai.effective}
-                  aria-label="AI assistance"
-                  aria-describedby={ai.note ? aiNoteId : undefined}
-                />
-              )}
-            >
-              <Sparkles aria-hidden />
-              <span className="min-w-0 flex-1">
-                <span className="block">AI assistance</span>
-                {ai.note ? (
-                  <span id={aiNoteId} className="block text-[10px] text-muted-foreground" data-testid="workspace-menu-ai-note">
-                    {ai.note}
-                  </span>
-                ) : null}
-              </span>
-              <SwitchTrack on={ai.effective} />
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push(`/workspaces/${encodeURIComponent(tag.current.id)}`)}>
               <Settings aria-hidden />
               This workspace&apos;s settings
@@ -178,7 +141,6 @@ export function WorkspaceTag({ tag, dense }: { tag: WorkspaceTagModel; dense?: b
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      <WorkspaceAiConfirm change={ai} workspaceName={tag.current.name} />
       {error ? (
         <p role="alert" className="text-[11px] text-destructive">
           {error}

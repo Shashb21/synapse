@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { sectionOfStage } from "@/modules/kernel/ai-sections";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { stageNeedsAi } from "@/modules/kernel/stage-ai";
 
@@ -38,7 +39,8 @@ export function RunStageButton({
   /** Shown instead of the button when AI is off and this stage needs AI. */
   aiOffFallback?: ReactNode;
 }) {
-  const ai = useAiEnabled();
+  // A stage's button follows its section's admin switch (KAN-53).
+  const ai = useAiEnabled(sectionOfStage(stage) ?? undefined);
   if (!ai && stageNeedsAi(stage)) return <>{aiOffFallback}</>;
   return (
     <StageButton
