@@ -66,9 +66,6 @@ export default async function TimelinePage() {
           <Link href="/breakouts" className="no-underline hover:underline">
             Open breakouts →
           </Link>
-          <Link href="/presentation" className="no-underline hover:underline">
-            Present this plan →
-          </Link>
         </div>
       </div>
 

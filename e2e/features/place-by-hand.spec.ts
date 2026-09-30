@@ -43,9 +43,9 @@ test.describe("Place by hand", () => {
     const before = await unplaced.getByRole("listitem").count();
     expect(before).toBeGreaterThan(0);
     const first = unplaced.getByRole("listitem").first();
-    const gapName = (await first.locator("span").first().innerText()).trim();
+    const gapName = (await first.locator(".truncate").first().innerText()).trim();
 
-    const trigger = page.getByRole("button", { name: "Place by hand" });
+    const trigger = page.getByRole("button", { name: "Type scores" });
     const dialog = page.getByRole("dialog");
     await expect(async () => {
       await first.getByRole("button").click();
@@ -100,8 +100,8 @@ test.describe("Place by hand", () => {
     const unplaced = page.getByRole("region", { name: "Gaps not placed yet" });
     await expect(unplaced.getByRole("listitem")).toHaveCount(1);
     const row = unplaced.getByRole("listitem").first();
-    const gapName = (await row.locator("span").first().innerText()).trim();
-    const trigger = page.getByRole("button", { name: "Place by hand" });
+    const gapName = (await row.locator(".truncate").first().innerText()).trim();
+    const trigger = page.getByRole("button", { name: "Type scores" });
     const dialog = page.getByRole("dialog");
     const open = async () =>
       expect(async () => {
@@ -150,5 +150,46 @@ test.describe("Place by hand", () => {
     expect(refused).toBe(1);
     await expect(unplaced).toHaveCount(0);
     await expect(page.getByRole("region", { name: /(High|Medium|Low) gaps/ }).getByText(gapName).first()).toBeVisible();
+  });
+
+  // Owner feedback (KAN-52): drag a gap from the list onto the matrix; where it lands sets its scores.
+  test("a gap dragged from the list onto the matrix is placed where it is dropped", async ({ page, request }) => {
+    await iegpAction(request, {
+      action: "create_gap",
+      name: "Drag gap three",
+      statement: "No real-world outcomes in patients over 75 for the German dossier.",
+      domain: "unmet_need",
+    });
+    await iegpAction(request, { action: "validate_gap", gap_id: "GAP-003" });
+    await page.goto("/?place=plan&setting=all");
+    const unplaced = page.getByRole("region", { name: "Gaps not placed yet" });
+    const item = unplaced.getByTestId("unplaced-gap").filter({ hasText: "Drag gap three" });
+    await expect(item).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    const plot = page.getByRole("group", { name: /^Prioritization matrix:/ });
+    const box = (await plot.boundingBox())!;
+    const from = (await item.boundingBox())!;
+
+    // A drop outside the matrix places nothing.
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2, from.y + 120, { steps: 6 });
+    await page.mouse.up();
+    await expect(item).toBeVisible();
+
+    // Drop in the top-right quadrant: favourable on both axes, so Prioritize (High).
+    const to = { x: box.x + box.width * 0.8, y: box.y + box.height * 0.2 };
+    const again = (await item.boundingBox())!;
+    await page.mouse.move(again.x + again.width / 2, again.y + again.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+
+    await expect(item).toHaveCount(0);
+    const chip = plot.getByRole("button", { name: /^Drag gap three: High/ });
+    await expect(chip).toBeVisible();
+    // It stays there after a reload: the scores were saved.
+    await page.reload();
+    await expect(page.getByRole("group", { name: /^Prioritization matrix:/ }).getByRole("button", { name: /^Drag gap three: High/ })).toBeVisible();
   });
 });

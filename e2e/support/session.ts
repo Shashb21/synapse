@@ -35,7 +35,8 @@ export async function listWorkspaces(request: APIRequestContext): Promise<Worksp
 
 export async function createWorkspace(request: APIRequestContext, name: string): Promise<WorkspaceSummary> {
   const body = await ok<{ workspace: WorkspaceSummary }>(
-    await request.post("/api/workspaces", { data: { name } }),
+    // The suite's workspaces keep AI on (new workspaces start with it off); AI-off specs turn it off.
+    await request.post("/api/workspaces", { data: { name, ai: true } }),
     `create workspace ${name}`,
   );
   return body.workspace;

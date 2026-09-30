@@ -1,23 +1,33 @@
 import { expect, test } from "@playwright/test";
 import { openRail } from "../support/rail";
 
-/** Prep ↔ Room: Room is one click from Prep, and Esc brings you back. */
-test("Room opens the room view and Esc brings you back to Prep", async ({ page }) => {
+/**
+ * Room is out of the app for now (owner, KAN-52): no Prep/Room switch, the Room URLs
+ * return to Prep, and plan context, the mapping table and breakouts are Prep places.
+ */
+test("Room is out for now; its context, mapping table and breakouts are in Prep", async ({ page }) => {
+  // Several routes compile on first visit in a dev server.
+  test.setTimeout(120_000);
   await page.goto("/");
-  // The rail opens on hover (KAN-8), and the Prep / Room switch sits in it.
   await openRail(page);
-  const toggle = page.getByRole("group", { name: /prep or room mode/i }).first();
-  await expect(toggle.getByText("Prep")).toHaveAttribute("aria-current", "true");
-  await toggle.getByRole("link", { name: "Room" }).click();
-  await expect(page).toHaveURL(/\/room(\?.*)?$/, { timeout: 60_000 });
-  // Room never renders the accuracy app.
-  expect(page.url()).not.toContain("/accuracy");
+  await expect(page.getByRole("group", { name: /prep or room mode/i })).toHaveCount(0);
+  const places = page.getByRole("navigation", { name: "Places" });
+  for (const [name, href] of [
+    [/^plan context/i, "/setup"],
+    [/^mapping table/i, "/mappings"],
+    [/^breakout groups/i, "/breakouts"],
+  ] as const) {
+    await expect(places.getByRole("link", { name })).toHaveAttribute("href", href);
+  }
 
-  await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/\/(\?.*)?$/, { timeout: 60_000 });
-  await openRail(page);
-  await expect(page.getByRole("group", { name: /prep or room mode/i }).first().getByText("Prep")).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  for (const path of ["/room", "/room/audience", "/presentation"]) {
+    await page.goto(path);
+    await expect(page).not.toHaveURL(/\/(room|presentation)/);
+  }
+
+  await page.goto("/breakouts");
+  await expect(page.getByRole("heading", { name: "Breakout groups" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /room presenter view|switch to presentation/i })).toHaveCount(0);
+  await page.goto("/timeline");
+  await expect(page.getByRole("link", { name: /present this plan/i })).toHaveCount(0);
 });

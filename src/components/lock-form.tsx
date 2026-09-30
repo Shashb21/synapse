@@ -40,6 +40,7 @@ export function LockForm({
   description,
   variant = "outline",
   note,
+  size = "md",
 }: {
   label: string;
   action: string;
@@ -54,6 +55,8 @@ export function LockForm({
    * request then carries an empty note.
    */
   note?: LockFormNote;
+  /** A form with many fields gets a wider dialog (KAN-52). */
+  size?: "md" | "lg";
 }) {
   const router = useRouter();
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -109,7 +112,7 @@ export function LockForm({
       <DialogTrigger render={<Button size="sm" variant={variant} />}>
         {label}
       </DialogTrigger>
-      <DialogContent className="z-[60] sm:max-w-md" initialFocus={note ? noteRef : undefined}>
+      <DialogContent className={size === "lg" ? "z-[60] sm:max-w-2xl" : "z-[60] sm:max-w-md"} initialFocus={note ? noteRef : undefined}>
         <form
           noValidate
           onSubmit={(e) => {

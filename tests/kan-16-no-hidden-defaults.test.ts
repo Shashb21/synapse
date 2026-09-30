@@ -113,10 +113,13 @@ describe("server: nothing assumed", () => {
 
 describe("forms: judgement fields start unpicked", () => {
   it("gap domain selects have no preselected domain", () => {
+    // Every create-gap dialog uses the shared fields (KAN-52).
     for (const file of ["src/components/plan-cards.tsx", "src/components/gaps-workbench.tsx"]) {
-      expect(src(file)).not.toContain('defaultValue="unmet_need"');
-      expect(src(file)).toContain("Choose a domain");
+      expect(src(file)).toContain("<GapFormFields />");
     }
+    const fields = src("src/components/gap-form-fields.tsx");
+    expect(fields).not.toContain('defaultValue="unmet_need"');
+    expect(fields).toContain("Choose a domain");
   });
 
   it("tactic type, status and owner function are not preselected", () => {

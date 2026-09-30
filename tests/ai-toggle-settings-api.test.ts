@@ -72,8 +72,8 @@ async function aiAudit(ws: Workspace) {
 beforeAll(async () => {
   vi.stubEnv("SYNAPSE_TEST_ANON_API", "0");
   await setAiEnabled({ enabled: true, actor_name: OWNER.name });
-  workspace = await createWorkspace({ name: `AI setting ${unique}`, owner: OWNER.email });
-  other = await createWorkspace({ name: `AI setting other ${unique}`, owner: OWNER.email });
+  workspace = await createWorkspace({ name: `AI setting ${unique}`, owner: OWNER.email, ai_enabled: true });
+  other = await createWorkspace({ name: `AI setting other ${unique}`, owner: OWNER.email, ai_enabled: true });
   await inviteMember({ workspace_id: workspace.id, email: MEMBER.email, by: OWNER.email });
 }, 60_000);
 

@@ -127,7 +127,13 @@ async function addMember(args: { workspace_id: string; principal: string; role: 
  * `demo` only records the flag; the caller loads the demo contents
  * (modules/workspaces/contents.ts).
  */
-export async function createWorkspace(args: { name: string; owner: string; demo?: boolean }): Promise<Workspace> {
+export async function createWorkspace(args: {
+  name: string;
+  owner: string;
+  demo?: boolean;
+  /** AI assistance starts off in a new workspace (owner feedback, KAN-52); the owner turns it on. */
+  ai_enabled?: boolean;
+}): Promise<Workspace> {
   const name = args.name.trim();
   if (name.length < 2) throw new Error("Give the workspace a name.");
   const id = `w${randomBytes(6).toString("hex")}`;
@@ -135,12 +141,13 @@ export async function createWorkspace(args: { name: string; owner: string; demo?
   await ensureWorkspaceSchema(schemaName);
   const created_at = nowIso();
   const demo = args.demo === true;
+  const ai_enabled = args.ai_enabled === true;
   await rows(sql`
-    insert into workspaces (id, name, schema_name, created_by, created_at, demo)
-    values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo})`);
+    insert into workspaces (id, name, schema_name, created_by, created_at, demo, ai_enabled)
+    values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo}, ${ai_enabled})`);
   await addMember({ workspace_id: id, principal: args.owner, role: "owner", added_by: args.owner });
   schemaCache.set(id, schemaName);
-  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled: true };
+  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled };
 }
 
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */

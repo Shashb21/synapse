@@ -52,6 +52,7 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
   test("adding a gap by hand asks for its domain instead of assuming one", async ({ page }) => {
     await page.goto("/?place=upload");
     const dialog = await openDialog(page, "Add gaps");
+    await dialog.locator('input[name="name"]').fill("Persistence versus standard of care");
     await dialog.locator('textarea[name="statement"]').fill("No persistence evidence versus standard of care in routine practice.");
     const domain = dialog.locator('select[name="domain"]');
     await expect(domain).toHaveValue("");

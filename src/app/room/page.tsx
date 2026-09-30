@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { ROOM_ENABLED } from "@/lib/room/enabled";
 import { PresenterConsole, type BreakoutSummary } from "@/components/room/presenter-console";
 import { loadState } from "@/lib/iegp/store";
 import { getRoomState, listRoomNotes } from "@/lib/room/store";
@@ -14,6 +16,7 @@ export const metadata: Metadata = { title: "Room · Presenter view · Synapse IE
  * in plan order (src/lib/room/slides.ts); the consultant edits them live here.
  */
 export default async function RoomPage() {
+  if (!ROOM_ENABLED) redirect("/");
   const [state, room, notes, workspace] = await Promise.all([
     loadState(),
     getRoomState(),

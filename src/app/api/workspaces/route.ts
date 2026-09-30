@@ -41,7 +41,13 @@ export async function POST(request: Request) {
     const { principal } = await requireSession();
     const body = await readBody(request);
     const start = startChoice(body.start);
-    const created = await createWorkspace({ name: String(body.name ?? ""), owner: principal, demo: start === "demo" });
+    const created = await createWorkspace({
+      name: String(body.name ?? ""),
+      owner: principal,
+      demo: start === "demo",
+      // Off unless asked for: the owner turns AI assistance on from the workspace menu.
+      ai_enabled: body.ai === true,
+    });
     if (start === "demo") await replaceContentsOf(created.id, "demo");
     const workspace = await selectWorkspace(created.id);
     return NextResponse.json(

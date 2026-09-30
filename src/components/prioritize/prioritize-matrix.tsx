@@ -432,7 +432,7 @@ function GapDetail({
               band: values.band ?? "",
             })
           }
-          label={point ? "Edit scores" : "Place by hand"}
+          label={point ? "Edit scores" : "Type scores"}
           title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
           description="Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
           confirmLabel="Save placement"
@@ -487,7 +487,14 @@ export function PrioritizeMatrix({
   const router = useRouter();
   const ai = useAiEnabled();
   const plotRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ gapId: string; startX: number; startY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{
+    gapId: string;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    /** Dragged in from the "Not placed yet" list: a drop outside the matrix places nothing. */
+    fromList: boolean;
+  } | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoPlaced = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -588,7 +595,49 @@ export function PrioritizeMatrix({
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
     if (!mayPrioritize || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { gapId, startX: event.clientX, startY: event.clientY, moved: false };
+    dragRef.current = { gapId, startX: event.clientX, startY: event.clientY, moved: false, fromList: false };
+  }
+
+  /**
+   * A drag from the "Not placed yet" list onto the matrix (owner feedback, KAN-52). The pointer
+   * leaves the list, so it is followed on the window rather than captured by the list item.
+   */
+  function onListPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
+    if (!mayPrioritize || event.button !== 0) return;
+    event.preventDefault(); // no text selection while dragging
+    dragRef.current = { gapId, startX: event.clientX, startY: event.clientY, moved: false, fromList: true };
+    const move = (e: globalThis.PointerEvent) => onPointerMove(e as unknown as PointerEvent<HTMLButtonElement>);
+    const up = (e: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      onPointerUp(e as unknown as PointerEvent<HTMLButtonElement>);
+    };
+    const cancel = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      dragRef.current = null;
+      dropPosition(gapId);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  }
+
+  function overPlot(event: PointerEvent) {
+    const rect = plotRef.current?.getBoundingClientRect();
+    return Boolean(
+      rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom,
+    );
+  }
+
+  function dropPosition(gapId: string) {
+    setPositions((current) => {
+      const next = { ...current };
+      delete next[gapId];
+      return next;
+    });
   }
 
   function onPointerMove(event: PointerEvent<HTMLButtonElement>) {
@@ -596,6 +645,11 @@ export function PrioritizeMatrix({
     if (!drag) return;
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
     drag.moved = true;
+    // From the list, the gap appears on the matrix only while the pointer is over it.
+    if (drag.fromList && !overPlot(event)) {
+      dropPosition(drag.gapId);
+      return;
+    }
     const point = pointFromEvent(event);
     if (point) setPositions((current) => ({ ...current, [drag.gapId]: point }));
   }
@@ -606,6 +660,11 @@ export function PrioritizeMatrix({
     if (!drag) return;
     if (!drag.moved) {
       setSelectedId(drag.gapId);
+      return;
+    }
+    // Dropped back outside the matrix: nothing is placed and nothing is selected.
+    if (drag.fromList && !overPlot(event)) {
+      dropPosition(drag.gapId);
       return;
     }
     setSelectedId(drag.gapId);
@@ -859,19 +918,28 @@ export function PrioritizeMatrix({
                   Not placed yet <span className="font-normal text-muted-foreground">{unplaced.length}</span>
                 </h3>
                 <p className="mb-1 text-[11px] leading-4 text-muted-foreground">
-                  Select one to type its scores or band by hand — no model run needed.
+                  {mayPrioritize
+                    ? "Drag a gap onto the matrix: where you drop it sets its two scores. Or select it to type them."
+                    : "Your role may view the matrix but not place gaps."}
                 </p>
                 <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
                   {unplaced.map((gap) => (
                     <li key={gap.gap_id}>
                       <button
                         type="button"
+                        data-testid="unplaced-gap"
+                        onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
                         onClick={() => setSelectedId(gap.gap_id)}
+                        aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
                         className={cn(
-                          "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                          "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                          mayPrioritize && "cursor-grab active:cursor-grabbing",
                           gap.gap_id === selectedId && "bg-muted",
                         )}
                       >
+                        <span aria-hidden className="text-muted-foreground">
+                          ⠿
+                        </span>
                         <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
                         <span className="shrink-0 text-[10px] text-muted-foreground">
                           {gap.band ? `${BAND_LABELS[gap.band]}${gap.validated ? " · validated" : ""}` : "Unplaced"}

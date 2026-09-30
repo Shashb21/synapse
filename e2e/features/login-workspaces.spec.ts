@@ -189,9 +189,9 @@ test("the customer app shows no owner or lab tools", async ({ page }) => {
     await expect(page.locator(`aside a[href="${href}"]`)).toHaveCount(0);
   }
   await expect(page.locator('aside a[href^="/accuracy"]')).toHaveCount(0);
+  // Room is out for now (KAN-52): no Prep/Room switch in the customer app.
   await openRail(page);
-  const toggle = page.getByRole("group", { name: /prep or room mode/i }).first();
-  await expect(toggle.getByRole("link", { name: "Room" })).toHaveAttribute("href", "/room");
+  await expect(page.getByRole("group", { name: /prep or room mode/i })).toHaveCount(0);
 });
 
 /** `npm run create-admin`, the only way a password account starts (KAN-28). The password goes on stdin. */
