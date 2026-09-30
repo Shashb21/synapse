@@ -150,6 +150,7 @@ export const accuracyOmissionActions = pgTable("accuracy_omission_actions", {
   created_at: text("created_at").notNull(),
   idempotency_key: text("idempotency_key").notNull(),
   request_fingerprint: text("request_fingerprint").notNull(),
+  contributor_statement: text("contributor_statement"),
 }, (table) => ({
   requestKey: unique("accuracy_omission_actions_workspace_request_key").on(table.workspace_id, table.idempotency_key),
   history: index("accuracy_omission_actions_history_idx").on(table.workspace_id, table.run_id, table.issue_id),
@@ -356,7 +357,7 @@ export const ACCURACY_DDL = [
     run_id text NOT NULL, issue_id text NOT NULL, action text NOT NULL,
     claim_id text, new_importance text, reason text NOT NULL, actor_name text NOT NULL,
     actor_function text NOT NULL, created_at text NOT NULL, idempotency_key text NOT NULL,
-    request_fingerprint text NOT NULL,
+    request_fingerprint text NOT NULL, contributor_statement text,
     CONSTRAINT accuracy_omission_actions_workspace_request_key UNIQUE (workspace_id, idempotency_key)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_omission_actions_history_idx ON accuracy_omission_actions (workspace_id, run_id, issue_id)`,
@@ -416,6 +417,7 @@ export const ACCURACY_DDL = [
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_omission_actions ADD COLUMN IF NOT EXISTS contributor_statement text`,
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
   `DO $$ BEGIN
     IF NOT EXISTS (
