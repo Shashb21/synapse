@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -21,7 +22,7 @@ import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import {
   ConflictList,
   DragRescheduleDialog,
-  EditActivityDialog,
+  ActivitySheetEditor,
   ManualDatesDialog,
   type DragChange,
 } from "@/components/timeline/timeline-dialogs";
@@ -35,7 +36,6 @@ import {
 } from "@/lib/iegp/enums";
 import {
   LANE_LABELS,
-  TIMELINE_LANES,
   type ScheduleSource,
   type TimelineActivity,
   type TimelineModel,
@@ -141,6 +141,9 @@ export function TimelineBoard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Read from the live model, so an edit shows as soon as the page refreshes.
   const selected = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
+  // Editing happens inside the side panel (KAN-56); choosing another bar leaves edit mode.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = selected !== null && editingId === selected.id;
   const setSelected = (activity: TimelineActivity | null) => setSelectedId(activity?.id ?? null);
   const nameOf = new Map(model.activities.map((row) => [row.id, row.tactic_name]));
   const stale = plan ? plan.activities !== model.activities.length : false;
@@ -358,7 +361,7 @@ export function TimelineBoard({
       {canReschedule && hasRows ? (
         <p className="-mt-2 text-[11px] text-muted-foreground">
           Drag a bar to move it, or drag either end to change its start or end. From the keyboard, focus a bar and
-          press Enter to open it, then use Reschedule.
+          press Enter to open it, then use Edit.
         </p>
       ) : null}
 
@@ -407,6 +410,16 @@ export function TimelineBoard({
                   {selected.tactic_status.replaceAll("_", " ")}
                 </SheetDescription>
               </SheetHeader>
+              {editing ? (
+                <div className="px-4 pb-6">
+                  <ActivitySheetEditor
+                    identity={identity}
+                    activity={selected}
+                    canEditDetails={canEditDetails}
+                    onDone={() => setEditingId(null)}
+                  />
+                </div>
+              ) : (
               <div className="grid gap-4 px-4 pb-6">
                 <div className="flex flex-wrap gap-1">
                   <Badge variant="outline" className="text-[10px]">
@@ -493,6 +506,7 @@ export function TimelineBoard({
                     <Row label="Outcomes" value={selected.meta.outcomes} />
                     <Row label="Data source" value={selected.meta.data_source} />
                     <Row label="Design" value={selected.meta.study_design} />
+                    <Row label="Budget" value={selected.meta.budget || "—"} />
                     <Row label="Owner" value={`${selected.meta.owner} · ${FUNCTION_LABELS[selected.meta.function as ActorFunction] ?? selected.meta.function}`} />
                   </dl>
                   <p className="mt-2 text-[11px] text-muted-foreground">
@@ -511,46 +525,10 @@ export function TimelineBoard({
 
                 {canReschedule ? (
                   <div className="flex flex-wrap gap-2">
-                    <ActionDialog
-                      endpoint="/api/plan"
-                      payload={{ action: "move_activity", id: selected.id }}
-                      label="Reschedule"
-                      title={`Reschedule ${selected.tactic_name}`}
-                      description="Your dates, lane and rationale are marked as yours and survive every rebuild. The change is recorded with its rationale."
-                      confirmLabel="Move"
-                      identity={identity}
-                      fields={[
-                        { name: "start_date", label: "Start", type: "date", defaultValue: selected.start_date },
-                        { name: "end_date", label: "End", type: "date", defaultValue: selected.end_date },
-                        {
-                          name: "readout_date",
-                          label: "Readout",
-                          type: "date",
-                          defaultValue: selected.readout_date ?? "",
-                        },
-                        {
-                          name: "lane",
-                          label: "Lane",
-                          type: "select",
-                          defaultValue: "",
-                          options: [
-                            { value: "", label: `Unchanged (${LANE_LABELS[selected.lane]})` },
-                            ...TIMELINE_LANES.map((lane) => ({ value: lane, label: LANE_LABELS[lane] })),
-                            ...(selected.meta.lane_locked
-                              ? [{ value: "band", label: "Follow the validated band again" }]
-                              : []),
-                          ],
-                        },
-                        {
-                          name: "schedule_rationale",
-                          label: "Why these dates (shown on the activity)",
-                          type: "textarea",
-                          defaultValue: selected.meta.schedule_rationale ?? "",
-                        },
-                      ]}
-                    />
+                    <Button size="sm" onClick={() => setEditingId(selected.id)}>
+                      Edit
+                    </Button>
                     <DependencyDialog activity={selected} activities={model.activities} identity={identity} />
-                    {canEditDetails ? <EditActivityDialog identity={identity} activity={selected} /> : null}
                     <ActionDialog
                       endpoint="/api/plan"
                       payload={{ action: "remove_activity", id: selected.id }}
@@ -563,6 +541,7 @@ export function TimelineBoard({
                   </div>
                 ) : null}
               </div>
+              )}
             </>
           ) : null}
         </SheetContent>

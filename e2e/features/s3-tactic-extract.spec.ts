@@ -8,6 +8,7 @@ import {
   runStage,
   seedParsed,
 } from "../support/synapse";
+import { openInventoryRow } from "../support/inventory";
 
 type TacticExtractOutput = {
   proposed: number;
@@ -44,6 +45,7 @@ test.describe("S3 tactic extraction", () => {
     expect(dry.output.proposed).toBeGreaterThan(0);
 
     await page.goto("/?place=gaps");
+    await openInventoryRow(page);
     const dialog = page.getByRole("dialog");
     // Retry until the page has hydrated; a click before that does nothing.
     await expect(async () => {

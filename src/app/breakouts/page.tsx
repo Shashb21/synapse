@@ -1,3 +1,5 @@
+import { BREAKOUTS_ENABLED } from "@/lib/breakouts-enabled";
+import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import {
   BreakoutsOverview,
@@ -21,6 +23,7 @@ const PRIORITY_LABELS: Record<string, string> = {
 };
 
 export default async function BreakoutsPage() {
+  if (!BREAKOUTS_ENABLED) redirect("/");
   const [state, placements] = await Promise.all([loadState(), listPlacements().catch(() => [])]);
   const bands = new Map(placements.filter((row) => row.validated && row.band).map((row) => [row.gap_id, row.band!]));
   const groupsOf = (gapId: string) =>

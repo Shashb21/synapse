@@ -9,6 +9,13 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { GapDetailsEditor } from "@/components/gap-metadata";
+import { gapNumberLabel } from "@/lib/iegp/gap-number";
+
+const STATUS_BAND: Record<string, string> = {
+  validated_open: "border-l-rose-500",
+  validated_partial: "border-l-amber-500",
+  validated_addressed: "border-l-emerald-500",
+};
 import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import {
   GAPS_TACTIC_HELPER,
@@ -163,9 +170,9 @@ function GapDetailPane({
 }) {
   const isPartial = card.gap_status === "validated_partial";
   return (
-    <article className="rounded-md border border-border bg-card p-4">
+    <article data-gap-id={card.gap_id} className="rounded-md border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={cn("font-mono text-[11px] text-muted-foreground", inline && "sr-only")}>{card.gap_id}</p>
+        <p className={cn("font-mono text-[11px] text-muted-foreground", inline && "sr-only")}>{gapNumberLabel(card.number)}</p>
         <Link
           href={`/gaps/${card.gap_id}`}
           className="ml-auto text-[11px] text-muted-foreground no-underline hover:underline"
@@ -357,7 +364,7 @@ export function GapsWorkbench({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const rows = sortReviewGapCards(filterReviewGapCards(cards, filter)).filter((card) => {
-      if (q && ![card.gap_id, card.gap_name, card.statement, DOMAIN_LABELS[card.domain]].some((v) => v.toLowerCase().includes(q))) {
+      if (q && ![card.gap_id, gapNumberLabel(card.number), card.gap_name, card.statement, DOMAIN_LABELS[card.domain]].some((v) => v.toLowerCase().includes(q))) {
         return false;
       }
       if (domain && card.domain !== domain) return false;
@@ -391,8 +398,9 @@ export function GapsWorkbench({
     });
   }, [cards, filter, query, domain, setting, priority, sort, priorities]);
   // One row open at a time; the first visible gap starts open so its actions are in reach.
-  const [openId, setOpenId] = useState<string | null | undefined>(undefined);
-  const expandedId = openId === undefined ? (visible[0]?.gap_id ?? null) : openId;
+  // Every row starts collapsed (owner feedback, KAN-56).
+  const [openId, setOpenId] = useState<string | null>(null);
+  const expandedId = openId;
   const partials = counts.partial;
   const unvalidated = counts.needs_validation;
   const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
@@ -514,13 +522,18 @@ export function GapsWorkbench({
                   return (
                     <Fragment key={card.gap_id}>
                       <tr
+                        data-gap-id={card.gap_id}
                         className={cn(
                           "border-b border-border/70 transition-colors",
                           open ? "bg-accent/50" : "hover:bg-muted/50",
                         )}
                       >
-                        <td className={cn("border-l-2 px-3 py-2 align-top font-mono text-[11px] text-primary", unconfirmed ? "border-l-amber-400" : "border-l-transparent")}>
-                          {card.gap_id}
+                        {/* Every row carries its status colour (KAN-56): open, partial or addressed. */}
+                        <td
+                          className={cn("border-l-[3px] px-3 py-2 align-top font-mono text-[11px] text-primary", STATUS_BAND[card.gap_status] ?? "border-l-border")}
+                          title={card.gap_id}
+                        >
+                          {gapNumberLabel(card.number)}
                         </td>
                         <td className="px-3 py-2 align-top">
                           <button

@@ -1746,8 +1746,10 @@ export function buildSeed(): IegpState {
   return {
     ...state,
     residual_gap_suggestions: [],
-    gaps: state.gaps.map((gap) => ({
+    // The demo gaps are numbered 001… in the order they are defined (KAN-56).
+    gaps: state.gaps.map((gap, index) => ({
       ...gap,
+      number: index + 1,
       parent_gap_id: null,
       computed_status:
         gap.status === "validated_open" ||

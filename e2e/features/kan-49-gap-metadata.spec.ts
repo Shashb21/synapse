@@ -38,7 +38,7 @@ test.describe("gap details", () => {
 
     await page.goto("/?place=gaps");
     const inventory = page.getByTestId("evidence-inventory");
-    const row = inventory.locator("tr").filter({ has: page.getByRole("cell", { name: gap.gap_id, exact: true }) });
+    const row = inventory.locator(`tr[data-gap-id="${gap.gap_id}"]`);
     const toggle = row.getByTestId("gap-row-toggle");
     await expect(async () => {
       if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click({ timeout: 5_000 });

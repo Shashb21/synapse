@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openInventoryRow } from "./support/inventory";
 
 /** The demo's asset and objectives, no sources yet; the demo files wait on Upload. */
 async function loadDemoSetup(page: Page) {
@@ -71,6 +72,8 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
     await expect(page.getByTestId("evidence-inventory").getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
+    // Rows start collapsed (KAN-56); opening one shows its actions.
+    await openInventoryRow(page);
     await expect(
       page
         .getByRole("button", { name: /confirm status|resolve this partially addressed gap/i })

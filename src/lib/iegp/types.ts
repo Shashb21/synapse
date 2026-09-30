@@ -139,6 +139,8 @@ export type EvidenceGap = {
   settings: string[];
   /** The design's gap metadata (KAN-49): who it affects, where, and notes. Written by a person. */
   metadata: GapMetadata;
+  /** The gap's number as people read it (001, 002…); the id stays the key (KAN-56). */
+  number: number;
 };
 
 export type GapMetadata = {

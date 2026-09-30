@@ -23,73 +23,6 @@ function scopeHref(scope: string) {
   return `/?place=plan&setting=${encodeURIComponent(scope)}`;
 }
 
-function SettingPicker({
-  options,
-  counts,
-  untagged,
-}: {
-  options: { scope: string; label: string; open: number; validated: number }[];
-  counts: { open: number; validated: number };
-  untagged: number;
-}) {
-  return (
-    <section className="grid gap-4" aria-labelledby="choose-setting">
-      <div>
-        <h2 id="choose-setting" className="text-[15px] font-medium text-foreground">
-          Choose a setting to prioritize
-        </h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
-          Each setting gets its own matrix and axes. A gap tagged with several settings keeps one
-          priority across all of them.
-        </p>
-      </div>
-      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {options.map((option) => (
-          <li key={option.scope}>
-            <Link
-              href={scopeHref(option.scope)}
-              className="grid gap-1 border border-border bg-card/40 p-4 no-underline transition-colors hover:bg-card"
-            >
-              <span className="text-[14px] font-medium text-foreground">{option.label}</span>
-              <span className="text-[12px] text-muted-foreground">
-                {option.open} Open gap{option.open === 1 ? "" : "s"} · {option.validated} validated
-              </span>
-            </Link>
-          </li>
-        ))}
-        <li>
-          <Link
-            href={scopeHref(ALL_SETTINGS_SCOPE)}
-            className="grid gap-1 border border-dashed border-border bg-card/20 p-4 no-underline transition-colors hover:bg-card"
-          >
-            <span className="text-[14px] font-medium text-foreground">All settings</span>
-            <span className="text-[12px] text-muted-foreground">
-              Every Open gap · {counts.open} total · {counts.validated} validated
-            </span>
-          </Link>
-        </li>
-      </ul>
-      {options.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          No gap is tagged with a setting yet. Tag settings on{" "}
-          <Link href="/?place=gaps" className="text-foreground no-underline hover:underline">
-            Gaps
-          </Link>{" "}
-          to prioritize one setting at a time, or prioritize across all settings.
-        </p>
-      ) : untagged > 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          {untagged} Open gap{untagged === 1 ? " has" : "s have"} no setting and only appear under
-          All settings.{" "}
-          <Link href="/?place=gaps" className="text-foreground no-underline hover:underline">
-            Tag them on Gaps
-          </Link>
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
 /**
  * Prioritize: pick a treatment setting (or all), pick two axes, and the model
  * places that scope's Open gaps on the matrix for the user to drag and validate.
@@ -126,10 +59,8 @@ export async function PrioritizePlace({
   const tags = settingOptions({ gaps: openGaps });
   const allCounts = { open: openGaps.length, validated: validatedIn(openGaps) };
 
-  const scope =
-    setting === ALL_SETTINGS_SCOPE
-      ? ALL_SETTINGS_SCOPE
-      : tags.find((tag) => tag.toLowerCase() === setting?.toLowerCase());
+  // One screen (owner feedback, KAN-56): no setting picker step; All settings until one is chosen.
+  const scope = tags.find((tag) => tag.toLowerCase() === setting?.toLowerCase()) ?? ALL_SETTINGS_SCOPE;
   const unlockTactics =
     !state.asset.tactics_unlocked && allCounts.open > 0 && allCounts.validated === allCounts.open ? (
       <LockForm label="Continue to tactics" action="unlock_tactics" confirmLabel="Go to tactics" variant="default" />
@@ -137,21 +68,6 @@ export async function PrioritizePlace({
 
   const footer = (
     <>
-      <div className="mt-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-medium text-foreground">
-            {allCounts.validated} of {allCounts.open} Open gaps validated across all settings
-          </h2>
-          <p className="mt-0.5 text-[12px] text-muted-foreground">
-            {state.asset.tactics_unlocked
-              ? "Tactics is unlocked. You can keep adjusting priorities here."
-              : allCounts.validated === allCounts.open && allCounts.open > 0
-                ? "Every Open gap has a validated band."
-                : "Validate every Open gap's band to continue to Tactics."}
-          </p>
-        </div>
-        {unlockTactics}
-      </div>
       <details className="group mt-6">
         <summary className="cursor-pointer list-none text-[13px] font-medium text-foreground marker:content-none">
           Addressed
@@ -172,27 +88,12 @@ export async function PrioritizePlace({
     </>
   );
 
-  if (!scope) {
-    return (
-      <>
-        <SettingPicker
-          options={tags.map((tag) => {
-            const inScope = openGaps.filter((gap) => gapInSetting(gap, tag));
-            return { scope: tag, label: tag, open: inScope.length, validated: validatedIn(inScope) };
-          })}
-          counts={allCounts}
-          untagged={openGaps.filter((gap) => (gap.settings ?? []).length === 0).length}
-        />
-        {footer}
-      </>
-    );
-  }
-
   const scopeLabel = scope === ALL_SETTINGS_SCOPE ? "all settings" : scope;
   const scopeGaps = openGaps.filter((gap) => gapInSetting(gap, scope));
   const scopeAxes = await loadScopeAxes(scope);
-  const xAxis = catalog.axes.find((axis) => axis.id === scopeAxes?.x_axis);
-  const yAxis = catalog.axes.find((axis) => axis.id === scopeAxes?.y_axis);
+  // A scope without saved axes starts on the default pair; the axis pickers above the matrix change them.
+  const xAxis = catalog.axes.find((axis) => axis.id === (scopeAxes?.x_axis ?? catalog.x_axis));
+  const yAxis = catalog.axes.find((axis) => axis.id === (scopeAxes?.y_axis ?? catalog.y_axis));
 
   const cards: PrioritizeGap[] = scopeGaps.map((gap) => {
     const placement = placementByGap.get(gap.id);
@@ -218,36 +119,69 @@ export async function PrioritizePlace({
 
   return (
     <>
-      <nav className="mb-4 flex flex-wrap items-center gap-1.5" aria-label="Setting">
-        <Link href="/?place=plan" className="mr-1 text-[12px] text-muted-foreground no-underline hover:underline">
-          ← Settings
-        </Link>
-        {[...tags, ALL_SETTINGS_SCOPE].map((tag) => {
-          const active = tag === scope;
-          return (
-            <Link
-              key={tag}
-              href={scopeHref(tag)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "rounded-md border px-2 py-0.5 text-[12px] no-underline",
-                active
-                  ? "border-foreground/40 bg-muted text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tag === ALL_SETTINGS_SCOPE ? "All settings" : tag}
-            </Link>
-          );
-        })}
-      </nav>
+      <section
+        className="mb-4 grid gap-3 rounded-lg border border-border bg-card p-3"
+        aria-label="Prioritization controls"
+        data-testid="prioritize-toolbar"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Setting</span>
+          <nav className="flex flex-wrap items-center gap-1" aria-label="Setting">
+            {[ALL_SETTINGS_SCOPE, ...tags].map((tag) => {
+              const active = tag === scope;
+              const inScope = tag === ALL_SETTINGS_SCOPE ? openGaps : openGaps.filter((gap) => gapInSetting(gap, tag));
+              return (
+                <Link
+                  key={tag}
+                  href={scopeHref(tag)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11.5px] font-medium no-underline",
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {tag === ALL_SETTINGS_SCOPE ? "All settings" : tag}
+                  <span className={cn("text-[10px]", active ? "text-primary-foreground/80" : "text-muted-foreground")}>
+                    {validatedIn(inScope)}/{inScope.length}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+          {tags.length === 0 ? (
+            <span className="text-[11px] text-muted-foreground">
+              Tag treatment settings on{" "}
+              <Link href="/?place=gaps" className="text-foreground">
+                Evidence Inventory
+              </Link>{" "}
+              to prioritize one setting at a time.
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] font-semibold text-foreground">
+              {allCounts.validated} of {allCounts.open} Open gaps validated across all settings
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {state.asset.tactics_unlocked
+                ? "Tactics is unlocked. You can keep adjusting priorities here."
+                : allCounts.validated === allCounts.open && allCounts.open > 0
+                  ? "Every Open gap has a validated priority."
+                  : "Drag each gap to its place, then validate its priority to continue to Tactics."}
+            </p>
+          </div>
+          {unlockTactics}
+        </div>
+      </section>
       {scopeGaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">No Open gap in {scopeLabel}.</p>
       ) : xAxis && yAxis ? (
         <PrioritizeMatrix
           key={`${scope}:${xAxis.id}:${yAxis.id}`}
           scope={scope}
-          scopeLabel={scopeLabel}
           gaps={cards}
           axes={catalog.axes}
           xAxis={xAxis}

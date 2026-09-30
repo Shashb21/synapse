@@ -9,6 +9,7 @@ import {
   runStage,
   seedMapped,
 } from "../support/synapse";
+import { openInventoryRow } from "../support/inventory";
 
 type SplitOutput = {
   mode: string;
@@ -41,6 +42,7 @@ test.describe("S6 partial gap split", () => {
     await page.goto("/?place=gaps");
     // The inventory's row actions are client components: wait until they are live.
     await page.waitForLoadState("networkidle");
+    await openInventoryRow(page, partial!.gap_id);
     const card = page
       .locator("article")
       .filter({ has: page.getByRole("button", { name: /resolve this partially addressed gap/i }) })
@@ -73,12 +75,9 @@ test.describe("S6 partial gap split", () => {
     expect(partial).toBeTruthy();
     await page.goto("/?place=gaps");
     await page.waitForLoadState("networkidle");
-    const card = page
-      .locator("article")
-      .filter({ has: page.getByRole("button", { name: /resolve this partially addressed gap/i }) })
-      .first();
-    const gapId = (await card.locator("p.font-mono").first().textContent())?.trim() ?? "";
-    expect(gapId).toMatch(/^GAP-/);
+    await openInventoryRow(page, partial!.gap_id);
+    const card = page.locator(`article[data-gap-id="${partial!.gap_id}"]`);
+    const gapId = partial!.gap_id;
     await card.getByRole("button", { name: /resolve this partially addressed gap/i }).click();
 
     const dialog = page.getByRole("dialog");

@@ -467,7 +467,6 @@ function GapDetail({
  */
 export function PrioritizeMatrix({
   scope,
-  scopeLabel,
   gaps,
   axes,
   xAxis,
@@ -476,7 +475,6 @@ export function PrioritizeMatrix({
   mayPrioritize,
 }: {
   scope: string;
-  scopeLabel: string;
   gaps: PrioritizeGap[];
   axes: PriorityAxis[];
   xAxis: PriorityAxis;
@@ -502,7 +500,6 @@ export function PrioritizeMatrix({
   const [bands, setBands] = useState<Record<string, { band: Band; validated: boolean }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [editingAxes, setEditingAxes] = useState(false);
 
   // Server data is the truth once it refreshes; drop local drag overrides then.
   const [seenGaps, setSeenGaps] = useState(gaps);
@@ -512,7 +509,8 @@ export function PrioritizeMatrix({
     setBands({});
   }
 
-  const unplaced = gaps.filter((gap) => !pointOf(gap, xAxis, yAxis));
+  // A gap dropped on the matrix leaves this list at once, not after the refresh.
+  const unplaced = gaps.filter((gap) => !positions[gap.gap_id] && !pointOf(gap, xAxis, yAxis));
 
   // Gaps new to this scope (or to these axes) get a first placement automatically.
   useEffect(() => {
@@ -712,21 +710,31 @@ export function PrioritizeMatrix({
     router.refresh();
   }
 
-  if (editingAxes) {
-    return (
-      <AxisChooser
-        scope={scope}
-        scopeLabel={scopeLabel}
-        axes={axes}
-        initialX={xAxis.id}
-        initialY={yAxis.id}
-        gapIds={gaps.map((gap) => gap.gap_id)}
-        identity={identity}
-        mayPrioritize={mayPrioritize}
-        submitLabel="Save axes"
-        onCancel={() => setEditingAxes(false)}
-      />
-    );
+  /** Axes change in place (owner feedback, KAN-56): save them, then place any gap missing scores on them. */
+  async function changeAxes(nextX: string, nextY: string) {
+    if (!mayPrioritize || nextX === nextY) return;
+    setBusy("Saving axes…");
+    setMessage(null);
+    const saveError = await saveAxes(scope, nextX, nextY);
+    if (saveError) {
+      setBusy(null);
+      setMessage(saveError);
+      return;
+    }
+    if (ai && gaps.length > 0) {
+      setBusy("Placing gaps on the new axes…");
+      const result = await runPrioritization({
+        identity,
+        gapIds: gaps.map((gap) => gap.gap_id),
+        xAxis: nextX,
+        yAxis: nextY,
+        setting: scope,
+        onlyMissing: true,
+      });
+      if (!result.ok) setMessage(result.error ?? "Prioritization failed");
+    }
+    setBusy(null);
+    router.refresh();
   }
 
   return (
@@ -754,10 +762,41 @@ export function PrioritizeMatrix({
         })}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[12px] text-muted-foreground">
-          <span className="text-foreground">{yAxis.label}</span> ×{" "}
-          <span className="text-foreground">{xAxis.label}</span> · {validatedCount} of {gaps.length} validated
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="matrix-axes">
+          <label className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">Vertical</span>
+            <select
+              aria-label="Vertical axis (Y)"
+              value={yAxis.id}
+              disabled={!mayPrioritize || Boolean(busy)}
+              onChange={(event) => void changeAxes(xAxis.id, event.target.value)}
+              className="h-7 rounded-md border border-input bg-card px-2 text-[12px] text-foreground"
+            >
+              {axes.map((axis) => (
+                <option key={axis.id} value={axis.id} disabled={axis.id === xAxis.id}>
+                  {axis.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span aria-hidden>×</span>
+          <label className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">Horizontal</span>
+            <select
+              aria-label="Horizontal axis (X)"
+              value={xAxis.id}
+              disabled={!mayPrioritize || Boolean(busy)}
+              onChange={(event) => void changeAxes(event.target.value, yAxis.id)}
+              className="h-7 rounded-md border border-input bg-card px-2 text-[12px] text-foreground"
+            >
+              {axes.map((axis) => (
+                <option key={axis.id} value={axis.id} disabled={axis.id === yAxis.id}>
+                  {axis.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {busy ? (
             <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -765,14 +804,6 @@ export function PrioritizeMatrix({
               {busy}
             </span>
           ) : null}
-          <button
-            type="button"
-            onClick={() => setEditingAxes(true)}
-            disabled={!mayPrioritize || Boolean(busy)}
-            className="h-7 rounded-md border border-border px-2.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
-          >
-            Change axes
-          </button>
           {ai ? (
             <button
               type="button"
@@ -788,8 +819,10 @@ export function PrioritizeMatrix({
       </div>
       {message ? <p className="text-[12px] text-muted-foreground">{message}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,760px)_minmax(300px,1fr)] xl:items-start">
-        <div className="grid min-w-0 gap-2">
+      {/* The matrix and its side panel share one screen (KAN-56): the matrix shrinks to the
+          window height, so a gap in "Not placed yet" can be dragged on without scrolling. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,auto)_minmax(280px,1fr)] lg:items-start">
+        <div className="grid w-full min-w-0 max-w-[min(748px,calc(100dvh-140px))] gap-2 max-lg:max-w-[748px]">
           <div className="flex items-stretch gap-2">
             <div className="flex w-5 shrink-0 flex-col items-center justify-between py-1 text-[11px] text-muted-foreground">
               <span className="[writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{favourableLabel(yAxis)}</span>
@@ -798,7 +831,7 @@ export function PrioritizeMatrix({
             </div>
             <div
               ref={plotRef}
-              className="relative aspect-square w-full max-w-[720px] touch-none select-none overflow-hidden rounded-md border border-border bg-card/40"
+              className="relative aspect-square w-full touch-none select-none overflow-hidden rounded-md border border-border bg-card/40"
               role="group"
               aria-label={`Prioritization matrix: ${yAxis.label} by ${xAxis.label}`}
             >
@@ -851,18 +884,18 @@ export function PrioritizeMatrix({
               ) : null}
             </div>
           </div>
-          <div className="flex max-w-[748px] items-center justify-between pl-7 text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between pl-7 text-[11px] text-muted-foreground">
             <span>{unfavourableLabel(xAxis)}</span>
             <span className="text-foreground">{xAxis.label}</span>
             <span>{favourableLabel(xAxis)}</span>
           </div>
-          <p className="max-w-[748px] pl-7 text-[11px] leading-4 text-muted-foreground">
+          <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
             steps). A dashed edge means the band is not validated yet.
           </p>
         </div>
 
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:sticky xl:top-5">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:sticky lg:top-5">
           {selected && selectedView ? (
             <GapDetail
               gap={{ ...selected, band: selectedView.band, validated: selectedView.validated }}
@@ -877,41 +910,6 @@ export function PrioritizeMatrix({
             </p>
           )}
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
-            {BANDS.map((band) => {
-              const rows = view.filter((row) => row.point && row.band === band);
-              return (
-                <section key={band} aria-label={`${BAND_LABELS[band]} gaps`}>
-                  <h3 className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-foreground">
-                    <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[band] }} aria-hidden />
-                    {BAND_LABELS[band]}
-                    <span className="font-normal text-muted-foreground">{rows.length}</span>
-                  </h3>
-                  {rows.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground">None</p>
-                  ) : (
-                    <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
-                      {rows.map(({ gap, validated }) => (
-                        <li key={gap.gap_id}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedId(gap.gap_id)}
-                            className={cn(
-                              "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
-                              gap.gap_id === selectedId && "bg-muted",
-                            )}
-                          >
-                            <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {validated ? "Validated" : "Draft"}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              );
-            })}
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">
                 <h3 className="mb-1 text-[12px] font-medium text-foreground">
@@ -950,6 +948,41 @@ export function PrioritizeMatrix({
                 </ul>
               </section>
             ) : null}
+            {BANDS.map((band) => {
+              const rows = view.filter((row) => row.point && row.band === band);
+              return (
+                <section key={band} aria-label={`${BAND_LABELS[band]} gaps`}>
+                  <h3 className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: BAND_TOKENS[band] }} aria-hidden />
+                    {BAND_LABELS[band]}
+                    <span className="font-normal text-muted-foreground">{rows.length}</span>
+                  </h3>
+                  {rows.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">None</p>
+                  ) : (
+                    <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
+                      {rows.map(({ gap, validated }) => (
+                        <li key={gap.gap_id}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedId(gap.gap_id)}
+                            className={cn(
+                              "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
+                              gap.gap_id === selectedId && "bg-muted",
+                            )}
+                          >
+                            <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {validated ? "Validated" : "Draft"}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
           </div>
         </div>
       </div>

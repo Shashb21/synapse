@@ -1,5 +1,6 @@
+import { BREAKOUTS_ENABLED } from "@/lib/breakouts-enabled";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { SessionPanel } from "@/components/platform/session-panel";
 import {
@@ -30,6 +31,7 @@ export default async function BreakoutRoomPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  if (!BREAKOUTS_ENABLED) redirect("/");
   const { id } = await params;
   const [state, session, placements] = await Promise.all([loadState(), sessionContext(), listPlacements().catch(() => [])]);
   const group = state.breakout_groups.find((g) => g.id === id);

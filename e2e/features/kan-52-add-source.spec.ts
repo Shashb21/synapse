@@ -74,7 +74,7 @@ test.describe("create a gap with all its details", () => {
     // No description given: the title stands in for it.
     const row = page.getByTestId("evidence-inventory").locator("tr").filter({ hasText: "Persistence in German routine care" });
     await expect(row.first()).toBeVisible();
-    const gapId = (await row.first().locator("td").first().innerText()).trim();
+    const gapId = (await row.first().getAttribute("data-gap-id"))!;
     await page.goto(`/gaps/${gapId}`);
     await expect(page.getByRole("heading", { name: "Persistence in German routine care" })).toBeVisible();
     const details = page.getByTestId("gap-metadata");

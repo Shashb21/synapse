@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -301,5 +301,210 @@ export function DragRescheduleDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Edits an activity inside the timeline's side panel (owner feedback, KAN-56): the panel
+ * that opens on a bar stays put and turns into the form, rather than opening a dialog.
+ * Dates, lane and why go to the plan (`move_activity`); name, type, evidence question and
+ * budget go to the tactic (`modify_tactic`). Only what changed is sent, with one rationale.
+ */
+export function ActivitySheetEditor({
+  identity,
+  activity,
+  canEditDetails,
+  onDone,
+}: {
+  identity: ActionIdentity;
+  activity: TimelineActivity;
+  canEditDetails: boolean;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
+  // The panel leaves edit mode with the refreshed values, not the stale ones for a moment.
+  const [refreshing, startRefresh] = useTransition();
+
+  async function post(endpoint: string, body: Record<string, unknown>): Promise<string | null> {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...body,
+        actor_name: actorName.trim() || identity.actor_name,
+        actor_function: identity.actor_function,
+      }),
+    });
+    if (res.ok) return null;
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    return json.error ?? "Saving failed";
+  }
+
+  async function submit(form: HTMLFormElement) {
+    const data = new FormData(form);
+    const value = (name: string) => String(data.get(name) ?? "").trim();
+    const rationale = value("rationale");
+    setError(null);
+    if (rationale.length < 3) {
+      setError("A short rationale is required. It is stored with the edit.");
+      return;
+    }
+    if (!identity.signed_in && !actorName.trim()) {
+      setError("Type your name so the edit has an actor.");
+      return;
+    }
+    const start = value("start_date");
+    const end = value("end_date");
+    if (start && end && end < start) {
+      setError("The end date is before the start date.");
+      return;
+    }
+
+    const schedule: Record<string, string> = {};
+    if (start && start !== activity.start_date) schedule.start_date = start;
+    if (end && end !== activity.end_date) schedule.end_date = end;
+    if (value("readout_date") !== (activity.readout_date ?? "")) schedule.readout_date = value("readout_date");
+    if (value("lane")) schedule.lane = value("lane");
+    if (value("schedule_rationale") !== (activity.meta.schedule_rationale ?? "")) {
+      schedule.schedule_rationale = value("schedule_rationale");
+    }
+
+    const details: Record<string, string> = {};
+    if (canEditDetails) {
+      if (!value("name")) return setError("Activity name is required.");
+      if (!value("evidence_question")) return setError("Evidence question is required.");
+      if (value("name") !== activity.tactic_name) details.name = value("name");
+      if (value("type") !== activity.tactic_type) details.type = value("type");
+      if (value("evidence_question") !== activity.meta.evidence_question) {
+        details.evidence_question = value("evidence_question");
+      }
+      if (value("budget") !== (activity.meta.budget ?? "")) details.budget = value("budget");
+    }
+
+    if (Object.keys(schedule).length === 0 && Object.keys(details).length === 0) {
+      setError("Nothing changed.");
+      return;
+    }
+    setPending(true);
+    const failed =
+      (Object.keys(schedule).length > 0
+        ? await post("/api/plan", { action: "move_activity", id: activity.id, ...schedule, rationale })
+        : null) ??
+      (Object.keys(details).length > 0
+        ? await post("/api/iegp", { action: "modify_tactic", tactic_id: activity.tactic_id, ...details, rationale })
+        : null);
+    setPending(false);
+    if (failed) {
+      setError(failed);
+      return;
+    }
+    startRefresh(() => {
+      router.refresh();
+      onDone();
+    });
+  }
+
+  const label = "grid gap-1 text-[12px] font-medium text-foreground";
+  const select =
+    "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  return (
+    <form
+      aria-label={`Edit ${activity.tactic_name}`}
+      data-testid="activity-editor"
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit(event.currentTarget);
+      }}
+    >
+      {canEditDetails ? (
+        <fieldset className="grid gap-3">
+          <legend className="mb-1 text-[12px] font-medium text-foreground">Details</legend>
+          <label className={label}>
+            Activity name
+            <Input name="name" defaultValue={activity.tactic_name} required />
+          </label>
+          <label className={label}>
+            Type
+            <select name="type" defaultValue={activity.tactic_type} className={select}>
+              {TACTIC_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {TACTIC_TYPE_LABELS[type]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={label}>
+            Budget
+            <Input name="budget" defaultValue={activity.meta.budget ?? ""} placeholder="e.g. $120k" maxLength={60} />
+          </label>
+          <label className={label}>
+            Evidence question
+            <Textarea name="evidence_question" defaultValue={activity.meta.evidence_question} rows={3} required />
+          </label>
+        </fieldset>
+      ) : null}
+
+      <fieldset className="grid gap-3">
+        <legend className="mb-1 text-[12px] font-medium text-foreground">Schedule</legend>
+        <div className="grid grid-cols-2 gap-2">
+          <label className={label}>
+            Start
+            <Input type="date" name="start_date" defaultValue={activity.start_date} />
+          </label>
+          <label className={label}>
+            End
+            <Input type="date" name="end_date" defaultValue={activity.end_date} />
+          </label>
+        </div>
+        <label className={label}>
+          Readout
+          <Input type="date" name="readout_date" defaultValue={activity.readout_date ?? ""} />
+        </label>
+        <label className={label}>
+          Lane
+          <select name="lane" defaultValue="" className={select}>
+            <option value="">Unchanged ({LANE_LABELS[activity.lane]})</option>
+            {TIMELINE_LANES.map((lane) => (
+              <option key={lane} value={lane}>
+                {LANE_LABELS[lane]}
+              </option>
+            ))}
+            {activity.meta.lane_locked ? <option value="band">Follow the validated band again</option> : null}
+          </select>
+        </label>
+        <label className={label}>
+          Why these dates (shown on the activity)
+          <Textarea name="schedule_rationale" defaultValue={activity.meta.schedule_rationale ?? ""} rows={2} />
+        </label>
+      </fieldset>
+
+      {!identity.signed_in ? (
+        <label className={label}>
+          Your name
+          <Input value={actorName} onChange={(event) => setActorName(event.target.value)} />
+        </label>
+      ) : null}
+      <label className={label}>
+        Rationale for the change
+        <Textarea name="rationale" rows={2} placeholder="Stored with the edit" />
+      </label>
+      {error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={pending || refreshing}>
+          {pending || refreshing ? "Saving…" : "Save changes"}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onDone} disabled={pending || refreshing}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }

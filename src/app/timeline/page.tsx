@@ -1,5 +1,6 @@
 import "@/modules";
 import Link from "next/link";
+import { BREAKOUTS_ENABLED } from "@/lib/breakouts-enabled";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { TimelineBoard, type PlanView } from "@/components/timeline/timeline-board";
 import { loadState } from "@/lib/iegp/store";
@@ -62,11 +63,13 @@ export default async function TimelinePage() {
           drag, add and sequence activities by hand, no model needed; click an activity for its full record,
           export the chart as an image, and save the version you stand behind.
         </PageIntro>
-        <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
-          <Link href="/breakouts" className="no-underline hover:underline">
-            Open breakouts →
-          </Link>
-        </div>
+        {BREAKOUTS_ENABLED ? (
+          <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
+            <Link href="/breakouts" className="no-underline hover:underline">
+              Open breakouts →
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <TimelineBoard

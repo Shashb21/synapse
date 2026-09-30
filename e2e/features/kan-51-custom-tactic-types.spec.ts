@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import { firstOpenGap, runStage, seedMapped, validateBandHigh } from "../support/synapse";
+import { openIdeationCard } from "../support/ideation";
 
 test.describe.configure({ mode: "serial" });
 
@@ -21,7 +22,7 @@ test.describe("custom tactic types", () => {
   test("a custom tactic on Tactic Ideation gets a custom type and colour", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto("/?place=tactics");
-    const card = page.getByTestId("ideation-gap").filter({ hasText: gapId });
+    const card = await openIdeationCard(page, gapId);
     const dialog = page.getByRole("dialog");
     await expect(async () => {
       await card.getByRole("button", { name: /\+ custom tactic/i }).click({ timeout: 5_000 });

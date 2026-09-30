@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import { firstOpenGap, iegpAction, runStage, seedMapped, validateBandHigh } from "../support/synapse";
+import { openIdeationCard } from "../support/ideation";
 
 test.describe.configure({ mode: "serial" });
 
@@ -32,7 +33,7 @@ test.describe("tactic side panel", () => {
 
   async function openFirstLinked(page: Page) {
     await page.goto("/?place=tactics");
-    const card = page.getByTestId("ideation-gap").filter({ hasText: gapId });
+    const card = await openIdeationCard(page, gapId);
     const panel = page.getByTestId("tactic-panel");
     const row = card.getByRole("list").first().getByRole("button").first();
     await expect(async () => {
