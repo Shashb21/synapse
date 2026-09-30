@@ -126,6 +126,11 @@ export async function runStage<O = unknown>(args: {
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /**
+   * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
+   * switches say, so a section can be tried before it is turned on. Needs a routed model.
+   */
+  force_ai?: boolean;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const implementation = await activeModule(args.stage);
@@ -133,7 +138,7 @@ export async function runStage<O = unknown>(args: {
   // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
   // Each stage follows its section's admin switch (KAN-53); S7 and S10 have no section.
   const section = sectionOfStage(args.stage);
-  const ai = section ? await aiSectionEnabled(section) : await aiEnabled();
+  const ai = args.force_ai === true || (section ? await aiSectionEnabled(section) : await aiEnabled());
   const manifest = implementation.manifest;
   if (!ai && ((manifest.agentic && !manifest.ai_optional) || manifest.needs_ai)) {
     throw new AiDisabledError(stageLabel(args.stage));

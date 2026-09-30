@@ -5,6 +5,7 @@ export type AdminSectionId =
   | "customers"
   | "users"
   | "accuracy"
+  | "harness"
   | "pipeline"
   | "runs"
   | "evals"
@@ -40,6 +41,12 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/accuracy",
     label: "Accuracy",
     summary: "The accuracy lab: workspaces, sources, review, ledger, coverage, plan, timeline, audit, routing, runs.",
+  },
+  {
+    id: "harness",
+    href: "/admin/harness",
+    label: "AI harness",
+    summary: "Run each AI use case on its own against the live model, on samples or your own input.",
   },
   { id: "pipeline", href: "/admin/pipeline", label: "Pipeline", summary: "Run any stage S0–S10, or the chain, and its evals." },
   { id: "runs", href: "/admin/runs", label: "Runs & traces", summary: "Every stage run: inputs, outputs, route, timing, scores." },
