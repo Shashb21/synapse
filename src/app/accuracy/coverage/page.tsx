@@ -1,3 +1,4 @@
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { CoverageQueue } from "@/components/accuracy/coverage-queue";
@@ -28,13 +29,16 @@ export default async function AccuracyCoveragePage({
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
+      await assertAccuracyCanProgress(workspaceId, "pair_generate");
       pairs = await listCoveragePairs(workspaceId);
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
     }
   } catch (error) {
-    loadError = error instanceof Error ? error.message : "Could not load coverage";
+    loadError = error instanceof AccuracyPausedError
+      ? "Coverage is paused until important source omissions are resolved."
+      : error instanceof Error ? error.message : "Could not load coverage";
   }
 
   const active = workspaces.find((w) => w.id === workspaceId);
@@ -61,7 +65,7 @@ export default async function AccuracyCoveragePage({
           </Link>{" "}
           with a <code>workspace_id</code>.
         </p>
-      ) : (
+      ) : loadError ? null : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
             Workspace · {active?.name ?? workspaceId} · {queue.total_count} pair(s) ·{" "}

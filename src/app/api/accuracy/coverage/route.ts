@@ -15,19 +15,30 @@ export async function GET(req: Request) {
   if (!workspace_id) {
     return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
   }
-  const pairs = await listCoveragePairs(workspace_id);
-  return NextResponse.json({
-    pairs: pairs.map((p) => ({
-      id: p.id,
-      gap_id: p.gap.id,
-      gap_statement: p.gap.statement,
-      tactic_id: p.tactic.id,
-      tactic_statement: p.tactic.statement,
-      overall: p.overall,
-      rationale: p.rationale,
-      validated: p.validated,
-    })),
-  });
+  try {
+    const org_id = await getWorkspaceOrgId(workspace_id);
+    if (!org_id) return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
+    await assertAccuracyCanProgress(workspace_id, "pair_generate");
+    const pairs = await listCoveragePairs(workspace_id);
+    return NextResponse.json({
+      pairs: pairs.map((p) => ({
+        id: p.id,
+        gap_id: p.gap.id,
+        gap_statement: p.gap.statement,
+        tactic_id: p.tactic.id,
+        tactic_statement: p.tactic.statement,
+        overall: p.overall,
+        rationale: p.rationale,
+        validated: p.validated,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof AccuracyPausedError) {
+      return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
+    const message = error instanceof Error ? error.message : "Coverage pair generation failed";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+  }
 }
 
 const decideSchema = z.object({

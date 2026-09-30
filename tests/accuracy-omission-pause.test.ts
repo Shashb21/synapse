@@ -2,6 +2,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement, ReactNode } from "react";
+import AccuracyCoveragePage from "@/app/accuracy/coverage/page";
+import AccuracyAuditPage from "@/app/accuracy/audit/page";
 import AccuracyTimelinePage from "@/app/accuracy/timeline/page";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,11 +16,11 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { claimMetadata, getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
-import { listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { listCoverageJoins, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
 import { projectWorkspaceGantt, saveFinalGanttPlan } from "@/accuracy/modules/gantt-project/save-final";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import { POST as coverage } from "@/app/api/accuracy/coverage/route";
+import { POST as coverage, GET as coverageRead } from "@/app/api/accuracy/coverage/route";
 import { POST as assist } from "@/app/api/accuracy/coverage/assist/route";
 import { POST as validate } from "@/app/api/accuracy/claims/validate/route";
 import { POST as ideate } from "@/app/api/accuracy/ideate/route";
@@ -126,6 +128,47 @@ describe("downstream omission pause", () => {
     const response = await gantt(new Request(`http://localhost/api/accuracy/gantt?workspace_id=${clear.workspace_id}`));
     expect(response.status).toBe(200);
     expect(JSON.stringify(await response.json())).not.toContain(paused.run_id);
+  });
+  it("returns scoped 409 before coverage GET generates candidate pairs", async () => {
+    const scope = await fixture();
+    const other = await fixture();
+    const response = await coverageRead(new Request(`http://localhost/api/accuracy/coverage?workspace_id=${scope.workspace_id}`));
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.blockers).toEqual([expect.objectContaining({ workspace_id: scope.workspace_id, run_id: scope.run_id })]);
+    expect(JSON.stringify(body)).not.toContain(other.run_id);
+    expect(body.pairs).toBeUndefined();
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+  });
+  it("renders paused coverage without generating or rendering a new pair queue", async () => {
+    const scope = await fixture();
+    const page = await AccuracyCoveragePage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
+    const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
+    expect(html).toContain("Coverage is paused until important source omissions are resolved.");
+    expect(html).not.toContain("Need comparator evidence");
+    expect(html).not.toContain("Comparator study");
+    expect(html).not.toContain("Pair 1 of");
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+  });
+  it.each(["advisory", null] as const)("continues coverage candidate generation with %s findings", async (importance) => {
+    const scope = await fixture(importance);
+    const response = await coverageRead(new Request(`http://localhost/api/accuracy/coverage?workspace_id=${scope.workspace_id}`));
+    expect(response.status).toBe(200);
+    expect((await response.json()).pairs).toEqual([expect.objectContaining({ id: `pair_${scope.gap.id}_${scope.tactic.id}`, gap_id: scope.gap.id, tactic_id: scope.tactic.id })]);
+    const page = await AccuracyCoveragePage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
+    const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
+    expect(html).toContain("Need comparator evidence");
+    expect(html).toContain("Comparator study");
+    expect(html).not.toContain("Coverage is paused");
+  });
+  it("keeps saved coverage decisions readable through audit while paused", async () => {
+    const scope = await fixture();
+    await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id, overall: "covers", rationale: "Historical source review" });
+    const page = await AccuracyAuditPage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
+    const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
+    expect(html).toContain("Historical source review");
+    expect(html).toContain("coverage · covers");
+    expect(html).not.toContain("Accuracy work is paused");
   });
   it("renders a visible pause message when the timeline page calls projection directly", async () => {
     const scope = await fixture();
