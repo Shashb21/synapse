@@ -1,5 +1,7 @@
 /** Authenticated view of a single accuracy agent run's recorded versions. */
 import Link from "next/link";
+import { can } from "@/modules/auth/roles";
+import OmissionActions from "./omission-actions";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { readAgentProgression, registerAccuracyStack } from "@/accuracy";
 import type { AgentEventRecord } from "@/accuracy/kernel/agent-events";
@@ -57,6 +59,7 @@ export default async function AccuracyRunDetailPage({
         Back to runs
       </Link>
       {error ? <p role="alert" className="border border-border p-3 text-[13px] text-foreground">{error}</p> : null}
+      {!error && progression ? <OmissionActions key={`${workspaceId}:${run_id}`} workspaceId={workspaceId} runId={run_id.trim()} canReview={!!session.role && can(session.role, "validate")} /> : null}
       {!error && events.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">No agent progression has been recorded for this run.</p>
       ) : null}
@@ -107,7 +110,7 @@ export default async function AccuracyRunDetailPage({
                         {event.completeness.suspected_omissions.map((omission) => (
                           <li key={omission.issue_id} className="border-t border-border pt-2">
                             <strong>{omission.importance === "important" ? "Important" : "Advisory"} · {omission.item_kind}</strong>: {omission.summary}
-                            <p>Issue ID: {omission.issue_id}</p>
+                            <p>Issue ID: <a className="underline underline-offset-2" href={`#omission-${encodeURIComponent(omission.issue_id)}`}>{omission.issue_id}</a></p>
                             <p>Source file {omission.source_ref.source_file_id}, block {omission.source_ref.block_id}</p>
                             <p>Evidence quote: “{omission.evidence_quote}”</p>
                             <p>{omission.reason} Suggested action: {omission.suggested_action}</p>

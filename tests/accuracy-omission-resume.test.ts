@@ -69,7 +69,7 @@ describe("extraction omission resume", () => {
   it("pauses a fully applied batch and resumes without extraction or duplicate drafts; replay is identical", async () => {
     const scope = await fixture(); const body = await paused(scope);
     const read = await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${body.runs[0].run_id}`));
-    expect(await read.json()).toMatchObject({ extraction_batch_id: body.extraction_batch_id });
+    expect(await read.json()).toMatchObject({ extraction_batch_id: body.extraction_batch_id, source_file_id: scope.source_file_id });
     const wrongWorkspace = await fixture();
     expect((await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${wrongWorkspace.workspace_id}&run_id=${body.runs[0].run_id}`))).status).toBe(404);
     expect((await runs(scope.workspace_id)).map(r => r.call_kind)).toEqual(["need_extract"]);
@@ -82,6 +82,15 @@ describe("extraction omission resume", () => {
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     expect(await (await post({ ...request, idempotency_key: "resume-2" })).json()).toEqual(completed);
     expect(await runs(scope.workspace_id)).toHaveLength(3);
+  });
+  it("returns the server source and batch even when an applied run has no findings", async () => {
+    const scope = await fixture(); installExtractor(false);
+    const body = await (await post({ ...scope, kinds: ["need"] })).json();
+    const response = await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${body.runs[0].run_id}`));
+    expect(response.status).toBe(200);
+    const runBatch = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.workspace_id, scope.workspace_id));
+    expect(await response.json()).toMatchObject({ items: [], actions: [], source_file_id: scope.source_file_id,
+      extraction_batch_id: runBatch[0].id });
   });
   it("rejects mismatched and superseded batches", async () => {
     const scope = await fixture(); const body = await paused(scope);
