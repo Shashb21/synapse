@@ -212,14 +212,15 @@ export async function POST(req: Request) {
     await applyExtractionBatch(batch, runs.map(run => run.run_id), created_claim_ids, async () => {
       for (const claim of draftClaims) await insertClaim(claim);
     });
+    let downstream: Awaited<ReturnType<typeof runDownstream>>;
     try {
       await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
+      downstream = await runDownstream({ workspace_id: body.workspace_id, org_id, actor });
     } catch (error) {
       if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers,
         extraction_batch_id: batch.id, runs, gaps_inserted, tactics_inserted }, { status: 409 });
       throw error;
     }
-    const downstream = await runDownstream({ workspace_id: body.workspace_id, org_id, actor });
     runs.push(...downstream.runs);
 
     return NextResponse.json({
