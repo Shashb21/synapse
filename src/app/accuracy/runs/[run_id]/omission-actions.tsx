@@ -27,7 +27,10 @@ function useRequestKey() {
 }
 
 /** Render one issue's action fields, requiring a deliberate confirmation for an ambiguous add. */
-function DecisionForm({ item, onSaved }: { item: OmissionReviewItem; onSaved: () => Promise<void> }) {
+function DecisionForm({ item, onSaved, unavailable, onPendingChange }: {
+  item: OmissionReviewItem; onSaved: () => Promise<void>; unavailable: boolean;
+  onPendingChange: (issueId: string, pending: boolean) => void;
+}) {
   const [action, setAction] = useState<Decision>("add");
   const [reason, setReason] = useState("");
   const [statement, setStatement] = useState(item.issue.summary);
@@ -46,11 +49,11 @@ function DecisionForm({ item, onSaved }: { item: OmissionReviewItem; onSaved: ()
   const confirmable = confirmation === fingerprint;
 
   async function save(confirmedDistinct = false) {
-    if (pending) return;
+    if (pending || unavailable) return;
     if (!reason.trim() || (action === "link_existing" && !claimId.trim()) || (action === "add" && !statement.trim())) {
       setError("Complete the required fields, including a reason."); return;
     }
-    setPending(true); setError(null);
+    setPending(true); onPendingChange(item.issue.issue_id, true); setError(null);
     try {
       const response = await fetch("/api/accuracy/omissions", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(requestKey({ ...payload, ...(confirmedDistinct ? { confirmed_distinct: true } : {}) })) });
@@ -66,12 +69,12 @@ function DecisionForm({ item, onSaved }: { item: OmissionReviewItem; onSaved: ()
       await onSaved();
     } catch {
       setError("Could not save this decision. Try again with the same fields.");
-    } finally { setPending(false); }
+    } finally { setPending(false); onPendingChange(item.issue.issue_id, false); }
   }
 
   return <form className="mt-3 grid max-w-xl gap-2" aria-label={`Review issue ${item.issue.issue_id}`}
     onSubmit={(event) => { event.preventDefault(); void save(); }}>
-    <fieldset disabled={pending} className="grid gap-2">
+    <fieldset disabled={pending || unavailable} className="grid gap-2">
       <label htmlFor={`${prefix}-action`}>Action</label>
       <select id={`${prefix}-action`} className={fieldClass} value={action} onChange={(event) => { setAction(event.target.value as Decision); setConfirmation(null); setError(null); }}>
         <option value="add">Add item</option><option value="link_existing">Link existing item</option>
@@ -105,6 +108,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
   const [loading, setLoading] = useState(true);
   const [resuming, setResuming] = useState(false);
   const [resumed, setResumed] = useState(false);
+  const [pendingDecisions, setPendingDecisions] = useState<Set<string>>(() => new Set());
   const requestKey = useRequestKey();
   const loadReview = useCallback(async () => {
     const query = `workspace_id=${encodeURIComponent(workspaceId)}`;
@@ -127,6 +131,15 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
     return () => { active = false; };
   }, [loadReview]);
 
+  /** Keep review refresh and resume disabled while any decision awaits its response. */
+  function recordPendingDecision(issueId: string, pending: boolean) {
+    setPendingDecisions(previous => {
+      const next = new Set(previous);
+      if (pending) next.add(issueId); else next.delete(issueId);
+      return next;
+    });
+  }
+
   async function refreshReview() {
     setLoading(true); setError(null);
     try {
@@ -138,7 +151,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
   }
 
   async function resume() {
-    if (!review?.extraction_batch_id || !review.source_file_id || loading || error || resuming || blockers.length || review.items.some(item => item.blocking)) return;
+    if (!review?.extraction_batch_id || !review.source_file_id || loading || error || resuming || pendingDecisions.size || blockers.length || review.items.some(item => item.blocking)) return;
     setResuming(true); setError(null);
     try {
       await readResponse(await fetch("/api/accuracy/extract", { method: "POST", headers: { "content-type": "application/json" },
@@ -168,7 +181,8 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
           <p>Evidence quote: “{item.issue.evidence_quote}”</p>
           {action ? <><p>Latest action: {action.action.replaceAll("_", " ")}{action.claim_id ? ` · Claim ${action.claim_id}` : ""}</p>
             <p>Actor: {action.actor_name} ({action.actor_function}) · Reason: {action.reason}</p></> : <p>Open · No contributor decision recorded.</p>}
-          {canReview && review.current && !closed && !loading && !error ? <DecisionForm item={item} onSaved={refreshReview} /> : null}
+          {canReview && review.current && !closed ? <DecisionForm item={item} onSaved={refreshReview}
+            unavailable={loading || !!error || resuming} onPendingChange={recordPendingDecision} /> : null}
         </li>;
       })}</ul>
       {review.actions.length ? <details className="mt-3"><summary>Decision history</summary>
@@ -177,9 +191,9 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
           <p>{action.actor_name} ({action.actor_function}) · {action.reason} · {action.created_at}</p>
         </li>)}</ul></details> : null}
       {canReview ? <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className={buttonClass} disabled={loading || resuming} onClick={() => void refreshReview()}>Refresh review</button>
+        <button type="button" className={buttonClass} disabled={loading || resuming || pendingDecisions.size > 0} onClick={() => void refreshReview()}>Refresh review</button>
         {review.current && review.extraction_batch_id && review.source_file_id && !blockers.length && !review.items.some(item => item.blocking) && !loading && !error && !resumed
-          ? <button type="button" className={buttonClass} disabled={resuming} onClick={() => void resume()}>{resuming ? "Resuming…" : "Resume downstream work"}</button> : null}
+          ? <button type="button" className={buttonClass} disabled={resuming || pendingDecisions.size > 0} onClick={() => void resume()}>{resuming ? "Resuming…" : "Resume downstream work"}</button> : null}
       </div> : null}
       {resuming ? <p role="status">Resuming downstream work…</p> : null}
       {resumed ? <p role="status">Downstream work resumed.</p> : null}

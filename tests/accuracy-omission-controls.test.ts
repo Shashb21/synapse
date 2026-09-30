@@ -13,6 +13,7 @@ const item = { workspace_id: "ws-1", run_id: "run-1", source_file_id: "source-1"
 let review: Record<string, unknown>;
 let currentItems: unknown[];
 let post: ReturnType<typeof vi.fn>;
+let get: ReturnType<typeof vi.fn>;
 let host: HTMLDivElement;
 let root: Root;
 let requests: Array<{ url: string; body: Record<string, unknown> }>;
@@ -23,6 +24,7 @@ beforeEach(() => {
   review = { current: true, items: [item], actions: [], extraction_batch_id: "server-batch", source_file_id: "source-1" };
   currentItems = [item];
   post = vi.fn(async () => response({ ok: true }));
+  get = vi.fn(async (url: string) => response(url.includes("run_id=") ? review : { items: currentItems }));
   requests = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
     if (options?.method === "POST") {
@@ -30,7 +32,7 @@ beforeEach(() => {
       requests.push({ url, body });
       return post(url, body);
     }
-    return response(url.includes("run_id=") ? review : { items: currentItems });
+    return get(url);
   }));
   host = document.createElement("div");
   document.body.append(host);
@@ -41,9 +43,9 @@ async function mount(canReview = true) {
   await act(async () => root.render(createElement(OmissionActions, { workspaceId: "ws-1", runId: "run-1", canReview })));
 }
 function text() { return host.textContent ?? ""; }
-async function input(label: string, value: string) {
+async function input(label: string, value: string, index = 0) {
   const element = Array.from(host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select"))
-    .find((node) => host.querySelector(`label[for="${node.id}"]`)?.textContent === label)!;
+    .filter((node) => host.querySelector(`label[for="${node.id}"]`)?.textContent === label)[index]!;
   const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
     : element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
   await act(async () => {
@@ -56,8 +58,17 @@ async function click(label: string) {
   expect(button, label).toBeTruthy();
   await act(async () => button.click());
 }
-async function submit() {
-  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+async function submit(index = 0) {
+  await act(async () => host.querySelectorAll("form")[index]!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+}
+
+/** Hold both review reads so tests observe the intermediate loading render. */
+function delayReviewReads() {
+  const release: Array<() => void> = [];
+  get.mockImplementation((url: string) => new Promise(resolve => {
+    release.push(() => resolve(response(url.includes("run_id=") ? review : { items: currentItems })));
+  }));
+  return async () => { await act(async () => { release.forEach(resolve => resolve()); }); };
 }
 
 describe("omission review controls", () => {
@@ -181,6 +192,68 @@ describe("omission review controls", () => {
     expect(text()).toContain("Confirm distinct item and add");
     await input("Statement", "Different statement");
     expect(text()).not.toContain("Confirm distinct item and add");
+  });
+  it("preserves another issue's draft through the delayed refresh after saving", async () => {
+    const second = { ...item, issue: { ...issue, issue_id: "issue-2", summary: "Second need" } };
+    review.items = [item, second]; currentItems = [item, second];
+    await mount();
+    await input("Reason", "Carefully written review", 1);
+    await input("Statement", "Detailed second statement", 1);
+    await input("Reason", "First decision");
+    const release = delayReviewReads();
+    await submit();
+    expect(host.querySelectorAll("form")).toHaveLength(2);
+    expect(host.querySelectorAll("fieldset")[1].disabled).toBe(true);
+    expect(host.querySelectorAll<HTMLTextAreaElement>("textarea")[3].value).toBe("Carefully written review");
+    review.items = [{ ...item, blocking: false, latest_action: { action: "dismiss", actor_name: "Alex", reason: "First decision" } }, second];
+    await release();
+    const form = host.querySelector('form[aria-label="Review issue issue-2"]')!;
+    expect(form.querySelectorAll<HTMLTextAreaElement>("textarea")[0].value).toBe("Detailed second statement");
+    expect(form.querySelectorAll<HTMLTextAreaElement>("textarea")[1].value).toBe("Carefully written review");
+    expect(form.querySelector("fieldset")?.disabled).toBe(false);
+  });
+  it("retains fields and the uncertain POST key across a delayed manual refresh", async () => {
+    post.mockRejectedValueOnce(new TypeError("Response lost"));
+    await mount(); await input("Reason", "Carefully written review"); await submit();
+    const firstKey = requests[0].body.idempotency_key;
+    const release = delayReviewReads();
+    await click("Refresh review");
+    expect(host.querySelector("form")).toBeTruthy();
+    expect(host.querySelector("fieldset")?.disabled).toBe(true);
+    expect(host.querySelectorAll<HTMLTextAreaElement>("textarea")[1].value).toBe("Carefully written review");
+    await submit();
+    expect(requests).toHaveLength(1);
+    await release(); await submit();
+    expect(requests[1].body.reason).toBe("Carefully written review");
+    expect(requests[1].body.idempotency_key).toBe(firstKey);
+  });
+  it("prevents manual refresh and repeated submit while a decision POST is pending", async () => {
+    let complete!: (value: ReturnType<typeof response>) => void;
+    post.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    await mount(); await input("Reason", "Pending decision"); await submit();
+    const refresh = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Refresh review")!;
+    expect(refresh.disabled).toBe(true);
+    const readCount = get.mock.calls.length;
+    await click("Refresh review"); await submit();
+    expect(get.mock.calls).toHaveLength(readCount);
+    expect(requests).toHaveLength(1);
+    expect(host.querySelector("fieldset")?.disabled).toBe(true);
+    await act(async () => complete(response({ error: "Unavailable" }, 500)));
+    expect(refresh.disabled).toBe(false);
+  });
+  it("keeps ambiguity confirmation and drafts through a failed review refresh", async () => {
+    post.mockResolvedValueOnce(response({ error: "Ambiguous claim gap-2; confirm this is a distinct item before adding." }, 409));
+    await mount(); await input("Reason", "Separate need"); await submit();
+    get.mockResolvedValue(response({ error: "Lookup unavailable" }, 500));
+    await click("Refresh review");
+    expect(text()).toContain("Confirm distinct item and add");
+    expect(host.querySelector("fieldset")?.disabled).toBe(true);
+    expect(host.querySelectorAll<HTMLTextAreaElement>("textarea")[1].value).toBe("Separate need");
+    get.mockImplementation(async (url: string) => response(url.includes("run_id=") ? review : { items: currentItems }));
+    await click("Refresh review");
+    expect(host.querySelector("fieldset")?.disabled).toBe(false);
+    await click("Confirm distinct item and add");
+    expect(requests[1].body.confirmed_distinct).toBe(true);
   });
   it("shows errors on lookup failures instead of treating them as clearance", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ error: "Unavailable" }, 500)));
