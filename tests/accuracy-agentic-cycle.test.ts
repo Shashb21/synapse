@@ -180,13 +180,34 @@ describe("agentic version capture", () => {
     } finally { now.mockRestore(); }
   });
 
-  it("keeps V0 when the critic fails", async () => {
+  it("assesses and pairs V0 before propagating a structural critic failure", async () => {
+    const { run, events, charge } = recordingRun();
+    const onCompleteness = vi.fn(async () => { charge(4, 0.04); return clean; });
+    const judge = vi.fn(async (draft: { value: string }) => draft);
+    await expect(runShallowAgenticCycle({ run, onSnapshot: async () => signals,
+      proposer: async () => ({ value: "V0" }),
+      critic: async () => { charge(2, 0.02); throw new Error("critic failed"); },
+      onCompleteness, judge,
+    })).rejects.toThrow("critic failed");
+    expect(onCompleteness).toHaveBeenCalledWith({ value: "V0" }, []);
+    expect(judge).not.toHaveBeenCalled();
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ event_type: "snapshot", output: { value: "V0" } });
+    expect(events[1]).toMatchObject({ event_type: "critique", iteration: 0, score: null,
+      issues: [], completeness: clean, token_usage: { total_tokens: 6 }, cost_usd: 0.06 });
+  });
+
+  it("keeps the structural error when completeness also fails", async () => {
     const { run, events } = recordingRun();
     await expect(runShallowAgenticCycle({ run, onSnapshot: async () => signals,
-      proposer: async () => ({ value: "V0" }), critic: async () => { throw new Error("critic failed"); },
+      proposer: async () => ({ value: "Exact V0" }),
+      critic: async () => { throw new Error("structural critic failed"); },
+      onCompleteness: async () => { throw new Error("completeness failed"); },
       judge: async (draft) => draft,
-    })).rejects.toThrow("critic failed");
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ event_type: "snapshot", output: { value: "V0" } });
+    })).rejects.toThrow("structural critic failed");
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ event_type: "snapshot", output: { value: "Exact V0" } });
+    expect(events[1]).toMatchObject({ event_type: "critique", score: null,
+      completeness: { risk_level: "check_failed" } });
   });
 });

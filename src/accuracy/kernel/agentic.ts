@@ -97,7 +97,17 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   for (let iteration = 0; iteration <= max; iteration++) {
     // A terminal version still needs an assessment, but has no revision-eligible structural pass.
     const assessed = await measure(async () => {
-      const structural = iteration < max ? await args.critic(draft) : null;
+      let structural: Awaited<ReturnType<typeof args.critic>> | null = null;
+      let structuralError: unknown;
+      let structuralFailed = false;
+      if (iteration < max) {
+        try {
+          structural = await args.critic(draft);
+        } catch (error) {
+          structuralError = error;
+          structuralFailed = true;
+        }
+      }
       let completeness = notApplicable;
       if (args.onCompleteness) {
         try {
@@ -106,9 +116,9 @@ export async function runShallowAgenticCycle<T extends object>(args: {
           completeness = failedAssessment(priorOpenIssues);
         }
       }
-      return { structural, completeness };
+      return { structural, completeness, structuralError, structuralFailed };
     });
-    const { structural, completeness } = assessed.value;
+    const { structural, completeness, structuralError, structuralFailed } = assessed.value;
     const importantIssues = completeness.suspected_omissions
       .filter((issue) => issue.importance === "important").map(omissionIssue);
     await args.run.recordAgentEvent({ event_type: "critique", iteration,
@@ -116,6 +126,7 @@ export async function runShallowAgenticCycle<T extends object>(args: {
       issues: [...(structural?.issues ?? []), ...(structural?.observationIssues ?? []), ...importantIssues],
       completeness, latency_ms: assessed.latency_ms,
       token_usage: assessed.token_usage, cost_usd: assessed.cost_usd });
+    if (structuralFailed) throw structuralError;
     priorOpenIssues = completeness.suspected_omissions;
     if (structural) trace.push(`round${iteration + 1}:critic`);
     if (iteration === max || !structural) break;

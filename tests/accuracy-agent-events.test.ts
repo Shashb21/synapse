@@ -77,6 +77,22 @@ const critique = {
 };
 
 describe("agent event persistence", () => {
+  it("reads historical critiques without completeness while rejecting new incomplete writes", async () => {
+    const ids = await fixture();
+    const legacy = Object.fromEntries(Object.entries(critique).filter(([key]) => key !== "completeness"));
+    await expect(appendAgentEvent({ ...ids, event: legacy as never })).rejects.toThrow();
+    await accuracyDb().insert(t.accuracyAgentEvents).values({
+      id: newId("aevt"), ...ids, event_type: "critique", iteration: 0,
+      payload: legacy, recorded_at: nowIso(),
+    });
+
+    const progression = await readAgentProgression(ids);
+    expect(progression?.events[0].event).toEqual({ ...legacy, completeness: {
+      risk_level: "not_applicable", checked_block_ids: [], unchecked_block_ids: [],
+      suspected_omissions: [], prior_issue_resolutions: [],
+    } });
+  });
+
   it("retains exact V0, critique, V1 and judgment in progression order", async () => {
     const ids = await fixture();
     const v1 = { ...v0, iteration: 1, output: { gaps: [{ id: "gap-1", statement: "Exact V1" }] } };

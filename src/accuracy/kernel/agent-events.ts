@@ -91,6 +91,18 @@ const agentEventSchema = z.discriminatedUnion("event_type", [
   snapshotSchema, critiqueSchema, judgmentSchema,
 ]);
 
+/** Supply an explicit historical state only for stored critiques predating completeness. */
+function parseStoredEvent(payload: unknown): AgentEvent {
+  if (typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    && "event_type" in payload && payload.event_type === "critique" && !("completeness" in payload)) {
+    return agentEventSchema.parse({ ...payload, completeness: {
+      risk_level: "not_applicable", checked_block_ids: [], unchecked_block_ids: [],
+      suspected_omissions: [], prior_issue_resolutions: [],
+    } });
+  }
+  return agentEventSchema.parse(payload);
+}
+
 export type CriticIssue = z.infer<typeof criticIssueSchema>;
 export type ProductionSignals = z.infer<typeof productionSignalsSchema>;
 export type AgentSnapshotEvent = z.infer<typeof snapshotSchema>;
@@ -174,7 +186,7 @@ export async function readAgentProgression(args: {
       workspace_id: row.workspace_id,
       event_type: row.event_type as AgentEvent["event_type"],
       iteration: row.iteration,
-      event: agentEventSchema.parse(row.payload),
+      event: parseStoredEvent(row.payload),
       recorded_at: row.recorded_at,
     };
   });
