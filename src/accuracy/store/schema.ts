@@ -134,6 +134,57 @@ export const accuracyAgentEvents = pgTable(
   }),
 );
 
+/** Append-only contributor decisions for individual source-linked omissions. */
+export const accuracyOmissionActions = pgTable("accuracy_omission_actions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  source_file_id: text("source_file_id").notNull(),
+  run_id: text("run_id").notNull(),
+  issue_id: text("issue_id").notNull(),
+  action: text("action").notNull(),
+  claim_id: text("claim_id"),
+  new_importance: text("new_importance"),
+  reason: text("reason").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+  idempotency_key: text("idempotency_key").notNull(),
+  request_fingerprint: text("request_fingerprint").notNull(),
+}, (table) => ({
+  requestKey: unique("accuracy_omission_actions_workspace_request_key").on(table.workspace_id, table.idempotency_key),
+  history: index("accuracy_omission_actions_history_idx").on(table.workspace_id, table.run_id, table.issue_id),
+}));
+
+/** An extraction is applied only after every draft has been persisted. */
+export const accuracyExtractionBatches = pgTable("accuracy_extraction_batches", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  source_file_id: text("source_file_id").notNull(),
+  requested_kinds: jsonb("requested_kinds").$type<string[]>().notNull(),
+  run_ids: jsonb("run_ids").$type<string[]>().notNull(),
+  created_claim_ids: jsonb("created_claim_ids").$type<string[]>().notNull(),
+  drafts_persisted: boolean("drafts_persisted").notNull().default(false),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  source: index("accuracy_extraction_batches_source_idx").on(table.workspace_id, table.source_file_id),
+}));
+
+/** Durable reserved operations and responses make a resumed batch retryable. */
+export const accuracyResumeJournals = pgTable("accuracy_resume_journals", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  batch_id: text("batch_id").notNull(),
+  merge_operation_id: text("merge_operation_id").notNull(),
+  merge_state: text("merge_state").notNull().default("reserved"),
+  status_operation_id: text("status_operation_id").notNull(),
+  status_state: text("status_state").notNull().default("reserved"),
+  final_response: jsonb("final_response"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+}, (table) => ({
+  batch: unique("accuracy_resume_journals_workspace_batch_key").on(table.workspace_id, table.batch_id),
+}));
+
 export const accuracyRoutingConfig = pgTable(
   "accuracy_routing_config",
   {
@@ -300,6 +351,28 @@ export const ACCURACY_DDL = [
     CONSTRAINT accuracy_agent_events_run_type_iteration_key UNIQUE (run_id, event_type, iteration)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_agent_events_run_workspace_idx ON accuracy_agent_events (run_id, workspace_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_omission_actions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, source_file_id text NOT NULL,
+    run_id text NOT NULL, issue_id text NOT NULL, action text NOT NULL,
+    claim_id text, new_importance text, reason text NOT NULL, actor_name text NOT NULL,
+    actor_function text NOT NULL, created_at text NOT NULL, idempotency_key text NOT NULL,
+    request_fingerprint text NOT NULL,
+    CONSTRAINT accuracy_omission_actions_workspace_request_key UNIQUE (workspace_id, idempotency_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_omission_actions_history_idx ON accuracy_omission_actions (workspace_id, run_id, issue_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_extraction_batches (
+    id text PRIMARY KEY, workspace_id text NOT NULL, source_file_id text NOT NULL,
+    requested_kinds jsonb NOT NULL, run_ids jsonb NOT NULL, created_claim_ids jsonb NOT NULL,
+    drafts_persisted boolean NOT NULL DEFAULT false, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_extraction_batches_source_idx ON accuracy_extraction_batches (workspace_id, source_file_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_resume_journals (
+    id text PRIMARY KEY, workspace_id text NOT NULL, batch_id text NOT NULL,
+    merge_operation_id text NOT NULL, merge_state text NOT NULL DEFAULT 'reserved',
+    status_operation_id text NOT NULL, status_state text NOT NULL DEFAULT 'reserved',
+    final_response jsonb, created_at text NOT NULL, updated_at text NOT NULL,
+    CONSTRAINT accuracy_resume_journals_workspace_batch_key UNIQUE (workspace_id, batch_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS accuracy_routing_config (
     call_kind text NOT NULL,
     agent_role text NOT NULL,

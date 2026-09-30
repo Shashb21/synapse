@@ -9,6 +9,9 @@ import {
 } from "@/accuracy/domain/plan-label";
 
 export type WorkspaceDeleteCounts = {
+  omission_actions: number;
+  resume_journals: number;
+  extraction_batches: number;
   agent_events: number;
   miss_flag_actions: number;
   provenance: number;
@@ -145,6 +148,21 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   const db = accuracyDb();
 
   const deleted: WorkspaceDeleteCounts = {
+    omission_actions: await deletedCount(
+      await db.delete(t.accuracyOmissionActions)
+        .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))
+        .returning({ id: t.accuracyOmissionActions.id }),
+    ),
+    resume_journals: await deletedCount(
+      await db.delete(t.accuracyResumeJournals)
+        .where(eq(t.accuracyResumeJournals.workspace_id, workspace_id))
+        .returning({ id: t.accuracyResumeJournals.id }),
+    ),
+    extraction_batches: await deletedCount(
+      await db.delete(t.accuracyExtractionBatches)
+        .where(eq(t.accuracyExtractionBatches.workspace_id, workspace_id))
+        .returning({ id: t.accuracyExtractionBatches.id }),
+    ),
     // The parent-run foreign key also cascades events inserted after this cleanup statement.
     agent_events: await deletedCount(
       await db
