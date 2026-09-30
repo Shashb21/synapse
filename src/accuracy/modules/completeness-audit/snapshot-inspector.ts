@@ -45,6 +45,7 @@ export type SnapshotCompletenessAssessment = {
 
 const nonempty = z.string().trim().min(1);
 const findingSchema = z.object({
+  prior_issue_id: nonempty.optional(),
   item_kind: z.enum(["gap", "tactic"]),
   summary: nonempty,
   source_ref: z.object({ source_file_id: nonempty, block_id: nonempty }),
@@ -65,10 +66,17 @@ const dispositionSchema = z.object({
   matched_item_ref: nonempty.optional(),
 });
 
-function identity(issue: Pick<SuspectedOmission, "item_kind" | "source_ref" | "evidence_quote">): string {
+/** Keep the legacy evidence key as the base for newly allocated issue IDs. */
+function evidenceIdentity(issue: Pick<SuspectedOmission, "item_kind" | "source_ref" | "evidence_quote">): string {
   return JSON.stringify([issue.source_ref.source_file_id, issue.source_ref.block_id, issue.item_kind, issue.evidence_quote]);
 }
 
+/** Match an exact repeated finding without merging distinct items sharing evidence. */
+function findingIdentity(issue: Pick<SuspectedOmission, "item_kind" | "source_ref" | "evidence_quote" | "summary">): string {
+  return JSON.stringify([evidenceIdentity(issue), issue.summary.trim()]);
+}
+
+/** Keep a prior issue open when its disposition cannot be validated. */
 function unresolved(issue_id: string): OmissionResolution {
   return { issue_id, outcome: "unresolved", reason: "No valid explicit disposition was supplied." };
 }
@@ -104,7 +112,7 @@ export async function inspectSnapshotCompleteness(args: {
     const response = await args.complete({
       purpose: "snapshot_completeness",
       maxTokens: 4000,
-      system: "Compare every source block with all current snapshot items semantically. A citation to a block does not cover every distinct claim in that block. Return JSON with suspected_omissions and prior_issue_resolutions. For each omission, include item_kind, summary, source_ref with source_file_id and block_id, a verbatim evidence_quote, basis (explicit or inferred), reason, and suggested_action. Consider each prior issue explicitly: disposition requires issue_id, outcome, and reason; when resolved or partly_resolved, provide matched_item_ref. Include checked_block_ids for every block actually inspected. Do not invent evidence or include gold fields.",
+      system: "Compare every source block with all current snapshot items semantically. A citation to a block does not cover every distinct claim in that block. Return JSON with suspected_omissions and prior_issue_resolutions. For each omission, include item_kind, summary, source_ref with source_file_id and block_id, a verbatim evidence_quote, basis (explicit or inferred), reason, and suggested_action. Distinct missing items may share a quote; give each its own summary. When repeating a prior omission, include its prior_issue_id even if its summary or quote wording changes. Omit prior_issue_id for a new distinct item. Consider each prior issue explicitly: disposition requires issue_id, outcome, and reason; when resolved or partly_resolved, provide matched_item_ref. Include checked_block_ids for every block actually inspected. Do not invent evidence or include gold fields.",
       user: JSON.stringify({ blocks: scope, items: args.items, prior_open_issues: args.prior_open_issues }),
     });
     parsed = responseSchema.parse(JSON.parse(response.raw));
@@ -116,9 +124,16 @@ export async function inspectSnapshotCompleteness(args: {
   const checkedIds = parsed.checked_block_ids;
   if (new Set(checkedIds).size !== checkedIds.length || checkedIds.some((id) => !allIds.includes(id))) return failed();
   const checked = new Set(checkedIds);
+  const priorById = new Map(args.prior_open_issues.map((issue) => [issue.issue_id, issue]));
   for (const finding of parsed.suspected_omissions) {
     const block = bySourceBlock.get(JSON.stringify([finding.source_ref.source_file_id, finding.source_ref.block_id]));
     if (!block || !checked.has(block.id) || !block.text.includes(finding.evidence_quote)) return failed();
+    if (finding.prior_issue_id) {
+      const prior = priorById.get(finding.prior_issue_id);
+      if (!prior || prior.item_kind !== finding.item_kind
+        || prior.source_ref.source_file_id !== finding.source_ref.source_file_id
+        || prior.source_ref.block_id !== finding.source_ref.block_id) return failed();
+    }
   }
 
   const itemRefs = new Set(args.items.map((item) => item.item_ref));
@@ -140,12 +155,24 @@ export async function inspectSnapshotCompleteness(args: {
     const outcome = resolutions[index].outcome;
     return outcome === "unresolved" || outcome === "partly_resolved";
   });
-  const priorByIdentity = new Map(args.prior_open_issues.map((issue) => [identity(issue), issue.issue_id]));
+  const idsByFinding = new Map(args.prior_open_issues.map((issue) => [findingIdentity(issue), issue.issue_id]));
+  const reservedIds = new Set(priorById.keys());
   const closedIds = new Set(resolutions.filter((entry) => entry.outcome === "resolved" || entry.outcome === "invalid").map((entry) => entry.issue_id));
   const omissions = new Map(activePrior.map((issue) => [issue.issue_id, issue]));
   for (const finding of parsed.suspected_omissions) {
-    const key = identity(finding);
-    const issue_id = priorByIdentity.get(key) ?? `omission-${createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
+    const key = findingIdentity(finding);
+    const exactId = idsByFinding.get(key);
+    if (finding.prior_issue_id && exactId && finding.prior_issue_id !== exactId) return failed();
+    let issue_id = finding.prior_issue_id ?? exactId;
+    if (!issue_id) {
+      // Preserve the existing base ID, then allocate independent IDs for shared evidence.
+      const baseId = `omission-${createHash("sha256").update(evidenceIdentity(finding)).digest("hex").slice(0, 16)}`;
+      issue_id = baseId;
+      let suffix = 2;
+      while (reservedIds.has(issue_id)) issue_id = `${baseId}-${suffix++}`;
+      reservedIds.add(issue_id);
+    }
+    idsByFinding.set(key, issue_id);
     if (closedIds.has(issue_id)) continue;
     if (omissions.has(issue_id)) continue;
     omissions.set(issue_id, {

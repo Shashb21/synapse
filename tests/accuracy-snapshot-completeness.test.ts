@@ -39,6 +39,66 @@ describe("snapshot completeness inspector", () => {
     expect(result.suspected_omissions[1]).toMatchObject({ basis: "inferred", importance: "advisory" });
   });
 
+  it("keeps same-quote safety and survival gaps independent when only safety is resolved", async () => {
+    const quote = "Safety and survival evidence are missing in elderly patients.";
+    const source = [{ ...blocks[1], text: quote }];
+    const safety = { ...finding, summary: "Safety evidence", evidence_quote: quote };
+    const survival = { ...finding, summary: "Survival evidence", evidence_quote: quote };
+    const v0 = await inspectSnapshotCompleteness({ blocks: source, items: [], prior_open_issues: [],
+      complete: completion({ checked_block_ids: ["b"], suspected_omissions: [safety, survival], prior_issue_resolutions: [] }) });
+    expect(v0.suspected_omissions).toHaveLength(2);
+    const [safetyIssue, survivalIssue] = v0.suspected_omissions;
+    expect(safetyIssue.issue_id).not.toBe(survivalIssue.issue_id);
+
+    const v1 = await inspectSnapshotCompleteness({ blocks: source,
+      items: [{ item_kind: "gap", item_ref: "safety-gap", statement: "Safety evidence", provenance: [] }],
+      prior_open_issues: v0.suspected_omissions,
+      complete: completion({ checked_block_ids: ["b"], suspected_omissions: [survival], prior_issue_resolutions: [
+        { issue_id: safetyIssue.issue_id, outcome: "resolved", reason: "Safety gap added", matched_item_ref: "safety-gap" },
+      ] }) });
+    expect(v1.suspected_omissions).toEqual([survivalIssue]);
+    expect(v1.prior_issue_resolutions).toEqual([
+      expect.objectContaining({ issue_id: safetyIssue.issue_id, outcome: "resolved" }),
+      expect.objectContaining({ issue_id: survivalIssue.issue_id, outcome: "unresolved" }),
+    ]);
+    expect(v1.risk_level).toBe("important");
+  });
+
+  it("retains a persisted ID when a repeated finding explicitly references it with new wording", async () => {
+    const prior: SuspectedOmission = { ...finding, issue_id: "legacy-issue", importance: "important" };
+    const result = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [prior],
+      complete: completion({ suspected_omissions: [{ ...finding, summary: "Reworded comparative evidence need",
+        evidence_quote: "Comparative effectiveness remains unknown", prior_issue_id: prior.issue_id }], prior_issue_resolutions: [] }) });
+    expect(result.suspected_omissions).toEqual([prior]);
+    expect(result.prior_issue_resolutions[0]).toMatchObject({ issue_id: "legacy-issue", outcome: "unresolved" });
+  });
+
+  it("fails inspection for unknown or incompatible prior finding references without losing prior evidence", async () => {
+    const prior: SuspectedOmission = { ...finding, issue_id: "legacy-issue", importance: "important" };
+    for (const repeated of [
+      { ...finding, prior_issue_id: "unknown" },
+      { ...finding, item_kind: "tactic", prior_issue_id: prior.issue_id },
+      { ...finding, source_ref: { source_file_id: "source", block_id: "a" }, evidence_quote: blocks[0].text, prior_issue_id: prior.issue_id },
+    ]) {
+      const result = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [prior],
+        complete: completion({ suspected_omissions: [repeated], prior_issue_resolutions: [] }) });
+      expect(result.risk_level).toBe("check_failed");
+      expect(result.suspected_omissions).toEqual([prior]);
+    }
+  });
+
+  it("does not give a new same-quote finding the ID of a closed persisted issue", async () => {
+    const first = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [],
+      complete: completion({ suspected_omissions: [finding], prior_issue_resolutions: [] }) });
+    const prior = first.suspected_omissions[0];
+    const result = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [prior],
+      complete: completion({ suspected_omissions: [{ ...finding, summary: "A distinct gap supported by the same quote" }],
+        prior_issue_resolutions: [{ issue_id: prior.issue_id, outcome: "resolved", reason: "Added", matched_item_ref: "gap-a" }] }) });
+    expect(result.suspected_omissions).toHaveLength(1);
+    expect(result.suspected_omissions[0].issue_id).not.toBe(prior.issue_id);
+    expect(result.risk_level).toBe("important");
+  });
+
   it("rejects a quote that is not verbatim or points outside selected source scope", async () => {
     for (const bad of [
       { ...finding, evidence_quote: "Comparative effectiveness is known" },

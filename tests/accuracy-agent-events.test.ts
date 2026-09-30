@@ -198,7 +198,8 @@ describe("run progression detail", () => {
     const terminal = { ...critique, iteration: 1, score: null, issues: [], completeness: {
       risk_level: "check_failed" as const, checked_block_ids: [], unchecked_block_ids: ["block-2"],
       suspected_omissions: [], prior_issue_resolutions: [{ issue_id: "issue-1", outcome: "resolved" as const,
-        reason: "Added in V1", matched_item_ref: "draft-gap-1" }],
+        reason: "Added in V1", matched_item_ref: "draft-gap-1" },
+        { issue_id: "issue-2", outcome: "unresolved" as const, reason: "Follow-up still absent" }],
     } };
     for (const event of [v0, firstCritique, v1, terminal]) await appendAgentEvent({ ...ids, event });
     const html = renderPageContent(await AccuracyRunDetailPage({
@@ -213,6 +214,11 @@ describe("run progression detail", () => {
     expect(html).toContain("Regional evidence need");
     expect(html).toContain("Resolved");
     expect(html).toContain("Added in V1");
+    const rows = html.match(/<li\b[^>]*>[\s\S]*?<\/li>/g) ?? [];
+    expect(rows.find((row) => row.includes("Regional evidence need omitted"))).toContain("issue-1");
+    expect(rows.find((row) => row.includes("Possible follow-up"))).toContain("issue-2");
+    expect(rows.find((row) => row.includes("Added in V1"))).toContain("Resolved</strong> · issue-1");
+    expect(rows.find((row) => row.includes("Follow-up still absent"))).toContain("Unresolved</strong> · issue-2");
     expect(html).toContain("Structurally unassessed");
     expect(html).toContain("Check failed");
     expect(html).not.toContain("recall");

@@ -107,6 +107,7 @@ export default async function AccuracyRunDetailPage({
                         {event.completeness.suspected_omissions.map((omission) => (
                           <li key={omission.issue_id} className="border-t border-border pt-2">
                             <strong>{omission.importance === "important" ? "Important" : "Advisory"} · {omission.item_kind}</strong>: {omission.summary}
+                            <p>Issue ID: {omission.issue_id}</p>
                             <p>Source file {omission.source_ref.source_file_id}, block {omission.source_ref.block_id}</p>
                             <p>Evidence quote: “{omission.evidence_quote}”</p>
                             <p>{omission.reason} Suggested action: {omission.suggested_action}</p>

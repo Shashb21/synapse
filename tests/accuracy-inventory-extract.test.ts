@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "@/accuracy/kernel/agent-events";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
+import { listActiveSourceClaims } from "@/accuracy/store/claim-store";
 
 vi.mock("@/accuracy/store/claim-store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/accuracy/store/claim-store")>(),
@@ -55,6 +56,44 @@ function stubCtx(): AccuracyModuleContext {
 }
 
 describe("inventory extract module", () => {
+  it("supplies persisted gaps and tactics with provenance alongside the current tactic draft", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([
+        { id: "blk-1", workspace_id: "ws-test", source_file_id: "src-1", index: 0,
+          kind: "prose", heading: null, text: "Evidence need. Registry study. Trial planned.", parser: "test", created_at: "now" },
+      ]);
+      vi.mocked(listActiveSourceClaims).mockResolvedValueOnce([
+        { id: "stored-gap", claim_type: "gap", statement: "Stored need", metadata: { provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Evidence need" }] } },
+        { id: "stored-tactic", claim_type: "tactic", statement: "Stored registry", metadata: { provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Registry study" }, null, { quote: 42 }] } },
+      ] as never);
+      const ctx = stubCtx();
+      const inspectedItems: unknown[] = [];
+      ctx.complete = vi.fn(async (request) => {
+        if (request.purpose === "snapshot_completeness") {
+          inspectedItems.push(JSON.parse(request.user).items);
+          return { raw: JSON.stringify({ checked_block_ids: ["blk-1"], suspected_omissions: [],
+            prior_issue_resolutions: [] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+        }
+        return { raw: JSON.stringify({ tactics: [{ name: "New trial", type: "phase3_trial", status: "planned",
+          evidence_question: "Does the treatment work?", provenance: [
+            { source_file_id: "src-1", block_id: "blk-1", quote: "Trial planned" }] }] }),
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      });
+      await inventoryExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx);
+      expect(inspectedItems).toEqual([[
+        { item_kind: "gap", item_ref: "stored-gap", statement: "Stored need", provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Evidence need" }] },
+        { item_kind: "tactic", item_ref: "stored-tactic", statement: "Stored registry", provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Registry study" }] },
+        { item_kind: "tactic", item_ref: "draft-tactic-0", statement: "New trial", provenance: [
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Trial planned" }] },
+      ]]);
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
   it("reports distinct tactic B despite A citing the same block and resolves it in V1", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
