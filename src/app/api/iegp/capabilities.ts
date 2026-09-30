@@ -64,6 +64,10 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "delete_breakout_group",
       "assign_gap_to_breakout",
       "unassign_gap_from_breakout",
+      "update_breakout_group",
+      "assign_gaps_to_breakout",
+      "move_gap_to_breakout",
+      "create_breakout_groups_by_theme",
     ].map((action) => [action, "validate" as Capability]),
   ),
 };
