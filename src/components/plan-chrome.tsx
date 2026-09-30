@@ -12,7 +12,6 @@ import {
   Menu,
   Rocket,
   Upload,
-  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,8 +126,8 @@ const SECONDARY: SecondaryItem[] = [
  */
 function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
   const gapsUnlocked = nav.gapsUnlocked || !ai;
-  // Owner feedback (KAN-52): Room is out for now, so its context, mapping table and
-  // breakouts live here in Prep, in plan order.
+  // Owner feedback (KAN-52): Room is out for now, so plan context lives here in Prep. The
+  // mapping table and breakouts are hidden from the nav (KAN-56; breakouts are KAN-57).
   const context: PlaceItem = {
     id: "setup",
     href: "/setup",
@@ -159,15 +158,6 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       ready: nav.planUnlocked,
     },
     {
-      id: "mappings",
-      href: "/mappings",
-      label: "Mapping table",
-      sub: "Gap ↔ tactic",
-      hint: "One row per gap with its tactics and mapping status",
-      icon: Columns3,
-      ready: gapsUnlocked,
-    },
-    {
       id: "tactics",
       href: "/?place=tactics",
       label: "Tactic Ideation",
@@ -183,15 +173,6 @@ function placesOf(nav: PlanNavModel, ai: boolean): PlaceItem[] {
       sub: "Schedule view",
       hint: "The living IEGP as an interactive Gantt",
       icon: ChartGantt,
-      ready: true,
-    },
-    {
-      id: "breakouts",
-      href: "/breakouts",
-      label: "Breakout groups",
-      sub: "Workshop groups & gaps",
-      hint: "Group gaps by theme and assign them for the workshop",
-      icon: Users,
       ready: true,
     },
   ];

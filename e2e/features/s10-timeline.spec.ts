@@ -91,7 +91,49 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await expect(panel.getByRole("heading", { name: "Timing" })).toBeVisible();
     await expect(panel.getByRole("heading", { name: "Design" })).toBeVisible();
     await expect(panel.getByText(activity.start_date)).toBeVisible();
-    await expect(panel.getByRole("button", { name: /reschedule/i })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /^edit$/i })).toBeVisible();
+  });
+
+  // Owner feedback (KAN-56): editing stays in the side panel, and the budget can be set there.
+  test("edits the activity and its budget inside the same side panel", async ({ page, request }) => {
+    const state = await planState(request);
+    const activity = state.timeline.activities[0]!;
+    await page.goto("/timeline");
+    await page.waitForLoadState("networkidle");
+    await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
+
+    const panel = page.getByRole("dialog");
+    await panel.getByRole("button", { name: /^edit$/i }).click();
+    const form = panel.getByTestId("activity-editor");
+    await expect(form).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+
+    // Nothing typed: nothing is sent.
+    await form.getByLabel("Rationale for the change").fill("Budget agreed with finance");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText("Nothing changed.");
+
+    // No rationale: refused before anything is sent.
+    await form.getByLabel("Budget", { exact: true }).fill("$120k");
+    await form.getByLabel("Rationale for the change").fill("");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText(/rationale is required/i);
+
+    // End before start is caught in the panel.
+    await form.getByLabel("End", { exact: true }).fill("2020-01-01");
+    await form.getByLabel("Rationale for the change").fill("Budget agreed with finance");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText("The end date is before the start date.");
+    await form.getByLabel("End", { exact: true }).fill(activity.end_date);
+
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form).toBeHidden({ timeout: 20_000 });
+    await expect(panel.getByRole("heading", { name: "Design" })).toBeVisible();
+    await expect(panel.getByText("$120k")).toBeVisible();
+    // Saved: it is still there after a reload.
+    await page.reload();
+    await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
+    await expect(page.getByRole("dialog").getByText("$120k")).toBeVisible();
   });
 
   test("exports the chart as a PNG image", async ({ page }) => {

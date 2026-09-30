@@ -31,7 +31,7 @@ test.describe("S5 classification and validation gate", () => {
     await page.goto("/?place=gaps");
     // The workbench is a list and one detail pane: pick the gap in the list, and
     // retry the pick until the page has hydrated (a click before that does nothing).
-    const card = page.locator("article").filter({ hasText: target.gap_id });
+    const card = page.locator(`article[data-gap-id="${target.gap_id}"]`);
     const confirm = card.getByRole("button", { name: /^confirm status$/i });
     await expect(async () => {
       await page.getByRole("button", { name: target.name }).first().click({ timeout: 5_000 });

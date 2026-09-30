@@ -274,6 +274,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS custom_type jsonb",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS number integer",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
     // Kernel, source-block, room, walkthrough and stage-module tables.

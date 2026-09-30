@@ -167,6 +167,8 @@ test.describe("Place by hand", () => {
     await expect(item).toBeVisible();
     await page.waitForLoadState("networkidle");
     const plot = page.getByRole("group", { name: /^Prioritization matrix:/ });
+    // The controls sit above the matrix (KAN-56), so the list can start below the fold.
+    await item.scrollIntoViewIfNeeded();
     const box = (await plot.boundingBox())!;
     const from = (await item.boundingBox())!;
 

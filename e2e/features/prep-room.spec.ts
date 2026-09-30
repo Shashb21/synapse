@@ -3,22 +3,19 @@ import { openRail } from "../support/rail";
 
 /**
  * Room is out of the app for now (owner, KAN-52): no Prep/Room switch, the Room URLs
- * return to Prep, and plan context, the mapping table and breakouts are Prep places.
+ * return to Prep, and plan context is a Prep place. The mapping table and breakouts are
+ * hidden from the nav for now (owner, KAN-56); breakouts return with KAN-57.
  */
-test("Room is out for now; its context, mapping table and breakouts are in Prep", async ({ page }) => {
+test("Room is out for now; plan context is in Prep; mapping table and breakouts are hidden", async ({ page }) => {
   // Several routes compile on first visit in a dev server.
   test.setTimeout(120_000);
   await page.goto("/");
   await openRail(page);
   await expect(page.getByRole("group", { name: /prep or room mode/i })).toHaveCount(0);
   const places = page.getByRole("navigation", { name: "Places" });
-  for (const [name, href] of [
-    [/^plan context/i, "/setup"],
-    [/^mapping table/i, "/mappings"],
-    [/^breakout groups/i, "/breakouts"],
-  ] as const) {
-    await expect(places.getByRole("link", { name })).toHaveAttribute("href", href);
-  }
+  await expect(places.getByRole("link", { name: /^plan context/i })).toHaveAttribute("href", "/setup");
+  await expect(places.getByRole("link", { name: /^mapping table/i })).toHaveCount(0);
+  await expect(places.getByRole("link", { name: /^breakout groups/i })).toHaveCount(0);
 
   for (const path of ["/room", "/room/audience", "/presentation"]) {
     await page.goto(path);
@@ -26,8 +23,7 @@ test("Room is out for now; its context, mapping table and breakouts are in Prep"
   }
 
   await page.goto("/breakouts");
-  await expect(page.getByRole("heading", { name: "Breakout groups" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /room presenter view|switch to presentation/i })).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\/breakouts/);
   await page.goto("/timeline");
   await expect(page.getByRole("link", { name: /present this plan/i })).toHaveCount(0);
 });

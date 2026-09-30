@@ -60,6 +60,8 @@ export type TimelineActivity = {
     data_source: string;
     study_design: string;
     owner: string;
+    /** The tactic's budget as typed, e.g. "$120k" (KAN-56: edited from the timeline side panel). */
+    budget?: string | null;
     function: string;
     priority_rationale: string | null;
     /** The model's reasons for each dependency, or null when there are none. */
@@ -463,6 +465,7 @@ export function buildTimeline(args: {
         data_source: tactic.data_source,
         study_design: tactic.study_design,
         owner: tactic.owner,
+        budget: tactic.budget ?? null,
         function: tactic.function,
         priority_rationale: candidate.priority_rationale,
         dependency_note:

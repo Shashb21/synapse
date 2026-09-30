@@ -5,7 +5,8 @@ import { seedMapped } from "../support/synapse";
 test.describe.configure({ mode: "serial", timeout: 120_000 });
 
 // KAN-55: clearer breakout actions; assign gaps one by one, by filter, or a whole theme at once.
-test.describe("breakout groups", () => {
+// Breakouts are hidden from the app for now (owner, KAN-56); the workflow comes back with KAN-57.
+test.describe.skip("breakout groups", () => {
   freshWorkspace({ name: "KAN-55", seed: (request) => seedMapped(request) });
 
   test("groups every gap by domain in one step", async ({ page }) => {

@@ -16,6 +16,7 @@ import {
 import { CreateActivityDialog, ManualDatesDialog, type DragChange } from "@/components/timeline/timeline-dialogs";
 import { TACTIC_TYPE_FAMILIES, tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
+import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import type { TimelineActivity, TimelineBand } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineGroup, GapTimelineItem, GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 
@@ -210,6 +211,12 @@ export function GapGantt({
     [shown, top, showNotPrioritized, showDeferred],
   );
   const bodyBottom = rows.length > 0 ? rows[rows.length - 1]!.y + rows[rows.length - 1]!.h : top;
+  // Marker lines stop at the last row with a dated bar (owner feedback, KAN-56), not in the
+  // unscheduled rows or collapsed sections below it.
+  const lastDated = [...rows]
+    .reverse()
+    .find((row) => (row.kind === "item" && row.item.activity) || (row.kind === "gap" && row.group.start));
+  const markerBottom = lastDated ? lastDated.y + lastDated.h : top;
   const trackW = months * monthWidth;
   const spans = useMemo(() => {
     const years: { year: number; from: number; span: number }[] = [];
@@ -550,7 +557,7 @@ export function GapGantt({
                   {truncate(group.gap_name, canCreate && editable ? 30 : 42)}
                 </text>
                 <text x={20} y={row.y + 26} fill={palette.primary} fontSize={9.5}>
-                  {`${group.gap_id} · ${group.items.length} tactic${group.items.length === 1 ? "" : "s"}`}
+                  {`${gapNumberLabel(group.number)} · ${group.items.length} tactic${group.items.length === 1 ? "" : "s"}`}
                 </text>
                 {group.start && group.end ? (
                   <rect
@@ -731,7 +738,16 @@ export function GapGantt({
           return (
             <g key={marker.id} aria-label={`${marker.detail}: ${marker.label}, ${marker.date}`}>
               <title>{`${marker.detail}: ${marker.label} · ${marker.date}`}</title>
-              <line x1={mx} y1={HEADER_H + 4} x2={mx} y2={bodyBottom} stroke={palette.readout} strokeWidth={1} strokeDasharray="1 3" />
+              <line
+                x1={mx}
+                y1={HEADER_H + 4}
+                x2={mx}
+                y2={markerBottom}
+                stroke={palette.readout}
+                strokeWidth={1}
+                strokeDasharray="1 3"
+                data-marker-line={marker.id}
+              />
               <polygon
                 points={`${mx},${HEADER_H + 2} ${mx + 5},${HEADER_H + 8} ${mx},${HEADER_H + 14} ${mx - 5},${HEADER_H + 8}`}
                 fill={marker.kind === "key_decision" ? palette.today : palette.readout}

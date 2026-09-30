@@ -7,6 +7,7 @@ import {
   seedMapped,
   validateBandHigh,
 } from "../support/synapse";
+import { openIdeationCard } from "../support/ideation";
 
 test.describe.configure({ mode: "serial" });
 
@@ -31,13 +32,18 @@ test.describe("Tactic Ideation place", () => {
     }
   });
 
-  test("lists only the gaps validated as High, the first one open", async ({ page }) => {
+  test("lists only the gaps validated as High, all collapsed", async ({ page }) => {
     await page.goto("/?place=tactics");
     await expect(page.getByRole("heading", { name: /^tactic ideation$/i })).toBeVisible();
     const board = page.getByTestId("tactic-ideation");
     const toggles = board.getByTestId("ideation-gap-toggle");
-    await expect(toggles.filter({ hasText: high.gap_id })).toHaveAttribute("aria-expanded", "true");
-    if (low) await expect(toggles.filter({ hasText: low.gap_id })).toHaveCount(0);
+    await expect(board.locator(`[data-gap-id="${high.gap_id}"]`).getByTestId("ideation-gap-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(toggles).toHaveCount(1);
+    if (low) await expect(board.locator(`[data-gap-id="${low.gap_id}"]`)).toHaveCount(0);
+    await expect(board.getByTestId("ideation-guide")).toContainText("0 of 1");
     await expect(board.getByText(/other open gaps? (is|are) medium, low or not validated yet/i)).toHaveCount(0);
     await expect(page.getByText(/other open gaps? (is|are) medium, low or not validated yet/i)).toBeVisible();
   });
@@ -61,20 +67,22 @@ test.describe("Tactic Ideation place", () => {
   test("collapses and expands a gap card", async ({ page }) => {
     await page.goto("/?place=tactics");
     const toggle = page.getByTestId("ideation-gap-toggle").first();
+    await expect(page.getByRole("button", { name: /\+ custom tactic/i })).toHaveCount(0);
     await expect(async () => {
       await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "false", { timeout: 1_000 });
+      await expect(toggle).toHaveAttribute("aria-expanded", "true", { timeout: 1_000 });
     }).toPass({ timeout: 15_000 });
-    await expect(page.getByRole("button", { name: /\+ custom tactic/i })).toHaveCount(0);
-    await toggle.click();
     await expect(page.getByRole("button", { name: /\+ custom tactic/i })).toBeVisible();
+    await toggle.click();
+    await expect(page.getByRole("button", { name: /\+ custom tactic/i })).toHaveCount(0);
   });
 
   test("a custom tactic is created and linked to the gap", async ({ page }) => {
     const name = `Custom ideation tactic ${Date.now()}`;
     await page.goto("/?place=tactics");
     await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: /\+ custom tactic/i }).click();
+    const card = await openIdeationCard(page, high.gap_id);
+    await card.getByRole("button", { name: /\+ custom tactic/i }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByPlaceholder("Tactic name").fill(name);
     await dialog.getByRole("combobox", { name: /tactic type/i }).selectOption("rwe_study");
@@ -82,7 +90,6 @@ test.describe("Tactic Ideation place", () => {
     await dialog.getByRole("button", { name: /^add tactic$/i }).click();
     await expect(dialog).toBeHidden();
 
-    const card = page.getByTestId("ideation-gap").filter({ hasText: high.gap_id });
     // Linked tactics open the side panel (KAN-50), so the row is a button.
     await expect(card.getByRole("button", { name: new RegExp(name) })).toBeVisible();
   });

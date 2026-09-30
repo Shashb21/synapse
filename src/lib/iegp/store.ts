@@ -116,8 +116,32 @@ export async function loadState(): Promise<IegpState> {
   if (assetRows.length === 0) {
     await persistState(buildBlankWorkspace());
   }
-  return readState();
+  const state = await readState();
+  if (state.gaps.some((gap) => !gap.number)) return numberGaps(state);
+  return state;
 }
+
+/**
+ * Gives every gap without one a number (KAN-56): GAP-007 style ids keep their own digits
+ * where free, the rest follow in the order they were created. Numbers are never reused.
+ */
+async function numberGaps(state: IegpState): Promise<IegpState> {
+  const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
+  let next = Math.max(0, ...taken) + 1;
+  for (const gap of state.gaps) {
+    if (gap.number) continue;
+    const own = /^GAP-(\d+)$/.exec(gap.id);
+    const wanted = own ? Number(own[1]) : null;
+    const number = wanted && !taken.has(wanted) ? wanted : next;
+    taken.add(number);
+    next = Math.max(next, number + 1);
+    await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
+    gap.number = number;
+  }
+  return state;
+}
+
+export { gapNumberLabel } from "./gap-number";
 
 async function readState(): Promise<IegpState> {
   const d = db();
@@ -202,6 +226,7 @@ async function readState(): Promise<IegpState> {
       parked_reason: g.parked_reason ?? null,
       settings: normalizeSettings(g.settings),
       metadata: normalizeGapMetadata(g.metadata),
+      number: g.number ?? 0,
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -2560,6 +2585,7 @@ export async function createGap(args: {
     parked_reason: null,
     settings,
     metadata,
+    number: Math.max(0, ...state.gaps.map((gap) => gap.number)) + 1,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
   if (args.need_id) {

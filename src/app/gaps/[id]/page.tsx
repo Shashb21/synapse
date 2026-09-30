@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { GapDetailsEditor } from "@/components/gap-metadata";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { notFound } from "next/navigation";
@@ -94,7 +95,7 @@ export default async function GapDetailPage({
 
   return (
     <AppShell active="gaps">
-      <PageIntro kicker={gap.id} title={gap.name} />
+      <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>

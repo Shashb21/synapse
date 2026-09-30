@@ -915,6 +915,7 @@ export type ReviewGapCard = {
   needs_review: boolean;
   settings: string[];
   metadata: GapMetadata;
+  number: number;
 };
 
 export type OpenGapCard = {
@@ -924,6 +925,7 @@ export type OpenGapCard = {
   domain: EvidenceDomain;
   settings: string[];
   metadata: GapMetadata;
+  number: number;
   gap_status: GapStatus;
   computed_status: MappedGapStatus;
   suggested_status: GapStatus;
@@ -1135,6 +1137,7 @@ export function buildPlanWorkspace(state: IegpState): {
       needs_review: coverages.some((c) => c.needs_review),
       settings: gap.settings ?? [],
       metadata: gap.metadata,
+      number: gap.number,
     });
   }
   review.sort(compareReviewGapCards);
@@ -1155,6 +1158,7 @@ export function buildPlanWorkspace(state: IegpState): {
       domain: gap.domain,
       settings: gap.settings ?? [],
       metadata: gap.metadata,
+      number: gap.number,
       gap_status: shown,
       computed_status: computed,
       suggested_status: computed,

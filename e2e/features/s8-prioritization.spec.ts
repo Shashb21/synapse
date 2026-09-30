@@ -74,7 +74,7 @@ test.describe("S8 prioritization matrix", () => {
     await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
     await expect(matrix).toBeVisible();
-    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} validated`))).toBeVisible();
+    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? validated`))).toBeVisible();
     await expect(page.getByText(/A dashed edge means the band is not validated yet/)).toBeVisible();
     // Each gap is a card on the plot, with its suggested band and not yet validated.
     const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), not validated\. Arrow keys move it\.$/ });
@@ -158,7 +158,7 @@ test.describe("S8 prioritization matrix", () => {
     await page.goto("/?place=plan&setting=all");
     const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
     await expect(matrix.getByRole("button", { name: /: High, validated\. Arrow keys move it\.$/ })).toHaveCount(1);
-    await expect(page.getByText(/\b1 of \d+ validated/).first()).toBeVisible();
+    await expect(page.getByText(/\b1 of \d+ Open gaps? validated/).first()).toBeVisible();
   });
 
   test("a re-run keeps the validated band and the suggestion the human judged", async ({ request }) => {

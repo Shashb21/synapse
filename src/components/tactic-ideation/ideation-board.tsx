@@ -9,6 +9,7 @@ import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { RunStageButton } from "@/components/platform/run-stage-button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { GapMetadataView } from "@/components/gap-metadata";
+import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { TacticEditPanel, type TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
@@ -108,7 +109,14 @@ function GapIdeationCard({
   const assignable = library.filter((item) => !linked.some((row) => row.id === item.id));
   const bodyId = `ideation-${card.gap_id}`;
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-card" data-testid="ideation-gap">
+    <article
+      className={cn(
+        "overflow-hidden rounded-lg border border-l-[3px] border-border bg-card",
+        linked.length > 0 ? "border-l-emerald-500" : "border-l-rose-500",
+      )}
+      data-testid="ideation-gap"
+      data-gap-id={card.gap_id}
+    >
       <button
         type="button"
         data-testid="ideation-gap-toggle"
@@ -120,7 +128,9 @@ function GapIdeationCard({
         <span className="text-[11px] text-muted-foreground" aria-hidden>
           {expanded ? "▾" : "▸"}
         </span>
-        <span className="shrink-0 font-mono text-[11px] font-medium text-primary">{card.gap_id}</span>
+        <span className="shrink-0 font-mono text-[11px] font-medium text-primary" title={card.gap_id}>
+          {gapNumberLabel(card.number)}
+        </span>
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{card.gap_name}</span>
         <span className="flex shrink-0 flex-wrap items-center gap-1.5">
           {linked.length > 0 ? (
@@ -369,13 +379,14 @@ export function IdeationBoard({
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState("");
   const [coverage, setCoverage] = useState<Coverage>("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(gaps[0] ? [gaps[0].gap_id] : []));
+  // Every card starts collapsed (owner feedback, KAN-56).
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const domains = useMemo(() => [...new Set(gaps.map((gap) => gap.domain))].sort(), [gaps]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return gaps.filter((gap) => {
-      if (q && !gap.gap_name.toLowerCase().includes(q) && !gap.gap_id.toLowerCase().includes(q)) return false;
+      if (q && !gap.gap_name.toLowerCase().includes(q) && !gap.gap_id.toLowerCase().includes(q) && !gapNumberLabel(gap.number).includes(q)) return false;
       if (domain && gap.domain !== domain) return false;
       if (coverage === "linked" && gap.tactics.length === 0) return false;
       if (coverage === "unlinked" && gap.tactics.length > 0) return false;
@@ -396,9 +407,43 @@ export function IdeationBoard({
 
   return (
     <div className="grid gap-2" data-testid="tactic-ideation">
-      <p className="text-[11px] text-muted-foreground">
-        {gaps.length} high-priority gap{gaps.length === 1 ? "" : "s"} · {withoutTactics} without linked tactics
-      </p>
+      {/* What this section is for, and how far along it is (owner feedback, KAN-56). */}
+      <section aria-label="How Tactic Ideation works" className="grid gap-2 rounded-lg border border-border bg-card p-3" data-testid="ideation-guide">
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-[12px] font-semibold text-foreground">
+            {gaps.length - withoutTactics} of {gaps.length} high-priority gap{gaps.length === 1 ? " has" : "s have"} a tactic
+          </p>
+          <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
+            <div
+              className="h-full bg-emerald-500 transition-all"
+              style={{ width: `${gaps.length ? ((gaps.length - withoutTactics) / gaps.length) * 100 : 0}%` }}
+            />
+          </div>
+          {withoutTactics > 0 ? (
+            <button
+              type="button"
+              onClick={() => setCoverage("unlinked")}
+              className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+            >
+              Show the {withoutTactics} without a tactic
+            </button>
+          ) : null}
+        </div>
+        <ol className="grid gap-1 text-[11px] leading-4 text-muted-foreground sm:grid-cols-3">
+          <li>
+            <span className="font-semibold text-foreground">1. Open a gap.</span> These are the gaps you validated as High
+            priority on the matrix — the ones this plan must close.
+          </li>
+          <li>
+            <span className="font-semibold text-foreground">2. Give it a tactic.</span> Assign one from the library, write a
+            custom tactic, or accept a suggestion when AI is on.
+          </li>
+          <li>
+            <span className="font-semibold text-foreground">3. Plan it.</span> A proposed tactic is an idea; set it to planned
+            or ongoing and it counts toward closing the gap and lands on the timeline.
+          </li>
+        </ol>
+      </section>
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5">
         <input
           type="search"

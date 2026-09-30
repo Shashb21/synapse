@@ -91,6 +91,8 @@ export const gaps = pgTable("gaps", {
   parked_reason: text("parked_reason"),
   settings: jsonb("settings").notNull().default([]),
   metadata: jsonb("metadata").notNull().default({}),
+  /** The gap's number as people read it: 001, 002… (KAN-56). Assigned once, never reused. */
+  number: integer("number"),
 });
 
 export const gapVersions = pgTable("gap_versions", {
