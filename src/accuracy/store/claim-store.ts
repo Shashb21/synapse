@@ -99,6 +99,23 @@ export async function listClaims(
   return rows.filter((row) => row.claim_type === opts.claim_type);
 }
 
+/** Return every active gap and tactic for one source file, without the UI list limit. */
+export async function listActiveSourceClaims(
+  workspace_id: string,
+  source_file_id: string,
+): Promise<AccuracyClaimRow[]> {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb()
+    .select()
+    .from(t.accuracyClaims)
+    .where(and(
+      eq(t.accuracyClaims.workspace_id, workspace_id),
+      eq(t.accuracyClaims.source_file_id, source_file_id),
+      inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
+    ));
+  return rows.filter(isActiveLedgerClaim);
+}
+
 export async function getClaimsByIds(
   workspace_id: string,
   claim_ids: string[],

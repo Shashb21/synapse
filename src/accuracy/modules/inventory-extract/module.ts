@@ -9,6 +9,8 @@ import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { INVENTORY_PROPOSER_SYSTEM, inventoryProposerUser } from "./prompts";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
+import { claimMetadata, listActiveSourceClaims } from "../../store/claim-store";
+import { inspectSnapshotCompleteness, type SnapshotItem } from "../completeness-audit/snapshot-inspector";
 
 const tacticStatusSchema = z.enum(TACTIC_STATUSES);
 const tacticTypeSchema = z.enum(TACTIC_TYPES);
@@ -125,36 +127,18 @@ function judgeDraft(draft: InventoryDraft): InventoryExtractOutput["tactics"] {
   return out;
 }
 
-async function loadBlocksForPrompt(input: {
-  workspace_id: string;
-  source_file_id: string;
-  block_ids: string[];
-}) {
-  const rows =
-    input.block_ids.length > 0
-      ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
-      : await readParseBlocks(input.workspace_id, input.source_file_id);
-  return rows
-    .filter((row) => row.source_file_id === input.source_file_id)
-    .map((row) => ({
-      id: row.id,
-      heading: row.heading,
-      text: row.text,
-    }));
-}
-
 async function proposeInventory(
   ctx: AccuracyModuleContext,
   input: { workspace_id: string; source_file_id: string; block_ids: string[] },
   round: number,
   prior: InventoryDraft | null,
   critiques: string[],
+  blocks: Awaited<ReturnType<typeof readParseBlocks>>,
+  block_ids: string[],
 ): Promise<InventoryDraft> {
   if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
     return { tactics: [] };
   }
-  const blocks = await loadBlocksForPrompt(input);
-  const block_ids = input.block_ids.length > 0 ? input.block_ids : blocks.map((b) => b.id);
   const raw = await completeJson(ctx.complete, {
     system: INVENTORY_PROPOSER_SYSTEM,
     user: inventoryProposerUser({
@@ -186,7 +170,28 @@ export const inventoryExtractModule = agenticModule({
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
-    const blocks = stub ? [] : await readParseBlocks(input.workspace_id, input.source_file_id);
+    const blocks = stub ? [] : (input.block_ids.length
+      ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
+      : await readParseBlocks(input.workspace_id, input.source_file_id))
+      .filter((row) => row.source_file_id === input.source_file_id);
+    const block_ids = blocks.map((block) => block.id);
+    const availableIds = new Set(blocks.map((block) => block.id));
+    const missingIds = input.block_ids.filter((id) => !availableIds.has(id));
+    const persisted = stub ? [] : await listActiveSourceClaims(input.workspace_id, input.source_file_id);
+    const persistedItems: SnapshotItem[] = persisted.map((claim) => {
+      const provenance = claimMetadata(claim).provenance;
+      return {
+        item_kind: claim.claim_type as SnapshotItem["item_kind"], item_ref: claim.id,
+        statement: claim.statement,
+        provenance: Array.isArray(provenance) ? provenance.flatMap((span) => {
+          if (!span || typeof span !== "object") return [];
+          const record = span as Record<string, unknown>;
+          return typeof record.source_file_id === "string" && typeof record.block_id === "string"
+            && typeof record.quote === "string"
+            ? [{ source_file_id: record.source_file_id, block_id: record.block_id, quote: record.quote }] : [];
+        }) : [],
+      };
+    });
 
     const cycle = await runShallowAgenticCycle<InventoryDraft>({
       run: ctx.run,
@@ -196,7 +201,23 @@ export const inventoryExtractModule = agenticModule({
         completeness: "not_checked",
       }),
       proposer: (round, prior, critiques) =>
-        proposeInventory(ctx, input, round, prior, critiques),
+        proposeInventory(ctx, input, round, prior, critiques, blocks, block_ids),
+      onCompleteness: stub ? undefined : async (draft, prior_open_issues) => {
+        const items: SnapshotItem[] = [
+          ...persistedItems,
+          ...draft.tactics.map((tactic, index) => ({ item_kind: "tactic" as const,
+            item_ref: `draft-tactic-${index}`, statement: tactic.name,
+            provenance: tactic.provenance ?? [] })),
+        ];
+        const assessment = await inspectSnapshotCompleteness({
+          blocks, items, prior_open_issues, complete: ctx.complete,
+        });
+        if (missingIds.length === 0) return assessment;
+        return { ...assessment,
+          risk_level: assessment.risk_level === "check_failed" ? "check_failed" : "important" as const,
+          unchecked_block_ids: [...assessment.unchecked_block_ids, ...missingIds],
+        };
+      },
       critic: async (draft) => {
         if (stub) return { score: 1, issues: [] };
         return critiqueDraft(draft, input.source_file_id, blocks);

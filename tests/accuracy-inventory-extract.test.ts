@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "@/accuracy/kernel/agent-events";
+import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
+
+vi.mock("@/accuracy/store/claim-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/accuracy/store/claim-store")>(),
+  listActiveSourceClaims: vi.fn(async () => []),
+}));
 
 vi.mock("@/accuracy/store/parse-store", () => ({
   readParseBlocks: vi.fn(async () => [{ id: "blk-1", source_file_id: "src-1",
@@ -49,6 +55,51 @@ function stubCtx(): AccuracyModuleContext {
 }
 
 describe("inventory extract module", () => {
+  it("reports distinct tactic B despite A citing the same block and resolves it in V1", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([
+        { id: "blk-1", workspace_id: "ws-test", source_file_id: "src-1", index: 0,
+          kind: "prose", heading: null, text: "Phase 3 trial A and registry B are planned.", parser: "test", created_at: "now" },
+      ]);
+      const ctx = stubCtx();
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async (event) => { events.push(event); };
+      let proposal = 0;
+      ctx.complete = vi.fn(async (request) => {
+        if (request.purpose === "snapshot_completeness") {
+          const input = JSON.parse(request.user);
+          expect(input.blocks.map((block: { id: string }) => block.id)).toEqual(["blk-1"]);
+          if (proposal === 1) return { raw: JSON.stringify({ checked_block_ids: ["blk-1"],
+            suspected_omissions: [{ item_kind: "tactic", summary: "Registry B",
+              source_ref: { source_file_id: "src-1", block_id: "blk-1" }, evidence_quote: "registry B",
+              basis: "explicit", reason: "Trial A does not cover registry B", suggested_action: "Add registry B" }],
+            prior_issue_resolutions: [] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+          return { raw: JSON.stringify({ checked_block_ids: ["blk-1"], suspected_omissions: [],
+            prior_issue_resolutions: [{ issue_id: input.prior_open_issues[0].issue_id,
+              outcome: "resolved", reason: "B added", matched_item_ref: "draft-tactic-1" }] }),
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+        }
+        proposal++;
+        const tactics = [{ name: "Trial A", type: "phase3_trial", status: "planned", evidence_question: "Does A work?",
+          provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote: "Phase 3 trial A" }] }];
+        if (proposal === 2) tactics.push({ name: "Registry B", type: "registry", status: "planned", evidence_question: "Does B work?",
+          provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote: "registry B" }] });
+        return { raw: JSON.stringify({ tactics }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      });
+      await inventoryExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1", "missing"] }, ctx);
+      const critiques = events.filter((event) => event.event_type === "critique");
+      expect(critiques[0]).toMatchObject({ completeness: { risk_level: "important",
+        checked_block_ids: ["blk-1"], unchecked_block_ids: ["missing"], suspected_omissions: [expect.objectContaining({ item_kind: "tactic",
+          source_ref: { source_file_id: "src-1", block_id: "blk-1" } })] } });
+      expect(critiques[1]).toMatchObject({ score: null, completeness: { prior_issue_resolutions: [
+        expect.objectContaining({ outcome: "resolved" })] } });
+      const proposalPrompt = vi.mocked(ctx.complete).mock.calls.find(([request]) => request.purpose?.includes("proposer"))?.[0].user;
+      expect(proposalPrompt).toContain("target_block_ids: blk-1");
+      expect(proposalPrompt).not.toContain("target_block_ids: blk-1, missing");
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
   it("flags an invalid tactic quote with its source reference", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";

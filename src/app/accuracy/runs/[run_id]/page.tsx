@@ -91,7 +91,41 @@ export default async function AccuracyRunDetailPage({
               return (
                 <section key={record.id} className="border border-border bg-card/40 p-3" aria-label={`Critique of V${event.iteration}`}>
                   <h2 className="text-[15px] font-medium text-foreground">Critique of V{event.iteration}</h2>
-                  <p className="mt-1 text-[12px] text-muted-foreground">Critic assessment: {event.score} · {eventMetering(record)}. This is a production signal, not gold accuracy.</p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">
+                    Critic assessment: {event.score === null ? "Structurally unassessed" : event.score} · {eventMetering(record)}.
+                    {event.score === null ? "" : " This is a production signal, not gold accuracy."}
+                  </p>
+                  <div className="mt-3 border-t border-border pt-2 text-[12px] text-foreground">
+                    <h3 className="font-medium">Production completeness risk: {event.completeness.risk_level.replaceAll("_", " ")}</h3>
+                    <p className="mt-1">Checked blocks: {event.completeness.checked_block_ids.join(", ") || "none"}.
+                      Unchecked blocks: {event.completeness.unchecked_block_ids.join(", ") || "none"}.</p>
+                    {event.completeness.risk_level === "check_failed" ? (
+                      <p>Check failed; this version has not been fully assessed for omissions.</p>
+                    ) : null}
+                    {event.completeness.suspected_omissions.length ? (
+                      <ul className="mt-2 grid gap-2">
+                        {event.completeness.suspected_omissions.map((omission) => (
+                          <li key={omission.issue_id} className="border-t border-border pt-2">
+                            <strong>{omission.importance === "important" ? "Important" : "Advisory"} · {omission.item_kind}</strong>: {omission.summary}
+                            <p>Source file {omission.source_ref.source_file_id}, block {omission.source_ref.block_id}</p>
+                            <p>Evidence quote: “{omission.evidence_quote}”</p>
+                            <p>{omission.reason} Suggested action: {omission.suggested_action}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {event.completeness.prior_issue_resolutions.length ? (
+                      <ul className="mt-2 grid gap-2">
+                        {event.completeness.prior_issue_resolutions.map((resolution) => (
+                          <li key={resolution.issue_id} className="border-t border-border pt-2">
+                            <strong>{resolution.outcome.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase())}</strong>
+                            {` · ${resolution.issue_id}: ${resolution.reason}`}
+                            {resolution.matched_item_ref ? ` · Matched item ${resolution.matched_item_ref}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                   {event.issues.length ? (
                     <ul className="mt-2 grid gap-2">
                       {event.issues.map((issue) => (

@@ -11,6 +11,7 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { listActiveSourceClaims } from "@/accuracy/store/claim-store";
 
 const auth = vi.hoisted(() => ({ signed_in: true }));
 vi.mock("@/modules/auth/session", () => ({
@@ -77,6 +78,26 @@ const critique = {
 };
 
 describe("agent event persistence", () => {
+  it("loads every active source claim in the workspace beyond the UI list limit", async () => {
+    const ids = await fixture();
+    const other = await fixture();
+    const now = nowIso();
+    await accuracyDb().insert(t.accuracyClaims).values([
+      ...Array.from({ length: 205 }, (_, index) => ({ id: newId("gap"), workspace_id: ids.workspace_id,
+        claim_type: index % 2 ? "gap" : "tactic", statement: `Claim ${index}`, status: "draft",
+        validated: false, source_file_id: "source-1", metadata: {}, created_at: now, updated_at: now })),
+      ...["merged", "rejected"].map((status) => ({ id: newId("gap"), workspace_id: ids.workspace_id,
+        claim_type: "gap", statement: status, status, validated: false, source_file_id: "source-1",
+        metadata: {}, created_at: now, updated_at: now })),
+      { id: newId("gap"), workspace_id: other.workspace_id, claim_type: "gap", statement: "Other workspace",
+        status: "draft", validated: false, source_file_id: "source-1", metadata: {}, created_at: now, updated_at: now },
+      { id: newId("gap"), workspace_id: ids.workspace_id, claim_type: "gap", statement: "Other source",
+        status: "draft", validated: false, source_file_id: "source-2", metadata: {}, created_at: now, updated_at: now },
+    ]);
+    const claims = await listActiveSourceClaims(ids.workspace_id, "source-1");
+    expect(claims).toHaveLength(205);
+    expect(claims.every((claim) => claim.source_file_id === "source-1" && claim.workspace_id === ids.workspace_id)).toBe(true);
+  });
   it("reads historical critiques without completeness while rejecting new incomplete writes", async () => {
     const ids = await fixture();
     const legacy = Object.fromEntries(Object.entries(critique).filter(([key]) => key !== "completeness"));
@@ -166,6 +187,36 @@ describe("agent event persistence", () => {
 });
 
 describe("run progression detail", () => {
+  it("shows production completeness risk, source evidence, and issue fate beside each version", async () => {
+    auth.signed_in = true;
+    const ids = await fixture();
+    const v1 = { ...v0, iteration: 1, output: { gaps: [{ statement: "Exact V1" }] } };
+    const advisory = { ...critique.completeness.suspected_omissions[0], issue_id: "issue-2",
+      summary: "Possible follow-up", basis: "inferred" as const, importance: "advisory" as const };
+    const firstCritique = { ...critique, completeness: { ...critique.completeness,
+      suspected_omissions: [...critique.completeness.suspected_omissions, advisory] } };
+    const terminal = { ...critique, iteration: 1, score: null, issues: [], completeness: {
+      risk_level: "check_failed" as const, checked_block_ids: [], unchecked_block_ids: ["block-2"],
+      suspected_omissions: [], prior_issue_resolutions: [{ issue_id: "issue-1", outcome: "resolved" as const,
+        reason: "Added in V1", matched_item_ref: "draft-gap-1" }],
+    } };
+    for (const event of [v0, firstCritique, v1, terminal]) await appendAgentEvent({ ...ids, event });
+    const html = renderPageContent(await AccuracyRunDetailPage({
+      params: Promise.resolve({ run_id: ids.run_id }),
+      searchParams: Promise.resolve({ workspace_id: ids.workspace_id }),
+    }));
+    expect(html).toContain("Production completeness risk");
+    expect(html).toContain("Important");
+    expect(html).toContain("Advisory");
+    expect(html).toContain("source-1");
+    expect(html).toContain("block-2");
+    expect(html).toContain("Regional evidence need");
+    expect(html).toContain("Resolved");
+    expect(html).toContain("Added in V1");
+    expect(html).toContain("Structurally unassessed");
+    expect(html).toContain("Check failed");
+    expect(html).not.toContain("recall");
+  });
   it("shows an input error for repeated workspace IDs without reading snapshots", async () => {
     auth.signed_in = true;
     const ids = await fixture();
