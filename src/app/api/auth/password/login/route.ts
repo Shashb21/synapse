@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { afterOwnerSignIn, safeNext } from "@/modules/auth/redirect";
+import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
+import { isAdminAccount } from "@/modules/auth/accounts";
 import { PasswordLoginError, signInWithPassword } from "@/modules/auth/password-login";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
 
@@ -17,14 +18,15 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const next = typeof body.next === "string" ? safeNext(body.next, "") : "";
   try {
-    await signInWithPassword({
+    const session = await signInWithPassword({
       email: typeof body.email === "string" ? body.email : "",
       password: typeof body.password === "string" ? body.password : "",
     });
-    // A new session never inherits the previous person's workspace. Only admins and
-    // operators have a password, so they land on the admin console (KAN-58).
+    // A new session never inherits the previous person's workspace. Staff land on
+    // the admin console (KAN-58); a test customer (KAN-59) on the workspace picker.
     await clearWorkspaceSelection();
-    return NextResponse.json({ ok: true, redirect: afterOwnerSignIn(next) });
+    const staff = session.role === "operator" || (await isAdminAccount(session.subject));
+    return NextResponse.json({ ok: true, redirect: staff ? afterOwnerSignIn(next) : afterSignIn(next) });
   } catch (error) {
     if (error instanceof PasswordLoginError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: STATUS[error.code] });

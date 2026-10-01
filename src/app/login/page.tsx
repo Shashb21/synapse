@@ -45,7 +45,6 @@ export default async function LoginPage({
           </h2>
           <LoginPanel
             providers={options.providers}
-            demo={options.demo}
             next={next}
             initialError={loginErrorMessage(params.error)}
           />

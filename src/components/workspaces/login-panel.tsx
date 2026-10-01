@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FlaskConical, Loader2, LogIn } from "lucide-react";
+import { Loader2, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sendJson } from "./model";
@@ -9,25 +9,21 @@ import { sendJson } from "./model";
 /**
  * Sign-in choices: one button per configured identity provider (customers
  * sign in with SSO and a seat their organisation assigned), then email and
- * password for Synapse staff accounts, and — only outside production — a demo
- * sign-in so local preview and tests work without SSO credentials. There is
- * no self sign-up.
+ * password for Synapse staff and the test customer account (KAN-59). There is
+ * no self sign-up. The demo sign-in is not offered here (KAN-59); it remains
+ * an API for automated tests in development builds only.
  */
 export function LoginPanel({
   providers,
-  demo,
   next,
   initialError,
 }: {
   providers: { id: string; label: string }[];
-  demo: boolean;
   next: string;
   initialError: string | null;
 }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(initialError);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -78,7 +74,7 @@ export function LoginPanel({
           void signIn({ email: loginEmail, password }, "password", "/api/auth/password/login");
         }}
       >
-        <p className="text-[11px] text-muted-foreground">Synapse staff: email and password</p>
+        <p className="text-[11px] text-muted-foreground">Email and password</p>
         <label className="grid gap-1 text-[11px] text-muted-foreground">
           Email
           <Input
@@ -107,43 +103,6 @@ export function LoginPanel({
         </Button>
       </form>
 
-      {demo ? (
-        <form
-          className="grid gap-2 border-t border-border pt-4"
-          aria-label="Demo sign-in"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void signIn({ demo: true, actor_name: name, email: email || undefined }, "demo");
-          }}
-        >
-          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <FlaskConical className="size-3.5" aria-hidden />
-            Development only. Never offered to customers in production.
-          </p>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Your name
-            <Input value={name} placeholder="e.g. Alex Morgan" onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Email (optional, so workspace invites reach you)
-            <Input
-              type="email"
-              value={email}
-              placeholder="alex@team.test"
-              aria-describedby="demo-email-hint"
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </label>
-          <p id="demo-email-hint" className="text-[11px] text-muted-foreground">
-            Use a test-only address (ending .test, .example or @example.com) that no real account or seat holds.
-            Leave it empty to be known as a generated name@demo.synapse.local address.
-          </p>
-          <Button type="submit" variant="secondary" disabled={pending !== null || !name.trim()}>
-            {pending === "demo" ? <Loader2 className="size-4 animate-spin" /> : null}
-            Continue as a demo user (development only)
-          </Button>
-        </form>
-      ) : null}
     </div>
   );
 }

@@ -8,7 +8,7 @@ import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
 import { ROLE_LABELS, isRole, ownerEmails, roleForFunction, testOwnerBypass, type Role } from "./roles";
-import { findAccountByEmail, isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER } from "./accounts";
+import { findAccountByEmail, getAccount, isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER, type Account } from "./accounts";
 import { hasActiveSeat } from "./customers";
 import {
   configuredIdentityProviders,
@@ -155,14 +155,32 @@ export async function seatAllowsSignIn(email: string | null | undefined): Promis
 }
 
 /**
+ * A test customer account (KAN-59): not staff, but allowed to sign in with a
+ * password because its verified email is on a test-only domain (so no real
+ * person can hold it) and holds a seat on an active customer. Real customers
+ * stay SSO-only.
+ */
+export async function testSeatPasswordAllowed(
+  account: Pick<Account, "email" | "email_verified" | "disabled">,
+): Promise<boolean> {
+  if (account.disabled || !account.email_verified || !testOnlyAddress(account.email)) return false;
+  return hasActiveSeat(account.email);
+}
+
+/**
  * Re-checked on every session lookup, so an unassigned seat, a deactivated
  * customer or a demoted staff account stops working even if a session row
  * survived. Demo sessions (development only) need nothing; password sessions
- * need a staff account; SSO sessions need a seat (one indexed query).
+ * need a staff account or a test seat (KAN-59); SSO sessions need a seat (one
+ * indexed query).
  */
 async function sessionStillAllowed(row: { provider_id: string; subject: string; email: string | null }): Promise<boolean> {
   if (row.provider_id === "demo") return true;
-  if (row.provider_id === PASSWORD_PROVIDER) return passwordSessionValid(row.subject);
+  if (row.provider_id === PASSWORD_PROVIDER) {
+    if (await passwordSessionValid(row.subject)) return true;
+    const account = await getAccount(row.subject);
+    return account ? testSeatPasswordAllowed(account) : false;
+  }
   return seatAllowsSignIn(row.email);
 }
 

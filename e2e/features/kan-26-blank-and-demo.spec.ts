@@ -25,15 +25,11 @@ async function fillUntilEnabled(fill: () => Promise<void>, button: Locator) {
   }).toPass({ timeout: 60_000 });
 }
 
+/** Demo sign-in through the API (KAN-59: the login page no longer offers it). */
 async function signIn(page: Page, name: string, email: string) {
-  await page.goto("/login");
-  const form = page.getByRole("form", { name: "Demo sign-in" });
-  const submit = form.getByRole("button", { name: /continue as a demo user/i });
-  await fillUntilEnabled(async () => {
-    await refill(form.getByLabel("Your name"), name);
-    await refill(form.getByLabel(/Email/), email);
-  }, submit);
-  await submit.click();
+  const res = await page.request.post("/api/auth/login", { data: { demo: true, actor_name: name, email } });
+  expect(res.ok(), `demo sign-in → ${res.status()} ${await res.text()}`).toBe(true);
+  await page.goto("/workspaces");
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 }
 

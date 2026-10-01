@@ -47,19 +47,14 @@ async function clickUntilUrl(page: Page, target: ReturnType<Page["getByRole"]>, 
   }).toPass({ timeout: 90_000 });
 }
 
+/**
+ * Demo sign-in through the API (KAN-59: the login page no longer offers it),
+ * on the page's own cookie jar, then on to the workspace picker.
+ */
 async function demoSignInThroughLoginPage(page: Page, name: string, email?: string) {
-  await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Synapse IEGP" })).toBeVisible();
-  const form = page.getByRole("form", { name: "Demo sign-in" });
-  const submit = form.getByRole("button", { name: /continue as a demo user \(development only\)/i });
-  await fillUntilEnabled(
-    async () => {
-      await refill(form.getByLabel("Your name"), name);
-      if (email) await refill(form.getByLabel(/Email/), email);
-    },
-    submit,
-  );
-  await submit.click();
+  const res = await page.request.post("/api/auth/login", { data: { demo: true, actor_name: name, ...(email ? { email } : {}) } });
+  expect(res.ok(), `demo sign-in → ${res.status()} ${await res.text()}`).toBe(true);
+  await page.goto("/workspaces");
   await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
 }
 
@@ -74,7 +69,9 @@ async function createWorkspaceThroughUi(page: Page, name: string) {
 test("signed out, every customer page and API sends you to sign in", async ({ page, request }) => {
   await page.goto("/timeline");
   await expect(page).toHaveURL(/\/login\?next=%2Ftimeline/);
-  await expect(page.getByRole("button", { name: /continue as a demo user/i })).toBeVisible();
+  await expect(page.getByRole("form", { name: "Sign in with email" })).toBeVisible();
+  // KAN-59: no demo sign-in on the login page.
+  await expect(page.getByRole("form", { name: "Demo sign-in" })).toHaveCount(0);
 
   const api = await request.post("/api/iegp", { data: { action: "reset" } });
   expect(api.status()).toBe(401);
@@ -270,14 +267,11 @@ test("demo sign-in keeps the typed test email, and refuses a real-world one", as
   await expect(profile).not.toContainText("@demo.synapse.local");
 
   await clickUntilUrl(page, page.getByRole("button", { name: /sign out/i }), /\/login/);
-  const form = page.getByRole("form", { name: "Demo sign-in" });
-  const submit = form.getByRole("button", { name: /continue as a demo user \(development only\)/i });
-  await fillUntilEnabled(async () => {
-    await refill(form.getByLabel("Your name"), `Real ${id}`);
-    await refill(form.getByLabel(/Email/), `real.${id}@pfizer.com`);
-  }, submit);
-  await submit.click();
-  await expect(page.getByTestId("login-error")).toContainText("test-only domain");
+  const refused = await page.request.post("/api/auth/login", {
+    data: { demo: true, actor_name: `Real ${id}`, email: `real.${id}@pfizer.com` },
+  });
+  expect(refused.status()).toBe(400);
+  expect(await refused.text()).toContain("test-only domain");
   await expect(page).toHaveURL(/\/login/);
 });
 
