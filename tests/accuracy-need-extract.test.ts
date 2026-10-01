@@ -95,7 +95,7 @@ describe("need extract module", () => {
       expect(critiques[0]).toMatchObject({ completeness: { risk_level: "important",
         checked_block_ids: ["blk-1"], unchecked_block_ids: ["missing"], suspected_omissions: [expect.objectContaining({ item_kind: "gap",
           source_ref: { source_file_id: "src-1", block_id: "blk-1" } })] } });
-      expect(critiques[1]).toMatchObject({ score: null, completeness: { prior_issue_resolutions: [
+      expect(critiques[1]).toMatchObject({ score: 1, completeness: { prior_issue_resolutions: [
         expect.objectContaining({ outcome: "resolved" })] } });
       const proposals = vi.mocked(ctx.complete).mock.calls.filter(([request]) => request.purpose?.includes("proposer"));
       expect(proposals[0]?.[0].user).toContain("target_block_ids: blk-1");

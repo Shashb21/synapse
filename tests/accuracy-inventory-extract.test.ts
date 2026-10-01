@@ -132,7 +132,7 @@ describe("inventory extract module", () => {
       expect(critiques[0]).toMatchObject({ completeness: { risk_level: "important",
         checked_block_ids: ["blk-1"], unchecked_block_ids: ["missing"], suspected_omissions: [expect.objectContaining({ item_kind: "tactic",
           source_ref: { source_file_id: "src-1", block_id: "blk-1" } })] } });
-      expect(critiques[1]).toMatchObject({ score: null, completeness: { prior_issue_resolutions: [
+      expect(critiques[1]).toMatchObject({ score: 1, completeness: { prior_issue_resolutions: [
         expect.objectContaining({ outcome: "resolved" })] } });
       const proposalPrompt = vi.mocked(ctx.complete).mock.calls.find(([request]) => request.purpose?.includes("proposer"))?.[0].user;
       expect(proposalPrompt).toContain("target_block_ids: blk-1");
