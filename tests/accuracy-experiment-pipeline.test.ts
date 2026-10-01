@@ -66,18 +66,28 @@ describe("isolated extraction-pipeline experiments", () => {
   it("persists extracted drafts in the copy before downstream stages and retains evaluations", async () => {
     const source = await sourceFixture();
     const second = await addSource({ workspace_id: source.workspace_id, org_id: source.org_id, filename: "second.txt" });
-    const calls: string[] = [];
-    controlled("inventory_extract", async (input) => { calls.push("inventory"); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"), name: "Tactic", type: "access", status: "planned", evidence_question: "Evidence?", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
-    controlled("need_extract", async (input) => { calls.push("need"); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"), statement: "Gap", external_id: "gap-1", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
-    controlled("merge_dedupe", async (input) => { calls.push("merge"); const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, input.workspace_id as string)); expect(claims.map(c => c.statement)).toEqual(expect.arrayContaining(["Gap", "Tactic"])); return { workspace_id: input.workspace_id, merged: 0, survivors: claims.length, contradictions: 0, merges: [], contradiction_rows: [] }; });
-    controlled("status_derive", async (input) => { calls.push("status"); return { statuses: [], open: 0, partial: 0, addressed: 0 }; });
+    const calls: Array<{ stage: string; source_file_id?: string }> = [];
+    controlled("inventory_extract", async (input) => { calls.push({ stage: "inventory", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"), name: "Tactic", type: "access", status: "planned", evidence_question: "Evidence?", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
+    controlled("need_extract", async (input) => { calls.push({ stage: "need", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"), statement: "Gap", external_id: "gap-1", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
+    controlled("merge_dedupe", async (input) => { calls.push({ stage: "merge" }); const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, input.workspace_id as string)); expect(claims.map(c => c.statement)).toEqual(expect.arrayContaining(["Gap", "Tactic"])); return { workspace_id: input.workspace_id, merged: 0, survivors: claims.length, contradictions: 0, merges: [], contradiction_rows: [] }; });
+    controlled("status_derive", async () => { calls.push({ stage: "status" }); return { statuses: [], open: 0, partial: 0, addressed: 0 }; });
 
     const request = { mode: "pipeline" as const, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id, second.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" as const } };
     const experiment = await runAccuracyExperiment(request);
     const repeated = await runAccuracyExperiment(request);
     workspaces.push(experiment.workspace_id, repeated.workspace_id);
 
-    expect(calls).toEqual(["inventory", "need", "merge", "status", "inventory", "need", "merge", "status", "inventory", "need", "merge", "status", "inventory", "need", "merge", "status"]);
+    const firstCopiedSources = experiment.calls.filter(call => call.call_kind === "inventory_extract").map(call => (call.input as { source_file_id: string }).source_file_id);
+    expect(firstCopiedSources).toHaveLength(2);
+    expect(new Set(firstCopiedSources).size).toBe(2);
+    expect(calls.slice(0, 8)).toEqual([
+      { stage: "inventory", source_file_id: firstCopiedSources[0] }, { stage: "need", source_file_id: firstCopiedSources[0] }, { stage: "merge" }, { stage: "status" },
+      { stage: "inventory", source_file_id: firstCopiedSources[1] }, { stage: "need", source_file_id: firstCopiedSources[1] }, { stage: "merge" }, { stage: "status" },
+    ]);
+    expect(calls.slice(8)).toEqual([
+      { stage: "inventory", source_file_id: expect.any(String) }, { stage: "need", source_file_id: expect.any(String) }, { stage: "merge" }, { stage: "status" },
+      { stage: "inventory", source_file_id: expect.any(String) }, { stage: "need", source_file_id: expect.any(String) }, { stage: "merge" }, { stage: "status" },
+    ]);
     expect(experiment.status).toBe("completed");
     expect(experiment.calls.map(call => call.call_kind)).toEqual(["inventory_extract", "need_extract", "merge_dedupe", "status_derive", "inventory_extract", "need_extract", "merge_dedupe", "status_derive"]);
     expect(experiment.evaluations).toHaveLength(8);
@@ -85,6 +95,14 @@ describe("isolated extraction-pipeline experiments", () => {
     expect(repeated.workspace_id).not.toBe(experiment.workspace_id);
     expect(repeated.calls.map(call => call.call_id)).not.toEqual(experiment.calls.map(call => call.call_id));
     expect(repeated.evaluations.map(row => row.id)).not.toEqual(experiment.evaluations.map(row => row.id));
+    const [batches, journals] = await Promise.all([
+      accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.workspace_id, experiment.workspace_id)),
+      accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id)),
+    ]);
+    expect(batches).toHaveLength(2);
+    expect(new Set(batches.map(batch => batch.source_file_id))).toEqual(new Set(firstCopiedSources));
+    expect(journals).toHaveLength(2);
+    expect(new Set(journals.map(journal => journal.batch_id))).toEqual(new Set(batches.map(batch => batch.id)));
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
     expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
     expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, source.workspace_id))).toEqual([]);

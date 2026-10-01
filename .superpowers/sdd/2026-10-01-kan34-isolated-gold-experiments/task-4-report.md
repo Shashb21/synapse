@@ -45,3 +45,9 @@
 - Added pipeline coverage for a real important omission critique event. The copied pipeline pauses before merge/status, leaves the resume journal resumable, and leaves the live workspace claims, runs, and agent events unchanged.
 - Expanded the success case to two sources and asserted each source's complete extraction sequence, independent repeats, and live agent-event isolation.
 - Verified with local PostgreSQL: `npx vitest run tests/accuracy-experiment-copy.test.ts tests/accuracy-experiment-pipeline.test.ts tests/accuracy-omission-resume.test.ts` passed: 32 tests.
+
+## Rereview follow-up
+
+- Strengthened the two-source pipeline test to record the copied `source_file_id` received by every inventory and need extractor. It now proves that each distinct copied source receives `inventory_extract → need_extract → merge_dedupe → status_derive` in request order.
+- The test also proves the first experiment has exactly two copy-local extraction batches and two resume journals, each journal referring to one of those batches and the batches covering both copied source IDs.
+- Verified with local PostgreSQL: `npx vitest run tests/accuracy-experiment-pipeline.test.ts` passed: 3 tests. `npx tsc --noEmit --incremental false` and `git diff --check` passed.
