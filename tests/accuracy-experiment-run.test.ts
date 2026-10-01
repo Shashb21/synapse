@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
@@ -202,5 +202,48 @@ describe("isolated accuracy experiments", () => {
     await expect(runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "status_derive", input: { workspace_id: source.workspace_id, gap_ids: [newId("gap")], tactics: [{ id: newId("tac"), status: "planned" }], coverages: [{ gap_id: newId("gap"), tactic_id: newId("tac"), overall: "full", validated: true }], persist: false } }, actor: { name: "test", function: "medical_affairs" } })).rejects.toThrow("Unresolved copied gap_ids");
 
     expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it("remaps every status-derive claim reference into the copied workspace", async () => {
+    const source = await sourceFixture();
+    const tactic = await insertClaim({ workspace_id: source.workspace_id, claim_type: "tactic", statement: "Baseline tactic", source_file_id: source.source_file_id });
+    const [gap] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id));
+    const original = activeAccuracyModuleId("status_derive");
+    if (original) originals.set("status_derive", original);
+    const id = newId("status-remap-module");
+    let received: Record<string, unknown> | undefined;
+    registerAccuracyModule(mechanicalModule({ id, call_kind: "status_derive", title: "Status remap test", summary: "Observes copied references",
+      inputSchema: z.object({ workspace_id: z.string(), gap_ids: z.array(z.string()), tactics: z.array(z.object({ id: z.string(), status: z.string() })), coverages: z.array(z.object({ gap_id: z.string(), tactic_id: z.string(), overall: z.string(), validated: z.boolean() })), persist: z.boolean() }),
+      outputSchema: z.object({ statuses: z.array(z.unknown()) }), run: async (input) => { received = input; return { output: { statuses: [] }, summary: "copied status input" }; } }));
+    activateAccuracyModule({ call_kind: "status_derive", module_id: id, activated_by: "experiment test" });
+    const input = { workspace_id: source.workspace_id, gap_ids: [gap!.id], tactics: [{ id: tactic.id, status: "planned" }], coverages: [{ gap_id: gap!.id, tactic_id: tactic.id, overall: "full", validated: true }], persist: false };
+
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "status_derive", input }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+
+    expect(received).toMatchObject({ workspace_id: experiment.workspace_id });
+    expect(received?.gap_ids).not.toContain(gap!.id);
+    expect((received?.tactics as Array<{ id: string }>)[0]?.id).not.toBe(tactic.id);
+    expect((received?.coverages as Array<{ gap_id: string; tactic_id: string }>)[0]).not.toMatchObject({ gap_id: gap!.id, tactic_id: tactic.id });
+    expect(input).toEqual({ workspace_id: source.workspace_id, gap_ids: [gap!.id], tactics: [{ id: tactic.id, status: "planned" }], coverages: [{ gap_id: gap!.id, tactic_id: tactic.id, overall: "full", validated: true }], persist: false });
+  });
+
+  it("terminalizes an experiment when failed-call evaluation persistence fails without hiding the module error", async () => {
+    const source = await sourceFixture();
+    activateControlledModule({ call_kind: "need_extract", run: async () => { throw new Error("primary module failure"); } });
+    await accuracyDb().execute(sql.raw("CREATE OR REPLACE FUNCTION kan34_fail_evaluation_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected evaluation persistence failure'; END; $$"));
+    await accuracyDb().execute(sql.raw("CREATE TRIGGER kan34_fail_evaluation_insert BEFORE INSERT ON accuracy_experiment_evaluations FOR EACH ROW EXECUTE FUNCTION kan34_fail_evaluation_insert()"));
+    try {
+      await expect(runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id } }, actor: { name: "test", function: "medical_affairs" } })).rejects.toThrow("primary module failure");
+    } finally {
+      await accuracyDb().execute(sql.raw("DROP TRIGGER IF EXISTS kan34_fail_evaluation_insert ON accuracy_experiment_evaluations"));
+      await accuracyDb().execute(sql.raw("DROP FUNCTION IF EXISTS kan34_fail_evaluation_insert()"));
+    }
+    const [experiment] = await accuracyDb().select().from(t.accuracyExperiments).where(eq(t.accuracyExperiments.source_workspace_id, source.workspace_id));
+    createdWorkspaces.push(experiment!.workspace_id);
+
+    expect(experiment).toMatchObject({ status: "failed" });
+    const calls = await accuracyDb().select().from(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.experiment_id, experiment!.id));
+    expect(calls).toEqual([expect.objectContaining({ output_error: "primary module failure" })]);
   });
 });

@@ -68,6 +68,12 @@ function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown
 
 function unresolved(key: string, value: string): never { throw new Error(`Unresolved copied ${key}: ${value}`); }
 
+/** Keep an already-created experiment inspectable while preserving its primary failure. */
+async function terminateAfterPersistenceFailure(args: { workspace_id: string; experiment_id: string; error: unknown }): Promise<never> {
+  await finishExperiment({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, status: "failed" }).catch(() => undefined);
+  throw args.error;
+}
+
 /** Execute the supported single-call experiment and persist every output version before returning. */
 export async function runAccuracyExperiment(request: AccuracyExperimentRequest): Promise<ExperimentRecord> {
   if (request.mode !== "single_call") throw new Error("Pipeline experiments are not implemented yet.");
@@ -97,26 +103,31 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
     result = await runAccuracyModule({ call_kind: request.call.call_kind, reserved_run_id: call_id, input, actor: request.actor,
       org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment" });
   } catch (error) {
-    const output_error = error instanceof Error ? error.message : String(error);
-    const failedRun = await reservedAccuracyRun(copy.workspace_id, call_id);
-    const progression = failedRun ? await readAgentProgression({ workspace_id: copy.workspace_id, run_id: call_id }) : null;
-    const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
-    for (const [version_index, output] of snapshots.entries()) {
+    const moduleError = error;
+    try {
+      const output_error = error instanceof Error ? error.message : String(error);
+      const failedRun = await reservedAccuracyRun(copy.workspace_id, call_id);
+      const progression = failedRun ? await readAgentProgression({ workspace_id: copy.workspace_id, run_id: call_id }) : null;
+      const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
+      for (const [version_index, output] of snapshots.entries()) {
+        await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
+          version_index, input, output, module_version: failedRun?.module_version ?? implementation.manifest.version, route: failedRun?.route ?? { status: "unavailable" } });
+        await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index,
+          evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+      }
+      const errorVersion = snapshots.length;
       await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
-        version_index, input, output, module_version: failedRun?.module_version ?? implementation.manifest.version, route: failedRun?.route ?? { status: "unavailable" } });
-      await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index,
-        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+        version_index: errorVersion, input, output_error, module_version: failedRun?.module_version ?? implementation.manifest.version,
+        route: failedRun?.route ?? { status: "unavailable", reason: "Module did not open a run." } });
+      await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index: errorVersion,
+        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output: null, output_error }) });
+      await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" });
+      const failed = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
+      if (!failed) throw new Error("Failed experiment record disappeared before it could be returned.");
+      return failed;
+    } catch {
+      return terminateAfterPersistenceFailure({ workspace_id: copy.workspace_id, experiment_id: experiment.id, error: moduleError });
     }
-    const errorVersion = snapshots.length;
-    await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
-      version_index: errorVersion, input, output_error, module_version: failedRun?.module_version ?? implementation.manifest.version,
-      route: failedRun?.route ?? { status: "unavailable", reason: "Module did not open a run." } });
-    await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index: errorVersion,
-      evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output: null, output_error }) });
-    await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" });
-    const failed = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
-    if (!failed) throw new Error("Failed experiment record disappeared before it could be returned.");
-    return failed;
   }
   try {
     const progression = await readAgentProgression({ workspace_id: copy.workspace_id, run_id: result.run_id });
@@ -132,8 +143,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
   } catch (error) {
     // The original persistence/evaluator error is the actionable cause. Best-effort
     // terminalization keeps the retained workspace inspectable without replacing it.
-    await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" }).catch(() => undefined);
-    throw error;
+    return terminateAfterPersistenceFailure({ workspace_id: copy.workspace_id, experiment_id: experiment.id, error });
   }
   const record = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
   if (!record) throw new Error("Experiment record disappeared before it could be returned.");
