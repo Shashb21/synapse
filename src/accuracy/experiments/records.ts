@@ -84,9 +84,35 @@ export async function getExperiment(args: { workspace_id: string; experiment_id:
   return { ...row, calls, evaluations };
 }
 
+/** Read an experiment from the original workspace boundary, never from its private copy ID. */
+export async function getExperimentForSourceWorkspace(args: { source_workspace_id: string; experiment_id: string }): Promise<ExperimentRecord | null> {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb().select({ workspace_id: t.accuracyExperiments.workspace_id })
+    .from(t.accuracyExperiments)
+    .where(and(
+      eq(t.accuracyExperiments.source_workspace_id, args.source_workspace_id),
+      eq(t.accuracyExperiments.id, args.experiment_id),
+    ))
+    .limit(1);
+  const row = rows[0];
+  return row ? getExperiment({ workspace_id: row.workspace_id, experiment_id: args.experiment_id }) : null;
+}
+
 /** Export complete workspace-scoped records in deterministic JSON or JSONL order. */
 export async function exportExperiments(args: { workspace_id: string; format: "json" | "jsonl" }): Promise<string> {
   await ensureAccuracySchema(); const rows = await accuracyDb().select({ id: t.accuracyExperiments.id }).from(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, args.workspace_id)).orderBy(desc(t.accuracyExperiments.created_at), asc(t.accuracyExperiments.id));
   const records = (await Promise.all(rows.map((row) => getExperiment({ workspace_id: args.workspace_id, experiment_id: row.id })))).filter((row): row is ExperimentRecord => row !== null);
+  return args.format === "json" ? JSON.stringify(records) : records.map((row) => JSON.stringify(row)).join("\n") + (records.length ? "\n" : "");
+}
+
+/** Export all complete records tied to one original workspace in stable order. */
+export async function exportExperimentsForSourceWorkspace(args: { source_workspace_id: string; format: "json" | "jsonl" }): Promise<string> {
+  await ensureAccuracySchema();
+  const rows = await accuracyDb().select({ id: t.accuracyExperiments.id, workspace_id: t.accuracyExperiments.workspace_id })
+    .from(t.accuracyExperiments)
+    .where(eq(t.accuracyExperiments.source_workspace_id, args.source_workspace_id))
+    .orderBy(desc(t.accuracyExperiments.created_at), asc(t.accuracyExperiments.id));
+  const records = (await Promise.all(rows.map((row) => getExperiment({ workspace_id: row.workspace_id, experiment_id: row.id }))))
+    .filter((row): row is ExperimentRecord => row !== null);
   return args.format === "json" ? JSON.stringify(records) : records.map((row) => JSON.stringify(row)).join("\n") + (records.length ? "\n" : "");
 }
