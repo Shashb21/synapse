@@ -220,11 +220,14 @@ describe("isolated accuracy experiments", () => {
 
     const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "status_derive", input }, actor: { name: "test", function: "medical_affairs" } });
     createdWorkspaces.push(experiment.workspace_id);
+    const copiedClaimIds = new Set((await accuracyDb().select({ id: t.accuracyClaims.id }).from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, experiment.workspace_id))).map((claim) => claim.id));
+    const [coverage] = received?.coverages as Array<{ gap_id: string; tactic_id: string }>;
 
     expect(received).toMatchObject({ workspace_id: experiment.workspace_id });
     expect(received?.gap_ids).not.toContain(gap!.id);
     expect((received?.tactics as Array<{ id: string }>)[0]?.id).not.toBe(tactic.id);
-    expect((received?.coverages as Array<{ gap_id: string; tactic_id: string }>)[0]).not.toMatchObject({ gap_id: gap!.id, tactic_id: tactic.id });
+    expect(copiedClaimIds).toContain(coverage!.gap_id);
+    expect(copiedClaimIds).toContain(coverage!.tactic_id);
     expect(input).toEqual({ workspace_id: source.workspace_id, gap_ids: [gap!.id], tactics: [{ id: tactic.id, status: "planned" }], coverages: [{ gap_id: gap!.id, tactic_id: tactic.id, overall: "full", validated: true }], persist: false });
   });
 
