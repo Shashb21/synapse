@@ -16,7 +16,7 @@ import { getSourceFile } from "@/accuracy/store/source-store";
 import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
-import { recordExperimentCall, recordVersionEvaluation } from "./records";
+import { getExperiment, recordExperimentCall, recordVersionEvaluation } from "./records";
 import { newId } from "@/modules/kernel/ids";
 
 const MAX_EXTRACT_BLOCKS = 80;
@@ -39,16 +39,31 @@ export async function runExtractionDownstream(args: { workspace_id: string; org_
     { call_kind: "status_derive", run_id: status.run_id, summary: status.summary, count: status.output.statuses.length }] };
 }
 
+/** Complete a retained version without duplicating rows after a partial write. */
+async function retainVersion(args: PipelineExperimentContext & {
+  call_kind: CallKind; input: Record<string, unknown>; call_id: string; version_index: number;
+  output?: unknown; output_error?: string; module_version: string; route: unknown;
+}) {
+  const existing = await getExperiment(args);
+  const call = existing?.calls.find(row => row.call_id === args.call_id && row.version_index === args.version_index)
+    ?? await recordExperimentCall({ workspace_id: args.workspace_id, experiment_id: args.experiment_id,
+      call_id: args.call_id, call_kind: args.call_kind, version_index: args.version_index, input: args.input,
+      output: args.output, output_error: args.output_error, module_version: args.module_version, route: args.route });
+  if (!existing?.evaluations.some(row => row.call_id === args.call_id && row.version_index === args.version_index)) {
+    await recordVersionEvaluation({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, call_id: args.call_id,
+      version_index: args.version_index, evaluation: evaluateExperimentVersion({ pack_id: args.pack_id, call_kind: args.call_kind,
+        output: call.output, ...(call.output_error ? { output_error: call.output_error } : {}) }) });
+  }
+}
+
 /** Retain every available module snapshot before allowing the workflow to advance. */
 async function retainResult(args: PipelineExperimentContext & { call_kind: CallKind; input: Record<string, unknown>; result: AccuracyRunResult<unknown> }) {
   const progression = await readAgentProgression({ workspace_id: args.workspace_id, run_id: args.result.run_id });
   const snapshots = progression?.events.flatMap(event => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
   const outputs = snapshots.length ? snapshots : [args.result.output];
   for (const [version_index, output] of outputs.entries()) {
-    await recordExperimentCall({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, call_id: args.result.run_id,
-      call_kind: args.call_kind, version_index, input: args.input, output, module_version: args.result.module_version, route: args.result.route });
-    await recordVersionEvaluation({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, call_id: args.result.run_id,
-      version_index, evaluation: evaluateExperimentVersion({ pack_id: args.pack_id, call_kind: args.call_kind, output }) });
+    await retainVersion({ ...args, call_id: args.result.run_id, version_index, output,
+      module_version: args.result.module_version, route: args.result.route });
   }
 }
 
@@ -57,10 +72,21 @@ async function retainFailure(args: PipelineExperimentContext & { call_kind: Call
   const implementation = await activeAccuracyModule(args.call_kind);
   const output_error = args.error instanceof Error ? args.error.message : String(args.error);
   const failedRun = await reservedAccuracyRun(args.workspace_id, args.call_id);
-  await recordExperimentCall({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, call_id: args.call_id, call_kind: args.call_kind,
-    version_index: 0, input: args.input, output_error, module_version: failedRun?.module_version ?? implementation.manifest.version, route: failedRun?.route ?? { status: "unavailable" } });
-  await recordVersionEvaluation({ workspace_id: args.workspace_id, experiment_id: args.experiment_id, call_id: args.call_id, version_index: 0,
-    evaluation: evaluateExperimentVersion({ pack_id: args.pack_id, call_kind: args.call_kind, output: null, output_error }) });
+  const progression = await readAgentProgression({ workspace_id: args.workspace_id, run_id: args.call_id });
+  const snapshots = progression?.events.flatMap(event => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
+  const retained = await getExperiment(args);
+  const calls = retained?.calls.filter(call => call.call_id === args.call_id) ?? [];
+  const module_version = failedRun?.module_version ?? calls[0]?.module_version ?? implementation.manifest.version;
+  const route = failedRun?.route ?? calls[0]?.route ?? { status: "unavailable" };
+  for (const [version_index, output] of snapshots.entries()) {
+    await retainVersion({ ...args, version_index, output, module_version, route });
+  }
+  // A non-agentic final output may already exist when its evaluation write fails.
+  for (const call of calls) {
+    await retainVersion({ ...args, version_index: call.version_index, output: call.output, module_version, route });
+  }
+  const errorVersion = Math.max(snapshots.length, ...calls.map(call => call.version_index + 1));
+  await retainVersion({ ...args, version_index: errorVersion, output_error, module_version, route });
 }
 
 async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: CallKind, input: Record<string, unknown>, reserved_run_id?: string, retain = true): Promise<AccuracyRunResult<O>> {
@@ -71,7 +97,7 @@ async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: Ca
     if (retain) await retainResult({ ...context, call_kind, input, result });
     return result;
   } catch (error) {
-    await retainFailure({ ...context, call_kind, input, call_id, error });
+    if (retain) await retainFailure({ ...context, call_kind, input, call_id, error });
     throw error;
   }
 }

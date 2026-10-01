@@ -1,8 +1,11 @@
 /** End-to-end isolated extraction-pipeline experiment behavior. */
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
+import * as records from "@/accuracy/experiments/records";
+import { runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
+import { inventoryExtractModule } from "@/accuracy/modules/inventory-extract/module";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
@@ -19,6 +22,8 @@ const originals = new Map<string, string>();
 
 beforeAll(() => { registerAccuracyStack(); });
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind: call_kind as never, module_id, activated_by: "pipeline test restore" });
   originals.clear();
   for (const workspace_id of workspaces.splice(0)) await deleteWorkspace(workspace_id);
@@ -57,12 +62,99 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
     status_derive: z.object({ statuses: z.array(z.unknown()), open: z.number(), partial: z.number(), addressed: z.number() }),
   };
   const id = newId("pipeline-module");
-  const module = agentic ? agenticModule : mechanicalModule;
-  registerAccuracyModule(module({ id, call_kind, title: "Controlled pipeline", summary: "Controlled pipeline module", inputSchema: schemas[call_kind], outputSchema: outputs[call_kind] as never, run: async (input, context) => ({ output: await run(input as Record<string, unknown>, context), summary: call_kind }) }));
+  const createModule = agentic ? agenticModule : mechanicalModule;
+  registerAccuracyModule(createModule({ id, call_kind, title: "Controlled pipeline", summary: "Controlled pipeline module", inputSchema: schemas[call_kind], outputSchema: outputs[call_kind] as never, run: async (input, context) => ({ output: await run(input as Record<string, unknown>, context), summary: call_kind }) }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "pipeline test" });
 }
 
 describe("isolated extraction-pipeline experiments", () => {
+  it.each(["single_call", "pipeline"] as const)("scores V0 and revision snapshots from the real inventory module in %s mode", async (mode) => {
+    const source = await sourceFixture();
+    const original = activeAccuracyModuleId("inventory_extract");
+    if (original) originals.set("inventory_extract", original);
+    const id = newId("real-inventory-controlled-completion");
+    const name = "A source-backed clinical trial";
+    registerAccuracyModule({ ...inventoryExtractModule, manifest: { ...inventoryExtractModule.manifest, id },
+      run: async (rawInput, context) => {
+        const input = inventoryExtractModule.inputSchema.parse(rawInput);
+        vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "0");
+        try {
+          return await inventoryExtractModule.run(input, { ...context, complete: async request => {
+            const response = request.purpose === "snapshot_completeness"
+              ? { checked_block_ids: input.block_ids, suspected_omissions: [], prior_issue_resolutions: [] }
+              : { tactics: [{ name, type: "phase3_trial", status: "planned", evidence_question: "Does it work?",
+                provenance: request.purpose.endsWith("r0") ? [] : [{ source_file_id: input.source_file_id, block_id: input.block_ids[0], quote: "Source evidence." }] }] };
+            return { raw: JSON.stringify(response), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+          } });
+        } finally { vi.unstubAllEnvs(); }
+      } });
+    activateAccuracyModule({ call_kind: "inventory_extract", module_id: id, activated_by: "regression test" });
+    controlled("need_extract", async input => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [] }));
+    controlled("merge_dedupe", async input => ({ workspace_id: input.workspace_id, merged: 0, survivors: 1, contradictions: 0, merges: [], contradiction_rows: [] }));
+    controlled("status_derive", async () => ({ statuses: [], open: 0, partial: 0, addressed: 0 }));
+    const experiment = await runAccuracyExperiment({ mode, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" },
+      ...(mode === "single_call" ? { call: { call_kind: "inventory_extract" as const,
+        input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_ids: [source.block_id] } } } : {}) });
+    workspaces.push(experiment.workspace_id);
+    expect(experiment.status).toBe("completed");
+    const calls = experiment.calls.filter(call => call.call_kind === "inventory_extract");
+    expect(calls.map(call => call.version_index)).toEqual([0, 1]);
+    for (const call of calls) {
+      expect(call.output).toMatchObject({ tactics: [{ name }] });
+      expect((call.output as { tactics: object[] }).tactics[0]).not.toHaveProperty("id");
+      expect(experiment.evaluations.find(row => row.call_id === call.call_id && row.version_index === call.version_index)?.evaluation)
+        .toMatchObject({ status: "scored", outcomes: expect.arrayContaining([expect.objectContaining({ model_item_index: 0, outcome: "wrong" })]) });
+    }
+  });
+
+  it.each([0, 1])("retains every snapshot and exports a separate error after critic failure at V%i", async (failedVersion) => {
+    const source = await sourceFixture();
+    controlled("inventory_extract", async (_input, context) => {
+      await runShallowAgenticCycle({ run: context.run, maxExchanges: 1,
+        onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
+        proposer: async round => ({ tactics: [{ name: `Trial version ${round}` }] }),
+        critic: async draft => {
+          if (draft.tactics[0].name === `Trial version ${failedVersion}`) throw new Error("critic failed after snapshot");
+          return { score: 0, issues: [] };
+        }, judge: async draft => draft });
+      throw new Error("unreachable");
+    }, true);
+    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
+    workspaces.push(experiment.workspace_id);
+    expect(experiment.status).toBe("failed");
+    const versions = failedVersion === 0 ? [0] : [0, 1];
+    expect(experiment.calls.map(call => ({ version: call.version_index, output: call.output, error: call.output_error }))).toEqual([
+      ...versions.map(version => ({ version, output: { tactics: [{ name: `Trial version ${version}` }] }, error: null })),
+      { version: failedVersion + 1, output: null, error: "critic failed after snapshot" },
+    ]);
+    expect(experiment.evaluations.map(row => (row.evaluation as { status: string }).status)).toEqual([...versions.map(() => "scored"), "model_error"]);
+    const json = JSON.parse(await records.exportExperiments({ workspace_id: experiment.workspace_id, format: "json" }));
+    const jsonl = (await records.exportExperiments({ workspace_id: experiment.workspace_id, format: "jsonl" })).trim().split("\n").map(line => JSON.parse(line));
+    expect(json).toEqual([experiment]);
+    expect(jsonl).toEqual(json);
+  });
+
+  it("recovers a partially retained version without duplicate calls after an evaluation write fails once", async () => {
+    const source = await sourceFixture();
+    const saveEvaluation = records.recordVersionEvaluation;
+    vi.spyOn(records, "recordVersionEvaluation").mockRejectedValueOnce(new Error("transient evaluation write failure")).mockImplementation(saveEvaluation);
+    controlled("inventory_extract", async (_input, context) => {
+      const result = await runShallowAgenticCycle({ run: context.run, maxExchanges: 1,
+        onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
+        proposer: async () => ({ tactics: [] }), critic: async () => ({ score: 0, issues: [] }), judge: async draft => draft });
+      return { workspace_id: _input.workspace_id, source_file_id: _input.source_file_id, ...result.final };
+    }, true);
+    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
+    workspaces.push(experiment.workspace_id);
+    expect(experiment.status).toBe("failed");
+    expect(experiment.calls.map(call => call.version_index)).toEqual([0, 1, 2]);
+    expect(experiment.calls[2].output_error).toBe("transient evaluation write failure");
+    expect(experiment.evaluations.map(row => (row.evaluation as { status: string }).status)).toEqual(["scored", "scored", "model_error"]);
+  });
+
   it("persists extracted drafts in the copy before downstream stages and retains evaluations", async () => {
     const source = await sourceFixture();
     const second = await addSource({ workspace_id: source.workspace_id, org_id: source.org_id, filename: "second.txt" });

@@ -1,6 +1,5 @@
 /** Authenticated experiment start and source-workspace-scoped record export API. */
 import { NextResponse } from "next/server";
-import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { CALL_KINDS } from "@/accuracy/kernel/contracts";
@@ -54,11 +53,22 @@ async function authorizedSourceWorkspace(source_workspace_id: string, session: A
   return getAuthorizedWorkspace({ workspace_id: source_workspace_id, subject: session.session.subject, role: session.role });
 }
 
+/** Detect keys stripped by the schema while allowing defaults and value normalization. */
+function hasUnknownInputKeys(input: unknown, normalized: unknown): boolean {
+  if (Array.isArray(input)) {
+    return !Array.isArray(normalized) || input.some((value, index) => hasUnknownInputKeys(value, normalized[index]));
+  }
+  if (!input || typeof input !== "object") return false;
+  if (!normalized || typeof normalized !== "object") return true;
+  return Object.entries(input).some(([key, value]) => !Object.hasOwn(normalized, key)
+    || hasUnknownInputKeys(value, (normalized as Record<string, unknown>)[key]));
+}
+
 /** Use the active module's input schema as the per-call public allowlist. */
 async function validatedCallInput(call: { call_kind: typeof CALL_KINDS[number]; input: Record<string, unknown> }) {
-  const module = await activeAccuracyModule(call.call_kind);
-  const parsed = module.inputSchema.safeParse(call.input);
-  if (!parsed.success || !isDeepStrictEqual(parsed.data, call.input)) {
+  const implementation = await activeAccuracyModule(call.call_kind);
+  const parsed = implementation.inputSchema.safeParse(call.input);
+  if (!parsed.success || hasUnknownInputKeys(call.input, parsed.data)) {
     throw new InvalidExperimentRequestError("Invalid single-call input.");
   }
   return parsed.data as Record<string, unknown>;
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ experiment }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof InvalidExperimentRequestError || (error instanceof Error && error.message.startsWith("Unknown reference pack"))) {
-      return NextResponse.json({ error: error instanceof z.ZodError ? "Invalid experiment request" : "Unknown reference pack" }, { status: 400 });
+      return NextResponse.json({ error: error instanceof z.ZodError ? "Invalid experiment request" : error instanceof InvalidExperimentRequestError ? error.message : "Unknown reference pack" }, { status: 400 });
     }
     console.error("Could not start isolated accuracy experiment", error);
     return NextResponse.json({ error: "Could not start experiment" }, { status: 500 });

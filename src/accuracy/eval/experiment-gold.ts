@@ -71,7 +71,9 @@ function modelItems(output: unknown, field: "gaps" | "tactics"): ModelItem[] | s
     const item = raw as Record<string, unknown>;
     const text = field === "gaps" ? item.statement : item.name;
     if (typeof text !== "string" || !text.trim()) throw new Error(`Expected output.${field}[${index}] to contain a non-empty ${field === "gaps" ? "statement" : "name"}.`);
-    if (field === "tactics" && typeof item.id !== "string") throw new Error(`Expected output.tactics[${index}].id to be a string.`);
+    // Proposer/reviser snapshots precede judge-generated IDs. Validate an ID only
+    // when supplied; matching inventory items uses their text, never this ID.
+    if (field === "tactics" && item.id !== undefined && (typeof item.id !== "string" || !item.id.trim())) throw new Error(`Expected output.tactics[${index}].id to be a non-empty string when supplied.`);
     if (field === "gaps" && item.external_id !== undefined && item.external_id !== null && typeof item.external_id !== "string") throw new Error(`Expected output.gaps[${index}].external_id to be a string or null.`);
     // Inventory tactic ids are generated per run and cannot identify a gold tactic.
     const stable_id = field === "gaps" && typeof item.external_id === "string" ? item.external_id : undefined;

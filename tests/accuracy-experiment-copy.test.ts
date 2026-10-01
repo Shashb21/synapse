@@ -159,6 +159,41 @@ describe("copyExperimentWorkspace", () => {
     expect(await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, source.workspace_id))).toEqual(before.coverage);
   });
 
+  it("remaps every supported metadata claim relationship inside the copy", async () => {
+    const source = await fixture();
+    const metadata = { parent_gap_id: source.claim.id, depends_on: [source.tactic.id], gap_ids: [source.claim.id],
+      merged_into: source.tactic.id, merged_from: [source.claim.id],
+      nested: { claim_id: source.claim.id, gap_id: source.claim.id, tactic_id: source.tactic.id } };
+    await accuracyDb().update(t.accuracyClaims).set({ metadata }).where(eq(t.accuracyClaims.id, source.tactic.id));
+    const copy = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(copy.workspace_id);
+    const [copied] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, copy.claim_id_map[source.tactic.id]));
+    expect(copied.metadata).toEqual({ parent_gap_id: copy.claim_id_map[source.claim.id], depends_on: [copy.claim_id_map[source.tactic.id]],
+      gap_ids: [copy.claim_id_map[source.claim.id]], merged_into: copy.claim_id_map[source.tactic.id], merged_from: [copy.claim_id_map[source.claim.id]],
+      nested: { claim_id: copy.claim_id_map[source.claim.id], gap_id: copy.claim_id_map[source.claim.id], tactic_id: copy.claim_id_map[source.tactic.id] } });
+    const [original] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, source.tactic.id));
+    expect(original.metadata).toEqual(metadata);
+  });
+
+  it.each(["omitted", "unknown", "cross-workspace"])("rejects %s metadata claim endpoints without leaving a copy", async (kind) => {
+    const source = await fixture();
+    const other = kind === "cross-workspace" ? await fixture() : source;
+    const endpoint = kind === "unknown" ? "missing-claim" : (await insertClaim({ workspace_id: other.workspace_id,
+      claim_type: "gap", statement: "Endpoint outside the selected sources" })).id;
+    for (const field of ["parent_gap_id", "depends_on", "merged_into", "merged_from", "gap_ids", "claim_id", "gap_id", "tactic_id"]) {
+      const metadata = { [field]: ["depends_on", "merged_from", "gap_ids"].includes(field) ? [endpoint] : endpoint };
+      await accuracyDb().update(t.accuracyClaims).set({ metadata }).where(eq(t.accuracyClaims.id, source.claim.id));
+      const beforeWorkspaces = await accuracyDb().select().from(t.accuracyWorkspaces);
+      const beforeOrgs = await accuracyDb().select().from(t.accuracyOrganizations);
+      await expect(copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] }))
+        .rejects.toMatchObject({ code: "unresolved_reference" });
+      expect(await accuracyDb().select().from(t.accuracyWorkspaces)).toEqual(beforeWorkspaces);
+      expect(await accuracyDb().select().from(t.accuracyOrganizations)).toEqual(beforeOrgs);
+      const [original] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, source.claim.id));
+      expect(original.metadata).toEqual(metadata);
+    }
+  });
+
   it("copies a claim selected through table provenance even without a direct source id", async () => {
     const source = await fixture();
     await accuracyDb().update(t.accuracyClaims)

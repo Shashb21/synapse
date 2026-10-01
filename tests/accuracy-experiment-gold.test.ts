@@ -47,6 +47,20 @@ describe("evaluateExperimentVersion", () => {
     expect(partial.outcomes).toContainEqual(expect.objectContaining({ outcome: "partial", model_item_index: 0 }));
   });
 
+  it("scores an inventory draft before judge IDs are assigned", () => {
+    const result = evaluateExperimentVersion({ pack_id: "beone-bgb-58067-prmt5i", call_kind: "inventory_extract",
+      output: { tactics: [{ name: "A source-backed trial", type: "phase3_trial", status: "planned", evidence_question: "Does it work?" }] } });
+    expect(result.status).toBe("scored");
+    expect(result.outcomes).toContainEqual(expect.objectContaining({ outcome: "wrong", model_item_index: 0 }));
+  });
+
+  it.each([{ name: "" }, { name: null }, { name: 4 }, { name: "Trial", id: 4 }, { name: "Trial", id: null }, { name: "Trial", id: " " }])(
+    "rejects malformed inventory draft text or a supplied identifier: %j", (item) => {
+      const result = evaluateExperimentVersion({ pack_id: "beone-bgb-58067-prmt5i", call_kind: "inventory_extract", output: { tactics: [item] } });
+      expect(result.status).toBe("invalid_output");
+      expect(result.score).toBeUndefined();
+    });
+
   it("records extra model items as wrong and absent gold items as missed", () => {
     const result = evaluateExperimentVersion({
       pack_id: "beone-bgb-58067-prmt5i", call_kind: "need_extract",

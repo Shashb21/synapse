@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { ideateInputSchema } from "@/accuracy/modules/ideate/module";
 
 const {
   sessionContext,
@@ -70,6 +71,36 @@ beforeEach(() => {
 });
 
 describe("accuracy experiment API", () => {
+  it.each([
+    { gaps: [] },
+    { gaps: [{ id: "gap-source", status: "open", priority_band: "high" }] },
+    { gaps: [{ id: "gap-source", statement: "", status: "open", priority_band: "high" }], per_gap: 1 },
+  ])("accepts and normalizes real ideate schema defaults: %j", async (fields) => {
+    activeAccuracyModule.mockResolvedValue({ inputSchema: ideateInputSchema });
+    runAccuracyExperiment.mockResolvedValue({ id: "experiment-defaults" });
+    const input = { workspace_id: "ws-source", existing_tactic_names: [], ...fields };
+    const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "ideate", input } });
+    expect(response.status).toBe(201);
+    expect(runAccuracyExperiment).toHaveBeenCalledWith(expect.objectContaining({ call: {
+      call_kind: "ideate", input: { ...input, per_gap: 1, gaps: fields.gaps.map(gap => ({ ...gap, statement: "" })) },
+    } }));
+  });
+
+  it.each([
+    { gold: [{ answer: "secret" }] },
+    { gaps: [{ id: "gap-source", status: "open", priority_band: "high", gold: "secret" }] },
+    { per_gap: 99 },
+  ])("reports invalid module input accurately and rejects unknown nested fields: %j", async (fields) => {
+    activeAccuracyModule.mockResolvedValue({ inputSchema: ideateInputSchema });
+    const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "ideate",
+        input: { workspace_id: "ws-source", gaps: [], existing_tactic_names: [], ...fields } } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid single-call input." });
+    expect(runAccuracyExperiment).not.toHaveBeenCalled();
+  });
+
   it("rejects an unauthenticated attempt before starting an experiment", async () => {
     sessionContext.mockResolvedValue({ ...signedInContributor, signed_in: false });
     const response = await post({ mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {} });

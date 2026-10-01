@@ -89,6 +89,15 @@ function sourceReferences(value: unknown): Array<{ source_file_id: string; block
   });
 }
 
+/** Resolve a workspace-owned metadata reference without preserving live IDs. */
+function remapReference(key: string, value: unknown, ids: Record<string, string>): string {
+  if (typeof value !== "string" || !Object.hasOwn(ids, value)) {
+    throw new ExperimentCopyError("unresolved_reference", `Metadata ${key} points outside the selected baseline: ${String(value)}`);
+  }
+  return ids[value];
+}
+
+/** Remap supported claim relationships, merge lineage, and source provenance. */
 function remapMetadata(value: unknown, maps: {
   source: Record<string, string>;
   block: Record<string, string>;
@@ -97,15 +106,12 @@ function remapMetadata(value: unknown, maps: {
   if (Array.isArray(value)) return value.map((item) => remapMetadata(item, maps));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => {
-    if (typeof child === "string") {
-      if (key === "source_file_id") return [key, maps.source[child] ?? child];
-      if (key === "block_id") return [key, maps.block[child] ?? child];
-      if (["claim_id", "gap_id", "tactic_id", "merged_into"].includes(key)) {
-        return [key, maps.claim[child] ?? child];
-      }
-    }
-    if (key === "merged_from" || key === "gap_ids") {
-      return [key, Array.isArray(child) ? child.map((item) => typeof item === "string" ? maps.claim[item] ?? item : item) : child];
+    const ids = key === "source_file_id" ? maps.source : key === "block_id" ? maps.block
+      : ["claim_id", "gap_id", "tactic_id", "parent_gap_id", "merged_into"].includes(key) ? maps.claim : null;
+    if (ids) return [key, child === null ? null : remapReference(key, child, ids)];
+    if (["merged_from", "gap_ids", "depends_on"].includes(key)) {
+      if (!Array.isArray(child)) throw new ExperimentCopyError("unresolved_reference", `Metadata ${key} must be an array of claim IDs.`);
+      return [key, child.map((item) => remapReference(key, item, maps.claim))];
     }
     return [key, remapMetadata(child, maps)];
   }));
@@ -240,6 +246,10 @@ export async function copyExperimentWorkspace(
     }
     const copiedCoverage = copiedCoverageRows.filter((row) => copiedClaimIds.has(row.gap_id) && copiedClaimIds.has(row.tactic_id));
 
+    const copiedMetadata = new Map(copiedClaimRows.map((claim) => [claim.id,
+      remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
+    ]));
+
     const org_id = newId("org");
     const workspace_id = newId("ws");
     const created_at = nowIso();
@@ -267,7 +277,7 @@ export async function copyExperimentWorkspace(
       await db.insert(t.accuracyClaims).values(copiedClaimRows.map((row) => ({
         id: claim_id_map[row.id], workspace_id, claim_type: row.claim_type, statement: row.statement, status: row.status,
         validated: row.validated, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null,
-        metadata: remapMetadata(row.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
+        metadata: copiedMetadata.get(row.id)!,
         created_at: row.created_at, updated_at: row.updated_at,
       })));
     }
@@ -287,7 +297,7 @@ export async function copyExperimentWorkspace(
     const baseline_snapshot = {
       source_files: sourceRows.map((row) => ({ original_id: row.id, copied_id: source_id_map[row.id], ...row, id: source_id_map[row.id], workspace_id, org_id })),
       parse_blocks: blockRows.map((row) => ({ original_id: row.id, copied_id: block_id_map[row.id], ...row, id: block_id_map[row.id], workspace_id, source_file_id: source_id_map[row.source_file_id] })),
-      claims: copiedClaimRows.map((row) => ({ original_id: row.id, copied_id: claim_id_map[row.id], ...row, id: claim_id_map[row.id], workspace_id, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null, metadata: remapMetadata(row.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) })),
+      claims: copiedClaimRows.map((row) => ({ original_id: row.id, copied_id: claim_id_map[row.id], ...row, id: claim_id_map[row.id], workspace_id, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null, metadata: copiedMetadata.get(row.id)! })),
       provenance: copiedProvenanceRows.map((row) => ({ original_id: row.id, copied_id: provenance_id_map[row.id], ...row, id: provenance_id_map[row.id], workspace_id, claim_id: claim_id_map[row.claim_id], source_file_id: source_id_map[row.source_file_id], block_id: block_id_map[row.block_id] })),
       coverage_joins: copiedCoverage.map((row) => ({ original_id: row.id, copied_id: coverage_id_map[row.id], ...row, id: coverage_id_map[row.id], workspace_id, gap_id: claim_id_map[row.gap_id], tactic_id: claim_id_map[row.tactic_id] })),
     };
