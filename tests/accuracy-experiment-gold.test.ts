@@ -28,6 +28,25 @@ describe("evaluateExperimentVersion", () => {
     expect(result.score?.found).toBe(0);
   });
 
+  it("scores inventory tactics using the module's id and name contract", () => {
+    const exactName = "Extended follow-up and planned long-term, post-hoc analyses within pivotal trials on key subgroups and long-term responder profiles";
+    const exact = evaluateExperimentVersion({
+      pack_id: "beone-bgb-58067-prmt5i", call_kind: "inventory_extract",
+      output: { tactics: [{ id: "generated-tactic-id", name: exactName }] },
+    });
+    const narrative = evaluateExperimentVersion({
+      pack_id: "beone-bgb-58067-prmt5i", call_kind: "inventory_extract",
+      output: { tactics: [{ id: "generated-tactic-id", name: exactName }] },
+    });
+    const partial = evaluateExperimentVersion({
+      pack_id: "beone-bgb-58067-prmt5i", call_kind: "inventory_extract",
+      output: { tactics: [{ id: "generated-tactic-id", name: `${exactName} reviewed` }] },
+    });
+    expect(exact.outcomes).toContainEqual(expect.objectContaining({ outcome: "found", model_item_index: 0 }));
+    expect(narrative.outcomes).toContainEqual(expect.objectContaining({ outcome: "found", model_item_index: 0 }));
+    expect(partial.outcomes).toContainEqual(expect.objectContaining({ outcome: "partial", model_item_index: 0 }));
+  });
+
   it("records extra model items as wrong and absent gold items as missed", () => {
     const result = evaluateExperimentVersion({
       pack_id: "beone-bgb-58067-prmt5i", call_kind: "need_extract",
@@ -44,6 +63,15 @@ describe("evaluateExperimentVersion", () => {
     expect(malformed.score).toBeUndefined();
     expect(errored.errors).toContain("provider timeout");
     expect(errored.score).toBeUndefined();
+  });
+
+  it("rejects malformed array items and malformed non-applicable outputs", () => {
+    const malformedItem = evaluateExperimentVersion({ pack_id: "beone-bgb-58067-prmt5i", call_kind: "need_extract", output: { gaps: [null] } });
+    const malformedOther = evaluateExperimentVersion({ pack_id: "beone-bgb-58067-prmt5i", call_kind: "merge_dedupe", output: null });
+    expect(malformedItem.status).toBe("invalid_output");
+    expect(malformedItem.errors[0]).toContain("gaps[0]");
+    expect(malformedOther.status).toBe("invalid_output");
+    expect(malformedOther.output_shape.valid).toBe(false);
   });
 
   it("records shape but omits scores when gold does not apply to the call kind", () => {

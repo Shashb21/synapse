@@ -67,9 +67,14 @@ function goldItems(pack_id: string, call_kind: string): GoldItem[] | null {
 function modelItems(output: unknown, field: "gaps" | "tactics"): ModelItem[] | string {
   if (!output || typeof output !== "object" || !Array.isArray((output as Record<string, unknown>)[field])) return `Expected output.${field} to be an array.`;
   return ((output as Record<string, unknown>)[field] as unknown[]).map((raw, index) => {
-    const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-    const text = typeof item.statement === "string" ? item.statement : typeof item.title === "string" ? item.title : "";
-    const stable_id = typeof item.external_id === "string" ? item.external_id : typeof item.identifier === "string" ? item.identifier : typeof item.number === "number" ? String(item.number) : undefined;
+    if (!raw || typeof raw !== "object") throw new Error(`Expected output.${field}[${index}] to be an object.`);
+    const item = raw as Record<string, unknown>;
+    const text = field === "gaps" ? item.statement : item.name;
+    if (typeof text !== "string" || !text.trim()) throw new Error(`Expected output.${field}[${index}] to contain a non-empty ${field === "gaps" ? "statement" : "name"}.`);
+    if (field === "tactics" && typeof item.id !== "string") throw new Error(`Expected output.tactics[${index}].id to be a string.`);
+    if (field === "gaps" && item.external_id !== undefined && item.external_id !== null && typeof item.external_id !== "string") throw new Error(`Expected output.gaps[${index}].external_id to be a string or null.`);
+    // Inventory tactic ids are generated per run and cannot identify a gold tactic.
+    const stable_id = field === "gaps" && typeof item.external_id === "string" ? item.external_id : undefined;
     return { index, text, stable_id };
   });
 }
@@ -80,9 +85,14 @@ export function evaluateExperimentVersion(args: { pack_id: string; call_kind: st
   const base = { evaluator_version: EXPERIMENT_EVALUATOR_VERSION, pack_id: args.pack_id, pack_fingerprint, call_kind: args.call_kind } as const;
   if (args.output_error) return { ...base, status: "model_error", output_shape: { valid: false }, outcomes: [], errors: [args.output_error] };
   const gold = goldItems(args.pack_id, args.call_kind);
-  if (!gold) return { ...base, status: "gold_not_applicable", output_shape: { valid: true }, outcomes: [], errors: [] };
+  if (!gold) {
+    const valid = Boolean(args.output && typeof args.output === "object" && !Array.isArray(args.output));
+    return valid ? { ...base, status: "gold_not_applicable", output_shape: { valid }, outcomes: [], errors: [] }
+      : { ...base, status: "invalid_output", output_shape: { valid }, outcomes: [], errors: ["Expected output to be an object."] };
+  }
   const field = args.call_kind === "need_extract" ? "gaps" : "tactics";
-  const model = modelItems(args.output, field);
+  let model: ModelItem[] | string;
+  try { model = modelItems(args.output, field); } catch (error) { return { ...base, status: "invalid_output", output_shape: { valid: false, item_field: field }, outcomes: [], errors: [error instanceof Error ? error.message : "Invalid output item."] }; }
   if (typeof model === "string") return { ...base, status: "invalid_output", output_shape: { valid: false, item_field: field }, outcomes: [], errors: [model] };
   const unmatchedGold = new Set(gold.map((_, index) => index)); const outcomes: ExperimentItemOutcome[] = [];
   for (const item of model) {

@@ -239,7 +239,7 @@ export const accuracyWorkshopSnapshots = pgTable("accuracy_workshop_snapshots", 
 /** One isolated, repeatable accuracy experiment; immutable apart from terminal status. */
 export const accuracyExperiments = pgTable("accuracy_experiments", {
   id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(), org_id: text("org_id").notNull(),
-  source_workspace_id: text("source_workspace_id").notNull(), pack_id: text("pack_id").notNull(), pack_fingerprint: text("pack_fingerprint").notNull(),
+  source_workspace_id: text("source_workspace_id").notNull(), source_org_id: text("source_org_id").notNull(), pack_id: text("pack_id").notNull(), pack_fingerprint: text("pack_fingerprint").notNull(),
   evaluator_version: text("evaluator_version").notNull(), source_fingerprint: text("source_fingerprint").notNull(), baseline_fingerprint: text("baseline_fingerprint").notNull(),
   baseline_snapshot: jsonb("baseline_snapshot").notNull(), condition: jsonb("condition").notNull(), status: text("status").notNull(), created_at: text("created_at").notNull(), finished_at: text("finished_at"),
 }, (table) => ({ workspace: index("accuracy_experiments_workspace_idx").on(table.workspace_id, table.created_at) }));
@@ -435,7 +435,7 @@ export const ACCURACY_DDL = [
     saved_at text NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_experiments (
-    id text PRIMARY KEY, workspace_id text NOT NULL, org_id text NOT NULL, source_workspace_id text NOT NULL,
+    id text PRIMARY KEY, workspace_id text NOT NULL, org_id text NOT NULL, source_workspace_id text NOT NULL, source_org_id text NOT NULL,
     pack_id text NOT NULL, pack_fingerprint text NOT NULL, evaluator_version text NOT NULL, source_fingerprint text NOT NULL,
     baseline_fingerprint text NOT NULL, baseline_snapshot jsonb NOT NULL, condition jsonb NOT NULL, status text NOT NULL,
     created_at text NOT NULL, finished_at text
@@ -454,6 +454,7 @@ export const ACCURACY_DDL = [
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_experiments ADD COLUMN IF NOT EXISTS source_org_id text`,
   `ALTER TABLE accuracy_omission_actions ADD COLUMN IF NOT EXISTS contributor_statement text`,
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
   `DO $$ BEGIN
