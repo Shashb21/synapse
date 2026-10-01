@@ -63,12 +63,12 @@ async function retainFailure(args: PipelineExperimentContext & { call_kind: Call
     evaluation: evaluateExperimentVersion({ pack_id: args.pack_id, call_kind: args.call_kind, output: null, output_error }) });
 }
 
-async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: CallKind, input: Record<string, unknown>, reserved_run_id?: string): Promise<AccuracyRunResult<O>> {
+async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: CallKind, input: Record<string, unknown>, reserved_run_id?: string, retain = true): Promise<AccuracyRunResult<O>> {
   const call_id = reserved_run_id ?? newId("arun");
   try {
     const result = await runAccuracyModule<O>({ call_kind, input, actor: context.actor, org_id: context.org_id, workspace_id: context.workspace_id,
       reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" || call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment" });
-    await retainResult({ ...context, call_kind, input, result });
+    if (retain) await retainResult({ ...context, call_kind, input, result });
     return result;
   } catch (error) {
     await retainFailure({ ...context, call_kind, input, call_id, error });
@@ -97,17 +97,23 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
   await applyExtractionBatch(batch, [inventory.run_id, needs.run_id], drafts.map(draft => draft.id!), async () => {
     for (const draft of drafts) await insertClaim(draft);
   });
-  const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null } = { current: null };
+  const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null; merge: AccuracyRunResult<MergeDedupeOutput> | null; status: AccuracyRunResult<StatusDeriveOutput> | null } = { current: null, merge: null, status: null };
   try {
     await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, execute: async (_batch, journal) => {
       await assertAccuracyCanProgress(context.workspace_id, "merge_dedupe");
       downstream.current = { call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, call_id: journal.merge_operation_id };
-      await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id);
+      downstream.merge = await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false);
       downstream.current = { call_kind: "status_derive", input: { workspace_id: context.workspace_id }, call_id: journal.status_operation_id };
-      await runAndRetain<StatusDeriveOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id);
+      downstream.status = await runAndRetain<StatusDeriveOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false);
       return { source_file_id, batch_id: batch.id };
     } });
+    if (downstream.merge) await retainResult({ ...context, call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, result: downstream.merge });
+    if (downstream.status) await retainResult({ ...context, call_kind: "status_derive", input: { workspace_id: context.workspace_id }, result: downstream.status });
   } catch (error) {
+    // resumeExtractionBatch rolls back its callback as one downstream unit. Keep
+    // successfully computed stage evidence after that rollback, before returning
+    // a pause or failure to the experiment runner.
+    if (downstream.merge) await retainResult({ ...context, call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, result: downstream.merge });
     if (error instanceof AccuracyPausedError) throw error;
     const failedStage = downstream.current;
     if (failedStage) await retainFailure({ ...context, call_kind: failedStage.call_kind, input: failedStage.input, call_id: failedStage.call_id, error });

@@ -263,12 +263,14 @@ export async function copyExperimentWorkspace(
         kind: row.kind, heading: row.heading, text: row.text, parser: row.parser, created_at: row.created_at,
       })));
     }
-    await db.insert(t.accuracyClaims).values(copiedClaimRows.map((row) => ({
-      id: claim_id_map[row.id], workspace_id, claim_type: row.claim_type, statement: row.statement, status: row.status,
-      validated: row.validated, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null,
-      metadata: remapMetadata(row.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
-      created_at: row.created_at, updated_at: row.updated_at,
-    })));
+    if (copiedClaimRows.length > 0) {
+      await db.insert(t.accuracyClaims).values(copiedClaimRows.map((row) => ({
+        id: claim_id_map[row.id], workspace_id, claim_type: row.claim_type, statement: row.statement, status: row.status,
+        validated: row.validated, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null,
+        metadata: remapMetadata(row.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
+        created_at: row.created_at, updated_at: row.updated_at,
+      })));
+    }
     if (copiedProvenanceRows.length > 0) {
       await db.insert(t.accuracyProvenance).values(copiedProvenanceRows.map((row) => ({
         id: provenance_id_map[row.id], workspace_id, claim_id: claim_id_map[row.claim_id], source_file_id: source_id_map[row.source_file_id],

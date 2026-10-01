@@ -89,6 +89,22 @@ afterEach(async () => {
 });
 
 describe("copyExperimentWorkspace", () => {
+  it("copies a parsed source with no baseline claims", async () => {
+    await ensureAccuracySchema();
+    const org_id = await createOrganization(`copy-empty-${newId("org")}`);
+    const workspace_id = await createWorkspace({ org_id, name: "Empty baseline", slug: `copy-empty-${newId("slug")}` });
+    createdWorkspaces.push(workspace_id);
+    const source = await insertSourceFile({ workspace_id, org_id, filename: "empty.txt", mime: "text/plain", checksum: newId("sum") });
+    await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: newId("block"), source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "No prior claims." }] });
+
+    const copy = await copyExperimentWorkspace({ source_workspace_id: workspace_id, source_file_ids: [source.id] });
+    createdWorkspaces.push(copy.workspace_id);
+
+    expect(copy.claim_id_map).toEqual({});
+    expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, copy.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.workspace_id, copy.workspace_id))).toHaveLength(1);
+  });
+
   it("copies selected baseline rows with remapped foreign keys and fingerprints", async () => {
     const source = await fixture();
     const before = {

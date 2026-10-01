@@ -36,5 +36,12 @@
 
 ## Unresolved risks
 
-- The database-backed pipeline and existing omission-resume suites require a permitted local Postgres connection to validate the new integration behavior.
-- A dedicated important-omission pipeline assertion is still needed. The implementation delegates that behavior to the existing `assertAccuracyCanProgress` and journal pause path, but this task's new test file currently covers downstream failure rather than synthesizing the persisted omission-review event required to exercise the pause condition directly.
+- The pipeline intentionally reports a paused copy as a failed experiment because experiment records currently expose only `running`, `completed`, and `failed` terminal states. The resumable extraction journal retains the distinct pause state; introducing an experiment-level `paused` status would require a schema and API contract change outside this task.
+
+## Review follow-up (2026-10-01)
+
+- Guarded the copy's claim insert so a parsed source with no existing claims creates a valid empty-claim experiment copy. Added a database-backed regression test.
+- Deferred downstream experiment call/evaluation persistence until the resume callback commits or rolls back. A successful merge is now retained if `status_derive` fails and causes the journal callback to roll back; the status error and replayable reserved journal remain retained too.
+- Added pipeline coverage for a real important omission critique event. The copied pipeline pauses before merge/status, leaves the resume journal resumable, and leaves the live workspace claims, runs, and agent events unchanged.
+- Expanded the success case to two sources and asserted each source's complete extraction sequence, independent repeats, and live agent-event isolation.
+- Verified with local PostgreSQL: `npx vitest run tests/accuracy-experiment-copy.test.ts tests/accuracy-experiment-pipeline.test.ts tests/accuracy-omission-resume.test.ts` passed: 32 tests.

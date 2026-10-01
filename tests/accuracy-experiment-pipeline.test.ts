@@ -5,7 +5,8 @@ import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
-import { mechanicalModule } from "@/accuracy/modules/_factory";
+import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { accuracyDb } from "@/accuracy/store/db";
@@ -33,7 +34,14 @@ async function sourceFixture() {
   return { org_id, workspace_id, source_file_id: source.id, block_id };
 }
 
-function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_dedupe" | "status_derive", run: (input: Record<string, unknown>) => Promise<unknown>) {
+async function addSource(args: { workspace_id: string; org_id: string; filename: string }) {
+  const source = await insertSourceFile({ workspace_id: args.workspace_id, org_id: args.org_id, filename: args.filename, mime: "text/plain", checksum: newId("checksum") });
+  const block_id = newId("block");
+  await persistParseBlocks({ workspace_id: args.workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Second source evidence." }] });
+  return { source_file_id: source.id, block_id };
+}
+
+function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_dedupe" | "status_derive", run: (input: Record<string, unknown>, context: AccuracyModuleContext) => Promise<unknown>, agentic = false) {
   const original = activeAccuracyModuleId(call_kind);
   if (original) originals.set(call_kind, original);
   const schemas = {
@@ -49,52 +57,85 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
     status_derive: z.object({ statuses: z.array(z.unknown()), open: z.number(), partial: z.number(), addressed: z.number() }),
   };
   const id = newId("pipeline-module");
-  registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Controlled pipeline", summary: "Controlled pipeline module", inputSchema: schemas[call_kind], outputSchema: outputs[call_kind] as never, run: async (input) => ({ output: await run(input as Record<string, unknown>), summary: call_kind }) }));
+  const module = agentic ? agenticModule : mechanicalModule;
+  registerAccuracyModule(module({ id, call_kind, title: "Controlled pipeline", summary: "Controlled pipeline module", inputSchema: schemas[call_kind], outputSchema: outputs[call_kind] as never, run: async (input, context) => ({ output: await run(input as Record<string, unknown>, context), summary: call_kind }) }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "pipeline test" });
 }
 
 describe("isolated extraction-pipeline experiments", () => {
   it("persists extracted drafts in the copy before downstream stages and retains evaluations", async () => {
     const source = await sourceFixture();
+    const second = await addSource({ workspace_id: source.workspace_id, org_id: source.org_id, filename: "second.txt" });
     const calls: string[] = [];
     controlled("inventory_extract", async (input) => { calls.push("inventory"); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"), name: "Tactic", type: "access", status: "planned", evidence_question: "Evidence?", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
     controlled("need_extract", async (input) => { calls.push("need"); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"), statement: "Gap", external_id: "gap-1", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
     controlled("merge_dedupe", async (input) => { calls.push("merge"); const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, input.workspace_id as string)); expect(claims.map(c => c.statement)).toEqual(expect.arrayContaining(["Gap", "Tactic"])); return { workspace_id: input.workspace_id, merged: 0, survivors: claims.length, contradictions: 0, merges: [], contradiction_rows: [] }; });
     controlled("status_derive", async (input) => { calls.push("status"); return { statuses: [], open: 0, partial: 0, addressed: 0 }; });
 
-    const request = { mode: "pipeline" as const, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" as const } };
+    const request = { mode: "pipeline" as const, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id, second.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" as const } };
     const experiment = await runAccuracyExperiment(request);
     const repeated = await runAccuracyExperiment(request);
     workspaces.push(experiment.workspace_id, repeated.workspace_id);
 
-    expect(calls).toEqual(["inventory", "need", "merge", "status", "inventory", "need", "merge", "status"]);
+    expect(calls).toEqual(["inventory", "need", "merge", "status", "inventory", "need", "merge", "status", "inventory", "need", "merge", "status", "inventory", "need", "merge", "status"]);
     expect(experiment.status).toBe("completed");
-    expect(experiment.calls.map(call => call.call_kind)).toEqual(["inventory_extract", "need_extract", "merge_dedupe", "status_derive"]);
-    expect(experiment.evaluations).toHaveLength(4);
+    expect(experiment.calls.map(call => call.call_kind)).toEqual(["inventory_extract", "need_extract", "merge_dedupe", "status_derive", "inventory_extract", "need_extract", "merge_dedupe", "status_derive"]);
+    expect(experiment.evaluations).toHaveLength(8);
     expect(repeated.id).not.toBe(experiment.id);
     expect(repeated.workspace_id).not.toBe(experiment.workspace_id);
     expect(repeated.calls.map(call => call.call_id)).not.toEqual(experiment.calls.map(call => call.call_id));
     expect(repeated.evaluations.map(row => row.id)).not.toEqual(experiment.evaluations.map(row => row.id));
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
     expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, source.workspace_id))).toEqual([]);
   });
 
-  it("retains a failed downstream stage and its reserved journal in the copy", async () => {
+  it("retains successful merge evidence when status fails and keeps the journal replayable", async () => {
     const source = await sourceFixture();
     const extractor = async (input: Record<string, unknown>) => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [], });
     controlled("inventory_extract", async input => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [] }));
     controlled("need_extract", extractor);
-    controlled("merge_dedupe", async () => { throw new Error("controlled merge failure"); });
-    controlled("status_derive", async () => ({ statuses: [], open: 0, partial: 0, addressed: 0 }));
+    controlled("merge_dedupe", async input => ({ workspace_id: input.workspace_id, merged: 0, survivors: 0, contradictions: 0, merges: [], contradiction_rows: [] }));
+    controlled("status_derive", async () => { throw new Error("controlled status failure"); });
 
     const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
     workspaces.push(experiment.workspace_id);
     const journals = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
 
     expect(experiment.status).toBe("failed");
-    expect(experiment.calls).toEqual(expect.arrayContaining([expect.objectContaining({ call_kind: "merge_dedupe", output_error: "controlled merge failure" })]));
+    expect(experiment.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ call_kind: "merge_dedupe", output: expect.objectContaining({ merged: 0 }) }),
+      expect.objectContaining({ call_kind: "status_derive", output_error: "controlled status failure" }),
+    ]));
     expect(experiment.evaluations).toEqual(expect.arrayContaining([expect.objectContaining({ evaluation: expect.objectContaining({ status: "model_error" }) })]));
     expect(journals).toEqual([expect.objectContaining({ merge_state: "reserved", status_state: "reserved", final_response: null })]);
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it("pauses the copied pipeline for an important extractor omission without touching the live workspace", async () => {
+    const source = await sourceFixture();
+    controlled("inventory_extract", async input => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [] }));
+    controlled("need_extract", async (input, context) => {
+      await context.run.recordAgentEvent({ event_type: "critique", iteration: 0, score: 0,
+        issues: [], completeness: { risk_level: "important", checked_block_ids: input.block_ids as string[], unchecked_block_ids: [],
+          suspected_omissions: [{ issue_id: "missing-important", item_kind: "gap", summary: "Important missing gap",
+            source_ref: { source_file_id: input.source_file_id as string, block_id: (input.block_ids as string[])[0]! }, evidence_quote: "Source evidence.",
+            basis: "explicit", importance: "important", reason: "The source explicitly requires this gap.", suggested_action: "Review the gap." }], prior_issue_resolutions: [] },
+        latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 });
+      return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [] };
+    }, true);
+    controlled("merge_dedupe", async () => { throw new Error("merge must be skipped while paused"); });
+    controlled("status_derive", async () => { throw new Error("status must be skipped while paused"); });
+
+    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
+    workspaces.push(experiment.workspace_id);
+    const journals = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
+
+    expect(experiment.status).toBe("failed");
+    expect(experiment.calls.map(call => call.call_kind)).toEqual(["inventory_extract", "need_extract"]);
+    expect(journals).toEqual([expect.objectContaining({ merge_state: "reserved", status_state: "reserved", final_response: null })]);
+    expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, source.workspace_id))).toEqual([]);
   });
 });
