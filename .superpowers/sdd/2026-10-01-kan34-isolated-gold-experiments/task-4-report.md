@@ -1,0 +1,40 @@
+# KAN-34 Task 4 report
+
+## Design decisions
+
+- Added pipeline mode to the existing experiment runner. It creates the existing isolated workspace copy and persists a normal experiment record before any module is invoked.
+- Added `extraction-pipeline.ts`, which uses the established extraction-batch store and resume journal for draft publication and downstream replay. Extractor calls happen before the batch persistence transaction; merge and status remain the established mechanical journal stages, so no model call is made while the journal transaction is open.
+- Moved the production route's merge/status helper to the new module so production and experiment resume paths use the same reserved IDs and stage sequence. A separate experiment-only batch or recovery mechanism was rejected because it would diverge from omission pause and replay semantics.
+- Sources are processed sequentially in request order. This is intentional: merge/status consume the copied workspace's accumulated draft state. Parallel source execution would need a new ordering and conflict contract.
+
+## Behaviours completed
+
+- `mode: "pipeline"` runs inventory extraction, needs extraction, draft persistence, merge/dedupe, and status derivation in every selected copied source workspace.
+- Extracted drafts are inserted through `applyExtractionBatch` before merge/status are invoked.
+- Each successful stage retains all available snapshots and a gold evaluation. A failed downstream stage records a model-error evaluation after its batch transaction rolls back, while the journal reservation remains replayable.
+- Repeated requests create independent copies, experiments, run IDs, and evaluation IDs.
+- Production's existing route calls the shared downstream helper, preserving the existing extraction batch and resume journal path.
+
+## Files changed
+
+- `src/accuracy/experiments/run.ts`
+- `src/accuracy/experiments/extraction-pipeline.ts`
+- `src/app/api/accuracy/extract/route.ts`
+- `tests/accuracy-experiment-pipeline.test.ts`
+
+## Tests added
+
+- Pipeline draft visibility, call ordering, per-stage evaluations, live workspace isolation, and repeat independence.
+- Failed merge retention with its copy-local resume journal reservation.
+
+## Verification
+
+- `npx tsc --noEmit --incremental false` — passed.
+- `npx vitest run tests/accuracy-experiment-gold.test.ts` — passed (8 tests).
+- `npx vitest run tests/accuracy-experiment-pipeline.test.ts tests/accuracy-omission-resume.test.ts` — could not reach assertions because this sandbox blocks the configured local PostgreSQL connection: `connect EPERM 127.0.0.1:5432`.
+- `git diff --check` — passed.
+
+## Unresolved risks
+
+- The database-backed pipeline and existing omission-resume suites require a permitted local Postgres connection to validate the new integration behavior.
+- A dedicated important-omission pipeline assertion is still needed. The implementation delegates that behavior to the existing `assertAccuracyCanProgress` and journal pause path, but this task's new test file currently covers downstream failure rather than synthesizing the persisted omission-review event required to exercise the pause condition directly.

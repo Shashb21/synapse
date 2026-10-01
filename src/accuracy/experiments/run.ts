@@ -9,6 +9,7 @@ import { newId } from "@/modules/kernel/ids";
 import { deleteWorkspace } from "@/accuracy/store/tenant";
 import { copyExperimentWorkspace } from "./copy-workspace";
 import { createExperiment, finishExperiment, getExperiment, recordExperimentCall, recordVersionEvaluation, type ExperimentRecord } from "./records";
+import { runExtractionPipeline } from "./extraction-pipeline";
 
 export type AccuracyExperimentRequest = {
   mode: "single_call" | "pipeline";
@@ -76,7 +77,27 @@ async function terminateAfterPersistenceFailure(args: { workspace_id: string; ex
 
 /** Execute the supported single-call experiment and persist every output version before returning. */
 export async function runAccuracyExperiment(request: AccuracyExperimentRequest): Promise<ExperimentRecord> {
-  if (request.mode !== "single_call") throw new Error("Pipeline experiments are not implemented yet.");
+  if (request.mode === "pipeline") {
+    const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
+    let experiment: Awaited<ReturnType<typeof createExperiment>>;
+    try {
+      experiment = await createExperiment({ workspace_id: copy.workspace_id, org_id: copy.org_id, source_workspace_id: request.source_workspace_id,
+        pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
+        baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
+      const copiedSourceIds = request.source_file_ids.map(source_file_id => copy.source_id_map[source_file_id] ?? unresolved("source_file_id", source_file_id));
+      await runExtractionPipeline({ workspace_id: copy.workspace_id, org_id: copy.org_id, experiment_id: experiment.id, pack_id: request.pack_id, actor: request.actor }, copiedSourceIds);
+      await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
+    } catch (error) {
+      if (!experiment!) {
+        await deleteWorkspace(copy.workspace_id);
+        throw error;
+      }
+      await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" }).catch(() => undefined);
+    }
+    const record = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment!.id });
+    if (!record) throw new Error("Pipeline experiment record disappeared before it could be returned.");
+    return record;
+  }
   if (!request.call) throw new Error("A single_call experiment requires a call.");
   const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
   let input: Record<string, unknown>;

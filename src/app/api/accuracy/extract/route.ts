@@ -8,8 +8,6 @@ import {
 } from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
-import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
-import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
@@ -22,8 +20,8 @@ import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kerne
 import { createExtractionBatch, applyExtractionBatch, resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
 import { requestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
-import type { Actor } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
+import { runExtractionDownstream } from "@/accuracy/experiments/extraction-pipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,7 +69,7 @@ export async function POST(req: Request) {
             const output = run.output as { gaps?: unknown[]; tactics?: unknown[] };
             return { call_kind: run.call_kind, run_id: id, summary: run.summary, count: output.gaps?.length ?? output.tactics?.length ?? 0 };
           });
-          const downstream = await runDownstream({ workspace_id: request.workspace_id, org_id, actor,
+          const downstream = await runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
             merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
           return { ok: true, workspace_id: request.workspace_id, source_file_id: request.source_file_id,
             extraction_batch_id: batch.id, gaps_inserted: runs.filter(run => run.call_kind === "need_extract").reduce((sum, run) => sum + run.count, 0),
@@ -222,7 +220,7 @@ export async function POST(req: Request) {
       const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
         batch_id: batch.id, execute: async (_batch, journal) => {
           await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
-          const downstream = await runDownstream({ workspace_id: body.workspace_id, org_id, actor,
+          const downstream = await runExtractionDownstream({ workspace_id: body.workspace_id, org_id, actor,
             merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
           return { ok: true, workspace_id: body.workspace_id, source_file_id: body.source_file_id,
             extraction_batch_id: batch.id, block_count: allBlocks.length, blocks_used: blocks.length,
@@ -249,14 +247,4 @@ export async function POST(req: Request) {
     const message = error instanceof Error ? error.message : "Extract failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
-}
-
-/** Execute the two mechanical stages using reserved identities when resuming. */
-async function runDownstream(args: { workspace_id: string; org_id: string; actor: Actor; merge_id: string; status_id: string }) {
-  const merge = await runAccuracyModule<MergeDedupeOutput>({ call_kind: "merge_dedupe", agent_role: "none", input: { workspace_id: args.workspace_id },
-    actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.merge_id });
-  const status = await runAccuracyModule<StatusDeriveOutput>({ call_kind: "status_derive", agent_role: "none", input: { workspace_id: args.workspace_id },
-    actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.status_id });
-  return { merge, status, runs: [{ call_kind: "merge_dedupe", run_id: merge.run_id, summary: merge.summary, count: merge.output.merged },
-    { call_kind: "status_derive", run_id: status.run_id, summary: status.summary, count: status.output.statuses.length }] };
 }
