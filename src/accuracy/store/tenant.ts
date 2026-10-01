@@ -98,10 +98,17 @@ export async function getWorkspace(workspace_id: string) {
   return rows[0] ?? null;
 }
 
-/** Grant an identity-provider subject access to one organization. */
+/** Grant an identity-provider subject access to an existing organization. */
 export async function grantOrganizationAccess(args: { subject: string; org_id: string }) {
   await ensureAccuracySchema();
+  const organization = await accuracyDb()
+    .select({ id: t.accuracyOrganizations.id })
+    .from(t.accuracyOrganizations)
+    .where(eq(t.accuracyOrganizations.id, args.org_id))
+    .limit(1);
+  if (!organization[0]) return false;
   await accuracyDb().insert(t.accuracyOrganizationGrants).values(args).onConflictDoNothing();
+  return true;
 }
 
 /** Create an organization and its first workspace, then grant its authenticated creator access atomically. */

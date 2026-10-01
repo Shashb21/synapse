@@ -52,6 +52,37 @@ function activateControlledModule(args: { call_kind: "need_extract" | "inventory
 }
 
 describe("isolated accuracy experiments", () => {
+  it("replaces an upload org_id supplied by the client with the copied organization", async () => {
+    const source = await sourceFixture();
+
+    const experiment = await runAccuracyExperiment({
+      mode: "single_call",
+      source_workspace_id: source.workspace_id,
+      source_file_ids: [source.source_file_id],
+      pack_id: "beone-bgb-58067-prmt5i",
+      condition: {},
+      call: {
+        call_kind: "upload",
+        input: {
+          workspace_id: source.workspace_id,
+          org_id: "forged-original-organization",
+          filename: "experiment-source.txt",
+          mime: "text/plain",
+          checksum: newId("checksum"),
+        },
+      },
+      actor: { name: "test", function: "medical_affairs" },
+    });
+    createdWorkspaces.push(experiment.workspace_id);
+
+    const callInput = experiment.calls[0]?.input as { workspace_id: string; org_id: string };
+    expect(callInput).toMatchObject({
+      workspace_id: experiment.workspace_id,
+      org_id: experiment.org_id,
+    });
+    expect(callInput.org_id).not.toBe("forged-original-organization");
+  });
+
   it("runs a remapped single call in a copied workspace and retains its evaluated snapshot", async () => {
     const source = await sourceFixture();
     let received: Record<string, unknown> | undefined;

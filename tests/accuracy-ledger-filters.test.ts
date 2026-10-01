@@ -149,6 +149,26 @@ describe("ledger SI / chapter filters", () => {
 });
 
 describe("workspace plan_label (IEP vs IEGP)", () => {
+  it("forbids read-only viewers from creating a workspace", async () => {
+    sessionContext.mockResolvedValue({
+      signed_in: true,
+      session: { subject: "viewer-subject" },
+      actor: { name: "Viewer", function: "medical_affairs" },
+      role: "viewer",
+    });
+
+    const response = await workspacesPost(
+      new Request("http://localhost/api/accuracy/workspaces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Viewer workspace", slug: `viewer-${Date.now()}` }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ ok: false });
+  });
+
   it("labels BGB as IEP and Tisle as IEGP for chrome copy", () => {
     expect(planLabelFromPack(getReferencePack("beone-bgb-58067-prmt5i"))).toBe("IEP");
     expect(planLabelFromPack(getReferencePack("beone-tislelizumab-iegp"))).toBe("IEGP");

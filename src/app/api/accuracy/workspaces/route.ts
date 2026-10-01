@@ -8,6 +8,7 @@ import {
   listWorkspaces,
 } from "@/accuracy/store/tenant";
 import { sessionContext } from "@/modules/auth/session";
+import { can } from "@/modules/auth/roles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,9 @@ export async function POST(req: Request) {
   const session = await sessionContext();
   if (!session.signed_in || !session.session) {
     return NextResponse.json({ ok: false, error: "Sign in to create a workspace" }, { status: 401 });
+  }
+  if (!can(session.role, "upload")) {
+    return NextResponse.json({ ok: false, error: "You do not have workspace creation capability" }, { status: 403 });
   }
   try {
     const body = createSchema.parse(await req.json());

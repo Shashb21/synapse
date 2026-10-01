@@ -74,6 +74,7 @@ Connect Grok on `/control` if you need a live extract. Confirm LlamaParse with a
 
 ## 7. Post-deploy hygiene
 
+- [ ] Provision each existing organization before asking a non-operator to use it: an `operator` calls `POST /api/accuracy/organizations/<org_id>/grants` with `{ "subject": "<identity-provider-subject>" }`. The endpoint is idempotent, rejects unknown organizations, and is the only in-app path for granting existing-organization access. New workspaces grant their authenticated creator automatically.
 - [ ] Archive or delete leftover gold-seed workspaces on `/accuracy`.
 - [ ] On `/accuracy/runs`, **Sweep stale runs** (or wait — listing auto-abandons `running` rows older than 30 minutes).
 - [ ] Check **Audit → Estimated spend** after a live extract so cost rollup is non-zero.

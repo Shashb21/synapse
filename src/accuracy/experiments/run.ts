@@ -45,7 +45,7 @@ const REMAP_CONTRACTS: Record<CallKind, RemapContract> = {
 };
 
 /** Remap workspace-owned input IDs, failing closed when a referenced ID has no copied counterpart. */
-function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown>, workspace_id: string, maps: IdMaps): Record<string, unknown> {
+function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown>, workspace_id: string, org_id: string, maps: IdMaps): Record<string, unknown> {
   const contract = REMAP_CONTRACTS[call_kind];
   const field = new Map<string, IdField>([
     ...contract.source.map((key) => [key, "source"] as const),
@@ -55,6 +55,7 @@ function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown
   const mapId = (key: string, value: string, kind: IdField): string => maps[kind][value] ?? unresolved(key, value);
   const visit = (value: unknown, key?: string, parentKey?: string): unknown => {
     if (key === "workspace_id") return workspace_id;
+    if (key === "org_id") return org_id;
     const kind = key ? field.get(key) : undefined;
     if (typeof value === "string" && kind) return mapId(key!, value, kind);
     if (typeof value === "string" && key === "id" && parentKey && contract.nested_claim_collections?.includes(parentKey)) return mapId(key, value, "claim");
@@ -102,7 +103,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
   const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
   let input: Record<string, unknown>;
   try {
-    input = remapExperimentInput(request.call.call_kind, request.call.input, copy.workspace_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
+    input = remapExperimentInput(request.call.call_kind, request.call.input, copy.workspace_id, copy.org_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
   } catch (error) {
     await deleteWorkspace(copy.workspace_id);
     throw error;
