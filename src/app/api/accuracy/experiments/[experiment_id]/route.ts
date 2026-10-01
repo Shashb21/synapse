@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
 import { getExperimentForSourceWorkspace } from "@/accuracy/experiments/records";
-import { getWorkspace } from "@/accuracy/store/tenant";
+import { getAuthorizedWorkspace } from "@/accuracy/store/tenant";
 import { sessionContext } from "@/modules/auth/session";
 
 export const runtime = "nodejs";
@@ -19,8 +19,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ expe
   if (!source_workspace_id || !experiment_id.trim()) {
     return NextResponse.json({ error: "source_workspace_id and experiment_id are required" }, { status: 400 });
   }
-  if (!await getWorkspace(source_workspace_id)) {
-    return NextResponse.json({ error: "Unknown source workspace" }, { status: 404 });
+  if (!session.session || !await getAuthorizedWorkspace({ workspace_id: source_workspace_id, subject: session.session.subject, role: session.role })) {
+    return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
   }
   const experiment = await getExperimentForSourceWorkspace({ source_workspace_id, experiment_id: experiment_id.trim() });
   if (!experiment) return NextResponse.json({ error: "Experiment not found in source workspace" }, { status: 404 });

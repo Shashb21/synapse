@@ -8,6 +8,12 @@ export const accuracyOrganizations = pgTable("accuracy_organizations", {
   created_at: text("created_at").notNull(),
 });
 
+/** Explicit organization access for authenticated identity-provider subjects. */
+export const accuracyOrganizationGrants = pgTable("accuracy_organization_grants", {
+  subject: text("subject").notNull(),
+  org_id: text("org_id").notNull(),
+}, (table) => ({ subjectOrg: unique("accuracy_organization_grants_subject_org_key").on(table.subject, table.org_id) }));
+
 export const accuracyWorkspaces = pgTable("accuracy_workspaces", {
   id: text("id").primaryKey(),
   org_id: text("org_id").notNull(),
@@ -263,6 +269,10 @@ export const ACCURACY_DDL = [
     id text PRIMARY KEY,
     name text NOT NULL,
     created_at text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_organization_grants (
+    subject text NOT NULL, org_id text NOT NULL,
+    UNIQUE (subject, org_id)
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_workspaces (
     id text PRIMARY KEY,

@@ -78,8 +78,8 @@ export async function getExperiment(args: { workspace_id: string; experiment_id:
   await ensureAccuracySchema(); const rows = await accuracyDb().select().from(t.accuracyExperiments).where(and(eq(t.accuracyExperiments.workspace_id, args.workspace_id), eq(t.accuracyExperiments.id, args.experiment_id))).limit(1); const row = rows[0];
   if (!row) return null;
   const [calls, evaluations] = await Promise.all([
-    accuracyDb().select().from(t.accuracyExperimentCalls).where(and(eq(t.accuracyExperimentCalls.workspace_id, args.workspace_id), eq(t.accuracyExperimentCalls.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentCalls.recorded_at), asc(t.accuracyExperimentCalls.version_index)),
-    accuracyDb().select().from(t.accuracyExperimentEvaluations).where(and(eq(t.accuracyExperimentEvaluations.workspace_id, args.workspace_id), eq(t.accuracyExperimentEvaluations.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentEvaluations.recorded_at), asc(t.accuracyExperimentEvaluations.version_index)),
+    accuracyDb().select().from(t.accuracyExperimentCalls).where(and(eq(t.accuracyExperimentCalls.workspace_id, args.workspace_id), eq(t.accuracyExperimentCalls.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentCalls.recorded_at), asc(t.accuracyExperimentCalls.call_id), asc(t.accuracyExperimentCalls.version_index), asc(t.accuracyExperimentCalls.id)),
+    accuracyDb().select().from(t.accuracyExperimentEvaluations).where(and(eq(t.accuracyExperimentEvaluations.workspace_id, args.workspace_id), eq(t.accuracyExperimentEvaluations.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentEvaluations.recorded_at), asc(t.accuracyExperimentEvaluations.call_id), asc(t.accuracyExperimentEvaluations.version_index), asc(t.accuracyExperimentEvaluations.id)),
   ]);
   return { ...row, calls, evaluations };
 }

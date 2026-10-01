@@ -1,4 +1,5 @@
-import { desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import type { Role } from "@/modules/auth/roles";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -95,6 +96,27 @@ export async function getWorkspace(workspace_id: string) {
     .where(eq(t.accuracyWorkspaces.id, workspace_id))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/** Grant an identity-provider subject access to one organization. */
+export async function grantOrganizationAccess(args: { subject: string; org_id: string }) {
+  await ensureAccuracySchema();
+  await accuracyDb().insert(t.accuracyOrganizationGrants).values(args).onConflictDoNothing();
+}
+
+/** Resolve a workspace only when the caller has a server-side organization grant. Operators may inspect all organizations. */
+export async function getAuthorizedWorkspace(args: { workspace_id: string; subject: string; role: Role }) {
+  const workspace = await getWorkspace(args.workspace_id);
+  if (!workspace) return null;
+  if (args.role === "operator") return workspace;
+  const grants = await accuracyDb().select({ subject: t.accuracyOrganizationGrants.subject })
+    .from(t.accuracyOrganizationGrants)
+    .where(and(
+      eq(t.accuracyOrganizationGrants.subject, args.subject),
+      eq(t.accuracyOrganizationGrants.org_id, workspace.org_id),
+    ))
+    .limit(1);
+  return grants[0] ? workspace : null;
 }
 
 export async function getWorkspaceOrgId(workspace_id: string): Promise<string | null> {

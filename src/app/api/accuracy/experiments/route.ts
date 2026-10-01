@@ -7,7 +7,7 @@ import { mustFindForPack } from "@/accuracy/eval/reference-gold";
 import { exportExperimentsForSourceWorkspace } from "@/accuracy/experiments/records";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
 import { getSourceFile } from "@/accuracy/store/source-store";
-import { getWorkspace } from "@/accuracy/store/tenant";
+import { getAuthorizedWorkspace } from "@/accuracy/store/tenant";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 
@@ -39,8 +39,20 @@ function unauthorized() {
   return NextResponse.json({ error: "Sign in to access experiments" }, { status: 401 });
 }
 
-async function sourceWorkspaceExists(source_workspace_id: string) {
-  return getWorkspace(source_workspace_id);
+async function authorizedSourceWorkspace(source_workspace_id: string, session: Awaited<ReturnType<typeof sessionContext>>) {
+  if (!session.session) return null;
+  return getAuthorizedWorkspace({ workspace_id: source_workspace_id, subject: session.session.subject, role: session.role });
+}
+
+function forbiddenRequestKey(value: unknown): string | null {
+  if (Array.isArray(value)) return value.map(forbiddenRequestKey).find((key): key is string => Boolean(key)) ?? null;
+  if (!value || typeof value !== "object") return null;
+  for (const [key, child] of Object.entries(value)) {
+    if (/(^|_)(gold|workspace_id|copied_workspace_id|copy_workspace_id)($|_)/i.test(key)) return key;
+    const nested = forbiddenRequestKey(child);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 /** Export records for an original source workspace. */
@@ -53,8 +65,8 @@ export async function GET(request: Request) {
   if (!source_workspace_id || (format !== "json" && format !== "jsonl")) {
     return NextResponse.json({ error: "source_workspace_id and format=json|jsonl are required" }, { status: 400 });
   }
-  if (!await sourceWorkspaceExists(source_workspace_id)) {
-    return NextResponse.json({ error: "Unknown source workspace" }, { status: 404 });
+  if (!await authorizedSourceWorkspace(source_workspace_id, session)) {
+    return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
   }
   const exported = await exportExperimentsForSourceWorkspace({ source_workspace_id, format });
   if (format === "jsonl") {
@@ -72,10 +84,14 @@ export async function POST(request: Request) {
   }
   try {
     const body = requestSchema.parse(await request.json());
-    if (!await sourceWorkspaceExists(body.source_workspace_id)) {
-      return NextResponse.json({ error: "Unknown source workspace" }, { status: 404 });
+    if (!await authorizedSourceWorkspace(body.source_workspace_id, session)) {
+      return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
     }
     mustFindForPack(body.pack_id);
+    const forbiddenKey = forbiddenRequestKey({ condition: body.condition, input: body.call?.input });
+    if (forbiddenKey) {
+      return NextResponse.json({ error: `Request may not contain ${forbiddenKey}` }, { status: 400 });
+    }
     const sources = await Promise.all(body.source_file_ids.map((source_file_id) => getSourceFile(body.source_workspace_id, source_file_id)));
     if (sources.some((source) => !source)) {
       return NextResponse.json({ error: "Every source_file_id must belong to the source workspace" }, { status: 400 });
@@ -83,7 +99,10 @@ export async function POST(request: Request) {
     const experiment = await runAccuracyExperiment({ ...body, actor: session.actor });
     return NextResponse.json({ experiment }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not start experiment";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof z.ZodError || (error instanceof Error && error.message.startsWith("Unknown reference pack"))) {
+      return NextResponse.json({ error: error instanceof z.ZodError ? "Invalid experiment request" : "Unknown reference pack" }, { status: 400 });
+    }
+    console.error("Could not start isolated accuracy experiment", error);
+    return NextResponse.json({ error: "Could not start experiment" }, { status: 500 });
   }
 }

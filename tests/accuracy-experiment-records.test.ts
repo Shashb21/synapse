@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, deleteWorkspace, getAuthorizedWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { createExperiment, exportExperiments, finishExperiment, getExperiment, recordExperimentCall, recordVersionEvaluation } from "@/accuracy/experiments/records";
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
 import { ACCURACY_MIGRATIONS } from "@/accuracy/store/schema";
+import * as tables from "@/accuracy/store/schema";
 import postgres from "postgres";
 
 const workspaces: string[] = [];
@@ -34,6 +35,16 @@ async function fixture() {
 afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorkspace(id); });
 
 describe("experiment records", () => {
+  it("allows a source workspace only to its granted subject or an operator", async () => {
+    const scope = await fixture();
+    expect(await getAuthorizedWorkspace({ workspace_id: scope.source_workspace_id, subject: "different-org-user", role: "contributor" })).toBeNull();
+    await grantOrganizationAccess({ subject: "source-org-user", org_id: scope.org_id });
+    await expect(getAuthorizedWorkspace({ workspace_id: scope.source_workspace_id, subject: "source-org-user", role: "contributor" }))
+      .resolves.toMatchObject({ id: scope.source_workspace_id, org_id: scope.org_id });
+    await expect(getAuthorizedWorkspace({ workspace_id: scope.source_workspace_id, subject: "platform-operator", role: "operator" }))
+      .resolves.toMatchObject({ id: scope.source_workspace_id });
+  });
+
   it("keeps identical attempts, all call versions, and complete exports", async () => {
     const scope = await fixture();
     const base = { ...scope, pack_id: "beone-bgb-58067-prmt5i", pack_fingerprint: "pack", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: { sources: [] }, condition: { temperature: 0 } };
@@ -62,6 +73,26 @@ describe("experiment records", () => {
     const record = await createExperiment({ ...owner, pack_id: "beone-bgb-58067-prmt5i", pack_fingerprint: "pack", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: {}, condition: {} });
     expect(await getExperiment({ workspace_id: other.workspace_id, experiment_id: record.id })).toBeNull();
     await expect(recordExperimentCall({ workspace_id: other.workspace_id, experiment_id: record.id, call_id: "cross", call_kind: "need_extract", version_index: 0, input: {}, output: {}, module_version: "v1", route: {} })).rejects.toThrow("Unknown experiment");
+  });
+
+  it("exports tied child records in a stable call and row order", async () => {
+    const scope = await fixture();
+    const experiment = await createExperiment({ ...scope, pack_id: "beone-bgb-58067-prmt5i", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: {}, condition: {} });
+    for (const call_id of ["call-b", "call-a"]) {
+      await recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id, call_kind: "need_extract", version_index: 0, input: {}, output: { call_id }, module_version: "v1", route: {} });
+      await recordVersionEvaluation({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id, version_index: 0, evaluation: evaluateExperimentVersion({ pack_id: experiment.pack_id, call_kind: "need_extract", output: { gaps: [] } }) });
+    }
+    const tiedAt = "2026-10-01T00:00:00.000Z";
+    await accuracyDb().update(tables.accuracyExperimentCalls).set({ recorded_at: tiedAt }).where(and(eq(tables.accuracyExperimentCalls.workspace_id, scope.workspace_id), eq(tables.accuracyExperimentCalls.experiment_id, experiment.id)));
+    await accuracyDb().update(tables.accuracyExperimentEvaluations).set({ recorded_at: tiedAt }).where(and(eq(tables.accuracyExperimentEvaluations.workspace_id, scope.workspace_id), eq(tables.accuracyExperimentEvaluations.experiment_id, experiment.id)));
+    await finishExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id, status: "completed" });
+
+    const first = await exportExperiments({ workspace_id: scope.workspace_id, format: "json" });
+    const second = await exportExperiments({ workspace_id: scope.workspace_id, format: "json" });
+    const lines = await exportExperiments({ workspace_id: scope.workspace_id, format: "jsonl" });
+    expect(second).toBe(first);
+    expect(lines.trim().split("\n").map((line) => JSON.parse(line))).toEqual(JSON.parse(first));
+    expect(JSON.parse(first)[0].calls.map((call: { call_id: string }) => call.call_id)).toEqual(["call-a", "call-b"]);
   });
 
   it("rejects a missing source lineage and mismatched evaluation identities", async () => {
@@ -124,7 +155,7 @@ describe("experiment records", () => {
       await db.execute(sql.raw("CREATE TEMP TABLE legacy_accuracy_experiments (id text PRIMARY KEY, source_workspace_id text NOT NULL)"));
       await db.execute(sql.raw("INSERT INTO legacy_accuracy_workspaces (id, org_id) VALUES ('source-present', 'source-org')"));
       await db.execute(sql.raw("INSERT INTO legacy_accuracy_experiments (id, source_workspace_id) VALUES ('resolved', 'source-present'), ('deleted', 'source-gone')"));
-      for (const migration of ACCURACY_MIGRATIONS.slice(0, 4)) {
+      for (const migration of ACCURACY_MIGRATIONS.slice(0, 5)) {
         await db.execute(sql.raw(migration.replaceAll("accuracy_experiments", "legacy_accuracy_experiments").replaceAll("accuracy_workspaces", "legacy_accuracy_workspaces")));
       }
       const rows = await db.execute<{ id: string; source_org_id: string }>(sql.raw("SELECT id, source_org_id FROM legacy_accuracy_experiments ORDER BY id"));

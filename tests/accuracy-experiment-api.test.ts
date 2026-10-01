@@ -4,6 +4,7 @@ const {
   sessionContext,
   runAccuracyExperiment,
   getWorkspace,
+  getAuthorizedWorkspace,
   getSourceFile,
   getExperimentForSourceWorkspace,
   exportExperimentsForSourceWorkspace,
@@ -12,6 +13,7 @@ const {
   sessionContext: vi.fn(),
   runAccuracyExperiment: vi.fn(),
   getWorkspace: vi.fn(),
+  getAuthorizedWorkspace: vi.fn(),
   getSourceFile: vi.fn(),
   getExperimentForSourceWorkspace: vi.fn(),
   exportExperimentsForSourceWorkspace: vi.fn(),
@@ -20,7 +22,7 @@ const {
 
 vi.mock("@/modules/auth/session", () => ({ sessionContext }));
 vi.mock("@/accuracy/experiments/run", () => ({ runAccuracyExperiment }));
-vi.mock("@/accuracy/store/tenant", () => ({ getWorkspace }));
+vi.mock("@/accuracy/store/tenant", () => ({ getAuthorizedWorkspace, getWorkspace }));
 vi.mock("@/accuracy/store/source-store", () => ({ getSourceFile }));
 vi.mock("@/accuracy/experiments/records", () => ({
   getExperimentForSourceWorkspace,
@@ -34,6 +36,7 @@ import { GET as getExperiment } from "@/app/api/accuracy/experiments/[experiment
 
 const signedInContributor = {
   signed_in: true,
+  session: { subject: "subject-source" },
   actor: { name: "A contributor", function: "medical_affairs" },
   role: "contributor",
 };
@@ -52,6 +55,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   sessionContext.mockResolvedValue(signedInContributor);
   getWorkspace.mockResolvedValue({ id: "ws-source", org_id: "org-source" });
+  getAuthorizedWorkspace.mockResolvedValue({ id: "ws-source", org_id: "org-source" });
   getSourceFile.mockResolvedValue({ id: "src-source", workspace_id: "ws-source" });
   mustFindForPack.mockReturnValue({ id: "beone-bgb-58067-prmt5i" });
 });
@@ -68,6 +72,21 @@ describe("accuracy experiment API", () => {
     sessionContext.mockResolvedValue({ ...signedInContributor, role: "viewer" });
     const response = await post({ mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {} });
     expect(response.status).toBe(403);
+  });
+
+  it("denies a signed-in user without a grant before a run, read, or export", async () => {
+    getAuthorizedWorkspace.mockResolvedValue(null);
+    const start = await post({ mode: "pipeline", source_workspace_id: "ws-other", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {} });
+    expect(start.status).toBe(404);
+    expect(runAccuracyExperiment).not.toHaveBeenCalled();
+
+    const read = await getExperiment(sourceWorkspaceRequest("http://localhost/api/accuracy/experiments/experiment-1?source_workspace_id=ws-other"), { params: Promise.resolve({ experiment_id: "experiment-1" }) });
+    expect(read.status).toBe(404);
+    expect(getExperimentForSourceWorkspace).not.toHaveBeenCalled();
+
+    const exported = await getExperiments(sourceWorkspaceRequest("http://localhost/api/accuracy/experiments?source_workspace_id=ws-other"));
+    expect(exported.status).toBe(404);
+    expect(exportExperimentsForSourceWorkspace).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown pack and a source outside the supplied source workspace", async () => {
@@ -100,6 +119,23 @@ describe("accuracy experiment API", () => {
       actor: signedInContributor.actor, source_workspace_id: "ws-source",
     }));
     expect((await accepted.json()).experiment.id).toBe("experiment-1");
+  });
+
+  it("rejects gold and copied-workspace values at every nested request level", async () => {
+    for (const body of [
+      { mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: { nested: { gold: [{ answer: "secret" }] } } },
+      { mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { nested: { copied_workspace_id: "ws-copy" } } } },
+    ]) {
+      expect((await post(body)).status).toBe(400);
+    }
+    expect(runAccuracyExperiment).not.toHaveBeenCalled();
+  });
+
+  it("does not expose unexpected runner failures as invalid request errors", async () => {
+    runAccuracyExperiment.mockRejectedValue(new Error("database password leaked"));
+    const response = await post({ mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {} });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Could not start experiment" });
   });
 
   it("reads a single experiment only through its source workspace", async () => {
