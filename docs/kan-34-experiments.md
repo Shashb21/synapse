@@ -112,7 +112,8 @@ curl --cookie "<session-cookie>" \
 `inventory_extract`. It validates the expected item array (`gaps` or
 `tactics`) first. For `need_extract`, a gap needs a non-empty `statement` and
 an optional string `external_id`. For `inventory_extract`, a tactic needs a
-non-empty `name` and string `id`. Invalid shapes receive `invalid_output`;
+non-empty `name`; draft tactics may omit `id`, but a supplied `id` must be a
+non-empty string. Invalid shapes receive `invalid_output`;
 model failures receive `model_error` with their retained error. Other call
 kinds retain their output shape and receive `gold_not_applicable`, without an
 invented score.
