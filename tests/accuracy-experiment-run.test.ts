@@ -8,6 +8,7 @@ import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
+import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { accuracyDb } from "@/accuracy/store/db";
@@ -127,5 +128,71 @@ describe("isolated accuracy experiments", () => {
       expect(event?.payload).not.toHaveProperty("gold");
       expect(event?.payload).not.toHaveProperty("metrics");
     }
+  });
+
+  it("retains snapshots and the resolved route when an agentic critic fails", async () => {
+    const source = await sourceFixture();
+    const original = activeAccuracyModuleId("inventory_extract");
+    if (original) originals.set("inventory_extract", original);
+    const id = newId("failing-agentic-module");
+    const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_id: z.string() });
+    registerAccuracyModule(agenticModule({ id, call_kind: "inventory_extract", title: "Failing agentic context test", summary: "Records then fails", inputSchema,
+      outputSchema: z.object({ tactics: z.array(z.object({ name: z.string(), id: z.string() })) }),
+      run: async (_input, ctx) => {
+        await runShallowAgenticCycle({ run: ctx.run, maxExchanges: 0, onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }), proposer: async () => ({ tactics: [] }), critic: async () => { throw new Error("critic failed after snapshot"); }, judge: async (draft) => draft });
+        return { output: { tactics: [] }, summary: "unreachable" };
+      } }));
+    activateAccuracyModule({ call_kind: "inventory_extract", module_id: id, activated_by: "experiment test" });
+
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "inventory_extract", input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id } }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+    const [moduleRun] = await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.id, experiment.calls[0]!.call_id));
+
+    expect(experiment.status).toBe("failed");
+    expect(experiment.calls).toHaveLength(2);
+    expect(experiment.calls.map((call) => [call.version_index, call.output_error])).toEqual([[0, null], [1, "critic failed after snapshot"]]);
+    expect(experiment.evaluations.map((row) => (row.evaluation as { status: string }).status)).toEqual(["scored", "model_error"]);
+    expect(experiment.calls[1]?.route).toEqual(moduleRun?.route);
+  });
+
+  it("remaps coverage block bundles so the module reads copied evidence", async () => {
+    const source = await sourceFixture();
+    const original = activeAccuracyModuleId("coverage_decide");
+    if (original) originals.set("coverage_decide", original);
+    const id = newId("coverage-remap-module");
+    let received: Record<string, unknown> | undefined;
+    registerAccuracyModule(mechanicalModule({ id, call_kind: "coverage_decide", title: "Coverage remap test", summary: "Reads the copied bundle",
+      inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()) }),
+      outputSchema: z.object({ read_count: z.number() }), run: async (input) => {
+        received = input;
+        const blocks = await readParseBlocksByIds(input.workspace_id, input.block_bundle_ids);
+        return { output: { read_count: blocks.length }, summary: "copied blocks read" };
+      } }));
+    activateAccuracyModule({ call_kind: "coverage_decide", module_id: id, activated_by: "experiment test" });
+    const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id));
+    const request = { workspace_id: source.workspace_id, gap_id: claims[0]!.id, tactic_id: claims[0]!.id, block_bundle_ids: [source.block_id] };
+
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "coverage_decide", input: request }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+
+    expect(received).toMatchObject({ workspace_id: experiment.workspace_id, block_bundle_ids: [expect.not.stringMatching(source.block_id)] });
+    expect(experiment.calls[0]?.output).toEqual({ read_count: 1 });
+    expect(request).toEqual({ workspace_id: source.workspace_id, gap_id: claims[0]!.id, tactic_id: claims[0]!.id, block_bundle_ids: [source.block_id] });
+  });
+
+  it("creates independent attempts for identical immutable requests", async () => {
+    const source = await sourceFixture();
+    activateControlledModule({ call_kind: "need_extract", run: async () => ({ output: { gaps: [] }, summary: "repeat" }) });
+    const input = { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id };
+    const request = { mode: "single_call" as const, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: { temperature: 0 }, call: { call_kind: "need_extract" as const, input }, actor: { name: "test", function: "medical_affairs" as const } };
+
+    const [first, second] = await Promise.all([runAccuracyExperiment(request), runAccuracyExperiment(request)]);
+    createdWorkspaces.push(first.workspace_id, second.workspace_id);
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.workspace_id).not.toBe(second.workspace_id);
+    expect(first.calls[0]?.call_id).not.toBe(second.calls[0]?.call_id);
+    expect(first.evaluations[0]?.id).not.toBe(second.evaluations[0]?.id);
+    expect(input).toEqual({ workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id });
   });
 });

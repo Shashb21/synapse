@@ -4,6 +4,7 @@ import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { Actor, CallKind } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule } from "@/accuracy/kernel/run";
+import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
 import { newId } from "@/modules/kernel/ids";
 import { deleteWorkspace } from "@/accuracy/store/tenant";
 import { copyExperimentWorkspace } from "./copy-workspace";
@@ -20,23 +21,41 @@ export type AccuracyExperimentRequest = {
 };
 
 type IdMaps = { source: Record<string, string>; block: Record<string, string>; claim: Record<string, string> };
-const singularIdKeys = new Set(["source_file_id", "block_id", "claim_id", "gap_id", "tactic_id"]);
-const pluralIdKeys = new Set(["source_file_ids", "block_ids", "claim_ids", "gap_ids", "tactic_ids"]);
+type IdField = "source" | "block" | "claim";
+type RemapContract = { source: readonly string[]; block: readonly string[]; claim: readonly string[]; nested_claim_collections?: readonly string[] };
+
+/** Each supported module declares every workspace-owned identifier it accepts. */
+const REMAP_CONTRACTS: Partial<Record<CallKind, RemapContract>> = {
+  parse: { source: ["source_file_id"], block: [], claim: [] },
+  inventory_extract: { source: ["source_file_id"], block: ["block_ids"], claim: [] },
+  need_extract: { source: ["source_file_id"], block: ["block_ids"], claim: [] },
+  coverage_decide: { source: [], block: ["block_bundle_ids"], claim: ["gap_id", "tactic_id"] },
+  coverage_critic: { source: [], block: ["quote_block_ids"], claim: ["gap_id", "tactic_id"] },
+  partial_split: { source: [], block: [], claim: ["gap_id"] },
+  prioritize: { source: [], block: [], claim: ["gap_ids"] },
+  validation_gate: { source: [], block: [], claim: ["claim_ids"] },
+  ideate: { source: [], block: [], claim: [], nested_claim_collections: ["gaps"] },
+  gantt_project: { source: [], block: [], claim: ["tactic_id", "gap_id", "parent_gap_id", "depends_on", "gap_ids"], nested_claim_collections: ["tactics", "gaps"] },
+};
 
 /** Remap workspace-owned input IDs, failing closed when a referenced ID has no copied counterpart. */
-function remapExperimentInput(input: Record<string, unknown>, workspace_id: string, maps: IdMaps): Record<string, unknown> {
-  const mapId = (key: string, value: string): string => {
-    if (key === "source_file_id" || key === "source_file_ids") return maps.source[value] ?? unresolved(key, value);
-    if (key === "block_id" || key === "block_ids") return maps.block[value] ?? unresolved(key, value);
-    return maps.claim[value] ?? unresolved(key, value);
-  };
-  const visit = (value: unknown, key?: string): unknown => {
+function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown>, workspace_id: string, maps: IdMaps): Record<string, unknown> {
+  const contract = REMAP_CONTRACTS[call_kind] ?? { source: [], block: [], claim: [] };
+  const field = new Map<string, IdField>([
+    ...contract.source.map((key) => [key, "source"] as const),
+    ...contract.block.map((key) => [key, "block"] as const),
+    ...contract.claim.map((key) => [key, "claim"] as const),
+  ]);
+  const mapId = (key: string, value: string, kind: IdField): string => maps[kind][value] ?? unresolved(key, value);
+  const visit = (value: unknown, key?: string, parentKey?: string): unknown => {
     if (key === "workspace_id") return workspace_id;
-    if (typeof value === "string" && key && singularIdKeys.has(key)) return mapId(key, value);
-    if (Array.isArray(value)) return value.map((item) => key && pluralIdKeys.has(key)
-      ? (typeof item === "string" ? mapId(key, item) : unresolved(key, String(item)))
-      : visit(item));
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [childKey, visit(child, childKey)]));
+    const kind = key ? field.get(key) : undefined;
+    if (typeof value === "string" && kind) return mapId(key!, value, kind);
+    if (typeof value === "string" && key === "id" && parentKey && contract.nested_claim_collections?.includes(parentKey)) return mapId(key, value, "claim");
+    if (Array.isArray(value)) return value.map((item) => kind
+      ? (typeof item === "string" ? mapId(key!, item, kind) : unresolved(key!, String(item)))
+      : visit(item, undefined, key));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [childKey, visit(child, childKey, parentKey)]));
     return value;
   };
   return visit(input) as Record<string, unknown>;
@@ -51,26 +70,43 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
   const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
   let input: Record<string, unknown>;
   try {
-    input = remapExperimentInput(request.call.input, copy.workspace_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
+    input = remapExperimentInput(request.call.call_kind, request.call.input, copy.workspace_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
   } catch (error) {
     await deleteWorkspace(copy.workspace_id);
     throw error;
   }
-  const experiment = await createExperiment({ workspace_id: copy.workspace_id, org_id: copy.org_id, source_workspace_id: request.source_workspace_id,
-    pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
-    baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
+  let experiment;
+  let implementation;
+  try {
+    experiment = await createExperiment({ workspace_id: copy.workspace_id, org_id: copy.org_id, source_workspace_id: request.source_workspace_id,
+      pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
+      baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
+    implementation = await activeAccuracyModule(request.call.call_kind);
+  } catch (error) {
+    await deleteWorkspace(copy.workspace_id);
+    throw error;
+  }
   const call_id = newId("arun");
-  const implementation = await activeAccuracyModule(request.call.call_kind);
   let result: Awaited<ReturnType<typeof runAccuracyModule>>;
   try {
     result = await runAccuracyModule({ call_kind: request.call.call_kind, reserved_run_id: call_id, input, actor: request.actor,
       org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment" });
   } catch (error) {
     const output_error = error instanceof Error ? error.message : String(error);
+    const failedRun = await reservedAccuracyRun(copy.workspace_id, call_id);
+    const progression = failedRun ? await readAgentProgression({ workspace_id: copy.workspace_id, run_id: call_id }) : null;
+    const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
+    for (const [version_index, output] of snapshots.entries()) {
+      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
+        version_index, input, output, module_version: failedRun?.module_version ?? implementation.manifest.version, route: failedRun?.route ?? { status: "unavailable" } });
+      await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index,
+        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+    }
+    const errorVersion = snapshots.length;
     await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
-      version_index: 0, input, output_error, module_version: implementation.manifest.version,
-      route: { status: "unavailable", reason: "Module did not return a resolved route." } });
-    await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index: 0,
+      version_index: errorVersion, input, output_error, module_version: failedRun?.module_version ?? implementation.manifest.version,
+      route: failedRun?.route ?? { status: "unavailable", reason: "Module did not open a run." } });
+    await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index: errorVersion,
       evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output: null, output_error }) });
     await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" });
     const failed = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
