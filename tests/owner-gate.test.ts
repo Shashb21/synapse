@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
 
 vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "x-synapse-admin-path": "/admin/users" }),
   cookies: async () => ({
     get: (name: string) => (jar.values.has(name) ? { name, value: jar.values.get(name)! } : undefined),
     set: () => undefined,
@@ -12,7 +13,7 @@ vi.mock("next/headers", () => ({
 
 import "@/modules";
 import { ownerDecision, ownerEmails, testOwnerBypass, type OwnerSubject } from "@/modules/auth/roles";
-import { ownerAccess, requireOwnerPage, TEST_AS_CUSTOMER_COOKIE } from "@/modules/auth/owner";
+import { ownerAccess, ownerPageOutcome, requireOwnerPage, TEST_AS_CUSTOMER_COOKIE } from "@/modules/auth/owner";
 import { GET as controlGet, POST as controlPost } from "@/app/api/control/route";
 import { GET as modulesGet, POST as modulesPost } from "@/app/api/modules/route";
 import { POST as evalsPost } from "@/app/api/modules/evals/route";
@@ -86,15 +87,19 @@ describe("who the owner is", () => {
     expect((await ownerAccess()).owner).toBe(false);
   });
 
-  it("renders the Owner only page (403) for a customer on an admin page", async () => {
-    // next.config's experimental.authInterrupts sets this for the app; vitest does not load it.
-    process.env.__NEXT_EXPERIMENTAL_AUTH_INTERRUPTS = "true";
+  it("sends a signed-out visitor on an admin page to sign in, then back to that page (KAN-58)", async () => {
     asCustomer();
     const failure = await requireOwnerPage().then(
       () => null,
       (error: unknown) => error as { digest?: string },
     );
-    expect(failure?.digest).toBe("NEXT_HTTP_ERROR_FALLBACK;403");
+    expect(failure?.digest).toMatch(/^NEXT_REDIRECT;replace;\/login\?next=%2Fadmin%2Fusers;307;/);
+  });
+
+  it("renders the Owner only page (403) for a signed-in customer, and lets the owner in", () => {
+    expect(ownerPageOutcome({ owner: false, signed_in: true })).toBe("forbidden");
+    expect(ownerPageOutcome({ owner: false, signed_in: false })).toBe("sign_in");
+    expect(ownerPageOutcome({ owner: true, signed_in: true })).toBe("allow");
   });
 });
 

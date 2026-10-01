@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { afterSignIn, safeNext } from "@/modules/auth/redirect";
+import { afterOwnerSignIn, safeNext } from "@/modules/auth/redirect";
 import { PasswordLoginError, signInWithPassword } from "@/modules/auth/password-login";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
 
@@ -21,9 +21,10 @@ export async function POST(request: Request) {
       email: typeof body.email === "string" ? body.email : "",
       password: typeof body.password === "string" ? body.password : "",
     });
-    // A new session never inherits the previous person's workspace.
+    // A new session never inherits the previous person's workspace. Only admins and
+    // operators have a password, so they land on the admin console (KAN-58).
     await clearWorkspaceSelection();
-    return NextResponse.json({ ok: true, redirect: afterSignIn(next) });
+    return NextResponse.json({ ok: true, redirect: afterOwnerSignIn(next) });
   } catch (error) {
     if (error instanceof PasswordLoginError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: STATUS[error.code] });
