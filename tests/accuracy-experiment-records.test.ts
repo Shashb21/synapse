@@ -2,8 +2,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { createExperiment, exportExperiments, finishExperiment, getExperiment, recordExperimentCall, recordVersionEvaluation } from "@/accuracy/experiments/records";
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
+import { sql } from "drizzle-orm";
+import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
+import { ACCURACY_MIGRATIONS } from "@/accuracy/store/schema";
+import postgres from "postgres";
 
 const workspaces: string[] = [];
+function deferred() {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 async function fixture() {
   const org_id = await createOrganization("experiment-records");
   const source_workspace_id = await createWorkspace({ org_id, name: "source", slug: `source-${Date.now()}-${Math.random()}` });
@@ -65,5 +74,48 @@ describe("experiment records", () => {
     ]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+  });
+
+  it("serializes a blocked append before concurrent finalization", async () => {
+    const scope = await fixture();
+    const experiment = await createExperiment({ ...scope, pack_id: "beone-bgb-58067-prmt5i", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: {}, condition: {} });
+    const lockClient = postgres(process.env.DATABASE_URL ?? "postgres://synapse:synapse@127.0.0.1:5432/synapse", { max: 1 });
+    const locked = deferred(); const release = deferred();
+    const heldLock = lockClient.begin(async (sql) => {
+      await sql.unsafe("LOCK TABLE accuracy_experiment_calls IN SHARE ROW EXCLUSIVE MODE");
+      locked.resolve(); await release.promise;
+    });
+    await locked.promise;
+    try {
+      const append = recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id: "racing-call", call_kind: "need_extract", version_index: 0, input: {}, output: { gaps: [] }, module_version: "v1", route: {} });
+      await new Promise((done) => setTimeout(done, 25));
+      const finish = finishExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id, status: "completed" });
+      const finishedBeforeRelease = await Promise.race([finish.then(() => true), new Promise<boolean>((done) => setTimeout(() => done(false), 25))]);
+      expect(finishedBeforeRelease).toBe(false);
+      release.resolve();
+      await heldLock;
+      await expect(append).resolves.toMatchObject({ call_id: "racing-call" });
+      await expect(finish).resolves.toMatchObject({ status: "completed" });
+    } finally {
+      release.resolve();
+      await lockClient.end();
+    }
+  });
+
+  it("backfills legacy source organizations and marks deleted sources explicitly", async () => {
+    await withAccuracyTransaction(async () => {
+      const db = accuracyDb();
+      await db.execute(sql.raw("CREATE TEMP TABLE legacy_accuracy_workspaces (id text PRIMARY KEY, org_id text NOT NULL)"));
+      await db.execute(sql.raw("CREATE TEMP TABLE legacy_accuracy_experiments (id text PRIMARY KEY, source_workspace_id text NOT NULL)"));
+      await db.execute(sql.raw("INSERT INTO legacy_accuracy_workspaces (id, org_id) VALUES ('source-present', 'source-org')"));
+      await db.execute(sql.raw("INSERT INTO legacy_accuracy_experiments (id, source_workspace_id) VALUES ('resolved', 'source-present'), ('deleted', 'source-gone')"));
+      for (const migration of ACCURACY_MIGRATIONS.slice(0, 4)) {
+        await db.execute(sql.raw(migration.replaceAll("accuracy_experiments", "legacy_accuracy_experiments").replaceAll("accuracy_workspaces", "legacy_accuracy_workspaces")));
+      }
+      const rows = await db.execute<{ id: string; source_org_id: string }>(sql.raw("SELECT id, source_org_id FROM legacy_accuracy_experiments ORDER BY id"));
+      expect(rows).toEqual([{ id: "deleted", source_org_id: "unknown_deleted_source_org_v1" }, { id: "resolved", source_org_id: "source-org" }]);
+      const [column] = await db.execute<{ is_nullable: string }>(sql.raw("SELECT is_nullable FROM information_schema.columns WHERE table_name = 'legacy_accuracy_experiments' AND column_name = 'source_org_id'"));
+      expect(column?.is_nullable).toBe("NO");
+    });
   });
 });

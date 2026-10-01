@@ -455,6 +455,15 @@ export const ACCURACY_DDL = [
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_experiments ADD COLUMN IF NOT EXISTS source_org_id text`,
+  `UPDATE accuracy_experiments AS experiment
+   SET source_org_id = workspace.org_id
+   FROM accuracy_workspaces AS workspace
+   WHERE experiment.source_org_id IS NULL
+     AND experiment.source_workspace_id = workspace.id`,
+  `UPDATE accuracy_experiments
+   SET source_org_id = 'unknown_deleted_source_org_v1'
+   WHERE source_org_id IS NULL`,
+  `ALTER TABLE accuracy_experiments ALTER COLUMN source_org_id SET NOT NULL`,
   `ALTER TABLE accuracy_omission_actions ADD COLUMN IF NOT EXISTS contributor_statement text`,
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
   `DO $$ BEGIN

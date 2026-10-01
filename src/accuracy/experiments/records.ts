@@ -2,7 +2,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { EXPERIMENT_EVALUATOR_VERSION, experimentPackFingerprint, type ExperimentVersionEvaluation } from "@/accuracy/eval/experiment-gold";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import { accuracyDb, ensureAccuracySchema } from "../store/db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "../store/db";
 import * as t from "../store/schema";
 import { getWorkspace } from "../store/tenant";
 
@@ -29,26 +29,40 @@ async function requireExperiment(workspace_id: string, experiment_id: string): P
   if (!rows[0]) throw new Error("Unknown experiment for workspace."); return rows[0];
 }
 
+/** Lock a running experiment row so append and terminal transitions serialize. */
+async function lockRunningExperiment(workspace_id: string, experiment_id: string): Promise<ExperimentRow> {
+  const rows = await accuracyDb().select().from(t.accuracyExperiments)
+    .where(and(eq(t.accuracyExperiments.workspace_id, workspace_id), eq(t.accuracyExperiments.id, experiment_id)))
+    .for("update");
+  if (!rows[0]) throw new Error("Unknown experiment for workspace.");
+  if (rows[0].status !== "running") throw new Error("Experiment has a terminal status.");
+  return rows[0];
+}
+
 /** Append one retained model snapshot, including its exact input and route. */
 export async function recordExperimentCall(args: { workspace_id: string; experiment_id: string; call_id: string; call_kind: string; version_index: number; input: unknown; output?: unknown; output_error?: string; module_version: string; route: unknown }): Promise<CallRow> {
-  await ensureAccuracySchema(); const experiment = await requireExperiment(args.workspace_id, args.experiment_id);
-  if (experiment.status !== "running") throw new Error("Experiment has a terminal status.");
-  const row = { id: newId("experiment_call"), ...args, recorded_at: nowIso(), output: args.output ?? null, output_error: args.output_error ?? null };
-  await accuracyDb().insert(t.accuracyExperimentCalls).values(row); return row;
+  await ensureAccuracySchema();
+  return withAccuracyTransaction(async () => {
+    await lockRunningExperiment(args.workspace_id, args.experiment_id);
+    const row = { id: newId("experiment_call"), ...args, recorded_at: nowIso(), output: args.output ?? null, output_error: args.output_error ?? null };
+    await accuracyDb().insert(t.accuracyExperimentCalls).values(row); return row;
+  });
 }
 
 /** Append the gold evaluator result for a previously stored call version. */
 export async function recordVersionEvaluation(args: { workspace_id: string; experiment_id: string; call_id: string; version_index: number; evaluation: ExperimentVersionEvaluation }): Promise<EvaluationRow> {
-  await ensureAccuracySchema(); const experiment = await requireExperiment(args.workspace_id, args.experiment_id);
-  if (experiment.status !== "running") throw new Error("Experiment has a terminal status.");
-  const call = await accuracyDb().select({ id: t.accuracyExperimentCalls.id, call_kind: t.accuracyExperimentCalls.call_kind }).from(t.accuracyExperimentCalls).where(and(eq(t.accuracyExperimentCalls.workspace_id, args.workspace_id), eq(t.accuracyExperimentCalls.experiment_id, args.experiment_id), eq(t.accuracyExperimentCalls.call_id, args.call_id), eq(t.accuracyExperimentCalls.version_index, args.version_index))).limit(1);
-  if (!call[0]) throw new Error("Unknown experiment call version for workspace.");
-  if (args.evaluation.evaluator_version !== experiment.evaluator_version) throw new Error("Evaluation evaluator version does not match experiment.");
-  if (args.evaluation.pack_id !== experiment.pack_id) throw new Error("Evaluation pack does not match experiment.");
-  if (args.evaluation.pack_fingerprint !== experiment.pack_fingerprint) throw new Error("Evaluation pack fingerprint does not match experiment.");
-  if (args.evaluation.call_kind !== call[0].call_kind) throw new Error("Evaluation call kind does not match experiment call.");
-  const row = { id: newId("experiment_evaluation"), ...args, evaluator_version: args.evaluation.evaluator_version, recorded_at: nowIso() };
-  await accuracyDb().insert(t.accuracyExperimentEvaluations).values(row); return row;
+  await ensureAccuracySchema();
+  return withAccuracyTransaction(async () => {
+    const experiment = await lockRunningExperiment(args.workspace_id, args.experiment_id);
+    const call = await accuracyDb().select({ id: t.accuracyExperimentCalls.id, call_kind: t.accuracyExperimentCalls.call_kind }).from(t.accuracyExperimentCalls).where(and(eq(t.accuracyExperimentCalls.workspace_id, args.workspace_id), eq(t.accuracyExperimentCalls.experiment_id, args.experiment_id), eq(t.accuracyExperimentCalls.call_id, args.call_id), eq(t.accuracyExperimentCalls.version_index, args.version_index))).limit(1);
+    if (!call[0]) throw new Error("Unknown experiment call version for workspace.");
+    if (args.evaluation.evaluator_version !== experiment.evaluator_version) throw new Error("Evaluation evaluator version does not match experiment.");
+    if (args.evaluation.pack_id !== experiment.pack_id) throw new Error("Evaluation pack does not match experiment.");
+    if (args.evaluation.pack_fingerprint !== experiment.pack_fingerprint) throw new Error("Evaluation pack fingerprint does not match experiment.");
+    if (args.evaluation.call_kind !== call[0].call_kind) throw new Error("Evaluation call kind does not match experiment call.");
+    const row = { id: newId("experiment_evaluation"), ...args, evaluator_version: args.evaluation.evaluator_version, recorded_at: nowIso() };
+    await accuracyDb().insert(t.accuracyExperimentEvaluations).values(row); return row;
+  });
 }
 
 /** Set the one permitted mutable experiment field: its terminal status. */
