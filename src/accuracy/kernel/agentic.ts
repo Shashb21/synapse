@@ -95,18 +95,16 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   let selectedIteration = 0;
   let priorOpenIssues: SuspectedOmission[] = [];
   for (let iteration = 0; iteration <= max; iteration++) {
-    // A terminal version still needs an assessment, but has no revision-eligible structural pass.
+    // Every produced version receives a structural and completeness assessment.
     const assessed = await measure(async () => {
       let structural: Awaited<ReturnType<typeof args.critic>> | null = null;
       let structuralError: unknown;
       let structuralFailed = false;
-      if (iteration < max) {
-        try {
-          structural = await args.critic(draft);
-        } catch (error) {
-          structuralError = error;
-          structuralFailed = true;
-        }
+      try {
+        structural = await args.critic(draft);
+      } catch (error) {
+        structuralError = error;
+        structuralFailed = true;
       }
       let completeness = notApplicable;
       if (args.onCompleteness) {

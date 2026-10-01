@@ -113,11 +113,11 @@ describe("agentic version capture", () => {
     expect(feedback[1].join(" ")).toContain(important.evidence_quote);
     expect(feedback[1].join(" ")).toContain(important.suggested_action);
     expect(prior).toEqual([[], [important]]);
-    expect(criticCalls).toBe(1);
+    expect(criticCalls).toBe(2);
     expect(events.map((event) => event.event_type)).toEqual(["snapshot", "critique", "snapshot", "critique", "judgment"]);
     expect(events[1]).toMatchObject({ score: 0.95, token_usage: { total_tokens: 7 }, cost_usd: 0.07,
       issues: [{ issue_id: important.issue_id, source_ref: important.source_ref }] });
-    expect(events[3]).toMatchObject({ score: null, token_usage: { total_tokens: 5 }, cost_usd: 0.05,
+    expect(events[3]).toMatchObject({ score: 0.95, token_usage: { total_tokens: 7 }, cost_usd: 0.07,
       completeness: { prior_issue_resolutions: [{ issue_id: important.issue_id, outcome: "resolved" }] } });
     expect(events[4]).toMatchObject({ selected_iteration: 1 });
   });
@@ -136,17 +136,18 @@ describe("agentic version capture", () => {
     expect(events[1]).toMatchObject({ issues: [], completeness: { risk_level: "advisory" } });
   });
 
-  it("preserves exact V0 and records check failure when assessment throws", async () => {
+  it("assesses terminal V0 and preserves completeness check failure semantics", async () => {
     const { run, events } = recordingRun();
     const exact = { value: "Exact V0", nested: { evidence: "source text" } };
-    await runShallowAgenticCycle({ run, onSnapshot: async () => signals,
+    const result = await runShallowAgenticCycle({ run, onSnapshot: async () => signals,
       maxExchanges: 0, proposer: async () => exact,
-      critic: async () => { throw new Error("should not run"); },
+      critic: async () => ({ score: 1, issues: [] }),
       onCompleteness: async () => { throw new Error("inspector unavailable"); },
       judge: async (draft) => draft,
     });
+    expect(result.final).toEqual(exact);
     expect(events[0]).toMatchObject({ event_type: "snapshot", output: exact });
-    expect(events[1]).toMatchObject({ event_type: "critique", score: null,
+    expect(events[1]).toMatchObject({ event_type: "critique", score: 1,
       completeness: { risk_level: "check_failed" } });
   });
 
@@ -172,8 +173,8 @@ describe("agentic version capture", () => {
       expect(events[0]).toMatchObject({ latency_ms: 11, token_usage: { total_tokens: 3 }, cost_usd: 0.03 });
       expect(events[1]).toMatchObject({ latency_ms: 7, token_usage: { total_tokens: 2 }, cost_usd: 0.02 });
       expect(events[2]).toMatchObject({ latency_ms: 13, token_usage: { total_tokens: 5 }, cost_usd: 0.05 });
-      expect(events[3]).toMatchObject({ score: null, latency_ms: 5,
-        token_usage: { total_tokens: 0 }, cost_usd: 0, completeness: { risk_level: "not_applicable" } });
+      expect(events[3]).toMatchObject({ score: 1, latency_ms: 5,
+        token_usage: { total_tokens: 2 }, cost_usd: 0.02, completeness: { risk_level: "not_applicable" } });
       expect(events[4]).toMatchObject({ latency_ms: 5, token_usage: { total_tokens: 1 }, cost_usd: 0.01 });
       expect(events[4]).toMatchObject({ selected_iteration: 1 });
       expect(result.final).toEqual({ round: 1 });
@@ -209,5 +210,33 @@ describe("agentic version capture", () => {
     expect(events[0]).toMatchObject({ event_type: "snapshot", output: { value: "Exact V0" } });
     expect(events[1]).toMatchObject({ event_type: "critique", score: null,
       completeness: { risk_level: "check_failed" } });
+  });
+
+  it("critics the terminal revision and records its structural issues without revising again", async () => {
+    const { run, events } = recordingRun();
+    let criticCalls = 0;
+    const terminalIssue = { issue_id: "terminal-1", category: "structure" as const,
+      code: "missing-heading", severity: "medium" as const,
+      claim: "V1 is missing a heading", suggested_action: "Add a heading" };
+
+    const result = await runShallowAgenticCycle<{ round: number }>({
+      run, onSnapshot: async () => signals, maxExchanges: 1,
+      proposer: async (round) => ({ round }),
+      critic: async () => {
+        criticCalls++;
+        return criticCalls === 1
+          ? { score: 0.4, issues: [{ ...terminalIssue, issue_id: "initial-1" }] }
+          : { score: 0.8, issues: [terminalIssue] };
+      },
+      judge: async (draft) => draft,
+    });
+
+    expect(result.final).toEqual({ round: 1 });
+    expect(criticCalls).toBe(2);
+    expect(events.map((event) => event.event_type)).toEqual([
+      "snapshot", "critique", "snapshot", "critique", "judgment",
+    ]);
+    expect(events[3]).toMatchObject({ event_type: "critique", iteration: 1,
+      score: 0.8, issues: [terminalIssue] });
   });
 });
