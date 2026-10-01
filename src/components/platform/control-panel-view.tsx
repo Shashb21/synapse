@@ -170,6 +170,7 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
           defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
           canConnect={may("connect_provider")}
           canRoute={may("configure_routing")}
+          routedTo={routedToEveryStage(configs)}
         />
 
         <RoutingPanel
@@ -189,4 +190,10 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       </div>
     </>
   );
+}
+
+/** The provider every stage routes to, or null when they differ (KAN-60). */
+export function routedToEveryStage(configs: Pick<RouteConfig, "provider_id">[]): string | null {
+  const first = configs[0]?.provider_id;
+  return first && configs.every((config) => config.provider_id === first) ? first : null;
 }

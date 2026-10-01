@@ -40,20 +40,25 @@ export function ProviderPanel({
   defaults,
   canConnect,
   canRoute,
+  routedTo = null,
 }: {
   connections: ProviderConnectionView[];
   defaults: { primary: string; alternate: string };
   canConnect: boolean;
   canRoute: boolean;
+  /** The provider every stage routes to; null when stages use a mix (KAN-60). */
+  routedTo?: string | null;
 }) {
   const ai = useAiEnabled();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  async function post(body: Record<string, unknown>, key: string) {
+  async function post(body: Record<string, unknown>, key: string, done?: string) {
     setBusy(key);
     setError(null);
+    setNotice(null);
     const res = await fetch("/api/control", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -66,9 +71,10 @@ export function ProviderPanel({
       return;
     }
     if (json.authorize_url) {
-      window.location.href = json.authorize_url;
+      window.location.assign(json.authorize_url);
       return;
     }
+    if (done) setNotice(done);
     router.refresh();
   }
 
@@ -92,33 +98,50 @@ export function ProviderPanel({
           )}
         </div>
         {canRoute ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">Route every stage to</span>
-            <Button
-              size="sm"
-              disabled={busy !== null}
-              onClick={() =>
-                void post({ action: "set_default_provider", provider_id: defaults.primary }, "switch-primary")
-              }
-            >
-              {busy === "switch-primary" ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {primary?.label ?? "Grok"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy !== null}
-              onClick={() =>
-                void post({ action: "set_default_provider", provider_id: defaults.alternate }, "switch-alternate")
-              }
-            >
-              {busy === "switch-alternate" ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {alternate?.label ?? "Claude"}
-            </Button>
+          <div className="grid justify-items-end gap-1">
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Route every stage to">
+              <span className="text-[11px] text-muted-foreground">Route every stage to</span>
+              {[
+                { connection: primary, id: defaults.primary, fallback: "Grok", key: "switch-primary" },
+                { connection: alternate, id: defaults.alternate, fallback: "Claude", key: "switch-alternate" },
+              ].map((choice) => {
+                const label = choice.connection?.label ?? choice.fallback;
+                const active = routedTo === choice.id;
+                return (
+                  <Button
+                    key={choice.key}
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    aria-pressed={active}
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void post(
+                        { action: "set_default_provider", provider_id: choice.id },
+                        choice.key,
+                        `Every stage now routes to ${label}.`,
+                      )
+                    }
+                  >
+                    {busy === choice.key ? <Loader2 className="size-3.5 animate-spin" /> : active ? <CircleCheck className="size-3.5" aria-hidden /> : null}
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground" data-testid="providers-routed-to">
+              {routedTo
+                ? `Every stage routes to ${connections.find((connection) => connection.provider_id === routedTo)?.label ?? routedTo}.`
+                : "Stages use a mix of providers. See Routing below."}
+            </p>
           </div>
         ) : null}
       </div>
 
+      {notice ? (
+        <p role="status" className="text-[12px] text-[var(--known-foreground)]">
+          {notice}
+        </p>
+      ) : null}
       {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -142,6 +165,11 @@ export function ProviderPanel({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="truncate text-[12px] font-semibold text-foreground">{connection.label}</h3>
+                    {routedTo === connection.provider_id ? (
+                      <Badge className="text-[10px]" data-testid="provider-routing-every-stage">
+                        Routing every stage
+                      </Badge>
+                    ) : null}
                     {connection.tier === "default" ? (
                       <Badge variant="outline" className="border-[var(--chart-1)]/50 text-[10px]">
                         Default route
