@@ -34,3 +34,12 @@ No schema or tenant changes were required for Task 1; experiment persistence tab
 
 - The focused suite requires the local Postgres test database; the initial sandboxed run was blocked by local socket permissions and the verified rerun used approved database access.
 - Snapshot fingerprints intentionally hash the original baseline rows so repeated copies can compare despite generated copied IDs; the snapshot itself retains both ID sets.
+
+## Review follow-up
+
+- Added provenance-table closure for claims with no direct `source_file_id`.
+- Rejected crossed source/block provenance pairs in both claim metadata and provenance rows.
+- Acquired the existing `omission:<workspace_id>` advisory transaction lock before reading the baseline, matching extraction-batch and omission-review mutations.
+- Added reproducibility, material-change, and lock coordination tests.
+
+Follow-up verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 9 tests passed; typecheck, focused ESLint, and `git diff --check` passed.

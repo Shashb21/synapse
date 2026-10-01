@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import postgres from "postgres";
 import { afterEach, describe, expect, it } from "vitest";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
@@ -140,6 +141,114 @@ describe("copyExperimentWorkspace", () => {
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual(before.claims);
     expect(await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, source.workspace_id))).toEqual(before.provenance);
     expect(await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, source.workspace_id))).toEqual(before.coverage);
+  });
+
+  it("copies a claim selected through table provenance even without a direct source id", async () => {
+    const source = await fixture();
+    await accuracyDb().update(t.accuracyClaims)
+      .set({ source_file_id: null })
+      .where(and(eq(t.accuracyClaims.id, source.claim.id), eq(t.accuracyClaims.workspace_id, source.workspace_id)));
+
+    const copy = await copyExperimentWorkspace({
+      source_workspace_id: source.workspace_id,
+      source_file_ids: [source.source_file_id],
+    });
+    createdWorkspaces.push(copy.workspace_id);
+
+    expect(copy.claim_id_map[source.claim.id]).toBeTruthy();
+    const copiedClaims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, copy.workspace_id));
+    const copiedProvenance = await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, copy.workspace_id));
+    expect(copiedClaims.map((row) => row.id)).toContain(copy.claim_id_map[source.claim.id]);
+    expect(copiedProvenance[0]).toMatchObject({
+      claim_id: copy.claim_id_map[source.claim.id],
+      source_file_id: copy.source_id_map[source.source_file_id],
+      block_id: copy.block_id_map[source.block_id],
+    });
+  });
+
+  it("rejects a provenance source and block that belong to different sources", async () => {
+    const source = await fixture();
+    const secondSource = await insertSourceFile({
+      workspace_id: source.workspace_id,
+      org_id: source.org_id,
+      filename: "second.txt",
+      mime: "text/plain",
+      checksum: "second-checksum",
+    });
+    const secondBlockId = newId("block");
+    await persistParseBlocks({
+      workspace_id: source.workspace_id,
+      source_file_id: secondSource.id,
+      parser: "test",
+      blocks: [{ id: secondBlockId, source_file_id: secondSource.id, index: 0, kind: "prose", heading: null, text: "Second source evidence." }],
+    });
+    await accuracyDb().update(t.accuracyClaims).set({
+      metadata: { provenance: [{ source_file_id: source.source_file_id, block_id: secondBlockId, quote: "crossed" }] },
+    }).where(and(eq(t.accuracyClaims.id, source.claim.id), eq(t.accuracyClaims.workspace_id, source.workspace_id)));
+
+    await expect(copyExperimentWorkspace({
+      source_workspace_id: source.workspace_id,
+      source_file_ids: [source.source_file_id, secondSource.id],
+    })).rejects.toMatchObject({ code: "unresolved_reference" });
+
+    await accuracyDb().update(t.accuracyClaims).set({ metadata: {} }).where(and(
+      eq(t.accuracyClaims.id, source.claim.id), eq(t.accuracyClaims.workspace_id, source.workspace_id),
+    ));
+    await accuracyDb().update(t.accuracyProvenance).set({ block_id: secondBlockId }).where(and(
+      eq(t.accuracyProvenance.id, source.provenance_id), eq(t.accuracyProvenance.workspace_id, source.workspace_id),
+    ));
+    await expect(copyExperimentWorkspace({
+      source_workspace_id: source.workspace_id,
+      source_file_ids: [source.source_file_id, secondSource.id],
+    })).rejects.toMatchObject({ code: "unresolved_reference" });
+  });
+
+  it("keeps fingerprints stable for an unchanged baseline and changes the baseline fingerprint after a claim edit", async () => {
+    const source = await fixture();
+    const first = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    const second = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(first.workspace_id, second.workspace_id);
+    expect(second.source_fingerprint).toBe(first.source_fingerprint);
+    expect(second.baseline_fingerprint).toBe(first.baseline_fingerprint);
+
+    await accuracyDb().update(t.accuracyClaims).set({ statement: "The materially changed proposed need requires evidence." })
+      .where(and(eq(t.accuracyClaims.id, source.claim.id), eq(t.accuracyClaims.workspace_id, source.workspace_id)));
+    const changed = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(changed.workspace_id);
+    expect(changed.source_fingerprint).toBe(first.source_fingerprint);
+    expect(changed.baseline_fingerprint).not.toBe(first.baseline_fingerprint);
+  });
+
+  it("waits for the established workspace mutation lock before reading the baseline", async () => {
+    const source = await fixture();
+    const blocker = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let release: () => void = () => undefined;
+    let announceLock!: () => void;
+    const lockAcquired = new Promise<void>((resolve) => { announceLock = resolve; });
+    const holdLock = new Promise<void>((resolve) => { release = resolve; });
+    const blockerTransaction = blocker.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${`omission:${source.workspace_id}`}, 0))`;
+      announceLock();
+      await holdLock;
+    });
+
+    try {
+      await lockAcquired;
+      const copyPromise = copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+      const outcome = await Promise.race([
+        copyPromise.then(() => "finished" as const),
+        new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 100)),
+      ]);
+      expect(outcome).toBe("waiting");
+      release();
+      const copy = await copyPromise;
+      createdWorkspaces.push(copy.workspace_id);
+      await blockerTransaction;
+    } finally {
+      release();
+      await blockerTransaction;
+      await blocker.end({ timeout: 5 });
+    }
   });
 
   it.each([

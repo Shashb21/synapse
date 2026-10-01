@@ -1,7 +1,7 @@
 /** Clone a selected accuracy workspace state for an isolated experiment. */
 
 import { createHash } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { withAccuracyTransaction, accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -142,6 +142,9 @@ export async function copyExperimentWorkspace(
   await ensureAccuracySchema();
   return withAccuracyTransaction(async () => {
     const db = accuracyDb();
+    // Match extraction-batch and omission-review mutations so the baseline is read
+    // after all earlier workspace writes and no coordinated write can interleave.
+    await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${args.source_workspace_id}`}, 0))`);
     const workspaceRows = await db.select().from(t.accuracyWorkspaces).where(eq(t.accuracyWorkspaces.id, args.source_workspace_id)).limit(1);
     const sourceWorkspace = workspaceRows[0];
     if (!sourceWorkspace) throw new ExperimentCopyError("unknown_workspace", `Unknown workspace: ${args.source_workspace_id}`);
@@ -173,8 +176,12 @@ export async function copyExperimentWorkspace(
     const block_id_map = Object.fromEntries(blockRows.map((row) => [row.id, newId("block")]));
     const blockById = new Map(blockRows.map((row) => [row.id, row]));
 
+    const provenanceRows = await db.select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, args.source_workspace_id));
     const claimRows = await db.select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, args.source_workspace_id));
     const claimIdsForSources = new Set(claimRows.filter((row) => row.source_file_id && selectedSourceIds.has(row.source_file_id)).map((row) => row.id));
+    for (const row of provenanceRows) {
+      if (selectedSourceIds.has(row.source_file_id)) claimIdsForSources.add(row.claim_id);
+    }
     for (const claim of claimRows) {
       const refs = sourceReferences(claim.metadata);
       if (refs.some((ref) => selectedSourceIds.has(ref.source_file_id))) claimIdsForSources.add(claim.id);
@@ -195,17 +202,18 @@ export async function copyExperimentWorkspace(
         if (!selectedSourceIds.has(ref.source_file_id)) {
           throw new ExperimentCopyError("unresolved_reference", `Claim ${claim.id} points to an omitted source file: ${ref.source_file_id}`);
         }
-        if (!blockById.has(ref.block_id)) {
-          throw new ExperimentCopyError("unresolved_reference", `Claim ${claim.id} points to an unresolved parse block: ${ref.block_id}`);
+        const block = blockById.get(ref.block_id);
+        if (!block || block.source_file_id !== ref.source_file_id) {
+          throw new ExperimentCopyError("unresolved_reference", `Claim ${claim.id} points to an unresolved or crossed parse block: ${ref.block_id}`);
         }
       }
     }
 
-    const provenanceRows = await db.select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, args.source_workspace_id));
     const copiedProvenanceRows = sortedById(provenanceRows.filter((row) => copiedClaimIds.has(row.claim_id)));
     const provenance_id_map = Object.fromEntries(copiedProvenanceRows.map((row) => [row.id, newId("prov")]));
     for (const row of copiedProvenanceRows) {
-      if (!selectedSourceIds.has(row.source_file_id) || !blockById.has(row.block_id)) {
+      const block = blockById.get(row.block_id);
+      if (!selectedSourceIds.has(row.source_file_id) || !block || block.source_file_id !== row.source_file_id) {
         throw new ExperimentCopyError("unresolved_reference", `Provenance ${row.id} points outside the selected source set.`);
       }
     }
