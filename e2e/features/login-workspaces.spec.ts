@@ -237,7 +237,7 @@ test("staff email and password: your account, sign out, sign back in; a wrong pa
     await refill(signIn.getByLabel("Password"), password);
   }, submit);
   await submit.click();
-  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+  await expect(page).toHaveURL(/\/admin(\?|$)/, { timeout: 60_000 });
 
   await page.goto("/account");
   const profile = page.getByTestId("account-profile");
@@ -257,7 +257,7 @@ test("staff email and password: your account, sign out, sign back in; a wrong pa
 
   await refill(signIn.getByLabel("Password"), password);
   await submit.click();
-  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+  await expect(page).toHaveURL(/\/admin(\?|$)/, { timeout: 60_000 });
 });
 
 test("demo sign-in keeps the typed test email, and refuses a real-world one", async ({ page }) => {

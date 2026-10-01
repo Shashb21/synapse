@@ -40,7 +40,8 @@ async function passwordSignIn(page: Page, email: string, password: string) {
     await form.getByLabel("Password").fill(password);
   }, submit);
   await submit.click();
-  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+  // KAN-58: staff land on the admin console.
+  await expect(page).toHaveURL(/\/admin(\?|$)/, { timeout: 60_000 });
 }
 
 test("create a customer, assign seats (one and pasted), hit the limit, unassign", async ({ page, browser }) => {
