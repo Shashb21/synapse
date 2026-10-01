@@ -13,6 +13,17 @@ function deferred() {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+async function waitForBlockedCallInsert(client: ReturnType<typeof postgres>): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const rows = await client.unsafe<{ waiting: boolean }[]>(
+      "SELECT EXISTS (SELECT 1 FROM pg_locks AS lock JOIN pg_class AS relation ON relation.oid = lock.relation WHERE relation.relname = 'accuracy_experiment_calls' AND lock.mode = 'RowExclusiveLock' AND NOT lock.granted) AS waiting",
+    );
+    if (rows[0]?.waiting) return;
+    await new Promise<void>((done) => setImmediate(done));
+  }
+  throw new Error("Append did not reach the blocked child insert.");
+}
 async function fixture() {
   const org_id = await createOrganization("experiment-records");
   const source_workspace_id = await createWorkspace({ org_id, name: "source", slug: `source-${Date.now()}-${Math.random()}` });
@@ -80,6 +91,7 @@ describe("experiment records", () => {
     const scope = await fixture();
     const experiment = await createExperiment({ ...scope, pack_id: "beone-bgb-58067-prmt5i", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: {}, condition: {} });
     const lockClient = postgres(process.env.DATABASE_URL ?? "postgres://synapse:synapse@127.0.0.1:5432/synapse", { max: 1 });
+    const observerClient = postgres(process.env.DATABASE_URL ?? "postgres://synapse:synapse@127.0.0.1:5432/synapse", { max: 1 });
     const locked = deferred(); const release = deferred();
     const heldLock = lockClient.begin(async (sql) => {
       await sql.unsafe("LOCK TABLE accuracy_experiment_calls IN SHARE ROW EXCLUSIVE MODE");
@@ -88,10 +100,12 @@ describe("experiment records", () => {
     await locked.promise;
     try {
       const append = recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id: "racing-call", call_kind: "need_extract", version_index: 0, input: {}, output: { gaps: [] }, module_version: "v1", route: {} });
-      await new Promise((done) => setTimeout(done, 25));
+      await waitForBlockedCallInsert(observerClient);
       const finish = finishExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id, status: "completed" });
-      const finishedBeforeRelease = await Promise.race([finish.then(() => true), new Promise<boolean>((done) => setTimeout(() => done(false), 25))]);
-      expect(finishedBeforeRelease).toBe(false);
+      let finishSettled = false;
+      void finish.finally(() => { finishSettled = true; });
+      await new Promise<void>((done) => setImmediate(done));
+      expect(finishSettled).toBe(false);
       release.resolve();
       await heldLock;
       await expect(append).resolves.toMatchObject({ call_id: "racing-call" });
@@ -99,6 +113,7 @@ describe("experiment records", () => {
     } finally {
       release.resolve();
       await lockClient.end();
+      await observerClient.end();
     }
   });
 
