@@ -218,6 +218,8 @@ export type JsonCompletion = (args: {
 
 export type RunHandle = {
   id: string;
+  /** Internal execution boundary; never carries evaluator data or gold answers. */
+  evaluation_context?: "production" | "experiment";
   recordAgentEvent(event: AgentEvent): Promise<void>;
   usageSummary(): { token_usage: TokenUsage; cost_usd: number };
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;
@@ -248,6 +250,8 @@ export type AccuracyModuleContext = {
   workspace_id: string;
   actor: Actor;
   role: string;
+  /** Internal execution boundary; never carries evaluator data or gold answers. */
+  evaluation_context?: "production" | "experiment";
   run: RunHandle;
   route: ResolvedAccuracyRoute;
   complete: JsonCompletion;

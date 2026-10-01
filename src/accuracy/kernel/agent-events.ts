@@ -69,7 +69,7 @@ const snapshotSchema = z.strictObject({
   event_type: z.literal("snapshot"),
   iteration: nonnegativeInt,
   output: z.unknown().refine((value) => value !== undefined, "Snapshot output is required"),
-  evaluation_context: z.literal("production"),
+  evaluation_context: z.enum(["production", "experiment"]),
   signals: productionSignalsSchema,
   ...metering,
 });

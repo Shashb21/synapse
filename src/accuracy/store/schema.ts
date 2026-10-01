@@ -114,6 +114,7 @@ export const accuracyModuleRuns = pgTable("accuracy_module_runs", {
   token_usage: jsonb("token_usage"),
   cost_usd: numeric("cost_usd"),
   evals: jsonb("evals"),
+  evaluation_context: text("evaluation_context").notNull().default("production"),
 });
 
 /** Immutable snapshots, critiques, and judgments for one accuracy call run. */
@@ -359,7 +360,8 @@ export const ACCURACY_DDL = [
     route jsonb,
     token_usage jsonb,
     cost_usd numeric,
-    evals jsonb
+    evals jsonb,
+    evaluation_context text NOT NULL DEFAULT 'production'
   )`,
   `CREATE TABLE IF NOT EXISTS accuracy_agent_events (
     id text PRIMARY KEY,
@@ -454,6 +456,7 @@ export const ACCURACY_DDL = [
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_module_runs ADD COLUMN IF NOT EXISTS evaluation_context text NOT NULL DEFAULT 'production'`,
   `ALTER TABLE accuracy_experiments ADD COLUMN IF NOT EXISTS source_org_id text`,
   `UPDATE accuracy_experiments AS experiment
    SET source_org_id = workspace.org_id

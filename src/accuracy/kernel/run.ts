@@ -14,6 +14,7 @@ import type {
   CostEstimate,
   EvalScore,
   Actor,
+  ResolvedAccuracyRoute,
 } from "./contracts";
 import { estimateCostUsd } from "./cost";
 import { getWorkspaceOrgId } from "../store/tenant";
@@ -29,6 +30,7 @@ export type AccuracyRunResult<O> = {
   evals: EvalScore[];
   cost_usd: number;
   token_usage: CostEstimate["usage"];
+  route: ResolvedAccuracyRoute | null;
 };
 
 /**
@@ -46,8 +48,11 @@ export async function runAccuracyModule<O = unknown>(args: {
   actor: Actor;
   org_id: string;
   workspace_id: string;
+  /** Internal boundary for isolated experiments; production remains the default. */
+  evaluation_context?: "production" | "experiment";
 }): Promise<AccuracyRunResult<O>> {
   const agent_role = args.agent_role ?? "proposer";
+  const evaluation_context = args.evaluation_context ?? "production";
   const implementation = await activeAccuracyModule(args.call_kind);
   await ensureAccuracySchema(implementation.migrations ?? []);
 
@@ -76,7 +81,8 @@ export async function runAccuracyModule<O = unknown>(args: {
       return { run_id: existing.id, call_kind: args.call_kind, module_id: existing.module_id,
         module_version: existing.module_version, summary: existing.summary ?? "", output: existing.output as O,
         evals: (existing.evals ?? []) as EvalScore[], cost_usd: Number(existing.cost_usd ?? 0),
-        token_usage: (existing.token_usage as CostEstimate["usage"] | null) ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+        token_usage: (existing.token_usage as CostEstimate["usage"] | null) ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        route: existing.route as ResolvedAccuracyRoute | null };
     }
   }
   const recorder = new AccuracyRunRecorder({
@@ -88,6 +94,7 @@ export async function runAccuracyModule<O = unknown>(args: {
     module_version: implementation.manifest.version,
     actor: args.actor,
     input: args.input,
+    evaluation_context,
   }, args.reserved_run_id);
   await openAccuracyRun(recorder);
 
@@ -138,6 +145,7 @@ export async function runAccuracyModule<O = unknown>(args: {
     workspace_id: args.workspace_id,
     actor: args.actor,
     role: "medical_affairs",
+    evaluation_context,
     run: recorder,
     route: route ?? {
       call_kind: args.call_kind,
@@ -212,6 +220,7 @@ export async function runAccuracyModule<O = unknown>(args: {
       evals: result.evals ?? [],
       cost_usd: summary.cost_usd,
       token_usage: summary.token_usage,
+      route,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

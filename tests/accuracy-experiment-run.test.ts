@@ -1,0 +1,131 @@
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import { runAccuracyExperiment } from "@/accuracy/experiments/run";
+import { runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
+import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
+import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
+import { persistParseBlocks } from "@/accuracy/store/parse-store";
+import { insertSourceFile } from "@/accuracy/store/source-store";
+import { insertClaim } from "@/accuracy/store/claim-store";
+import { accuracyDb } from "@/accuracy/store/db";
+import * as t from "@/accuracy/store/schema";
+import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
+import { newId } from "@/modules/kernel/ids";
+
+const createdWorkspaces: string[] = [];
+const originals = new Map<string, string>();
+
+beforeAll(() => { registerAccuracyStack(); });
+afterEach(async () => {
+  for (const [call_kind, module_id] of originals) {
+    activateAccuracyModule({ call_kind: call_kind as never, module_id, activated_by: "experiment test restore" });
+  }
+  originals.clear();
+  for (const workspace_id of createdWorkspaces.splice(0)) await deleteWorkspace(workspace_id);
+});
+
+async function sourceFixture() {
+  const org_id = await createOrganization(newId("experiment-org"));
+  const workspace_id = await createWorkspace({ org_id, name: "Experiment source", slug: newId("experiment-source") });
+  createdWorkspaces.push(workspace_id);
+  const source = await insertSourceFile({ workspace_id, org_id, filename: "source.txt", mime: "text/plain", checksum: newId("checksum") });
+  const block_id = newId("block");
+  await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Source evidence." }] });
+  await insertClaim({ workspace_id, claim_type: "gap", statement: "Baseline context", source_file_id: source.id });
+  return { org_id, workspace_id, source_file_id: source.id, block_id };
+}
+
+function activateControlledModule(args: { call_kind: "need_extract" | "inventory_extract"; run: (input: { workspace_id: string; source_file_id: string; block_id: string }, ctx: AccuracyModuleContext) => Promise<unknown> }) {
+  const original = activeAccuracyModuleId(args.call_kind);
+  if (original) originals.set(args.call_kind, original);
+  const id = newId("experiment-module");
+  const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_id: z.string() });
+  const outputSchema = args.call_kind === "need_extract"
+    ? z.object({ gaps: z.array(z.object({ statement: z.string(), external_id: z.string().nullable().optional() })) })
+    : z.object({ tactics: z.array(z.object({ name: z.string(), id: z.string() })) });
+  registerAccuracyModule(mechanicalModule({ id, call_kind: args.call_kind, title: "Experiment test", summary: "Controlled test module", inputSchema, outputSchema: outputSchema as never, run: args.run as never }));
+  activateAccuracyModule({ call_kind: args.call_kind, module_id: id, activated_by: "experiment test" });
+}
+
+describe("isolated accuracy experiments", () => {
+  it("runs a remapped single call in a copied workspace and retains its evaluated snapshot", async () => {
+    const source = await sourceFixture();
+    let received: Record<string, unknown> | undefined;
+    activateControlledModule({ call_kind: "need_extract", run: async (input) => {
+      received = input;
+      return { output: { gaps: [] }, summary: "controlled" };
+    } });
+    const originalInput = { workspace_id: "untrusted-client-workspace", source_file_id: source.source_file_id, block_id: source.block_id };
+
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: { temperature: 0 }, call: { call_kind: "need_extract", input: originalInput }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+
+    expect(received).toMatchObject({ workspace_id: experiment.workspace_id });
+    expect(received).not.toMatchObject({ source_file_id: source.source_file_id, block_id: source.block_id });
+    expect(experiment.status).toBe("completed");
+    expect(experiment.calls).toEqual([expect.objectContaining({ call_kind: "need_extract", input: received, output: { gaps: [] } })]);
+    expect(experiment.calls[0]?.call_id).toMatch(/^arun_/);
+    expect(experiment.evaluations).toEqual([expect.objectContaining({ evaluation: expect.objectContaining({ pack_id: "beone-bgb-58067-prmt5i", status: "scored" }) })]);
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracySourceFiles).where(eq(t.accuracySourceFiles.workspace_id, source.workspace_id))).toEqual([expect.objectContaining({ id: source.source_file_id, workspace_id: source.workspace_id })]);
+  });
+
+  it("retains a failed call and its model-error evaluation", async () => {
+    const source = await sourceFixture();
+    activateControlledModule({ call_kind: "need_extract", run: async () => { throw new Error("controlled output failure"); } });
+
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id } }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+
+    expect(experiment.status).toBe("failed");
+    expect(experiment.calls).toEqual([expect.objectContaining({ output: null, output_error: "controlled output failure" })]);
+    expect(experiment.evaluations).toEqual([expect.objectContaining({ evaluation: expect.objectContaining({ status: "model_error", errors: ["controlled output failure"] }) })]);
+  });
+
+  it("rejects an unresolved workspace-owned input reference before calling the module", async () => {
+    const source = await sourceFixture();
+    let called = false;
+    activateControlledModule({ call_kind: "need_extract", run: async () => {
+      called = true;
+      return { output: { gaps: [] }, summary: "unexpected" };
+    } });
+
+    await expect(runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { workspace_id: source.workspace_id, source_file_id: newId("src"), block_id: source.block_id } }, actor: { name: "test", function: "medical_affairs" } })).rejects.toThrow("Unresolved copied source_file_id");
+
+    expect(called).toBe(false);
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it("records experiment snapshots with experiment context while production defaults to production without gold payloads", async () => {
+    const source = await sourceFixture();
+    const original = activeAccuracyModuleId("inventory_extract");
+    if (original) originals.set("inventory_extract", original);
+    const id = newId("agentic-experiment-module");
+    const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_id: z.string() });
+    registerAccuracyModule(agenticModule({ id, call_kind: "inventory_extract", title: "Agentic context test", summary: "Records one snapshot", inputSchema,
+      outputSchema: z.object({ tactics: z.array(z.object({ name: z.string(), id: z.string() })) }),
+      run: async (_input, ctx) => {
+        await runShallowAgenticCycle({ run: ctx.run, maxExchanges: 0, onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }), proposer: async () => ({ tactics: [] }), critic: async () => ({ score: 1, issues: [] }), judge: async (draft) => draft });
+        return { output: { tactics: [] }, summary: "agentic context" };
+      } }));
+    activateAccuracyModule({ call_kind: "inventory_extract", module_id: id, activated_by: "experiment test" });
+
+    const production = await runAccuracyModule({ call_kind: "inventory_extract", workspace_id: source.workspace_id, org_id: source.org_id, input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id }, actor: { name: "test", function: "medical_affairs" } });
+    const experiment = await runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "inventory_extract", input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id } }, actor: { name: "test", function: "medical_affairs" } });
+    createdWorkspaces.push(experiment.workspace_id);
+    const productionEvents = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, production.run_id));
+    const experimentEvents = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, experiment.calls[0]!.call_id));
+    const productionEvent = productionEvents.find((event) => (event.payload as { event_type?: string }).event_type === "snapshot");
+    const experimentEvent = experimentEvents.find((event) => (event.payload as { event_type?: string }).event_type === "snapshot");
+
+    expect(productionEvent?.payload).toMatchObject({ event_type: "snapshot", evaluation_context: "production" });
+    expect(experimentEvent?.payload).toMatchObject({ event_type: "snapshot", evaluation_context: "experiment" });
+    for (const event of [...productionEvents, ...experimentEvents]) {
+      expect(event?.payload).not.toHaveProperty("gold");
+      expect(event?.payload).not.toHaveProperty("metrics");
+    }
+  });
+});

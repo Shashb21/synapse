@@ -85,7 +85,7 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   const snapshot = async (draft: T, iteration: number, metering: Awaited<ReturnType<typeof measure<T>>>) => {
     const signals = await args.onSnapshot(draft, iteration);
     await args.run.recordAgentEvent({ event_type: "snapshot", iteration, output: draft,
-      evaluation_context: "production", signals, latency_ms: metering.latency_ms,
+      evaluation_context: args.run.evaluation_context ?? "production", signals, latency_ms: metering.latency_ms,
       token_usage: metering.token_usage, cost_usd: metering.cost_usd });
   };
   const initial = await measure(() => args.proposer(0, null, []));

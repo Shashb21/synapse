@@ -45,6 +45,7 @@ export class AccuracyRunRecorder implements RunHandle {
       agent_role: AgentRole | "none";
       module_id: string;
       module_version: string;
+      evaluation_context: "production" | "experiment";
       actor: Actor;
       input: unknown;
     },
@@ -52,6 +53,8 @@ export class AccuracyRunRecorder implements RunHandle {
   ) {
     this.id = id ?? newId("arun");
   }
+
+  get evaluation_context(): "production" | "experiment" { return this.meta.evaluation_context; }
 
   addCost(cost: CostEstimate) {
     this.totalUsage = {
@@ -141,6 +144,7 @@ export async function openAccuracyRun(recorder: AccuracyRunRecorder) {
       token_usage: null,
       cost_usd: null,
       evals: null,
+      evaluation_context: recorder.meta.evaluation_context,
     });
 }
 
