@@ -65,11 +65,13 @@ to the copy and rejects references that cannot be remapped.
 actual model and prompt version when those variables matter; an empty object is
 valid but makes later interpretation weaker.
 
-The response is `201` and contains the new experiment record. Repeating the
-identical request deliberately produces a distinct experiment, copied
-workspace, module runs, calls, and evaluations. Experiments are append-only
-apart from their terminal `completed` or `failed` status, so a repeat is never
-an overwrite.
+The response is `201` and contains the new experiment record. Once copying
+succeeds, repeating the identical request deliberately produces a distinct
+experiment and copied workspace; it never overwrites an earlier attempt.
+Successful stages retain their module runs, calls, and evaluations. A failed
+attempt can instead retain only its completed stages, or no calls and
+evaluations when it fails before a stage begins. Experiments are append-only
+apart from their terminal `completed` or `failed` status.
 
 ## Read and export results
 
@@ -179,11 +181,13 @@ export it. A missing grant appears as an inaccessible source workspace.
 Pipeline experiments use the same extraction batch and pause/resume journal as
 normal extraction. After extraction drafts are applied in the copied workspace,
 the journal reserves durable merge and status run IDs. An important omission
-pauses progression while preserving the completed stage effects and journal
-state, so the copied batch is resumable. A non-pause downstream failure rolls
-back that downstream transaction; the experiment retains its failure evidence
-and ends `failed`. Neither pause nor failure writes claims, runs, events, or
-recovery state into the source workspace.
+creates a copy-local journal checkpoint and preserves completed stage effects.
+The submitted experiment is then retained with terminal status `failed`;
+there is currently no experiment-resume API and no later calls or evaluations
+can be appended to that experiment. A non-pause downstream failure also rolls
+back that downstream transaction, retains its available failure evidence, and
+ends the experiment `failed`. Neither pause nor failure writes claims, runs,
+events, or recovery state into the source workspace.
 
 🚩 A copied workspace is implementation state, not an API scope. Keep its ID
 out of scripts and dashboards that read results; always supply the original
