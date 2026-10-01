@@ -25,12 +25,17 @@ type IdField = "source" | "block" | "claim";
 type RemapContract = { source: readonly string[]; block: readonly string[]; claim: readonly string[]; nested_claim_collections?: readonly string[] };
 
 /** Each supported module declares every workspace-owned identifier it accepts. */
-const REMAP_CONTRACTS: Partial<Record<CallKind, RemapContract>> = {
+const REMAP_CONTRACTS: Record<CallKind, RemapContract> = {
+  upload: { source: [], block: [], claim: [] },
   parse: { source: ["source_file_id"], block: [], claim: [] },
   inventory_extract: { source: ["source_file_id"], block: ["block_ids"], claim: [] },
   need_extract: { source: ["source_file_id"], block: ["block_ids"], claim: [] },
+  merge_dedupe: { source: [], block: [], claim: [] },
+  completeness_audit: { source: [], block: [], claim: [] },
+  pair_generate: { source: [], block: [], claim: [] },
   coverage_decide: { source: [], block: ["block_bundle_ids"], claim: ["gap_id", "tactic_id"] },
   coverage_critic: { source: [], block: ["quote_block_ids"], claim: ["gap_id", "tactic_id"] },
+  status_derive: { source: [], block: [], claim: ["gap_ids", "gap_id", "tactic_id"], nested_claim_collections: ["tactics"] },
   partial_split: { source: [], block: [], claim: ["gap_id"] },
   prioritize: { source: [], block: [], claim: ["gap_ids"] },
   validation_gate: { source: [], block: [], claim: ["claim_ids"] },
@@ -40,7 +45,7 @@ const REMAP_CONTRACTS: Partial<Record<CallKind, RemapContract>> = {
 
 /** Remap workspace-owned input IDs, failing closed when a referenced ID has no copied counterpart. */
 function remapExperimentInput(call_kind: CallKind, input: Record<string, unknown>, workspace_id: string, maps: IdMaps): Record<string, unknown> {
-  const contract = REMAP_CONTRACTS[call_kind] ?? { source: [], block: [], claim: [] };
+  const contract = REMAP_CONTRACTS[call_kind];
   const field = new Map<string, IdField>([
     ...contract.source.map((key) => [key, "source"] as const),
     ...contract.block.map((key) => [key, "block"] as const),
@@ -113,16 +118,23 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
     if (!failed) throw new Error("Failed experiment record disappeared before it could be returned.");
     return failed;
   }
-  const progression = await readAgentProgression({ workspace_id: copy.workspace_id, run_id: result.run_id });
-  const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
-  const outputs = snapshots.length ? snapshots : [result.output];
-  for (const [version_index, output] of outputs.entries()) {
-    await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, call_kind: request.call.call_kind,
-      version_index, input, output, module_version: result.module_version, route: result.route });
-    await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, version_index,
-      evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+  try {
+    const progression = await readAgentProgression({ workspace_id: copy.workspace_id, run_id: result.run_id });
+    const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
+    const outputs = snapshots.length ? snapshots : [result.output];
+    for (const [version_index, output] of outputs.entries()) {
+      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, call_kind: request.call.call_kind,
+        version_index, input, output, module_version: result.module_version, route: result.route });
+      await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, version_index,
+        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+    }
+    await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
+  } catch (error) {
+    // The original persistence/evaluator error is the actionable cause. Best-effort
+    // terminalization keeps the retained workspace inspectable without replacing it.
+    await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" }).catch(() => undefined);
+    throw error;
   }
-  await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
   const record = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
   if (!record) throw new Error("Experiment record disappeared before it could be returned.");
   return record;

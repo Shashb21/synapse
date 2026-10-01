@@ -195,4 +195,12 @@ describe("isolated accuracy experiments", () => {
     expect(first.evaluations[0]?.id).not.toBe(second.evaluations[0]?.id);
     expect(input).toEqual({ workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id });
   });
+
+  it("rejects an unknown status-derive gap reference before the copied module can run", async () => {
+    const source = await sourceFixture();
+
+    await expect(runAccuracyExperiment({ mode: "single_call", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "status_derive", input: { workspace_id: source.workspace_id, gap_ids: [newId("gap")], tactics: [{ id: newId("tac"), status: "planned" }], coverages: [{ gap_id: newId("gap"), tactic_id: newId("tac"), overall: "full", validated: true }], persist: false } }, actor: { name: "test", function: "medical_affairs" } })).rejects.toThrow("Unresolved copied gap_ids");
+
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+  });
 });
