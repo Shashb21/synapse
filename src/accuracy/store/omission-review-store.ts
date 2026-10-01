@@ -26,10 +26,11 @@ export type OmissionReviewItem = {
 type Executor = Pick<ReturnType<typeof accuracyDb>, "select" | "insert" | "update" | "execute">;
 type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"] };
 
-/** Shared decision rule: inferred findings remain advisory even when reclassified. */
+/** Human importance decisions override the model default until a closing action. */
 function isBlocking(issue: SuspectedOmission, action: OmissionAction | null): boolean {
   if (action && action.action !== "reclassify") return false;
-  return issue.basis === "explicit" && (action?.new_importance ?? issue.importance) === "important";
+  if (action?.action === "reclassify") return action.new_importance === "important";
+  return issue.basis === "explicit" && issue.importance === "important";
 }
 
 /** Find successfully applied runs whose persisted identity agrees with their batch. */

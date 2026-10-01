@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { OmissionAction, OmissionReviewItem } from "@/accuracy/store/omission-review-store";
 
 type Review = { current: boolean; items: OmissionReviewItem[]; actions: OmissionAction[];
-  extraction_batch_id: string | null; source_file_id: string | null };
+  extraction_batch_id: string | null; source_file_id: string | null; downstream_state: "completed" | "resumable" | "stale" };
 type Decision = "add" | "link_existing" | "dismiss" | "reclassify";
 const fieldClass = "w-full border border-border bg-background p-2 text-[12px] text-foreground";
 const buttonClass = "border border-border px-3 py-2 text-[12px] text-foreground disabled:opacity-50";
@@ -170,6 +170,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
     {!loading && !error && !review ? <p className="mt-2">No applied extraction review is available for this run.</p> : null}
     {review ? <>
       <p className="mt-2">{review.current ? "Current extraction" : "Superseded extraction · historical findings"} · Run {runId}</p>
+      {review.downstream_state === "completed" ? <p className="mt-1">Downstream work completed.</p> : null}
       {review.current && blockers.length ? <p className="mt-1">Paused · {blockers.length} important unresolved {blockers.length === 1 ? "finding" : "findings"} in this workspace.</p> : null}
       <ul className="mt-2 grid gap-3">{review.items.map((item) => {
         const action = item.latest_action;
@@ -192,7 +193,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
         </li>)}</ul></details> : null}
       {canReview ? <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClass} disabled={loading || resuming || pendingDecisions.size > 0} onClick={() => void refreshReview()}>Refresh review</button>
-        {review.current && review.extraction_batch_id && review.source_file_id && !blockers.length && !review.items.some(item => item.blocking) && !loading && !error && !resumed
+        {review.current && review.downstream_state === "resumable" && review.extraction_batch_id && review.source_file_id && !blockers.length && !review.items.some(item => item.blocking) && !loading && !error && !resumed
           ? <button type="button" className={buttonClass} disabled={resuming || pendingDecisions.size > 0} onClick={() => void resume()}>{resuming ? "Resuming…" : "Resume downstream work"}</button> : null}
       </div> : null}
       {resuming ? <p role="status">Resuming downstream work…</p> : null}

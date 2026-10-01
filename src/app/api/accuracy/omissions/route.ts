@@ -2,7 +2,7 @@
 import { and, eq } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
 import { accuracyExtractionBatches } from "@/accuracy/store/schema";
-import { extractionBatchForRun } from "@/accuracy/store/extraction-batch-store";
+import { extractionBatchForRun, extractionDownstreamState } from "@/accuracy/store/extraction-batch-store";
 import { NextResponse } from "next/server";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { requestIdentity } from "@/modules/auth/request";
@@ -38,7 +38,8 @@ export async function GET(request: Request) {
       const batch = extraction_batch_id ? (await accuracyDb().select({ source_file_id: accuracyExtractionBatches.source_file_id })
         .from(accuracyExtractionBatches).where(and(eq(accuracyExtractionBatches.workspace_id, workspace_id),
           eq(accuracyExtractionBatches.id, extraction_batch_id))).limit(1))[0] : null;
-      return NextResponse.json({ ...reviews, actions, extraction_batch_id, source_file_id: batch?.source_file_id ?? null });
+      const downstream_state = extraction_batch_id && batch ? await extractionDownstreamState(workspace_id, batch.source_file_id, extraction_batch_id) : null;
+      return NextResponse.json({ ...reviews, actions, extraction_batch_id, source_file_id: batch?.source_file_id ?? null, downstream_state });
     }
     return NextResponse.json({ items: await listCurrentOmissionReviews(workspace_id) });
   } catch (error) { return errorResponse(error); }

@@ -2,6 +2,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
+import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
 export type ExtractionBatch = typeof t.accuracyExtractionBatches.$inferSelect;
@@ -92,15 +93,42 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
       batch_id: args.batch_id, merge_operation_id: newId("arun"), status_operation_id: newId("arun"), created_at: nowIso(), updated_at: nowIso() })
       .onConflictDoNothing();
   });
-  return withAccuracyTransaction(async () => {
+  const result = await withAccuracyTransaction(async () => {
     await lockWorkspace(args.workspace_id, false);
     const batch = await currentBatch(args.workspace_id, args.source_file_id, args.batch_id);
     const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
       eq(t.accuracyResumeJournals.workspace_id, args.workspace_id), eq(t.accuracyResumeJournals.batch_id, args.batch_id)));
-    if (journal.final_response !== null) return journal.final_response as T;
-    const response = await args.execute(batch, journal);
+    if (journal.final_response !== null) return { response: journal.final_response as T };
+    let response: T;
+    try { response = await args.execute(batch, journal); }
+    catch (error) {
+      if (!(error instanceof AccuracyPausedError)) throw error;
+      // A pause is a valid checkpoint: preserve completed stage effects and their IDs.
+      // Actual stage failures still throw through the transaction and roll back all writes.
+      const completed = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(
+        eq(t.accuracyModuleRuns.workspace_id, args.workspace_id), eq(t.accuracyModuleRuns.status, "ok"),
+        inArray(t.accuracyModuleRuns.id, [journal.merge_operation_id, journal.status_operation_id])));
+      await accuracyDb().update(t.accuracyResumeJournals).set({
+        merge_state: completed.some(run => run.id === journal.merge_operation_id) ? "completed" : "reserved",
+        status_state: completed.some(run => run.id === journal.status_operation_id) ? "completed" : "reserved",
+        updated_at: nowIso(),
+      }).where(eq(t.accuracyResumeJournals.id, journal.id));
+      return { pause: error };
+    }
     await accuracyDb().update(t.accuracyResumeJournals).set({ merge_state: "completed", status_state: "completed",
       final_response: response, updated_at: nowIso() }).where(eq(t.accuracyResumeJournals.id, journal.id));
-    return response;
+    return { response };
   });
+  if ("pause" in result) throw result.pause;
+  return result.response;
+}
+
+/** Report server-owned downstream eligibility independently of finding currency. */
+export async function extractionDownstreamState(workspace_id: string, source_file_id: string, batch_id: string): Promise<"completed" | "resumable" | "stale"> {
+  await ensureAccuracySchema();
+  try { await currentBatch(workspace_id, source_file_id, batch_id); }
+  catch (error) { if (error instanceof ExtractionBatchError) return "stale"; throw error; }
+  const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
+    eq(t.accuracyResumeJournals.workspace_id, workspace_id), eq(t.accuracyResumeJournals.batch_id, batch_id)));
+  return journal?.final_response != null ? "completed" : "resumable";
 }

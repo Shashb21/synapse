@@ -20,6 +20,9 @@ import { accuracyDb } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { createExtractionBatch, applyExtractionBatch, resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
+import { requestIdentity } from "@/modules/auth/request";
+import { assertCan, ForbiddenError } from "@/modules/auth/roles";
+import type { Actor } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 
 export const runtime = "nodejs";
@@ -51,13 +54,16 @@ export async function POST(req: Request) {
   try {
     const raw = await req.json();
     if (raw && raw.action === "resume") {
+      const identity = await requestIdentity(raw);
+      if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+      assertCan(identity.role, "validate");
       const request = resumeSchema.parse(raw);
       const response = await resumeExtractionBatch({ workspace_id: request.workspace_id, source_file_id: request.source_file_id,
         batch_id: request.extraction_batch_id, execute: async (batch, journal) => {
           await assertAccuracyCanProgress(request.workspace_id, "merge_dedupe");
           const org_id = await getWorkspaceOrgId(request.workspace_id);
           if (!org_id) throw new Error("Unknown workspace");
-          const actor = { name: "Accuracy extractor", function: "medical_affairs" as const };
+          const actor = identity.actor;
           const extractionRuns = await accuracyDb().select().from(tables.accuracyModuleRuns).where(and(
             eq(tables.accuracyModuleRuns.workspace_id, request.workspace_id), inArray(tables.accuracyModuleRuns.id, batch.run_ids)));
           const runs = batch.run_ids.map(id => {
@@ -212,34 +218,26 @@ export async function POST(req: Request) {
     await applyExtractionBatch(batch, runs.map(run => run.run_id), created_claim_ids, async () => {
       for (const claim of draftClaims) await insertClaim(claim);
     });
-    let downstream: Awaited<ReturnType<typeof runDownstream>>;
     try {
-      await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
-      downstream = await runDownstream({ workspace_id: body.workspace_id, org_id, actor });
+      const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
+        batch_id: batch.id, execute: async (_batch, journal) => {
+          await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
+          const downstream = await runDownstream({ workspace_id: body.workspace_id, org_id, actor,
+            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
+          return { ok: true, workspace_id: body.workspace_id, source_file_id: body.source_file_id,
+            extraction_batch_id: batch.id, block_count: allBlocks.length, blocks_used: blocks.length,
+            gaps_inserted, tactics_inserted, merge: downstream.merge.output, statuses: downstream.status.output,
+            runs: [...runs, ...downstream.runs], stub: gate.stub, provider_id: gate.stub ? null : gate.provider_id,
+            provider_label: gate.stub ? null : gate.provider_label, auth: gate.stub ? null : gate.auth };
+        } });
+      return NextResponse.json(response);
     } catch (error) {
       if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers,
         extraction_batch_id: batch.id, runs, gaps_inserted, tactics_inserted }, { status: 409 });
       throw error;
     }
-    runs.push(...downstream.runs);
-
-    return NextResponse.json({
-      ok: true,
-      workspace_id: body.workspace_id,
-      source_file_id: body.source_file_id,
-      block_count: allBlocks.length,
-      blocks_used: blocks.length,
-      gaps_inserted,
-      tactics_inserted,
-      merge: downstream.merge.output,
-      statuses: downstream.status.output,
-      runs,
-      stub: gate.stub,
-      provider_id: gate.stub ? null : gate.provider_id,
-      provider_label: gate.stub ? null : gate.provider_label,
-      auth: gate.stub ? null : gate.auth,
-    });
   } catch (error) {
+    if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
     if (error instanceof ExtractionBatchError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 409 });
     if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers }, { status: 409 });
     if (error instanceof NoRouteError) {
@@ -254,7 +252,7 @@ export async function POST(req: Request) {
 }
 
 /** Execute the two mechanical stages using reserved identities when resuming. */
-async function runDownstream(args: { workspace_id: string; org_id: string; actor: { name: string; function: "medical_affairs" }; merge_id?: string; status_id?: string }) {
+async function runDownstream(args: { workspace_id: string; org_id: string; actor: Actor; merge_id: string; status_id: string }) {
   const merge = await runAccuracyModule<MergeDedupeOutput>({ call_kind: "merge_dedupe", agent_role: "none", input: { workspace_id: args.workspace_id },
     actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.merge_id });
   const status = await runAccuracyModule<StatusDeriveOutput>({ call_kind: "status_derive", agent_role: "none", input: { workspace_id: args.workspace_id },

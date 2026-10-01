@@ -52,12 +52,14 @@ export function SourceExtractActions({
   const [error, setError] = useState<string | null>(null);
   const [connectPath, setConnectPath] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  const [reviewRuns, setReviewRuns] = useState<Array<{ run_id: string; call_kind: string }>>([]);
   const extractReady = gate.ready;
 
   function runExtract(kinds: Array<"need" | "inventory">) {
     setError(null);
     setConnectPath(null);
     setSummary(null);
+    setReviewRuns([]);
     startTransition(async () => {
       const res = await fetch("/api/accuracy/extract", {
         method: "POST",
@@ -77,8 +79,15 @@ export function SourceExtractActions({
         provider_label?: string | null;
         gate?: string;
         connect_path?: string;
-        runs?: Array<{ summary: string }>;
+        paused?: boolean;
+        runs?: Array<{ summary: string; run_id: string; call_kind: string }>;
       };
+      if (json.paused) {
+        setSummary(`Drafts saved: ${json.gaps_inserted ?? 0} gap(s) · ${json.tactics_inserted ?? 0} tactic(s). Downstream work is paused for omission review.`);
+        setReviewRuns((json.runs ?? []).filter(run => run.call_kind === "need_extract" || run.call_kind === "inventory_extract"));
+        router.refresh();
+        return;
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? "Extract failed");
         if (json.connect_path) setConnectPath(json.connect_path);
@@ -152,6 +161,12 @@ export function SourceExtractActions({
           ) : null}
         </p>
       ) : null}
+      {reviewRuns.map(run => (
+        <Link key={run.run_id} href={`/accuracy/runs/${encodeURIComponent(run.run_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}
+          className="text-[11px] text-foreground underline-offset-2 hover:underline">
+          Review {run.call_kind === "need_extract" ? "needs" : "inventory"} omissions →
+        </Link>
+      ))}
       {summary ? (
         <p className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
           {summary}

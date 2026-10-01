@@ -1,5 +1,5 @@
 /** Behavioral extraction and durable resume checks against the real database. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -21,12 +21,17 @@ import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store"
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
-vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "medical_affairs" } }) }));
+const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
+vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
 
+// Concurrent HTTP requests need separate connections, as in the normal server pool.
+beforeAll(() => vi.stubEnv("VITEST", ""));
+afterAll(() => vi.unstubAllEnvs());
 const originals = new Map<CallKind, string>();
 afterEach(() => {
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind, module_id, activated_by: "restore" });
   originals.clear();
+  Object.assign(identity, { signed_in: true, demo: false, role: "contributor" });
   vi.restoreAllMocks();
 });
 async function fixture() {
@@ -83,6 +88,38 @@ describe("extraction omission resume", () => {
     expect(await (await post({ ...request, idempotency_key: "resume-2" })).json()).toEqual(completed);
     expect(await runs(scope.workspace_id)).toHaveLength(3);
   });
+  it("replays initial success without repeating downstream work", async () => {
+    const scope = await fixture(); installExtractor(false);
+    const initial = await (await post({ ...scope, kinds: ["need"] })).json();
+    const review = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${initial.runs[0].run_id}`))).json();
+    const before = await runs(scope.workspace_id);
+    const replay = await post({ ...scope, action: "resume", extraction_batch_id: review.extraction_batch_id, idempotency_key: "repeat" });
+    expect(await replay.json()).toEqual(initial);
+    expect(await runs(scope.workspace_id)).toEqual(before);
+    expect(review).toMatchObject({ downstream_state: "completed" });
+  });
+  it.each([{ signed_in: false, role: "contributor", status: 401 }, { signed_in: true, role: "viewer", status: 403 }])("rejects unauthorized resume and completed replay: $status", async ({ signed_in, role, status }) => {
+    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+    const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "auth" };
+    const before = await runs(scope.workspace_id);
+    const claims = await listClaims(scope.workspace_id);
+    const journals = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
+    Object.assign(identity, { signed_in, role });
+    expect((await post(request)).status).toBe(status);
+    expect(await runs(scope.workspace_id)).toEqual(before);
+    expect(await listClaims(scope.workspace_id)).toEqual(claims);
+    expect(await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id))).toEqual(journals);
+    Object.assign(identity, { signed_in: true, role: "contributor" });
+    expect((await post(request)).status).toBe(200);
+    expect((await runs(scope.workspace_id)).filter(run => run.call_kind !== "need_extract").every(run => run.actor_name === "Test" && run.actor_function === "heor")).toBe(true);
+    Object.assign(identity, { signed_in, role });
+    expect((await post(request)).status).toBe(status);
+  });
+  it("preserves unsigned demo-mode resume", async () => {
+    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+    Object.assign(identity, { signed_in: false, demo: true });
+    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(200);
+  });
   it("returns the server source and batch even when an applied run has no findings", async () => {
     const scope = await fixture(); installExtractor(false);
     const body = await (await post({ ...scope, kinds: ["need"] })).json();
@@ -134,6 +171,8 @@ describe("extraction omission resume", () => {
     expect(inventory.status).toBe(409);
     const latest = await inventory.json();
     expect(latest.extraction_batch_id).not.toBe(body.extraction_batch_id);
+    const oldReview = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${body.runs[0].run_id}`))).json();
+    expect(oldReview).toMatchObject({ current: true, downstream_state: "stale" });
     const stale = await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "changed-set" });
     expect(stale.status).toBe(409); expect(await stale.json()).toMatchObject({ code: "stale_batch" });
     await resolve(scope, body);
@@ -162,6 +201,28 @@ describe("extraction omission resume", () => {
     expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
   });
 
+  it("serializes initial downstream work against an explicit resume", async () => {
+    const scope = await fixture(); installExtractor(false);
+    const kind = "merge_dedupe"; originals.set(kind, activeAccuracyModuleId(kind)!);
+    let entered!: () => void; let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const id = newId("held-merge");
+    registerAccuracyModule(mechanicalModule({ id, call_kind: kind, title: "Held", summary: "Held", inputSchema: z.object({ workspace_id: z.string() }), outputSchema: z.object({ merged: z.number() }), run: async () => {
+      entered(); await hold; return { output: { merged: 0 }, summary: "Once" };
+    } })); activateAccuracyModule({ call_kind: kind, module_id: id, activated_by: "test" });
+    const initial = post({ ...scope, kinds: ["need"] });
+    await started;
+    const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.workspace_id, scope.workspace_id));
+    const request = { ...scope, action: "resume", extraction_batch_id: batch.id, idempotency_key: "overlap" };
+    try {
+      const overlapping = await post(request);
+      expect(overlapping.status).toBe(409); expect(await overlapping.json()).toMatchObject({ code: "resume_in_progress" });
+    } finally { release(); }
+    const completed = await (await initial).json();
+    expect(await (await post(request)).json()).toEqual(completed);
+    expect(await runs(scope.workspace_id)).toHaveLength(3);
+  });
   it("returns resume_in_progress while another transaction holds the workspace lock", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
     const connection = postgres(process.env.DATABASE_URL!, { max: 1 });
@@ -176,6 +237,7 @@ describe("extraction omission resume", () => {
   it("recovers a completed reserved module run instead of repeating its downstream effects", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
     const merge_id = newId("arun"); const status_id = newId("arun");
+    await accuracyDb().delete(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
     await accuracyDb().insert(t.accuracyResumeJournals).values({ id: newId("resume"), workspace_id: scope.workspace_id,
       batch_id: body.extraction_batch_id, merge_operation_id: merge_id, merge_state: "reserved", status_operation_id: status_id,
       status_state: "reserved", created_at: nowIso(), updated_at: nowIso() });
@@ -224,6 +286,14 @@ describe("extraction omission resume", () => {
     expect(persistedRuns.filter(run => run.call_kind === "merge_dedupe")).toHaveLength(1);
     expect(persistedRuns.filter(run => run.call_kind === "status_derive")).toHaveLength(0);
     expect(await listClaims(scope.workspace_id)).toHaveLength(2);
+    const [checkpoint] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.batch_id, batch.id));
+    expect(checkpoint).toMatchObject({ merge_state: "completed", status_state: "reserved", final_response: null });
+    const blocker = (await listBlockingOmissions(scope.workspace_id))[0];
+    await applyOmissionAction({ workspace_id: scope.workspace_id, run_id: blocker.run_id, issue_id: "missing", action: "dismiss", reason: "Reviewed", idempotency_key: newId("decision"), actor: identity.actor as { name: string; function: "heor" } });
+    const completed = await post({ ...scope, action: "resume", extraction_batch_id: batch.id, idempotency_key: "late" });
+    expect(completed.status).toBe(200);
+    expect((await completed.json()).runs[1].run_id).toBe(persistedRuns.find(run => run.call_kind === "merge_dedupe")!.id);
+    expect((await runs(scope.workspace_id)).filter(run => run.call_kind === "merge_dedupe")).toHaveLength(1);
   });
 
 });

@@ -21,7 +21,7 @@ const response = (body: unknown, status = 200) => ({ ok: status < 400, status, j
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  review = { current: true, items: [item], actions: [], extraction_batch_id: "server-batch", source_file_id: "source-1" };
+  review = { current: true, items: [item], actions: [], extraction_batch_id: "server-batch", source_file_id: "source-1", downstream_state: "resumable" };
   currentItems = [item];
   post = vi.fn(async () => response({ ok: true }));
   get = vi.fn(async (url: string) => response(url.includes("run_id=") ? review : { items: currentItems }));
@@ -82,6 +82,12 @@ describe("omission review controls", () => {
     expect(host.querySelector("select")?.textContent).toContain("Dismiss");
     expect(host.querySelector("select")?.textContent).toContain("Reclassify");
     expect(text()).not.toContain("Resume downstream work");
+  });
+  it.each(["completed", "stale"])("does not offer resume for server state %s", async state => {
+    review.downstream_state = state; review.items = []; currentItems = [];
+    await mount();
+    expect(text()).not.toContain("Resume downstream work");
+    if (state === "completed") expect(text()).toContain("Downstream work completed");
   });
   it("shows an advisory without labeling it paused", async () => {
     review.items = [{ ...item, blocking: false, issue: { ...issue, importance: "advisory", basis: "inferred" } }];

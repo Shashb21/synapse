@@ -6,11 +6,13 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
-import { getOmissionReviewsForRun, listBlockingOmissions, listCurrentOmissionReviews, listOmissionActionHistory } from "@/accuracy/store/omission-review-store";
+import { applyOmissionAction, getOmissionReviewsForRun, listBlockingOmissions, listCurrentOmissionReviews, listOmissionActionHistory } from "@/accuracy/store/omission-review-store";
+import { runAccuracyModule, registerAccuracyStack } from "@/accuracy";
+import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
 function issue(source: string, id: string, importance: "important" | "advisory" = "important"): SuspectedOmission {
-  return { issue_id: id, item_kind: "gap", summary: id, source_ref: { source_file_id: source, block_id: "same-block" },
+  return { issue_id: id, item_kind: "gap", summary: id, source_ref: { source_file_id: source, block_id: `${source}-block` },
     evidence_quote: "Regional comparator evidence", basis: importance === "important" ? "explicit" : "inferred",
     importance, reason: "Absent from draft", suggested_action: "Add gap" };
 }
@@ -92,13 +94,23 @@ describe("current omission review store", () => {
     const reviews = await listCurrentOmissionReviews(scope.workspace_id);
     expect(reviews.map((x) => x.run_id).sort()).toEqual([first > second ? first : second, inventory, other].sort());
   });
-  it("exposes a failed check without inventing blockers and keeps inferred findings advisory", async () => {
-    const scope = await fixture();
+  it("keeps inferred findings advisory by default and enforces human importance until closed", async () => {
+    const org_id = await createOrganization("Reclassification");
+    const workspace_id = await createWorkspace({ org_id, name: "Review", slug: newId("slug") });
+    const scope = { workspace_id, source_file_id: newId("source") };
     const id = await run(scope, [], { risk: "check_failed" });
     expect((await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id }))?.completeness?.risk_level).toBe("check_failed");
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([]);
     const newer = await run(scope, [issue(scope.source_file_id, "inferred", "advisory")], { time: "2026-09-30T11:00:00.000Z" });
-    await action(scope, newer, "inferred", "reclassify", "important");
+    expect(await listBlockingOmissions(scope.workspace_id)).toEqual([]);
+    await accuracyDb().insert(t.accuracySourceFiles).values({ id: scope.source_file_id, workspace_id: scope.workspace_id, org_id: "test", filename: "test", mime: "text/plain", checksum: "test", doc_role: "medical", uploaded_at: nowIso() });
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: `${scope.source_file_id}-block`, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, index: 0, kind: "prose", text: "Regional comparator evidence", parser: "local", created_at: nowIso() });
+    const decision = { workspace_id: scope.workspace_id, run_id: newer, issue_id: "inferred", reason: "Human review", actor: { name: "Reviewer", function: "heor" as const } };
+    await applyOmissionAction({ ...decision, action: "reclassify", new_importance: "important", idempotency_key: newId("key") });
+    expect(await listBlockingOmissions(scope.workspace_id)).toHaveLength(1);
+    registerAccuracyStack();
+    await expect(runAccuracyModule({ call_kind: "merge_dedupe", agent_role: "none", input: { workspace_id: scope.workspace_id }, workspace_id: scope.workspace_id, org_id, actor: decision.actor })).rejects.toBeInstanceOf(AccuracyPausedError);
+    await applyOmissionAction({ ...decision, action: "dismiss", idempotency_key: newId("key") });
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([]);
     const other = await fixture();
     expect(await listOmissionActionHistory({ workspace_id: other.workspace_id, run_id: newer })).toEqual([]);
