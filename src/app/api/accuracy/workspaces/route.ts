@@ -3,11 +3,11 @@ import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { normalizePlanLabel, workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import {
-  createOrganization,
-  createWorkspace,
+  createWorkspaceForSubject,
   getWorkspace,
   listWorkspaces,
 } from "@/accuracy/store/tenant";
+import { sessionContext } from "@/modules/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,12 +41,16 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const session = await sessionContext();
+  if (!session.signed_in || !session.session) {
+    return NextResponse.json({ ok: false, error: "Sign in to create a workspace" }, { status: 401 });
+  }
   try {
     const body = createSchema.parse(await req.json());
-    const org_id = await createOrganization(body.org_name ?? `${body.name} org`);
     const plan_label = normalizePlanLabel(body.plan_label) ?? "IEGP";
-    const workspace_id = await createWorkspace({
-      org_id,
+    const { org_id, workspace_id } = await createWorkspaceForSubject({
+      subject: session.session.subject,
+      org_name: body.org_name ?? `${body.name} org`,
       name: body.name,
       slug: body.slug,
       plan_label,

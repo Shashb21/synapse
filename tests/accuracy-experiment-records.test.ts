@@ -45,6 +45,15 @@ describe("experiment records", () => {
       .resolves.toMatchObject({ id: scope.source_workspace_id });
   });
 
+  it("removes organization grants when its final workspace is deleted", async () => {
+    const org_id = await createOrganization("grant-cleanup");
+    const workspace_id = await createWorkspace({ org_id, name: "Only workspace", slug: `grant-cleanup-${Date.now()}` });
+    await grantOrganizationAccess({ subject: "deleted-org-user", org_id });
+    await deleteWorkspace(workspace_id);
+    const grants = await accuracyDb().select().from(tables.accuracyOrganizationGrants).where(eq(tables.accuracyOrganizationGrants.org_id, org_id));
+    expect(grants).toEqual([]);
+  });
+
   it("keeps identical attempts, all call versions, and complete exports", async () => {
     const scope = await fixture();
     const base = { ...scope, pack_id: "beone-bgb-58067-prmt5i", pack_fingerprint: "pack", source_fingerprint: "source", baseline_fingerprint: "baseline", baseline_snapshot: { sources: [] }, condition: { temperature: 0 } };

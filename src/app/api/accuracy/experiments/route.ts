@@ -1,8 +1,10 @@
 /** Authenticated experiment start and source-workspace-scoped record export API. */
 import { NextResponse } from "next/server";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { CALL_KINDS } from "@/accuracy/kernel/contracts";
+import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { mustFindForPack } from "@/accuracy/eval/reference-gold";
 import { exportExperimentsForSourceWorkspace } from "@/accuracy/experiments/records";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
@@ -21,7 +23,13 @@ const requestSchema = z.object({
   source_workspace_id: z.string().trim().min(1),
   source_file_ids: z.array(z.string().trim().min(1)).min(1),
   pack_id: z.string().trim().min(1),
-  condition: z.record(z.string(), z.unknown()),
+  condition: z.object({
+    label: z.string().trim().min(1).max(120).optional(),
+    model: z.string().trim().min(1).max(200).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    max_tokens: z.number().int().positive().max(65_536).optional(),
+    prompt_version: z.string().trim().min(1).max(120).optional(),
+  }).strict(),
   call: z.object({
     call_kind: z.enum(CALL_KINDS),
     input: z.record(z.string(), z.unknown()),
@@ -39,20 +47,21 @@ function unauthorized() {
   return NextResponse.json({ error: "Sign in to access experiments" }, { status: 401 });
 }
 
+class InvalidExperimentRequestError extends Error {}
+
 async function authorizedSourceWorkspace(source_workspace_id: string, session: Awaited<ReturnType<typeof sessionContext>>) {
   if (!session.session) return null;
   return getAuthorizedWorkspace({ workspace_id: source_workspace_id, subject: session.session.subject, role: session.role });
 }
 
-function forbiddenRequestKey(value: unknown): string | null {
-  if (Array.isArray(value)) return value.map(forbiddenRequestKey).find((key): key is string => Boolean(key)) ?? null;
-  if (!value || typeof value !== "object") return null;
-  for (const [key, child] of Object.entries(value)) {
-    if (/(^|_)(gold|workspace_id|copied_workspace_id|copy_workspace_id)($|_)/i.test(key)) return key;
-    const nested = forbiddenRequestKey(child);
-    if (nested) return nested;
+/** Use the active module's input schema as the per-call public allowlist. */
+async function validatedCallInput(call: { call_kind: typeof CALL_KINDS[number]; input: Record<string, unknown> }) {
+  const module = await activeAccuracyModule(call.call_kind);
+  const parsed = module.inputSchema.safeParse(call.input);
+  if (!parsed.success || !isDeepStrictEqual(parsed.data, call.input)) {
+    throw new InvalidExperimentRequestError("Invalid single-call input.");
   }
-  return null;
+  return parsed.data as Record<string, unknown>;
 }
 
 /** Export records for an original source workspace. */
@@ -88,18 +97,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
     }
     mustFindForPack(body.pack_id);
-    const forbiddenKey = forbiddenRequestKey({ condition: body.condition, input: body.call?.input });
-    if (forbiddenKey) {
-      return NextResponse.json({ error: `Request may not contain ${forbiddenKey}` }, { status: 400 });
-    }
+    const call = body.call
+      ? { ...body.call, input: await validatedCallInput(body.call) }
+      : undefined;
     const sources = await Promise.all(body.source_file_ids.map((source_file_id) => getSourceFile(body.source_workspace_id, source_file_id)));
     if (sources.some((source) => !source)) {
       return NextResponse.json({ error: "Every source_file_id must belong to the source workspace" }, { status: 400 });
     }
-    const experiment = await runAccuracyExperiment({ ...body, actor: session.actor });
+    const experiment = await runAccuracyExperiment({ ...body, call, actor: session.actor });
     return NextResponse.json({ experiment }, { status: 201 });
   } catch (error) {
-    if (error instanceof z.ZodError || (error instanceof Error && error.message.startsWith("Unknown reference pack"))) {
+    if (error instanceof z.ZodError || error instanceof InvalidExperimentRequestError || (error instanceof Error && error.message.startsWith("Unknown reference pack"))) {
       return NextResponse.json({ error: error instanceof z.ZodError ? "Invalid experiment request" : "Unknown reference pack" }, { status: 400 });
     }
     console.error("Could not start isolated accuracy experiment", error);

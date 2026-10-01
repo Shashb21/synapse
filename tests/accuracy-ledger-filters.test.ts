@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+const { sessionContext } = vi.hoisted(() => ({ sessionContext: vi.fn() }));
+vi.mock("@/modules/auth/session", () => ({ sessionContext }));
 import {
   claimChapterSlug,
   claimMatchesLedgerFilters,
@@ -158,6 +160,12 @@ describe("workspace plan_label (IEP vs IEGP)", () => {
   });
 
   it("persists plan_label on create and returns it from the workspaces API", async () => {
+    sessionContext.mockResolvedValue({
+      signed_in: true,
+      session: { subject: "plan-label-creator" },
+      actor: { name: "Plan label creator", function: "medical_affairs" },
+      role: "contributor",
+    });
     await ensureAccuracySchema();
     const org_id = await createOrganization(`org-plan-${Date.now()}`);
     const workspace_id = await createWorkspace({

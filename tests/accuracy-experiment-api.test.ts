@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const {
   sessionContext,
@@ -9,6 +10,7 @@ const {
   getExperimentForSourceWorkspace,
   exportExperimentsForSourceWorkspace,
   mustFindForPack,
+  activeAccuracyModule,
 } = vi.hoisted(() => ({
   sessionContext: vi.fn(),
   runAccuracyExperiment: vi.fn(),
@@ -18,6 +20,7 @@ const {
   getExperimentForSourceWorkspace: vi.fn(),
   exportExperimentsForSourceWorkspace: vi.fn(),
   mustFindForPack: vi.fn(),
+  activeAccuracyModule: vi.fn(),
 }));
 
 vi.mock("@/modules/auth/session", () => ({ sessionContext }));
@@ -29,6 +32,7 @@ vi.mock("@/accuracy/experiments/records", () => ({
   exportExperimentsForSourceWorkspace,
 }));
 vi.mock("@/accuracy/eval/reference-gold", () => ({ mustFindForPack }));
+vi.mock("@/accuracy/kernel/registry", () => ({ activeAccuracyModule }));
 vi.mock("@/accuracy", () => ({ registerAccuracyStack: vi.fn() }));
 
 import { GET as getExperiments, POST as postExperiment } from "@/app/api/accuracy/experiments/route";
@@ -58,6 +62,11 @@ beforeEach(() => {
   getAuthorizedWorkspace.mockResolvedValue({ id: "ws-source", org_id: "org-source" });
   getSourceFile.mockResolvedValue({ id: "src-source", workspace_id: "ws-source" });
   mustFindForPack.mockReturnValue({ id: "beone-bgb-58067-prmt5i" });
+  activeAccuracyModule.mockResolvedValue({ inputSchema: z.object({
+    workspace_id: z.string(),
+    source_file_id: z.string().optional(),
+    block_ids: z.array(z.string()).optional(),
+  }).strict() });
 });
 
 describe("accuracy experiment API", () => {
@@ -105,14 +114,14 @@ describe("accuracy experiment API", () => {
     runAccuracyExperiment.mockResolvedValue({ id: "experiment-1", workspace_id: "ws-copy", source_workspace_id: "ws-source", calls: [], evaluations: [] });
     const response = await post({
       mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i",
-      condition: { temperature: 0 }, call: { call_kind: "need_extract", input: { source_file_id: "src-source" } },
+      condition: { temperature: 0 }, call: { call_kind: "need_extract", input: { workspace_id: "ws-source", source_file_id: "src-source" } },
       actor: { name: "Client supplied", function: "viewer" }, workspace_id: "ws-copy", gold: [{ answer: "secret" }],
     });
     expect(response.status).toBe(400);
 
     const accepted = await post({
       mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i",
-      condition: { temperature: 0 }, call: { call_kind: "need_extract", input: { source_file_id: "src-source" } },
+      condition: { temperature: 0 }, call: { call_kind: "need_extract", input: { workspace_id: "ws-source", source_file_id: "src-source" } },
     });
     expect(accepted.status).toBe(201);
     expect(runAccuracyExperiment).toHaveBeenCalledWith(expect.objectContaining({
@@ -121,14 +130,16 @@ describe("accuracy experiment API", () => {
     expect((await accepted.json()).experiment.id).toBe("experiment-1");
   });
 
-  it("rejects gold and copied-workspace values at every nested request level", async () => {
+  it("rejects unsupported gold and copied-workspace values while allowing source workspace_id", async () => {
     for (const body of [
-      { mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: { nested: { gold: [{ answer: "secret" }] } } },
-      { mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { nested: { copied_workspace_id: "ws-copy" } } } },
+      { mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: { goldRows: [{ answer: "secret" }] } },
+      { mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { workspace_id: "ws-source", copiedWorkspaceId: "ws-copy" } } },
     ]) {
       expect((await post(body)).status).toBe(400);
     }
     expect(runAccuracyExperiment).not.toHaveBeenCalled();
+    const valid = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {}, call: { call_kind: "need_extract", input: { workspace_id: "ws-source" } } });
+    expect(valid.status).toBe(201);
   });
 
   it("does not expose unexpected runner failures as invalid request errors", async () => {

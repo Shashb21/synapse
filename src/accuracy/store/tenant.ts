@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Role } from "@/modules/auth/roles";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { WORKSHOP_SNAPSHOT_DDL } from "./workshop-store";
@@ -102,6 +102,22 @@ export async function getWorkspace(workspace_id: string) {
 export async function grantOrganizationAccess(args: { subject: string; org_id: string }) {
   await ensureAccuracySchema();
   await accuracyDb().insert(t.accuracyOrganizationGrants).values(args).onConflictDoNothing();
+}
+
+/** Create an organization and its first workspace, then grant its authenticated creator access atomically. */
+export async function createWorkspaceForSubject(args: {
+  subject: string;
+  org_name: string;
+  name: string;
+  slug: string;
+  plan_label?: PlanLabel | string | null;
+}) {
+  return withAccuracyTransaction(async () => {
+    const org_id = await createOrganization(args.org_name);
+    const workspace_id = await createWorkspace({ org_id, name: args.name, slug: args.slug, plan_label: args.plan_label });
+    await grantOrganizationAccess({ subject: args.subject, org_id });
+    return { org_id, workspace_id };
+  });
 }
 
 /** Resolve a workspace only when the caller has a server-side organization grant. Operators may inspect all organizations. */
@@ -268,6 +284,9 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
     .limit(1);
   let org_deleted = false;
   if (remaining.length === 0) {
+    await accuracyDb()
+      .delete(t.accuracyOrganizationGrants)
+      .where(eq(t.accuracyOrganizationGrants.org_id, workspace.org_id));
     await accuracyDb()
       .delete(t.accuracyOrganizations)
       .where(eq(t.accuracyOrganizations.id, workspace.org_id));
