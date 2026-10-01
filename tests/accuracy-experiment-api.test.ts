@@ -132,10 +132,13 @@ describe("accuracy experiment API", () => {
   });
 
   it("does not expose unexpected runner failures as invalid request errors", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     runAccuracyExperiment.mockRejectedValue(new Error("database password leaked"));
     const response = await post({ mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"], pack_id: "beone-bgb-58067-prmt5i", condition: {} });
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Could not start experiment" });
+    expect(log).toHaveBeenCalledWith("Could not start isolated accuracy experiment", expect.any(Error));
+    log.mockRestore();
   });
 
   it("reads a single experiment only through its source workspace", async () => {
