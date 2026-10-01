@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { withAccuracyTransaction, accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
@@ -28,7 +28,8 @@ export type ExperimentCopyErrorCode =
   | "unknown_source"
   | "cross_workspace_source"
   | "gold_baseline"
-  | "unresolved_reference";
+  | "unresolved_reference"
+  | "nested_transaction";
 
 /** A typed validation error raised before an experiment copy can be committed. */
 export class ExperimentCopyError extends Error {
@@ -138,13 +139,16 @@ export async function copyExperimentWorkspace(
   if (args.source_file_ids.length === 0 || new Set(args.source_file_ids).size !== args.source_file_ids.length) {
     throw new ExperimentCopyError("invalid_source_set", "At least one distinct source file is required.");
   }
+  if (accuracyTransactionActive()) {
+    throw new ExperimentCopyError(
+      "nested_transaction",
+      "copyExperimentWorkspace requires a top-level accuracy transaction for repeatable-read isolation.",
+    );
+  }
 
   await ensureAccuracySchema();
   return withAccuracyTransaction(async () => {
     const db = accuracyDb();
-    // Ordinary claim/source/coverage writers do not all take the advisory lock.
-    // Repeatable-read fixes the transaction snapshot even when one commits between reads.
-    await db.execute(sql`set transaction isolation level repeatable read`);
     // Match extraction-batch and omission-review mutations so the baseline is read
     // after all earlier workspace writes and no coordinated write can interleave.
     await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${args.source_workspace_id}`}, 0))`);
@@ -294,5 +298,5 @@ export async function copyExperimentWorkspace(
       coverage_joins: copiedCoverage,
     });
     return { workspace_id, org_id, source_id_map, block_id_map, claim_id_map, source_fingerprint, baseline_fingerprint, baseline_snapshot };
-  });
+  }, { isolationLevel: "repeatable read" });
 }

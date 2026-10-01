@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterEach, describe, expect, it } from "vitest";
-import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import {
   createOrganization,
@@ -251,36 +251,31 @@ describe("copyExperimentWorkspace", () => {
     }
   });
 
-  it("captures one complete version when an ordinary writer commits during the copy", async () => {
+  it("rejects a nested copy after an outer transaction has already issued a query", async () => {
     const source = await fixture();
-    const nextStatement = "The concurrently committed proposed need requires evidence.";
-    const nextRationale = "The concurrently committed tactic addresses the need.";
-    const writer = postgres(process.env.DATABASE_URL!, { max: 1 });
-    let release: () => void = () => undefined;
-    let announceWrite!: () => void;
-    const writeStarted = new Promise<void>((resolve) => { announceWrite = resolve; });
-    const holdWrite = new Promise<void>((resolve) => { release = resolve; });
-    const writerTransaction = writer.begin(async (transaction) => {
-      await transaction`update accuracy_claims set statement = ${nextStatement} where id = ${source.claim.id}`;
-      await transaction`update accuracy_coverage_joins set rationale = ${nextRationale} where id = ${source.coverage.id}`;
-      announceWrite();
-      await holdWrite;
-    });
+    await expect(withAccuracyTransaction(async () => {
+      await accuracyDb().select({ id: t.accuracyWorkspaces.id }).from(t.accuracyWorkspaces)
+        .where(eq(t.accuracyWorkspaces.id, source.workspace_id));
+      return copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    })).rejects.toMatchObject({ name: "ExperimentCopyError", code: "nested_transaction" });
+    expect(await accuracyDb().select().from(t.accuracyWorkspaces).where(eq(t.accuracyWorkspaces.org_id, source.org_id))).toHaveLength(1);
+  });
 
+  it("keeps later reads on the same repeatable-read snapshot after an ordinary writer commits", async () => {
+    const source = await fixture();
+    const nextStatement = "The independently committed statement is visible only to later snapshots.";
+    const writer = postgres(process.env.DATABASE_URL!, { max: 1 });
     try {
-      await writeStarted;
-      const copyPromise = copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
-      setTimeout(release, 20);
-      const copy = await copyPromise;
-      createdWorkspaces.push(copy.workspace_id);
-      await writerTransaction;
-      const copiedClaim = (await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, copy.claim_id_map[source.claim.id])))[0];
-      const copiedSnapshot = copy.baseline_snapshot as { coverage_joins: Array<{ rationale: string | null }> };
-      const copiedRationale = copiedSnapshot.coverage_joins[0]?.rationale;
-      expect([[source.claim.statement, source.coverage.rationale], [nextStatement, nextRationale]]).toContainEqual([copiedClaim?.statement, copiedRationale]);
+      const observed = await withAccuracyTransaction(async () => {
+        const before = (await accuracyDb().select({ statement: t.accuracyClaims.statement })
+          .from(t.accuracyClaims).where(eq(t.accuracyClaims.id, source.claim.id)))[0]?.statement;
+        await writer`update accuracy_claims set statement = ${nextStatement} where id = ${source.claim.id}`;
+        const after = (await accuracyDb().select({ statement: t.accuracyClaims.statement })
+          .from(t.accuracyClaims).where(eq(t.accuracyClaims.id, source.claim.id)))[0]?.statement;
+        return { before, after };
+      }, { isolationLevel: "repeatable read" });
+      expect(observed).toEqual({ before: source.claim.statement, after: source.claim.statement });
     } finally {
-      release();
-      await writerTransaction;
       await writer.end({ timeout: 5 });
     }
   });

@@ -51,3 +51,12 @@ Follow-up verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` 
 - Added an integration test with an uncoordinated writer that updates claims and coverage in one transaction while the copy runs; the copied claim and coverage rationale must come from the same complete version.
 
 Round 2 verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 10 tests passed; typecheck, focused ESLint, and `git diff --check` passed.
+
+## Review follow-up round 3
+
+- Verified that `withAccuracyTransaction` joins active transactions, while Drizzle's top-level Postgres transaction accepts `isolationLevel: "repeatable read"`.
+- Extended `withAccuracyTransaction` with transaction configuration support and a typed nested-isolation error.
+- `copyExperimentWorkspace` now requests repeatable-read at transaction creation and rejects invocation from an already-active accuracy transaction before schema or baseline work, because a joined transaction cannot safely change its isolation after prior queries.
+- Replaced the timer-based copy race with a deterministic database test: read inside the configured transaction, commit an ordinary writer, read again, and assert the original snapshot remains visible.
+
+Round 3 verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 11 tests passed; typecheck, focused ESLint, and `git diff --check` passed.
