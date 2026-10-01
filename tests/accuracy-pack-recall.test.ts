@@ -6,7 +6,7 @@ import {
   scorePackRecall,
 } from "@/accuracy/eval/reference-gold";
 import { sourceRecallCandidatesFromTactics } from "@/accuracy/eval/pack-recall";
-import { scoreGapIdRecall } from "@/accuracy/modules/need-extract/module";
+import { scoreGapIdRecall } from "@/accuracy/eval/gap-id-recall";
 
 describe("pack recall scoring", () => {
   it("scores empty candidates as zero recall when targets exist", () => {
@@ -57,10 +57,10 @@ describe("pack recall scoring", () => {
     expect(result.recall?.overall_recall).toBe(1);
   });
 
-  it("scoreGapIdRecall stays compatible with need_extract", () => {
+  it("scoreGapIdRecall accepts caller-supplied targets without loading gold", () => {
     const targets = mustFindForPack("beone-bgb-58067-prmt5i").gap_ids;
     const all = scoreGapIdRecall({
-      packId: "beone-bgb-58067-prmt5i",
+      targets,
       extractedExternalIds: targets,
     });
     expect(all.recall).toBe(1);

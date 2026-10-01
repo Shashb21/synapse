@@ -7,7 +7,6 @@ import { provenanceSpanSchema } from "../../store/quote-validator";
 import { newId } from "@/modules/kernel/ids";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import { NEED_PROPOSER_SYSTEM, needProposerUser } from "./prompts";
-import { scorePackRecall } from "../../eval/reference-gold";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
 import { claimMetadata, listActiveSourceClaims } from "../../store/claim-store";
 import { inspectSnapshotCompleteness, type SnapshotItem } from "../completeness-audit/snapshot-inspector";
@@ -134,15 +133,6 @@ async function proposeNeeds(
     return prior;
   }
   return normalizeDraft(raw, input.source_file_id);
-}
-
-/** Recall of extracted external_ids against reference pack must_find gap IDs. */
-export function scoreGapIdRecall(args: {
-  packId: string;
-  extractedExternalIds: (string | null | undefined)[];
-}): { found: string[]; missing: string[]; recall: number } {
-  const slice = scorePackRecall(args.packId, { gap_ids: args.extractedExternalIds }).gap_ids;
-  return { found: slice.found, missing: slice.missing, recall: slice.recall };
 }
 
 export const needExtractModule = agenticModule({

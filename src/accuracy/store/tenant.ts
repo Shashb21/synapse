@@ -9,6 +9,9 @@ import {
 } from "@/accuracy/domain/plan-label";
 
 export type WorkspaceDeleteCounts = {
+  experiment_evaluations: number;
+  experiment_calls: number;
+  experiments: number;
   omission_actions: number;
   resume_journals: number;
   extraction_batches: number;
@@ -148,6 +151,9 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   const db = accuracyDb();
 
   const deleted: WorkspaceDeleteCounts = {
+    experiment_evaluations: await deletedCount(await db.delete(t.accuracyExperimentEvaluations).where(eq(t.accuracyExperimentEvaluations.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentEvaluations.id })),
+    experiment_calls: await deletedCount(await db.delete(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentCalls.id })),
+    experiments: await deletedCount(await db.delete(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, workspace_id)).returning({ id: t.accuracyExperiments.id })),
     omission_actions: await deletedCount(
       await db.delete(t.accuracyOmissionActions)
         .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))

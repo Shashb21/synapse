@@ -18,8 +18,8 @@ import {
   needExtractModule,
   needExtractOutputSchema,
   needGapSchema,
-  scoreGapIdRecall,
 } from "@/accuracy/modules/need-extract/module";
+import { scoreGapIdRecall } from "@/accuracy/eval/gap-id-recall";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 
 function stubCtx(): AccuracyModuleContext {
@@ -280,17 +280,17 @@ describe("need extract module", () => {
     expect(bad.success).toBe(false);
   });
 
-  it("scores recall of extracted external_ids against mustFindForPack gap_ids", () => {
+  it("scores recall of extracted external_ids against supplied targets", () => {
     const scored = scoreGapIdRecall({
-      packId: "beone-bgb-58067-prmt5i",
+      targets: ["NSCLC_CE_01", "NSCLC_CE_04", "NSCLC_OTHER"],
       extractedExternalIds: ["NSCLC_CE_01", "NSCLC_CE_04", "NOT_A_GAP", null, ""],
     });
     expect(scored.found).toEqual(["NSCLC_CE_01", "NSCLC_CE_04"]);
-    expect(scored.missing).toHaveLength(41);
-    expect(scored.recall).toBeCloseTo(2 / 43, 5);
+    expect(scored.missing).toEqual(["NSCLC_OTHER"]);
+    expect(scored.recall).toBeCloseTo(2 / 3, 5);
 
     const emptyPack = scoreGapIdRecall({
-      packId: "beone-tislelizumab-iegp",
+      targets: [],
       extractedExternalIds: ["NSCLC_CE_01"],
     });
     expect(emptyPack.found).toEqual([]);

@@ -236,6 +236,27 @@ export const accuracyWorkshopSnapshots = pgTable("accuracy_workshop_snapshots", 
   saved_at: text("saved_at").notNull(),
 });
 
+/** One isolated, repeatable accuracy experiment; immutable apart from terminal status. */
+export const accuracyExperiments = pgTable("accuracy_experiments", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(), org_id: text("org_id").notNull(),
+  source_workspace_id: text("source_workspace_id").notNull(), pack_id: text("pack_id").notNull(), pack_fingerprint: text("pack_fingerprint").notNull(),
+  evaluator_version: text("evaluator_version").notNull(), source_fingerprint: text("source_fingerprint").notNull(), baseline_fingerprint: text("baseline_fingerprint").notNull(),
+  baseline_snapshot: jsonb("baseline_snapshot").notNull(), condition: jsonb("condition").notNull(), status: text("status").notNull(), created_at: text("created_at").notNull(), finished_at: text("finished_at"),
+}, (table) => ({ workspace: index("accuracy_experiments_workspace_idx").on(table.workspace_id, table.created_at) }));
+
+/** Append-only snapshots from calls belonging to an experiment. */
+export const accuracyExperimentCalls = pgTable("accuracy_experiment_calls", {
+  id: text("id").primaryKey(), experiment_id: text("experiment_id").notNull(), workspace_id: text("workspace_id").notNull(), call_id: text("call_id").notNull(),
+  call_kind: text("call_kind").notNull(), version_index: integer("version_index").notNull(), input: jsonb("input").notNull(), output: jsonb("output"), output_error: text("output_error"),
+  module_version: text("module_version").notNull(), route: jsonb("route").notNull(), recorded_at: text("recorded_at").notNull(),
+}, (table) => ({ version: unique("accuracy_experiment_calls_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
+
+/** Append-only evaluator result corresponding to a persisted experiment call version. */
+export const accuracyExperimentEvaluations = pgTable("accuracy_experiment_evaluations", {
+  id: text("id").primaryKey(), experiment_id: text("experiment_id").notNull(), workspace_id: text("workspace_id").notNull(), call_id: text("call_id").notNull(),
+  version_index: integer("version_index").notNull(), evaluator_version: text("evaluator_version").notNull(), evaluation: jsonb("evaluation").notNull(), recorded_at: text("recorded_at").notNull(),
+}, (table) => ({ version: unique("accuracy_experiment_evaluations_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
+
 export const ACCURACY_DDL = [
   `CREATE TABLE IF NOT EXISTS accuracy_organizations (
     id text PRIMARY KEY,
@@ -412,6 +433,22 @@ export const ACCURACY_DDL = [
     saved_by text NOT NULL,
     saved_function text NOT NULL,
     saved_at text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_experiments (
+    id text PRIMARY KEY, workspace_id text NOT NULL, org_id text NOT NULL, source_workspace_id text NOT NULL,
+    pack_id text NOT NULL, pack_fingerprint text NOT NULL, evaluator_version text NOT NULL, source_fingerprint text NOT NULL,
+    baseline_fingerprint text NOT NULL, baseline_snapshot jsonb NOT NULL, condition jsonb NOT NULL, status text NOT NULL,
+    created_at text NOT NULL, finished_at text
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_experiments_workspace_idx ON accuracy_experiments (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_experiment_calls (
+    id text PRIMARY KEY, experiment_id text NOT NULL, workspace_id text NOT NULL, call_id text NOT NULL, call_kind text NOT NULL,
+    version_index integer NOT NULL, input jsonb NOT NULL, output jsonb, output_error text, module_version text NOT NULL,
+    route jsonb NOT NULL, recorded_at text NOT NULL, UNIQUE (experiment_id, call_id, version_index)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_experiment_evaluations (
+    id text PRIMARY KEY, experiment_id text NOT NULL, workspace_id text NOT NULL, call_id text NOT NULL, version_index integer NOT NULL,
+    evaluator_version text NOT NULL, evaluation jsonb NOT NULL, recorded_at text NOT NULL, UNIQUE (experiment_id, call_id, version_index)
   )`,
 ];
 
