@@ -11,7 +11,7 @@ const transactionContext = new AsyncLocalStorage<AccuracyTransaction>();
 
 /** Typed failure for a transaction option that cannot be applied to a joined transaction. */
 export class AccuracyTransactionError extends Error {
-  constructor(readonly code: "nested_isolation_unsupported", message: string) {
+  constructor(readonly code: "nested_config_unsupported", message: string) {
     super(message);
     this.name = "AccuracyTransactionError";
   }
@@ -34,10 +34,10 @@ export async function withAccuracyTransaction<T>(
 ): Promise<T> {
   await ensureAccuracySchema();
   if (transactionContext.getStore()) {
-    if (config?.isolationLevel) {
+    if (config && Object.keys(config).length > 0) {
       throw new AccuracyTransactionError(
-        "nested_isolation_unsupported",
-        `Cannot apply ${config.isolationLevel} to an already active accuracy transaction.`,
+        "nested_config_unsupported",
+        "Cannot apply transaction configuration to an already active accuracy transaction.",
       );
     }
     return operation();

@@ -60,3 +60,36 @@ Round 2 verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` �
 - Replaced the timer-based copy race with a deterministic database test: read inside the configured transaction, commit an ordinary writer, read again, and assert the original snapshot remains visible.
 
 Round 3 verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 11 tests passed; typecheck, focused ESLint, and `git diff --check` passed.
+
+## Re-review round 3 follow-up
+
+### Design decision
+
+- Kept Drizzle's complete PostgreSQL transaction configuration type and reject every supplied configuration field when a nested call joins an active transaction. This extends the existing transaction wrapper rather than adding a second API. Narrowing the type to isolation only was rejected because it would make the wrapper diverge from Drizzle's top-level transaction capability and leave future configuration changes implicit.
+- An explicitly supplied configuration with `undefined` fields is also rejected because it is still a caller request at a boundary where the wrapper cannot safely apply transaction settings. The cost is that callers must omit configuration entirely for a joined transaction and set it on the outer transaction instead.
+
+### Behaviours completed
+
+- Nested `accessMode: "read only"` and `deferrable: true` transaction requests now fail with `AccuracyTransactionError("nested_config_unsupported")` before the nested operation runs.
+- Existing nested calls without configuration continue to join the active transaction.
+
+### Files changed
+
+- `src/accuracy/store/db.ts`
+- `tests/accuracy-experiment-copy.test.ts`
+
+### Tests added
+
+- Parameterized integration coverage for rejected nested access-mode and deferrability configurations, including proof that the requested nested operation does not execute.
+
+### Verification performed
+
+- Red: `npm test -- tests/accuracy-experiment-copy.test.ts` — the two new cases resolved instead of rejecting before the implementation change.
+- Green: `npm test -- tests/accuracy-experiment-copy.test.ts` — 13 tests passed with approved local PostgreSQL access.
+- `npm run typecheck` — passed.
+- `npm test` — passed (exit code 0).
+- `git diff --check` — passed.
+
+### Unresolved risks
+
+- The full Drizzle configuration remains accepted for top-level transactions. Any new configuration field added upstream will be rejected in joined calls by the non-empty-config guard, which is safe but requires an explicit design decision if nested support is later desired.

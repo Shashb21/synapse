@@ -261,6 +261,22 @@ describe("copyExperimentWorkspace", () => {
     expect(await accuracyDb().select().from(t.accuracyWorkspaces).where(eq(t.accuracyWorkspaces.org_id, source.org_id))).toHaveLength(1);
   });
 
+  it.each([
+    ["access mode", { accessMode: "read only" }],
+    ["deferrability", { deferrable: true }],
+  ] as const)("rejects nested transaction %s configuration before executing it", async (_label, config) => {
+    let nestedOperationRan = false;
+
+    await expect(withAccuracyTransaction(async () => withAccuracyTransaction(async () => {
+      nestedOperationRan = true;
+    }, config))).rejects.toMatchObject({
+      name: "AccuracyTransactionError",
+      code: "nested_config_unsupported",
+    });
+
+    expect(nestedOperationRan).toBe(false);
+  });
+
   it("keeps later reads on the same repeatable-read snapshot after an ordinary writer commits", async () => {
     const source = await fixture();
     const nextStatement = "The independently committed statement is visible only to later snapshots.";
