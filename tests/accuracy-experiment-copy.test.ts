@@ -251,6 +251,40 @@ describe("copyExperimentWorkspace", () => {
     }
   });
 
+  it("captures one complete version when an ordinary writer commits during the copy", async () => {
+    const source = await fixture();
+    const nextStatement = "The concurrently committed proposed need requires evidence.";
+    const nextRationale = "The concurrently committed tactic addresses the need.";
+    const writer = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let release: () => void = () => undefined;
+    let announceWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => { announceWrite = resolve; });
+    const holdWrite = new Promise<void>((resolve) => { release = resolve; });
+    const writerTransaction = writer.begin(async (transaction) => {
+      await transaction`update accuracy_claims set statement = ${nextStatement} where id = ${source.claim.id}`;
+      await transaction`update accuracy_coverage_joins set rationale = ${nextRationale} where id = ${source.coverage.id}`;
+      announceWrite();
+      await holdWrite;
+    });
+
+    try {
+      await writeStarted;
+      const copyPromise = copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+      setTimeout(release, 20);
+      const copy = await copyPromise;
+      createdWorkspaces.push(copy.workspace_id);
+      await writerTransaction;
+      const copiedClaim = (await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, copy.claim_id_map[source.claim.id])))[0];
+      const copiedSnapshot = copy.baseline_snapshot as { coverage_joins: Array<{ rationale: string | null }> };
+      const copiedRationale = copiedSnapshot.coverage_joins[0]?.rationale;
+      expect([[source.claim.statement, source.coverage.rationale], [nextStatement, nextRationale]]).toContainEqual([copiedClaim?.statement, copiedRationale]);
+    } finally {
+      release();
+      await writerTransaction;
+      await writer.end({ timeout: 5 });
+    }
+  });
+
   it.each([
     ["unknown source", "missing-source"],
     ["cross-workspace source", "cross-workspace"],

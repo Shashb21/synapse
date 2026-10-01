@@ -43,3 +43,11 @@ No schema or tenant changes were required for Task 1; experiment persistence tab
 - Added reproducibility, material-change, and lock coordination tests.
 
 Follow-up verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 9 tests passed; typecheck, focused ESLint, and `git diff --check` passed.
+
+## Review follow-up round 2
+
+- Verified Drizzle's `postgres-js` session supports PostgreSQL transaction isolation levels, including `repeatable read`.
+- Set `REPEATABLE READ` as the first statement inside the copy transaction, before the advisory lock and all baseline reads. This gives the clone one database snapshot even when an ordinary writer does not use the advisory lock.
+- Added an integration test with an uncoordinated writer that updates claims and coverage in one transaction while the copy runs; the copied claim and coverage rationale must come from the same complete version.
+
+Round 2 verification: `npx vitest run tests/accuracy-experiment-copy.test.ts` — 10 tests passed; typecheck, focused ESLint, and `git diff --check` passed.

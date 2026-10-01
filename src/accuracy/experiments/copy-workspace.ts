@@ -142,6 +142,9 @@ export async function copyExperimentWorkspace(
   await ensureAccuracySchema();
   return withAccuracyTransaction(async () => {
     const db = accuracyDb();
+    // Ordinary claim/source/coverage writers do not all take the advisory lock.
+    // Repeatable-read fixes the transaction snapshot even when one commits between reads.
+    await db.execute(sql`set transaction isolation level repeatable read`);
     // Match extraction-batch and omission-review mutations so the baseline is read
     // after all earlier workspace writes and no coordinated write can interleave.
     await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${args.source_workspace_id}`}, 0))`);
