@@ -1,9 +1,7 @@
 import { anthropicModel, hasAnthropicKey } from "@/lib/config";
+import { anthropicAcceptsTemperature, anthropicText } from "@/modules/llm/provider";
 
-type AnthropicMessage = {
-  content?: { type: string; text?: string }[];
-  error?: { message?: string };
-};
+type AnthropicMessage = Record<string, unknown> & { error?: { message?: string } };
 
 export function extractJsonObject(raw: string): unknown {
   const trimmed = raw.trim();
@@ -35,7 +33,8 @@ export async function completeJson(args: {
     body: JSON.stringify({
       model: anthropicModel(),
       max_tokens: args.maxTokens ?? 8192,
-      temperature: 0,
+      // Claude 5 models reject sampling parameters (KAN-65).
+      ...(anthropicAcceptsTemperature(anthropicModel()) ? { temperature: 0 } : {}),
       system: args.system,
       messages: [{ role: "user", content: args.user }],
     }),
@@ -44,9 +43,5 @@ export async function completeJson(args: {
   if (!res.ok) {
     throw new Error(body.error?.message ?? `Anthropic HTTP ${res.status}`);
   }
-  const text = (body.content ?? [])
-    .filter((c) => c.type === "text")
-    .map((c) => c.text ?? "")
-    .join("\n");
-  return extractJsonObject(text);
+  return extractJsonObject(anthropicText(body));
 }

@@ -310,3 +310,25 @@ describe("provider OAuth is gone", () => {
     }
   });
 });
+
+describe("KAN-65 Claude 5 request shape", () => {
+  it("sends temperature only to Claude models that still accept it", async () => {
+    const { anthropicAcceptsTemperature } = await import("@/modules/llm/provider");
+    for (const model of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-opus-4-8", "claude-opus-4-7"]) {
+      expect(anthropicAcceptsTemperature(model)).toBe(false);
+    }
+    for (const model of ["claude-haiku-4-5-20251001", "claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5"]) {
+      expect(anthropicAcceptsTemperature(model)).toBe(true);
+    }
+  });
+
+  it("reads only text blocks, and turns a refusal or an empty max_tokens cut-off into an error", async () => {
+    const { anthropicText } = await import("@/modules/llm/provider");
+    expect(
+      anthropicText({ stop_reason: "end_turn", content: [{ type: "thinking", thinking: "" }, { type: "text", text: "{\"ok\":true}" }] }),
+    ).toBe("{\"ok\":true}");
+    expect(() => anthropicText({ stop_reason: "refusal", stop_details: { category: "cyber" }, content: [] })).toThrow(/declined.*cyber/);
+    expect(() => anthropicText({ stop_reason: "max_tokens", content: [{ type: "thinking", thinking: "" }] })).toThrow(/max_tokens/);
+    expect(anthropicText({ stop_reason: "max_tokens", content: [{ type: "text", text: "partial" }] })).toBe("partial");
+  });
+});

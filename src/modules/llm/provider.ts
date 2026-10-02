@@ -152,6 +152,36 @@ export const xaiGrok: LlmProvider = {
 };
 
 /** The locked one-click alternate: Anthropic Claude, reached with `x-api-key`. */
+/**
+ * Whether a Claude model still takes `temperature`. Claude 5 models and Opus
+ * 4.7/4.8 return a 400 for sampling parameters; older models accept them.
+ */
+export function anthropicAcceptsTemperature(model: string): boolean {
+  return !/^claude-(?:(?:opus|sonnet|fable|mythos)-5|opus-4-[78])(?:-|$)/.test(model);
+}
+
+/**
+ * The answer text of a Messages API response. Thinking blocks are skipped, and
+ * a refusal or a reply cut off by max_tokens is an error rather than an empty
+ * string, so a stage never parses a silent blank.
+ */
+export function anthropicText(payload: Record<string, unknown>): string {
+  const stop = payload.stop_reason;
+  if (stop === "refusal") {
+    const details = payload.stop_details as { category?: string | null } | null | undefined;
+    throw new Error(`Claude declined this request${details?.category ? ` (${details.category})` : ""}.`);
+  }
+  const content = Array.isArray(payload.content) ? (payload.content as Array<{ type?: string; text?: string }>) : [];
+  const text = content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("\n");
+  if (stop === "max_tokens" && !text.trim()) {
+    throw new Error("Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.");
+  }
+  return text;
+}
+
 export const anthropicClaude: LlmProvider = {
   id: "anthropic-claude",
   label: "Anthropic · Claude",
@@ -177,12 +207,13 @@ export const anthropicClaude: LlmProvider = {
       {
         model: request.model,
         max_tokens: request.max_tokens,
-        temperature: request.temperature,
+        // Claude 5 models (and Opus 4.7/4.8) reject sampling parameters with a 400.
+        ...(anthropicAcceptsTemperature(request.model) ? { temperature: request.temperature } : {}),
         system: request.system,
         messages: [{ role: "user", content: request.user }],
       },
     );
-    return textFromPayload(payload);
+    return anthropicText(payload);
   },
 };
 
