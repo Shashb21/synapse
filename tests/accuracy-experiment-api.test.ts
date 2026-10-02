@@ -32,7 +32,7 @@ vi.mock("@/accuracy/experiments/records", () => ({
   getExperimentForSourceWorkspace,
   exportExperimentsForSourceWorkspace,
 }));
-vi.mock("@/accuracy/eval/reference-gold", () => ({ mustFindForPack }));
+vi.mock("@/accuracy/eval/reference-gold", () => ({ getReferencePack: mustFindForPack }));
 vi.mock("@/accuracy/kernel/registry", () => ({ activeAccuracyModule }));
 vi.mock("@/accuracy", () => ({ registerAccuracyStack: vi.fn() }));
 
@@ -71,6 +71,32 @@ beforeEach(() => {
 });
 
 describe("accuracy experiment API", () => {
+  it.each([1, 2, 3])("accepts controlled extraction pass count %i without changing the response envelope", async critic_revision_passes => {
+    runAccuracyExperiment.mockResolvedValue({ id: "experiment-controlled" });
+    const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes },
+      call: { call_kind: "need_extract", input: { workspace_id: "ws-source" } } });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ experiment: { id: "experiment-controlled" } });
+    expect(runAccuracyExperiment).toHaveBeenCalledWith(expect.objectContaining({ condition: { critic_revision_passes } }));
+  });
+
+  it.each([0, 4, -1, 1.5, "2", null])("rejects invalid controlled pass count %j", async critic_revision_passes => {
+    const response = await post({ mode: "pipeline", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes } });
+    expect(response.status).toBe(400);
+    expect(runAccuracyExperiment).not.toHaveBeenCalled();
+  });
+
+  it("rejects controlled non-extraction calls before execution", async () => {
+    activeAccuracyModule.mockResolvedValue({ inputSchema: ideateInputSchema });
+    const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes: 1 },
+      call: { call_kind: "ideate", input: { workspace_id: "ws-source", gaps: [], existing_tactic_names: [] } } });
+    expect(response.status).toBe(400);
+    expect(runAccuracyExperiment).not.toHaveBeenCalled();
+  });
+
   it.each([
     { gaps: [] },
     { gaps: [{ id: "gap-source", status: "open", priority_band: "high" }] },
