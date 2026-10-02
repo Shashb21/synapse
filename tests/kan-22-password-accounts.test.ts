@@ -87,7 +87,7 @@ describe("KAN-22 password sign-in", () => {
     const account = await verifiedUser("ok", { role: "medical_affairs", is_admin: true, actor_function: "heor" });
     const res = await login(email("ok").toUpperCase(), PASSWORD);
     expect(res.status).toBe(200);
-    expect(res.body.redirect).toBe("/workspaces");
+    expect(res.body.redirect).toBe("/admin");
     expect(jar.values.get(SESSION_COOKIE)).toBeTruthy();
     const session = await currentSession();
     expect(session).toMatchObject({

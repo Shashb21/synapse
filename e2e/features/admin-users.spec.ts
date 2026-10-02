@@ -28,7 +28,8 @@ async function passwordSignIn(page: Page, email: string, password: string) {
     await expect(submit).toBeEnabled({ timeout: 1_000 });
   }).toPass({ timeout: 60_000 });
   await submit.click();
-  await expect(page).toHaveURL(/\/workspaces/, { timeout: 60_000 });
+  // KAN-58: staff land on the admin console.
+  await expect(page).toHaveURL(/\/admin(\?|$)/, { timeout: 60_000 });
 }
 
 test("create-admin, sign in, manage users; a created user signs in with the temporary password", async ({ page, browser }) => {

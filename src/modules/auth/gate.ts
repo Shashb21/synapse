@@ -13,6 +13,8 @@ export const PROXY_SESSION_COOKIE = "synapse_session";
 export const PROXY_WORKSPACE_COOKIE = "synapse_workspace";
 /** Set by the proxy on requests whose URL carries `?present=1` (Room presenting a page). */
 export const PRESENT_HEADER = "x-synapse-present";
+/** Set by the proxy on admin pages: the path and query, so a signed-out visit can sign in and come back. */
+export const ADMIN_PATH_HEADER = "x-synapse-admin-path";
 
 /**
  * Reachable by anyone: sign-in (including /api/auth/password/login), OAuth
@@ -35,6 +37,11 @@ function isAsset(pathname: string): boolean {
 }
 
 export type Gate = "open" | "session" | "workspace";
+
+/** An owner console page (not an API): signed out, it sends you to sign in rather than a 403. */
+export function isAdminPage(pathname: string): boolean {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
 
 /** What a path needs before it may be served. */
 export function gateFor(pathname: string): Gate {

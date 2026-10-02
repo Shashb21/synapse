@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { forbidden } from "next/navigation";
-import { cookies } from "next/headers";
+import { forbidden, redirect } from "next/navigation";
+import { cookies, headers } from "next/headers";
 import type { Actor } from "@/modules/kernel/contracts";
 import { isAdminAccount, PASSWORD_PROVIDER } from "./accounts";
+import { ADMIN_PATH_HEADER } from "./gate";
+import { safeNext } from "./redirect";
 import { sessionContext } from "./session";
 import { OWNER_ONLY_MESSAGE, ownerDecision, testOwnerBypass, type Role } from "./roles";
 
@@ -71,11 +73,28 @@ export async function ownerAccess(): Promise<OwnerAccess> {
   };
 }
 
-/** For admin pages: renders the Owner only (403) page unless the owner is signed in. */
+/** For admin pages: the owner passes; signed out goes to sign in; anyone else gets the Owner only (403) page. */
 export async function requireOwnerPage(): Promise<OwnerAccess> {
   const access = await ownerAccess();
-  if (!access.owner) forbidden();
-  return access;
+  const outcome = ownerPageOutcome(access);
+  if (outcome === "allow") return access;
+  if (outcome === "sign_in") redirect(ownerSignInPath((await headers()).get(ADMIN_PATH_HEADER)));
+  forbidden();
+}
+
+/**
+ * What an admin page does for a visitor (KAN-58): the owner sees it; someone
+ * signed out (or whose session ended) signs in and comes back; anyone else
+ * signed in gets the Owner only page.
+ */
+export function ownerPageOutcome(access: Pick<OwnerAccess, "owner" | "signed_in">): "allow" | "sign_in" | "forbidden" {
+  if (access.owner) return "allow";
+  return access.signed_in ? "forbidden" : "sign_in";
+}
+
+/** Where a signed-out visit to an admin page goes: /login, returning to that page. */
+export function ownerSignInPath(path: string | null | undefined): string {
+  return `/login?next=${encodeURIComponent(safeNext(path, "/admin"))}`;
 }
 
 export function ownerOnlyJson(): NextResponse {

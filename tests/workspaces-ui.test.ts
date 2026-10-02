@@ -22,7 +22,7 @@ import {
   POST as membersPost,
 } from "@/app/api/workspaces/[id]/members/route";
 import { gateFor } from "@/modules/auth/gate";
-import { afterSignIn, safeNext } from "@/modules/auth/redirect";
+import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
 import { loginOptions, signInDemo } from "@/modules/auth/session";
 import { WORKSPACE_COOKIE } from "@/modules/workspaces/context";
 import { currentWorkspace } from "@/modules/workspaces/session";
@@ -224,5 +224,31 @@ describe("proxy gate and redirects", () => {
     expect(safeNext("/workspaces?new=1")).toBe("/");
     expect(afterSignIn(null)).toBe("/workspaces");
     expect(afterSignIn("/gaps")).toBe("/workspaces?next=%2Fgaps");
+  });
+
+  it("sends an owner's sign-in to the admin console, or where they were headed (KAN-58)", () => {
+    expect(afterOwnerSignIn(null)).toBe("/admin");
+    expect(afterOwnerSignIn("")).toBe("/admin");
+    expect(afterOwnerSignIn("/admin/runs")).toBe("/admin/runs");
+    expect(afterOwnerSignIn("/gaps")).toBe("/gaps");
+    expect(afterOwnerSignIn("https://evil.example")).toBe("/admin");
+    expect(afterOwnerSignIn("/login")).toBe("/admin");
+  });
+});
+
+describe("KAN-58 signed-out admin pages", () => {
+  it("send you to sign in and back to the page you asked for", async () => {
+    const { ownerSignInPath } = await import("@/modules/auth/owner");
+    expect(ownerSignInPath("/admin/runs?x=1")).toBe("/login?next=%2Fadmin%2Fruns%3Fx%3D1");
+    expect(ownerSignInPath(null)).toBe("/login?next=%2Fadmin");
+    expect(ownerSignInPath("//evil.example")).toBe("/login?next=%2Fadmin");
+  });
+
+  it("only admin pages carry the return path, not admin APIs", async () => {
+    const { isAdminPage } = await import("@/modules/auth/gate");
+    expect(isAdminPage("/admin")).toBe(true);
+    expect(isAdminPage("/admin/users")).toBe(true);
+    expect(isAdminPage("/api/admin/users")).toBe(false);
+    expect(isAdminPage("/administrator")).toBe(false);
   });
 });

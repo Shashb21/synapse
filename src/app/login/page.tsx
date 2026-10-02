@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { LoginPanel } from "@/components/workspaces/login-panel";
-import { afterSignIn, safeNext } from "@/modules/auth/redirect";
+import { ownerAccess } from "@/modules/auth/owner";
+import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
 import { currentSession, LOGIN_ERROR_MESSAGES, loginOptions } from "@/modules/auth/session";
 
 /** A known `?error=` code gets its fixed message; any other text is shown as sent. */
@@ -25,7 +26,7 @@ export default async function LoginPage({
   const params = await searchParams;
   const next = safeNext(params.next, "");
   const session = await currentSession().catch(() => null);
-  if (session) redirect(afterSignIn(next));
+  if (session) redirect((await ownerAccess()).owner ? afterOwnerSignIn(next) : afterSignIn(next));
   const options = loginOptions();
 
   return (
