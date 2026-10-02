@@ -11,6 +11,7 @@ import { recordEvalRun } from "./evals";
 import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
 import { isTestStub } from "./llm";
+import { tagStageError } from "./stage-errors";
 import type { RunStep } from "./contracts";
 
 export const DEFAULT_WORKSPACE = "default";
@@ -234,6 +235,8 @@ export async function runStage<O = unknown>(args: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await closeRun({ recorder, status: "error", error: message, route });
+    // So the response can say which step failed (and offer to re-run mapping, KAN-68).
+    tagStageError(error, args.stage);
     throw error;
   }
 }

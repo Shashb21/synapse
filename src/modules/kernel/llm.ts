@@ -2,6 +2,7 @@ import type { ModuleContext } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import { AiDisabledError } from "./ai-switch";
+import { IncompleteAnswerError } from "./stage-errors";
 
 /**
  * Judgement belongs to a model. These helpers are what every stage uses to hold
@@ -66,10 +67,12 @@ export async function completeAll<T>(args: {
   const unanswered = args.ids.filter((id) => !done.has(id));
   if (unanswered.length > 0) {
     const describe = args.describe ?? ((id: string) => id);
-    throw new Error(
+    // The remedy is the owner's; customers get plain wording (see stage-errors.ts).
+    throw new IncompleteAnswerError(
       `The model did not return a complete ${args.what} for ${unanswered.map(describe).join(", ")} after ${COMPLETION_ATTEMPTS} attempts. Nothing was saved; ${
         args.remedy ?? "run the stage again or switch its route in /admin/control."
       }`,
+      args.what,
     );
   }
   return done;

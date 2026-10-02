@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { completeJson, requireAccuracyLlm } from "@/accuracy/kernel/routing";
 import { completeAll } from "@/modules/kernel/llm";
-import { NoRouteError } from "@/modules/llm/provider";
+import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import {
   claimsForSource,
   completenessVerdictSchema,
@@ -73,7 +73,8 @@ export async function judgeCompleteness(args: {
               purpose: `completeness_audit:critic:a${attempt}:b${index + 1}`,
             });
           } catch (error) {
-            if (error instanceof NoRouteError) throw error;
+            // A provider failure (no credit, rejected key) is not an invalid answer: asking again hides it (KAN-68).
+            if (error instanceof NoRouteError || error instanceof ProviderError) throw error;
             ctx.run.note("completeness:invalid-answer", {
               attempt,
               batch: index + 1,

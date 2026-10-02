@@ -1,4 +1,5 @@
 import { anthropicModel, hasAnthropicKey } from "@/lib/config";
+import { ProviderError, parseProviderErrorBody, redactSecrets } from "@/modules/llm/provider-error";
 
 type AnthropicMessage = {
   content?: { type: string; text?: string }[];
@@ -40,13 +41,25 @@ export async function completeJson(args: {
       messages: [{ role: "user", content: args.user }],
     }),
   });
-  const body = (await res.json()) as AnthropicMessage;
+  const text = await res.text();
   if (!res.ok) {
-    throw new Error(body.error?.message ?? `Anthropic HTTP ${res.status}`);
+    // Typed and classified like every provider call (KAN-68); the key is never in it.
+    const parsed = parseProviderErrorBody(text);
+    throw new ProviderError({
+      provider_id: "anthropic-claude",
+      provider_name: "Anthropic",
+      key_env: "ANTHROPIC_API_KEY",
+      status: res.status,
+      error_type: parsed.error_type,
+      provider_message: parsed.message
+        ? redactSecrets(parsed.message, [process.env.ANTHROPIC_API_KEY ?? ""]).slice(0, 300)
+        : null,
+    });
   }
-  const text = (body.content ?? [])
+  const body = JSON.parse(text) as AnthropicMessage;
+  const reply = (body.content ?? [])
     .filter((c) => c.type === "text")
     .map((c) => c.text ?? "")
     .join("\n");
-  return extractJsonObject(text);
+  return extractJsonObject(reply);
 }
