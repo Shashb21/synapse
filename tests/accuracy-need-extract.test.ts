@@ -25,7 +25,7 @@ function stubCtx(): AccuracyModuleContext {
       provider_id: "xai",
       provider_label: "Grok",
       model: "stub",
-      auth: "oauth",
+      auth: "api_key",
       connected: true,
       params: { temperature: 0, max_tokens: 8192 },
       fallbacks: [],
@@ -58,7 +58,7 @@ describe("need extract module", () => {
     expect(result.summary).toContain("SYNAPSE_TEST_STUB_LLM");
   });
 
-  it("calls the connected OAuth LLM when stub is off", async () => {
+  it("calls the live LLM when stub is off", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {

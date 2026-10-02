@@ -22,7 +22,7 @@ import {
 } from "@/modules/kernel/no-llm";
 
 const DETAIL =
-  "xAI · Grok: disconnected; Anthropic · Claude: disconnected; OpenAI · ChatGPT: disconnected. Connect an LLM provider in the owner control panel (/admin/control) — log in with Grok, Claude, or another provider — then retry.";
+  "xAI · Grok: no API key (set XAI_API_KEY in the server environment); Anthropic · Claude: no API key (set ANTHROPIC_API_KEY in the server environment); OpenAI · ChatGPT: no API key (set OPENAI_API_KEY in the server environment). Set the provider's API key in the server environment (.env.local or your host's settings), then retry.";
 
 afterEach(() => jar.values.clear());
 
@@ -38,7 +38,7 @@ describe("the no-LLM message is chosen by audience", () => {
 
   it("gives the owner the provider-by-provider detail and the /admin/control link", () => {
     const body = noLlmBody(DETAIL, true);
-    expect(body.error).toContain("xAI · Grok: disconnected");
+    expect(body.error).toContain("xAI · Grok: no API key (set XAI_API_KEY");
     expect(body.admin_href).toBe(OWNER_CONTROL_HREF);
     expect(OWNER_CONTROL_HREF).toBe("/admin/control");
   });
@@ -72,7 +72,7 @@ describe("API responses for a run with no connected model", () => {
     const response = await apiErrorResponse(new NoRouteError(DETAIL));
     const json = (await response.json()) as Record<string, unknown>;
     expect(json.code).toBe("no_llm");
-    expect(json.error).toContain("Anthropic · Claude: disconnected");
+    expect(json.error).toContain("Anthropic · Claude: no API key (set ANTHROPIC_API_KEY");
     expect(json.admin_href).toBe("/admin/control");
   });
 

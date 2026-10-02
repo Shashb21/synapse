@@ -229,10 +229,10 @@ describe("KAN-63: routes only for stages that call a model", () => {
     }
   });
 
-  it("connect_provider names an unknown provider as unknown", async () => {
+  it("connect_provider no longer exists: provider OAuth was removed (KAN-65)", async () => {
     const res = await control({ action: "connect_provider", provider_id: "nope-ai" });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Unknown provider nope-ai");
+    expect(res.body.error).toBe("Unknown action connect_provider");
   });
 
   it("the control panel's AI-off copy is for the owner, not the customer", () => {

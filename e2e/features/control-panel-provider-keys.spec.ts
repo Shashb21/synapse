@@ -6,21 +6,29 @@ import {
 } from "../support/synapse";
 
 const LOCKED_PROVIDERS = [
-  "xai-grok",
-  "anthropic-claude",
-  "openai",
-  "google-gemini",
-  "openrouter",
+  ["xai-grok", "XAI_API_KEY"],
+  ["anthropic-claude", "ANTHROPIC_API_KEY"],
+  ["openai", "OPENAI_API_KEY"],
+  ["google-gemini", "GEMINI_API_KEY"],
+  ["openrouter", "OPENROUTER_API_KEY"],
 ] as const;
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("Control panel OAuth routing", () => {
-  test("offers the five locked providers, each with its own OAuth login", async ({ page, request }) => {
+/*
+ * KAN-65: every provider authenticates with an API key from the server
+ * environment. The Playwright web server blanks every provider key, so each
+ * card reads "No key" here.
+ */
+test.describe("Control panel provider key status", () => {
+  test("shows the five locked providers, each with its key status and env var", async ({ page, request }) => {
     const state = await controlState(request);
-    for (const provider of LOCKED_PROVIDERS) {
+    for (const [provider, env] of LOCKED_PROVIDERS) {
       expect(state.providers.map((row) => row.id)).toContain(provider);
-      expect(state.connections.find((row) => row.provider_id === provider)!.auth).toBe("oauth");
+      const key = state.provider_keys.find((row) => row.provider_id === provider)!;
+      expect(key.auth).toBe("api_key");
+      expect(key.status).toBe("missing");
+      expect(key.key_env).toBe(env);
     }
     expect(state.defaults).toEqual({ primary: "xai-grok", alternate: "anthropic-claude" });
 
@@ -37,16 +45,28 @@ test.describe("Control panel OAuth routing", () => {
     }
     await expect(page.getByText("Default route", { exact: true })).toBeVisible();
     await expect(page.getByText("One-click alternate", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: /log in with xAI/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /log in with Anthropic/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /log in with OpenRouter/i })).toBeVisible();
+    for (const [provider, env] of LOCKED_PROVIDERS) {
+      const card = page.getByTestId(`provider-card-${provider}`);
+      await expect(card.getByTestId("provider-key-status")).toHaveText("No key");
+      await expect(card.getByTestId("provider-key-env")).toHaveText(`${env} (server environment)`);
+    }
   });
 
-  test("never asks for an API key", async ({ page }) => {
+  test("has no login buttons and never asks for a key", async ({ page }) => {
     await page.goto("/admin/control");
-    await expect(page.getByText(/Synapse never asks you for an API key/)).toBeVisible();
+    await expect(page.getByText(/Each provider uses an API key set in the server environment/)).toBeVisible();
+    await expect(page.getByText(/Keys are never shown or entered here/).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /log in with|re-authorize|disconnect/i })).toHaveCount(0);
+    await expect(page.getByText(/OAuth client|Signed in by/)).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: /api key|secret|credential/i })).toHaveCount(0);
     await expect(page.getByPlaceholder(/api key|secret|sk-/i)).toHaveCount(0);
+  });
+
+  test("connect_provider and disconnect_provider are gone", async ({ request }) => {
+    for (const action of ["connect_provider", "disconnect_provider"]) {
+      const error = await controlActionExpectingError(request, { action, provider_id: "xai-grok" });
+      expect(error.error).toBe(`Unknown action ${action}`);
+    }
   });
 
   test("switches every stage to Claude and back to Grok in one click", async ({ page, request }) => {
@@ -58,8 +78,9 @@ test.describe("Control panel OAuth routing", () => {
     const claude = await controlState(request);
     // The other first-class default stays as the first fallback.
     expect(claude.routes[0]!.fallbacks[0]).toBe("xai-grok");
-
     await page.reload();
+    await expect(page.getByTestId("providers-routed-to")).toHaveText("Every stage routes to Anthropic · Claude.");
+
     await page.getByRole("button", { name: "xAI · Grok", exact: true }).click();
     await expect
       .poll(async () => (await controlState(request)).routes.every((route) => route.provider_id === "xai-grok"))
@@ -67,7 +88,6 @@ test.describe("Control panel OAuth routing", () => {
     const grok = await controlState(request);
     expect(grok.routes[0]!.fallbacks).toContain("anthropic-claude");
     expect(grok.routes[0]!.fallbacks).not.toContain("deterministic-local");
-    expect(grok.routes[0]!.fallbacks).toContain("anthropic-claude");
   });
 
   test("routes one stage on its own without touching its neighbours", async ({ request }) => {
@@ -92,36 +112,18 @@ test.describe("Control panel OAuth routing", () => {
     expect(badModel.error).toMatch(/does not serve/i);
   });
 
-  test("starts OAuth for Grok without operator client env vars", async ({ request }) => {
-    const started = await controlAction(request, {
-      action: "connect_provider",
-      provider_id: "xai-grok",
-    });
-    expect(started.authorize_url).toMatch(/^https:\/\/auth\.x\.ai\//);
-    expect(started.authorize_url).toContain("client_id=");
-    expect(started.authorize_url).toContain("code_challenge=");
-  });
-
   /*
    * The 409 no_llm itself cannot happen here: under SYNAPSE_TEST_STUB_LLM every
-   * run is handed the stub model (a test build must never be blocked on OAuth),
-   * so the API side is locked in vitest (tests/no-llm-message.test.ts:
-   * NoRouteError -> 409 no_llm, owner detail + /admin/control, plain text for a
-   * customer). What the running app does show without a model is the route
-   * preview, which is resolved for real, with no stub: the owner's pipeline
-   * says the stage has no connected model and where to connect one.
+   * run is handed the stub model, so the API side is locked in vitest
+   * (tests/no-llm-message.test.ts, tests/kan-65-provider-api-keys.test.ts).
+   * What the running app does show without a key is the route preview, which
+   * is resolved for real: the stage names the env var to set.
    */
-  test("an unconnected agentic stage says so; the owner is pointed at /admin/control", async ({ page, request }) => {
+  test("an agentic stage with no key names the env var to set", async ({ page, request }) => {
     await controlAction(request, {
       action: "set_default_provider",
       provider_id: "xai-grok",
     });
-    // Nothing is connected in the test environment (no OAuth tokens; the
-    // Playwright web server blanks the provider API keys).
-    const state = await controlState(request);
-    for (const provider of LOCKED_PROVIDERS) {
-      expect(state.connections.find((row) => row.provider_id === provider)!.status).not.toBe("connected");
-    }
 
     await page.goto("/admin/pipeline");
     const s2 = page
@@ -130,7 +132,8 @@ test.describe("Control panel OAuth routing", () => {
     await expect(s2.getByText("xAI · Grok · ", { exact: false })).toBeVisible();
     const reason = s2.getByText(/^xAI · Grok: /);
     await expect(reason).toBeVisible();
-    await expect(reason).toContainText("(/admin/control)");
-    await expect(reason).not.toContainText("(/control)");
+    await expect(reason).toContainText("XAI_API_KEY");
+    await expect(reason).toContainText("server environment");
+    await expect(reason).not.toContainText(/log in|OAuth/i);
   });
 });

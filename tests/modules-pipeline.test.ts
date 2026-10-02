@@ -335,13 +335,13 @@ describe("modular pipeline, S0 to S10", () => {
     ).rejects.toThrow(/may not run stage/i);
   }, 60_000);
 
-  it("switches every stage to one provider in a single action and degrades when it is not connected", async () => {
+  it("switches every stage to one provider in a single action and degrades when it has no key", async () => {
     await setDefaultProvider({ provider_id: "anthropic-claude", actor_name: ACTOR.name });
     const claude = await routeConfig("S2");
     expect(claude.provider_id).toBe("anthropic-claude");
     expect(claude.fallbacks).toContain("xai-grok");
 
-    await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+    await expect(resolveRoute("S2")).rejects.toThrow(/ANTHROPIC_API_KEY/);
 
     await setRouteConfig({
       stage: "S2",

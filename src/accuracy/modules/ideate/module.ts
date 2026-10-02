@@ -71,7 +71,7 @@ const proposerRowSchema = z.object({
 type IdeationDraft = { proposals: z.infer<typeof proposerRowSchema>[] };
 
 function routeAllowsLlm(route: AccuracyModuleContext["route"]): boolean {
-  return route.connected && (route.auth === "oauth" || route.auth === "api_key");
+  return route.connected && route.auth === "api_key";
 }
 
 function nameKey(value: string): string {
@@ -233,7 +233,7 @@ export const ideateModule = agenticModule({
       throw new NoRouteError(
         ctx.route.reason && ctx.route.reason !== "mechanical"
           ? ctx.route.reason
-          : "Ideation needs a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
+          : "Ideation needs a live LLM. Set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment and run it again.",
       );
     }
 

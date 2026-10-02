@@ -122,13 +122,16 @@ async function routeLabel(stage: StageId): Promise<string> {
 }
 
 /**
- * Why a case cannot run without a model. The routing reason often already says how to
- * connect one, so the message ends with a single instruction, not the same one twice.
+ * Why a case cannot run without a model. The routing reason often already says where
+ * to set the provider's API key, so the message ends with a single instruction, not
+ * the same one twice.
  */
 export function harnessNoModelMessage(stage: StageId, reason: string): string {
-  const detail = reason.trim().replace(/[.\s]+$/, "") || "not connected";
-  const advice = /\bconnect\b/i.test(detail) ? "" : " Connect one in AI & routing.";
-  return `No live model is connected for ${stage}: ${detail}.${advice}`;
+  const detail = reason.trim().replace(/[.\s]+$/, "") || "no API key is set";
+  const advice = /\bserver environment\b/i.test(detail)
+    ? ""
+    : " Set the provider's API key in the server environment.";
+  return `No live model is available for ${stage}: ${detail}.${advice}`;
 }
 
 /** The sandbox's partially addressed gaps, for the split case's picker. */

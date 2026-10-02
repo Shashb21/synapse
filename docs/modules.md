@@ -85,13 +85,16 @@ through the same domain code.
 
 ## Cross-cutting
 
-- **LLM routing** — `src/modules/llm/`. Five OAuth providers: xAI Grok (default
+- **LLM routing** — `src/modules/llm/`. Five providers: xAI Grok (default
   route), Anthropic Claude (one-click alternate), OpenAI, Google Gemini,
-  OpenRouter, plus optional server-side API keys (`XAI_API_KEY`,
-  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). There is no API-key path for an end
-  user. The owner logs in per provider and sets per-stage routing on
-  `/admin/control` (see `docs/deployment-live.md`). With no model connected an
-  agentic stage fails with a clear `no_llm` error; there is no offline rule
+  OpenRouter. Each authenticates only with a server-side API key from the
+  environment (`XAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; `api-keys.ts` is the single source).
+  There is no provider login and no key path for an end user. The owner sees
+  each key's status and sets per-stage routing on `/admin/control` (see
+  `docs/deployment-live.md`). A stored route whose model the provider no longer
+  lists runs on the provider's default. With no provider key an agentic stage
+  fails with a clear `no_llm` error naming the env var; there is no offline rule
   fallback (the removed `deterministic-local` route id is stripped from stored
   routing). S1 parse is an LLM stage too: every file type is parsed by the model
   routed to it.
@@ -121,7 +124,7 @@ through the same domain code.
 | `/timeline` | S10 timeline, built by hand or from a run: the final IEGP, saved as final and exportable as an image |
 | `/admin/pipeline` | owner only: run a stage S0–S10 or a chain, see module, route and last run |
 | `/admin/runs`, `/admin/runs/[id]` | owner only: stage health, run traces, edit rationales, signals, eval runs |
-| `/admin/control` | owner only: AI master switch, per-provider OAuth login, per-stage routing |
+| `/admin/control` | owner only: AI master switch, per-provider key status, per-stage routing |
 | `/admin/modules` | owner only: module versions |
 
 ## Testing
@@ -149,7 +152,7 @@ through the same domain code.
 | `s8-prioritization.spec.ts` | Configurable axes, matrix cards, band validation, re-run safety |
 | `s9-ideation.spec.ts` | High-only ideation, runnable designs, accept/reject with rationale |
 | `s10-timeline.spec.ts` | Gantt render, activity detail, PNG export, save as final, dependency gating |
-| `control-panel-oauth.spec.ts` | Five OAuth providers, Grok default, Claude one-click, no API-key field |
+| `control-panel-provider-keys.spec.ts` | Five providers with key status and env var, Grok default, Claude one-click, no API-key field |
 | `observability-trace.spec.ts` | Run traces, all three rounds on the page, failed runs kept |
 | `hillclimb-rationale.spec.ts` | Edit rationale → signal → next proposer brief |
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS stage_modules (
   stage text PRIMARY KEY, module_id text NOT NULL,
   activated_by text NOT NULL, activated_at text NOT NULL
 );
+-- Retired (KAN-65): LLM provider OAuth was removed. Kept so existing databases are untouched.
 CREATE TABLE IF NOT EXISTS oauth_connections (
   provider_id text PRIMARY KEY, status text NOT NULL, account_label text,
   scopes jsonb NOT NULL, access_token text, refresh_token text, expires_at text,

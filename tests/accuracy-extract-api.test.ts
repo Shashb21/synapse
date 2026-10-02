@@ -13,8 +13,6 @@ import { blocksFromParsedDocument, persistParseBlocks } from "@/accuracy/store/p
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
-import { db, ensurePlatformSchema } from "@/modules/kernel/db";
-import * as t from "@/modules/kernel/schema";
 
 async function freshWorkspace(label: string) {
   await ensureAccuracySchema();
@@ -131,7 +129,7 @@ describe("accuracy extract API", () => {
     expect(json.provider_id).toBeNull();
   });
 
-  it("returns oauth gate with /admin/control when live extract has no connected provider", async () => {
+  it("returns the API-key gate with /admin/control when live extract has no provider key", async () => {
     const prevStub = process.env.SYNAPSE_TEST_STUB_LLM;
     const prevKeys = {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -144,8 +142,6 @@ describe("accuracy extract API", () => {
     delete process.env.ANTHROPIC_WORKSPACE_ID;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENAI_API_KEY;
-    await ensurePlatformSchema();
-    await db().delete(t.oauthConnections);
     try {
       registerAccuracyStack();
       const { org_id, workspace_id } = await freshWorkspace("extract-gate");
@@ -189,7 +185,7 @@ describe("accuracy extract API", () => {
         connect_path?: string;
       };
       expect(json.ok).toBe(false);
-      expect(json.gate).toBe("oauth_required");
+      expect(json.gate).toBe("api_key_required");
       expect(json.connect_path).toBe("/admin/control");
       expect(json.error).toMatch(/\/control/i);
     } finally {

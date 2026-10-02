@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import {
-  extractOauthGateJson,
+  extractKeyGateJson,
   inspectLiveExtractGate,
 } from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
 
     const gate = await inspectLiveExtractGate();
     if (!gate.ready) {
-      return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+      return NextResponse.json(extractKeyGateJson(gate), { status: 409 });
     }
 
     const actor = await labActor();
@@ -230,7 +230,7 @@ export async function POST(req: Request) {
     if (error instanceof NoRouteError) {
       const gate = await inspectLiveExtractGate();
       if (!gate.ready) {
-        return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+        return NextResponse.json(extractKeyGateJson(gate), { status: 409 });
       }
     }
     const known = labRequestErrorResponse(error);

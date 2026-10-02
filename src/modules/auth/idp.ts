@@ -1,4 +1,12 @@
-import type { OauthDescriptor } from "@/modules/llm/provider";
+/** How sign-in reaches an identity provider's authorization-code flow. */
+export type OauthDescriptor = {
+  authorize_url: string;
+  token_url: string;
+  scopes: string[];
+  client_id_env: string;
+  client_secret_env?: string;
+  pkce: boolean;
+};
 
 /**
  * Identity providers for signing in to Synapse. End-user auth is OAuth; API

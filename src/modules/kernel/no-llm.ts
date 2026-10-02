@@ -9,7 +9,7 @@
 
 export const NO_LLM_CODE = "no_llm";
 
-/** Where the owner connects a provider. Owner-only; never shown to customers. */
+/** Where the owner sees each provider's key status. Owner-only; never shown to customers. */
 export const OWNER_CONTROL_HREF = "/admin/control";
 
 export const NO_LLM_CUSTOMER_MESSAGE =
@@ -18,7 +18,9 @@ export const NO_LLM_CUSTOMER_MESSAGE =
 /** The owner's version: the route detail the kernel reported, plus where to fix it. */
 export function noLlmOwnerMessage(detail: string): string {
   const text = detail.trim();
-  return text ? text : `No LLM provider is connected. Connect one in the control panel (${OWNER_CONTROL_HREF}), then retry.`;
+  return text
+    ? text
+    : `No LLM provider has an API key. Set one in the server environment (status in ${OWNER_CONTROL_HREF}), then retry.`;
 }
 
 export type NoLlmBody = {

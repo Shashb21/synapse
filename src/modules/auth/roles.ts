@@ -18,7 +18,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_SUMMARIES: Record<Role, string> = {
   medical_affairs: "Owns the plan: ingest, validate, prioritize, ideate, save the IEGP as final.",
   contributor: "Other functions: ingest, propose, comment and edit with rationale; cannot save final.",
-  operator: "Platform: routing, provider connections, module versions, plus everything a lead can do.",
+  operator: "Platform: routing, provider key status, module versions, plus everything a lead can do.",
   viewer: "Read-only across the plan.",
 };
 
@@ -31,7 +31,6 @@ export const CAPABILITIES = [
   "save_final",
   "export",
   "configure_routing",
-  "connect_provider",
   "activate_module",
   /** The admin AI switch: turn every AI suggestion and automatic AI action on or off. */
   "toggle_ai",
@@ -55,7 +54,6 @@ const MATRIX: Record<Role, Capability[]> = {
     "save_final",
     "export",
     "configure_routing",
-    "connect_provider",
     "toggle_ai",
     "reset_workspace",
   ],
@@ -93,7 +91,7 @@ export function assertCan(role: Role, capability: Capability) {
 
 /**
  * The owner runs the platform: the admin console (/admin), the accuracy lab,
- * routing, provider logins, the AI switch and module versions. Customers never
+ * routing, provider key status, the AI switch and module versions. Customers never
  * see any of it.
  */
 export type OwnerSubject = {

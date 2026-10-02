@@ -63,7 +63,7 @@ export async function runCoverageDecide(
   }
   if (!coverageRouteAllowsLlm(ctx.route)) {
     throw new NoRouteError(
-      "Coverage decisions need a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
+      "Coverage decisions need a live LLM. Set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment and run it again.",
     );
   }
 

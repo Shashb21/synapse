@@ -27,7 +27,7 @@ function mockCtx(connected: boolean): AccuracyModuleContext {
       provider_id: connected ? "xai" : "none",
       provider_label: connected ? "Grok" : "None",
       model: connected ? "grok-2" : "none",
-      auth: connected ? "oauth" : "none",
+      auth: connected ? "api_key" : "none",
       connected,
       params: { temperature: 0, max_tokens: 8192 },
       fallbacks: [],

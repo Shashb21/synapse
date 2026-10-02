@@ -6,7 +6,7 @@ import { ManualSourceForm } from "@/components/platform/manual-source-form";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { sessionContext } from "@/modules/auth/session";
 import { STAKEHOLDER_FUNCTIONS } from "@/lib/schema";
-import { SourceExtractActions, ExtractOauthGateBanner } from "@/components/accuracy/source-extract-actions";
+import { SourceExtractActions, ExtractKeyGateBanner } from "@/components/accuracy/source-extract-actions";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
 import { registerAccuracyStack, inspectLiveExtractGate } from "@/accuracy";
 import { toParseBlockPreviews } from "@/accuracy/store/parse-preview";
@@ -92,7 +92,7 @@ export default async function AccuracySourcesPage({
             Every file is parsed by the chosen LLM: its text is extracted, then the model decides
             the blocks, their kinds and headings. After parse, preview verbatim parse blocks
             (quotes must be substrings of this text), then run need + inventory extract to populate
-            the ledger. Live extract uses a connected OAuth LLM from the{" "}
+            the ledger. Live extract uses an LLM whose API key is set in the server environment; see the{" "}
             <Link href="/admin/control" className="underline-offset-2 hover:underline">
               control panel
             </Link>{" "}
@@ -147,7 +147,7 @@ export default async function AccuracySourcesPage({
               </p>
             </div>
           ) : null}
-          {extractGate ? <ExtractOauthGateBanner gate={extractGate} /> : null}
+          {extractGate ? <ExtractKeyGateBanner gate={extractGate} /> : null}
           {aiOn ? <SourceUploadForm workspaceId={workspaceId} /> : null}
           {aiOn ? (
             <details className="mb-3 border border-border bg-card p-3 rounded-lg">

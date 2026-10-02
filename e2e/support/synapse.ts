@@ -50,7 +50,7 @@ export type RunRecord = {
     provider_id: string;
     provider_label: string;
     model: string;
-    auth: "oauth" | "none";
+    auth: "api_key" | "none";
     connected: boolean;
     degraded: boolean;
     reason: string | null;
@@ -196,14 +196,15 @@ export async function controlState(request: APIRequestContext) {
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
     routes: { stage: string; provider_id: string; model: string; fallbacks: string[] }[];
-    connections: {
+    provider_keys: {
       provider_id: string;
       label: string;
       tier: string | null;
       auth: string;
-      configured: boolean;
-      status: string;
+      status: "configured" | "missing";
+      key_env: string | null;
       models: string[];
+      default_model: string;
     }[];
     providers: { id: string; label: string; tier: string | null; auth: string; models: string[] }[];
     defaults: { primary: string; alternate: string };
@@ -317,12 +318,12 @@ export async function expectThreeExchanges(request: APIRequestContext, runId: st
   return { run, rounds };
 }
 
-/** Agentic runs must use a connected LLM route; mechanical runs may note degradation. */
+/** Agentic runs must use a live LLM route; mechanical runs may note degradation. */
 export function expectRouteIsHonest(run: RunRecord) {
   expect(run.route, `${run.stage} should record its route`).toBeTruthy();
   const agentic = ["S2", "S3", "S4", "S6", "S8", "S9"].includes(run.stage);
   if (agentic) {
-    expect(run.route!.auth).toBe("oauth");
+    expect(run.route!.auth).toBe("api_key");
     expect(run.route!.connected).toBeTruthy();
   }
 }

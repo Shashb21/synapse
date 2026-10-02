@@ -18,7 +18,7 @@ import AccuracyWorkspacesPage from "@/app/admin/accuracy/page";
 import AccuracyLedgerPage from "@/app/admin/accuracy/ledger/page";
 import { MissFlagInbox } from "@/components/accuracy/miss-flag-inbox";
 import { SourceUploadForm } from "@/components/accuracy/source-upload-form";
-import { ExtractOauthGateBanner, SourceExtractActions } from "@/components/accuracy/source-extract-actions";
+import { ExtractKeyGateBanner, SourceExtractActions } from "@/components/accuracy/source-extract-actions";
 import { ManualSourceForm } from "@/components/platform/manual-source-form";
 import { ParseBlockPreview } from "@/components/accuracy/parse-block-preview";
 import { LedgerNewClaimForm } from "@/components/accuracy/ledger-new-claim-form";
@@ -252,7 +252,7 @@ describe("the accuracy app with AI off", () => {
     });
     const tree = elements(await AccuracySourcesPage({ searchParams: Promise.resolve({ workspace_id }) }));
     expect(hasTestId(tree, "sources-ai-off")).toBe(true);
-    for (const hidden of [SourceUploadForm, ManualSourceForm, SourceExtractActions, ExtractOauthGateBanner]) {
+    for (const hidden of [SourceUploadForm, ManualSourceForm, SourceExtractActions, ExtractKeyGateBanner]) {
       expect(tree.some((el) => el.type === hidden)).toBe(false);
     }
     const previews = tree.filter((el) => el.type === ParseBlockPreview);

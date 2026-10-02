@@ -50,8 +50,7 @@ describe("mapCoverageOverallToUi", () => {
 });
 
 describe("coverageRouteAllowsLlm", () => {
-  it("accepts oauth and api_key when connected", () => {
-    expect(coverageRouteAllowsLlm({ connected: true, auth: "oauth" })).toBe(true);
+  it("accepts api_key when connected", () => {
     expect(coverageRouteAllowsLlm({ connected: true, auth: "api_key" })).toBe(true);
     expect(coverageRouteAllowsLlm({ connected: true, auth: "none" })).toBe(false);
     expect(coverageRouteAllowsLlm({ connected: false, auth: "api_key" })).toBe(false);

@@ -7,7 +7,7 @@
 | `beone-bgb-58067-prmt5i` | BGB-58067 PRMT5i IEP Report v1.0 | 57 | `NSCLC_{AD\|CE\|GA\|HI}_{nn}` (43 IDs) | Numbered tactics 1–36 + CDP/pivotal |
 | `beone-tislelizumab-iegp` | Tislelizumab IEGP VShare 3.0 | 59+ | Narrative “Need for …” by chapter | `G:{n}` + RN- trial post-hocs |
 
-**Decision:** Coverage and extraction use **schema-locked OAuth LLMs only** — **no TypeSafe Jev**.
+**Decision:** Coverage and extraction use **schema-locked LLMs only** (server API keys) — **no TypeSafe Jev**.
 
 One **Synapse workspace = one IEGP** (one pack per workspace for eval; do not mix gold across the two BeOne decks).
 

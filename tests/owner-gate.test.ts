@@ -121,8 +121,6 @@ describe("admin APIs are owner only", () => {
       controlPost(post("/api/control", { action: "set_route", stage: "S2", provider_id: "xai-grok", model: "grok-4" })),
       controlPost(post("/api/control", { action: "set_default_provider", provider_id: "anthropic-claude" })),
       controlPost(post("/api/control", { action: "activate_module", stage: "S2", module_id: "x" })),
-      controlPost(post("/api/control", { action: "connect_provider", provider_id: "xai-grok" })),
-      controlPost(post("/api/control", { action: "disconnect_provider", provider_id: "xai-grok" })),
       evalsPost(post("/api/modules/evals", { stage: "S2" })),
       hillclimbPost(post("/api/modules/hillclimb", { stage: "S2" })),
       docGet(new Request("http://localhost/admin/docs/sdlc/01-requirements.md"), {

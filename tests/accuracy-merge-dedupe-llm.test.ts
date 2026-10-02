@@ -26,7 +26,7 @@ function fakeCtx(complete: JsonCompletion, connected = true): AccuracyModuleCont
       provider_id: connected ? "xai-grok" : "none",
       provider_label: connected ? "Grok" : "None",
       model: connected ? "grok" : "none",
-      auth: connected ? "oauth" : "none",
+      auth: connected ? "api_key" : "none",
       connected,
       params: { temperature: 0, max_tokens: 8192 },
       fallbacks: [],

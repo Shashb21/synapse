@@ -29,8 +29,8 @@ import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
   PROVIDERS,
-  providerConfigured,
 } from "@/modules/llm/provider";
+import { providerConfigured } from "@/modules/llm/api-keys";
 import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
 import { DEFAULT_AXES, parseAxesConfig, validateAxes } from "@/modules/stages/s8-prioritization/axes";
 import { addMonths, buildTimeline, monthsBetween, timelineCandidates } from "@/modules/stages/s10-timeline/build";
@@ -112,7 +112,7 @@ describe("the locked agentic loop", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: false,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,
@@ -265,7 +265,7 @@ describe("routing defaults", () => {
     expect(DEFAULT_FALLBACKS).toEqual(["anthropic-claude", "openai"]);
   });
 
-  it("ships the five locked OAuth providers", () => {
+  it("ships the five locked API-key providers", () => {
     const ids = PROVIDERS.map((provider) => provider.id);
     expect(ids).toEqual([
       "xai-grok",
@@ -275,27 +275,33 @@ describe("routing defaults", () => {
       "openrouter",
     ]);
     for (const provider of PROVIDERS) {
-      expect(provider.auth).toBe("oauth");
-      expect(provider.oauth?.authorize_url).toMatch(/^https:\/\//);
-      expect(provider.oauth?.token_url).toMatch(/^https:\/\//);
+      expect(provider.auth).toBe("api_key");
+      expect("oauth" in provider).toBe(false);
     }
   });
 
-  it("treats every MVP provider as OAuth-ready without operator client env vars", () => {
-    for (const provider of PROVIDERS) {
-      expect(providerConfigured(provider)).toBe(true);
+  it("treats a provider as configured only when its API key is set", () => {
+    const saved = process.env.OPENROUTER_API_KEY;
+    try {
+      delete process.env.OPENROUTER_API_KEY;
+      expect(providerConfigured(PROVIDERS.find((provider) => provider.id === "openrouter")!)).toBe(false);
+      process.env.OPENROUTER_API_KEY = "sk-or-test";
+      expect(providerConfigured(PROVIDERS.find((provider) => provider.id === "openrouter")!)).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = saved;
     }
   });
 
-  it("blocks agentic routing when no provider is connected", async () => {
-    const keyEnvs = ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"] as const;
+  it("blocks agentic routing when no provider has a key", async () => {
+    const keyEnvs = ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"] as const;
     const saved: Record<string, string | undefined> = {};
     for (const name of keyEnvs) {
       saved[name] = process.env[name];
       delete process.env[name];
     }
     try {
-      await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+      await expect(resolveRoute("S2")).rejects.toThrow(/server environment/i);
     } finally {
       for (const name of keyEnvs) {
         if (saved[name] === undefined) delete process.env[name];
@@ -308,12 +314,12 @@ describe("routing defaults", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: false,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,
         degraded: true,
-        reason: "disconnected",
+        reason: "no API key",
       }),
     ).toBe(false);
     expect(
@@ -322,7 +328,7 @@ describe("routing defaults", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: true,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,

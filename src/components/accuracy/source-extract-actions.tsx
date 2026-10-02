@@ -5,20 +5,19 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { LiveExtractGate } from "@/accuracy/kernel/extract-gate";
 
-export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
+export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
   if (gate.ready && gate.stub) return null;
   if (gate.ready) {
     return (
-      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="extract-oauth-gate">
-        Live extract will use {gate.provider_label} ({gate.auth === "oauth" ? "OAuth" : "connected"}
-        ).
+      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="extract-key-gate">
+        Live extract will use {gate.provider_label} (server API key).
       </p>
     );
   }
   return (
     <div
       className="mb-3 border border-border bg-card p-3 rounded-lg"
-      data-testid="extract-oauth-gate"
+      data-testid="extract-key-gate"
       role="status"
     >
       <p className="text-[13px] text-foreground">{gate.message}</p>
@@ -30,7 +29,7 @@ export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
         href={gate.connect_path}
         className="mt-2 inline-block text-[12px] text-foreground underline-offset-2 hover:underline"
       >
-        Connect a provider in /admin/control →
+        Check provider key status in /admin/control →
       </Link>
     </div>
   );
@@ -90,7 +89,7 @@ export function SourceExtractActions({
       ];
       const via = json.provider_label ? ` via ${json.provider_label}` : "";
       const note = json.stub
-        ? " (stub LLM — connect a provider in /admin/control for live extract)"
+        ? " (stub LLM — set a provider's API key in the server environment for live extract)"
         : via;
       setSummary(`Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
@@ -146,7 +145,7 @@ export function SourceExtractActions({
             <>
               {" "}
               <Link href={connectPath} className="underline-offset-2 hover:underline">
-                Connect in /admin/control →
+                Key status in /admin/control →
               </Link>
             </>
           ) : null}

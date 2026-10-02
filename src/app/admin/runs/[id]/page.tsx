@@ -103,7 +103,14 @@ export default async function RunDetailPage({
               <div className="flex justify-between gap-2">
                 <dt>Auth</dt>
                 <dd className="text-foreground">
-                  {run.route.auth === "oauth" ? (run.route.connected ? "OAuth, connected" : "OAuth, not connected") : "none"}
+                  {run.route.auth === "api_key"
+                    ? run.route.connected
+                      ? "Server API key"
+                      : "Server API key, not set"
+                    : // Runs recorded before KAN-65 may still say "oauth".
+                      (run.route.auth as string) === "oauth"
+                      ? "OAuth (retired)"
+                      : "none"}
                 </dd>
               </div>
               <div className="flex justify-between gap-2">

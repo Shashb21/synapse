@@ -101,6 +101,7 @@ export const stageModules = pgTable("stage_modules", {
   activated_at: text("activated_at").notNull(),
 });
 
+/** Retired (KAN-65): LLM provider OAuth was removed. Nothing reads or writes this table. */
 export const oauthConnections = pgTable("oauth_connections", {
   provider_id: text("provider_id").primaryKey(),
   status: text("status").notNull(),

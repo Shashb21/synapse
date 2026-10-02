@@ -376,16 +376,16 @@ describe("the AI harness follows the platform AI switch (KAN-61 item 8)", () => 
     expect(page.some((el) => el.type === AiHarness)).toBe(true);
   });
 
-  it("says how to connect a model once, not twice", () => {
+  it("says where to set the API key once, not twice", () => {
     const routed = harnessNoModelMessage(
       "S1",
-      "Connect an LLM provider in the owner control panel (/admin/control) — log in with Grok, Claude, or another provider — then retry.",
+      "xAI · Grok: no API key (set XAI_API_KEY in the server environment). Set the provider's API key in the server environment (.env.local or your host's settings), then retry.",
     );
     expect(routed).not.toMatch(/\.\./);
-    expect(routed.match(/\bconnect\b/gi)).toHaveLength(1);
+    expect(routed.match(/Set the provider's API key/g)).toHaveLength(1);
     expect(routed).toMatch(/then retry\.$/);
-    expect(harnessNoModelMessage("S2", "xAI · Grok: disconnected")).toBe(
-      "No live model is connected for S2: xAI · Grok: disconnected. Connect one in AI & routing.",
+    expect(harnessNoModelMessage("S2", "xAI · Grok: unknown provider")).toBe(
+      "No live model is available for S2: xAI · Grok: unknown provider. Set the provider's API key in the server environment.",
     );
   });
 });
