@@ -49,6 +49,9 @@ export async function parseExperimentRequest(request: Request, comparison = fals
   }
   const body = requestSchema.parse(json);
   if (comparison) {
+    if (new Set(body.source_file_ids).size !== body.source_file_ids.length) {
+      throw new InvalidExperimentRequestError("Source file IDs must be distinct.");
+    }
     const reserved = PASS_COMPARISON_RESERVED_CONDITION_FIELDS.find(key => Object.hasOwn(body.condition, key));
     if (reserved) throw new InvalidExperimentRequestError("Invalid experiment request");
   }

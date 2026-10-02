@@ -136,6 +136,24 @@ describe("authenticated controlled pass comparison API", () => {
     expect(response.status).toBe(400);
   });
 
+  it.each(["exact", "trimmed"])("rejects %s duplicate source IDs before the runner or copy boundary", async normalization => {
+    const body = await fixture();
+    const source_id = body.source_file_ids[0];
+    const before = await workspaceIds();
+    const runnerBoundary = vi.spyOn(comparisonService, "runPassComparison");
+    const copyBoundary = vi.spyOn(copyService, "copyExperimentWorkspace");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await post({ ...body, source_file_ids: [source_id, normalization === "trimmed" ? ` ${source_id} ` : source_id] });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Source file IDs must be distinct." });
+    expect(await records(body.source_workspace_id)).toEqual([]);
+    expect(await workspaceIds()).toEqual(before);
+    expect(runnerBoundary).not.toHaveBeenCalled();
+    expect(copyBoundary).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown pack and a source from another workspace before copying", async () => {
     const body = await fixture(); const other = await fixture();
     const pack = await post({ ...body, pack_id: "missing-pack" });
