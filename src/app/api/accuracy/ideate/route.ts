@@ -130,7 +130,7 @@ async function persistProposal(args: {
 /**
  * Ideate proposed tactics for validated high-priority open gaps.
  * - Manual: title + rationale inserts one human-authored proposed tactic (no LLM).
- * - Live: runs the ideate module (OAuth / API key). Stub LLM returns empty proposals.
+ * - Live: runs the ideate module (server API key). Stub LLM returns empty proposals.
  *   With the admin AI switch off the live path answers 409 { code: "ai_off" }.
  */
 export async function POST(req: Request) {

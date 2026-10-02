@@ -14,7 +14,7 @@ import {
   DEFAULT_ROUTE_PROVIDER,
   PROVIDERS,
 } from "@/modules/llm/provider";
-import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
+import { listProviderKeys } from "@/modules/llm/api-keys";
 import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { requestIdentity } from "@/modules/auth/request";
 import { ownerAccess, ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
@@ -38,18 +38,19 @@ const OWNER_ACTIONS = new Set([
   "set_route",
   "set_default_provider",
   "activate_module",
-  "connect_provider",
-  "disconnect_provider",
 ]);
 
-/** Platform configuration (routes, provider connections, module wiring): owner only. */
+/**
+ * Platform configuration (routes, provider key status, module wiring): owner only.
+ * A provider's key status says only whether it is set and which env var it comes
+ * from, never its value.
+ */
 export async function GET() {
   const denied = await ownerGate();
   if (denied) return denied;
-  const [wiring, routes, connections, axes, ai, sections] = await Promise.all([
+  const [wiring, routes, axes, ai, sections] = await Promise.all([
     stageWiring(),
     routeConfigs(),
-    listConnections(),
     loadAxes(),
     aiSwitch(),
     storedAiSections(),
@@ -59,7 +60,7 @@ export async function GET() {
     ai_sections: sections.sections,
     wiring,
     routes,
-    connections,
+    provider_keys: listProviderKeys(),
     axes,
     providers: PROVIDERS.map((provider) => ({
       id: provider.id,
@@ -146,19 +147,6 @@ export async function POST(request: Request) {
           module_id: String(body.module_id ?? ""),
           actor_name: identity.actor.name,
         });
-        return NextResponse.json({ ok: true });
-      }
-      case "connect_provider": {
-        const provider_id = String(body.provider_id ?? "");
-        const { authorize_url } = await beginOauth({
-          provider_id,
-          redirect_uri: `${origin}/api/oauth/llm/callback?provider=${encodeURIComponent(provider_id)}`,
-          actor_name: identity.actor.name,
-        });
-        return NextResponse.json({ ok: true, authorize_url });
-      }
-      case "disconnect_provider": {
-        await disconnect(String(body.provider_id ?? ""));
         return NextResponse.json({ ok: true });
       }
       case "save_axes": {

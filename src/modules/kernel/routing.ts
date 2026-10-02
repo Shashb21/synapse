@@ -4,14 +4,14 @@ import * as t from "./schema";
 import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
-import { accessToken, authKindFor, connectionStatus } from "@/modules/llm/oauth";
-import { hasProviderApiKey } from "@/modules/llm/api-keys";
+import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
   findProvider,
-  providerConfigured,
+  providerServes,
+  servedModel,
 } from "@/modules/llm/provider";
 
 /** Removed from the product; strip from stored fallbacks when resolving routes. */
@@ -103,10 +103,13 @@ export async function routeConfigs(): Promise<RouteConfig[]> {
   return STAGE_IDS.map((stage) => {
     const row = rows.find((candidate) => candidate.stage === stage);
     if (!row) return defaultConfig(stage);
+    const provider_id = row.provider_id === LEGACY_OFFLINE_PROVIDER ? DEFAULT_PROVIDER_ID : row.provider_id;
+    const provider = findProvider(provider_id);
     return {
       stage,
-      provider_id: row.provider_id === LEGACY_OFFLINE_PROVIDER ? DEFAULT_PROVIDER_ID : row.provider_id,
-      model: row.model,
+      provider_id,
+      // A model the provider no longer lists reads as its default (KAN-65).
+      model: provider ? servedModel(provider, row.model) : row.model,
       params: row.params as RouteConfig["params"],
       fallbacks: scrubFallbacks((row.fallbacks as string[]) ?? DEFAULT_FALLBACKS),
       updated_by: row.updated_by,
@@ -147,7 +150,7 @@ async function writeRouteConfig(args: RouteInput): Promise<RouteConfig> {
   }
   const provider = findProvider(args.provider_id);
   if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
-  if (args.model && provider.models.length > 0 && !provider.models.includes(args.model)) {
+  if (args.model && !providerServes(provider, args.model)) {
     throw new Error(`${provider.label} does not serve ${args.model}`);
   }
   if (args.temperature !== undefined) parseRouteParam(args.temperature, "temperature");
@@ -174,12 +177,12 @@ async function writeRouteConfig(args: RouteInput): Promise<RouteConfig> {
   return { ...values, stage: args.stage, params: values.params as RouteConfig["params"] };
 }
 
-const CONNECT_PROMPT =
-  "Connect an LLM provider in the owner control panel (/admin/control) — log in with Grok, Claude, or another provider — then retry.";
+const KEY_PROMPT =
+  "Set the provider's API key in the server environment (.env.local or your host's settings), then retry.";
 
 /**
  * Turns the control-panel configuration into the route a run will actually use.
- * Every resolved route is a connected OAuth LLM; there is no offline fallback.
+ * Every resolved route is an LLM whose API key is set; there is no offline fallback.
  */
 export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
   const config = await routeConfig(stage);
@@ -195,37 +198,25 @@ export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
       reasons.push(`${provider.label}: not an LLM provider`);
       continue;
     }
-    const oauthReady = providerConfigured(provider);
-    const keyReady = hasProviderApiKey(provider.id);
-    if (!oauthReady && !keyReady) {
-      reasons.push(`${provider.label}: OAuth client not available`);
+    if (!providerConfigured(provider)) {
+      reasons.push(missingKeyReason(provider));
       continue;
     }
-    const status = await connectionStatus(provider.id);
-    if (status !== "connected") {
-      reasons.push(`${provider.label}: ${status}`);
-      continue;
-    }
-    const authKind = (await authKindFor(provider.id)) ?? (keyReady ? "api_key" : "oauth");
     return {
       stage,
       provider_id: provider.id,
       provider_label: provider.label,
       model: index === 0 ? config.model : provider.default_model,
-      auth: authKind,
+      auth: "api_key",
       connected: true,
       params: config.params,
       fallbacks: config.fallbacks,
       degraded: index > 0,
-      reason: reasons.length
-        ? reasons.join("; ")
-        : authKind === "api_key"
-          ? "server API key"
-          : null,
+      reason: reasons.length ? reasons.join("; ") : null,
     };
   }
   throw new NoRouteError(
-    reasons.length ? `${reasons.join("; ")}. ${CONNECT_PROMPT}` : CONNECT_PROMPT,
+    reasons.length ? `${reasons.join("; ")}. ${KEY_PROMPT}` : KEY_PROMPT,
   );
 }
 
@@ -260,20 +251,19 @@ export async function setDefaultProvider(args: {
 
 /** True when a stage may prompt a model on this route. */
 export function canPrompt(route: ResolvedRoute): boolean {
-  return (route.auth === "oauth" || route.auth === "api_key") && route.connected;
+  return route.auth === "api_key" && route.connected;
 }
 
 /** Builds the JSON completion the module receives, bound to route + run trace. */
 export function completionFor(route: ResolvedRoute, run: RunHandle): JsonCompletion {
   return async ({ system, user, purpose, maxTokens }) => {
     if (!canPrompt(route)) {
-      throw new NoRouteError(
-        `${route.provider_label} cannot serve ${purpose}: connect it in the owner control panel (/admin/control)`,
-      );
+      throw new NoRouteError(`${route.provider_label} cannot serve ${purpose}. ${KEY_PROMPT}`);
     }
     const provider = findProvider(route.provider_id)!;
-    const token = await accessToken(route.provider_id);
-    if (!token) throw new NoRouteError(`${route.provider_label} has no usable access token`);
+    // Read at call time and handed straight to the provider; never logged or traced.
+    const api_key = providerApiKey(route.provider_id);
+    if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     const text = await run.step(
       `llm:${purpose}`,
       () =>
@@ -285,7 +275,7 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
             temperature: route.params.temperature,
             max_tokens: maxTokens ?? route.params.max_tokens,
           },
-          { access_token: token, kind: route.auth === "api_key" ? "api_key" : "oauth" },
+          { api_key },
         ),
       `${route.provider_label} · ${route.model}`,
     );
@@ -298,7 +288,7 @@ export function stageLabel(stage: StageId): string {
 }
 
 /**
- * UI preview when no provider is connected yet (does not throw). `ai` overrides
+ * UI preview when no provider has a key yet (does not throw). `ai` overrides
  * the effective switch: the control panel passes the platform master switch.
  */
 export async function previewRoute(stage: StageId, ai?: boolean): Promise<ResolvedRoute> {
@@ -315,13 +305,13 @@ export async function previewRoute(stage: StageId, ai?: boolean): Promise<Resolv
     }
     const provider =
       findProvider(config.provider_id) ?? findProvider(DEFAULT_PROVIDER_ID)!;
-    const message = error instanceof Error ? error.message : CONNECT_PROMPT;
+    const message = error instanceof Error ? error.message : KEY_PROMPT;
     return {
       stage,
       provider_id: provider.id,
       provider_label: provider.label,
       model: config.model || provider.default_model,
-      auth: "oauth",
+      auth: provider.auth,
       connected: false,
       params: config.params,
       fallbacks: config.fallbacks,

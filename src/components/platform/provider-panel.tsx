@@ -2,49 +2,43 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { CircleCheck, CircleDashed, Loader2, TriangleAlert } from "lucide-react";
+import { CircleCheck, CircleDashed, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 
-export type ProviderConnectionView = {
+/** What the panel knows about a provider's key: whether it is set and where from. Never its value. */
+export type ProviderKeyCardView = {
   provider_id: string;
   label: string;
   summary: string;
   tier: "default" | "alternate" | null;
-  auth: "oauth" | "none";
-  configured: boolean;
-  status: "disconnected" | "pending" | "connected" | "error";
-  account_label: string | null;
-  connected_by: string | null;
-  connected_at: string | null;
-  detail: string | null;
+  auth: "api_key" | "none";
+  status: "configured" | "missing";
+  /** The env var the server reads the key from; null for a provider that needs none. */
+  key_env: string | null;
   models: string[];
   default_model: string;
 };
 
-const STATUS_COPY: Record<ProviderConnectionView["status"], string> = {
-  connected: "Connected",
-  pending: "Authorization started",
-  disconnected: "Not connected",
-  error: "Needs attention",
+const STATUS_COPY: Record<ProviderKeyCardView["status"], string> = {
+  configured: "Key set",
+  missing: "No key",
 };
 
 /**
- * Per-provider OAuth login plus the locked one-click default switch. There is no
- * field anywhere here for pasting an API key.
+ * Each provider's API-key status plus the locked one-click default switch. Keys
+ * live in the server environment; there is no field anywhere here for one (KAN-65).
  */
 export function ProviderPanel({
   connections,
   defaults,
-  canConnect,
   canRoute,
   routedTo = null,
 }: {
-  connections: ProviderConnectionView[];
+  connections: ProviderKeyCardView[];
   defaults: { primary: string; alternate: string };
-  canConnect: boolean;
   canRoute: boolean;
   /** The provider every stage routes to; null when stages use a mix (KAN-60). */
   routedTo?: string | null;
@@ -64,14 +58,10 @@ export function ProviderPanel({
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const json = (await res.json()) as { error?: string; authorize_url?: string };
+    const json = (await res.json()) as { error?: string };
     setBusy(null);
     if (!res.ok) {
       setError(json.error ?? "Action failed");
-      return;
-    }
-    if (json.authorize_url) {
-      window.location.assign(json.authorize_url);
       return;
     }
     if (done) setNotice(done);
@@ -89,11 +79,12 @@ export function ProviderPanel({
             LLM providers
           </h2>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            Every provider is reached by OAuth login. Synapse never asks you for an API key.
+            Each provider uses an API key set in the server environment (.env.local or your host&apos;s
+            settings). Keys are never shown or entered here.
           </p>
           {ai ? null : (
             <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="providers-ai-off">
-              AI is off, so no provider is called. Connections are kept for when AI is turned back on.
+              AI is off, so no provider is called. Keys stay in place for when AI is turned back on.
             </p>
           )}
         </div>
@@ -146,19 +137,15 @@ export function ProviderPanel({
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {connections.map((connection) => {
-          const connected = connection.status === "connected";
-          const Icon =
-            connection.status === "connected"
-              ? CircleCheck
-              : connection.status === "error"
-                ? TriangleAlert
-                : CircleDashed;
+          const configured = connection.status === "configured";
+          const Icon = configured ? CircleCheck : CircleDashed;
           return (
             <article
               key={connection.provider_id}
+              data-testid={`provider-card-${connection.provider_id}`}
               className={cn(
                 "grid min-w-0 gap-2 border bg-card p-3 rounded-lg",
-                connected ? "border-[var(--known)]/40" : "border-border",
+                configured ? "border-[var(--known)]/40" : "border-border",
               )}
             >
               <div className="flex items-start justify-between gap-2">
@@ -185,7 +172,7 @@ export function ProviderPanel({
                 <Icon
                   className={cn(
                     "size-4 shrink-0",
-                    connected ? "text-[var(--known-foreground)]" : connection.status === "error" ? "text-destructive" : "text-muted-foreground",
+                    configured ? "text-[var(--known-foreground)]" : "text-muted-foreground",
                   )}
                   aria-hidden
                 />
@@ -194,65 +181,30 @@ export function ProviderPanel({
               <dl className="grid gap-1 text-[11px] text-muted-foreground">
                 <div className="flex justify-between gap-2">
                   <dt>Status</dt>
-                  <dd className="text-foreground">{STATUS_COPY[connection.status]}</dd>
+                  <dd
+                    className={configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}
+                    data-testid="provider-key-status"
+                  >
+                    {STATUS_COPY[connection.status]}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt>Default model</dt>
                   <dd className="truncate text-foreground">{connection.default_model}</dd>
                 </div>
-                {connection.auth === "oauth" ? (
-                  <div className="flex justify-between gap-2">
-                    <dt>OAuth client</dt>
-                    <dd className={connection.configured ? "text-foreground" : "text-[var(--unknown-foreground)]"}>
-                      {connection.configured ? "built-in (PKCE)" : "unavailable"}
-                    </dd>
-                  </div>
-                ) : null}
-                {connection.connected_by ? (
-                  <div className="flex justify-between gap-2">
-                    <dt>Signed in by</dt>
-                    <dd className="truncate text-foreground">{connection.connected_by}</dd>
-                  </div>
-                ) : null}
-              </dl>
-
-              {connection.detail ? (
-                <p className="break-all text-[11px] text-amber-800 dark:text-amber-300">{connection.detail}</p>
-              ) : null}
-
-              {connection.auth === "oauth" ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant={connected ? "outline" : "default"}
-                    disabled={!canConnect || busy !== null}
-                    onClick={() =>
-                      void post(
-                        { action: "connect_provider", provider_id: connection.provider_id },
-                        connection.provider_id,
-                      )
-                    }
-                  >
-                    {busy === connection.provider_id ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                    {connected ? "Re-authorize" : `Log in with ${connection.label.split(" · ")[0]}`}
-                  </Button>
-                  {connection.status !== "disconnected" ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={!canConnect || busy !== null}
-                      onClick={() =>
-                        void post(
-                          { action: "disconnect_provider", provider_id: connection.provider_id },
-                          `${connection.provider_id}-off`,
-                        )
-                      }
-                    >
-                      Disconnect
-                    </Button>
-                  ) : null}
+                <div className="flex justify-between gap-2">
+                  <dt>Credential</dt>
+                  <dd className="truncate text-foreground" data-testid="provider-key-env">
+                    {connection.key_env ? (
+                      <>
+                        <code className="font-mono">{connection.key_env}</code> (server environment)
+                      </>
+                    ) : (
+                      "none needed"
+                    )}
+                  </dd>
                 </div>
-              ) : null}
+              </dl>
             </article>
           );
         })}

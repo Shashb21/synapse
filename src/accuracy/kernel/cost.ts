@@ -1,6 +1,6 @@
 /**
  * Live-ish model pricing (USD per 1M tokens). Updated manually from provider pages;
- * control panel reads this table for estimates when OAuth LLM calls do not return billing APIs.
+ * control panel reads this table for estimates because LLM calls do not return billing.
  */
 export type ModelPrice = {
   provider_id: string;

@@ -84,7 +84,7 @@ test.describe("platform surfaces", () => {
     }
   });
 
-  test("control panel offers OAuth login per provider with Grok as the default route", async ({ page }) => {
+  test("control panel shows each provider's key status with Grok as the default route", async ({ page }) => {
     await page.goto("/admin/control");
     await expect(page.getByRole("heading", { name: /^control panel$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^xAI · Grok$/ })).toBeVisible();
@@ -94,7 +94,10 @@ test.describe("platform surfaces", () => {
     for (const provider of ["OpenAI · ChatGPT", "Google · Gemini", "OpenRouter"]) {
       await expect(page.getByRole("heading", { name: provider })).toBeVisible();
     }
-    await expect(page.getByRole("button", { name: /log in with xAI/i })).toBeVisible();
+    await expect(page.getByTestId("provider-card-xai-grok").getByTestId("provider-key-env")).toHaveText(
+      "XAI_API_KEY (server environment)",
+    );
+    await expect(page.getByRole("button", { name: /log in with/i })).toHaveCount(0);
     // Nothing on the panel accepts a pasted credential.
     await expect(page.getByRole("textbox", { name: /api key|secret|credential/i })).toHaveCount(0);
     await expect(page.getByPlaceholder(/api key|secret|sk-/i)).toHaveCount(0);

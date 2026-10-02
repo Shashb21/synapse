@@ -8,7 +8,7 @@ import { noAiSections } from "@/modules/kernel/ai-sections";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
 import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
-import { listConnections } from "@/modules/llm/oauth";
+import { listProviderKeys } from "@/modules/llm/api-keys";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
@@ -19,13 +19,11 @@ import { loginOptions, sessionContext } from "@/modules/auth/session";
 import { ownerAccess } from "@/modules/auth/owner";
 
 export type ControlPanelSearchParams = {
-  connected?: string;
-  connect_error?: string;
   signed_in?: string;
   sign_in_error?: string;
 };
 
-/** Owner control panel (/admin/control): the AI switch, provider logins and per-stage routing. OAuth control panel: five LLM providers, Grok default, Claude one-click, no API-key fields. */
+/** Owner control panel (/admin/control): the AI switch, provider key status and per-stage routing. Five LLM providers, Grok default, Claude one-click; keys come from the server environment and are never shown or entered here. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
   let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
     stage,
@@ -44,7 +42,6 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     updated_by: "default (locked: Grok)",
     updated_at: "—",
   }));
-  let connections: Awaited<ReturnType<typeof listConnections>> = [];
   let identity = await sessionContext().catch(() => ({
     session: null,
     actor: { name: "Unsigned (demo)", function: "medical_affairs" as const },
@@ -54,15 +51,12 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
   }));
 
   try {
-    [wiring, configs, connections, identity] = await Promise.all([
-      stageWiring(),
-      routeConfigs(),
-      listConnections(),
-      sessionContext(),
-    ]);
+    [wiring, configs, identity] = await Promise.all([stageWiring(), routeConfigs(), sessionContext()]);
   } catch {
-    // Control panel must render before Postgres or OAuth connections exist.
+    // Control panel must render before Postgres is ready.
   }
+  // Key presence only, read from the environment; never a key's value.
+  const keys = listProviderKeys();
 
   const ai: AiSwitch = await aiSwitch().catch(() => ({
     enabled: true,
@@ -113,16 +107,6 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
 
   return (
     <>
-      {params.connected ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
-          {params.connected} is connected.
-        </p>
-      ) : null}
-      {params.connect_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
-          Connection failed: {params.connect_error}
-        </p>
-      ) : null}
       {params.signed_in ? (
         <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
           Signed in as {params.signed_in}.
@@ -157,23 +141,8 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
         {/* Providers and routes follow the master switch, not the owner's open workspace. */}
         <AiStatusProvider enabled={ai.enabled} offBy={ai.enabled ? null : "platform"}>
         <ProviderPanel
-          connections={connections.map((connection) => ({
-              provider_id: connection.provider_id,
-              label: connection.label,
-              summary: connection.summary,
-              tier: connection.tier ?? null,
-              auth: connection.auth,
-              configured: connection.configured,
-              status: connection.status,
-              account_label: connection.account_label,
-              connected_by: connection.connected_by,
-              connected_at: connection.connected_at,
-              detail: connection.detail,
-              models: connection.models,
-              default_model: connection.default_model,
-            }))}
+          connections={keys.map((key) => ({ ...key, tier: key.tier ?? null }))}
           defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
-          canConnect={may("connect_provider")}
           canRoute={may("configure_routing")}
           routedTo={routedToEveryStage(configs)}
         />

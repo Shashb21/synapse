@@ -147,7 +147,6 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
       createElement(ProviderPanel, {
         connections: [],
         defaults: { primary: "xai", alternate: "anthropic" },
-        canConnect: true,
         canRoute: true,
       }),
       false,
@@ -157,11 +156,10 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     const routed = render(
       createElement(ProviderPanel, {
         connections: [
-          { provider_id: "xai", label: "xAI · Grok", summary: "", tier: "default", auth: "oauth", configured: true, status: "disconnected", account_label: null, connected_by: null, connected_at: null, detail: null, models: [], default_model: "grok-4" },
-          { provider_id: "anthropic", label: "Anthropic · Claude", summary: "", tier: "alternate", auth: "oauth", configured: true, status: "disconnected", account_label: null, connected_by: null, connected_at: null, detail: null, models: [], default_model: "claude" },
+          { provider_id: "xai", label: "xAI · Grok", summary: "", tier: "default", auth: "api_key", status: "missing", key_env: "XAI_API_KEY", models: [], default_model: "grok-4" },
+          { provider_id: "anthropic", label: "Anthropic · Claude", summary: "", tier: "alternate", auth: "api_key", status: "missing", key_env: "ANTHROPIC_API_KEY", models: [], default_model: "claude" },
         ],
         defaults: { primary: "xai", alternate: "anthropic" },
-        canConnect: true,
         canRoute: true,
         routedTo: "anthropic",
       }),

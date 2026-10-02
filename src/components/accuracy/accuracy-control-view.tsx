@@ -81,7 +81,7 @@ export async function AccuracyControlView() {
           Live price table
         </h2>
         <p className="text-[12px] text-muted-foreground">
-          USD per 1M tokens used for run estimates. OAuth providers do not return billing; Audit shows
+          USD per 1M tokens used for run estimates. Provider calls do not return billing; Audit shows
           the rollup of these estimates.
         </p>
         <div className="overflow-x-auto border border-border">

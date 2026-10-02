@@ -23,12 +23,14 @@ export default defineConfig({
     env: {
       ...process.env,
       SYNAPSE_TEST_STUB_LLM: "1",
-      // Never reach a real model from e2e, and keep "no provider connected" true
+      // Never reach a real model from e2e, and keep every provider at "No key"
       // on a machine that has keys in its shell or .env.local (Next does not
       // override a variable that is already set, even when it is empty).
       XAI_API_KEY: "",
       ANTHROPIC_API_KEY: "",
       OPENAI_API_KEY: "",
+      GEMINI_API_KEY: "",
+      OPENROUTER_API_KEY: "",
     },
   },
   projects: [

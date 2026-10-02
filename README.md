@@ -113,11 +113,14 @@ Every stage (S0 upload → S10 timeline) is an independent module behind a
 versioned contract, with its own observability and evals. See
 [`docs/modules.md`](docs/modules.md) for the boundaries and the upgrade steps.
 
-LLM access is set up by the owner, never by an end user: provider OAuth logins in
-`/admin/control` (xAI Grok as the default route, Anthropic Claude, OpenAI, Google
-Gemini, OpenRouter), or server-side API keys (`XAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`) in the environment. With no model connected an AI step fails
-with a clear message and the manual path stays available; nothing falls back to
+LLM access is set up by the owner, never by an end user. Every provider uses one
+server-side API key from the environment: `XAI_API_KEY` (xAI Grok, the default
+route), `ANTHROPIC_API_KEY` (Anthropic Claude, the one-click alternate),
+`OPENAI_API_KEY`, `GEMINI_API_KEY` and `OPENROUTER_API_KEY`. There is no provider
+login. **AI & routing** (`/admin/control`) shows each provider as "Key set" or
+"No key" with the env var it reads, never the value, and sets per-stage routing.
+A provider with no key is not configured: routing to it fails with a message
+naming the env var, and the manual path stays available; nothing falls back to
 rules. Copy `.env.example` to `.env.local` and fill in what you need; never commit
 a credential.
 

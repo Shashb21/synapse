@@ -26,16 +26,20 @@ describe("LLM API key routing groundwork", () => {
     if (!(name in saved)) saved[name] = process.env[name];
   }
 
-  it("maps Claude, Grok, and OpenAI to env key names", () => {
+  it("maps every provider to its env key name", () => {
     expect(apiKeyRoutableProviderIds().sort()).toEqual([
       "anthropic-claude",
+      "google-gemini",
       "openai",
+      "openrouter",
       "xai-grok",
     ]);
     expect(providerApiKeyEnvName("anthropic-claude")).toBe("ANTHROPIC_API_KEY");
     expect(providerApiKeyEnvName("xai-grok")).toBe("XAI_API_KEY");
     expect(providerApiKeyEnvName("openai")).toBe("OPENAI_API_KEY");
-    expect(providerApiKeyEnvName("google-gemini")).toBeUndefined();
+    expect(providerApiKeyEnvName("google-gemini")).toBe("GEMINI_API_KEY");
+    expect(providerApiKeyEnvName("openrouter")).toBe("OPENROUTER_API_KEY");
+    expect(providerApiKeyEnvName("nope-ai")).toBeUndefined();
   });
 
   it("reads keys only when present (no invented secrets)", () => {
@@ -57,13 +61,13 @@ describe("LLM API key routing groundwork", () => {
         stage: "S2",
         provider_id: "anthropic-claude",
         provider_label: "Anthropic · Claude",
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-5-5",
         auth: "api_key",
         connected: true,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: [],
         degraded: false,
-        reason: "server API key",
+        reason: null,
       }),
     ).toBe(true);
   });

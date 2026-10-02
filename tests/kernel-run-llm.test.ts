@@ -34,7 +34,7 @@ describe("accuracy stub guard", () => {
 
   it("requireAccuracyLlm throws on an unconnected route outside the test stub", () => {
     expect(() => requireAccuracyLlm({ connected: false, auth: "none" }, "X")).toThrow(NoRouteError);
-    expect(() => requireAccuracyLlm({ connected: true, auth: "oauth" }, "X")).not.toThrow();
+    expect(() => requireAccuracyLlm({ connected: true, auth: "api_key" }, "X")).not.toThrow();
     process.env.SYNAPSE_TEST_STUB_LLM = "1";
     expect(() => requireAccuracyLlm({ connected: false, auth: "none" }, "X")).not.toThrow();
   });

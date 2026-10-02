@@ -10,10 +10,10 @@ export default async function AccuracyControlPage() {
   return (
     <AccuracyAppShell active="control">
       <PageIntro kicker="Routing · call kind × agent role" title="Accuracy routing">
-        Default chain is Grok → Claude → OpenAI. Prefer OAuth on the legacy control panel; server
-        env keys (<code>XAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>,{" "}
-        <code>OPENAI_API_KEY</code>) also unlock those providers when present. Never paste secrets
-        in the UI.
+        Default chain is Grok → Claude → OpenAI. Each provider uses an API key set in the server
+        environment (<code>XAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>,{" "}
+        <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>);
+        a provider without one is skipped. Keys are never shown or entered here.
       </PageIntro>
       <AccuracyControlView />
     </AccuracyAppShell>

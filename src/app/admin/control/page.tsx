@@ -11,8 +11,6 @@ export default async function ControlPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    connected?: string;
-    connect_error?: string;
     signed_in?: string;
     sign_in_error?: string;
   }>;
@@ -24,8 +22,8 @@ export default async function ControlPage({
   return (
     <AdminMain>
       <PageIntro kicker="Owner · platform-wide" title="Control panel">
-        Switch AI on or off for every customer, as a whole and section by section; customers have no AI switch. Log in to each model provider with OAuth and route every stage where you want it. Grok is the
-        locked default; Claude is one click away. Nothing here accepts an API key.
+        Switch AI on or off for every customer, as a whole and section by section; customers have no AI switch. Each model provider uses an API key set in the server environment; route every stage where you want it. Grok is the
+        locked default; Claude is one click away. Keys are never shown or entered here.
         {ai ? null : " AI is off right now, so providers and routes below are kept but not used."}
       </PageIntro>
       <ControlPanelView params={params} />

@@ -17,7 +17,7 @@ export function CostRollupPanel({
         ) : null}
       </h2>
       <p className="text-[12px] text-muted-foreground">
-        Rollup of recorded module-run estimates (OAuth providers do not expose a billing API). Uses the
+        Rollup of recorded module-run estimates (provider calls do not return billing). Uses the
         live price table in the accuracy kernel.
       </p>
       <div className="grid gap-2 sm:grid-cols-4">

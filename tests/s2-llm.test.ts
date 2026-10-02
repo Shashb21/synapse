@@ -39,7 +39,7 @@ function route(connected: boolean): ResolvedRoute {
     params: { temperature: 0, max_tokens: 4096 },
     fallbacks: [],
     degraded: false,
-    reason: connected ? null : "No LLM provider is connected. Log in at /control.",
+    reason: connected ? null : "No LLM provider has an API key. Set one in the server environment (status in /admin/control).",
   };
 }
 

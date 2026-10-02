@@ -8,6 +8,6 @@ Start here:
 The pack under [`sdlc/`](sdlc/) is historical lineage from the earlier insights-terminal slice (CIR / themes). It is not the live system of record.
 
 - **[Deploy checklist](deploy-checklist.md)** — Vercel + Postgres operator list (env, smoke, workspace hygiene)
-- **[Deploy on Vercel](deployment-vercel.md)** — project, Postgres, OAuth redirects
+- **[Deploy on Vercel](deployment-vercel.md)** — project, Postgres, provider keys, SSO redirect
 - **[Consultant UX spec](consultant-ux-spec.md)** — nav IA, readiness strip, Gaps workbench, Prep \| Room, phased delivery
 - **[Presentation view and breakout groups](presentation-and-breakouts.md)** — Room presenter view over the real pages, multi-window breakout facilitation

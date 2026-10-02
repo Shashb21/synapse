@@ -34,7 +34,7 @@ export async function runCoverageCritic(
   }
   if (!coverageRouteAllowsLlm(ctx.route)) {
     throw new NoRouteError(
-      "The coverage critic needs a connected LLM. Connect Grok or Claude in /admin/control and run it again.",
+      "The coverage critic needs a live LLM. Set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment and run it again.",
     );
   }
 

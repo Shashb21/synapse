@@ -7,7 +7,6 @@ describe("where the walkthrough loads its progress", () => {
       "/login",
       "/login/",
       "/api/auth/login",
-      "/api/oauth/llm/callback",
       "/workspaces",
       "/workspaces/new",
       "/account",

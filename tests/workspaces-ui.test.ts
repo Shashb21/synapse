@@ -205,13 +205,13 @@ describe("login and workspaces API", () => {
 
 describe("proxy gate and redirects", () => {
   it("gates customer routes by session and workspace, and leaves auth, admin and assets open", () => {
-    for (const path of ["/login", "/api/auth/callback", "/api/auth/login", "/api/oauth/llm/callback", "/admin", "/admin/runs", "/api/accuracy/extract", "/api/control", "/_next/static/x.js", "/favicon.ico", "/logo.svg"]) {
+    for (const path of ["/login", "/api/auth/callback", "/api/auth/login", "/admin", "/admin/runs", "/api/accuracy/extract", "/api/control", "/_next/static/x.js", "/favicon.ico", "/logo.svg"]) {
       expect(gateFor(path), path).toBe("open");
     }
     for (const path of ["/workspaces", "/workspaces/w123", "/api/workspaces", "/api/workspaces/select"]) {
       expect(gateFor(path), path).toBe("session");
     }
-    for (const path of ["/", "/setup", "/timeline", "/room", "/gaps/g1", "/api/iegp", "/api/plan", "/api/modules", "/api/sources/blocks", "/loginx", "/administrator"]) {
+    for (const path of ["/", "/setup", "/timeline", "/room", "/gaps/g1", "/api/iegp", "/api/plan", "/api/modules", "/api/sources/blocks", "/loginx", "/administrator", "/api/oauth/llm/callback"]) {
       expect(gateFor(path), path).toBe("workspace");
     }
   });

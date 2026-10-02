@@ -103,7 +103,7 @@ export async function runAccuracyModule<O = unknown>(args: {
   const llmReady =
     route &&
     route.connected &&
-    (route.auth === "oauth" || route.auth === "api_key") &&
+    route.auth === "api_key" &&
     !isTestStub();
   const ctx: AccuracyModuleContext = {
     org_id: args.org_id,
@@ -148,7 +148,7 @@ export async function runAccuracyModule<O = unknown>(args: {
           throw new Error(
             isTestStub()
               ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
-              : "LLM not available — connect Grok or Claude in /admin/control",
+              : "LLM not available — set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment",
           );
         },
     noteCost: (cost) => {

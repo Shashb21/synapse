@@ -1,6 +1,6 @@
 # Deploy checklist
 
-Practical operator list for shipping Synapse (the customer IEGP app plus the owner console at `/admin`) to **Vercel + Postgres**. Details and OAuth redirect URIs live in [`deployment-vercel.md`](./deployment-vercel.md) and [`deployment-live.md`](./deployment-live.md). Copy env names from [`.env.example`](../.env.example) — never commit values.
+Practical operator list for shipping Synapse (the customer IEGP app plus the owner console at `/admin`) to **Vercel + Postgres**. Details and the SSO redirect URI live in [`deployment-vercel.md`](./deployment-vercel.md); LLM provider keys in [`deployment-live.md`](./deployment-live.md). Copy env names from [`.env.example`](../.env.example) — never commit values.
 
 What the deployment gives customers: SSO sign-in for seat holders only (no self sign-up), blank workspaces by default (demo data only when chosen), AI that the owner and each workspace owner can switch off, a timeline built by hand, and no PowerPoint export. Every uploaded file is parsed by the LLM routed to the parse stage; there is no separate parser service or parser key.
 
@@ -29,9 +29,8 @@ Set in **Vercel → Project → Settings → Environment Variables**. Documented
 | `ALLOWED_EMAIL_DOMAINS` | Optional. Comma-separated domains; only verified emails on them may sign in with SSO (and on non-admin staff password sign-in). Per-customer domains live on each customer in **Admin → Customers** |
 | `AZURE_TENANT_ID` | **Required with Microsoft sign-in.** Your directory id; `common`/`organizations` refused unless `MICROSOFT_ALLOW_MULTI_TENANT=1` |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Anthropic API keys (not workspace-scoped) |
-| `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Server-side fallback when no OAuth session is connected |
-| `XAI_OAUTH_CLIENT_ID` (+ secret if issued) | Grok login on `/admin/control` (public client ships if unset) |
-| Other `*_OAUTH_CLIENT_ID` | Claude / OpenAI / Gemini / OpenRouter overrides |
+| `XAI_API_KEY` | xAI Grok, the default route. Set at least this one (or another provider's key) for live AI |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | Claude (one-click alternate), OpenAI, Gemini, OpenRouter. A provider without its key is "not configured" and is skipped by routing. Server-only; the console shows only "Key set" / "No key" |
 | `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | Customer sign-in (SSO, seat holders only; see §3a). **None set** = customers cannot sign in; only staff password accounts can |
 
 - [ ] `SESSION_SECRET` set on **Production** (and Preview) — generate a fresh value per environment; rotating it signs everyone out of their workspace selection.
@@ -84,20 +83,15 @@ Identity rules: only a **verified** email reaches a session (Google `email_verif
 
 Never put API keys or PATs in the UI. `GH_TOKEN` is for this repo’s dual-forge push only — not a Vercel app secret.
 
-## 4. OAuth redirect URIs
+## 4. SSO redirect URI
 
-Register production (and preview, if used) callbacks before the first live login:
+Register the production (and preview, if used) sign-in callback with each SSO provider before the first customer sign-in:
 
 ```text
-https://<vercel-host>/api/oauth/llm/callback?provider=xai-grok
-https://<vercel-host>/api/oauth/llm/callback?provider=anthropic-claude
-https://<vercel-host>/api/oauth/llm/callback?provider=openai
-https://<vercel-host>/api/oauth/llm/callback?provider=google-gemini
-https://<vercel-host>/api/oauth/llm/callback?provider=openrouter
 https://<vercel-host>/api/auth/callback
 ```
 
-Local: `http://localhost:43217` with the same paths.
+Local: `http://localhost:43217/api/auth/callback`. LLM providers need no redirect URI: they use API keys only.
 
 ## 5. Deploy
 
@@ -113,7 +107,7 @@ Local: `http://localhost:43217` with the same paths.
 | `/login?error=no_seat` | "Your organisation hasn't assigned you a Synapse seat. Ask your administrator." |
 | `/admin/users` | After signing in as the `create-admin` account: the staff Users table |
 | `/admin/customers` | Customers with seats used / total; assign and unassign seats |
-| `/admin/control` | AI master switch; LLM OAuth providers (Grok default); per-stage routing; no API-key fields |
+| `/admin/control` | AI master switch; each LLM provider shows "Key set" or "No key" and its env var (Grok default); per-stage routing; no API-key fields |
 | `/control`, `/pipeline`, `/runs`, `/accuracy` | Redirect to the matching `/admin/...` page (owner only) |
 | `/workspaces` | Create a workspace: **Start blank** (default) or **Start with demo data (Velmara)**; a demo workspace shows a **Demo** badge |
 | `/` | Blank workspace: Upload (AI on) or Start (AI off) |
@@ -123,7 +117,7 @@ Local: `http://localhost:43217` with the same paths.
 | `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
 | `/admin/accuracy/runs?workspace_id=…` | Module runs; stale `running` rows can be swept |
 
-Connect a provider on `/admin/control` if you need live AI. Upload a PDF or PPTX on `/sources` with AI on to confirm the parse stage's LLM parses it; with AI off, `/sources` is read only and nothing is uploaded or parsed.
+Set a provider's API key (e.g. `XAI_API_KEY`) in the Vercel environment and redeploy if you need live AI; its card on `/admin/control` then reads "Key set". Upload a PDF or PPTX on `/sources` with AI on to confirm the parse stage's LLM parses it; with AI off, `/sources` is read only and nothing is uploaded or parsed.
 
 ## 7. Post-deploy hygiene
 
@@ -134,5 +128,5 @@ Connect a provider on `/admin/control` if you need live AI. Upload a PDF or PPTX
 ## Related
 
 - [`deployment-vercel.md`](./deployment-vercel.md) — Vercel project + Postgres walkthrough
-- [`deployment-live.md`](./deployment-live.md) — OAuth / Grok routing
+- [`deployment-live.md`](./deployment-live.md) — provider API keys and Grok routing
 - [`accuracy-first-build.md`](./accuracy-first-build.md) — accuracy stack map

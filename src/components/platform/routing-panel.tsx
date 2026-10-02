@@ -13,7 +13,7 @@ export type ProviderOption = {
   label: string;
   models: string[];
   default_model: string;
-  auth: "oauth" | "none";
+  auth: "api_key" | "none";
 };
 
 export type StageRouteView = {
@@ -54,8 +54,9 @@ export function RoutingPanel({
           Per-stage routing
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          Each stage resolves its own provider, model and parameters. Agentic stages require a
-          connected LLM — log in on this page first, or the run blocks with a link back here.
+          Each stage resolves its own provider, model and parameters. Agentic stages need a
+          provider whose API key is set in the server environment, or the run blocks with a link
+          back here.
         </p>
         {ai ? null : (
           <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">

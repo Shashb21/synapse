@@ -1,37 +1,30 @@
-# Live OAuth and Grok routing
+# Live LLM keys and Grok routing
 
-Synapse never exposes API-key fields in the UI. The owner connects each LLM provider from the owner console's **AI & routing** page (`/admin/control`) via OAuth (PKCE); customers never see it. The app ships **public OAuth client ids** for Grok, Claude, OpenAI, Gemini, and OpenRouter so **Log in** works without setting `*_OAUTH_CLIENT_ID` env vars. Operators may still override those ids (and secrets where required) in the deployment environment.
+Every LLM provider authenticates with one **server-side API key** from the environment (`.env.local` locally, your host's environment settings in production). There is no provider login, and no field in the UI ever takes or shows a key. The owner console's **AI & routing** page (`/admin/control`) shows each provider as **Key set** or **No key**, with the env var it reads; customers never see it.
 
-## Grok (default route) — UI path
+| Provider | Env var | Sent as |
+| --- | --- | --- |
+| xAI · Grok (default route) | `XAI_API_KEY` | `Authorization: Bearer` |
+| Anthropic · Claude (one-click alternate) | `ANTHROPIC_API_KEY` | `x-api-key` + `anthropic-version` |
+| OpenAI · ChatGPT | `OPENAI_API_KEY` | `Authorization: Bearer` |
+| Google · Gemini | `GEMINI_API_KEY` | `x-goog-api-key` |
+| OpenRouter | `OPENROUTER_API_KEY` | `Authorization: Bearer` |
 
-1. Open **`/admin/control`** (owner console → AI & routing; `/control` redirects there).
-2. In **LLM providers**, find **xAI · Grok** (marked **Default route**).
-3. Click **Log in with xAI** and complete xAI’s OAuth consent in the browser.
-4. Optional: use **Route every stage to** → **xAI · Grok** to apply Grok as the default on all stages (Claude remains the one-click alternate).
+A provider without its key is **not configured**: routing skips it, and if nothing in a stage's chain has a key the run stops with a message naming the env var to set (customers are told to ask their administrator or carry on by hand; there is no deterministic / offline LLM fallback). Keys are read when a call is made; restart or redeploy after changing one.
 
-Agentic stages use Grok only after this login succeeds and routing points at `xai-grok`.
+## Grok (default route)
 
-## Grok — operator OAuth client env (deployment)
-
-Register an OAuth application with xAI (or your IdP console) and set redirect URI to your Synapse callback, typically:
-
-`https://<your-host>/api/oauth/llm/callback?provider=xai-grok`
-
-(local dev: `http://localhost:43217/api/oauth/llm/callback?provider=xai-grok`)
+1. Set `XAI_API_KEY` in the server environment and restart (or redeploy).
+2. Open **`/admin/control`** (owner console → AI & routing; `/control` redirects there). **xAI · Grok** (marked **Default route**) reads **Key set**.
+3. Optional: use **Route every stage to** → **xAI · Grok** to apply Grok on all stages (Claude remains the one-click alternate).
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `XAI_OAUTH_CLIENT_ID` | No (built-in public client) | Optional override for the PKCE flow |
-| `XAI_OAUTH_CLIENT_SECRET` | If xAI issues one | Token exchange |
-| `XAI_OAUTH_AUTHORIZE_URL` | No | Default `https://accounts.x.ai/oauth/authorize` |
-| `XAI_OAUTH_TOKEN_URL` | No | Default `https://api.x.ai/oauth/token` |
-| `XAI_OAUTH_SCOPES` | No | Default `api offline_access` |
+| `XAI_API_KEY` | Yes, for Grok | The key |
 | `XAI_BASE_URL` | No | Default `https://api.x.ai/v1` |
-| `XAI_MODELS` | No | Comma-separated allowlist for the control panel |
+| `XAI_MODELS` | No | Comma-separated allowlist for the control panel; the first is the default |
 
-Agentic stages **require** a connected LLM. If nothing is logged in on `/admin/control` and no server-side API key is set, runs stop with a clear message (customers are told to ask their administrator or carry on by hand; there is no deterministic / offline LLM fallback).
-
-Optional `*_OAUTH_CLIENT_ID` overrides are documented in `.env.example`.
+Each provider has the same `*_MODELS` override (`ANTHROPIC_MODELS` defaults to `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-4-5-20251001`). A stored route whose model a provider no longer lists runs on that provider's default model, and the routing panel shows the model actually used. An org-scoped Anthropic key also needs `ANTHROPIC_WORKSPACE_ID`. All names are in `.env.example`.
 
 ## Identity (app sign-in)
 

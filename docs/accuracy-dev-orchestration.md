@@ -2,7 +2,7 @@
 
 **Branch:** `cursor/accuracy-app-ready-b7b5`  
 **Coordinator:** parent Project agent + worker `bc-483e609a`  
-**Policy:** No TypeSafe Jev; schema-locked OAuth LLMs; BeOne reference gold per pack.
+**Policy:** No TypeSafe Jev; schema-locked LLMs (server API keys); BeOne reference gold per pack.
 
 ## Workstreams (parallel agents)
 
