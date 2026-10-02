@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -41,6 +41,7 @@ export function LockForm({
   variant = "outline",
   note,
   size = "md",
+  href,
 }: {
   label: string;
   action: string;
@@ -57,8 +58,10 @@ export function LockForm({
   note?: LockFormNote;
   /** A form with many fields gets a wider dialog (KAN-52). */
   size?: "md" | "lg";
+  /** Where to go once the action has saved (e.g. the next place); without it the page refreshes in place. */
+  href?: string;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh, navigate } = usePageRefresh();
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,8 +106,9 @@ export function LockForm({
       setError(json.error ?? "Could not save. Try again.");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    // The dialog closes as the new data (or the next page) arrives, not before it.
+    if (href) navigate(href, () => setOpen(false));
+    else refresh(() => setOpen(false));
   }
 
   return (
@@ -143,8 +147,8 @@ export function LockForm({
             {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : confirmLabel ?? "Lock"}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : confirmLabel ?? "Lock"}
             </Button>
           </DialogFooter>
         </form>
