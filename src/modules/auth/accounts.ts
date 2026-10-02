@@ -292,6 +292,31 @@ export async function revokeAccountSessions(accountId: string, options: { except
     .where(options.except ? and(match, ne(t.authSessions.id, options.except)) : match);
 }
 
+/**
+ * Deletes an account and ends its sessions (KAN-63). Refuses to delete the
+ * last enabled admin, under a lock so two deletes at once can't both pass.
+ */
+export async function deleteAccount(accountId: string): Promise<Account> {
+  await ensureTables();
+  const account = await sharedDb().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('user_accounts.admins'))`);
+    const found = (await tx.execute(sql`select * from user_accounts where id = ${accountId}`)) as unknown as Row[];
+    if (!found[0]) throw new AccountError("That account does not exist.", "not_found");
+    const target = toAccount(found[0]);
+    if (target.is_admin && !target.disabled) {
+      const others = (await tx.execute(sql`
+        select count(*)::int as n from user_accounts where is_admin and not disabled and id <> ${accountId}`)) as unknown as Row[];
+      if (Number(others[0]?.n ?? 0) === 0) {
+        throw new AccountError("This is the last enabled admin, so it can't be deleted. Make another admin first.");
+      }
+    }
+    await tx.execute(sql`delete from user_accounts where id = ${accountId}`);
+    return target;
+  });
+  await revokeAccountSessions(accountId);
+  return account;
+}
+
 /** Test helper: removes accounts whose email matches the LIKE pattern. */
 export async function deleteAccountsLike(pattern: string): Promise<void> {
   await rows(sql`delete from user_accounts where email like ${pattern}`);

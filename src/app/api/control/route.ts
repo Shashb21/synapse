@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activateModule, stageWiring } from "@/modules/kernel/registry";
-import { routeConfigs, setDefaultProvider, setRouteConfig } from "@/modules/kernel/routing";
+import {
+  parseFallbacks,
+  parseRouteParam,
+  routeConfigs,
+  setDefaultProvider,
+  setRouteConfig,
+} from "@/modules/kernel/routing";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
@@ -112,18 +118,15 @@ export async function POST(request: Request) {
       case "set_route": {
         const stage = String(body.stage ?? "") as StageId;
         if (!STAGE_IDS.includes(stage)) throw new Error(`Unknown stage ${body.stage}`);
+        const provider_id = String(body.provider_id ?? "");
+        // Blank numbers keep the current value; blank fallbacks mean none (KAN-63).
         const config = await setRouteConfig({
           stage,
-          provider_id: String(body.provider_id ?? ""),
+          provider_id,
           model: String(body.model ?? ""),
-          temperature: body.temperature === undefined ? undefined : Number(body.temperature),
-          max_tokens: body.max_tokens === undefined ? undefined : Number(body.max_tokens),
-          fallbacks:
-            typeof body.fallbacks === "string"
-              ? body.fallbacks.split(",").map((id) => id.trim()).filter(Boolean)
-              : Array.isArray(body.fallbacks)
-                ? (body.fallbacks as string[])
-                : undefined,
+          temperature: parseRouteParam(body.temperature, "temperature"),
+          max_tokens: parseRouteParam(body.max_tokens, "max_tokens"),
+          fallbacks: parseFallbacks(body.fallbacks, provider_id),
           actor_name: identity.actor.name,
         });
         return NextResponse.json({ ok: true, config });

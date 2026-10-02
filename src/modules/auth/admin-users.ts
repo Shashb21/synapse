@@ -2,9 +2,11 @@ import {
   AccountError,
   asActorFunction,
   createAccount,
+  deleteAccount,
   getAccount,
   isLocked,
   listAccounts,
+  normalizeEmail,
   PASSWORD_PROVIDER,
   revokeAccountSessions,
   setPassword,
@@ -19,8 +21,8 @@ import type { Session } from "./session";
 /**
  * What the owner console's Users page (/admin/users) may do to email + password
  * accounts. Callers must already have passed ownerGate. An admin can never
- * demote, un-admin or disable their own account, so the console can't lock
- * its last owner out.
+ * demote, un-admin, disable or delete their own account, and the last enabled
+ * admin can't be deleted, so the console can't lock its last owner out.
  *
  * Password accounts are for the owner's own staff only (KAN-28): every account
  * stays an admin or a Platform operator. Customers sign in with SSO and a seat
@@ -52,9 +54,10 @@ export type AdminUserAction =
   | { action: "set_admin"; id: string; is_admin: boolean }
   | { action: "verify"; id: string }
   | { action: "set_disabled"; id: string; disabled: boolean }
-  | { action: "unlock"; id: string };
+  | { action: "unlock"; id: string }
+  | { action: "delete"; id: string };
 
-export type AdminUserResult = { user: AdminUserView; temporary_password?: string };
+export type AdminUserResult = { user: AdminUserView; temporary_password?: string; deleted?: boolean };
 
 /** The admin's own account id when they signed in with a password, else null. */
 function selfId(actor: Session | null): string | null {
@@ -78,6 +81,8 @@ export async function runAdminUserAction(
       const role = typeof input.role === "string" && input.role ? input.role : "operator";
       if (!isRole(role)) throw new AccountError("Unknown role.");
       if (input.is_admin !== true && role !== "operator") throw new AccountError(STAFF_ONLY_MESSAGE);
+      // createAccount's own message speaks to someone signing up; here an admin names someone else.
+      if (typeof input.name !== "string" || !input.name.trim()) throw new AccountError("Enter the user's name.");
       const temporary_password = temporaryPassword();
       const account = await createAccount({
         email: String(input.email ?? ""),
@@ -135,6 +140,14 @@ export async function runAdminUserAction(
       const account = await mustGet(input.id);
       await unlockAccount(account.id);
       return { user: adminUserView((await getAccount(account.id))!) };
+    }
+    case "delete": {
+      const account = await mustGet(input.id);
+      // Also by email: an admin signed in with SSO still owns their password account.
+      const sameEmail = Boolean(by.session?.email) && normalizeEmail(by.session!.email!) === account.email;
+      if (account.id === self || sameEmail) throw new AccountError("You can't delete your own account.");
+      const deleted = await deleteAccount(account.id);
+      return { user: adminUserView(deleted), deleted: true };
     }
     default:
       throw new AccountError(`Unknown action ${action || "(none)"}.`);

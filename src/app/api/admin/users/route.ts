@@ -16,8 +16,9 @@ export async function GET() {
 
 /**
  * `{ action, ... }`: create (returns a temporary password once), reset_password
- * (likewise), set_role, set_admin, verify, set_disabled, unlock. Owner only; an
- * admin cannot demote, un-admin or disable themself.
+ * (likewise), set_role, set_admin, verify, set_disabled, unlock, delete (ends
+ * their sessions). Owner only; an admin cannot demote, un-admin, disable or
+ * delete themself, and the last enabled admin can't be deleted.
  */
 export async function POST(request: Request) {
   const denied = await ownerGate();

@@ -2,12 +2,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { ownerGate } from "@/modules/auth/owner";
-import { SDLC_DOCS } from "@/components/admin/sdlc-docs";
+import { specDoc } from "@/components/admin/sdlc-docs";
 
 export const runtime = "nodejs";
 
-const ALLOWED = new Set<string>(SDLC_DOCS);
-
+/** One spec as raw markdown. Only slugs in SPEC_DOCS resolve, each to the path the list names. */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> },
@@ -15,11 +14,11 @@ export async function GET(
   const denied = await ownerGate();
   if (denied) return denied;
   const { slug } = await params;
-  if (!ALLOWED.has(slug)) {
+  const doc = specDoc(slug);
+  if (!doc) {
     return NextResponse.json({ error: "Unknown spec" }, { status: 404 });
   }
-  const file = path.join(process.cwd(), "docs", "sdlc", slug);
-  const body = await readFile(file, "utf8");
+  const body = await readFile(path.join(process.cwd(), doc.rel), "utf8");
   return new NextResponse(body, {
     headers: { "content-type": "text/markdown; charset=utf-8" },
   });

@@ -24,6 +24,12 @@ export function promptVariantInstruction(version: PromptVersionId): string {
 /** Agentic stages that participate in the improvement loop. */
 export const HILLCLIMB_STAGES: StageId[] = ["S2", "S3", "S4", "S6", "S8", "S9"];
 
+/**
+ * Stages whose module appends the variant instruction (augmentSystemPrompt in
+ * prompt-variant.ts). The rest run every version with their baseline prompt.
+ */
+export const PROMPT_VARIANT_STAGES: StageId[] = ["S2", "S3"];
+
 export function promptVersionsFor(stage: StageId): PromptVersionId[] {
   if (!HILLCLIMB_STAGES.includes(stage)) return ["v1.0-baseline"];
   return [...PROMPT_VERSION_IDS];

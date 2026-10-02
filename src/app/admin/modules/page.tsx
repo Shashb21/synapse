@@ -4,6 +4,7 @@ import { ModuleActivation } from "@/components/admin/module-activation";
 import { STAGES } from "@/modules/kernel/contracts";
 import { stageWiring } from "@/modules/kernel/registry";
 import { requireOwnerPage } from "@/modules/auth/owner";
+import { formatUtc } from "@/lib/format-time";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,7 +34,7 @@ export default async function ModuleVersionsPage() {
               <div className="flex justify-between gap-2">
                 <dt>Activated</dt>
                 <dd className="truncate text-foreground">
-                  {row.activated_by ? `${row.activated_by} · ${row.activated_at?.slice(0, 16).replace("T", " ")}` : "default"}
+                  {row.activated_by ? `${row.activated_by} · ${formatUtc(row.activated_at, "time not recorded")}` : "default"}
                 </dd>
               </div>
               <div className="flex justify-between gap-2">

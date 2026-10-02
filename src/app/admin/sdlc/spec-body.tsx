@@ -31,7 +31,8 @@ function MermaidBlock({ chart, index }: { chart: string; index: number }) {
     let cancelled = false;
     mermaid.initialize({
       startOnLoad: false,
-      theme: "dark",
+      // The console is light only, so diagrams use mermaid's light theme.
+      theme: "default",
       securityLevel: "strict",
       fontFamily: "inherit",
     });

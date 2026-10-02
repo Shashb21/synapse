@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CustomerError, getCustomer, listSeats, updateCustomer } from "@/modules/auth/customers";
+import { CustomerError, deleteCustomer, getCustomer, listSeats, updateCustomer } from "@/modules/auth/customers";
 import { ownerGate } from "@/modules/auth/owner";
 import { customerErrorResponse, invalidJson, NO_STORE, readObject } from "../_shared";
 
@@ -38,5 +38,21 @@ export async function PATCH(request: Request, { params }: Context) {
     return NextResponse.json({ customer, seats: await listSeats(id) }, { headers: NO_STORE });
   } catch (error) {
     return customerErrorResponse(error, "update");
+  }
+}
+
+/**
+ * Deletes a customer and its seats; every seat holder's sessions end at once
+ * (KAN-63). Owner only.
+ */
+export async function DELETE(_request: Request, { params }: Context) {
+  const denied = await ownerGate();
+  if (denied) return denied;
+  try {
+    const { id } = await params;
+    const { customer, seats_removed } = await deleteCustomer(id);
+    return NextResponse.json({ ok: true, customer, seats_removed: seats_removed.length }, { headers: NO_STORE });
+  } catch (error) {
+    return customerErrorResponse(error, "delete");
   }
 }

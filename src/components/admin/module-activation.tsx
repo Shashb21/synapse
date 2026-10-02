@@ -20,18 +20,24 @@ export function ModuleActivation({
   async function activate(moduleId: string) {
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/control", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "activate_module", stage, module_id: moduleId }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
-    setBusy(false);
-    if (!res.ok) {
-      setError(json.error ?? "Could not activate that module");
-      return;
+    // finally re-enables the picker even when the request itself throws (offline, aborted).
+    try {
+      const res = await fetch("/api/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "activate_module", stage, module_id: moduleId }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(json.error ?? "Could not activate that module");
+        return;
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? `Could not activate that module: ${err.message}` : "Could not activate that module");
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
   }
 
   if (options.length < 2) {
@@ -55,7 +61,11 @@ export function ModuleActivation({
           ))}
         </select>
       </label>
-      {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-[11px] text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

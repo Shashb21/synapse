@@ -117,7 +117,8 @@ export async function beginOauth(args: {
   actor_name: string;
 }): Promise<{ authorize_url: string }> {
   const provider = findProvider(args.provider_id);
-  if (!provider?.oauth) throw new Error(`${args.provider_id} does not use OAuth`);
+  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider.oauth) throw new Error(`${provider.label} does not use OAuth`);
   const clientId = resolveOAuthClientId(provider);
   if (!clientId && !provider.oauth.client_id_optional) {
     throw new Error(`${provider.label} does not have an OAuth client id configured.`);
@@ -201,7 +202,8 @@ export async function completeOauth(args: {
   state: string;
 }): Promise<ProviderConnection> {
   const provider = findProvider(args.provider_id);
-  if (!provider?.oauth) throw new Error(`${args.provider_id} does not use OAuth`);
+  if (!provider) throw new Error(`Unknown provider ${args.provider_id}`);
+  if (!provider.oauth) throw new Error(`${provider.label} does not use OAuth`);
   const stored = await row(args.provider_id);
   const pending = stored?.detail ? (JSON.parse(stored.detail) as PendingDetail) : null;
   if (!pending || pending.state !== args.state) {

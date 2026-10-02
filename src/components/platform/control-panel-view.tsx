@@ -102,7 +102,12 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       updated_by: config.updated_by,
       updated_at: config.updated_at,
       resolved_label: `${route.provider_label} · ${route.model}`,
-      degraded_reason: route.degraded ? (route.reason ?? "degraded to a fallback") : null,
+      // The owner gets owner copy, not the customer's "ask your administrator" text.
+      degraded_reason: !ai.enabled
+        ? AI_OFF_OWNER_MESSAGE
+        : route.degraded
+          ? (route.reason ?? "degraded to a fallback")
+          : null,
     };
   });
 
@@ -191,6 +196,9 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     </>
   );
 }
+
+/** Why a route is idle while the master switch is off, worded for the owner. */
+export const AI_OFF_OWNER_MESSAGE = "AI is off platform-wide. Turn it on above.";
 
 /** The provider every stage routes to, or null when they differ (KAN-60). */
 export function routedToEveryStage(configs: Pick<RouteConfig, "provider_id">[]): string | null {
