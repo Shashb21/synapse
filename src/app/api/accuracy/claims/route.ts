@@ -4,12 +4,14 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { insertClaim, listClaims, type AccuracyClaimType } from "@/accuracy/store/claim-store";
 import { createManualClaim, updateClaim } from "@/accuracy/store/claim-edit";
+import { actorFieldsSchema, claimPatchSchema } from "@/accuracy/store/claim-patch-schema";
 import {
-  actorFieldsSchema,
-  actorFromBody,
-  claimPatchSchema,
-} from "@/accuracy/store/claim-patch-schema";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,7 +60,8 @@ export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = insertSchema.parse(await request.json());
+    const body = await parseLabBody(request, insertSchema);
+    await requireLabWorkspace(body.workspace_id);
     if (body.rationale !== undefined) {
       if (body.validated) {
         return NextResponse.json(
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
         claim_type: body.claim_type,
         statement: body.statement,
         rationale: body.rationale,
-        actor: actorFromBody(body),
+        actor: await labActor(),
         fields: body.fields,
         source_file_id: body.source_file_id ?? null,
         metadata: body.metadata,
@@ -89,7 +92,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, claim });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not insert claim";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Could not insert claim");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -111,34 +116,35 @@ export async function PATCH(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = patchSchema.parse(await request.json());
+    const body = await parseLabBody(request, patchSchema);
+    const workspace = await requireLabWorkspace(body.workspace_id);
+    const actor = await labActor();
     const result = await updateClaim({
       workspace_id: body.workspace_id,
       claim_id: body.claim_id,
       patch: body.patch,
       rationale: body.rationale,
-      actor: actorFromBody(body),
+      actor,
     });
 
     let statuses: unknown = null;
     const statusFields = ["status_override", "tactic_status"];
     if (result.changed.some((field) => statusFields.includes(field))) {
-      const org_id = await getWorkspaceOrgId(body.workspace_id);
-      if (org_id) {
-        const derived = await runAccuracyModule({
-          call_kind: "status_derive",
-          agent_role: "none",
-          input: { workspace_id: body.workspace_id },
-          actor: actorFromBody(body),
-          org_id,
-          workspace_id: body.workspace_id,
-        });
-        statuses = derived.output;
-      }
+      const derived = await runAccuracyModule({
+        call_kind: "status_derive",
+        agent_role: "none",
+        input: { workspace_id: body.workspace_id },
+        actor,
+        org_id: workspace.org_id,
+        workspace_id: body.workspace_id,
+      });
+      statuses = derived.output;
     }
     return NextResponse.json({ ok: true, claim: result.claim, changed: result.changed, statuses });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not update claim";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Could not update claim");
     const status = /^Unknown claim/.test(message) ? 404 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }

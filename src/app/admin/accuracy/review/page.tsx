@@ -5,7 +5,9 @@ import { MissFlagInbox, type MissFlagCardModel } from "@/components/accuracy/mis
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CompletenessAuditOutput } from "@/accuracy/modules/completeness-audit/module";
 import { listSourceFiles } from "@/accuracy/store/source-store";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +20,11 @@ export default async function AccuracyReviewPage({
 }: {
   searchParams: Promise<{ workspace_id?: string }>;
 }) {
-  await requireOwnerPage();
+  const access = await requireOwnerPage();
   const { workspace_id: workspaceId = "" } = await searchParams;
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let flags: MissFlagCardModel[] = [];
   let scanned = 0;
   let openCount = 0;
@@ -33,29 +36,29 @@ export default async function AccuracyReviewPage({
   try {
     aiOn = await aiEnabled();
     workspaces = await listWorkspaces();
-    if (workspaceId && aiOn) {
-      const org = workspaces.find((w) => w.id === workspaceId);
-      if (org) {
-        const [result, sources] = await Promise.all([
-          runAccuracyModule<CompletenessAuditOutput>({
-            call_kind: "completeness_audit",
-            agent_role: "critic",
-            input: { workspace_id: workspaceId },
-            actor: { name: "Accuracy reviewer", function: "medical_affairs" },
-            org_id: org.org_id,
-            workspace_id: workspaceId,
-          }),
-          listSourceFiles(workspaceId),
-        ]);
-        const filenameById = new Map(sources.map((s) => [s.id, s.filename]));
-        scanned = result.output.scanned_blocks;
-        openCount = result.output.open_flags;
-        skippedNoise = result.output.skipped_noise;
-        flags = result.output.flags.map((flag) => ({
-          ...flag,
-          source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,
-        }));
-      }
+    // Looked up directly, so a workspace past the picker's cap still shows its name.
+    if (workspaceId) active = await getWorkspace(workspaceId);
+    if (active && aiOn) {
+      const [result, sources] = await Promise.all([
+        runAccuracyModule<CompletenessAuditOutput>({
+          call_kind: "completeness_audit",
+          agent_role: "critic",
+          input: { workspace_id: workspaceId },
+          // Credited to the signed-in owner who opened the inbox.
+          actor: access.actor,
+          org_id: active.org_id,
+          workspace_id: workspaceId,
+        }),
+        listSourceFiles(workspaceId),
+      ]);
+      const filenameById = new Map(sources.map((s) => [s.id, s.filename]));
+      scanned = result.output.scanned_blocks;
+      openCount = result.output.open_flags;
+      skippedNoise = result.output.skipped_noise;
+      flags = result.output.flags.map((flag) => ({
+        ...flag,
+        source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,
+      }));
     }
   } catch (error) {
     if (error instanceof AiDisabledError) {
@@ -66,10 +69,10 @@ export default async function AccuracyReviewPage({
     }
   }
 
-  const active = workspaces.find((w) => w.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
 
   return (
-    <AccuracyAppShell active="review">
+    <AccuracyAppShell active="review" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Recall gate · completeness audit" title="Review">
         Miss flags from parse blocks that are not yet in the ledger. A model critic reads each uncited
         block and flags the ones that state a gap or tactic the ledger is missing, with its reason.
@@ -82,7 +85,9 @@ export default async function AccuracyReviewPage({
         </p>
       ) : null}
 
-      {workspaceId && !aiOn ? (
+      {unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
+      ) : workspaceId && !aiOn ? (
         <section
           className="grid gap-2 border border-border bg-card p-3 rounded-lg"
           aria-labelledby="review-ai-off"
@@ -103,7 +108,7 @@ export default async function AccuracyReviewPage({
             .
           </p>
           <p className="text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId}
+            Workspace · {active ? workspaceLabel(active) : workspaceId}
           </p>
         </section>
       ) : !workspaceId ? (
@@ -136,7 +141,7 @@ export default async function AccuracyReviewPage({
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {scanned} block(s) scanned · {openCount} open
+            Workspace · {active ? workspaceLabel(active) : workspaceId} · {scanned} block(s) scanned · {openCount} open
             miss flag(s)
             {skippedNoise > 0 ? ` · ${skippedNoise} judged not a miss by the model critic` : ""}
           </p>

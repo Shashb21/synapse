@@ -10,7 +10,9 @@ import {
   resolvePriorityBand,
 } from "@/accuracy/domain/iegp-semantics";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 
@@ -26,7 +28,7 @@ export default async function AccuracyPlanPage({
 }) {
   await requireOwnerPage();
   const { workspace_id: workspaceId = "" } = await searchParams;
-  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let gaps: Awaited<ReturnType<typeof listClaims>> = [];
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
@@ -34,8 +36,8 @@ export default async function AccuracyPlanPage({
   const aiOn = await aiEnabled();
 
   try {
-    workspaces = await listWorkspaces();
-    if (workspaceId) {
+    if (workspaceId) active = await getWorkspace(workspaceId);
+    if (active) {
       gaps = await listClaims(workspaceId, { claim_type: "gap", limit: 200 });
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
@@ -45,7 +47,7 @@ export default async function AccuracyPlanPage({
     loadError = error instanceof Error ? error.message : "Could not load plan";
   }
 
-  const active = workspaces.find((w) => w.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
   const eligibleCount = gapsEligibleForIdeation(
     gaps.map((gap) => {
       const meta = claimMetadata(gap);
@@ -59,7 +61,7 @@ export default async function AccuracyPlanPage({
   ).length;
 
   return (
-    <AccuracyAppShell active="plan">
+    <AccuracyAppShell active="plan" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
         {aiOn
           ? "Set priority bands on evidence gaps. Validated high-priority open gaps can run live LLM ideation — origin ideated, status proposed until you validate. Inventory tactics stay on extract."
@@ -80,10 +82,12 @@ export default async function AccuracyPlanPage({
           </Link>
           .
         </p>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
+            Workspace · {active ? workspaceLabel(active) : workspaceId} · {gaps.length} gap(s) · {eligibleCount} high
             open eligible for {aiOn ? "ideate" : "a proposed tactic"} · edit proposed tactics (name, type, design, dates) on the{" "}
             <Link
               href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}

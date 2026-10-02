@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { addFacilitatorTag, assignFacilitatorTag } from "@/accuracy/store/workshop-store";
+import {
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +28,8 @@ export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
+    const body = await parseLabBody(request, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
     if (body.action === "add_tag") {
       const snapshot = await addFacilitatorTag({
         workspace_id: body.workspace_id,
@@ -39,7 +46,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, snapshot });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not update facilitator tags";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Could not update facilitator tags");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

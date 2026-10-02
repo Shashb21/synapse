@@ -1,6 +1,5 @@
 import { z } from "zod";
-import type { Actor } from "@/accuracy/kernel/contracts";
-import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
+import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { CLAIM_PRIORITIES, GAP_STATUS_OVERRIDES } from "./claim-edit";
 
 /** Wire schema for a human claim patch (PATCH /api/accuracy/claims). */
@@ -22,17 +21,11 @@ export const claimPatchSchema = z
   })
   .strict();
 
+/**
+ * Older clients still send who they are; the fields are accepted and ignored.
+ * Writes are credited to the signed-in owner server-side (api/accuracy/_lib/request.ts).
+ */
 export const actorFieldsSchema = {
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.enum(ACTOR_FUNCTIONS).optional(),
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 };
-
-export function actorFromBody(
-  body: { actor_name?: string; actor_function?: Actor["function"] },
-  fallbackName = "Accuracy reviewer",
-): Actor {
-  return {
-    name: body.actor_name?.trim() || fallbackName,
-    function: body.actor_function ?? "medical_affairs",
-  };
-}

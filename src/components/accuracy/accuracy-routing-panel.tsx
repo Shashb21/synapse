@@ -92,8 +92,9 @@ function AccuracyRouteCard({
         agent_role: route.agent_role,
         provider_id: providerId,
         model,
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
+        // Sent as typed: the server checks the range, and a blank keeps the current value.
+        temperature,
+        max_tokens: maxTokens,
         fallbacks,
       }),
     });

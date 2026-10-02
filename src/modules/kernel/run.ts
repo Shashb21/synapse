@@ -2,7 +2,7 @@ import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
 import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
-import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled, aiSectionEnabled } from "./ai-switch";
+import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled, aiSectionEnabled, platformAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
@@ -129,6 +129,7 @@ export async function runStage<O = unknown>(args: {
   /**
    * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
    * switches say, so a section can be tried before it is turned on. Needs a routed model.
+   * It never overrides the platform master switch: with AI off for the platform, no model runs.
    */
   force_ai?: boolean;
 }): Promise<StageRunResult<O>> {
@@ -138,7 +139,12 @@ export async function runStage<O = unknown>(args: {
   // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
   // Each stage follows its section's admin switch (KAN-53); S7 and S10 have no section.
   const section = sectionOfStage(args.stage);
-  const ai = args.force_ai === true || (section ? await aiSectionEnabled(section) : await aiEnabled());
+  const ai =
+    args.force_ai === true
+      ? await platformAiEnabled()
+      : section
+        ? await aiSectionEnabled(section)
+        : await aiEnabled();
   const manifest = implementation.manifest;
   if (!ai && ((manifest.agentic && !manifest.ai_optional) || manifest.needs_ai)) {
     throw new AiDisabledError(stageLabel(args.stage));

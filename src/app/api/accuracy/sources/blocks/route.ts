@@ -22,6 +22,7 @@ import {
 import { getSourceFile } from "@/accuracy/store/source-store";
 import { getWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { STAKEHOLDER_FUNCTIONS } from "@/lib/schema";
+import { labActor, labErrorMessage, labRequestErrorResponse, readLabJson } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +83,7 @@ export async function GET(req: Request) {
 const actorFields = {
   workspace_id: z.string().min(1),
   rationale: z.string(),
+  /** Ignored: every edit is credited to the signed-in owner. */
   actor_name: z.string().optional(),
   actor_function: z.string().optional(),
 };
@@ -158,17 +160,13 @@ export async function POST(req: Request) {
   if (denied) return denied;
   let body: z.infer<typeof postSchema>;
   try {
-    body = postSchema.parse(await req.json());
+    body = postSchema.parse(await readLabJson(req));
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : "Invalid body";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    return labRequestErrorResponse(error) ?? NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
   }
   const org_id = await getWorkspaceOrgId(body.workspace_id);
   if (!org_id) return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-  const actor = {
-    name: body.actor_name?.trim() || "Accuracy reviewer",
-    function: body.actor_function?.trim() || "medical_affairs",
-  };
+  const actor = await labActor();
   const base = { workspace_id: body.workspace_id, rationale: body.rationale, actor };
   try {
     switch (body.action) {
@@ -240,7 +238,7 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
-    const message = error instanceof Error ? error.message : "Block edit failed";
+    const message = labErrorMessage(error, "Block edit failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

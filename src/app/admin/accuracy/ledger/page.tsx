@@ -20,7 +20,8 @@ import {
 } from "@/accuracy/domain/ledger-filters";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice } from "@/components/accuracy/unknown-workspace";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
@@ -89,6 +90,7 @@ export default async function AccuracyLedgerPage({
   const aiOn = await aiEnabled();
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let activeWorkspace: Awaited<ReturnType<typeof getWorkspace>> = null;
   let gaps: LedgerClaimCardModel[] = [];
   let tactics: LedgerClaimCardModel[] = [];
   let facets = ledgerFilterFacets([]);
@@ -101,7 +103,9 @@ export default async function AccuracyLedgerPage({
 
   try {
     workspaces = await listWorkspaces();
-    if (workspaceId) {
+    // Looked up directly, so a workspace past the picker's cap still shows its name.
+    if (workspaceId) activeWorkspace = await getWorkspace(workspaceId);
+    if (activeWorkspace) {
       const claims = await listClaims(workspaceId);
       const live = claims.filter((c) => c.status !== "merged");
       const statementById = new Map(claims.map((c) => [c.id, c.statement]));
@@ -145,7 +149,7 @@ export default async function AccuracyLedgerPage({
     loadError = error instanceof Error ? error.message : "Could not load ledger";
   }
 
-  const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;
   const planLabel = workspacePlanLabel(activeWorkspace);
   const filtering = Boolean(filters.chapter || filters.si);
 
@@ -190,6 +194,8 @@ export default async function AccuracyLedgerPage({
             </ul>
           ) : null}
         </section>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">

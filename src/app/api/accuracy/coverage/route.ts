@@ -7,7 +7,13 @@ import {
   requireCoveragePairClaims,
   upsertCoverageDecision,
 } from "@/accuracy/store/coverage-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,9 +43,9 @@ export async function GET(req: Request) {
 }
 
 const decideSchema = z.object({
-  workspace_id: z.string(),
-  gap_id: z.string(),
-  tactic_id: z.string(),
+  workspace_id: z.string().min(1),
+  gap_id: z.string().min(1),
+  tactic_id: z.string().min(1),
   overall: z.enum(["covers", "partial", "none", "unknown"]),
   rationale: z.string().trim().min(3),
 });
@@ -53,25 +59,23 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = decideSchema.parse(await req.json());
+    const body = await parseLabBody(req, decideSchema);
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
     await requireCoveragePairClaims(body);
     await upsertCoverageDecision(body);
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    let statuses: unknown = null;
-    if (org_id) {
-      const derived = await runAccuracyModule({
-        call_kind: "status_derive",
-        agent_role: "none",
-        input: { workspace_id: body.workspace_id, gap_ids: [body.gap_id] },
-        actor: { name: "Coverage decide", function: "medical_affairs" },
-        org_id,
-        workspace_id: body.workspace_id,
-      });
-      statuses = derived.output;
-    }
-    return NextResponse.json({ ok: true, statuses });
+    const derived = await runAccuracyModule({
+      call_kind: "status_derive",
+      agent_role: "none",
+      input: { workspace_id: body.workspace_id, gap_ids: [body.gap_id] },
+      actor: await labActor(),
+      org_id,
+      workspace_id: body.workspace_id,
+    });
+    return NextResponse.json({ ok: true, statuses: derived.output });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Coverage decide failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Coverage decide failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

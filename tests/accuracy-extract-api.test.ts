@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 // This file switches the LLM test stub off to reach the live-extract gate, which
 // also switches off the test owner bypass; the owner gate is covered in owner-gate.test.ts.
-vi.mock("@/modules/auth/owner", () => ({ ownerGate: async () => null }));
+vi.mock("@/modules/auth/owner", () => ({
+  ownerGate: async () => null,
+  ownerAccess: async () => ({ owner: true, actor: { name: "Extract Owner", function: "medical_affairs" } }),
+}));
 import { POST as extractPost } from "@/app/api/accuracy/extract/route";
 import { registerAccuracyStack } from "@/accuracy";
 import { listClaims } from "@/accuracy/store/claim-store";
