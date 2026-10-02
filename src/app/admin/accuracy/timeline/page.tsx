@@ -9,7 +9,9 @@ import {
   snapshotHashForPlan,
   workspaceLatestPlan,
 } from "@/accuracy/modules/gantt-project/save-final";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice } from "@/components/accuracy/unknown-workspace";
 import { claimFieldSnapshot } from "@/accuracy/domain/claim-fields";
 import { isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
 import type { GanttTacticSchedule } from "@/components/accuracy/gantt-schedule-editor";
@@ -28,6 +30,7 @@ export default async function AccuracyTimelinePage({
   const { workspace_id: workspaceId = "" } = await searchParams;
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let activeWorkspace: Awaited<ReturnType<typeof getWorkspace>> = null;
   let activities: Awaited<ReturnType<typeof projectWorkspaceGantt>>["activities"] = [];
   let catalog: Awaited<ReturnType<typeof projectWorkspaceGantt>>["catalog"] = [];
   let plan: Awaited<ReturnType<typeof workspaceLatestPlan>> = null;
@@ -36,7 +39,9 @@ export default async function AccuracyTimelinePage({
 
   try {
     workspaces = await listWorkspaces();
-    if (workspaceId) {
+    // Looked up directly, so a workspace past the picker's cap still shows its name.
+    if (workspaceId) activeWorkspace = await getWorkspace(workspaceId);
+    if (activeWorkspace) {
       const projected = await projectWorkspaceGantt(workspaceId);
       activities = projected.activities;
       catalog = projected.catalog;
@@ -63,10 +68,11 @@ export default async function AccuracyTimelinePage({
     loadError = error instanceof Error ? error.message : "Could not load timeline";
   }
 
-  const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;
+  const planLabel = workspacePlanLabel(activeWorkspace);
 
   return (
-    <AccuracyAppShell active="timeline">
+    <AccuracyAppShell active="timeline" planLabel={planLabel}>
       <PageIntro kicker="Final truth · validated tactics only" title="Timeline">
         Interactive Gantt projection from validated tactics. Click a bar for gap, tactic, and
         interdependencies. Export PNG or save as final to freeze a snapshot hash with an audit
@@ -106,6 +112,8 @@ export default async function AccuracyTimelinePage({
             </ul>
           ) : null}
         </section>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <section className="mb-6 grid gap-2" aria-labelledby="workspace-picker">
@@ -114,6 +122,7 @@ export default async function AccuracyTimelinePage({
               {activeWorkspace ? (
                 <span className="ml-2 text-[12px] font-normal text-muted-foreground">
                   · {activeWorkspace.name}
+                  {planLabel ? ` · ${planLabel}` : ""}
                 </span>
               ) : null}
             </h2>

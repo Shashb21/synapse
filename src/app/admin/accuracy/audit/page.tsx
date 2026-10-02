@@ -5,7 +5,9 @@ import { registerAccuracyStack } from "@/accuracy";
 import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { getAccuracyPlanById, type AccuracyPlanRecord } from "@/accuracy/store/plan-store";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { listAccuracyRuns, summarizeAccuracyRunCost } from "@/accuracy/kernel/observability";
 import { snapshotHashForPlan } from "@/accuracy/modules/gantt-project/save-final";
 import type { AccuracyCostRollup } from "@/accuracy/kernel/cost-rollup";
@@ -34,15 +36,15 @@ export default async function AccuracyAuditPage({
     plan_id: planId = "",
     snapshot_hash: queryHash = "",
   } = await searchParams;
-  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   const rows: AuditRow[] = [];
   let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
   let plan: AccuracyPlanRecord | null = null;
 
   try {
-    workspaces = await listWorkspaces();
-    if (workspaceId) {
+    if (workspaceId) active = await getWorkspace(workspaceId);
+    if (active) {
       const [claims, pairs, runs, cost, savedPlan] = await Promise.all([
         listClaims(workspaceId, { limit: 300 }),
         listCoveragePairs(workspaceId),
@@ -126,10 +128,10 @@ export default async function AccuracyAuditPage({
     loadError = error instanceof Error ? error.message : "Could not load audit";
   }
 
-  const active = workspaces.find((w) => w.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
 
   return (
-    <AccuracyAppShell active="audit">
+    <AccuracyAppShell active="audit" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Trace · rationales & runs" title="Audit">
         Hillclimb trail: validation rationales, coverage decisions, priority changes, module runs, and
         estimated spend for one workspace.
@@ -149,10 +151,12 @@ export default async function AccuracyAuditPage({
           </Link>{" "}
           with a <code>workspace_id</code>.
         </p>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {rows.length} event(s)
+            Workspace · {active ? workspaceLabel(active) : workspaceId} · {rows.length} event(s)
           </p>
           {planId && !plan ? (
             <p className="mb-3 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">

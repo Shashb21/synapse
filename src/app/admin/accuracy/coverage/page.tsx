@@ -8,7 +8,9 @@ import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 
@@ -24,7 +26,7 @@ export default async function AccuracyCoveragePage({
 }) {
   await requireOwnerPage();
   const { workspace_id: workspaceId = "" } = await searchParams;
-  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let pairs: Awaited<ReturnType<typeof listCoveragePairs>> = [];
   let loadError: string | null = null;
   let gapOptions: { id: string; statement: string }[] = [];
@@ -34,14 +36,14 @@ export default async function AccuracyCoveragePage({
   const aiOn = await aiEnabled();
 
   try {
-    workspaces = await listWorkspaces();
-    if (workspaceId) {
+    if (workspaceId) active = await getWorkspace(workspaceId);
+    if (active) {
       pairs = await listCoveragePairs(workspaceId);
-      const active = (await listClaims(workspaceId, { limit: 500 })).filter(isActiveLedgerClaim);
-      gapOptions = active
+      const live = (await listClaims(workspaceId, { limit: 500 })).filter(isActiveLedgerClaim);
+      gapOptions = live
         .filter((c) => c.claim_type === "gap")
         .map((c) => ({ id: c.id, statement: c.statement }));
-      tacticOptions = active
+      tacticOptions = live
         .filter((c) => c.claim_type === "tactic")
         .map((c) => ({ id: c.id, statement: c.statement }));
       const workshop = await workshopReadiness(workspaceId);
@@ -52,11 +54,11 @@ export default async function AccuracyCoveragePage({
     loadError = error instanceof Error ? error.message : "Could not load coverage";
   }
 
-  const active = workspaces.find((w) => w.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
   const queue = buildCoverageQueue(pairs);
 
   return (
-    <AccuracyAppShell active="coverage">
+    <AccuracyAppShell active="coverage" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Pairwise · one decision at a time" title="Coverage">
         {aiOn
           ? "Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and rationale — you still confirm with a decide button. Linked inventory pairs are preferred."
@@ -77,10 +79,12 @@ export default async function AccuracyCoveragePage({
           </Link>{" "}
           with a <code>workspace_id</code>.
         </p>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active?.name ?? workspaceId} · {queue.total_count} pair(s) ·{" "}
+            Workspace · {active ? workspaceLabel(active) : workspaceId} · {queue.total_count} pair(s) ·{" "}
             {queue.undecided_count} undecided
           </p>
           {ready ? (

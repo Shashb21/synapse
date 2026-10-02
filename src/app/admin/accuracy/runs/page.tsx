@@ -10,7 +10,11 @@ import {
   summarizeAccuracyRunCost,
 } from "@/accuracy";
 import type { AccuracyCostRollup } from "@/accuracy/kernel/cost-rollup";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice } from "@/components/accuracy/unknown-workspace";
+import { runRouteLabel } from "@/accuracy/domain/run-route";
+import { listAccuracyModules } from "@/accuracy/kernel/registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,13 +36,16 @@ export default async function AccuracyRunsPage({
   const { workspace_id: workspaceId = "" } = await searchParams;
 
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let activeWorkspace: Awaited<ReturnType<typeof getWorkspace>> = null;
   let runs: Awaited<ReturnType<typeof listAccuracyRuns>> = [];
   let rollup: AccuracyCostRollup | null = null;
   let loadError: string | null = null;
 
   try {
     workspaces = await listWorkspaces();
-    if (workspaceId) {
+    // Looked up directly, so a workspace past the picker's cap still shows its name.
+    if (workspaceId) activeWorkspace = await getWorkspace(workspaceId);
+    if (activeWorkspace) {
       [runs, rollup] = await Promise.all([
         listAccuracyRuns(workspaceId, 40),
         summarizeAccuracyRunCost(workspaceId),
@@ -48,10 +55,17 @@ export default async function AccuracyRunsPage({
     loadError = error instanceof Error ? error.message : "Could not load runs";
   }
 
-  const activeWorkspace = workspaces.find((row) => row.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !activeWorkspace && !loadError;
+  const planLabel = workspacePlanLabel(activeWorkspace);
+  // Only agentic modules call a model; mechanical runs read "No model" whatever route was noted.
+  const modelModules = new Set(
+    listAccuracyModules()
+      .filter((implementation) => implementation.manifest.agentic)
+      .map((implementation) => implementation.manifest.id),
+  );
 
   return (
-    <AccuracyAppShell active="runs">
+    <AccuracyAppShell active="runs" planLabel={planLabel}>
       <PageIntro kicker="Observability · accuracy module runs" title="Runs">
         Per-workspace module runs with timing, route, cost rollup, and eval scores. Stale{" "}
         <code>running</code> rows older than 30 minutes are marked abandoned.
@@ -95,7 +109,9 @@ export default async function AccuracyRunsPage({
         )}
       </section>
 
-      {workspaceId && rollup ? (
+      {unknownWorkspace ? <UnknownWorkspaceNotice workspaceId={workspaceId} /> : null}
+
+      {activeWorkspace && rollup ? (
         <CostRollupPanel rollup={rollup} workspaceName={activeWorkspace?.name} />
       ) : null}
 
@@ -106,22 +122,19 @@ export default async function AccuracyRunsPage({
             {activeWorkspace ? (
               <span className="ml-2 text-[12px] font-normal text-muted-foreground">
                 · {activeWorkspace.name}
+                {planLabel ? ` · ${planLabel}` : ""}
               </span>
             ) : null}
           </h2>
-          {workspaceId ? <SweepStaleRunsButton workspaceId={workspaceId} /> : null}
+          {activeWorkspace ? <SweepStaleRunsButton workspaceId={workspaceId} /> : null}
         </div>
         {!workspaceId ? (
           <p className="text-[12px] text-muted-foreground">Select a workspace to list runs.</p>
-        ) : runs.length === 0 ? (
+        ) : unknownWorkspace ? null : runs.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">Nothing has run in this workspace yet.</p>
         ) : (
           <ul className="grid gap-2">
             {runs.map((run) => {
-              const route =
-                run.route && typeof run.route === "object"
-                  ? (run.route as { provider_label?: string; model?: string; degraded?: boolean })
-                  : null;
               const evals = Array.isArray(run.evals) ? run.evals : [];
               return (
                 <li key={run.id} className="border border-border bg-card p-3 rounded-lg">
@@ -142,15 +155,10 @@ export default async function AccuracyRunsPage({
                     <span>{run.started_at.slice(0, 16).replace("T", " ")}</span>
                     <span>·</span>
                     <span>{run.actor_name}</span>
-                    {route?.provider_label ? (
-                      <>
-                        <span>·</span>
-                        <span>
-                          {route.provider_label} · {route.model}
-                          {route.degraded ? " (degraded)" : ""}
-                        </span>
-                      </>
-                    ) : null}
+                    <span>·</span>
+                    <span data-testid="run-route">
+                      {runRouteLabel(run.route, modelModules.has(run.module_id))}
+                    </span>
                     {run.cost_usd ? (
                       <>
                         <span>·</span>

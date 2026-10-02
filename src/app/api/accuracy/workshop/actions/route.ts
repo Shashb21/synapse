@@ -4,7 +4,13 @@ import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { parseWorkshopActionKind } from "@/accuracy/modules/workshop/actions";
 import { applyWorkshopAction } from "@/accuracy/store/workshop-store";
-import type { ActorFunction } from "@/lib/iegp/enums";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,22 +26,21 @@ const bodySchema = z.object({
   tactic_id: z.string().optional(),
   overall: z.enum(["covers", "partial", "none", "unknown"]).optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the action is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
+    const body = await parseLabBody(request, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
     const snapshot = await applyWorkshopAction({
       workspace_id: body.workspace_id,
       snapshot_id: body.snapshot_id,
-      actor: {
-        name: body.actor_name?.trim() || "Workshop facilitator",
-        function: (body.actor_function?.trim() || "medical_affairs") as ActorFunction,
-      },
+      actor: await labActor(),
       action: {
         kind: parseWorkshopActionKind(body.kind),
         gap_id: body.gap_id,
@@ -47,7 +52,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, snapshot });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Workshop action failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Workshop action failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

@@ -17,7 +17,9 @@ import {
   readSourceStakeholder,
 } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
-import { listWorkspaces } from "@/accuracy/store/tenant";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
+import { getWorkspace } from "@/accuracy/store/tenant";
+import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +34,7 @@ export default async function AccuracySourcesPage({
 }) {
   await requireOwnerPage();
   const { workspace_id: workspaceId = "" } = await searchParams;
-  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let sources: Array<
     Awaited<ReturnType<typeof listSourceFiles>>[number] & {
       block_count: number;
@@ -46,8 +48,8 @@ export default async function AccuracySourcesPage({
   let loadError: string | null = null;
 
   try {
-    workspaces = await listWorkspaces();
-    if (workspaceId) {
+    if (workspaceId) active = await getWorkspace(workspaceId);
+    if (active) {
       const rows = await listSourceFiles(workspaceId);
       sources = await Promise.all(
         rows.map(async (row) => {
@@ -70,7 +72,7 @@ export default async function AccuracySourcesPage({
     loadError = error instanceof Error ? error.message : "Could not load sources";
   }
 
-  const active = workspaces.find((w) => w.id === workspaceId);
+  const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
   // AI off (owner's decision): no upload, parse, hand-typed source or extract —
   // existing sources are shown read-only and gaps/tactics are added on the Ledger.
   const aiOn = await aiEnabled();
@@ -83,7 +85,7 @@ export default async function AccuracySourcesPage({
   };
 
   return (
-    <AccuracyAppShell active="sources">
+    <AccuracyAppShell active="sources" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Ingest · parse · extract" title="Sources">
         {aiOn ? (
           <>
@@ -118,10 +120,12 @@ export default async function AccuracySourcesPage({
           </Link>{" "}
           (or open with <code>?workspace_id=</code>).
         </p>
+      ) : unknownWorkspace ? (
+        <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · <span className="text-foreground">{active?.name ?? workspaceId}</span>
+            Workspace · <span className="text-foreground">{active ? workspaceLabel(active) : workspaceId}</span>
           </p>
           {!aiOn ? (
             <div

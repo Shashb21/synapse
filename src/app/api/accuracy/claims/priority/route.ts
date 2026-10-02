@@ -3,7 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { CLAIM_PRIORITIES, updateClaim } from "@/accuracy/store/claim-edit";
-import { actorFieldsSchema, actorFromBody } from "@/accuracy/store/claim-patch-schema";
+import { actorFieldsSchema } from "@/accuracy/store/claim-patch-schema";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,14 +30,16 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
+    const body = await parseLabBody(req, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
+    const actor = await labActor();
     try {
       const result = await updateClaim({
         workspace_id: body.workspace_id,
         claim_id: body.claim_id,
         patch: { priority: body.priority },
         rationale: body.rationale,
-        actor: actorFromBody(body, "Accuracy planner"),
+        actor,
       });
       return NextResponse.json({ ok: true, changed: result.changed });
     } catch (error) {
@@ -44,12 +53,9 @@ export async function POST(req: Request) {
       throw error;
     }
   } catch (error) {
-    const message =
-      error instanceof z.ZodError
-        ? error.issues.map((issue) => issue.message).join("; ")
-        : error instanceof Error
-          ? error.message
-          : "Priority update failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Priority update failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

@@ -6,6 +6,8 @@ import { registerAccuracyStack } from "@/accuracy";
 import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
+import { UnknownWorkspaceNotice } from "@/components/accuracy/unknown-workspace";
+import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -56,7 +58,7 @@ export default async function AccuracyWorkshopPage({
     : "/admin/accuracy/workshop";
 
   return (
-    <AccuracyAppShell active="workshop">
+    <AccuracyAppShell active="workshop" planLabel={workspacePlanLabel(workspace)}>
       <PageIntro kicker="Stage · facilitator tags" title="Workshop">
         Freeze inventory after validate/map, then facilitate on tagged boards. No suggested tags in
         v1. Every adapt needs a rationale.
@@ -96,7 +98,7 @@ export default async function AccuracyWorkshopPage({
           ) : null}
         </section>
       ) : !workspace ? (
-        <p className="text-[12px] text-destructive">Unknown workspace.</p>
+        loadError ? null : <UnknownWorkspaceNotice workspaceId={workspaceId} />
       ) : readiness ? (
         <WorkshopSaveCta
           workspaceId={workspace.id}

@@ -8,6 +8,7 @@ import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { getWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { mimeForFilename } from "@/lib/ingest/local-parse";
+import { labActor } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,7 +90,7 @@ export async function POST(req: Request) {
           mime,
           content_base64: buffer.toString("base64"),
         },
-        actor: { name: "Source upload", function: "medical_affairs" },
+        actor: await labActor(),
         org_id,
         workspace_id,
       });

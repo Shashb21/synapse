@@ -6,6 +6,7 @@ import { listReferencePacks } from "@/accuracy/eval/reference-gold";
 import { seedWorkspaceFromGold } from "@/accuracy/store/seed-from-gold";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { aiOffFromError, aiOffResponse } from "@/app/api/accuracy/_lib/ai-off";
+import { labErrorMessage, labRequestErrorResponse, parseLabBody } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
+    const body = await parseLabBody(req, bodySchema);
     // An explicit parse request is an AI step: refuse it before creating anything.
     // Without one, AI off seeds the gold claims and skips the parse (parse_skipped).
     if (body.parse_source === true && !(await aiEnabled())) return aiOffResponse();
@@ -47,7 +48,9 @@ export async function POST(req: Request) {
   } catch (error) {
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
-    const message = error instanceof Error ? error.message : "Seed failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Seed failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

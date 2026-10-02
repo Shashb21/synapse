@@ -29,7 +29,7 @@ export default async function AccuracyWorkspacesPage({
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
   let loadError: string | null = null;
   try {
-    workspaces = await listWorkspaces(50, { includeArchived });
+    workspaces = await listWorkspaces(undefined, { includeArchived });
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Could not load workspaces";
   }

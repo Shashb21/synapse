@@ -6,6 +6,7 @@ import { isTestStub } from "@/modules/kernel/llm";
 import { resolveRoute } from "@/modules/kernel/routing";
 import type { Actor, StageId } from "@/modules/kernel/contracts";
 import { AI_SECTIONS, type AiSectionId } from "@/modules/kernel/ai-sections";
+import { AiDisabledError, platformAiEnabled } from "@/modules/kernel/ai-switch";
 import { replaceContentsOf } from "@/modules/workspaces/contents";
 import { createWorkspace, getWorkspace, withWorkspace } from "@/modules/workspaces/store";
 import { createGap, loadState } from "@/lib/iegp/store";
@@ -20,6 +21,8 @@ import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
  * against the live routed model, on the Velmara samples or on the admin's own input.
  * Nothing is scored; the output is shown for the admin to judge. Every run happens in a
  * private sandbox workspace, reset to the demo first, so customer data is never touched.
+ * The harness ignores the per-section switches, but never the platform master switch:
+ * with AI off for the platform no model is called (KAN-61).
  */
 
 const SANDBOX_KEY = "ai_harness_workspace";
@@ -27,6 +30,18 @@ const SANDBOX_OWNER = "ai-harness@synapse.internal";
 
 export class HarnessNotBuiltError extends Error {}
 export class HarnessNoModelError extends Error {}
+
+/** Why the harness will not run while the platform AI switch is off. */
+export const HARNESS_AI_OFF_MESSAGE =
+  "AI is turned off for the platform, so the harness calls no model. Turn AI on in AI & routing to run it.";
+
+/** The harness refused because the platform AI switch is off (409 `ai_off`). */
+export class HarnessAiOffError extends AiDisabledError {
+  constructor() {
+    super();
+    this.message = HARNESS_AI_OFF_MESSAGE;
+  }
+}
 
 export type HarnessInput = {
   /** "sample" runs the fixed Velmara input; "custom" runs the admin's own. */
@@ -102,10 +117,18 @@ async function routeLabel(stage: StageId): Promise<string> {
     if (!route.connected) throw new Error(route.reason ?? "not connected");
     return `${route.provider_label} · ${route.model}${route.degraded ? ` (fallback: ${route.reason})` : ""}`;
   } catch (error) {
-    throw new HarnessNoModelError(
-      `No live model is connected for ${stage}: ${error instanceof Error ? error.message : String(error)}. Connect one in AI & routing.`,
-    );
+    throw new HarnessNoModelError(harnessNoModelMessage(stage, error instanceof Error ? error.message : String(error)));
   }
+}
+
+/**
+ * Why a case cannot run without a model. The routing reason often already says how to
+ * connect one, so the message ends with a single instruction, not the same one twice.
+ */
+export function harnessNoModelMessage(stage: StageId, reason: string): string {
+  const detail = reason.trim().replace(/[.\s]+$/, "") || "not connected";
+  const advice = /\bconnect\b/i.test(detail) ? "" : " Connect one in AI & routing.";
+  return `No live model is connected for ${stage}: ${detail}.${advice}`;
 }
 
 /** The sandbox's partially addressed gaps, for the split case's picker. */
@@ -126,6 +149,7 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
   if (!section.built) {
     throw new HarnessNotBuiltError(`${section.label}: no AI module is developed yet. ${section.detail}`);
   }
+  if (!(await platformAiEnabled())) throw new HarnessAiOffError();
   const stage = CASE_STAGE[args.case];
   const route = await routeLabel(stage);
   const sandbox = await harnessSandboxId();

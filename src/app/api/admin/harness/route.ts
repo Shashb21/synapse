@@ -29,8 +29,13 @@ export async function GET() {
 export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!body || !isAiSectionId(body.case)) {
+  let body: Record<string, unknown> | null;
+  try {
+    body = (await request.json()) as Record<string, unknown> | null;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON", code: "invalid_json" }, { status: 400, headers: NO_STORE });
+  }
+  if (!body || typeof body !== "object" || !isAiSectionId(body.case)) {
     return NextResponse.json({ error: "Choose an AI use case." }, { status: 400 });
   }
   const text = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : undefined);

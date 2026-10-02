@@ -7,7 +7,14 @@ import {
   manualMergeClaims,
   unmergeClaim,
 } from "@/accuracy/store/claim-merge";
-import { actorFieldsSchema, actorFromBody } from "@/accuracy/store/claim-patch-schema";
+import { actorFieldsSchema } from "@/accuracy/store/claim-patch-schema";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,8 +56,9 @@ export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
-    const actor = actorFromBody(body);
+    const body = await parseLabBody(request, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
+    const actor = await labActor();
     if (body.action === "merge") {
       const result = await manualMergeClaims({
         workspace_id: body.workspace_id,
@@ -78,7 +86,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, action: body.action, claim });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Merge action failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Merge action failed");
     const status = /^Unknown claim/.test(message) ? 404 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }

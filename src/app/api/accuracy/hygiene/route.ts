@@ -12,6 +12,7 @@ import {
   deleteWorkspace,
   unarchiveWorkspace,
 } from "@/accuracy/store/tenant";
+import { labErrorMessage, labRequestErrorResponse, parseLabBody } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
+    const body = await parseLabBody(req, bodySchema);
     if (body.action === "sweep_stale_runs") {
       const result = await sweepStaleAccuracyRuns({
         workspace_id: body.workspace_id,
@@ -69,7 +70,9 @@ export async function POST(req: Request) {
     const rollup = await summarizeAccuracyRunCost(body.workspace_id);
     return NextResponse.json({ ok: true, rollup });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Hygiene action failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Hygiene action failed");
     const status = message.startsWith("Unknown workspace") ? 404 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }

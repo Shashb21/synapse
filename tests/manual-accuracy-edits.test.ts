@@ -30,6 +30,7 @@ import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { ownerAccess } from "@/modules/auth/owner";
 
 registerAccuracyStack();
 
@@ -435,7 +436,8 @@ describe("status_override writer", () => {
     expect(rerun.output.statuses.find((s) => s.gap_id === gap.id)?.status).toBe("addressed");
     const meta = claimMetadata((await getClaim(workspace_id, gap.id))!);
     expect(meta.status_override?.rationale).toMatch(/NMA/);
-    expect(meta.status_override?.by).toBe("Accuracy reviewer");
+    // Credited to the signed-in owner server-side (KAN-61), never a placeholder.
+    expect(meta.status_override?.by).toBe((await ownerAccess()).actor.name);
 
     const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "T" });
     const wrong = await claimsPatch(

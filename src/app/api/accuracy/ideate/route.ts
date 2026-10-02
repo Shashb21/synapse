@@ -16,11 +16,17 @@ import {
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { normalizeClaimDate, withHumanEdit } from "@/accuracy/store/claim-edit";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { TACTIC_TYPES } from "@/lib/iegp/enums";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import { isTestStub } from "@/modules/kernel/llm";
 import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +34,7 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 const bodySchema = z.object({
-  workspace_id: z.string(),
+  workspace_id: z.string().min(1),
   gap_id: z.string().optional(),
   title: z.string().min(8).max(280).optional(),
   rationale: z.string().min(3).optional(),
@@ -37,8 +43,9 @@ const bodySchema = z.object({
   end: z.string().optional(),
   type: z.enum(TACTIC_TYPES).optional(),
   per_gap: z.number().int().min(1).max(3).optional(),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: proposals are credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 function gapRecordFromClaim(gap: AccuracyClaimRow) {
@@ -130,7 +137,9 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
+    const body = await parseLabBody(req, bodySchema);
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
+    const actor = await labActor();
     const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
     const tactics = await listClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
     const isManual = Boolean(body.title?.trim() && body.rationale?.trim());
@@ -161,10 +170,7 @@ export async function POST(req: Request) {
         source_file_id: gap.source_file_id,
         human: {
           rationale: body.rationale!.trim(),
-          actor: {
-            name: body.actor_name?.trim() || "Accuracy planner",
-            function: (body.actor_function?.trim() || "medical_affairs") as Actor["function"],
-          },
+          actor,
         },
       });
       return NextResponse.json({
@@ -180,11 +186,6 @@ export async function POST(req: Request) {
     // LLM ideation from here on: nothing runs or is written with AI off.
     const aiOff = await refuseWhenAiOff();
     if (aiOff) return aiOff;
-
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
 
     let targetGaps = gaps;
     if (body.gap_id) {
@@ -212,11 +213,6 @@ export async function POST(req: Request) {
         summary: "No high-priority open gaps to ideate for",
       });
     }
-
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy ideate",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
 
     const result = await runAccuracyModule<IdeateOutput>({
       call_kind: "ideate",
@@ -268,7 +264,9 @@ export async function POST(req: Request) {
   } catch (error) {
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
-    const message = error instanceof Error ? error.message : "Ideate failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Ideate failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

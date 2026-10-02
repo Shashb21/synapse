@@ -13,10 +13,16 @@ import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { NoRouteError } from "@/modules/llm/provider";
 import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +36,9 @@ const bodySchema = z.object({
     .array(z.enum(["need", "inventory"]))
     .min(1)
     .default(["need", "inventory"]),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the run is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 const MAX_EXTRACT_BLOCKS = 80;
@@ -44,14 +51,11 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
+    const body = await parseLabBody(req, bodySchema);
     // Extract is an AI step: with AI off, refuse before reading or writing anything.
     const aiOff = await refuseWhenAiOff();
     if (aiOff) return aiOff;
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
 
     const sources = await listSourceFiles(body.workspace_id);
     const source = sources.find((row) => row.id === body.source_file_id);
@@ -79,10 +83,7 @@ export async function POST(req: Request) {
       return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
     }
 
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy extractor",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
+    const actor = await labActor();
 
     const kinds = body.kinds;
     let gaps_inserted = 0;
@@ -232,7 +233,9 @@ export async function POST(req: Request) {
         return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
       }
     }
-    const message = error instanceof Error ? error.message : "Extract failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Extract failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

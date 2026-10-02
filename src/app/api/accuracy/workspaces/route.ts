@@ -6,9 +6,12 @@ import { normalizePlanLabel, workspacePlanLabel } from "@/accuracy/domain/plan-l
 import {
   createOrganization,
   createWorkspace,
+  DuplicateWorkspaceSlugError,
   getWorkspace,
+  getWorkspaceBySlug,
   listWorkspaces,
 } from "@/accuracy/store/tenant";
+import { labErrorMessage, labRequestErrorResponse, parseLabBody } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,13 +35,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ workspace: withPlanLabel(workspace) });
   }
   const includeArchived = searchParams.get("include_archived") === "1";
-  const workspaces = await listWorkspaces(50, { includeArchived });
+  const workspaces = await listWorkspaces(undefined, { includeArchived });
   return NextResponse.json({ workspaces: workspaces.map(withPlanLabel) });
 }
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
-  slug: z.string().min(2).max(80).regex(/^[a-z0-9-]+$/),
+  slug: z
+    .string()
+    .min(2)
+    .max(80)
+    .regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers and hyphens only"),
   org_name: z.string().min(2).max(120).optional(),
   plan_label: z.enum(["IEP", "IEGP"]).optional(),
 });
@@ -47,7 +54,9 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = createSchema.parse(await req.json());
+    const body = await parseLabBody(req, createSchema);
+    // Checked before the org is created, so a taken slug leaves no orphan org behind.
+    if (await getWorkspaceBySlug(body.slug)) throw new DuplicateWorkspaceSlugError(body.slug);
     const org_id = await createOrganization(body.org_name ?? `${body.name} org`);
     const plan_label = normalizePlanLabel(body.plan_label) ?? "IEGP";
     const workspace_id = await createWorkspace({
@@ -64,7 +73,9 @@ export async function POST(req: Request) {
       plan_label,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not create workspace";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Could not create workspace");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }
