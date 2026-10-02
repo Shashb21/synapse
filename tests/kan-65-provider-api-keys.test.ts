@@ -332,3 +332,54 @@ describe("KAN-65 Claude 5 request shape", () => {
     expect(anthropicText({ stop_reason: "max_tokens", content: [{ type: "text", text: "partial" }] })).toBe("partial");
   });
 });
+
+describe("KAN-66 a reply that is not valid JSON is asked for again", () => {
+  const claudeReply = (text: string) =>
+    new Response(JSON.stringify({ stop_reason: "end_turn", content: [{ type: "text", text }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  const recorder = () =>
+    new RunRecorder({
+      workspace_id: "test",
+      stage: "S4",
+      module_id: "kan66.test",
+      module_version: "1.0.0",
+      actor: { name: ACTOR, function: "medical_affairs" },
+      input: {},
+    });
+
+  it("retries with the parse error in the system prompt and returns the valid reply", async () => {
+    clearKeys();
+    process.env.ANTHROPIC_API_KEY = SECRET;
+    await setRouteConfig({ stage: "S4", provider_id: "anthropic-claude", model: "claude-sonnet-5-5", fallbacks: [], actor_name: ACTOR });
+    const route = await resolveRoute("S4");
+    const bodies: { system: string }[] = [];
+    const replies = ['{"rows":[{"gap_id":"GAP-1"} {"gap_id":"GAP-2"}]}', '{"rows":[{"gap_id":"GAP-1"},{"gap_id":"GAP-2"}]}'];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: { body: string }) => {
+        bodies.push(JSON.parse(init.body) as { system: string });
+        return claudeReply(replies[bodies.length - 1]!);
+      }),
+    );
+    const out = await completionFor(route, recorder())({ system: "Map gaps.", user: "{}", purpose: "mapping-table-proposer" });
+    expect(out).toEqual({ rows: [{ gap_id: "GAP-1" }, { gap_id: "GAP-2" }] });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]!.system).toBe("Map gaps.");
+    expect(bodies[1]!.system).toMatch(/^Map gaps\.\n\nYour previous reply was not valid JSON \(/);
+  });
+
+  it("gives up with a clear error after the last attempt", async () => {
+    clearKeys();
+    process.env.ANTHROPIC_API_KEY = SECRET;
+    await setRouteConfig({ stage: "S4", provider_id: "anthropic-claude", model: "claude-sonnet-5-5", fallbacks: [], actor_name: ACTOR });
+    const route = await resolveRoute("S4");
+    const fetchSpy = vi.fn(async () => claudeReply("not json at all"));
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(
+      completionFor(route, recorder())({ system: "s", user: "{}", purpose: "mapping-table-proposer" }),
+    ).rejects.toThrow(/did not return valid JSON for mapping-table-proposer after 3 attempts/);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+});
