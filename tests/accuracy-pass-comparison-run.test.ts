@@ -95,7 +95,7 @@ describe("isolated pass cohorts", () => {
       expect(condition.eligibility).toBe("eligible"); expect(condition.calls).toHaveLength(8);
       expect(condition.calls.filter(call => call.call_kind === "need_extract").map(call => call.lineage_key)).toEqual(request.source_file_ids.concat(second.id).map(id => `need_extract:${id}:0`));
       expect(condition.calls.filter(call => call.call_kind === "merge_dedupe").map(call => call.lineage_key)).toEqual(["merge_dedupe:workspace:0", "merge_dedupe:workspace:1"]);
-      expect(condition.totals.must_find.missed).toBe(158);
+      expect(condition.totals.summed_call_must_find_outcomes?.missed).toBe(158);
       expect(condition.totals.latency_ms).toBe(condition.calls.reduce((sum, call) => sum + call.runtime!.duration_ms!, 0));
     }
   });

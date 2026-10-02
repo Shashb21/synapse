@@ -1,10 +1,13 @@
 /** Conservative pass comparisons over retained, controlled evidence. */
-import { describe, expect, it } from "vitest";
-import { comparePassExperiments, comparisonRequestFingerprint, type ComparisonEvidence } from "@/accuracy/eval/pass-comparison";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { comparePassExperiments, comparisonRequestFingerprint, evaluatePassComparison, type ComparisonEvidence } from "@/accuracy/eval/pass-comparison";
+import * as goldIdentity from "@/accuracy/eval/experiment-gold";
+import * as referenceGold from "@/accuracy/eval/reference-gold";
 import type { ExperimentRecord } from "@/accuracy/experiments/records";
 import type { AgentEvent } from "@/accuracy/kernel/agent-events";
 
 const targets = { gap_ids: ["a", "b"], tactic_numbers: [], tactic_identifiers: [] };
+afterEach(() => vi.restoreAllMocks());
 function cohort(): ComparisonEvidence[] {
   return [1, 2, 3].map(pass => {
     const call_id = `call-${pass}`;
@@ -20,14 +23,82 @@ function cohort(): ComparisonEvidence[] {
   });
 }
 
+function multiSourceCohort(): ComparisonEvidence[] {
+  return cohort().map(evidence => {
+    const { experiment } = evidence;
+    const pass = (experiment.condition as Record<string, unknown>).critic_revision_passes;
+    const templateCalls = experiment.calls;
+    const templateEvaluations = experiment.evaluations;
+    const templateRun = evidence.runs[0];
+    experiment.calls = []; experiment.evaluations = []; evidence.runs = [];
+    experiment.baseline_snapshot = { source_files: [
+      { original_id: "source-original", copied_id: `source-copy-${pass}` },
+      { original_id: "second-source", copied_id: `second-copy-${pass}` },
+    ] };
+    experiment.condition = { ...experiment.condition as object, original_request_identity: { mode: "pipeline", source_file_ids: ["source-original", "second-source"] } };
+    for (const [sourceIndex, source] of [`source-copy-${pass}`, `second-copy-${pass}`].entries()) {
+      for (const call_kind of ["need_extract", "inventory_extract", "merge_dedupe", "status_derive"]) {
+        const extraction = ["need_extract", "inventory_extract"].includes(call_kind);
+        const call_id = `${templateRun.call_id}-${sourceIndex}-${call_kind}`;
+        const rows = extraction ? templateCalls : templateCalls.slice(0, 1);
+        experiment.calls.push(...rows.map(row => ({ ...row, id: `${row.id}-${sourceIndex}-${call_kind}`, call_id, call_kind,
+          input: extraction ? { source_file_id: source } : {}, output: call_kind === "need_extract" ? { gaps: [] } : call_kind === "inventory_extract" ? { tactics: [] } : {} })));
+        const evaluations = extraction ? templateEvaluations : templateEvaluations.slice(0, 1);
+        experiment.evaluations.push(...evaluations.map(row => ({ ...row, id: `${row.id}-${sourceIndex}-${call_kind}`, call_id,
+          evaluation: { ...row.evaluation as object, call_kind, status: extraction ? "scored" : "gold_not_applicable", outcomes: [] } })));
+        const events = extraction ? structuredClone(templateRun.events) : [];
+        for (const event of events) if (event.event_type === "snapshot") event.output = call_kind === "need_extract" ? { gaps: [] } : { tactics: [] };
+        evidence.runs.push({ ...templateRun, call_id, events });
+      }
+    }
+    return evidence;
+  });
+}
+
 describe("retained pass comparison", () => {
+  it("refuses changed current must-find targets without rewriting historical target outcomes", () => {
+    const evidence = cohort();
+    vi.spyOn(goldIdentity, "experimentPackFingerprint").mockReturnValue("pack-hash");
+    vi.spyOn(referenceGold, "mustFindForPack").mockReturnValue(targets);
+    const before = evaluatePassComparison(evidence);
+    expect(before).toMatchObject({ matched: true, recommendation: { pass_count: 1 } });
+    vi.spyOn(goldIdentity, "experimentPackFingerprint").mockReturnValue("changed-pack-hash");
+    vi.spyOn(referenceGold, "mustFindForPack").mockImplementation(() => { throw new Error("Changed targets must not be read for historic scoring."); });
+    const after = evaluatePassComparison(evidence);
+    expect(after).toMatchObject({ matched: false, recommendation: null });
+    expect(after.mismatch_reasons).toContain("Current reference pack fingerprint differs from retained pack identity; must-find targets are unavailable.");
+    expect(after.conditions[0].calls[0].versions[1]).toMatchObject({ outcomes: [{ outcome: "found", gold_item_key: "a", reason: "exact" }, { outcome: "missed", gold_item_key: "b", reason: "absent" }], must_find: null, exact_must_find_keys: null, recovered_from_v0: null, lost_from_v0: null });
+    expect(after.conditions[0].totals).toMatchObject({ summed_call_outcomes: { found: 1, missed: 1 }, summed_call_must_find_outcomes: null, distinct_exact_found_count: 1, distinct_exact_must_find_found_count: null, distinct_exact_must_find_keys: null });
+    expect(after.loaded_pack_identity).toEqual({ pack_id: "pack", pack_fingerprint: "changed-pack-hash", matches_retained: false });
+  });
+  it.each(["missing_pack", "malformed_targets"])("keeps historical outcomes inspectable when current gold has %s", problem => {
+    const evidence = cohort();
+    vi.spyOn(goldIdentity, "experimentPackFingerprint").mockImplementation(() => {
+      if (problem === "missing_pack") throw Object.assign(new Error("Current gold file missing"), { code: "ENOENT" });
+      return "pack-hash";
+    });
+    vi.spyOn(referenceGold, "mustFindForPack").mockImplementation(() => { throw new SyntaxError("Current target JSON malformed"); });
+    const result = evaluatePassComparison(evidence);
+    expect(result).toMatchObject({ matched: false, recommendation: null });
+    expect(result.mismatch_reasons.some(reason => reason.includes("Current reference pack could not be read"))).toBe(true);
+    expect(result.conditions[0].calls[0].versions[1]).toMatchObject({ counts: { found: 1, missed: 1 }, must_find: null });
+    expect(result.conditions[0].totals.distinct_exact_must_find_found_count).toBeNull();
+  });
+  it("makes must-find targets unavailable when the pack changes during target loading", () => {
+    const evidence = cohort();
+    vi.spyOn(goldIdentity, "experimentPackFingerprint").mockReturnValueOnce("pack-hash").mockReturnValue("changed-after-read");
+    vi.spyOn(referenceGold, "mustFindForPack").mockReturnValue({ ...targets, gap_ids: ["changed-member"] });
+    const result = evaluatePassComparison(evidence);
+    expect(result).toMatchObject({ matched: false, recommendation: null });
+    expect(result.conditions[0].calls[0].versions[1].must_find).toBeNull();
+  });
   it("matches original source lineage across generated IDs and includes terminal costs", () => {
     const result = comparePassExperiments(cohort(), targets);
     expect(result.matched).toBe(true);
     expect(result.recommendation?.pass_count).toBe(1);
     expect(result.conditions[0].calls[0].lineage_key).toBe("need_extract:source-original:0");
     expect(result.conditions[0].calls[0].versions[1].cumulative_metering).toMatchObject({ cost_usd: 6, latency_ms: 10, token_usage: { total_tokens: 8 } });
-    expect(result.conditions[0].totals).toMatchObject({ cost_usd: 10, latency_ms: 20, must_find: { found: 1, partial: 0, missed: 1, wrong: 0 } });
+    expect(result.conditions[0].totals).toMatchObject({ cost_usd: 10, latency_ms: 20, summed_call_must_find_outcomes: { found: 1, partial: 0, missed: 1, wrong: 0 } });
   });
   it.each(["source_workspace_id", "source_fingerprint", "baseline_fingerprint", "pack_fingerprint", "evaluator_version"] as const)("refuses attribution after %s changes", field => {
     const evidence = cohort(); evidence[1].experiment[field] = "changed";
@@ -64,6 +135,28 @@ describe("retained pass comparison", () => {
     expect(condition.eligibility).toBe("ineligible");
     expect(condition.calls[0].versions[1].regressions).toContain("New serious critic finding: bad");
     expect(condition.calls[0].versions[1].critique?.issues[0].source_ref).toEqual({ source_file_id: "s", block_id: "b" });
+  });
+  it.each(["claim", "source", "category", "code"])("detects changed serious %s evidence under a reused issue ID", changedField => {
+    const evidence = cohort();
+    const initial = evidence[0].runs[0].events[1]; const revision = evidence[0].runs[0].events[3];
+    const issue = { issue_id: "position-0", category: "unsupported", code: "unsupported_claim", severity: "high" as const, claim: "Initial unsupported claim", source_ref: { source_file_id: "source-a", block_id: "block-a" }, suggested_action: "remove" };
+    if (initial.event_type === "critique") initial.issues = [issue];
+    if (revision.event_type === "critique") revision.issues = [{ ...issue,
+      ...(changedField === "claim" ? { claim: "Different unsupported claim" } : {}),
+      ...(changedField === "source" ? { source_ref: { source_file_id: "source-b", block_id: "block-b" } } : {}),
+      ...(changedField === "category" ? { category: "provenance" } : {}),
+      ...(changedField === "code" ? { code: "invalid_provenance" } : {}),
+    }];
+    expect(comparePassExperiments(evidence, targets).conditions[0].calls[0].versions[1].regressions).toEqual(["New serious critic finding: position-0"]);
+  });
+  it("does not report unchanged serious evidence as new when positional IDs change", () => {
+    const evidence = cohort(); const initial = evidence[0].runs[0].events[1]; const revision = evidence[0].runs[0].events[3];
+    const issue = { issue_id: "position-0", category: "unsupported", code: "unsupported_claim", severity: "high" as const, claim: "Same unsupported claim", source_ref: { source_file_id: "source-a", block_id: "block-a" }, suggested_action: "remove" };
+    if (initial.event_type === "critique") initial.issues = [issue];
+    if (revision.event_type === "critique") revision.issues = [{ ...issue, issue_id: "position-4", source_ref: { block_id: "block-a", source_file_id: "source-a" } }];
+    const result = comparePassExperiments(evidence, targets).conditions[0];
+    expect(result.calls[0].versions[1].regressions).toEqual([]);
+    expect(result.eligibility).toBe("ineligible");
   });
   it("keeps omission risk and gold wrong items distinct from source falsity", () => {
     const evidence = cohort(); const event = evidence[0].runs[0].events[3];
@@ -141,5 +234,32 @@ describe("retained pass comparison", () => {
     const evidence = cohort(); evidence[0].experiment.evaluations.pop(); evidence[1].runs[0].cost_usd = null;
     const result = comparePassExperiments(evidence, targets);
     expect(result.conditions.map(item => item.eligibility)).toEqual(["unknown", "unknown", "eligible"]); expect(result.recommendation?.pass_count).toBe(3);
+  });
+  it("ranks two distinct recovered targets above the same target recovered in two sources", () => {
+    const evidence = multiSourceCohort();
+    for (const [conditionIndex, item] of evidence.entries()) {
+      const finals = item.experiment.evaluations.filter(row => row.version_index === conditionIndex + 1 && (row.evaluation as { call_kind: string }).call_kind === "need_extract");
+      for (const [sourceIndex, final] of finals.entries()) final.evaluation = { ...final.evaluation as object, outcomes: conditionIndex === 2 ? [] : [{ outcome: "found", gold_item_key: conditionIndex === 1 && sourceIndex === 1 ? "b" : "a", reason: "exact" }] };
+    }
+    evidence[1].runs.forEach(run => { run.cost_usd = 100; });
+    const result = comparePassExperiments(evidence, targets);
+    expect(result.recommendation?.pass_count).toBe(2);
+    expect(result.conditions[0].totals).toMatchObject({ summed_call_outcomes: { found: 2 }, summed_call_must_find_outcomes: { found: 2 }, distinct_exact_found_count: 1, distinct_exact_must_find_found_count: 1, distinct_exact_found_keys: ["need_extract:a"], distinct_exact_must_find_keys: ["need_extract:a"] });
+    expect(result.conditions[1].totals).toMatchObject({ distinct_exact_found_count: 2, distinct_exact_must_find_found_count: 2, distinct_exact_must_find_keys: ["need_extract:a", "need_extract:b"] });
+  });
+  it("qualifies distinct exact keys by extraction kind and preserves non-must-find exact ranking", () => {
+    const evidence = multiSourceCohort();
+    for (const [conditionIndex, item] of evidence.entries()) {
+      const finals = item.experiment.evaluations.filter(row => row.version_index === conditionIndex + 1);
+      const need = finals.find(row => (row.evaluation as { call_kind: string }).call_kind === "need_extract")!;
+      need.evaluation = { ...need.evaluation as object, outcomes: [{ outcome: "found", gold_item_key: "a", reason: "exact" }] };
+      if (conditionIndex === 1) {
+        const inventory = finals.find(row => (row.evaluation as { call_kind: string }).call_kind === "inventory_extract")!;
+        inventory.evaluation = { ...inventory.evaluation as object, outcomes: [{ outcome: "found", gold_item_key: "a", reason: "exact" }, { outcome: "found", gold_item_key: "optional", reason: "exact" }] };
+      }
+    }
+    const result = comparePassExperiments(evidence, { ...targets, tactic_identifiers: ["a"] });
+    expect(result.recommendation?.pass_count).toBe(2);
+    expect(result.conditions[1].totals).toMatchObject({ distinct_exact_found_count: 3, distinct_exact_must_find_found_count: 2, distinct_exact_found_keys: ["inventory_extract:a", "inventory_extract:optional", "need_extract:a"], distinct_exact_must_find_keys: ["inventory_extract:a", "need_extract:a"] });
   });
 });
