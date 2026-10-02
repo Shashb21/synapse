@@ -14,7 +14,7 @@ import {
 } from "./accounts";
 import { emailDomainAllowed } from "./idp";
 import { dummyPasswordHash, MAX_PASSWORD_LENGTH, verifyPassword } from "./password";
-import { createSession, testSeatPasswordAllowed, type Session } from "./session";
+import { createSession, testOnlyAddress, testSeatPasswordAllowed, type Session } from "./session";
 
 /**
  * Email + password sign-in and password changes, for Synapse staff (KAN-28):
@@ -35,6 +35,13 @@ export const DISABLED_MESSAGE = "This account has been disabled. Contact your Sy
 /** A password account that is not Synapse staff (e.g. a pre-KAN-28 self sign-up). */
 export const NOT_STAFF_MESSAGE =
   "Email and password sign-in is only for Synapse staff. Sign in with your organisation's single sign-on.";
+
+/**
+ * A test customer account (KAN-59) whose seat was removed or whose customer is
+ * deactivated: it may be a customer, just not right now (KAN-68).
+ */
+export const NO_ACTIVE_SEAT_MESSAGE =
+  "Your organisation's access to Synapse isn't active, or your seat was removed. Contact your Synapse administrator.";
 
 export type PasswordLoginCode = "incorrect" | "locked" | "disabled" | "domain" | "not_staff";
 
@@ -82,7 +89,9 @@ export async function signInWithPassword(args: { email: string; password: string
   }
   if (account.disabled) throw new PasswordLoginError("disabled", DISABLED_MESSAGE);
   if (!isStaffAccount(account) && !(await testSeatPasswordAllowed(account))) {
-    throw new PasswordLoginError("not_staff", NOT_STAFF_MESSAGE);
+    // A verified test-domain account is a test customer without an active seat right now.
+    const testCustomer = account.email_verified && testOnlyAddress(account.email);
+    throw new PasswordLoginError("not_staff", testCustomer ? NO_ACTIVE_SEAT_MESSAGE : NOT_STAFF_MESSAGE);
   }
   if (!account.is_admin && !emailDomainAllowed(account.email)) {
     throw new PasswordLoginError("domain", "Your email domain is not allowed to sign in to this deployment.");

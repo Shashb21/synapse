@@ -3303,7 +3303,7 @@ export async function unlockTacticsStage(args: {
 }) {
   const state = await loadState();
   if (!state.asset.wizard_complete) {
-    throw new Error("Prioritize open gaps before tactics.");
+    throw new Error("Finish Gaps first: on Gaps, choose Continue to prioritize, then come back to Tactics.");
   }
   // The same rule the Prioritize footer applies before it offers "Continue to
   // tactics": every live Open gap has a validated band. Loaded lazily because

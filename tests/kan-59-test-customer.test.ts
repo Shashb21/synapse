@@ -17,7 +17,7 @@ import { createAccount, deleteAccountsLike } from "@/modules/auth/accounts";
 import { ensureAdminAccount, ensureTestCustomer } from "@/modules/auth/admin-setup";
 import { assignSeats, createCustomer, deleteCustomersLike, unassignSeat, updateCustomer } from "@/modules/auth/customers";
 import { ownerAccess } from "@/modules/auth/owner";
-import { NOT_STAFF_MESSAGE } from "@/modules/auth/password-login";
+import { NO_ACTIVE_SEAT_MESSAGE } from "@/modules/auth/password-login";
 import { currentSession } from "@/modules/auth/session";
 
 const run = Math.random().toString(36).slice(2, 8);
@@ -88,7 +88,8 @@ describe("KAN-59 test customer account", () => {
     expect((await login(seat)).status).toBe(200);
     await unassignSeat({ customer_id: customer.id, email: seat });
     expect(await currentSession()).toBeNull();
-    expect(await login(seat)).toMatchObject({ status: 403, body: { code: "not_staff", error: NOT_STAFF_MESSAGE } });
+    // KAN-68: a test customer without an active seat is told so, not that passwords are staff-only.
+    expect(await login(seat)).toMatchObject({ status: 403, body: { code: "not_staff", error: NO_ACTIVE_SEAT_MESSAGE } });
   });
 
   it("still refuses password sign-in to a customer on a real-world domain, even with a seat", async () => {
