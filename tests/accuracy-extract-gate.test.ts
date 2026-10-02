@@ -77,15 +77,13 @@ describe("live extract API-key gate", () => {
     await clearLegacyOauth();
   });
 
-  it("accuracyAuthAllowsLive accepts Grok and OpenAI keys, not Claude keys without workspace", () => {
+  it("accuracyAuthAllowsLive accepts any provider's API key, Claude included without a workspace id (KAN-65)", () => {
     stash("ANTHROPIC_WORKSPACE_ID");
     delete process.env.ANTHROPIC_WORKSPACE_ID;
     expect(accuracyAuthAllowsLive("xai-grok", "api_key")).toBe(true);
     expect(accuracyAuthAllowsLive("openai", "api_key")).toBe(true);
-    expect(accuracyAuthAllowsLive("anthropic-claude", "api_key")).toBe(false);
-    expect(accuracyAuthAllowsLive("xai-grok", "none")).toBe(false);
-    process.env.ANTHROPIC_WORKSPACE_ID = "ws_test";
     expect(accuracyAuthAllowsLive("anthropic-claude", "api_key")).toBe(true);
+    expect(accuracyAuthAllowsLive("xai-grok", "none")).toBe(false);
   });
 
   it("is ready under SYNAPSE_TEST_STUB_LLM", async () => {
@@ -121,13 +119,14 @@ describe("live extract API-key gate", () => {
     expect(gate.reason).toContain("XAI_API_KEY");
   });
 
-  it("does not treat a Claude API key as live-ready without ANTHROPIC_WORKSPACE_ID", async () => {
+  it("treats a Claude API key as live-ready without ANTHROPIC_WORKSPACE_ID (KAN-65)", async () => {
     registerAccuracyStack();
     liveEnv({ ANTHROPIC_API_KEY: "sk-ant-test" });
     const gate = await inspectLiveExtractGate();
-    expect(gate.ready).toBe(false);
-    if (gate.ready) return;
-    expect(gate.reason).toMatch(/ANTHROPIC_WORKSPACE_ID|\/control/i);
+    expect(gate.ready).toBe(true);
+    if (!gate.ready || gate.stub) throw new Error("expected Claude API key route");
+    expect(gate.provider_id).toBe("anthropic-claude");
+    expect(gate.auth).toBe("api_key");
   });
 
   it("allows Claude API key when ANTHROPIC_WORKSPACE_ID is set", async () => {

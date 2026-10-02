@@ -23,18 +23,17 @@ import {
 import { estimateCostUsd, usageFromMessages } from "./cost";
 import { isTestStub } from "@/modules/kernel/llm";
 
-/** Live LLM uses the provider's env API key; a Claude key also needs an Anthropic workspace id. */
+/**
+ * Whether an Anthropic workspace id is set. Optional: only an org-scoped key
+ * needs one, and the Claude provider sends it when it is set (KAN-65).
+ */
 export function anthropicWorkspaceConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_WORKSPACE_ID?.trim());
 }
 
-export function accuracyAuthAllowsLive(
-  provider_id: string,
-  auth: "api_key" | "none",
-): boolean {
-  if (auth !== "api_key") return false;
-  if (provider_id === "anthropic-claude") return anthropicWorkspaceConfigured();
-  return true;
+/** Live LLM needs the provider's env API key; every provider's key is enough on its own. */
+export function accuracyAuthAllowsLive(_provider_id: string, auth: "api_key" | "none"): boolean {
+  return auth === "api_key";
 }
 
 export type AccuracyRouteConfig = {
@@ -163,11 +162,7 @@ export async function resolveAccuracyRoute(args: {
       continue;
     }
     if (!accuracyAuthAllowsLive(provider.id, "api_key")) {
-      reasons.push(
-        provider.id === "anthropic-claude"
-          ? `${provider.label}: its API key also needs ANTHROPIC_WORKSPACE_ID in the server environment`
-          : `${provider.label}: not usable for live LLM`,
-      );
+      reasons.push(`${provider.label}: not usable for live LLM`);
       continue;
     }
     return {
