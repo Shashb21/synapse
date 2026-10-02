@@ -10,13 +10,25 @@ import {
   SOURCE_TYPE_LABELS,
   SOURCE_TYPES,
 } from "@/lib/iegp/enums";
+import { MAX_UPLOAD_BYTES, TOO_LARGE, UPLOAD_ACCEPT, UPLOAD_FORMATS_LABEL, uploadKindOf } from "@/lib/ingest/upload-formats";
 
 const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
 const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
+/** A file's bytes as base64, via a data URL so a large file never goes through a spread. */
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
  * Add a source (owner feedback, KAN-52): the whole form is on the page, no dialog. Choose a
- * text file or paste the text, name it, say what kind of source it is, and Synapse reads it.
+ * file or paste the text, name it, say what kind of source it is, and Synapse reads it. A text
+ * file fills the editable text box; a PDF or Office file (KAN-68) is sent as is and parsed on upload.
  */
 export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
   const router = useRouter();
@@ -25,6 +37,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
   const [fileName, setFileName] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
+  const [binary, setBinary] = useState<{ content_base64: string; mime: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -32,13 +45,27 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
   async function pickFile(file: File | undefined) {
     if (!file) return;
     setError(null);
-    if (!/\.(txt|md|markdown)$/i.test(file.name) && !file.type.startsWith("text/")) {
-      setError("Choose a .txt or .md file, or paste the text below.");
+    const kind = uploadKindOf(file.name);
+    if (kind.kind === "refused" || file.size > MAX_UPLOAD_BYTES) {
+      setError(kind.kind === "refused" ? kind.reason : TOO_LARGE);
+      if (fileRef.current) fileRef.current.value = "";
       return;
     }
     setFileName(file.name);
-    setText(await file.text());
+    if (kind.kind === "binary") {
+      setBinary({ content_base64: await readBase64(file), mime: kind.mime });
+      setText("");
+    } else {
+      setBinary(null);
+      setText(await file.text());
+    }
     if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, "").replaceAll(/[_-]+/g, " "));
+  }
+
+  function clearFile() {
+    setFileName(null);
+    setBinary(null);
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -50,7 +77,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
       setError("Give the source a title.");
       return;
     }
-    if (!text.trim()) {
+    if (!binary && !text.trim()) {
       setError("Choose a file or paste the source text.");
       return;
     }
@@ -63,7 +90,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         note: "",
         title: title.trim(),
         ...(fileName ? { filename: fileName } : {}),
-        text,
+        ...(binary ?? { text }),
         source_type: String(data.get("source_type") ?? ""),
         stakeholder_function: String(data.get("stakeholder_function") ?? ""),
       }),
@@ -77,8 +104,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
     setDone(`Read “${title.trim()}”. Its gaps and tactics are on Evidence Inventory.`);
     setTitle("");
     setText("");
-    setFileName(null);
-    if (fileRef.current) fileRef.current.value = "";
+    clearFile();
     router.refresh();
   }
 
@@ -88,7 +114,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         Add a source
       </h2>
       <p className="mt-1 max-w-3xl text-[12px] leading-5 text-muted-foreground">
-        Upload a text file or paste text: interview notes, a literature review, a plan excerpt. Synapse reads it and
+        Upload a {UPLOAD_FORMATS_LABEL} file, or paste text: interview notes, a literature review, a plan excerpt. Synapse reads it and
         pulls out the evidence gaps and existing tactics it mentions; you review every one on Evidence Inventory.
         {demoFiles ? " The demo files above can be downloaded and added here too." : ""}
       </p>
@@ -98,7 +124,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
             ref={fileRef}
             id={fileId}
             type="file"
-            accept=".txt,.md,.markdown,text/plain,text/markdown"
+            accept={UPLOAD_ACCEPT}
             className="sr-only"
             onChange={(event) => void pickFile(event.currentTarget.files?.[0])}
           />
@@ -115,7 +141,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
                 <FileText className="size-3.5" aria-hidden /> {fileName}
               </>
             ) : (
-              ".txt or .md — or paste the text below"
+              `${UPLOAD_FORMATS_LABEL}, up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB — or paste the text below`
             )}
           </span>
         </div>
@@ -152,18 +178,28 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
             </select>
           </label>
         </div>
-        <label className={LABEL}>
-          Source text
-          <textarea
-            name="text"
-            required
-            rows={8}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            placeholder="Paste the notes or document text here, or choose a file above."
-            className="w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] font-normal normal-case tracking-normal text-foreground"
-          />
-        </label>
+        {binary ? (
+          // A PDF or Office file has no text to preview here: S1 extracts it on upload.
+          <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground" data-testid="binary-file">
+            {fileName} will be parsed on upload.
+            <button type="button" onClick={clearFile} className="font-medium text-foreground underline">
+              Remove file and paste text instead
+            </button>
+          </p>
+        ) : (
+          <label className={LABEL}>
+            Source text
+            <textarea
+              name="text"
+              required
+              rows={8}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Paste the notes or document text here, or choose a file above."
+              className="w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] font-normal normal-case tracking-normal text-foreground"
+            />
+          </label>
+        )}
         {error ? (
           <p role="alert" className="text-[12px] text-destructive">
             {error}

@@ -28,8 +28,16 @@ test.describe("add a source", () => {
 
     const other = page.waitForEvent("filechooser");
     await form.getByText("Choose file", { exact: true }).click();
-    await (await other).setFiles({ name: "deck.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF") });
-    await expect(form.getByRole("alert")).toHaveText("Choose a .txt or .md file, or paste the text below.");
+    await (await other).setFiles({ name: "deck.key", mimeType: "application/octet-stream", buffer: Buffer.from("KEY") });
+    await expect(form.getByRole("alert")).toHaveText(
+      "Choose a PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), .txt or .md file, or paste the text below.",
+    );
+
+    // KAN-68: a PDF or Office file is sent as is and parsed on upload.
+    const pdf = page.waitForEvent("filechooser");
+    await form.getByText("Choose file", { exact: true }).click();
+    await (await pdf).setFiles({ name: "deck.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF") });
+    await expect(form.getByTestId("binary-file")).toContainText("deck.pdf will be parsed on upload.");
   });
 
   test("a pasted source is read and its gaps reach Evidence Inventory", async ({ page }) => {

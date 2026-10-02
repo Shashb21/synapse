@@ -69,7 +69,7 @@ Two switches decide whether AI runs, and both must be on:
 
 With AI off no model is called and nothing is uploaded or parsed: the first place is **Start**, where gaps and tactics are added by hand, and every later step works by hand. With AI on, every manual path is still there.
 
-With AI on, the first visit is **Upload** on `/`. Upload a source; the LLM chosen for the parse stage parses every file type (PDF, PPTX, DOCX, XLSX, text) into blocks. There is no separate parser service. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
+With AI on, the first visit is **Upload** on `/`. Upload a source (PDF, DOCX, PPTX, XLSX, .txt or .md, up to 3 MB) or paste its text; the LLM chosen for the parse stage parses every file type into blocks. Old .doc, .ppt and .xls files must be saved as the newer formats first. There is no separate parser service. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
 
 Gap status after mapping (not the Plan High / Medium / Low bands):
 
