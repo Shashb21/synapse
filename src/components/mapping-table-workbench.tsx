@@ -267,7 +267,7 @@ function MappingRowEditor({
       <td className="px-3 py-3">
         {status ? null : (
           <p className="mb-2 text-[11px] text-muted-foreground">
-            {ai ? "Pick a status, or run AI mapping, before saving." : "Pick a status before saving."}
+            {ai ? "Pick a status, or choose Re-run mapping, before saving." : "Pick a status before saving."}
           </p>
         )}
         <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">
