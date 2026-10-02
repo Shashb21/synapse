@@ -63,7 +63,13 @@ export async function PrioritizePlace({
   const scope = tags.find((tag) => tag.toLowerCase() === setting?.toLowerCase()) ?? ALL_SETTINGS_SCOPE;
   const unlockTactics =
     !state.asset.tactics_unlocked && allCounts.open > 0 && allCounts.validated === allCounts.open ? (
-      <LockForm label="Continue to tactics" action="unlock_tactics" confirmLabel="Go to tactics" variant="default" />
+      <LockForm
+        label="Continue to tactics"
+        action="unlock_tactics"
+        confirmLabel="Go to tactics"
+        variant="default"
+        href="/?place=tactics"
+      />
     ) : null;
 
   const footer = (
