@@ -23,6 +23,37 @@ export const CALL_KINDS = [
 
 export type CallKind = (typeof CALL_KINDS)[number];
 
+/** Trusted isolated-experiment revision depth; gold never enters this control. */
+export type ExperimentPassCount = 1 | 2 | 3;
+export type ExperimentCycleControl = { critic_revision_passes: ExperimentPassCount };
+
+/**
+ * Validate trusted experiment controls before any execution side effects.
+ * @param control - Runtime control to validate, or undefined for normal execution.
+ * @param evaluation_context - Internal execution boundary.
+ * @param call_kind - Module kind, when validating an execution request.
+ * @returns A validated control containing only the supported pass count.
+ * @throws Error for production controls or unsupported controlled module kinds.
+ * @throws RangeError for a pass count outside the integers 1, 2, and 3.
+ */
+export function validateExperimentCycleControl(
+  control: unknown,
+  evaluation_context: "production" | "experiment",
+  call_kind?: CallKind,
+): ExperimentCycleControl | undefined {
+  if (control === undefined) return undefined;
+  if (evaluation_context !== "experiment") throw new Error("Experiment cycle control requires experiment execution.");
+  if (call_kind !== undefined && call_kind !== "need_extract" && call_kind !== "inventory_extract") {
+    throw new Error("Experiment cycle control supports extraction calls only.");
+  }
+  const passes = control && typeof control === "object"
+    ? (control as Record<string, unknown>).critic_revision_passes : undefined;
+  if (passes !== 1 && passes !== 2 && passes !== 3) {
+    throw new RangeError("critic_revision_passes must be 1, 2, or 3.");
+  }
+  return { critic_revision_passes: passes };
+}
+
 export const AGENT_ROLES = ["proposer", "critic", "reviser", "judge"] as const;
 export type AgentRole = (typeof AGENT_ROLES)[number];
 
@@ -220,6 +251,8 @@ export type RunHandle = {
   id: string;
   /** Internal execution boundary; never carries evaluator data or gold answers. */
   evaluation_context?: "production" | "experiment";
+  /** Trusted experiment-only execution control, never client input or gold. */
+  experiment_cycle_control?: ExperimentCycleControl;
   recordAgentEvent(event: AgentEvent): Promise<void>;
   usageSummary(): { token_usage: TokenUsage; cost_usd: number };
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;

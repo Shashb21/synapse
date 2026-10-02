@@ -1,7 +1,7 @@
 /** Execute the existing extraction batch workflow inside an isolated experiment copy. */
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
-import type { Actor, CallKind } from "@/accuracy/kernel/contracts";
+import type { Actor, CallKind, ExperimentCycleControl } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule, type AccuracyRunResult } from "@/accuracy/kernel/run";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
@@ -27,6 +27,7 @@ export type PipelineExperimentContext = {
   experiment_id: string;
   pack_id: string;
   actor: Actor;
+  experiment_cycle_control?: ExperimentCycleControl;
 };
 
 /** Shared mechanical tail used after an applied extraction batch has reserved its journal IDs. */
@@ -93,7 +94,8 @@ async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: Ca
   const call_id = reserved_run_id ?? newId("arun");
   try {
     const result = await runAccuracyModule<O>({ call_kind, input, actor: context.actor, org_id: context.org_id, workspace_id: context.workspace_id,
-      reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" || call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment" });
+      reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" || call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment",
+      ...((call_kind === "inventory_extract" || call_kind === "need_extract") ? { experiment_cycle_control: context.experiment_cycle_control } : {}) });
     if (retain) await retainResult({ ...context, call_kind, input, result });
     return result;
   } catch (error) {

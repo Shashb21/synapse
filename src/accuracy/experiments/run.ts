@@ -2,6 +2,7 @@
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { Actor, CallKind } from "@/accuracy/kernel/contracts";
+import { validateExperimentCycleControl } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule } from "@/accuracy/kernel/run";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
@@ -78,6 +79,12 @@ async function terminateAfterPersistenceFailure(args: { workspace_id: string; ex
 
 /** Execute the supported single-call experiment and persist every output version before returning. */
 export async function runAccuracyExperiment(request: AccuracyExperimentRequest): Promise<ExperimentRecord> {
+  const experiment_cycle_control = validateExperimentCycleControl(
+    Object.hasOwn(request.condition, "critic_revision_passes")
+      ? { critic_revision_passes: request.condition.critic_revision_passes } : undefined,
+    "experiment",
+    request.mode === "single_call" ? request.call?.call_kind : undefined,
+  );
   if (request.mode === "pipeline") {
     const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
     let experiment: Awaited<ReturnType<typeof createExperiment>>;
@@ -86,7 +93,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
         pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
         baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
       const copiedSourceIds = request.source_file_ids.map(source_file_id => copy.source_id_map[source_file_id] ?? unresolved("source_file_id", source_file_id));
-      await runExtractionPipeline({ workspace_id: copy.workspace_id, org_id: copy.org_id, experiment_id: experiment.id, pack_id: request.pack_id, actor: request.actor }, copiedSourceIds);
+      await runExtractionPipeline({ workspace_id: copy.workspace_id, org_id: copy.org_id, experiment_id: experiment.id, pack_id: request.pack_id, actor: request.actor, experiment_cycle_control }, copiedSourceIds);
       await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
     } catch (error) {
       if (!experiment!) {
@@ -123,7 +130,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
   let result: Awaited<ReturnType<typeof runAccuracyModule>>;
   try {
     result = await runAccuracyModule({ call_kind: request.call.call_kind, reserved_run_id: call_id, input, actor: request.actor,
-      org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment" });
+      org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment", experiment_cycle_control });
   } catch (error) {
     const moduleError = error;
     try {

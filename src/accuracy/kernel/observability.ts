@@ -15,6 +15,7 @@ import type {
   RunStatus,
   RunStep,
   TokenUsage,
+  ExperimentCycleControl,
 } from "./contracts";
 
 /** Runs still `running` after this age are marked abandoned (process crash / hung LLM). */
@@ -46,6 +47,7 @@ export class AccuracyRunRecorder implements RunHandle {
       module_id: string;
       module_version: string;
       evaluation_context: "production" | "experiment";
+      experiment_cycle_control?: ExperimentCycleControl;
       actor: Actor;
       input: unknown;
     },
@@ -55,6 +57,8 @@ export class AccuracyRunRecorder implements RunHandle {
   }
 
   get evaluation_context(): "production" | "experiment" { return this.meta.evaluation_context; }
+
+  get experiment_cycle_control(): ExperimentCycleControl | undefined { return this.meta.experiment_cycle_control; }
 
   addCost(cost: CostEstimate) {
     this.totalUsage = {
