@@ -1,7 +1,7 @@
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { completeJson } from "@/accuracy/kernel/routing";
 import { completeAll, isTestStub } from "@/modules/kernel/llm";
-import { NoRouteError } from "@/modules/llm/provider";
+import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import {
   coverageCriticOutputSchema,
   coverageDecisionSchema,
@@ -54,7 +54,8 @@ export async function runCoverageCritic(
         });
         out.set(pair, coverageCriticOutputSchema.parse(raw));
       } catch (error) {
-        if (error instanceof NoRouteError) throw error;
+        // A provider failure (no credit, rejected key) is not an invalid answer: asking again hides it (KAN-68).
+        if (error instanceof NoRouteError || error instanceof ProviderError) throw error;
         ctx.run.note("coverage-critic:invalid-answer", {
           attempt,
           error: error instanceof Error ? error.message : String(error),

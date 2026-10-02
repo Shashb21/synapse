@@ -3,7 +3,7 @@ import { completeJson } from "@/accuracy/kernel/routing";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import type { ParseBlock } from "@/accuracy/store/quote-validator";
 import { completeAll, isTestStub } from "@/modules/kernel/llm";
-import { NoRouteError } from "@/modules/llm/provider";
+import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import { buildStateFromBlocks } from "./build-state-from-blocks";
 import { COVERAGE_DECIDE_SYSTEM } from "./prompts";
 import { coverageRouteAllowsLlm } from "./overall-map";
@@ -100,7 +100,8 @@ export async function runCoverageDecide(
         });
         out.set(pair, lockDecision({ input, raw }));
       } catch (error) {
-        if (error instanceof NoRouteError) throw error;
+        // A provider failure (no credit, rejected key) is not an invalid answer: asking again hides it (KAN-68).
+        if (error instanceof NoRouteError || error instanceof ProviderError) throw error;
         ctx.run.note("coverage:invalid-answer", {
           attempt,
           error: error instanceof Error ? error.message : String(error),

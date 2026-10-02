@@ -271,6 +271,10 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
     const api_key = providerApiKey(route.provider_id);
     if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     let invalid: string | null = null;
+    // Only a reply that fails to parse is asked for again. A provider failure (a
+    // ProviderError: no credit, a rejected key, rate limit) is thrown straight out,
+    // and is not retried or sent to a fallback provider, so the cause stays visible
+    // (KAN-68). Fallbacks apply only when resolveRoute finds a provider has no key.
     for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {
       const text = await run.step(
         `llm:${purpose}`,

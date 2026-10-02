@@ -1,3 +1,5 @@
+import { ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
+
 /**
  * LLM provider contract. Every cloud provider authenticates with a server-side
  * API key from the environment (see ./api-keys.ts); there is no provider login
@@ -36,6 +38,8 @@ export type LlmProvider = {
 
 export class NoRouteError extends Error {}
 
+export { ProviderError } from "./provider-error";
+
 function env(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
 }
@@ -47,7 +51,10 @@ function models(envName: string, fallback: string[]): string[] {
   return list.length ? list : fallback;
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown) {
+/** Who a call goes to, for a typed error when it fails (KAN-68). */
+type CallTarget = { provider_id: string; provider_name: string; key_env: string; api_key: string };
+
+async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -55,7 +62,16 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`${new URL(url).host} HTTP ${res.status}: ${text.slice(0, 400)}`);
+    // A typed, classified error instead of the raw body; the key never appears in it.
+    const parsed = parseProviderErrorBody(text);
+    throw new ProviderError({
+      provider_id: target.provider_id,
+      provider_name: target.provider_name,
+      key_env: target.key_env,
+      status: res.status,
+      error_type: parsed.error_type,
+      provider_message: parsed.message ? redactSecrets(parsed.message, [target.api_key]).slice(0, 300) : null,
+    });
   }
   return JSON.parse(text) as Record<string, unknown>;
 }
@@ -114,6 +130,7 @@ async function chatCompletions(args: {
   base: string;
   request: LlmRequest;
   auth: LlmAuth;
+  target: Omit<CallTarget, "api_key">;
   headers?: Record<string, string>;
 }): Promise<string> {
   const payload = await postJson(
@@ -128,6 +145,7 @@ async function chatCompletions(args: {
         { role: "user", content: args.request.user },
       ],
     },
+    { ...args.target, api_key: args.auth.api_key },
   );
   return textFromPayload(payload);
 }
@@ -147,6 +165,7 @@ export const xaiGrok: LlmProvider = {
       base: env("XAI_BASE_URL", "https://api.x.ai/v1"),
       request,
       auth,
+      target: { provider_id: "xai-grok", provider_name: "xAI", key_env: "XAI_API_KEY" },
     });
   },
 };
@@ -222,6 +241,7 @@ export const anthropicClaude: LlmProvider = {
         system: request.system,
         messages: [{ role: "user", content: request.user }],
       },
+      { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
     );
     return anthropicText(payload);
   },
@@ -240,6 +260,7 @@ export const openAi: LlmProvider = {
       base: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
       request,
       auth,
+      target: { provider_id: "openai", provider_name: "OpenAI", key_env: "OPENAI_API_KEY" },
     });
   },
 };
@@ -265,6 +286,7 @@ export const googleGemini: LlmProvider = {
           maxOutputTokens: request.max_tokens,
         },
       },
+      { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
     );
     return textFromPayload(payload);
   },
@@ -289,6 +311,7 @@ export const openRouter: LlmProvider = {
       base: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
       request,
       auth,
+      target: { provider_id: "openrouter", provider_name: "OpenRouter", key_env: "OPENROUTER_API_KEY" },
       headers: {
         "http-referer": env("OPENROUTER_APP_URL", "https://github.com/Shashb21/synapse"),
         "x-title": "Synapse IEGP",
