@@ -14,8 +14,8 @@ import { normalizeEmail, validEmail } from "./accounts";
  * - `seat_assignments`: one row per email (lower case), unique across every
  *   customer, so one person can't hold seats at two customers.
  *
- * Unassigning a seat or deactivating a customer ends the affected SSO
- * sessions at once.
+ * Unassigning a seat, deactivating a customer or deleting one ends the
+ * affected SSO sessions at once.
  */
 
 const DDL = [
@@ -151,6 +151,12 @@ function parseName(input: unknown): string {
   return name;
 }
 
+/** Only a real boolean: a string such as "true" is refused, not read as false. */
+function parseActive(input: unknown): boolean {
+  if (typeof input !== "boolean") throw new CustomerError("active must be true or false.");
+  return input;
+}
+
 /**
  * Splits a pasted list (commas, semicolons, whitespace, newlines) into
  * lower-cased, de-duplicated emails. A `Name <a@b.co>` entry keeps the address.
@@ -251,16 +257,36 @@ export async function revokeSeatSessions(emails: string[]): Promise<number> {
 
 export type CustomerInput = { name?: unknown; email_domains?: unknown; seats?: unknown; active?: unknown };
 
+type Tx = Parameters<Parameters<ReturnType<typeof sharedDb>["transaction"]>[0]>[0];
+
+/**
+ * Refuses a name another customer already has, ignoring case. The lock
+ * serialises creates and renames, so two at once can't both pass the check.
+ */
+async function assertNameFree(tx: Tx, name: string, exceptId: string | null): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('customers.name'))`);
+  const taken = (await tx.execute(sql`
+    select name from customers where lower(name) = lower(${name})
+    ${exceptId ? sql`and id <> ${exceptId}` : sql``} limit 1`)) as unknown as Row[];
+  if (taken[0]) {
+    throw new CustomerError(`A customer named "${String(taken[0].name)}" already exists. Pick another name.`, "conflict");
+  }
+}
+
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
   const name = parseName(input.name);
   const domains = parseDomains(input.email_domains);
   const seats = parseSeats(input.seats ?? 0);
-  const active = input.active === undefined ? true : input.active === true;
+  const active = input.active === undefined ? true : parseActive(input.active);
   const id = `cust_${randomBytes(9).toString("base64url")}`;
   const now = nowIso();
-  await rows(sql`
-    insert into customers (id, name, email_domains, seats, active, created_at, updated_at)
-    values (${id}, ${name}, ${textArray(domains)}, ${seats}, ${active}, ${now}, ${now})`);
+  await ensureTables();
+  await sharedDb().transaction(async (tx) => {
+    await assertNameFree(tx, name, null);
+    await tx.execute(sql`
+      insert into customers (id, name, email_domains, seats, active, created_at, updated_at)
+      values (${id}, ${name}, ${textArray(domains)}, ${seats}, ${active}, ${now}, ${now})`);
+  });
   return (await getCustomer(id))!;
 }
 
@@ -278,7 +304,8 @@ export async function updateCustomer(id: string, input: CustomerInput): Promise<
     const name = input.name === undefined ? current.name : parseName(input.name);
     const domains = input.email_domains === undefined ? current.email_domains : parseDomains(input.email_domains);
     const seats = input.seats === undefined ? current.seats : parseSeats(input.seats);
-    const active = input.active === undefined ? current.active : input.active === true;
+    const active = input.active === undefined ? current.active : parseActive(input.active);
+    if (name.toLowerCase() !== current.name.toLowerCase()) await assertNameFree(tx, name, id);
     const assigned = ((await tx.execute(
       sql`select email from seat_assignments where customer_id = ${id} order by email`,
     )) as unknown as Row[]).map((row) => String(row.email));
@@ -385,6 +412,27 @@ export async function unassignSeat(args: { customer_id: string; email: string })
   const customer = await getCustomer(args.customer_id);
   if (!customer) throw new CustomerError("That customer does not exist.", "not_found");
   return customer;
+}
+
+/**
+ * Deletes a customer and its seats. Every seat holder's SSO sessions end at
+ * once; a test customer's password session fails its per-request seat check
+ * (sessionStillAllowed in modules/auth/session.ts) from the next request.
+ */
+export async function deleteCustomer(id: string): Promise<{ customer: Customer; seats_removed: string[] }> {
+  const customer = await getCustomer(id);
+  if (!customer) throw new CustomerError("That customer does not exist.", "not_found");
+  const emails = await sharedDb().transaction(async (tx) => {
+    const locked = (await tx.execute(sql`select id from customers where id = ${id} for update`)) as unknown as Row[];
+    if (!locked[0]) throw new CustomerError("That customer does not exist.", "not_found");
+    const held = ((await tx.execute(
+      sql`delete from seat_assignments where customer_id = ${id} returning email`,
+    )) as unknown as Row[]).map((row) => String(row.email));
+    await tx.execute(sql`delete from customers where id = ${id}`);
+    return held;
+  });
+  await revokeSeatSessions(emails);
+  return { customer, seats_removed: emails };
 }
 
 /** Test helper: removes customers whose name matches the LIKE pattern (their seats go with them). */

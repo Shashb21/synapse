@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Loader2, Plus, Save, UserMinus, UserPlus, X } from "lucide-react";
+import { Building2, Loader2, Plus, Save, Trash2, UserMinus, UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { Customer, SeatAssignment } from "@/modules/auth/customers";
+import { formatUtc } from "@/lib/format-time";
 
 type Detail = { customer: Customer; seats: SeatAssignment[] };
 
@@ -22,7 +23,7 @@ async function call<T>(url: string, method: string, body?: Record<string, unknow
 }
 
 function when(iso: string): string {
-  return iso.slice(0, 16).replace("T", " ");
+  return formatUtc(iso);
 }
 
 function seatsLabel(customer: Customer): string {
@@ -327,6 +328,8 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   function upsert(customer: Customer) {
     setCustomers((list) =>
@@ -348,6 +351,25 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
     }
   }
 
+  async function remove(customer: Customer) {
+    setLoading(`delete:${customer.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await call<{ seats_removed: number }>(`/api/admin/customers/${customer.id}`, "DELETE");
+      setCustomers((list) => list.filter((c) => c.id !== customer.id));
+      if (detail?.customer.id === customer.id) setDetail(null);
+      setConfirmDelete(null);
+      setNotice(
+        `Deleted ${customer.name}.${result.seats_removed ? ` ${result.seats_removed} seat holder${result.seats_removed === 1 ? " is" : "s are"} signed out.` : ""}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the customer.");
+    } finally {
+      setLoading(null);
+    }
+  }
+
   return (
     <div className="grid gap-6">
       <CreateCustomerForm
@@ -357,6 +379,11 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
         }}
       />
       <ErrorNote error={error} testId="customers-error" />
+      {notice ? (
+        <p role="status" data-testid="customers-notice" className="text-[12px] text-foreground">
+          {notice}
+        </p>
+      ) : null}
 
       <div className="overflow-x-auto border border-border">
         <table className="w-full min-w-[640px] text-left text-[12px]" aria-label="Customers">
@@ -392,16 +419,49 @@ export function AdminCustomers({ initialCustomers, maxBulk }: { initialCustomers
                 </td>
                 <td className="px-3 py-2">{customer.active ? "Active" : "Inactive"}</td>
                 <td className="px-3 py-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={loading !== null}
-                    aria-label={`Manage ${customer.name}`}
-                    onClick={() => void open(customer.id)}
-                  >
-                    {loading === customer.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                    Manage
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={loading !== null}
+                      aria-label={`Manage ${customer.name}`}
+                      onClick={() => void open(customer.id)}
+                    >
+                      {loading === customer.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                      Manage
+                    </Button>
+                    {confirmDelete === customer.id ? (
+                      <span
+                        role="group"
+                        aria-label={`Confirm deleting ${customer.name}`}
+                        data-testid="confirm-delete-customer"
+                        className="flex flex-wrap items-center gap-1"
+                      >
+                        <span className="text-[11px] text-foreground">
+                          Delete {customer.name} and its {customer.seats_used} assigned seat{customer.seats_used === 1 ? "" : "s"}? Seat
+                          holders are signed out at once.
+                        </span>
+                        <Button size="sm" variant="destructive" disabled={loading !== null} onClick={() => void remove(customer)}>
+                          {loading === `delete:${customer.id}` ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                          Yes, delete
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={loading !== null} onClick={() => setConfirmDelete(null)}>
+                          Cancel
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={loading !== null}
+                        aria-label={`Delete ${customer.name}`}
+                        onClick={() => setConfirmDelete(customer.id)}
+                      >
+                        <Trash2 className="size-3.5" aria-hidden />
+                        Delete
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

@@ -35,6 +35,56 @@ function scrubFallbacks(ids: string[]): string[] {
   return ids.filter((id) => id !== LEGACY_OFFLINE_PROVIDER);
 }
 
+/** The bounds a route's parameters must sit inside (KAN-63). */
+export const ROUTE_LIMITS = {
+  temperature: { min: 0, max: 2 },
+  max_tokens: { min: 1, max: 200_000 },
+} as const;
+
+/** Only stages that call a model have a route; mechanical and human stages do not. */
+export function stageHasRoute(stage: StageId): boolean {
+  return STAGES[stage].kind === "agentic";
+}
+
+/**
+ * A route parameter from a request body. Blank (missing, null or "") means
+ * "keep the current value"; anything else must be a number inside the bounds.
+ */
+export function parseRouteParam(value: unknown, field: keyof typeof ROUTE_LIMITS): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+  const { min, max } = ROUTE_LIMITS[field];
+  if (field === "max_tokens") {
+    if (!Number.isInteger(number) || number < min || number > max) {
+      throw new Error(`Max tokens must be a whole number from ${min} to ${max.toLocaleString("en-US")}.`);
+    }
+  } else if (!Number.isFinite(number) || number < min || number > max) {
+    throw new Error(`Temperature must be a number from ${min} to ${max}.`);
+  }
+  return number;
+}
+
+/**
+ * A route's fallbacks from a request body: a comma-separated string or an
+ * array. Blank means "no fallbacks". Unknown providers and the stage's own
+ * provider are refused; repeats are dropped.
+ */
+export function parseFallbacks(value: unknown, provider_id: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  let ids: string[];
+  if (typeof value === "string") ids = value.split(",");
+  else if (Array.isArray(value) && value.every((id) => typeof id === "string")) ids = value;
+  else throw new Error("Fallbacks must be a comma-separated list of provider ids.");
+  const out: string[] = [];
+  for (const id of ids.map((candidate) => candidate.trim()).filter(Boolean)) {
+    if (!findProvider(id)) throw new Error(`Unknown fallback provider ${id}`);
+    if (id === provider_id) throw new Error(`${id} is this stage's provider, so it cannot also be its fallback.`);
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 function defaultConfig(stage: StageId): RouteConfig {
   return {
     stage,
@@ -70,15 +120,27 @@ export async function routeConfig(stage: StageId): Promise<RouteConfig> {
   return configs.find((config) => config.stage === stage) ?? defaultConfig(stage);
 }
 
-export async function setRouteConfig(args: {
+type RouteInput = {
   stage: StageId;
   provider_id: string;
   model: string;
+  /** Undefined keeps the stage's current value. */
   temperature?: number;
   max_tokens?: number;
+  /** Undefined keeps the current chain; [] means no fallbacks. */
   fallbacks?: string[];
   actor_name: string;
-}): Promise<RouteConfig> {
+};
+
+/** One stage's route. Mechanical and human stages have none, so they are refused. */
+export async function setRouteConfig(args: RouteInput): Promise<RouteConfig> {
+  if (!stageHasRoute(args.stage)) {
+    throw new Error(`${args.stage} does not call a model, so it has no route to set.`);
+  }
+  return writeRouteConfig(args);
+}
+
+async function writeRouteConfig(args: RouteInput): Promise<RouteConfig> {
   await ensurePlatformSchema();
   if (args.provider_id === LEGACY_OFFLINE_PROVIDER) {
     throw new Error("Deterministic / no-LLM routing was removed. Pick a cloud provider.");
@@ -88,15 +150,20 @@ export async function setRouteConfig(args: {
   if (args.model && provider.models.length > 0 && !provider.models.includes(args.model)) {
     throw new Error(`${provider.label} does not serve ${args.model}`);
   }
+  if (args.temperature !== undefined) parseRouteParam(args.temperature, "temperature");
+  if (args.max_tokens !== undefined) parseRouteParam(args.max_tokens, "max_tokens");
+  const fallbacks = args.fallbacks === undefined ? undefined : parseFallbacks(args.fallbacks, args.provider_id);
+  const current = await routeConfig(args.stage);
   const values = {
     stage: args.stage,
     provider_id: args.provider_id,
     model: args.model || provider.default_model,
     params: {
-      temperature: args.temperature ?? 0,
-      max_tokens: args.max_tokens ?? 8192,
+      temperature: args.temperature ?? current.params.temperature,
+      max_tokens: args.max_tokens ?? current.params.max_tokens,
     },
-    fallbacks: scrubFallbacks(args.fallbacks?.length ? args.fallbacks : DEFAULT_FALLBACKS),
+    // A kept chain drops the new provider, which cannot fall back to itself.
+    fallbacks: scrubFallbacks(fallbacks ?? current.fallbacks.filter((id) => id !== args.provider_id)),
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
@@ -177,8 +244,9 @@ export async function setDefaultProvider(args: {
   const fallbacks = chain.filter((id) => id !== args.provider_id);
   const out: RouteConfig[] = [];
   for (const stage of STAGE_IDS) {
+    // Every stage, so "routed to" names one provider across the board (KAN-60).
     out.push(
-      await setRouteConfig({
+      await writeRouteConfig({
         stage,
         provider_id: args.provider_id,
         model: args.model ?? provider.default_model,

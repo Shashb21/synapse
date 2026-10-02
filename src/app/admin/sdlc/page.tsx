@@ -4,95 +4,10 @@ import path from "node:path";
 import { AdminMain, PageIntro } from "@/components/admin/admin-page";
 import { SpecBody } from "@/app/admin/sdlc/spec-body";
 import Link from "next/link";
+import { SPEC_DOCS, specDoc } from "@/components/admin/sdlc-docs";
+import { RetiredMarker } from "./retired-marker";
 
 export const dynamic = "force-dynamic";
-
-const SPECS = [
-  {
-    slug: "iegp-model.md",
-    rel: "docs/iegp-model.md",
-    id: "IEGP",
-    title: "IEGP model",
-  },
-  {
-    slug: "problem-and-solution.md",
-    rel: "docs/problem-and-solution.md",
-    id: "PS",
-    title: "Problem & solution",
-  },
-  {
-    slug: "01-requirements.md",
-    rel: "docs/sdlc/01-requirements.md",
-    id: "REQ",
-    title: "Requirements",
-  },
-  {
-    slug: "02-architecture.md",
-    rel: "docs/sdlc/02-architecture.md",
-    id: "ARCH",
-    title: "Architecture",
-  },
-  {
-    slug: "03-design.md",
-    rel: "docs/sdlc/03-design.md",
-    id: "DES",
-    title: "Design",
-  },
-  {
-    slug: "04-tdd.md",
-    rel: "docs/sdlc/04-tdd.md",
-    id: "TDD",
-    title: "TDD",
-  },
-  {
-    slug: "05-process.md",
-    rel: "docs/sdlc/05-process.md",
-    id: "PRC",
-    title: "Process",
-  },
-  {
-    slug: "06-eval-protocol.md",
-    rel: "docs/sdlc/06-eval-protocol.md",
-    id: "EVA",
-    title: "Eval protocol",
-  },
-  {
-    slug: "07-catalog-evolution.md",
-    rel: "docs/sdlc/07-catalog-evolution.md",
-    id: "CAT",
-    title: "Catalog evolution",
-  },
-  {
-    slug: "08-knowledge-graph.md",
-    rel: "docs/sdlc/08-knowledge-graph.md",
-    id: "GRF",
-    title: "Knowledge graph",
-  },
-  {
-    slug: "09-flow-high-level.md",
-    rel: "docs/sdlc/09-flow-high-level.md",
-    id: "FLOW",
-    title: "Flow (process)",
-  },
-  {
-    slug: "10-flow-technical.md",
-    rel: "docs/sdlc/10-flow-technical.md",
-    id: "TECH",
-    title: "Flow (technical)",
-  },
-  {
-    slug: "11-regression.md",
-    rel: "docs/sdlc/11-regression.md",
-    id: "REG",
-    title: "Regression",
-  },
-  {
-    slug: "12-gold-set.md",
-    rel: "docs/sdlc/12-gold-set.md",
-    id: "GOLD",
-    title: "Gold set",
-  },
-] as const;
 
 export default async function SdlcPage({
   searchParams,
@@ -101,7 +16,7 @@ export default async function SdlcPage({
 }) {
   await requireOwnerPage();
   const { spec } = await searchParams;
-  const active = SPECS.find((s) => s.slug === spec) ?? SPECS[0]!;
+  const active = specDoc(spec) ?? SPEC_DOCS[0];
   const body = await readFile(path.join(process.cwd(), active.rel), "utf8");
 
   return (
@@ -112,22 +27,25 @@ export default async function SdlcPage({
         Hill-climb and tests run off-screen.
       </PageIntro>
       <div className="mb-4 flex flex-wrap gap-1">
-        {SPECS.map((s) => (
+        {SPEC_DOCS.map((s) => (
           <Link
             key={s.slug}
             href={`/admin/sdlc?spec=${s.slug}`}
-            className={`rounded-md px-2 py-1 text-[12px] no-underline ${
+            aria-current={s.slug === active.slug ? "page" : undefined}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] no-underline ${
               s.slug === active.slug
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
             }`}
           >
             {s.title}
+            {s.retired ? <RetiredMarker /> : null}
           </Link>
         ))}
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
         {active.id} · {active.rel}
+        {active.retired ? " · Retired v1 spec, kept for lineage only: it does not describe the current product." : ""}
       </p>
       <SpecBody markdown={body} />
     </AdminMain>

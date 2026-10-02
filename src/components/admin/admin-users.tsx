@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, UserPlus } from "lucide-react";
+import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS } from "@/lib/iegp/enums";
 import { ROLE_LABELS, ROLES, type Role } from "@/modules/auth/roles";
 import type { AdminUserView } from "@/modules/auth/admin-users";
+import { formatUtc } from "@/lib/format-time";
 
-type Result = { user: AdminUserView; temporary_password?: string; error?: string };
+type Result = { user: AdminUserView; temporary_password?: string; deleted?: boolean; error?: string };
 
 async function call(body: Record<string, unknown>): Promise<Result> {
   const res = await fetch("/api/admin/users", {
@@ -22,7 +23,7 @@ async function call(body: Record<string, unknown>): Promise<Result> {
 }
 
 function when(iso: string | null): string {
-  return iso ? iso.slice(0, 16).replace("T", " ") : "never";
+  return formatUtc(iso);
 }
 
 /** The Users table: every email + password account, and what an admin can do to each. */
@@ -36,6 +37,7 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
   const [role, setRole] = useState<Role>("operator");
   const [isAdmin, setIsAdmin] = useState(false);
   const [fn, setFn] = useState<string>("medical_affairs");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   function replace(user: AdminUserView) {
     setUsers((list) => (list.some((u) => u.id === user.id) ? list.map((u) => (u.id === user.id ? user : u)) : [...list, user]));
@@ -46,7 +48,10 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
     setError(null);
     try {
       const result = await call(body);
-      replace(result.user);
+      if (result.deleted) {
+        setUsers((list) => list.filter((u) => u.id !== result.user.id));
+        setConfirmDelete(null);
+      } else replace(result.user);
       setSecret(result.temporary_password ? { email: result.user.email, password: result.temporary_password } : null);
       return true;
     } catch (err) {
@@ -191,14 +196,17 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                   <td className="px-3 py-2 text-muted-foreground">{when(user.last_sign_in_at)}</td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy !== null}
-                        onClick={() => void run(`reset:${user.id}`, { action: "reset_password", id: user.id })}
-                      >
-                        Reset password
-                      </Button>
+                      {/* You change your own password at /account. */}
+                      {!self ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy !== null}
+                          onClick={() => void run(`reset:${user.id}`, { action: "reset_password", id: user.id })}
+                        >
+                          Reset password
+                        </Button>
+                      ) : null}
                       {!user.email_verified ? (
                         <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run(`verify:${user.id}`, { action: "verify", id: user.id })}>
                           Verify email
@@ -228,6 +236,34 @@ export function AdminUsers({ initialUsers, selfId }: { initialUsers: AdminUserVi
                         >
                           {user.disabled ? "Enable" : "Disable"}
                         </Button>
+                      ) : null}
+                      {!self && confirmDelete !== user.id ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy !== null}
+                          aria-label={`Delete ${user.email}`}
+                          onClick={() => setConfirmDelete(user.id)}
+                        >
+                          <Trash2 className="size-3.5" aria-hidden />
+                          Delete
+                        </Button>
+                      ) : null}
+                      {!self && confirmDelete === user.id ? (
+                        <span role="group" aria-label={`Confirm deleting ${user.email}`} className="flex flex-wrap items-center gap-1" data-testid="confirm-delete-user">
+                          <span className="text-[11px] text-foreground">Delete {user.email}? They are signed out at once.</span>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={busy !== null}
+                            onClick={() => void run(`delete:${user.id}`, { action: "delete", id: user.id })}
+                          >
+                            Yes, delete
+                          </Button>
+                          <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmDelete(null)}>
+                            Cancel
+                          </Button>
+                        </span>
                       ) : null}
                       {pending ? <Loader2 className="size-4 animate-spin self-center" aria-label="Working" /> : null}
                     </div>

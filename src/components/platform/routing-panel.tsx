@@ -115,16 +115,27 @@ function StageRouteCard({
         stage: route.stage,
         provider_id: providerId,
         model,
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
+        // Sent as typed: the server checks the bounds, keeps a blank number's
+        // current value and reads blank fallbacks as none (KAN-63).
+        temperature,
+        max_tokens: maxTokens,
         fallbacks,
       }),
     });
-    const json = (await res.json()) as { error?: string };
+    const json = (await res.json()) as {
+      error?: string;
+      config?: { params: { temperature: number; max_tokens: number }; fallbacks: string[] };
+    };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not save this route");
       return;
+    }
+    // Show what was stored: a blank number comes back as the value it kept.
+    if (json.config) {
+      setTemperature(String(json.config.params.temperature));
+      setMaxTokens(String(json.config.params.max_tokens));
+      setFallbacks(json.config.fallbacks.join(", "));
     }
     setSaved(true);
     router.refresh();
@@ -203,17 +214,21 @@ function StageRouteCard({
             </select>
           </label>
           <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Temperature
+            Temperature (0 to 2)
             <Input
               value={temperature}
+              inputMode="decimal"
+              placeholder="Blank keeps the current value"
               disabled={!canRoute}
               onChange={(event) => setTemperature(event.target.value)}
             />
           </label>
           <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Max tokens
+            Max tokens (1 to 200,000)
             <Input
               value={maxTokens}
+              inputMode="numeric"
+              placeholder="Blank keeps the current value"
               disabled={!canRoute}
               onChange={(event) => setMaxTokens(event.target.value)}
             />
@@ -223,8 +238,13 @@ function StageRouteCard({
             <Input
               value={fallbacks}
               disabled={!canRoute}
+              placeholder="No fallbacks"
               onChange={(event) => setFallbacks(event.target.value)}
             />
+            <span>
+              Provider ids, comma-separated ({providers.map((option) => option.id).join(", ")}). Leave
+              blank for no fallbacks: the stage then fails rather than switch providers.
+            </span>
           </label>
         </div>
       ) : (

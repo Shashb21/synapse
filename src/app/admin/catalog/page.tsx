@@ -3,7 +3,12 @@ import { AdminMain, PageIntro } from "@/components/admin/admin-page";
 import { Badge } from "@/components/ui/badge";
 import { STAGES } from "@/modules/kernel/contracts";
 import { manifests } from "@/modules/kernel/registry";
-import { HILLCLIMB_STAGES, promptVariantInstruction, promptVersionsFor } from "@/modules/kernel/prompt-versions";
+import {
+  HILLCLIMB_STAGES,
+  PROMPT_VARIANT_STAGES,
+  promptVariantInstruction,
+  promptVersionsFor,
+} from "@/modules/kernel/prompt-versions";
 import { requireOwnerPage } from "@/modules/auth/owner";
 
 export const dynamic = "force-dynamic";
@@ -62,8 +67,25 @@ export default async function CatalogPage() {
         <p className="text-[11px] text-muted-foreground">
           Hillclimb stages: {HILLCLIMB_STAGES.join(", ")}. Sweeps run from Runs &amp; traces.
         </p>
+        <ul className="grid gap-1 text-[12px]" aria-label="Prompt versions by stage">
+          {HILLCLIMB_STAGES.map((stage) => (
+            <li key={stage} className="text-foreground">
+              {stage} · {STAGES[stage].title}:{" "}
+              <span className="text-muted-foreground">
+                {promptVersionsFor(stage).join(", ")}
+                {PROMPT_VARIANT_STAGES.includes(stage)
+                  ? " · uses the S2 variant instructions below"
+                  : " · no variant instructions of its own: every version runs the baseline prompt"}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {/* One instruction per version; the wording targets S2's gaps, and S3 reuses it (KAN-63). */}
+        <h3 className="mt-2 text-[12px] font-semibold text-foreground">
+          S2 · {STAGES.S2.title}: variant instructions
+        </h3>
         <ul className="grid gap-2">
-          {promptVersionsFor(HILLCLIMB_STAGES[0]!).map((version) => (
+          {promptVersionsFor("S2").map((version) => (
             <li key={version} className="border border-border bg-card p-2 rounded-lg">
               <p className="text-[12px] text-foreground">{version}</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
