@@ -112,8 +112,8 @@ export default async function IdeationPage() {
     <AppShell active="ideation">
       <PageIntro kicker="Tactics ideation" title="Tactics ideation review">
         {ai
-          ? "The model designs candidate tactics for every open gap whose priority band you validated (High first, then Medium, then Low), critiques them against the tactic library and keeps the best per gap. Accepting a proposal creates a proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
-          : "Write ideas for any open gap whose priority band was validated (High, Medium or Low). Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
+          ? "The model designs candidate tactics for open gaps you validated as High priority only, critiques them against the tactic library and keeps the best per gap. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting a proposal creates a proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
+          : "Write ideas for open gaps validated as High priority. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
       </PageIntro>
 
       <div className="grid gap-4">
@@ -132,7 +132,7 @@ export default async function IdeationPage() {
               <span className="text-foreground">{rejected}</span> rejected
             </li>
             <li>
-              <span className="text-foreground">{eligibleCount}</span> open gap(s) with a validated band
+              <span className="text-foreground">{eligibleCount}</span> open gap(s) validated as High
             </li>
           </ul>
           {ai ? (
@@ -155,8 +155,8 @@ export default async function IdeationPage() {
             </h2>
             <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">
               {ai
-                ? "These open gaps have a validated priority band but no ideated tactic yet, High first. Generate ideas for them, or add an idea by hand."
-                : "These open gaps have a validated priority band but no ideated tactic yet, High first. Add an idea by hand."}
+                ? "These open gaps are validated as High priority but have no ideated tactic yet. Generate ideas for them, or add an idea by hand. Medium and Low gaps are not listed: their tactics come from the tactic library or by hand on the gap."
+                : "These open gaps are validated as High priority but have no ideated tactic yet. Add an idea by hand. Medium and Low gaps are not listed: their tactics come from the tactic library or by hand on the gap."}
             </p>
             <ul className="flex flex-wrap gap-2" data-testid="ideation-without-proposal">
               {withoutProposal.map((gap) => (
@@ -196,8 +196,8 @@ export default async function IdeationPage() {
           <section className="grid gap-3 rounded-md border border-border bg-card p-4">
             <h2 className="text-[13px] text-foreground">No proposal to review yet</h2>
             <p className="max-w-2xl text-[12px] leading-5 text-muted-foreground">
-              {ai ? "Ideas are generated" : "Ideas are added"} for open gaps whose priority band (High,
-              Medium or Low) has been validated. Validate a band on the{" "}
+              {ai ? "Ideas are generated" : "Ideas are added"} for open gaps validated as High priority only;
+              Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Validate a band on the{" "}
               <Link href="/?place=plan" className="text-foreground no-underline hover:underline">
                 prioritization matrix
               </Link>{" "}
