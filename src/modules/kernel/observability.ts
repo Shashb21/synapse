@@ -34,11 +34,17 @@ export type RunRecord = {
 
 /** Bounded so a run row never grows without limit. */
 const MAX_STEP_BYTES = 40_000;
+/**
+ * A run's input and output are read back by the app (the mapping table reads the
+ * latest S4 output), so they get a far larger bound than trace steps: a real plan's
+ * S4 output is tens of kilobytes and must never be cut to a preview (KAN-68).
+ */
+const MAX_IO_BYTES = 2_000_000;
 
-function trim(data: unknown): unknown {
+function trim(data: unknown, max = MAX_STEP_BYTES): unknown {
   if (data === undefined) return null;
   const json = JSON.stringify(data) ?? "null";
-  if (json.length <= MAX_STEP_BYTES) return data;
+  if (json.length <= max) return data;
   return { truncated: true, bytes: json.length, preview: json.slice(0, 2_000) };
 }
 
@@ -118,7 +124,7 @@ export async function openRun(recorder: RunRecorder) {
       started_at: nowIso(),
       actor_name: recorder.meta.actor.name,
       actor_function: recorder.meta.actor.function,
-      input: trim(recorder.meta.input),
+      input: trim(recorder.meta.input, MAX_IO_BYTES),
       steps: [],
     });
 }
@@ -140,7 +146,7 @@ export async function closeRun(args: {
       duration_ms: args.recorder.elapsedMs(),
       summary: args.summary ?? null,
       error: args.error ?? null,
-      output: trim(args.output),
+      output: trim(args.output, MAX_IO_BYTES),
       steps: args.recorder.steps(),
       route: args.route ?? null,
       evals: args.evals ?? [],

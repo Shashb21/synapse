@@ -60,12 +60,15 @@ const storedRows = z.array(mappingTableRowSchema);
 export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
   try {
     const runs = await listRuns({ stage: "S4", limit: 20 });
-    const ok = runs.find((run) => run.status === "ok" && run.output);
-    if (!ok?.output) return null;
-    const output = ok.output as { rows?: unknown; accepted?: unknown };
-    for (const candidate of [output.rows, output.accepted]) {
-      const parsed = storedRows.safeParse(candidate);
-      if (parsed.success && parsed.data.length > 0) return parsed.data;
+    // The newest successful run whose rows were stored whole: an output cut to a
+    // preview by an older size bound is skipped, not shown as "not mapped" (KAN-68).
+    for (const run of runs) {
+      if (run.status !== "ok" || !run.output) continue;
+      const output = run.output as { rows?: unknown; accepted?: unknown };
+      for (const candidate of [output.rows, output.accepted]) {
+        const parsed = storedRows.safeParse(candidate);
+        if (parsed.success && parsed.data.length > 0) return parsed.data;
+      }
     }
     return null;
   } catch {
@@ -82,7 +85,7 @@ function decisionsFor(state: IegpState, gapId: string): Record<string, PairDecis
   return out;
 }
 
-export const UNMAPPED_RATIONALE_AI = "Not mapped yet: run S4 for a coverage verdict, or map tactics by hand.";
+export const UNMAPPED_RATIONALE_AI = "Not mapped yet: choose Re-run mapping for a coverage verdict, or map tactics by hand.";
 export const UNMAPPED_RATIONALE_MANUAL = "Not mapped yet: pick the tactics and a status by hand.";
 
 export function buildMappingTableView(
