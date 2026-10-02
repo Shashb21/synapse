@@ -153,6 +153,24 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
       false,
     );
     expect(providers).toContain('data-testid="providers-ai-off"');
+    // KAN-60: the switch shows which provider every stage routes to.
+    const routed = render(
+      createElement(ProviderPanel, {
+        connections: [
+          { provider_id: "xai", label: "xAI · Grok", summary: "", tier: "default", auth: "oauth", configured: true, status: "disconnected", account_label: null, connected_by: null, connected_at: null, detail: null, models: [], default_model: "grok-4" },
+          { provider_id: "anthropic", label: "Anthropic · Claude", summary: "", tier: "alternate", auth: "oauth", configured: true, status: "disconnected", account_label: null, connected_by: null, connected_at: null, detail: null, models: [], default_model: "claude" },
+        ],
+        defaults: { primary: "xai", alternate: "anthropic" },
+        canConnect: true,
+        canRoute: true,
+        routedTo: "anthropic",
+      }),
+      true,
+    );
+    expect(routed).toContain("Every stage routes to Anthropic · Claude.");
+    expect(routed).toMatch(/aria-pressed="true"[^>]*>(?:(?!<\/button>).)*Anthropic · Claude/);
+    expect(routed).toMatch(/aria-pressed="false"[^>]*>(?:(?!<\/button>).)*xAI · Grok/);
+    expect(routed.match(/provider-routing-every-stage/g)).toHaveLength(1);
     const panel = render(
       createElement(AiSwitchPanel, {
         ai: { enabled: false, updated_by: ACTOR, updated_at: "now", rationale: "test" },
@@ -193,5 +211,14 @@ describe("AI off: platform, pipeline, runs, control and setup", () => {
     // Customers never see owner-only links.
     expect(on).not.toContain('href="/pipeline"');
     expect(on).not.toContain('href="/control"');
+  });
+});
+
+describe("KAN-60 routed-to provider", () => {
+  it("is the provider every stage shares, else null", async () => {
+    const { routedToEveryStage } = await import("@/components/platform/control-panel-view");
+    expect(routedToEveryStage([{ provider_id: "anthropic" }, { provider_id: "anthropic" }])).toBe("anthropic");
+    expect(routedToEveryStage([{ provider_id: "anthropic" }, { provider_id: "xai" }])).toBeNull();
+    expect(routedToEveryStage([])).toBeNull();
   });
 });
