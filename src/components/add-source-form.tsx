@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useRef, useState, type FormEvent } from "react";
 import { FileText, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RerunMappingButton } from "@/components/platform/rerun-mapping-button";
 import {
   ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
@@ -39,6 +40,8 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
   const [text, setText] = useState("");
   const [binary, setBinary] = useState<{ content_base64: string; mime: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The mapping step (S4) failed after the source was read: offer to run it again (KAN-68).
+  const [mappingFailed, setMappingFailed] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -72,6 +75,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     setError(null);
+    setMappingFailed(false);
     setDone(null);
     if (!title.trim()) {
       setError("Give the source a title.");
@@ -95,10 +99,11 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         stakeholder_function: String(data.get("stakeholder_function") ?? ""),
       }),
     });
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const json = (await res.json().catch(() => ({}))) as { error?: string; stage?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not read the source. Try again.");
+      setMappingFailed(json.stage === "S4");
       return;
     }
     setDone(`Read “${title.trim()}”. Its gaps and tactics are on Evidence Inventory.`);
@@ -201,9 +206,21 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
           </label>
         )}
         {error ? (
-          <p role="alert" className="text-[12px] text-destructive">
-            {error}
-          </p>
+          <div className="grid gap-2">
+            <p role="alert" className="text-[12px] text-destructive">
+              {error}
+            </p>
+            {mappingFailed ? (
+              <RerunMappingButton
+                onDone={(ok) => {
+                  if (!ok) return;
+                  setError(null);
+                  setMappingFailed(false);
+                  setDone("Mapping finished. The mapping table shows the new proposal.");
+                }}
+              />
+            ) : null}
+          </div>
         ) : null}
         {done ? (
           <p role="status" className="text-[12px] text-[var(--known-foreground)]">
