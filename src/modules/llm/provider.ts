@@ -164,7 +164,7 @@ export function anthropicAcceptsTemperature(model: string): boolean {
  * The answer text of a Messages API response: its text blocks joined as one
  * continuous answer. Thinking blocks are skipped, and
  * a refusal or a reply cut off by max_tokens is an error rather than an empty
- * string, so a stage never parses a silent blank.
+ * string, so a stage never parses a silent blank or a truncated answer.
  */
 export function anthropicText(payload: Record<string, unknown>): string {
   const stop = payload.stop_reason;
@@ -180,8 +180,14 @@ export function anthropicText(payload: Record<string, unknown>): string {
     .filter((block) => block.type === "text")
     .map((block) => block.text ?? "")
     .join("");
-  if (stop === "max_tokens" && !text.trim()) {
-    throw new Error("Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.");
+  // Every stage parses the answer as JSON, so a reply cut off at max_tokens is never
+  // usable, even with some text: say so instead of handing on a truncated answer (KAN-66).
+  if (stop === "max_tokens") {
+    throw new Error(
+      text.trim()
+        ? "Claude's reply was cut off at its max_tokens limit before it finished. Raise Max tokens for this stage in AI & routing."
+        : "Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.",
+    );
   }
   return text;
 }
