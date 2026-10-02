@@ -1062,7 +1062,7 @@ export async function savePlan(args: {
     throw new Error(
       `${model.pending.length} activity(ies) have no schedule yet (${model.pending
         .map((row) => row.tactic_name)
-        .join(", ")}). Rebuild the timeline before saving it as final.`,
+        .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or rebuild the timeline, then save it as final.`,
     );
   }
   const previous = await latestPlan();
