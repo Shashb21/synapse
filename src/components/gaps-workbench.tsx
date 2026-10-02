@@ -600,6 +600,7 @@ export function GapsWorkbench({
               label="Continue to prioritize"
               action="complete_wizard"
               confirmLabel="Go to prioritize"
+              href="/?place=plan"
             />
           </>
         ) : (
