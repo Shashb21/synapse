@@ -107,6 +107,7 @@ const MAPPING_TABLE_PROPOSER_SYSTEM = `You produce a gap ↔ tactic mapping TABL
 Each TABLE ROW is one evidence gap. For each gap you are given, decide which tactics bear on it and how much of it they cover:
 - mappings: one entry per tactic you assessed for the gap. coverage is "full" (the tactic fully covers the gap), "partial" (covers some of it), "limited" (bears on it but thinly, e.g. population or endpoints too narrow) or "not_relevant" (you considered it and it does not apply). Each mapping needs a confidence (0-100), a one-sentence rationale naming what overlaps or is missing (population, comparator, outcome, timing), and, unless coverage is "not_relevant", a value for every dimension (${DIMENSION_KEYS}) of "yes", "partial", "no" or "unknown". For "not_relevant" set dimensions to null.
 - mapping_status: "open" (no tactic bears on the gap), "addressed" (the tactics together fully close it) or "partially_addressed" (they cover part of it).
+- mapping_status must agree with the mappings. A "full", "partial" or "limited" mapping bears on the gap, so a row with any of them is never "open". When the only tactics that bear on a gap are "limited", the status is "partially_addressed"; if a tactic does not really bear on it, mark that mapping "not_relevant" instead. "open" means every mapping is "not_relevant" (or there are none).
 - confidence (0-100) and a one-sentence rationale for the row as a whole.
 
 At most max_tactics_per_gap mappings per gap may have coverage other than "not_relevant". Do not map dissemination-only tactics unless the gap is about dissemination. Tactics already assigned to a gap are listed on it; judge them like any other. A gap may list human_rejected_tactic_ids: a reviewer rejected or removed those tactics for that gap, so never map them to it.
@@ -120,6 +121,8 @@ Return JSON only: {"rows":[{"gap_id":"","mapping_status":"open|addressed|partial
 const MAPPING_CRITIC_SYSTEM = `You independently review a proposed gap ↔ tactic mapping table for a pharma Integrated Evidence Generation Plan.
 
 For each row, judge whether each mapping's coverage and dimensions are defensible from the gap statement and the tactic's evidence question, population, comparator and outcomes; whether a tactic in the library that bears on the gap was left out; and whether the row's mapping_status follows from its mappings. Weigh any reviewer corrections.
+
+The status rule is fixed: a "full", "partial" or "limited" mapping bears on the gap, so a row with any of them cannot be "open". Never ask for "open" while such a mapping stays; to make a row open, ask for those mappings to become "not_relevant". A gap whose only bearing tactics are "limited" is "partially_addressed".
 
 verdict is "keep" when the row is right, "revise" when a mapping, a coverage value or the status should change, and "drop" when the row cannot be salvaged and should be withdrawn this run. confidence is 0-100 that the row is right. note names what should change and why; for "keep" say briefly why it holds. Give a verdict and note for every mapping in the row under mappings; a "keep" row has only "keep" mappings.
 
@@ -242,27 +245,35 @@ function parseProposedRow(
   tactics: TacticRow[],
   maxPerGap: number,
   blocked: Set<string> = new Set(),
+  /** Told why a row is rejected, so the next attempt can say so (KAN-66). */
+  onReject: (reason: string) => void = () => {},
 ): Row | null {
+  const reject = (reason: string): null => {
+    onReject(reason);
+    return null;
+  };
   const status = mappingStatusSchema.safeParse(raw.mapping_status);
-  if (!status.success) return null;
-  if (!finiteNumber(raw.confidence)) return null;
+  if (!status.success) return reject("mapping_status must be open, addressed or partially_addressed.");
+  if (!finiteNumber(raw.confidence)) return reject("the row needs a numeric confidence.");
   const rationale = typeof raw.rationale === "string" ? raw.rationale.trim() : "";
-  if (!rationale) return null;
-  if (!Array.isArray(raw.mappings)) return null;
+  if (!rationale) return reject("the row needs a rationale.");
+  if (!Array.isArray(raw.mappings)) return reject("mappings must be a list.");
   const mappings: TacticMapping[] = [];
   for (const item of raw.mappings as RawMapping[]) {
     const tactic = tactics.find((candidate) => candidate.id === item?.tactic_id);
-    if (!tactic || mappings.some((mapping) => mapping.tactic_id === tactic.id)) return null;
+    if (!tactic) return reject(`tactic ${String(item?.tactic_id)} is not in the tactic library.`);
+    if (mappings.some((mapping) => mapping.tactic_id === tactic.id)) return reject(`tactic ${tactic.id} is listed twice.`);
     // A person rejected or removed this pair: it is left out, never proposed again.
     if (blocked.has(pairKey(gap.id, tactic.id))) continue;
     const coverage = coverageSchema.safeParse(item.coverage);
-    if (!coverage.success || !finiteNumber(item.confidence)) return null;
+    if (!coverage.success) return reject(`coverage for ${tactic.id} must be full, partial, limited or not_relevant.`);
+    if (!finiteNumber(item.confidence)) return reject(`the mapping to ${tactic.id} needs a numeric confidence.`);
     const note = typeof item.rationale === "string" ? item.rationale.trim() : "";
-    if (!note) return null;
+    if (!note) return reject(`the mapping to ${tactic.id} needs a rationale.`);
     let dimensions: TacticMapping["dimensions"] = null;
     if (coverage.data !== "not_relevant") {
       const parsed = dimensionsSchema.safeParse(item.dimensions);
-      if (!parsed.success) return null;
+      if (!parsed.success) return reject(`the mapping to ${tactic.id} needs a yes/partial/no/unknown value for every dimension.`);
       dimensions = parsed.data;
     }
     mappings.push({
@@ -275,9 +286,16 @@ function parseProposedRow(
     });
   }
   const bearing = mappings.filter(bearsOnGap);
-  if (bearing.length > maxPerGap) return null;
+  if (bearing.length > maxPerGap) return reject(`at most ${maxPerGap} mappings may be other than not_relevant.`);
   // The status must agree with the mappings the model gave: open means none bear on the gap.
-  if ((status.data === "open") !== (bearing.length === 0)) return null;
+  if (status.data === "open" && bearing.length > 0) {
+    return reject(
+      `mapping_status is "open" but ${bearing.map((m) => `${m.tactic_id} is "${m.coverage}"`).join(", ")}. A full, partial or limited mapping bears on the gap: use "partially_addressed", or mark those mappings "not_relevant".`,
+    );
+  }
+  if (status.data !== "open" && bearing.length === 0) {
+    return reject(`mapping_status is "${status.data}" but no mapping bears on the gap: use "open", or map the tactics that cover it.`);
+  }
   return {
     gap_id: gap.id,
     gap_name: gap.name,
@@ -335,6 +353,8 @@ type Shared = {
   hints: string;
   /** Pairs a person rejected or removed. */
   blocked: Set<string>;
+  /** Why the last answer's row for a gap was rejected; sent with the retry (KAN-66). */
+  rejections: Map<string, string>;
 };
 
 function rejectedFor(shared: Shared, gapId: string): string[] | undefined {
@@ -363,7 +383,7 @@ async function llmProposals(
     user: JSON.stringify({
       reviewer_corrections: shared.hints || undefined,
       note: args.retry
-        ? "An earlier answer left these gaps without a complete, valid row (missing fields, unknown tactic ids, values outside the vocabulary, too many tactics, or a status that does not match the mappings). Return a complete row for each."
+        ? "An earlier answer left these gaps without a complete, valid row. Each gap's rejected_because says what was wrong; fix exactly that and return a complete row for each."
         : undefined,
       gaps: args.gapIds.map((id) => {
         const previous = args.previous.get(id);
@@ -371,6 +391,7 @@ async function llmProposals(
           ...promptGap(shared, id),
           previous: previous ? promptRow(previous) : undefined,
           objection: args.objections.get(id),
+          rejected_because: args.retry ? shared.rejections.get(id) : undefined,
         };
       }),
       tactics: promptTactics(shared.tactics),
@@ -382,8 +403,13 @@ async function llmProposals(
   for (const raw of payload?.rows ?? []) {
     const gap = typeof raw?.gap_id === "string" ? shared.gapById.get(raw.gap_id) : undefined;
     if (!gap || !args.gapIds.includes(gap.id)) continue;
-    const row = parseProposedRow(raw, gap, shared.tactics, shared.input.max_per_gap, shared.blocked);
-    if (row) map.set(gap.id, row);
+    const row = parseProposedRow(raw, gap, shared.tactics, shared.input.max_per_gap, shared.blocked, (reason) =>
+      shared.rejections.set(gap.id, reason),
+    );
+    if (row) {
+      map.set(gap.id, row);
+      shared.rejections.delete(gap.id);
+    }
   }
   return map;
 }
@@ -496,7 +522,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
     // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
-    const shared: Shared = { ctx, state, input, gapById, tactics, hints: "", blocked: blockedPairs(state) };
+    const shared: Shared = { ctx, state, input, gapById, tactics, hints: "", blocked: blockedPairs(state), rejections: new Map() };
     const reviewByGap = new Map<string, Review>();
     const judgeVerdicts = new Map<string, JudgeVerdict>();
 

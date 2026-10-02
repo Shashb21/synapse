@@ -200,6 +200,50 @@ describe("S4 on the model path", () => {
     });
   });
 
+  it("tells the model why a row was rejected: open with a limited mapping must be partially_addressed (KAN-66)", async () => {
+    const [a, b] = gapIds as [string, string];
+    const [t1] = tacticIds as [string, string];
+    let first = true;
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      if (first) {
+        first = false;
+        return { rows: [unmapped(a), { ...mapped(b, t1, "limited"), mapping_status: "open" }] };
+      }
+      return { rows: gapIdsOf(call).map((id) => mapped(id, t1, "limited", "second answer")) };
+    });
+
+    const { output } = await kgMappingModule.run(input(), ctx);
+
+    const retry = calls.filter((call) => call.purpose === "mapping-table-proposer")[1]!;
+    expect(gapIdsOf(retry)).toEqual([b]);
+    expect(retry.body.note).toMatch(/rejected_because/);
+    const retried = (retry.body.gaps as { id: string; rejected_because?: string }[]).find((gap) => gap.id === b)!;
+    expect(retried.rejected_because).toMatch(new RegExp(`"open" but ${t1} is "limited".*partially_addressed`));
+    expect(output.rows.find((row) => row.gap_id === b)).toMatchObject({ mapping_status: "partially_addressed" });
+  });
+
+  it("states the status rule to the critic, so it never asks for open while a limited mapping stays (KAN-66)", async () => {
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map((id) => unmapped(id)) };
+    });
+    const systems: string[] = [];
+    const complete = ctx.complete;
+    ctx.complete = async (args) => {
+      systems.push(`${args.purpose}::${args.system}`);
+      return complete(args);
+    };
+    await kgMappingModule.run(input(), ctx);
+    const critic = systems.find((entry) => entry.startsWith("mapping-table-critic::"))!;
+    const proposer = systems.find((entry) => entry.startsWith("mapping-table-proposer::"))!;
+    expect(critic).toMatch(/cannot be "open"/);
+    expect(proposer).toMatch(/never "open"/);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
   it("re-asks for a gap the model skipped or left without confidence, and never fills one in", async () => {
     const [a, b] = gapIds as [string, string];
     const [t1] = tacticIds as [string, string];
