@@ -161,7 +161,8 @@ export function anthropicAcceptsTemperature(model: string): boolean {
 }
 
 /**
- * The answer text of a Messages API response. Thinking blocks are skipped, and
+ * The answer text of a Messages API response: its text blocks joined as one
+ * continuous answer. Thinking blocks are skipped, and
  * a refusal or a reply cut off by max_tokens is an error rather than an empty
  * string, so a stage never parses a silent blank.
  */
@@ -172,10 +173,13 @@ export function anthropicText(payload: Record<string, unknown>): string {
     throw new Error(`Claude declined this request${details?.category ? ` (${details.category})` : ""}.`);
   }
   const content = Array.isArray(payload.content) ? (payload.content as Array<{ type?: string; text?: string }>) : [];
+  // With adaptive thinking one answer arrives as several text blocks with thinking
+  // blocks between them; they are one continuous answer, so join them with nothing
+  // in between. A newline here lands inside JSON strings and breaks the reply (KAN-66).
   const text = content
     .filter((block) => block.type === "text")
     .map((block) => block.text ?? "")
-    .join("\n");
+    .join("");
   if (stop === "max_tokens" && !text.trim()) {
     throw new Error("Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.");
   }

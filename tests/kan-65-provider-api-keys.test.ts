@@ -330,6 +330,17 @@ describe("KAN-65 Claude 5 request shape", () => {
     expect(() => anthropicText({ stop_reason: "refusal", stop_details: { category: "cyber" }, content: [] })).toThrow(/declined.*cyber/);
     expect(() => anthropicText({ stop_reason: "max_tokens", content: [{ type: "thinking", thinking: "" }] })).toThrow(/max_tokens/);
     expect(anthropicText({ stop_reason: "max_tokens", content: [{ type: "text", text: "partial" }] })).toBe("partial");
+    // KAN-66: adaptive thinking splits one answer into several text blocks; a newline
+    // between them would land inside a JSON string and break the reply.
+    const split = anthropicText({
+      stop_reason: "end_turn",
+      content: [
+        { type: "text", text: '{"tactics":[{"name":"Retrospective comparative coh' },
+        { type: "thinking", thinking: "" },
+        { type: "text", text: 'ort","outcomes":"OS"}]}' },
+      ],
+    });
+    expect(JSON.parse(split)).toEqual({ tactics: [{ name: "Retrospective comparative cohort", outcomes: "OS" }] });
   });
 });
 
