@@ -20,6 +20,14 @@ export type StageRunResponse = {
   mode?: "llm" | "deterministic";
 };
 
+/**
+ * Where a stage run goes. Customers use /api/modules in their selected
+ * workspace; the owner console uses /api/admin/modules and names the
+ * workspace its page showed (KAN-62).
+ */
+export type StageTarget = { endpoint: string; workspace_id?: string };
+export const CUSTOMER_STAGE_TARGET: StageTarget = { endpoint: "/api/modules" };
+
 /** Runs one stage through the kernel and reports what came back, inline. */
 export function RunStageButton({
   stage,
@@ -29,6 +37,7 @@ export function RunStageButton({
   variant = "outline",
   onDone,
   aiOffFallback = null,
+  target = CUSTOMER_STAGE_TARGET,
 }: {
   stage: string;
   input?: Record<string, unknown>;
@@ -38,6 +47,7 @@ export function RunStageButton({
   onDone?: (result: StageRunResponse) => void;
   /** Shown instead of the button when AI is off and this stage needs AI. */
   aiOffFallback?: ReactNode;
+  target?: StageTarget;
 }) {
   // A stage's button follows its section's admin switch (KAN-53).
   const ai = useAiEnabled(sectionOfStage(stage) ?? undefined);
@@ -50,6 +60,7 @@ export function RunStageButton({
       identity={identity}
       variant={variant}
       onDone={onDone}
+      target={target}
     />
   );
 }
@@ -61,6 +72,7 @@ function StageButton({
   identity,
   variant,
   onDone,
+  target,
 }: {
   stage: string;
   input?: Record<string, unknown>;
@@ -68,6 +80,7 @@ function StageButton({
   identity: ActionIdentity;
   variant: "default" | "outline" | "ghost" | "secondary";
   onDone?: (result: StageRunResponse) => void;
+  target: StageTarget;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -76,7 +89,7 @@ function StageButton({
   async function run() {
     setPending(true);
     setResult(null);
-    const res = await fetch("/api/modules", {
+    const res = await fetch(target.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -84,9 +97,10 @@ function StageButton({
         input: input ?? {},
         actor_name: identity.actor_name,
         actor_function: identity.actor_function,
+        ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
       }),
     });
-    const json = (await res.json()) as StageRunResponse;
+    const json = (await res.json().catch(() => ({ error: `Stage run failed (HTTP ${res.status}).` }))) as StageRunResponse;
     setPending(false);
     setResult(
       res.ok ? json : { code: json.code, error: json.error ?? "Stage run failed", admin_href: json.admin_href },

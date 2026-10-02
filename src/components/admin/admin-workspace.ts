@@ -1,15 +1,13 @@
-import { selectedWorkspaceId } from "@/modules/workspaces/context";
-import { DEFAULT_WORKSPACE_ID, getWorkspace } from "@/modules/workspaces/store";
+import { adminWorkspace } from "@/modules/workspaces/admin-context";
 
 /**
  * The workspace the owner console reads per-workspace data from (pipeline,
- * runs, evals): whichever one the owner has selected, else the Default one.
+ * runs, evals): the one picked at /admin/workspace, else the owner's own app
+ * selection, else the Default one (modules/workspaces/admin-context.ts).
  */
 export async function adminWorkspaceName(): Promise<string> {
   try {
-    const id = (await selectedWorkspaceId()) ?? DEFAULT_WORKSPACE_ID;
-    const workspace = await getWorkspace(id);
-    return workspace?.name ?? "Default";
+    return (await adminWorkspace()).name;
   } catch {
     return "Default";
   }

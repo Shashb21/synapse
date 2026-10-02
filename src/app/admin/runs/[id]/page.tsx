@@ -2,11 +2,12 @@ import { requireOwnerPage } from "@/modules/auth/owner";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import "@/modules";
-import { AdminMain, PageIntro } from "@/components/admin/admin-page";
+import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admin-page";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
 import { getRun } from "@/modules/kernel/observability";
 import type { AgenticRound } from "@/modules/kernel/agentic";
+import { UnknownWorkspaceError, withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +19,27 @@ function Json({ value }: { value: unknown }) {
   );
 }
 
-export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RunDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ workspace?: string | string[] }>;
+}) {
   await requireOwnerPage();
-  const { id } = await params;
-  const run = await getRun(id);
-  if (!run) notFound();
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  // A trace link names the workspace its run lives in (the AI harness runs in its
+  // sandbox); without one, the console's workspace. Owner only (KAN-62).
+  const named = typeof query.workspace === "string" ? query.workspace : null;
+  const found = await withAdminWorkspace(
+    async (workspace) => ({ workspace, run: await getRun(id) }),
+    named,
+  ).catch((error: unknown) => {
+    if (error instanceof UnknownWorkspaceError) return null;
+    throw error;
+  });
+  if (!found?.run) notFound();
+  const { workspace, run } = found;
   const exchanges =
     (run.steps.find((step) => step.name === "exchanges")?.data as AgenticRound[] | undefined) ?? [];
 
@@ -34,6 +51,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       >
         {run.summary ?? run.error ?? "No summary recorded."}
       </PageIntro>
+
+      <AdminWorkspaceBar workspace={workspace} path="/admin/runs" />
 
       <Link href="/admin/runs" className="text-[12px] text-muted-foreground no-underline hover:text-foreground">
         ← All runs

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/brand-mark";
-import { ADMIN_SECTIONS, adminSectionFor } from "@/components/admin/admin-nav";
+import { ADMIN_SECTIONS, adminSectionFor, adminWorkspacePickerHref } from "@/components/admin/admin-nav";
 
 /**
  * The owner console's own shell: an amber "Synapse Admin" bar with the console
@@ -21,7 +21,8 @@ export function AdminShell({
   workspaceName: string;
   ownerName: string;
 }) {
-  const active = adminSectionFor(usePathname() ?? "/admin");
+  const pathname = usePathname() ?? "/admin";
+  const active = adminSectionFor(pathname);
   return (
     <div className="flex min-h-full flex-1 flex-col" data-testid="admin-shell">
       <header className="border-b border-amber-500/30 border-t-2 border-t-amber-500 bg-card">
@@ -41,7 +42,12 @@ export function AdminShell({
             <span data-testid="admin-workspace">
               Workspace: <span className="text-foreground">{workspaceName}</span>
             </span>
-            <Link href="/workspaces" className="text-foreground underline-offset-2 hover:underline">
+            {/* The console's own picker: the owner belongs to no customer workspace (KAN-62). */}
+            <Link
+              href={adminWorkspacePickerHref(pathname)}
+              className="text-foreground underline-offset-2 hover:underline"
+              data-testid="admin-workspace-switch"
+            >
               Switch
             </Link>
             <span aria-hidden>·</span>

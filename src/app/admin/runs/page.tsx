@@ -1,7 +1,8 @@
 import { requireOwnerPage } from "@/modules/auth/owner";
 import Link from "next/link";
 import "@/modules";
-import { AdminMain, PageIntro } from "@/components/admin/admin-page";
+import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admin-page";
+import { runTraceHref } from "@/components/admin/admin-nav";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
 import { listRuns, stageHealth } from "@/modules/kernel/observability";
@@ -11,6 +12,7 @@ import { listEvalRuns } from "@/modules/kernel/evals";
 import { HillclimbSweepButton } from "@/components/platform/hillclimb-sweep-button";
 import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +24,18 @@ function statusTone(status: string): string {
 
 export default async function RunsPage() {
   await requireOwnerPage();
-  const [runs, health, edits, signals, evals, ai] = await Promise.all([
-    listRuns({ limit: 40 }),
-    stageHealth(),
-    listEdits({ limit: 12 }),
-    listSignals({ limit: 12 }),
-    listEvalRuns({ limit: 12 }),
-    aiEnabled(),
-  ]);
+  // Runs live in each workspace's own schema: this page reads the console's workspace (KAN-62).
+  const { workspace, runs, health, edits, signals, evals, ai } = await withAdminWorkspace(async (workspace) => {
+    const [runs, health, edits, signals, evals, ai] = await Promise.all([
+      listRuns({ limit: 40 }),
+      stageHealth(),
+      listEdits({ limit: 12 }),
+      listSignals({ limit: 12 }),
+      listEvalRuns({ limit: 12 }),
+      aiEnabled(),
+    ]);
+    return { workspace, runs, health, edits, signals, evals, ai };
+  });
 
   return (
     <AdminMain>
@@ -37,6 +43,8 @@ export default async function RunsPage() {
         Inputs, outputs, steps, route, timing, errors and eval scores for every stage run. Nothing in the
         pipeline is a black box.
       </PageIntro>
+
+      <AdminWorkspaceBar workspace={workspace} path="/admin/runs" />
 
       <section className="mb-8 grid gap-3" aria-labelledby="health">
         <h2 id="health" className="text-[13px] font-semibold text-foreground">
@@ -88,7 +96,7 @@ export default async function RunsPage() {
             {runs.map((run) => (
               <li key={run.id} className="border border-border bg-card p-3 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <Link href={`/admin/runs/${run.id}`} className="text-[13px] text-foreground no-underline hover:underline">
+                  <Link href={runTraceHref(run.id, workspace.id)} className="text-[13px] text-foreground no-underline hover:underline">
                     {run.stage} · {run.module_id} v{run.module_version}
                   </Link>
                   <span className={`text-[11px] ${statusTone(run.status)}`}>
@@ -165,7 +173,11 @@ export default async function RunsPage() {
           {ai ? (
             <div className="flex flex-wrap gap-2">
               {HILLCLIMB_STAGES.map((stage) => (
-                <HillclimbSweepButton key={stage} stage={stage} />
+                <HillclimbSweepButton
+                  key={stage}
+                  stage={stage}
+                  target={{ endpoint: "/api/admin/modules/hillclimb", workspace_id: workspace.id }}
+                />
               ))}
             </div>
           ) : (

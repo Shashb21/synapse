@@ -5,13 +5,20 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { StageId } from "@/modules/kernel/contracts";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import type { StageTarget } from "@/components/platform/run-stage-button";
 
 /** Scores prompt variants against gold. Prompts only matter to a model, so this is hidden while AI is off. */
-export function HillclimbSweepButton({ stage }: { stage: StageId }) {
-  return useAiEnabled() ? <SweepButton stage={stage} /> : null;
+export function HillclimbSweepButton({ stage, target }: { stage: StageId; target?: StageTarget }) {
+  return useAiEnabled() ? <SweepButton stage={stage} target={target} /> : null;
 }
 
-function SweepButton({ stage }: { stage: StageId }) {
+function SweepButton({
+  stage,
+  target = { endpoint: "/api/modules/hillclimb" },
+}: {
+  stage: StageId;
+  target?: StageTarget;
+}) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,12 +27,17 @@ function SweepButton({ stage }: { stage: StageId }) {
     setBusy(true);
     setError(null);
     setMessage(null);
-    const res = await fetch("/api/modules/hillclimb", {
+    const res = await fetch(target.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ stage, actor_name: "Operator", actor_function: "medical_affairs" }),
+      body: JSON.stringify({
+        stage,
+        actor_name: "Operator",
+        actor_function: "medical_affairs",
+        ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
+      }),
     });
-    const json = (await res.json()) as { error?: string; champion?: string };
+    const json = (await res.json().catch(() => ({}))) as { error?: string; champion?: string };
     setBusy(false);
     if (!res.ok) {
       setError(json.error ?? "Sweep failed");

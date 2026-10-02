@@ -63,6 +63,8 @@ export type HarnessResult = {
   steps: HarnessStep[];
   /** What the run was given, in words, so the output can be read against it. */
   input_summary: string;
+  /** The sandbox workspace every run here was recorded in, so a trace link can open it. */
+  workspace_id: string;
 };
 
 /** The sandbox workspace: created once, owned by an internal principal no customer can be. */
@@ -275,5 +277,6 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
     duration_ms: Date.now() - started,
     steps,
     input_summary: inputSummary,
+    workspace_id: sandbox,
   };
 }

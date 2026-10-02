@@ -51,9 +51,22 @@ export function runInWorkspace<T>(workspace: { workspace_id: string; schema: str
  */
 export const WORKSPACE_COOKIE_TTL_MS = 12 * 60 * 60 * 1000;
 
+/**
+ * What a signed selection is for. The owner console's selection
+ * (modules/workspaces/admin-context.ts) is signed with its own key derived
+ * from SESSION_SECRET, so its value never verifies as the customer app's
+ * workspace cookie, nor the other way round.
+ */
+export type SelectionPurpose = "app" | "admin";
+
+function signingKey(purpose: SelectionPurpose): string | Buffer {
+  if (purpose === "app") return sessionSecret();
+  return createHmac("sha256", sessionSecret()).update("synapse-admin-workspace").digest();
+}
+
 /** Signed with SESSION_SECRET; production never falls back to a default (see modules/auth/secret.ts). */
-function sign(workspaceId: string, expiresAt: number, sessionId: string): string {
-  return createHmac("sha256", sessionSecret())
+function sign(workspaceId: string, expiresAt: number, sessionId: string, purpose: SelectionPurpose): string {
+  return createHmac("sha256", signingKey(purpose))
     .update(`${workspaceId}.${expiresAt}.${sessionId}`)
     .digest("base64url");
 }
@@ -65,10 +78,10 @@ function sign(workspaceId: string, expiresAt: number, sessionId: string): string
 export function workspaceCookieValue(
   workspaceId: string,
   sessionId: string,
-  options: { now?: number; ttlMs?: number } = {},
+  options: { now?: number; ttlMs?: number; purpose?: SelectionPurpose } = {},
 ): string {
   const expiresAt = (options.now ?? Date.now()) + (options.ttlMs ?? WORKSPACE_COOKIE_TTL_MS);
-  return `${workspaceId}.${expiresAt}.${sign(workspaceId, expiresAt, sessionId)}`;
+  return `${workspaceId}.${expiresAt}.${sign(workspaceId, expiresAt, sessionId, options.purpose ?? "app")}`;
 }
 
 /**
@@ -80,6 +93,7 @@ export function verifyWorkspaceCookie(
   value: string | undefined,
   sessionId: string | undefined,
   now: number = Date.now(),
+  purpose: SelectionPurpose = "app",
 ): string | null {
   if (!value || !sessionId) return null;
   const sigDot = value.lastIndexOf(".");
@@ -91,7 +105,7 @@ export function verifyWorkspaceCookie(
   if (!/^\d{1,16}$/.test(expRaw)) return null;
   const expiresAt = Number(expRaw);
   const given = Buffer.from(value.slice(sigDot + 1));
-  const expected = Buffer.from(sign(id, expiresAt, sessionId));
+  const expected = Buffer.from(sign(id, expiresAt, sessionId, purpose));
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
   if (expiresAt <= now) return null;
   return id;
