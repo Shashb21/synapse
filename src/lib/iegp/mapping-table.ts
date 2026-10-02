@@ -5,7 +5,7 @@ import {
   type MappingTableRow,
 } from "@/modules/stages/s4-kg-mapping/module";
 import { listRuns } from "@/modules/kernel/observability";
-import { gapEligibleForMapping } from "@/lib/iegp/engine";
+import { displayedGapStatus, gapEligibleForMapping } from "@/lib/iegp/engine";
 import { humanMappingRow, isMappingRowKey } from "@/lib/iegp/store";
 import type { IegpState, Lock } from "@/lib/iegp/types";
 
@@ -36,6 +36,18 @@ export type MappingTableViewRow = Omit<MappingTableRow, "mapping_status" | "conf
   human_lock: Lock | null;
   /** Tactics mapped (e.g. by a later S4 run) that no person has accepted yet. */
   unreviewed_tactic_ids: string[];
+  /**
+   * The gap's status as the engine computes it from recorded coverage (proposed
+   * tactics don't count), the same status the gap page shows. This is the row's
+   * status; `mapping_status` is the AI's (or the saved row's) view (KAN-68).
+   */
+  gap_status: MappingStatus;
+};
+
+const GAP_TO_MAPPING_STATUS: Record<string, MappingStatus> = {
+  validated_open: "open",
+  validated_partial: "partially_addressed",
+  validated_addressed: "addressed",
 };
 
 const storedRows = z.array(mappingTableRowSchema);
@@ -87,6 +99,7 @@ export function buildMappingTableView(
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);
+    const gap_status = GAP_TO_MAPPING_STATUS[displayedGapStatus(gap)] ?? "open";
     if (human) {
       // The person's row wins over the latest S4 run.
       return {
@@ -104,6 +117,7 @@ export function buildMappingTableView(
         decisions,
         human_lock: human.lock,
         unreviewed_tactic_ids: unreviewed,
+        gap_status,
       };
     }
     const proposal = proposedByGap.get(gap.id);
@@ -116,6 +130,7 @@ export function buildMappingTableView(
         decisions,
         human_lock: null,
         unreviewed_tactic_ids: unreviewed,
+        gap_status,
       };
     }
     return {
@@ -133,6 +148,7 @@ export function buildMappingTableView(
       decisions,
       human_lock: null,
       unreviewed_tactic_ids: unreviewed,
+      gap_status,
     };
   });
 }
