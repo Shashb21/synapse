@@ -14,13 +14,14 @@ import {
 } from "./accounts";
 import { emailDomainAllowed } from "./idp";
 import { dummyPasswordHash, MAX_PASSWORD_LENGTH, verifyPassword } from "./password";
-import { createSession, type Session } from "./session";
+import { createSession, testSeatPasswordAllowed, type Session } from "./session";
 
 /**
- * Email + password sign-in and password changes, for Synapse staff only
- * (KAN-28): an account signs in only while it is an admin or has the operator
- * role. Customers never get a password; they sign in with SSO and a seat
- * (modules/auth/seats.ts). There is no self sign-up.
+ * Email + password sign-in and password changes, for Synapse staff (KAN-28):
+ * an account signs in only while it is an admin or has the operator role.
+ * Customers sign in with SSO and a seat (modules/auth/customers.ts); the one
+ * exception is a test customer account (KAN-59), whose email is on a test-only
+ * domain and holds a seat. There is no self sign-up.
  *
  * A password session is `provider_id = "password"`, `subject = <account id>`;
  * it carries the email only when the account's email is verified, so an
@@ -80,7 +81,9 @@ export async function signInWithPassword(args: { email: string; password: string
     throw new PasswordLoginError(locked ? "locked" : "incorrect", locked ? LOCKED_MESSAGE : INCORRECT_CREDENTIALS);
   }
   if (account.disabled) throw new PasswordLoginError("disabled", DISABLED_MESSAGE);
-  if (!isStaffAccount(account)) throw new PasswordLoginError("not_staff", NOT_STAFF_MESSAGE);
+  if (!isStaffAccount(account) && !(await testSeatPasswordAllowed(account))) {
+    throw new PasswordLoginError("not_staff", NOT_STAFF_MESSAGE);
+  }
   if (!account.is_admin && !emailDomainAllowed(account.email)) {
     throw new PasswordLoginError("domain", "Your email domain is not allowed to sign in to this deployment.");
   }

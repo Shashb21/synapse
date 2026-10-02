@@ -37,7 +37,7 @@ Developer shortcut: `npx tsx scripts/seed.ts` replaces the Default workspace's p
 
 ### Sign-in and the admin account
 
-There is no self sign-up. Customers sign in on `/login` with their organisation's **single sign-on** (Google, Microsoft or GitHub, when configured), and only when their verified email holds a **seat** the owner assigned in **Admin → Customers** (`/admin/customers`); everyone else is refused. Email and password sign-in is for the owner's own staff. A demo sign-in is offered in development only. `/account` shows who you are and, for staff, changes your password. Setting up a provider: [`docs/deploy-checklist.md`](docs/deploy-checklist.md) §3a.
+There is no self sign-up. Customers sign in on `/login` with their organisation's **single sign-on** (Google, Microsoft or GitHub, when configured), and only when their verified email holds a **seat** the owner assigned in **Admin → Customers** (`/admin/customers`); everyone else is refused. Email and password sign-in is for the owner's own staff, plus one test customer account (below). The login page offers no demo sign-in; a demo sign-in API remains for automated tests in development builds only. `/account` shows who you are and, for staff, changes your password. Setting up a provider: [`docs/deploy-checklist.md`](docs/deploy-checklist.md) §3a.
 
 The admin account that opens the owner control panel (`/admin`) is created from the command line — nothing secret goes in config:
 
@@ -45,6 +45,13 @@ The admin account that opens the owner control panel (`/admin`) is created from 
 npm run create-admin
 # prompts for email, name, and the password twice (hidden); the same command resets an admin's password
 # non-interactive: printf '%s\n' "$ADMIN_PASSWORD" | npm run create-admin -- --email you@example.com --name "Your Name"
+```
+
+A test customer account for trying the customer side without SSO (KAN-59): a password account on a test-only email (default `tester@synapse.test`) holding the one seat of the **Synapse Test** customer. It signs in on `/login` like a customer and lands on the workspace picker; unassigning its seat in **Admin → Customers** signs it out at once. Only emails on test-only domains (`.test`, `.example`, `example.com`, …) can sign in this way; real customers stay SSO-only.
+
+```bash
+npm run create-test-customer
+# prompts for the email (Enter for tester@synapse.test) and the password; run again to reset the password
 ```
 
 It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login` with that email and password. Sell and assign customer seats at **Admin → Customers** (`/admin/customers`); manage your own staff's password accounts (admins and Platform operators only) at **Admin → Users** (`/admin/users`): create (a temporary password is shown once), reset passwords, change roles, verify, disable/enable and unlock.
