@@ -1,21 +1,20 @@
 import Link from "next/link";
 import "@/modules";
 import { AdminMain, PageIntro } from "@/components/admin/admin-page";
-import { ADMIN_SECTIONS } from "@/components/admin/admin-nav";
-import { adminWorkspaceName } from "@/components/admin/admin-workspace";
+import { ADMIN_SECTIONS, ADMIN_WORKSPACE_PICKER } from "@/components/admin/admin-nav";
 import { aiSwitch } from "@/modules/kernel/ai-switch";
 import { stageHealth } from "@/modules/kernel/observability";
 import { requireOwnerPage } from "@/modules/auth/owner";
+import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export default async function AdminOverviewPage() {
   const access = await requireOwnerPage();
-  const [workspaceName, ai, health] = await Promise.all([
-    adminWorkspaceName(),
+  const [{ name: workspaceName, health }, ai] = await Promise.all([
+    withAdminWorkspace(async (workspace) => ({ name: workspace.name, health: await stageHealth().catch(() => []) })),
     aiSwitch().catch(() => null),
-    stageHealth().catch(() => []),
   ]);
   const runs = health.reduce((sum, row) => sum + row.runs, 0);
   const errors = health.reduce((sum, row) => sum + row.errors, 0);
@@ -25,7 +24,7 @@ export default async function AdminOverviewPage() {
       <PageIntro kicker={`Owner console · ${access.reason}`} title="Synapse Admin">
         The owner&apos;s control panel for testing and running the platform. Customers never see it. It
         shares the same database and stages as the app: pipeline, runs and evals read the workspace you
-        have selected.
+        choose with Switch workspace, which can be any customer workspace.
       </PageIntro>
 
       <dl className="mb-8 grid gap-3 sm:grid-cols-3">
@@ -44,7 +43,7 @@ export default async function AdminOverviewPage() {
           <dt className="text-[11px] text-muted-foreground">Workspace</dt>
           <dd className="mt-1 truncate text-[15px] text-foreground">{workspaceName}</dd>
           <dd className="mt-1 text-[11px]">
-            <Link href="/workspaces" className="text-muted-foreground underline-offset-2 hover:underline">
+            <Link href={ADMIN_WORKSPACE_PICKER} className="text-muted-foreground underline-offset-2 hover:underline">
               Switch workspace
             </Link>
           </dd>

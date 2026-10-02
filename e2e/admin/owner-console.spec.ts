@@ -29,7 +29,7 @@ test.describe("owner console", () => {
       await expect(nav.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", href);
     }
     await expect(page.getByTestId("admin-workspace")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Switch", exact: true })).toHaveAttribute("href", "/workspaces");
+    await expect(page.getByRole("link", { name: "Switch", exact: true })).toHaveAttribute("href", "/admin/workspace");
   });
 
   for (const path of ["/admin/control", "/admin/catalog", "/admin/modules", "/admin/docs", "/admin/evals"]) {

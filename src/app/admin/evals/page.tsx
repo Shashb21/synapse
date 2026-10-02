@@ -1,14 +1,16 @@
 import { requireOwnerPage } from "@/modules/auth/owner";
-import { AdminMain, PageIntro } from "@/components/admin/admin-page";
+import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admin-page";
 import { loadState } from "@/lib/iegp/store";
 import { coverageEval, needEvalMetrics, pairNeeds } from "@/lib/iegp/engine";
 import { engineMaySetStatus } from "@/lib/iegp/engine";
+import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
 export const dynamic = "force-dynamic";
 
 export default async function EvalsPage() {
   await requireOwnerPage();
-  const state = await loadState();
+  // The console's workspace (KAN-62), not whatever the app happens to have selected.
+  const { workspace, state } = await withAdminWorkspace(async (workspace) => ({ workspace, state: await loadState() }));
   // Scores what the S2 stage actually committed, not a local keyword extractor.
   const extracted = state.needs.map((n) => ({
     id: n.id,
@@ -25,6 +27,7 @@ export default async function EvalsPage() {
     })),
     state.gold_coverages,
   );
+  const noGold = state.gold_needs.length === 0;
   const autoClose = state.gaps.filter(
     (g) => g.status === "validated_addressed" && !g.status_lock.locked,
   );
@@ -37,6 +40,7 @@ export default async function EvalsPage() {
         override requires a reason and is marked stale on ingest or coverage refresh — never
         silent-clobbered.
       </PageIntro>
+      <AdminWorkspaceBar workspace={workspace} path="/admin/evals" />
       {state.sources.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">
           No sources ingested. engineMaySetStatus(addressed) = {String(engineMaySetStatus("validated_addressed"))}{" "}
@@ -44,10 +48,20 @@ export default async function EvalsPage() {
         </p>
       ) : (
       <>
+      {noGold ? (
+        <p className="mb-4 border border-border bg-card p-3 text-[13px] text-muted-foreground rounded-lg" data-testid="evals-no-gold">
+          There is no gold set to score against in this workspace, so need recall, precision and the composite
+          are not scored. Add gold needs to score what S2 committed.
+        </p>
+      ) : metrics.scored ? null : (
+        <p className="mb-4 border border-border bg-card p-3 text-[13px] text-muted-foreground rounded-lg" data-testid="evals-no-must-find">
+          No gold need is marked must-find, so need recall and the composite are not scored.
+        </p>
+      )}
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
-        <Metric label="Need recall" value={metrics.recall.toFixed(3)} />
-        <Metric label="Need precision" value={metrics.precision.toFixed(3)} />
-        <Metric label="Need composite" value={metrics.composite.toFixed(3)} />
+        <Metric label="Need recall" value={noGold ? "no gold set" : score(metrics.recall)} />
+        <Metric label="Need precision" value={noGold ? "no gold set" : score(metrics.precision)} />
+        <Metric label="Need composite" value={noGold ? "no gold set" : score(metrics.composite)} />
         <Metric label="Exact / partial / missed / wrong" value={`${metrics.exact} / ${metrics.partial} / ${metrics.missed} / ${metrics.wrong}`} />
         <Metric label="Coverage gold exact" value={`${cov.exact}/${state.gold_coverages.length}`} />
         <Metric label="Computed addressed (no override)" value={String(autoClose.length)} />
@@ -73,6 +87,11 @@ export default async function EvalsPage() {
       )}
     </AdminMain>
   );
+}
+
+/** A score to three places; an unscored one (null) says so rather than inventing a number. */
+function score(value: number | null): string {
+  return value === null ? "not scored" : value.toFixed(3);
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

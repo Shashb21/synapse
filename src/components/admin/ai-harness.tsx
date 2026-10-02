@@ -6,6 +6,7 @@ import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AiSectionId } from "@/modules/kernel/ai-sections";
 import { cn } from "@/lib/utils";
+import { runTraceHref } from "@/components/admin/admin-nav";
 
 type HarnessCase = {
   id: AiSectionId;
@@ -18,7 +19,15 @@ type HarnessCase = {
 };
 
 type Step = { stage: string; run_id: string; module: string; mode: string; summary: string; output: unknown };
-type Result = { route: string; duration_ms: number; steps: Step[]; input_summary: string; started_at: string };
+type Result = {
+  route: string;
+  duration_ms: number;
+  steps: Step[];
+  input_summary: string;
+  started_at: string;
+  /** The sandbox workspace the runs live in; trace links open them there. */
+  workspace_id: string;
+};
 
 const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
 const AREA = "w-full rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] text-foreground";
@@ -278,7 +287,7 @@ function HarnessCard({
               <div className="rounded-md border border-border bg-background p-3">
                 <p className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-foreground">
                   {main.stage} · {main.module}
-                  <Link href={`/admin/runs/${main.run_id}`} className="text-[11px] font-normal text-muted-foreground">
+                  <Link href={runTraceHref(main.run_id, result.workspace_id)} className="text-[11px] font-normal text-muted-foreground">
                     Trace ↗
                   </Link>
                 </p>
@@ -294,7 +303,7 @@ function HarnessCard({
                     {setup.map((step) => (
                       <li key={step.run_id} className="text-muted-foreground">
                         {step.stage} · {step.module}: {step.summary}{" "}
-                        <Link href={`/admin/runs/${step.run_id}`} className="text-foreground">
+                        <Link href={runTraceHref(step.run_id, result.workspace_id)} className="text-foreground">
                           Trace ↗
                         </Link>
                       </li>

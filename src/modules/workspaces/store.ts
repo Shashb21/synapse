@@ -108,6 +108,21 @@ export async function listWorkspacesFor(principal: string): Promise<WorkspaceWit
   return found.map((row) => ({ ...toWorkspace(row), role: row.role === "owner" ? "owner" : "member" }));
 }
 
+export type WorkspaceSummary = Workspace & { member_count: number };
+
+/**
+ * Every workspace with its member count, oldest first. Only the owner
+ * console's workspace picker reads this (modules/workspaces/admin-context.ts);
+ * it is never a customer's list.
+ */
+export async function listAllWorkspaces(): Promise<WorkspaceSummary[]> {
+  const found = await rows(sql`
+    select w.*, (select count(*) from workspace_members m where m.workspace_id = w.id)::int as member_count
+    from workspaces w
+    order by w.created_at asc`);
+  return found.map((row) => ({ ...toWorkspace(row), member_count: Number(row.member_count ?? 0) }));
+}
+
 export async function memberRole(workspaceId: string, principal: string): Promise<WorkspaceRole | null> {
   const found = await rows(sql`
     select role from workspace_members where workspace_id = ${workspaceId} and principal = ${normalizePrincipal(principal)} limit 1`);

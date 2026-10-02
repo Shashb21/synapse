@@ -6,6 +6,7 @@ import { FlaskConical, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import type { StageTarget } from "@/components/platform/run-stage-button";
 
 type EvalResponse = {
   error?: string;
@@ -15,11 +16,19 @@ type EvalResponse = {
 };
 
 /** Runs the stage's own gold cases. Nothing is written to the domain store. Hidden while AI is off. */
-export function RunEvalsButton(props: { stage: string; identity: ActionIdentity }) {
+export function RunEvalsButton(props: { stage: string; identity: ActionIdentity; target?: StageTarget }) {
   return useAiEnabled() ? <EvalsButton {...props} /> : null;
 }
 
-function EvalsButton({ stage, identity }: { stage: string; identity: ActionIdentity }) {
+function EvalsButton({
+  stage,
+  identity,
+  target = { endpoint: "/api/modules/evals" },
+}: {
+  stage: string;
+  identity: ActionIdentity;
+  target?: StageTarget;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<EvalResponse | null>(null);
@@ -27,16 +36,17 @@ function EvalsButton({ stage, identity }: { stage: string; identity: ActionIdent
   async function run() {
     setPending(true);
     setResult(null);
-    const res = await fetch("/api/modules/evals", {
+    const res = await fetch(target.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         stage,
         actor_name: identity.actor_name,
         actor_function: identity.actor_function,
+        ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
       }),
     });
-    const json = (await res.json()) as EvalResponse;
+    const json = (await res.json().catch(() => ({}))) as EvalResponse;
     setPending(false);
     setResult(res.ok ? json : { error: json.error ?? "Eval run failed" });
     if (res.ok) router.refresh();

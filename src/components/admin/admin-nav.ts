@@ -57,6 +57,24 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { id: "docs", href: "/admin/docs", label: "Docs", summary: "The raw spec documents." },
 ];
 
+/** Where the owner picks the console's workspace (KAN-62). */
+export const ADMIN_WORKSPACE_PICKER = "/admin/workspace";
+
+/** The console's workspace picker, returning to `path` once a workspace is chosen. */
+export function adminWorkspacePickerHref(path: string | null | undefined): string {
+  const back = path && path !== "/admin" && !path.startsWith(ADMIN_WORKSPACE_PICKER) ? path : null;
+  return back ? `${ADMIN_WORKSPACE_PICKER}?next=${encodeURIComponent(back)}` : ADMIN_WORKSPACE_PICKER;
+}
+
+/**
+ * A run's trace page. Runs live in their workspace's schema, so the link names
+ * the workspace and the page opens it there, whichever one the console is in.
+ */
+export function runTraceHref(runId: string, workspaceId: string | null | undefined): string {
+  const path = `/admin/runs/${encodeURIComponent(runId)}`;
+  return workspaceId ? `${path}?workspace=${encodeURIComponent(workspaceId)}` : path;
+}
+
 /** The section a pathname belongs to (longest matching prefix). */
 export function adminSectionFor(pathname: string): AdminSectionId {
   const match = ADMIN_SECTIONS.filter(

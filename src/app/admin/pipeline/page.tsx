@@ -1,9 +1,9 @@
 import { requireOwnerPage } from "@/modules/auth/owner";
 import Link from "next/link";
 import "@/modules";
-import { AdminMain, PageIntro } from "@/components/admin/admin-page";
+import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admin-page";
 import { Badge } from "@/components/ui/badge";
-import { RunStageButton } from "@/components/platform/run-stage-button";
+import { RunStageButton, type StageTarget } from "@/components/platform/run-stage-button";
 import { stageNeedsAi } from "@/modules/kernel/stage-ai";
 import { RunEvalsButton } from "@/components/platform/run-evals-button";
 import { ChainRunner, ModularUploadForm } from "@/components/platform/pipeline-runner";
@@ -16,6 +16,8 @@ import { sessionContext } from "@/modules/auth/session";
 import { loadState } from "@/lib/iegp/store";
 import { DEMO_FILE_OPTIONS, listSourceFiles } from "@/modules/stages/s0-upload/module";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
+import { withAdminWorkspace } from "@/modules/workspaces/admin-context";
+import { runTraceHref } from "@/components/admin/admin-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -60,16 +62,26 @@ const MANUAL_STEPS: { href: string; label: string; detail: string }[] = [
 
 export default async function PipelinePage() {
   await requireOwnerPage();
-  const [wiring, runs, identity, files, documents, iegp, ai] = await Promise.all([
-    stageWiring(),
-    listRuns({ limit: 200 }),
-    sessionContext(),
-    listSourceFiles(),
-    listParsedDocuments(),
-    loadState(),
-    aiEnabled(),
-  ]);
-  const routes = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
+  // Everything here reads, and every button runs, in the console's workspace
+  // (KAN-62): the owner is a member of no customer workspace, so /api/modules
+  // would refuse them with "Choose a workspace first".
+  const { workspace, wiring, runs, identity, files, documents, iegp, ai, routes } = await withAdminWorkspace(
+    async (workspace) => {
+      const [wiring, runs, identity, files, documents, iegp, ai] = await Promise.all([
+        stageWiring(),
+        listRuns({ limit: 200 }),
+        sessionContext(),
+        listSourceFiles(),
+        listParsedDocuments(),
+        loadState(),
+        aiEnabled(),
+      ]);
+      const routes = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
+      return { workspace, wiring, runs, identity, files, documents, iegp, ai, routes };
+    },
+  );
+  const stageTarget: StageTarget = { endpoint: "/api/admin/modules", workspace_id: workspace.id };
+  const evalsTarget: StageTarget = { endpoint: "/api/admin/modules/evals", workspace_id: workspace.id };
   const actionIdentity = {
     signed_in: identity.signed_in,
     actor_name: identity.actor.name,
@@ -83,6 +95,8 @@ export default async function PipelinePage() {
           ? "Each stage is its own module behind a versioned contract. Run one stage, or run the chain. Every run is traced, scored and attributed."
           : "AI is off, so there is no upload, parsing or AI stage to run. Every step is done by hand on its own page; consolidation (S7) and the timeline (S10) still run without a model."}
       </PageIntro>
+
+      <AdminWorkspaceBar workspace={workspace} path="/admin/pipeline" verb="Running in" />
 
       {!iegp.asset.setup_complete ? (
         <p className="mb-6 border border-[var(--chart-1)]/30 bg-[var(--chart-1)]/5 px-3 py-2 text-[12px] text-muted-foreground">
@@ -129,7 +143,7 @@ export default async function PipelinePage() {
           <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
             {files.length} file(s) uploaded, {documents.length} parsed.
           </p>
-          <ModularUploadForm demoOptions={DEMO_FILE_OPTIONS} identity={actionIdentity} />
+          <ModularUploadForm demoOptions={DEMO_FILE_OPTIONS} identity={actionIdentity} target={stageTarget} />
         </section>
 
         <section className="border border-border bg-card p-3 rounded-lg" aria-labelledby="chain">
@@ -143,6 +157,7 @@ export default async function PipelinePage() {
           <ChainRunner
             label="Parse → extract → map → consolidate"
             identity={actionIdentity}
+            target={stageTarget}
             steps={[
               { stage: "S1", label: "S1 Parse" },
               { stage: "S2", label: "S2 Gap extraction" },
@@ -155,6 +170,7 @@ export default async function PipelinePage() {
             <ChainRunner
               label="Prioritize → ideate → timeline"
               identity={actionIdentity}
+              target={stageTarget}
               steps={[
                 { stage: "S8", label: "S8 Prioritization" },
                 { stage: "S9", label: "S9 Ideation" },
@@ -236,6 +252,7 @@ export default async function PipelinePage() {
                     input={STAGE_INPUT[stage]}
                     label={`Run ${stage}`}
                     identity={actionIdentity}
+                    target={stageTarget}
                   />
                 ) : stage === "S0" ? (
                   <span className="text-[11px] text-muted-foreground">Upload above.</span>
@@ -244,9 +261,9 @@ export default async function PipelinePage() {
                     Runs from the {stage === "S5" ? "Gaps workbench" : "split dialog"}, per gap.
                   </span>
                 )}
-                {ai && wired.has_evals ? <RunEvalsButton stage={stage} identity={actionIdentity} /> : null}
+                {ai && wired.has_evals ? <RunEvalsButton stage={stage} identity={actionIdentity} target={evalsTarget} /> : null}
                 {lastRun ? (
-                  <Link href={`/admin/runs/${lastRun.id}`} className="text-[11px] text-muted-foreground no-underline hover:text-foreground">
+                  <Link href={runTraceHref(lastRun.id, workspace.id)} className="text-[11px] text-muted-foreground no-underline hover:text-foreground">
                     View trace
                   </Link>
                 ) : null}
