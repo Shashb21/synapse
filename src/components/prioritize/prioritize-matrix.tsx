@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { SettingChips } from "@/components/gap-settings-editor";
 import { placementGapError, scoreError } from "@/components/prioritize/score-input";
 import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
@@ -168,7 +168,7 @@ export function AxisChooser({
   submitLabel: string;
   onCancel?: () => void;
 }) {
-  const router = useRouter();
+  const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const [xAxis, setXAxis] = useState(initialX);
   const [yAxis, setYAxis] = useState(initialY);
@@ -201,13 +201,15 @@ export function AxisChooser({
       if (!result.ok) {
         setPending(false);
         setError(result.error ?? "Prioritization failed");
-        router.refresh();
+        refresh();
         return;
       }
     }
-    setPending(false);
-    onCancel?.();
-    router.refresh();
+    // The chooser gives way to the matrix once the placements have arrived.
+    refresh(() => {
+      setPending(false);
+      onCancel?.();
+    });
   }
 
   const x = axes.find((axis) => axis.id === xAxis);
@@ -482,7 +484,7 @@ export function PrioritizeMatrix({
   identity: ActionIdentity;
   mayPrioritize: boolean;
 }) {
-  const router = useRouter();
+  const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const plotRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -526,11 +528,13 @@ export function PrioritizeMatrix({
       setting: scope,
       onlyMissing: true,
     }).then((result) => {
-      setBusy(null);
-      if (!result.ok) setMessage(result.error ?? "Could not place the new gaps.");
-      router.refresh();
+      // "Placing…" stays up until the placed gaps are on the matrix, not just saved.
+      refresh(() => {
+        setBusy(null);
+        if (!result.ok) setMessage(result.error ?? "Could not place the new gaps.");
+      });
     });
-  }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, router]);
+  }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, refresh]);
 
   const view = gaps.map((gap) => {
     const point = positions[gap.gap_id] ?? pointOf(gap, xAxis, yAxis);
@@ -587,7 +591,7 @@ export function PrioritizeMatrix({
       return;
     }
     setBands((current) => ({ ...current, [gapId]: json.placement! }));
-    router.refresh();
+    refresh();
   }
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
@@ -705,9 +709,10 @@ export function PrioritizeMatrix({
       setting: scope,
       onlyMissing: false,
     });
-    setBusy(null);
-    setMessage(result.ok ? (result.summary ?? null) : (result.error ?? "Re-suggest failed"));
-    router.refresh();
+    refresh(() => {
+      setBusy(null);
+      setMessage(result.ok ? (result.summary ?? null) : (result.error ?? "Re-suggest failed"));
+    });
   }
 
   /** Axes change in place (owner feedback, KAN-56): save them, then place any gap missing scores on them. */
@@ -733,8 +738,7 @@ export function PrioritizeMatrix({
       });
       if (!result.ok) setMessage(result.error ?? "Prioritization failed");
     }
-    setBusy(null);
-    router.refresh();
+    refresh(() => setBusy(null));
   }
 
   return (

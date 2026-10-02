@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +7,7 @@ import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { sectionOfStage } from "@/modules/kernel/ai-sections";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { stageNeedsAi } from "@/modules/kernel/stage-ai";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 
 export type StageRunResponse = {
   ok?: boolean;
@@ -82,7 +82,7 @@ function StageButton({
   onDone?: (result: StageRunResponse) => void;
   target: StageTarget;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<StageRunResponse | null>(null);
 
@@ -101,18 +101,22 @@ function StageButton({
       }),
     });
     const json = (await res.json().catch(() => ({ error: `Stage run failed (HTTP ${res.status}).` }))) as StageRunResponse;
-    setPending(false);
-    setResult(
-      res.ok ? json : { code: json.code, error: json.error ?? "Stage run failed", admin_href: json.admin_href },
-    );
+    const show = () => {
+      setPending(false);
+      setResult(
+        res.ok ? json : { code: json.code, error: json.error ?? "Stage run failed", admin_href: json.admin_href },
+      );
+    };
+    // A good run keeps the spinner until the page has its new data, then shows both at once.
+    if (res.ok) refresh(show);
+    else show();
     onDone?.(json);
-    if (res.ok) router.refresh();
   }
 
   return (
     <div className="grid gap-1">
-      <Button size="sm" variant={variant} disabled={pending} onClick={() => void run()}>
-        {pending ? (
+      <Button size="sm" variant={variant} disabled={pending || refreshing} onClick={() => void run()}>
+        {pending || refreshing ? (
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
         ) : (
           <Play className="size-3.5" aria-hidden />

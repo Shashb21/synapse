@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { Textarea } from "@/components/ui/textarea";
@@ -99,7 +99,7 @@ export function SplitGapDialog({
   residualName: string;
   tactics: PlanTactic[];
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"split" | "rewrite">("split");
   const [error, setError] = useState<string | null>(null);
@@ -272,8 +272,8 @@ export function SplitGapDialog({
       setError(json.error ?? "Could not resolve this gap.");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    // Closes as the refreshed list arrives: the retired gap and its counts go in the same frame.
+    refresh(() => setOpen(false));
   }
 
   return (
@@ -497,8 +497,8 @@ export function SplitGapDialog({
           <DialogClose render={<Button type="button" size="sm" variant="outline" />}>
             Cancel
           </DialogClose>
-          <Button type="button" size="sm" disabled={pending} onClick={() => void onSubmit()}>
-            {pending ? "Saving…" : mode === "split" ? "Accept split" : "Rewrite and retire original"}
+          <Button type="button" size="sm" disabled={pending || refreshing} onClick={() => void onSubmit()}>
+            {pending || refreshing ? "Saving…" : mode === "split" ? "Accept split" : "Rewrite and retire original"}
           </Button>
         </DialogFooter>
       </DialogContent>

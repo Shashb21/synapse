@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useId, useRef, useState, type ReactNode } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -62,7 +62,7 @@ export function GapStatusOverride({
   override: GapStatusOverrideRecord | null;
   children?: ReactNode;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const reasonId = useId();
   const statusId = useId();
   const reasonRef = useRef<HTMLTextAreaElement>(null);
@@ -115,8 +115,7 @@ export function GapStatusOverride({
       setError(json.error ?? "Override failed");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    refresh(() => setOpen(false));
   }
 
   async function clearOverride() {
@@ -135,8 +134,7 @@ export function GapStatusOverride({
       setError(json.error ?? "Clear failed");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    refresh(() => setOpen(false));
   }
 
   const triggerLabel = `Change status of this gap (currently ${GAP_STATUS_LABELS[status]})`;
@@ -224,14 +222,14 @@ export function GapStatusOverride({
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={pending}
+                disabled={pending || refreshing}
                 onClick={() => void clearOverride()}
               >
                 Clear override
               </Button>
             ) : null}
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : "Save override"}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : "Save override"}
             </Button>
           </DialogFooter>
         </form>

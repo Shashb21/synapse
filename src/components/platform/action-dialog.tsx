@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -74,7 +74,7 @@ export function ActionDialog({
   /** A check across fields (by name, as typed) once each field passes its own; message or null. */
   validateForm?: (values: Record<string, string>) => string | null;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const formId = useId();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -134,8 +134,8 @@ export function ActionDialog({
       return;
     }
     setError(null);
-    setOpen(false);
-    router.refresh();
+    // The dialog closes as the refreshed data arrives, so the page never shows the old value.
+    refresh(() => setOpen(false));
   }
 
   function onOpenChange(next: boolean) {
@@ -240,8 +240,8 @@ export function ActionDialog({
             {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : (confirmLabel ?? "Save")}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : (confirmLabel ?? "Save")}
             </Button>
           </DialogFooter>
         </form>

@@ -576,7 +576,11 @@ export async function ensureGapHasConstituentNeed(gapId: string) {
 
 export async function ensureAllLiveGapsHaveNeeds() {
   const state = await loadState();
+  // Pages run this on every render, refreshes included (KAN-68): a gap that already
+  // has a need is skipped here, not after a fresh loadState of its own.
+  const linked = new Set(state.need_gap_links.map((link) => link.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
+    if (linked.has(gap.id)) continue;
     await ensureGapHasConstituentNeed(gap.id);
   }
 }
