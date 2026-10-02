@@ -5,6 +5,7 @@ import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { getReferencePack } from "@/accuracy/eval/reference-gold";
 import { PASS_COMPARISON_RESERVED_CONDITION_FIELDS } from "@/accuracy/experiments/pass-comparison";
 import { getSourceFile } from "@/accuracy/store/source-store";
+import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { getAuthorizedWorkspace } from "@/accuracy/store/tenant";
 import type { sessionContext } from "@/modules/auth/session";
 
@@ -80,8 +81,8 @@ function hasUnknownInputKeys(input: unknown, normalized: unknown): boolean {
     || hasUnknownInputKeys(value, (normalized as Record<string, unknown>)[key]));
 }
 
-/** Validate pack, active module input and selected source ownership before execution. */
-export async function validateExperimentSources(body: ExperimentBody): Promise<ExperimentBody> {
+/** Validate pack, input and ownership; comparisons additionally require original extraction lineage. */
+export async function validateExperimentSources(body: ExperimentBody, comparison = false): Promise<ExperimentBody> {
   if (!getReferencePack(body.pack_id)) throw new InvalidExperimentRequestError("Unknown reference pack");
   let call = body.call;
   if (call) {
@@ -96,7 +97,25 @@ export async function validateExperimentSources(body: ExperimentBody): Promise<E
   if (sources.some(source => !source)) {
     throw new InvalidExperimentRequestError("Every source_file_id must belong to the source workspace");
   }
+  if (comparison && call) await validateComparisonInputLineage(body, call.input);
   return { ...body, call };
+}
+
+/** Reject extraction IDs outside the original selected source before the runner copies it. */
+async function validateComparisonInputLineage(body: ExperimentBody, input: Record<string, unknown>): Promise<void> {
+  const source_file_id = input.source_file_id;
+  const block_ids = input.block_ids === undefined ? [] : input.block_ids;
+  const invalid = () => new InvalidExperimentRequestError("Invalid single-call source identifiers.");
+  if (input.workspace_id !== body.source_workspace_id || typeof source_file_id !== "string"
+    || !body.source_file_ids.includes(source_file_id) || !Array.isArray(block_ids)
+    || block_ids.some(id => typeof id !== "string")) {
+    throw invalid();
+  }
+  // Empty/omitted lists keep the extractor's existing whole-source behavior.
+  if (!block_ids.length) return;
+  const blocks = await readParseBlocks(body.source_workspace_id, source_file_id);
+  const sourceBlockIds = new Set(blocks.map(block => block.id));
+  if (block_ids.some(id => !sourceBlockIds.has(id))) throw invalid();
 }
 
 /** Map known validation failures to safe public messages, leaving server faults unclassified. */

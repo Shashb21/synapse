@@ -71,6 +71,14 @@ beforeEach(() => {
 });
 
 describe("accuracy experiment API", () => {
+  it("preserves legacy workspace-input remapping on the existing endpoint", async () => {
+    runAccuracyExperiment.mockResolvedValue({ id: "legacy-experiment" });
+    const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],
+      pack_id: "beone-bgb-58067-prmt5i", condition: {},
+      call: { call_kind: "need_extract", input: { workspace_id: "legacy-copy-workspace", source_file_id: "src-source" } } });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ experiment: { id: "legacy-experiment" } });
+  });
   it.each([1, 2, 3])("accepts controlled extraction pass count %i without changing the response envelope", async critic_revision_passes => {
     runAccuracyExperiment.mockResolvedValue({ id: "experiment-controlled" });
     const response = await post({ mode: "single_call", source_workspace_id: "ws-source", source_file_ids: ["src-source"],

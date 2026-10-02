@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     if (!await authorizedSourceWorkspace(body.source_workspace_id, session)) {
       return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
     }
-    const validated = await validateExperimentSources(body);
+    const validated = await validateExperimentSources(body, true);
     return NextResponse.json(await runPassComparison({ ...validated, actor: session.actor }), { status: 201 });
   } catch (error) {
     const message = experimentRequestError(error);

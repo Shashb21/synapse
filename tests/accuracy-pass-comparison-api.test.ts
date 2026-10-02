@@ -5,12 +5,15 @@ import { registerAccuracyStack } from "@/accuracy";
 import type { PassComparison } from "@/accuracy/eval/pass-comparison";
 import { exportExperimentsForSourceWorkspace, type ExperimentRecord } from "@/accuracy/experiments/records";
 import * as comparisonService from "@/accuracy/experiments/pass-comparison";
+import * as copyService from "@/accuracy/experiments/copy-workspace";
 import { runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { agenticModule } from "@/accuracy/modules/_factory";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
-import { createOrganization, createWorkspace, deleteWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, deleteWorkspace, getWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
+import { accuracyDb } from "@/accuracy/store/db";
+import { accuracyWorkspaces } from "@/accuracy/store/schema";
 import { newId } from "@/modules/kernel/ids";
 
 const { sessionContext } = vi.hoisted(() => ({ sessionContext: vi.fn() }));
@@ -24,6 +27,7 @@ const session = {
   actor: { name: "Session actor", function: "medical_affairs" as const }, role: "contributor" as const,
 };
 const sources: string[] = [];
+const fixtureCopies: string[] = [];
 let originalModule: string | undefined;
 
 beforeAll(() => registerAccuracyStack());
@@ -32,6 +36,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   if (originalModule) activateAccuracyModule({ call_kind: "need_extract", module_id: originalModule, activated_by: "API test restore" });
   originalModule = undefined;
+  for (const workspace_id of fixtureCopies.splice(0)) await deleteWorkspace(workspace_id);
   for (const workspace_id of sources.splice(0)) {
     const experiments = JSON.parse(await exportExperimentsForSourceWorkspace({ source_workspace_id: workspace_id, format: "json" })) as ExperimentRecord[];
     for (const experiment of experiments) await deleteWorkspace(experiment.workspace_id);
@@ -85,6 +90,21 @@ function get(source_workspace_id: string, experiment_ids: string[]) {
 
 async function records(source_workspace_id: string) {
   return JSON.parse(await exportExperimentsForSourceWorkspace({ source_workspace_id, format: "json" })) as ExperimentRecord[];
+}
+
+async function workspaceIds() {
+  return (await accuracyDb().select({ id: accuracyWorkspaces.id }).from(accuracyWorkspaces)).map(row => row.id).sort();
+}
+
+async function anotherSource(workspace_id: string) {
+  const workspace = await getWorkspace(workspace_id);
+  if (!workspace) throw new Error("Test source workspace missing");
+  const source = await insertSourceFile({ workspace_id, org_id: workspace.org_id, filename: "another.txt", mime: "text/plain", checksum: newId("sum") });
+  const block_id = newId("block");
+  await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "test", blocks: [{
+    id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Other source evidence.",
+  }] });
+  return { source_file_id: source.id, block_id };
 }
 
 describe("authenticated controlled pass comparison API", () => {
@@ -159,6 +179,83 @@ describe("authenticated controlled pass comparison API", () => {
       expect((await post({ ...body, call: { ...body.call, input: { ...body.call.input, ...extra } } })).status).toBe(400);
     }
     expect(await records(body.source_workspace_id)).toEqual([]);
+  });
+
+  it.each(["need_extract", "inventory_extract"].flatMap(call_kind =>
+    ["foreign", "copied", "missing"].flatMap(origin =>
+      ["workspace_id", "source_file_id", "block_ids"].map(field => ({ call_kind, origin, field })))))
+  ("rejects $origin $field under real $call_kind input keys before any copy", async ({ call_kind, origin, field }) => {
+    const body = await fixture(); controlled();
+    let identifiers: { workspace_id: string; source_file_id: string; block_ids: string[] };
+    if (origin === "copied") {
+      const copy = await copyService.copyExperimentWorkspace({ source_workspace_id: body.source_workspace_id, source_file_ids: body.source_file_ids });
+      fixtureCopies.push(copy.workspace_id);
+      identifiers = { workspace_id: copy.workspace_id, source_file_id: copy.source_id_map[body.source_file_ids[0]],
+        block_ids: [copy.block_id_map[body.call.input.block_ids[0]]] };
+    } else if (origin === "foreign") {
+      identifiers = (await fixture()).call.input;
+    } else {
+      identifiers = { workspace_id: "absent-workspace", source_file_id: "absent-source", block_ids: ["absent-block"] };
+    }
+    const before = await workspaceIds();
+    const copyBoundary = vi.spyOn(copyService, "copyExperimentWorkspace");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await post({ ...body, call: { call_kind, input: { ...body.call.input, [field]: identifiers[field as keyof typeof identifiers] } } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid single-call source identifiers." });
+    expect(await records(body.source_workspace_id)).toEqual([]);
+    expect(await workspaceIds()).toEqual(before);
+    // Workspace snapshots alone would miss a copy created then deleted on remapping failure.
+    expect(copyBoundary).not.toHaveBeenCalled();
+  });
+
+  it.each(["need_extract", "inventory_extract"].flatMap(call_kind =>
+    ["source_file_id", "block_ids"].map(field => ({ call_kind, field }))))
+  ("rejects unselected original $field for $call_kind before copying", async ({ call_kind, field }) => {
+    const body = await fixture(); controlled();
+    const other = await anotherSource(body.source_workspace_id);
+    const before = await workspaceIds();
+    const copyBoundary = vi.spyOn(copyService, "copyExperimentWorkspace");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const input = { ...body.call.input, [field]: field === "source_file_id" ? other.source_file_id : [other.block_id] };
+    const response = await post({ ...body, call: { call_kind, input } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid single-call source identifiers." });
+    expect(await records(body.source_workspace_id)).toEqual([]);
+    expect(await workspaceIds()).toEqual(before);
+    expect(copyBoundary).not.toHaveBeenCalled();
+  });
+
+  it.each(["need_extract", "inventory_extract"])("rejects blocks from another selected source for %s", async call_kind => {
+    const body = await fixture(); controlled();
+    const other = await anotherSource(body.source_workspace_id);
+    const before = await workspaceIds();
+    const copyBoundary = vi.spyOn(copyService, "copyExperimentWorkspace");
+    const response = await post({ ...body, source_file_ids: [...body.source_file_ids, other.source_file_id],
+      call: { call_kind, input: { ...body.call.input, block_ids: [other.block_id] } } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid single-call source identifiers." });
+    expect(await records(body.source_workspace_id)).toEqual([]);
+    expect(await workspaceIds()).toEqual(before);
+    expect(copyBoundary).not.toHaveBeenCalled();
+  });
+
+  it.each(["need_extract", "inventory_extract"].flatMap(call_kind =>
+    ["explicit", "whole_source"].map(selection => ({ call_kind, selection }))))
+  ("accepts original $selection block selection for $call_kind", async ({ call_kind, selection }) => {
+    const body = await fixture(); controlled();
+    const block_ids = selection === "explicit" ? body.call.input.block_ids : [];
+    const response = await post({ ...body, call: { call_kind, input: { ...body.call.input, block_ids } } });
+    expect(response.status).toBe(201);
+    const result = await response.json() as { experiments: ExperimentRecord[] };
+    expect(result.experiments).toHaveLength(3);
+    for (const experiment of result.experiments) {
+      expect(experiment.status).toBe("completed");
+      const input = experiment.calls[0].input as Record<string, unknown>;
+      expect(input.workspace_id).toBe(experiment.workspace_id);
+      expect(input.block_ids).toHaveLength(selection === "explicit" ? 1 : 0);
+      if (selection === "explicit") expect(input.block_ids).not.toEqual(block_ids);
+    }
   });
 
   it.each([{ experiment_ids: [] }, { experiment_ids: [""] }, { experiment_ids: ["same", "same"] }, { experiment_ids: ["a", "b", "c", "d"] }])("rejects invalid read ID set $experiment_ids", async ({ experiment_ids }) => {
