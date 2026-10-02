@@ -1,0 +1,177 @@
+/** Derive conservative controlled-pass comparisons from retained experiment evidence. */
+import { createHash } from "node:crypto";
+import type { ExperimentRecord } from "@/accuracy/experiments/records";
+import type { AgentEvent, AgentCritiqueEvent, AgentSnapshotEvent, CriticIssue } from "@/accuracy/kernel/agent-events";
+import type { TokenUsage, RunStatus } from "@/accuracy/kernel/contracts";
+import type { ExperimentItemOutcome, ExperimentVersionEvaluation } from "./experiment-gold";
+import { mustFindForPack, type ReferenceMustFindTargets } from "./reference-gold";
+
+export const PASS_COMPARISON_EVALUATOR_VERSION = "pass-comparison-v1";
+export type ComparisonRun = { call_id: string; module_id: string; module_version: string; route: unknown; status: RunStatus; duration_ms: number | null; cost_usd: number | null; token_usage: TokenUsage | null; events: AgentEvent[] };
+export type ComparisonEvidence = { experiment: ExperimentRecord; runs: ComparisonRun[] };
+export type OutcomeCounts = { found: number; partial: number; missed: number; wrong: number };
+export type ComparisonMetering = { token_usage: TokenUsage; cost_usd: number; latency_ms: number };
+export type ComparedVersion = {
+  version_index: number; evaluation: unknown; outcomes: ExperimentItemOutcome[]; counts: OutcomeCounts; must_find: OutcomeCounts;
+  exact_must_find_keys: string[]; recovered_from_v0: string[]; lost_from_v0: string[]; recovered_from_previous: string[]; lost_from_previous: string[];
+  delta_from_v0: OutcomeCounts; delta_from_previous: OutcomeCounts; regressions: string[];
+  snapshot: AgentSnapshotEvent | null; critique: AgentCritiqueEvent | null; cumulative_metering: ComparisonMetering;
+};
+export type ComparedCall = { call_id: string; call_kind: string; lineage_key: string; runtime: ComparisonRun | null; versions: ComparedVersion[]; full_call_metering: ComparisonMetering };
+export type ComparedCondition = { experiment_id: string; pass_count: number | null; status: string; identity: unknown; eligibility: "eligible" | "ineligible" | "unknown"; reasons: string[]; calls: ComparedCall[]; totals: ComparisonMetering & { counts: OutcomeCounts; must_find: OutcomeCounts }; };
+export type PassComparison = { comparison_evaluator_version: string; comparison_id: string | null; matched: boolean; mismatch_reasons: string[]; conditions: ComparedCondition[]; recommendation: { experiment_id: string; pass_count: number; reason: string } | null };
+
+/** Canonical object keys preserve array order because request execution order matters. */
+export function canonicalComparisonJson(value: unknown): string {
+  const visit = (item: unknown): unknown => Array.isArray(item) ? item.map(visit)
+    : item && typeof item === "object" ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, visit(child)])) : item;
+  return JSON.stringify(visit(value));
+}
+
+/** Stable original-request identity, independent of JSON object insertion order. */
+export function comparisonRequestFingerprint(value: unknown): string {
+  return createHash("sha256").update(canonicalComparisonJson(value)).digest("hex");
+}
+
+function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function emptyCounts(): OutcomeCounts { return { found: 0, partial: 0, missed: 0, wrong: 0 }; }
+function counts(outcomes: ExperimentItemOutcome[]): OutcomeCounts { const result = emptyCounts(); for (const item of outcomes) if (Object.hasOwn(result, item.outcome)) result[item.outcome]++; return result; }
+function delta(a: OutcomeCounts, b: OutcomeCounts): OutcomeCounts { return { found: a.found - b.found, partial: a.partial - b.partial, missed: a.missed - b.missed, wrong: a.wrong - b.wrong }; }
+function addCounts(a: OutcomeCounts, b: OutcomeCounts): OutcomeCounts { return { found: a.found + b.found, partial: a.partial + b.partial, missed: a.missed + b.missed, wrong: a.wrong + b.wrong }; }
+function difference(a: string[], b: string[]): string[] { return a.filter(key => !b.includes(key)).sort(); }
+function emptyMetering(): ComparisonMetering { return { cost_usd: 0, latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }; }
+function addMetering(a: ComparisonMetering, b: ComparisonMetering): ComparisonMetering { return { cost_usd: a.cost_usd + b.cost_usd, latency_ms: a.latency_ms + b.latency_ms, token_usage: { prompt_tokens: a.token_usage.prompt_tokens + b.token_usage.prompt_tokens, completion_tokens: a.token_usage.completion_tokens + b.token_usage.completion_tokens, total_tokens: a.token_usage.total_tokens + b.token_usage.total_tokens } }; }
+
+/** Only explicit source-support categories/codes qualify; omission severity alone never does. */
+function serious(issue: CriticIssue): boolean {
+  const explicit = new Set(["false", "false_claim", "false_evidence", "unsupported", "unsupported_claim", "unsupported_content", "provenance", "invalid_provenance", "missing_provenance", "quote_invalid", "invalid_quote"]);
+  return issue.category !== "omission" && ["high", "critical"].includes(issue.severity) && (explicit.has(issue.category.toLowerCase()) || explicit.has(issue.code.toLowerCase()));
+}
+
+function originalSource(experiment: ExperimentRecord, input: unknown): string | null {
+  const copied = record(input).source_file_id;
+  if (typeof copied !== "string") return null;
+  const rows = record(experiment.baseline_snapshot).source_files;
+  if (!Array.isArray(rows)) return null;
+  const mapping = rows.map(record).find(row => row.copied_id === copied);
+  return typeof mapping?.original_id === "string" ? mapping.original_id : null;
+}
+
+function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFindTargets): ComparedCondition {
+  const { experiment, runs } = evidence;
+  const condition = record(experiment.condition);
+  const pass = condition.critic_revision_passes;
+  const pass_count = typeof pass === "number" && [1, 2, 3].includes(pass) ? pass : null;
+  const ineligible: string[] = []; const unknown: string[] = [];
+  if (experiment.status !== "completed") ineligible.push(`Experiment status is ${experiment.status}.`);
+  if (pass_count === null) ineligible.push("Invalid or missing pass condition.");
+  const groups = new Map<string, ExperimentRecord["calls"]>();
+  for (const row of experiment.calls) groups.set(row.call_id, [...(groups.get(row.call_id) ?? []), row]);
+  if (!groups.size) ineligible.push("No retained calls.");
+  const occurrences = new Map<string, number>();
+  const calls = [...groups.entries()].map(([call_id, rows]): ComparedCall => {
+    rows.sort((a, b) => a.version_index - b.version_index);
+    const first = rows[0];
+    const extraction = ["inventory_extract", "need_extract"].includes(first.call_kind);
+    const source = originalSource(experiment, first.input);
+    if (extraction && source === null) ineligible.push(`Unresolved original source for ${call_id}.`);
+    const base = `${first.call_kind}:${source ?? "workspace"}`;
+    const occurrence = occurrences.get(base) ?? 0; occurrences.set(base, occurrence + 1);
+    const lineage_key = `${base}:${occurrence}`;
+    const runtime = runs.find(run => run.call_id === call_id) ?? null;
+    if (!runtime) unknown.push(`Missing runtime for ${lineage_key}.`);
+    else {
+      if (runtime.status !== "ok") ineligible.push(`Runtime ${lineage_key} is ${runtime.status}.`);
+      if (runtime.cost_usd === null || runtime.duration_ms === null || runtime.token_usage === null) unknown.push(`Missing runtime metering for ${lineage_key}.`);
+      if (rows.some(row => row.module_version !== runtime.module_version || canonicalComparisonJson(row.route) !== canonicalComparisonJson(runtime.route))) ineligible.push(`Runtime identity disagrees with retained versions for ${lineage_key}.`);
+    }
+    if (extraction && (pass_count === null || rows.length !== pass_count + 1 || rows.some((row, index) => row.version_index !== index))) ineligible.push(`Missing or extra requested versions for ${lineage_key}.`);
+    const events = runtime?.events ?? [];
+    const judgment = events.find(event => event.event_type === "judgment");
+    if (extraction && (!judgment || judgment.event_type !== "judgment" || judgment.selected_iteration !== pass_count)) unknown.push(`Missing matching terminal judgment for ${lineage_key}.`);
+    let cumulative_metering = emptyMetering();
+    const versions: ComparedVersion[] = [];
+    for (const row of rows) {
+      const evaluations = experiment.evaluations.filter(item => item.call_id === call_id && item.version_index === row.version_index);
+      const evaluation = evaluations.length === 1 ? evaluations[0].evaluation : null;
+      const assessed = record(evaluation) as Partial<ExperimentVersionEvaluation>;
+      if (!evaluation) unknown.push(`Missing or duplicate evaluation for ${lineage_key} V${row.version_index}.`);
+      else if (row.output_error || !["scored", "gold_not_applicable"].includes(assessed.status ?? "") || !assessed.output_shape?.valid) ineligible.push(`Invalid output/evaluation for ${lineage_key} V${row.version_index}.`);
+      if (evaluation && (assessed.pack_id !== experiment.pack_id || assessed.pack_fingerprint !== experiment.pack_fingerprint || assessed.evaluator_version !== experiment.evaluator_version || assessed.call_kind !== row.call_kind)) ineligible.push(`Evaluation identity mismatch for ${lineage_key} V${row.version_index}.`);
+      const outcomes = Array.isArray(assessed.outcomes) ? assessed.outcomes : [];
+      const mustKeys = first.call_kind === "need_extract" ? targets.gap_ids : first.call_kind === "inventory_extract" ? [...targets.tactic_identifiers, ...targets.tactic_numbers.map(String)] : [];
+      const mustOutcomes = outcomes.filter(item => item.gold_item_key && mustKeys.includes(item.gold_item_key));
+      const exact_must_find_keys = mustOutcomes.filter(item => item.outcome === "found").map(item => item.gold_item_key!).sort();
+      const snapshot = events.find(event => event.event_type === "snapshot" && event.iteration === row.version_index) as AgentSnapshotEvent | undefined;
+      const critique = events.find(event => event.event_type === "critique" && event.iteration === row.version_index) as AgentCritiqueEvent | undefined;
+      if (extraction && (!snapshot || !critique || critique.score === null)) unknown.push(`Missing assessment for ${lineage_key} V${row.version_index}.`);
+      const prior = versions.at(-1); const initial = versions[0];
+      const regressions: string[] = [];
+      if (snapshot) {
+        if (snapshot.signals.quote_validity.invalid_count > 0) ineligible.push(`Invalid quotes in ${lineage_key} V${row.version_index}.`);
+        if (snapshot.signals.invariant_failures.length) ineligible.push(`Invariant failures in ${lineage_key} V${row.version_index}.`);
+        if (snapshot.signals.quote_validity.unchecked_count > 0) unknown.push(`Unchecked quotes in ${lineage_key} V${row.version_index}.`);
+        if (prior?.snapshot && snapshot.signals.quote_validity.invalid_count > prior.snapshot.signals.quote_validity.invalid_count) regressions.push("Invalid quote count increased.");
+        if (prior?.snapshot) regressions.push(...difference(snapshot.signals.invariant_failures, prior.snapshot.signals.invariant_failures).map(key => `New invariant failure: ${key}`));
+      }
+      if (critique) {
+        if (critique.completeness.risk_level === "check_failed" || critique.completeness.unchecked_block_ids.length) unknown.push(`Incomplete completeness assessment in ${lineage_key} V${row.version_index}.`);
+        const findings = critique.issues.filter(serious);
+        if (findings.length) ineligible.push(`Serious source-support findings in ${lineage_key} V${row.version_index}.`);
+        if (prior?.critique) regressions.push(...difference(findings.map(issue => issue.issue_id), prior.critique.issues.filter(serious).map(issue => issue.issue_id)).map(key => `New serious critic finding: ${key}`));
+      }
+      for (const event of [snapshot, critique]) if (event) cumulative_metering = addMetering(cumulative_metering, event);
+      const versionCounts = counts(outcomes);
+      versions.push({ version_index: row.version_index, evaluation, outcomes, counts: versionCounts, must_find: counts(mustOutcomes), exact_must_find_keys,
+        recovered_from_v0: initial ? difference(exact_must_find_keys, initial.exact_must_find_keys) : [], lost_from_v0: initial ? difference(initial.exact_must_find_keys, exact_must_find_keys) : [],
+        recovered_from_previous: prior ? difference(exact_must_find_keys, prior.exact_must_find_keys) : [], lost_from_previous: prior ? difference(prior.exact_must_find_keys, exact_must_find_keys) : [],
+        delta_from_v0: delta(versionCounts, initial?.counts ?? versionCounts), delta_from_previous: delta(versionCounts, prior?.counts ?? versionCounts), regressions,
+        snapshot: snapshot ?? null, critique: critique ?? null, cumulative_metering });
+    }
+    const full_call_metering = runtime ? { cost_usd: runtime.cost_usd ?? 0, latency_ms: runtime.duration_ms ?? 0, token_usage: runtime.token_usage ?? emptyMetering().token_usage } : emptyMetering();
+    return { call_id, call_kind: first.call_kind, lineage_key, runtime, versions, full_call_metering };
+  });
+  // Request scope identifies missing pipeline stages even when another source completed.
+  const request = record(condition.original_request_identity);
+  const selected = Array.isArray(request.source_file_ids) ? request.source_file_ids : [];
+  const expectedKinds = request.mode === "pipeline" ? ["inventory_extract", "need_extract"] : [record(request.call).call_kind].filter(Boolean);
+  const expectedSources = request.mode === "pipeline" ? selected : [record(record(request.call).input).source_file_id].filter(Boolean);
+  for (const source of expectedSources) for (const kind of expectedKinds) if (calls.filter(call => call.lineage_key.startsWith(`${kind}:${source}:`)).length !== 1) ineligible.push(`Missing or duplicate selected call ${kind}:${source}.`);
+  if (request.mode === "pipeline") for (const kind of ["merge_dedupe", "status_derive"]) if (calls.filter(call => call.call_kind === kind).length !== selected.length) ineligible.push(`Missing or duplicate pipeline ${kind} calls.`);
+  let totals = { ...emptyMetering(), counts: emptyCounts(), must_find: emptyCounts() };
+  for (const call of calls) {
+    const final = call.versions.at(-1);
+    totals = { ...addMetering(totals, call.full_call_metering), counts: addCounts(totals.counts, final?.counts ?? emptyCounts()), must_find: addCounts(totals.must_find, final?.must_find ?? emptyCounts()) };
+  }
+  const identity = { source_workspace_id: experiment.source_workspace_id, source_fingerprint: experiment.source_fingerprint, baseline_fingerprint: experiment.baseline_fingerprint,
+    pack_id: experiment.pack_id, pack_fingerprint: experiment.pack_fingerprint, evaluator_version: experiment.evaluator_version,
+    comparison_evaluator_version: condition.comparison_evaluator_version, original_request_identity: condition.original_request_identity, original_request_fingerprint: condition.original_request_fingerprint,
+    calls: calls.map(call => ({ lineage_key: call.lineage_key, module_id: call.runtime?.module_id, module_version: call.runtime?.module_version, route: call.runtime?.route })).sort((a, b) => a.lineage_key.localeCompare(b.lineage_key)) };
+  return { experiment_id: experiment.id, pass_count, status: experiment.status, identity, eligibility: ineligible.length ? "ineligible" : unknown.length ? "unknown" : "eligible", reasons: [...new Set([...ineligible, ...unknown])], calls, totals };
+}
+
+/** Compare pure retained evidence; no database or gold access occurs here. */
+export function comparePassExperiments(evidence: ComparisonEvidence[], targets: ReferenceMustFindTargets): PassComparison {
+  const conditions = evidence.map(item => compareCondition(item, targets)).sort((a, b) => (a.pass_count ?? 0) - (b.pass_count ?? 0));
+  const mismatch_reasons: string[] = [];
+  if (conditions.length !== 3 || canonicalComparisonJson(conditions.map(item => item.pass_count)) !== "[1,2,3]") mismatch_reasons.push("Expected exactly one condition for each of one, two and three passes.");
+  const ids = evidence.map(item => record(item.experiment.condition).comparison_id);
+  const comparison_id = typeof ids[0] === "string" ? ids[0] : null;
+  if (!comparison_id || ids.some(id => id !== comparison_id)) mismatch_reasons.push("Comparison IDs do not match.");
+  if (new Set(evidence.map(item => item.experiment.id)).size !== evidence.length) mismatch_reasons.push("Duplicate experiment IDs.");
+  for (const condition of conditions) {
+    const identity = record(condition.identity);
+    if (identity.comparison_evaluator_version !== PASS_COMPARISON_EVALUATOR_VERSION || !identity.original_request_identity || !identity.original_request_fingerprint) mismatch_reasons.push(`Missing or unsupported comparison identity for ${condition.experiment_id}.`);
+    if (conditions[0] && canonicalComparisonJson(condition.identity) !== canonicalComparisonJson(conditions[0].identity)) mismatch_reasons.push(`Source, baseline, pack, evaluator, original request or actual module/route identity differs for ${condition.experiment_id}.`);
+  }
+  const matched = mismatch_reasons.length === 0;
+  const ranked = matched ? conditions.filter(item => item.eligibility === "eligible").sort((a, b) => b.totals.must_find.found - a.totals.must_find.found || b.totals.counts.found - a.totals.counts.found || a.totals.counts.wrong - b.totals.counts.wrong || a.totals.counts.partial - b.totals.counts.partial || a.totals.cost_usd - b.totals.cost_usd || a.totals.latency_ms - b.totals.latency_ms || a.pass_count! - b.pass_count!) : [];
+  const winner = ranked[0];
+  return { comparison_evaluator_version: PASS_COMPARISON_EVALUATOR_VERSION, comparison_id, matched, mismatch_reasons: [...new Set(mismatch_reasons)], conditions,
+    recommendation: winner ? { experiment_id: winner.experiment_id, pass_count: winner.pass_count!, reason: "Eligible matched condition ranked by exact must-find, exact found, fewer wrong, fewer partial, cost, latency, then pass count. This is not deployment approval." } : null };
+}
+
+/** Load must-find targets only inside evaluation code, then derive the comparison. */
+export function evaluatePassComparison(evidence: ComparisonEvidence[]): PassComparison {
+  return comparePassExperiments(evidence, evidence[0] ? mustFindForPack(evidence[0].experiment.pack_id) : { gap_ids: [], tactic_numbers: [], tactic_identifiers: [] });
+}
