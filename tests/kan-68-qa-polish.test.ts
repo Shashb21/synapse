@@ -37,4 +37,10 @@ describe("KAN-68 QA polish", () => {
     const chart = src("src/components/timeline/gantt-chart.tsx");
     expect(chart).toMatch(/hydrated \? readPalette\(\) : FALLBACK/);
   });
+
+  it("an action dialog remounts a field whose default changed instead of changing it in place", () => {
+    // Base UI warns when an uncontrolled FieldControl's defaultValue changes (Type scores, then refresh).
+    const dialog = src("src/components/platform/action-dialog.tsx");
+    expect(dialog).toContain('<label key={`${field.name}:${field.defaultValue ?? ""}`}');
+  });
 });

@@ -167,7 +167,9 @@ export function ActionDialog({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {fields.map((field) => (
-              <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+              // A new default (the page refreshed after a save) remounts the control: Base UI
+              // refuses to change an uncontrolled field's default in place (KAN-68).
+              <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
                 {field.label}
                 {field.type === "textarea" ? (
                   <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder} />
