@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 /** Exercise immutable assembly proposal inspection through real React DOM interactions. */
-import { act, createElement } from "react";
+import { StrictMode, act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -134,6 +134,10 @@ afterEach(async () => {
 
 async function render(workspaceId = "ws") {
   await act(async () => root.render(createElement(AssemblyHistory, { workspaceId })));
+}
+
+async function renderStrictMode(workspaceId = "ws") {
+  await act(async () => root.render(createElement(StrictMode, null, createElement(AssemblyHistory, { workspaceId }))));
 }
 
 async function click(label: string) {
@@ -270,4 +274,20 @@ it("does not show loaded or late old-workspace proposals after the workspace pro
   expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws-new", { cache: "no-store" });
   expect(host.textContent).toContain("assembly-new");
   expect(host.textContent).not.toContain("assembly-a");
+});
+
+it("loads list and detail after StrictMode effect setup cleanup replay", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response({ assemblies: [blockedAssembly] }))
+    .mockResolvedValueOnce(response({ assembly: blockedAssembly }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await renderStrictMode();
+  await click("Complete proposals");
+  expect(host.textContent).toContain("assembly-a");
+  expect(host.textContent).not.toContain("Loading complete proposals");
+
+  await click("Inspect proposal assembly-a");
+  expect(host.textContent).toContain("Fingerprint: fingerprint-a");
+  expect(host.textContent).not.toContain("Loading proposal detail");
 });

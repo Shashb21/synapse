@@ -267,6 +267,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   const [detailError, setDetailError] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
       mounted.current = false;
       listRequestToken.current += 1;
@@ -315,11 +316,9 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   }
 
   function toggleList() {
-    setExpanded((current) => {
-      const next = !current;
-      if (next && !list && !listLoading) void loadList();
-      return next;
-    });
+    const next = !expanded;
+    if (next && !list && !listLoading) void loadList();
+    setExpanded(next);
   }
 
   function toggleDetail(assemblyId: string) {
