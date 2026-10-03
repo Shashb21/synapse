@@ -1,18 +1,79 @@
 "use client";
 
 /** On-demand immutable complete-proposal inspection in the ledger. */
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Assembly, AssemblyCoverage, ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 type AssemblyListState = { assemblies: Assembly[] } | null;
 
-function fieldValue(value: unknown): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function simpleValue(value: unknown): string {
   if (value === null || value === undefined) return "None recorded";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value, null, 2);
+  return "Unsupported value";
+}
+
+function fieldLabel(field: string): string {
+  const labels: Record<string, string> = {
+    block_id: "Block",
+    external_id: "External ID",
+    quote: "Quote",
+    quote_block_ids: "Evidence blocks",
+    source_file_id: "Source",
+    tactic_type: "Tactic type",
+  };
+  return labels[field] ?? field.replaceAll("_", " ");
+}
+
+function StructuredValue({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span>None recorded</span>;
+    if (value.every((nested) => !isRecord(nested) && !Array.isArray(nested))) {
+      return <span>{value.map(simpleValue).join(", ")}</span>;
+    }
+    if (value.every(isRecord)) {
+      return (
+        <ol className="grid gap-2">
+          {value.map((row, index) => (
+            <li key={index}>
+              <dl className="grid gap-1">
+                {Object.entries(row).map(([field, nested]) => (
+                  <div key={field}>
+                    <dt className="inline text-foreground">{fieldLabel(field)}: </dt>
+                    <dd className="inline break-words"><StructuredValue value={nested} /></dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    return (
+      <ul className="grid gap-1">
+        {value.map((nested, index) => <li key={index}><StructuredValue value={nested} /></li>)}
+      </ul>
+    );
+  }
+  if (isRecord(value)) {
+    return (
+      <dl className="grid gap-1">
+        {Object.entries(value).map(([field, nested]) => (
+          <div key={field}>
+            <dt className="inline text-foreground">{fieldLabel(field)}: </dt>
+            <dd className="inline break-words"><StructuredValue value={nested} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <span>{simpleValue(value)}</span>;
 }
 
 function payloadTitle(item: ResolvedAssemblyItem): string {
@@ -24,9 +85,13 @@ function payloadTitle(item: ResolvedAssemblyItem): string {
 
 function coverageOverall(row: AssemblyCoverage): string {
   if (row.output && typeof row.output === "object" && "overall" in row.output) {
-    return fieldValue((row.output as { overall?: unknown }).overall);
+    return simpleValue((row.output as { overall?: unknown }).overall);
   }
   return "No structured result";
+}
+
+function coverageField(row: AssemblyCoverage, field: string): unknown {
+  return isRecord(row.output) ? row.output[field] : null;
 }
 
 function mappedGapIds(assembly: Assembly): Set<string> {
@@ -81,8 +146,8 @@ function SelectedItem({ item }: { item: ResolvedAssemblyItem }) {
       <dl className="mt-2 grid gap-1">
         {Object.entries(item.payload).map(([field, value]) => (
           <div key={field}>
-            <dt className="font-medium">{field}</dt>
-            <dd className="whitespace-pre-wrap break-words text-muted-foreground">{fieldValue(value)}</dd>
+            <dt className="font-medium">{fieldLabel(field)}</dt>
+            <dd className="break-words text-muted-foreground"><StructuredValue value={value} /></dd>
           </div>
         ))}
       </dl>
@@ -149,8 +214,11 @@ function AssemblyDetail({ assembly }: { assembly: Assembly }) {
                 <p>{row.gap_version_id} -&gt; {row.tactic_version_id} · {coverageOverall(row)}</p>
                 <p className="text-muted-foreground">Run: {row.run_id} · Mode: {row.mode}</p>
                 {row.mode === "stub" ? <p className="text-[var(--unknown)]">Stub coverage advisory</p> : null}
-                {row.output && typeof row.output === "object" && "rationale" in row.output ? (
-                  <p className="text-muted-foreground">Rationale: {fieldValue((row.output as { rationale?: unknown }).rationale)}</p>
+                {isRecord(row.output) && "quote_block_ids" in row.output ? (
+                  <p className="text-muted-foreground">Evidence blocks: <StructuredValue value={coverageField(row, "quote_block_ids")} /></p>
+                ) : null}
+                {isRecord(row.output) && "rationale" in row.output ? (
+                  <p className="text-muted-foreground">Rationale: <StructuredValue value={coverageField(row, "rationale")} /></p>
                 ) : null}
               </li>
             ))}
@@ -182,6 +250,8 @@ function AssemblyDetail({ assembly }: { assembly: Assembly }) {
 /** Render saved agent assemblies without approval or human-edit controls. */
 export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
   const listPanelId = useId();
+  const listRequestToken = useRef(0);
+  const detailRequestToken = useRef(0);
   const [expanded, setExpanded] = useState(false);
   const [list, setList] = useState<AssemblyListState>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -191,35 +261,56 @@ export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    listRequestToken.current += 1;
+    detailRequestToken.current += 1;
+    setExpanded(false);
+    setList(null);
+    setListLoading(false);
+    setListError(null);
+    setOpenAssemblyId(null);
+    setDetails({});
+    setDetailLoading(null);
+    setDetailError({});
+  }, [workspaceId]);
+
   async function loadList() {
+    const token = listRequestToken.current + 1;
+    listRequestToken.current = token;
     setListLoading(true);
     setListError(null);
     try {
       const query = new URLSearchParams({ workspace_id: workspaceId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
       const body = await response.json() as { assemblies?: Assembly[]; error?: string };
+      if (token !== listRequestToken.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not load complete proposals");
       setList({ assemblies: body.assemblies ?? [] });
     } catch (cause) {
+      if (token !== listRequestToken.current) return;
       setListError(cause instanceof Error ? cause.message : "Could not load complete proposals");
     } finally {
-      setListLoading(false);
+      if (token === listRequestToken.current) setListLoading(false);
     }
   }
 
   async function loadDetail(assemblyId: string) {
+    const token = detailRequestToken.current + 1;
+    detailRequestToken.current = token;
     setDetailLoading(assemblyId);
     setDetailError((current) => ({ ...current, [assemblyId]: "" }));
     try {
       const query = new URLSearchParams({ workspace_id: workspaceId, assembly_id: assemblyId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
       const body = await response.json() as { assembly?: Assembly; error?: string };
+      if (token !== detailRequestToken.current) return;
       if (!response.ok || !body.assembly) throw new Error(body.error ?? "Could not load proposal");
       setDetails((current) => ({ ...current, [assemblyId]: body.assembly! }));
     } catch (cause) {
+      if (token !== detailRequestToken.current) return;
       setDetailError((current) => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not load proposal" }));
     } finally {
-      setDetailLoading(null);
+      if (token === detailRequestToken.current) setDetailLoading(null);
     }
   }
 

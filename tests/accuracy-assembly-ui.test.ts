@@ -131,8 +131,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render() {
-  await act(async () => root.render(createElement(AssemblyHistory, { workspaceId: "ws" })));
+async function render(workspaceId = "ws") {
+  await act(async () => root.render(createElement(AssemblyHistory, { workspaceId })));
 }
 
 async function click(label: string) {
@@ -169,6 +169,9 @@ it("loads list and detail on demand with exact lineage, findings and uncovered o
     "snapshot-gap",
     "Iteration: 2",
     "Selected by judged gap output",
+    "Source: source-1",
+    "Block: block-1",
+    "Quote: gap source quote",
     "gap source quote",
     "gap-v2",
     "Judged final output (no snapshot)",
@@ -182,6 +185,7 @@ it("loads list and detail on demand with exact lineage, findings and uncovered o
     "coverage-run-1",
     "Stub coverage advisory",
     "partial",
+    "Evidence blocks: block-1",
     "coverage-run-2",
     "not_relevant",
     "linking_incomplete",
@@ -193,6 +197,8 @@ it("loads list and detail on demand with exact lineage, findings and uncovered o
   for (const absent of ["Approve", "Reject assembly", "Add gap", "Remove tactic", "Select version", "Accuracy score"]) {
     expect(host.textContent).not.toContain(absent);
   }
+  expect(host.textContent).not.toContain("\"source_file_id\"");
+  expect(host.textContent).not.toContain("\"quote_block_ids\"");
 });
 
 it("announces loading, supports retry after failure and explains empty history", async () => {
@@ -212,4 +218,44 @@ it("announces loading, supports retry after failure and explains empty history",
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Sign in to access assemblies");
   await click("Retry proposals");
   expect(host.textContent).toContain("No complete proposals recorded for this workspace.");
+});
+
+it("announces detail errors and retries the same proposal successfully", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response({ assemblies: [blockedAssembly] }))
+    .mockResolvedValueOnce(response({ error: "Detail unavailable" }, false))
+    .mockResolvedValueOnce(response({ assembly: blockedAssembly }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await render();
+  await click("Complete proposals");
+  await click("Inspect proposal assembly-a");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Detail unavailable");
+  await click("Retry proposal");
+  expect(host.textContent).toContain("Fingerprint: fingerprint-a");
+  expect(host.textContent).toContain("Selected generated items");
+  expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws&assembly_id=assembly-a", { cache: "no-store" });
+});
+
+it("does not show stale proposals when workspace changes while a list request is in flight", async () => {
+  let finishOld!: (value: ReturnType<typeof response>) => void;
+  const workspaceAssembly = { ...blockedAssembly, id: "assembly-new", workspace_id: "ws-new", fingerprint: "fingerprint-new" };
+  const fetcher = vi.fn()
+    .mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response({ assemblies: [workspaceAssembly] }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await render("ws-old");
+  await click("Complete proposals");
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("Loading complete proposals");
+
+  await render("ws-new");
+  await act(async () => finishOld(response({ assemblies: [blockedAssembly] })));
+  expect(host.textContent).not.toContain("assembly-a");
+  expect(host.textContent).not.toContain("Transient failure");
+
+  await click("Complete proposals");
+  expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws-new", { cache: "no-store" });
+  expect(host.textContent).toContain("assembly-new");
+  expect(host.textContent).not.toContain("assembly-a");
 });
