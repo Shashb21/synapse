@@ -9,6 +9,7 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES } from "@/lib/iegp/enums";
 import { DEMO_PACK, demoSourceById } from "@/lib/iegp/demo-pack";
 import { mimeForFilename } from "@/lib/ingest/local-parse";
 import { SOURCE_FILES_DDL, sourceFiles } from "./schema";
+import { plural } from "@/lib/plural";
 
 const fileInput = z.object({
   filename: z.string().min(1),
@@ -179,7 +180,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
 
     return {
       output: { files: accepted, skipped },
-      summary: `${accepted.length} file(s) uploaded, ${skipped.length} skipped`,
+      summary: `${plural(accepted.length, "file")} uploaded, ${skipped.length} skipped`,
       evals: [
         { name: "files_accepted", value: accepted.length, unit: "count" },
         {

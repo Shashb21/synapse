@@ -23,6 +23,7 @@ import { appendAudit, createProposedTactic, loadState } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
+import { plural } from "@/lib/plural";
 
 /**
  * The designed study. Every field, the timing included, comes from the model:
@@ -838,9 +839,9 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         rejected: outcome.rejected.map((item) => item.candidate),
         gaps_considered: gaps.length,
       },
-      summary: `${outcome.accepted.length} tactic proposal(s) for ${gaps.length} prioritized gap(s)${
+      summary: `${plural(outcome.accepted.length, "tactic proposal")} for ${plural(gaps.length, "prioritized gap")}${
         input.dry_run ? " (dry run)" : ""
-      }`,
+      }${outcome.accepted.length === 0 ? duplicateNote(outcome) : ""}`,
       evals: [
         ...outcome.metrics,
         {
@@ -907,6 +908,24 @@ ideationModule.evals = {
     ];
   },
 };
+
+/**
+ * Why a run came back empty, when it did because every idea repeated a tactic already in
+ * the library (KAN-69): the customer sees the summary, not the critic's notes.
+ */
+export function duplicateNote(outcome: {
+  withdrawn: { note: string; issues?: string[] }[];
+  rejected: { note: string }[];
+}): string {
+  const notes = [
+    ...outcome.withdrawn.map((row) => `${row.note} ${(row.issues ?? []).join(" ")}`),
+    ...outcome.rejected.map((row) => row.note),
+  ];
+  if (notes.length === 0 || !notes.every((note) => /duplicat/i.test(note))) return "";
+  const ids = [...new Set(notes.flatMap((note) => note.match(/\bTAC-\d+\b/g) ?? []))];
+  const which = ids.length ? ` (${ids.join(", ")})` : "";
+  return `. Every idea repeated a tactic already in the library${which}: plan or extend that tactic on the gap, or add an idea by hand.`;
+}
 
 registerModule(ideationModule);
 

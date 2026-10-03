@@ -29,6 +29,7 @@ import {
   type TimelineCandidate,
   type TimelineModel,
 } from "./build";
+import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
   /** What the model's start offsets count from. Defaults to today. */
@@ -510,7 +511,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     });
     return {
       output: model,
-      summary: `${model.activities.length} activity(ies) across ${model.window.months} month(s); ${estimates.size} dated by the model; ${model.unscheduled.length} open gap(s) unscheduled`,
+      summary: `${plural(model.activities.length, "activity", "activities")} across ${plural(model.window.months, "month")}; ${estimates.size} dated by the model; ${plural(model.unscheduled.length, "open gap")} unscheduled`,
       evals: [
         { name: "activities", value: model.activities.length, unit: "count" },
         {

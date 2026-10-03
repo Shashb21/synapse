@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ActionField, ActionIdentity } from "@/components/platform/action-dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import { splitParagraphs } from "@/lib/ingest/manual-blocks";
+import { plural } from "@/lib/plural";
 
 type DraftBlock = { key: number; text: string; heading: string; kind: string };
 
@@ -221,7 +222,7 @@ export function ManualSourceForm({
       {saved ? <p className="text-muted-foreground">Saved as human-entered source {saved}.</p> : null}
       <div>
         <Button type="button" size="sm" onClick={() => void save()} disabled={pending || blocks.length === 0}>
-          {pending ? "Saving…" : `Save ${blocks.length} human-entered block(s)`}
+          {pending ? "Saving…" : `Save ${plural(blocks.length, "human-entered block")}`}
         </Button>
       </div>
     </div>

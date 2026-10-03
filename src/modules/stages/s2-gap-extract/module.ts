@@ -28,6 +28,7 @@ import {
   documentBody,
   gapProposerUser,
 } from "./prompts";
+import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
   /** Defaults to every parsed document. */
@@ -691,8 +692,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         committed_gap_ids,
         committed_need_ids,
       },
-      summary: `${outcome.accepted.length} of ${outcome.proposed.length} gap candidate(s) accepted${
-        input.dry_run ? " (dry run)" : `, ${committed_gap_ids.length} new gap(s) committed`
+      summary: `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
+        input.dry_run ? " (dry run)" : `, ${plural(committed_gap_ids.length, "new gap")} committed`
       }`,
       evals: outcome.metrics,
     };
