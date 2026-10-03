@@ -57,7 +57,7 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
     const domain = dialog.locator('select[name="domain"]');
     await expect(domain).toHaveValue("");
     await dialog.getByRole("button", { name: "Add gap" }).click();
-    await expect(dialog.getByText(/Fill every required field/)).toBeVisible();
+    await expect(dialog.getByRole("alert")).toHaveText(/Fill in "Domain", then try again\./);
     await domain.selectOption("comparative_effectiveness");
     await dialog.getByRole("button", { name: "Add gap" }).click();
     await expect(dialog).toBeHidden();
@@ -103,7 +103,7 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
 
     const restore = await openDialog(page, "Restore gap");
     await restore.getByRole("button", { name: "Restore" }).click();
-    await expect(restore.getByText(/Fill every required field/)).toBeVisible();
+    await expect(restore.getByRole("alert")).toHaveText(/Fill in "Why bring it back\?", then try again\./);
     await restore.locator('textarea[name="note"]').fill("The caregiver programme folded into this plan");
     await restore.getByRole("button", { name: "Restore" }).click();
     await expect(restore).toBeHidden();
