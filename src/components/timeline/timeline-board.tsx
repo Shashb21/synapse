@@ -584,7 +584,7 @@ function EmptyTimeline({
       <p className="mt-1 text-[12px] text-muted-foreground">
         {ai
           ? "The timeline is built from validated state: gaps mapped to tactics, with priority bands. Upload sources on Upload, confirm the gaps and their tactics on Gaps, validate their bands on Prioritize, then build the timeline here."
-          : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. AI is off: add gaps and tactics by hand, map them on Gaps, validate their bands on Prioritize, then lay out dates here or add an activity by hand."}
+          : "The timeline is built from validated state: gaps mapped to tactics, with validated priority bands. Add gaps and tactics by hand, map them on Gaps, validate their bands on Prioritize, then lay out dates here or add an activity by hand."}
       </p>
       {unscheduled.length > 0 ? (
         <p className="mt-2 text-[12px] text-muted-foreground">

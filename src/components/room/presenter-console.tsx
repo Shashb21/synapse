@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAiEnabled } from "@/components/platform/ai-status";
 import {
   ROOM_SLIDES,
   isShowableHref,
@@ -154,7 +153,6 @@ export function PresenterConsole({
   initialNotes,
   breakouts,
 }: PresenterConsoleProps) {
-  const ai = useAiEnabled();
   const [slideId, setSlideId] = useState(slideById(initialState.slide_id)?.id ?? ROOM_SLIDES[0].id);
   /** What the current frame loads; changes only when the presenter changes slide. */
   const [frameSrc, setFrameSrc] = useState(initialState.href);
@@ -380,7 +378,6 @@ export function PresenterConsole({
           <span className="text-[12px] text-muted-foreground">
             Room · Presenter view{workspaceName ? ` · ${workspaceName}` : ""}
           </span>
-          {ai ? null : <span className="rounded border border-border px-1.5 text-[11px] text-muted-foreground">AI off</span>}
         </div>
         <nav className="flex gap-1" aria-label="Room sections">
           <Button size="sm" variant={tab === "present" ? "default" : "ghost"} aria-pressed={tab === "present"} onClick={() => setTab("present")}>

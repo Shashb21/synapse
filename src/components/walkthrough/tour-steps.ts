@@ -77,7 +77,7 @@ const ALL_TOUR_STEPS: TourStep[] = [
     href: "/ideation",
     title: "Ideate new tactics",
     ai: "For each Open gap whose priority band you validated (High first, then Medium, then Low) the model proposes candidate studies, critiqued and ranked. Accept the ones worth doing; they become proposed tactics.",
-    manual: "AI is off, so no candidates are proposed. Add proposed tactics by hand for each Open gap whose priority band you validated.",
+    manual: "Add proposed tactics by hand for each Open gap whose priority band you validated, starting with High.",
     targets: [{ selector: "button", text: /propose|ideate|generate/i }, heading],
   },
   {
@@ -95,7 +95,7 @@ const ALL_TOUR_STEPS: TourStep[] = [
     href: "/room",
     title: "Present in the Room",
     ai: "Room is a presenter view, like PowerPoint's: the real pages are your slides, with notes, a timer and an audience window for the projector. Edit live as the client team decides, and use Breakouts for small groups.",
-    manual: "Room is a presenter view, like PowerPoint's: the real pages are your slides, with notes, a timer and an audience window for the projector. Everything is captured by hand while AI is off.",
+    manual: "Room is a presenter view, like PowerPoint's: the real pages are your slides, with notes, a timer and an audience window for the projector. Edit live as the client team decides.",
     targets: [{ selector: '[aria-label="Prep or Room mode"]' }, heading],
   },
 ];
