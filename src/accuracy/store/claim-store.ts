@@ -291,6 +291,7 @@ function metaStringList(value: unknown): string[] {
 
 /** Map tactic claims into inputs for `projectGanttFromTactics`. */
 export function tacticsForGantt(claims: AccuracyClaimRow[]) {
+  const excludedIds = new Set(claims.filter(row => !isDownstreamClaim(row)).map(row => row.id));
   return claims
     .filter((row) => row.claim_type === "tactic" && isDownstreamClaim(row))
     .map((row) => {
@@ -304,22 +305,24 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
           metaString(meta.readout) ??
           metaString(meta.readout_date) ??
           metaString(meta.evidence_available),
-        depends_on: metaStringList(meta.depends_on),
+        depends_on: metaStringList(meta.depends_on).filter(id => !excludedIds.has(id)),
         tactic_type: metaString(meta.tactic_type),
-        gap_ids: metaStringList(meta.gap_ids),
+        gap_ids: metaStringList(meta.gap_ids).filter(id => !excludedIds.has(id)),
       };
     });
 }
 
 /** Map gap claims into parent links for Gantt coverage continuity. */
 export function gapsForGantt(claims: AccuracyClaimRow[]) {
+  const excludedIds = new Set(claims.filter(row => !isDownstreamClaim(row)).map(row => row.id));
   return claims
     .filter((row) => row.claim_type === "gap" && isDownstreamClaim(row))
     .map((row) => {
       const meta = claimMetadata(row);
+      const parentId = metaString(meta.parent_gap_id);
       return {
         id: row.id,
-        parent_gap_id: metaString(meta.parent_gap_id),
+        parent_gap_id: parentId && excludedIds.has(parentId) ? null : parentId,
         validated: row.validated,
       };
     });

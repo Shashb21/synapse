@@ -6,7 +6,7 @@ import {
   projectGanttFromTactics,
 } from "@/accuracy/modules/gantt-project/engine";
 import { projectWorkspaceGantt } from "@/accuracy/modules/gantt-project/save-final";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { insertClaim, tacticsForGantt, gapsForGantt, type AccuracyClaimRow } from "@/accuracy/store/claim-store";
 import { upsertCoverageDecision } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
@@ -346,4 +346,22 @@ describe("workspace gantt reads coverage joins", () => {
     expect(pubBar.start).toBe("2026-09-01");
     expect(dependenciesRespectReadouts(projected.activities)).toBe(true);
   });
+});
+
+it("strips known history-only references before fallback projection and keeps unknown legacy links", () => {
+  const base = { workspace_id: "ws", status: "draft", validated: true, source_file_id: null, created_at: "2026-01-01", updated_at: "2026-01-01" };
+  const claims: AccuracyClaimRow[] = [
+    { ...base, id: "hidden-gap", claim_type: "gap", statement: "Alternative", metadata: { history_only: true } },
+    { ...base, id: "hidden-tactic", claim_type: "tactic", statement: "Alternative tactic", metadata: { history_only: true } },
+    { ...base, id: "judged-gap", claim_type: "gap", statement: "Judged", metadata: { parent_gap_id: "hidden-gap" } },
+    { ...base, id: "legacy-gap", claim_type: "gap", statement: "Legacy", metadata: { parent_gap_id: "unknown-parent" } },
+    { ...base, id: "study", claim_type: "tactic", statement: "Study", metadata: { start: "2026-01-01", end: "2026-03-01", gap_ids: ["hidden-gap", "judged-gap", "unknown-gap"], depends_on: ["hidden-tactic", "unknown-tactic"] } },
+  ];
+  const tactics = tacticsForGantt(claims); const gaps = gapsForGantt(claims);
+  expect(tactics[0].gap_ids).toEqual(["judged-gap", "unknown-gap"]);
+  expect(tactics[0].depends_on).toEqual(["unknown-tactic"]);
+  expect(gaps).toEqual([{ id: "judged-gap", parent_gap_id: null, validated: true }, { id: "legacy-gap", parent_gap_id: "unknown-parent", validated: true }]);
+  const activities = projectGanttFromTactics({ tactics, gaps });
+  expect(activities).toHaveLength(1);
+  expect(activities[0].gap_ids).toEqual(["judged-gap", "unknown-gap"]);
 });

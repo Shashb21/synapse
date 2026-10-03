@@ -7,6 +7,9 @@ import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { claimMetadata } from "@/accuracy/store/claim-store";
 import { POST as coverageAssist } from "@/app/api/accuracy/coverage/assist/route";
 import { buildWorkshopInventory } from "@/accuracy/store/workshop-store";
+import { insertSourceFile } from "@/accuracy/store/source-store";
+import { persistParseBlocks } from "@/accuracy/store/parse-store";
+import { listActiveSourceClaims } from "@/accuracy/store/claim-store";
 import { newId } from "@/modules/kernel/ids";
 const workspaces: string[] = [];
 afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorkspace(id); });
@@ -35,4 +38,24 @@ it("keeps history-only drafts reviewable but blocks promotion, metadata removal 
   const inventory = await buildWorkshopInventory(workspace_id);
   expect(JSON.stringify(inventory)).not.toContain(gap.id);
   expect((await applyClaimValidation({ workspace_id, claim_ids: [legacy.id], action: "validate", rationale: "Confirmed", actor: { name: "Reviewer", function: "medical_affairs" } })).updated).toBe(1);
+});
+
+it("counts eligible claims, but not matching history-only drafts, toward completeness inventory", async () => {
+  const org_id = await createOrganization("completeness history");
+  const workspace_id = await createWorkspace({ org_id, name: "completeness history", slug: newId("slug") }); workspaces.push(workspace_id);
+  const source = await insertSourceFile({ workspace_id, filename: "evidence.txt", mime: "text/plain", checksum: newId("sum") });
+  const block_id = newId("block");
+  const statement = "Unmet evidence need for comparative effectiveness in elderly NSCLC patients after progression.";
+  await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: statement }] });
+  const metadata = { provenance: [{ block_id, source_file_id: source.id, quote: statement }] };
+  await insertClaim({ workspace_id, source_file_id: source.id, claim_type: "gap", statement, metadata: { ...metadata, history_only: true } });
+  registerAccuracyStack();
+  const args = { workspace_id, org_id, actor: { name: "Reviewer", function: "medical_affairs" as const }, call_kind: "completeness_audit" as const, input: { workspace_id }, agent_role: "none" as const };
+  const missing = await runAccuracyModule<{ flags: Array<{ block_id: string }> }>(args);
+  expect(missing.output.flags.map(flag => flag.block_id)).toEqual([block_id]);
+  expect(await listActiveSourceClaims(workspace_id, source.id)).toEqual([]);
+  const judged = await insertClaim({ workspace_id, source_file_id: source.id, claim_type: "gap", statement, metadata });
+  expect((await listActiveSourceClaims(workspace_id, source.id)).map(claim => claim.id)).toEqual([judged.id]);
+  const covered = await runAccuracyModule<{ flags: unknown[] }>(args);
+  expect(covered.output.flags).toEqual([]);
 });
