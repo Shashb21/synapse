@@ -114,6 +114,12 @@ function coverageSelectedVersions(input: Record<string, unknown>): Record<string
     : null;
 }
 
+function coverageInputBlockBundle(input: Record<string, unknown>): string[] | null {
+  return Array.isArray(input.block_bundle_ids) && input.block_bundle_ids.every((id) => typeof id === "string")
+    ? input.block_bundle_ids
+    : null;
+}
+
 function payloadMatches(a: unknown, b: unknown): boolean {
   return canonicalString(a) === canonicalString(b);
 }
@@ -262,6 +268,9 @@ export function checkAssembly(args: {
         addFinding(findings, "coverage_stale_reference", ids, "Coverage input payload differs from selected version payload.");
       }
     }
+    if (row.input.gap_id !== row.gap_version_id || row.input.tactic_id !== row.tactic_version_id) {
+      addFinding(findings, "coverage_input_endpoint_mismatch", ids, "Coverage input pair IDs do not match selected version endpoints.");
+    }
 
     const parsed = coverageDecisionSchema.safeParse(row.output);
     if (!parsed.success) {
@@ -277,13 +286,34 @@ export function checkAssembly(args: {
       ...collectProvenance(gaps.get(row.gap_version_id)?.payload ?? {}).map((span) => span.block_id),
       ...collectProvenance(tactics.get(row.tactic_version_id)?.payload ?? {}).map((span) => span.block_id),
     ]);
+    const inputBlockBundle = coverageInputBlockBundle(row.input);
+    if (!inputBlockBundle) {
+      addFinding(findings, "coverage_input_block_bundle_unbound", ids, "Coverage input does not record the exact block bundle used for the decision.");
+    } else {
+      for (const blockId of inputBlockBundle) {
+        if (!allowedBlocks.has(blockId) || !blocksById.has(blockId)) {
+          addFinding(findings, "coverage_input_unknown_evidence_block", ids, `Coverage input block bundle includes ${blockId}, which is not in the selected pair evidence bundle.`);
+        }
+      }
+    }
+    let verifiedEvidenceCount = 0;
     for (const blockId of parsed.data.quote_block_ids) {
       if (!allowedBlocks.has(blockId) || !blocksById.has(blockId)) {
         addFinding(findings, "coverage_unknown_evidence_block", ids, `Coverage cites block ${blockId}, which is not in the selected pair evidence bundle.`);
+        continue;
       }
+      if (!inputBlockBundle?.includes(blockId)) {
+        addFinding(findings, "coverage_quote_not_in_input_bundle", ids, `Coverage cites block ${blockId}, which was not recorded in the input block bundle.`);
+        continue;
+      }
+      verifiedEvidenceCount += 1;
     }
     if (parsed.data.overall === "full" || parsed.data.overall === "partial" || parsed.data.overall === "limited") {
-      supportedCoveragePairs.add(pair);
+      if (verifiedEvidenceCount === 0) {
+        addFinding(findings, "coverage_missing_evidence", ids, "Supported coverage decisions must cite at least one verified selected-pair evidence block.");
+      } else {
+        supportedCoveragePairs.add(pair);
+      }
     }
   }
   for (const [pair, rows] of coveragePairs) {
