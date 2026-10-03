@@ -9,6 +9,7 @@ import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { GapMetadata, IegpState, Lock, GapStatusOverride } from "./types";
 import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
+import { tacticDateError, tacticDateOrderError, type TacticDateField } from "./tactic-dates";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
   ActorFunction,
@@ -576,7 +577,11 @@ export async function ensureGapHasConstituentNeed(gapId: string) {
 
 export async function ensureAllLiveGapsHaveNeeds() {
   const state = await loadState();
+  // Pages run this on every render, refreshes included (KAN-68): a gap that already
+  // has a need is skipped here, not after a fresh loadState of its own.
+  const linked = new Set(state.need_gap_links.map((link) => link.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
+    if (linked.has(gap.id)) continue;
     await ensureGapHasConstituentNeed(gap.id);
   }
 }
@@ -1594,19 +1599,17 @@ type LibraryTacticDraft = {
   custom_type?: CustomTacticType | null;
 };
 
-const TACTIC_DATE_LABELS = { start_date: "Start date", evidence_available: "Evidence available" } as const;
+/** A tactic date as stored: a real YYYY-MM or YYYY-MM-DD, or null when blank. */
+export function optionalTacticDate(field: TacticDateField, value: string | null | undefined): string | null {
+  const error = tacticDateError(field, value);
+  if (error) throw new Error(error);
+  return (value ?? "").trim() || null;
+}
 
-/** A tactic date as stored: YYYY-MM or YYYY-MM-DD, or null when blank. */
-export function optionalTacticDate(
-  field: keyof typeof TACTIC_DATE_LABELS,
-  value: string | null | undefined,
-): string | null {
-  const trimmed = (value ?? "").trim();
-  if (!trimmed) return null;
-  if (!/^\d{4}-\d{2}(-\d{2})?$/.test(trimmed)) {
-    throw new Error(`${TACTIC_DATE_LABELS[field]} must be a date (YYYY-MM-DD) or blank.`);
-  }
-  return trimmed;
+/** Refuses evidence that arrives before the tactic starts (KAN-68). */
+function assertTacticDateOrder(start: string | null | undefined, evidence: string | null | undefined) {
+  const error = tacticDateOrderError(start, evidence);
+  if (error) throw new Error(error);
 }
 
 /** A blank status keeps the default, proposed. Anything else must be a known creatable status. */
@@ -1646,6 +1649,7 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
   if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
   const start_date = optionalTacticDate("start_date", args.start_date);
   const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
+  assertTacticDateOrder(start_date, evidence_available);
   const id = nextId("TAC", state.tactics.map((x) => x.id));
   const reasonNote = args.note?.trim() || null;
   await db().insert(t.tactics).values({
@@ -2727,12 +2731,15 @@ export async function lockRoadmapItem(args: {
   if (tactic.status === "completed") {
     throw new Error("Completed tactics stay on the dossier, not the forward roadmap.");
   }
+  const start_date = optionalTacticDate("start_date", args.start_date);
+  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
+  assertTacticDateOrder(start_date, evidence_available);
   const existing = state.roadmap.find((r) => r.tactic_id === args.tactic_id);
   const row = {
     tactic_id: args.tactic_id,
     residual_ids: args.residual_ids,
-    start_date: args.start_date,
-    evidence_available: args.evidence_available,
+    start_date,
+    evidence_available,
     owner: args.owner,
     note: args.note ?? null,
     lock: makeLock(args.actor_name, args.actor_function, args.note),
@@ -3112,10 +3119,7 @@ export async function modifyTactic(args: {
     if (raw === undefined) continue;
     const value = (raw ?? "").trim();
     if (TACTIC_DATE_FIELDS.has(field)) {
-      if (value && !/^\d{4}-\d{2}(-\d{2})?$/.test(value)) {
-        throw new Error(`${field.replace("_", " ")} must be a date (YYYY-MM-DD) or blank.`);
-      }
-      clean[field] = value || null;
+      clean[field] = optionalTacticDate(field as TacticDateField, value);
       continue;
     }
     if ((field === "name" || field === "evidence_question") && !value) {
@@ -3135,6 +3139,11 @@ export async function modifyTactic(args: {
     }
     clean[field] = value;
   }
+  // The pair is checked as it will stand: an edited date against the other, saved one.
+  assertTacticDateOrder(
+    "start_date" in clean ? clean.start_date : tactic.start_date,
+    "evidence_available" in clean ? clean.evidence_available : tactic.evidence_available,
+  );
   const changes = diffFields(tactic, clean);
   const customLabel = (value: CustomTacticType | null | undefined) =>
     value ? `${value.label} (${value.color})` : null;
@@ -3303,7 +3312,7 @@ export async function unlockTacticsStage(args: {
 }) {
   const state = await loadState();
   if (!state.asset.wizard_complete) {
-    throw new Error("Prioritize open gaps before tactics.");
+    throw new Error("Finish Gaps first: on Gaps, choose Continue to prioritize, then come back to Tactics.");
   }
   // The same rule the Prioritize footer applies before it offers "Continue to
   // tactics": every live Open gap has a validated band. Loaded lazily because

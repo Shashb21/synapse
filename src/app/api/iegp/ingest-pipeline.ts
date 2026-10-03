@@ -12,12 +12,15 @@ import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
 /** The judgement stages ingest runs. Each needs a connected LLM. */
 const LLM_STAGES: StageId[] = ["S2", "S3", "S4"];
 
-export type IngestFile = {
-  filename: string;
+/** A source's content: pasted or text-file text, or a PDF/Office file as base64 with its mime (KAN-68). */
+export type IngestPayload =
+  | { filename: string; text: string; content_base64?: undefined; mime?: undefined }
+  | { filename: string; content_base64: string; mime: string; text?: undefined };
+
+export type IngestFile = IngestPayload & {
   title: string;
   source_type: SourceType;
   stakeholder_function: ActorFunction;
-  text: string;
 };
 
 export type IngestResult = {
@@ -67,7 +70,8 @@ export async function ingestThroughStages(args: {
   if (files.length === 0 && demo_ids.length === 0) throw new Error("Nothing to ingest.");
   for (const file of files) {
     if (!file.title?.trim()) throw new Error("A title is required.");
-    if (!file.text?.trim()) throw new Error("Paste or drop the source text to ingest.");
+    // A binary file's text is only known once S1 parses it.
+    if (!file.content_base64 && !file.text?.trim()) throw new Error("Paste or drop the source text to ingest.");
   }
   const sections = await aiSections();
   await requireLlmStages(sections);

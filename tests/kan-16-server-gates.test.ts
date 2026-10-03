@@ -41,7 +41,7 @@ describe("unlock_tactics", () => {
   it("refuses before Prioritize is entered", async () => {
     const { status, json } = await post({ action: "unlock_tactics" });
     expect(status).toBe(400);
-    expect(String(json.error)).toMatch(/Prioritize open gaps before tactics/);
+    expect(String(json.error)).toMatch(/Finish Gaps first/);
   });
 
   it("refuses with a clear message while no Open gap has a validated band", async () => {

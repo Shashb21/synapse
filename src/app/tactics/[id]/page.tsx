@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, LockMeta, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { isLiveGap } from "@/lib/iegp/engine";
 import { TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext } from "@/modules/auth/session";
@@ -19,7 +20,11 @@ export default async function TacticDetailPage({
   const [state, session] = await Promise.all([loadState(), sessionContext()]);
   const tactic = state.tactics.find((x) => x.id === id);
   if (!tactic) notFound();
-  const maps = state.coverages.filter((c) => c.tactic_id === tactic.id);
+  // Only live gaps: a split or rewritten parent is retired into version history.
+  const maps = state.coverages.filter((c) => {
+    const gap = state.gaps.find((g) => g.id === c.gap_id);
+    return c.tactic_id === tactic.id && gap !== undefined && isLiveGap(gap);
+  });
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
     actor_name: session.actor.name,
@@ -146,11 +151,12 @@ export default async function TacticDetailPage({
   );
 }
 
-function Item({ k, v }: { k: string; v: string }) {
+function Item({ k, v }: { k: string; v: string | null | undefined }) {
   return (
     <div>
       <dt className="text-[11px] text-muted-foreground">{k}</dt>
-      <dd className="text-foreground">{v}</dd>
+      {/* An empty field reads "—", like the dates and budget, not a blank line. */}
+      <dd className="text-foreground">{v?.trim() ? v : "—"}</dd>
     </div>
   );
 }

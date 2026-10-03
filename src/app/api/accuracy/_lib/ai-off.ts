@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
+import { AI_OFF_ADMIN_MESSAGE, AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
 
 /**
  * Shared AI-off answer for accuracy API routes. With the admin AI switch off,
@@ -7,7 +7,7 @@ import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled } from "@/modules/kernel/ai-
  * never a generic 400/500 — so the UI can point at the manual path instead.
  */
 export function aiOffResponse(): NextResponse {
-  return NextResponse.json({ ok: false, code: "ai_off", error: AI_OFF_MESSAGE }, { status: 409 });
+  return NextResponse.json({ ok: false, code: "ai_off", error: AI_OFF_ADMIN_MESSAGE }, { status: 409 });
 }
 
 /** The 409 response when AI is off, or null when AI steps may run. */

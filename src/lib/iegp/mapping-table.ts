@@ -5,7 +5,7 @@ import {
   type MappingTableRow,
 } from "@/modules/stages/s4-kg-mapping/module";
 import { listRuns } from "@/modules/kernel/observability";
-import { gapEligibleForMapping } from "@/lib/iegp/engine";
+import { displayedGapStatus, gapEligibleForMapping } from "@/lib/iegp/engine";
 import { humanMappingRow, isMappingRowKey } from "@/lib/iegp/store";
 import type { IegpState, Lock } from "@/lib/iegp/types";
 
@@ -36,6 +36,18 @@ export type MappingTableViewRow = Omit<MappingTableRow, "mapping_status" | "conf
   human_lock: Lock | null;
   /** Tactics mapped (e.g. by a later S4 run) that no person has accepted yet. */
   unreviewed_tactic_ids: string[];
+  /**
+   * The gap's status as the engine computes it from recorded coverage (proposed
+   * tactics don't count), the same status the gap page shows. This is the row's
+   * status; `mapping_status` is the AI's (or the saved row's) view (KAN-68).
+   */
+  gap_status: MappingStatus;
+};
+
+const GAP_TO_MAPPING_STATUS: Record<string, MappingStatus> = {
+  validated_open: "open",
+  validated_partial: "partially_addressed",
+  validated_addressed: "addressed",
 };
 
 const storedRows = z.array(mappingTableRowSchema);
@@ -48,12 +60,15 @@ const storedRows = z.array(mappingTableRowSchema);
 export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
   try {
     const runs = await listRuns({ stage: "S4", limit: 20 });
-    const ok = runs.find((run) => run.status === "ok" && run.output);
-    if (!ok?.output) return null;
-    const output = ok.output as { rows?: unknown; accepted?: unknown };
-    for (const candidate of [output.rows, output.accepted]) {
-      const parsed = storedRows.safeParse(candidate);
-      if (parsed.success && parsed.data.length > 0) return parsed.data;
+    // The newest successful run whose rows were stored whole: an output cut to a
+    // preview by an older size bound is skipped, not shown as "not mapped" (KAN-68).
+    for (const run of runs) {
+      if (run.status !== "ok" || !run.output) continue;
+      const output = run.output as { rows?: unknown; accepted?: unknown };
+      for (const candidate of [output.rows, output.accepted]) {
+        const parsed = storedRows.safeParse(candidate);
+        if (parsed.success && parsed.data.length > 0) return parsed.data;
+      }
     }
     return null;
   } catch {
@@ -70,7 +85,7 @@ function decisionsFor(state: IegpState, gapId: string): Record<string, PairDecis
   return out;
 }
 
-export const UNMAPPED_RATIONALE_AI = "Not mapped yet: run S4 for a coverage verdict, or map tactics by hand.";
+export const UNMAPPED_RATIONALE_AI = "Not mapped yet: choose Re-run mapping for a coverage verdict, or map tactics by hand.";
 export const UNMAPPED_RATIONALE_MANUAL = "Not mapped yet: pick the tactics and a status by hand.";
 
 export function buildMappingTableView(
@@ -87,6 +102,7 @@ export function buildMappingTableView(
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);
+    const gap_status = GAP_TO_MAPPING_STATUS[displayedGapStatus(gap)] ?? "open";
     if (human) {
       // The person's row wins over the latest S4 run.
       return {
@@ -104,6 +120,7 @@ export function buildMappingTableView(
         decisions,
         human_lock: human.lock,
         unreviewed_tactic_ids: unreviewed,
+        gap_status,
       };
     }
     const proposal = proposedByGap.get(gap.id);
@@ -116,6 +133,7 @@ export function buildMappingTableView(
         decisions,
         human_lock: null,
         unreviewed_tactic_ids: unreviewed,
+        gap_status,
       };
     }
     return {
@@ -133,6 +151,7 @@ export function buildMappingTableView(
       decisions,
       human_lock: null,
       unreviewed_tactic_ids: unreviewed,
+      gap_status,
     };
   });
 }

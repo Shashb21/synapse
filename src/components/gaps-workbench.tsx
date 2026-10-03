@@ -600,7 +600,17 @@ export function GapsWorkbench({
               label="Continue to prioritize"
               action="complete_wizard"
               confirmLabel="Go to prioritize"
+              href="/?place=plan"
             />
+          </>
+        ) : cards.length === 0 ? (
+          // No gaps: there is nothing to confirm yet, so name the first step, not "0 unconfirmed" (KAN-68).
+          <>
+            <h2 className="text-[13px] font-semibold">Add gaps first</h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              There are no gaps yet. Add them{ai ? " from an uploaded source or" : ""} by hand, confirm each one here,
+              then continue to prioritize.
+            </p>
           </>
         ) : (
           <>

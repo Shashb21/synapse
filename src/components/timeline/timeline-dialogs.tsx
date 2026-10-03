@@ -47,7 +47,7 @@ export function ManualDatesDialog({
       payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}) }}
       label={label}
       title={title}
-      description="Your dates are marked as yours and survive every rebuild; no model is needed. The change is recorded with its rationale."
+      description="Your dates are marked as yours and survive every rebuild. The change is recorded with its rationale."
       confirmLabel="Save dates"
       identity={identity}
       trigger={small ? SMALL_TRIGGER : undefined}
@@ -360,6 +360,11 @@ export function ActivitySheetEditor({
     const end = value("end_date");
     if (start && end && end < start) {
       setError("The end date is before the start date.");
+      return;
+    }
+    const readout = value("readout_date");
+    if (readout && start && readout < start) {
+      setError("The readout cannot be before the activity starts.");
       return;
     }
 

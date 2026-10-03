@@ -7,7 +7,8 @@ vi.mock("next/headers", () => ({
 
 import "@/modules";
 import { POST as iegpPost } from "@/app/api/iegp/route";
-import { createTacticStatus, loadState, optionalTacticDate, resetDemoSetup } from "@/lib/iegp/store";
+import { createTacticStatus, loadState, modifyTactic, optionalTacticDate, resetDemoSetup } from "@/lib/iegp/store";
+import { TACTIC_DATE_ORDER_MESSAGE, tacticDatesError } from "@/lib/iegp/tactic-dates";
 import { tacticCountsTowardAddressing } from "@/lib/iegp/engine";
 import { CREATE_TACTIC_STATUSES } from "@/lib/iegp/enums";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
@@ -100,5 +101,56 @@ describe("create tactic status and dates", () => {
     expect(await tacticNamed("Bad date study")).toBeUndefined();
     expect(() => optionalTacticDate("evidence_available", "2027/01/01")).toThrow(/Evidence available/);
     expect(optionalTacticDate("start_date", "")).toBeNull();
+  });
+
+  it("KAN-68: refuses an impossible date and evidence before the start, on create and on edit", async () => {
+    const impossible = await createTactic({ name: "Leap study", status: "planned", start_date: "2026-02-30" });
+    expect(impossible.status).toBe(400);
+    expect(impossible.json.error).toBe("Start date must be a date (YYYY-MM-DD) or blank.");
+    expect(() => optionalTacticDate("start_date", "2026-13")).toThrow(/Start date/);
+
+    const backwards = await createTactic({
+      name: "Backwards study",
+      status: "planned",
+      start_date: "2027-06-01",
+      evidence_available: "2026-01-01",
+    });
+    expect(backwards.status).toBe(400);
+    expect(backwards.json.error).toBe(TACTIC_DATE_ORDER_MESSAGE);
+    expect(await tacticNamed("Backwards study")).toBeUndefined();
+
+    // A month-only date covers its month: evidence in the start's month is fine.
+    const sameMonth = await createTactic({
+      name: "Same month study",
+      status: "planned",
+      start_date: "2027-06-15",
+      evidence_available: "2027-06",
+    });
+    expect(sameMonth.status).toBe(200);
+    const tactic = await tacticNamed("Same month study");
+
+    // Editing one date is checked against the other, saved one.
+    await expect(
+      modifyTactic({
+        tactic_id: tactic!.id,
+        fields: { evidence_available: "2027-05-31" },
+        rationale: "Moved the readout",
+        ...ACTOR,
+      }),
+    ).rejects.toThrow(TACTIC_DATE_ORDER_MESSAGE);
+    await modifyTactic({
+      tactic_id: tactic!.id,
+      fields: { evidence_available: "2028-01-15" },
+      rationale: "Readout slips a year",
+      ...ACTOR,
+    });
+    expect((await tacticNamed("Same month study"))?.evidence_available).toBe("2028-01-15");
+  });
+
+  it("KAN-68: the dialogs run the same date checks", () => {
+    expect(tacticDatesError("2027-06-01", "2026-01-01")).toBe(TACTIC_DATE_ORDER_MESSAGE);
+    expect(tacticDatesError("", "2026-01-01")).toBeNull();
+    expect(tacticDatesError("2026-02-29", "")).toBe("Start date must be a date (YYYY-MM-DD) or blank.");
+    expect(tacticDatesError("2028-02-29", "2028-03")).toBeNull();
   });
 });

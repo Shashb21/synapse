@@ -256,6 +256,7 @@ export function TagField({
 /** An editable list of records (indications, objectives, competitors…). */
 export function ListField<T>({
   label,
+  itemLabel,
   items,
   onChange,
   blank,
@@ -266,6 +267,8 @@ export function ListField<T>({
   hint,
 }: {
   label: string;
+  /** One item, singular: "Indication" for the list "Indications" (KAN-68). */
+  itemLabel: string;
   items: T[];
   onChange: (items: T[]) => void;
   blank: () => T;
@@ -287,7 +290,6 @@ export function ListField<T>({
           {items.map((item, index) => (
             <li
               key={index}
-              aria-label={`${label} ${index + 1}`}
               className="relative grid gap-2 rounded-md border border-border bg-card p-3 pr-9"
             >
               {renderItem(
@@ -297,7 +299,7 @@ export function ListField<T>({
               )}
               <button
                 type="button"
-                aria-label={`Remove ${label.toLowerCase()} ${index + 1}`}
+                aria-label={`Remove ${itemLabel.toLowerCase()} ${index + 1}`}
                 className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => onChange(items.filter((_, i) => i !== index))}
               >

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +18,10 @@ import {
 /** The optional note a dialog collects. Only actions that store a note pass one. */
 export type LockFormNote = { label: string; required?: boolean; placeholder?: string };
 
-function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
+type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+function missingRequired(form: HTMLFormElement): FormControl[] {
+  const missing: FormControl[] = [];
   for (const el of Array.from(form.elements)) {
     if (
       !(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)
@@ -26,9 +30,43 @@ function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
     }
     if (el.disabled || el.type === "hidden" || el.type === "submit" || el.type === "button") continue;
     if (!el.required) continue;
-    if (!String(el.value || "").trim()) return el;
+    if (!String(el.value || "").trim()) missing.push(el);
   }
-  return null;
+  return missing;
+}
+
+/** The name a person sees for a field: its aria-label, its label's own text, or its placeholder. */
+export function fieldName(el: FormControl): string {
+  const aria = el.getAttribute("aria-label")?.trim();
+  if (aria) return aria;
+  const label = el.labels?.[0];
+  if (label) {
+    // The label's own words come before the control; a hint after it is not part of the name.
+    let lead = "";
+    for (const node of Array.from(label.childNodes)) {
+      if (node === el || (node instanceof Element && node.contains(el))) break;
+      lead += node.textContent ?? "";
+    }
+    const leadText = lead.replace(/\s+/g, " ").replace(/\s*(?:\*|\(required\))\s*$/i, "").trim();
+    if (leadText) return leadText;
+    // Otherwise the whole label, without the control's own text (options, typed value).
+    const copy = label.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll("input, select, textarea").forEach((node) => node.remove());
+    const text = copy.textContent
+      ?.replace(/\s+/g, " ")
+      .replace(/\s*(?:\*|\(required\))\s*$/i, "")
+      .trim();
+    if (text) return text;
+  }
+  const placeholder = el instanceof HTMLSelectElement ? "" : el.placeholder.replace(/…$/, "").trim();
+  return placeholder || el.name || "the required field";
+}
+
+/** Names the empty required fields instead of a vague "fill every required field" (KAN-68). */
+export function missingFieldsMessage(names: string[]): string {
+  const unique = [...new Set(names)].map((name) => `"${name}"`);
+  if (unique.length === 1) return `Fill in ${unique[0]}, then try again.`;
+  return `Fill in ${unique.slice(0, -1).join(", ")} and ${unique.at(-1)}, then try again.`;
 }
 
 export function LockForm({
@@ -41,6 +79,7 @@ export function LockForm({
   variant = "outline",
   note,
   size = "md",
+  href,
 }: {
   label: string;
   action: string;
@@ -57,8 +96,10 @@ export function LockForm({
   note?: LockFormNote;
   /** A form with many fields gets a wider dialog (KAN-52). */
   size?: "md" | "lg";
+  /** Where to go once the action has saved (e.g. the next place); without it the page refreshes in place. */
+  href?: string;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh, navigate } = usePageRefresh();
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +116,22 @@ export function LockForm({
   async function onSubmit(form: HTMLFormElement) {
     const formData = new FormData(form);
     setError(null);
-    const missing = firstMissingRequired(form);
-    if (missing) {
-      setError("Fill every required field in this dialog, then try again.");
-      missing.focus();
+    const missing = missingRequired(form);
+    if (missing.length > 0) {
+      setError(missingFieldsMessage(missing.map(fieldName)));
+      missing[0]!.focus();
       return;
+    }
+    // A tactic's dates: the same check the server makes, before anything is sent (KAN-68).
+    if (form.elements.namedItem("evidence_available")) {
+      const dateError = tacticDatesError(
+        String(formData.get("start_date") ?? ""),
+        String(formData.get("evidence_available") ?? ""),
+      );
+      if (dateError) {
+        setError(dateError);
+        return;
+      }
     }
     setPending(true);
     // The actor is the signed-in person; the server takes it from the session.
@@ -103,8 +155,9 @@ export function LockForm({
       setError(json.error ?? "Could not save. Try again.");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    // The dialog closes as the new data (or the next page) arrives, not before it.
+    if (href) navigate(href, () => setOpen(false));
+    else refresh(() => setOpen(false));
   }
 
   return (
@@ -140,11 +193,15 @@ export function LockForm({
                 />
               </label>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : confirmLabel ?? "Lock"}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : confirmLabel ?? "Lock"}
             </Button>
           </DialogFooter>
         </form>

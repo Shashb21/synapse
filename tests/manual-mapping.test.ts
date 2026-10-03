@@ -409,3 +409,34 @@ describe("gap page coverage forms", () => {
     expect(workbench).toContain('action="reject_mapping"');
   });
 });
+
+describe("KAN-68 the mapping table's status is the gap's", () => {
+  it("shows the gap's computed status beside an AI view of addressed that the engine does not reach", async () => {
+    const { gapId, tacticIds } = await workspace(1);
+    const tacticId = tacticIds[0]!;
+    await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked." });
+    // A model "full" no person has locked does not make the gap Addressed.
+    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...MODEL, coverage: "full" });
+    const state = await loadState();
+    const gap = state.gaps.find((g) => g.id === gapId)!;
+    const proposal: MappingTableRow = {
+      gap_id: gapId,
+      gap_name: "x",
+      tactic_ids: [tacticId],
+      tactic_names: ["t1"],
+      mapping_status: "addressed",
+      confidence: 90,
+      rationale: ["The proposed tactic closes it."],
+      mappings: [],
+      review: null,
+    };
+    const view = buildMappingTableView(state, [proposal]).find((row) => row.gap_id === gapId)!;
+    expect(view.source).toBe("proposal");
+    expect(view.mapping_status).toBe("addressed");
+    expect(view.gap_status).toBe(displayedGapStatus(gap) === "validated_partial" ? "partially_addressed" : "open");
+    expect(view.gap_status).not.toBe(view.mapping_status);
+    const workbench = readFileSync(path.join(process.cwd(), "src/components/mapping-table-workbench.tsx"), "utf8");
+    expect(workbench).toContain("AI view");
+    expect(workbench).toContain("proposed tactics don't count until planned");
+  });
+});

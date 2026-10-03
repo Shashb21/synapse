@@ -72,7 +72,8 @@ import {
   restoreRejectedTactic,
 } from "@/lib/iegp/restore";
 import type { SourceType } from "@/lib/iegp/enums";
-import { ingestThroughStages } from "./ingest-pipeline";
+import { ingestThroughStages, type IngestPayload } from "./ingest-pipeline";
+import { MAX_UPLOAD_BYTES, TOO_LARGE, uploadKindOf } from "@/lib/ingest/upload-formats";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
 
 export const runtime = "nodejs";
@@ -732,11 +733,10 @@ export async function POST(request: Request) {
         await ingestThroughStages({
           files: [
             {
-              filename: body.filename?.trim() || `${title.replaceAll(" ", "_")}.txt`,
               title,
               source_type: body.source_type as SourceType,
               stakeholder_function: body.stakeholder_function as ActorFunction,
-              text: body.text,
+              ...ingestPayloadOf(body, title),
             },
           ],
           actor: identity.actor,
@@ -833,6 +833,36 @@ export async function POST(request: Request) {
   } catch (error) {
     return apiErrorResponse(error, "Failed");
   }
+}
+
+/**
+ * What an ingest request uploads (KAN-68): pasted or text-file `text`, or a PDF/Office file as
+ * `content_base64` with its `filename`. Exactly one, of a supported type and under the size
+ * limit; the mime is the one the extension names, so S1 parses the file as what it is.
+ */
+function ingestPayloadOf(body: Record<string, string>, title: string): IngestPayload {
+  const hasText = typeof body.text === "string" && body.text.length > 0;
+  const hasFile = typeof body.content_base64 === "string" && body.content_base64.length > 0;
+  if (hasText && hasFile) throw new Error("Send the source as text or as a file, not both.");
+  const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+  if (hasFile) {
+    if (!filename) throw new Error("A file upload needs its filename.");
+    const kind = uploadKindOf(filename);
+    if (kind.kind === "refused") throw new Error(kind.reason);
+    if (kind.kind === "text") throw new Error(`Send a ${filename} file's contents as text.`);
+    if (body.mime && body.mime !== kind.mime && body.mime !== "application/octet-stream") {
+      throw new Error(`${filename} does not match its type (${body.mime}).`);
+    }
+    const content_base64 = body.content_base64.replaceAll(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content_base64)) throw new Error("The file is not valid base64.");
+    if (Buffer.byteLength(content_base64, "base64") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
+    return { filename, content_base64, mime: kind.mime };
+  }
+  if (filename && uploadKindOf(filename).kind === "binary") {
+    throw new Error(`Send ${filename} as content_base64, not text.`);
+  }
+  if (hasText && Buffer.byteLength(body.text, "utf8") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
+  return { filename: filename || `${title.replaceAll(" ", "_")}.txt`, text: body.text };
 }
 
 /** Tactic fields present in the body; a field absent from the form is left unchanged. */

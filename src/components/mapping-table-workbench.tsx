@@ -7,12 +7,40 @@ import type { TacticLibraryItem } from "@/lib/iegp/engine";
 import { LockForm } from "@/components/lock-form";
 import { Button } from "@/components/ui/button";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { RerunMappingButton } from "@/components/platform/rerun-mapping-button";
 
 const STATUS_OPTIONS = [
   { value: "open", label: "Open" },
   { value: "partially_addressed", label: "Partially addressed" },
   { value: "addressed", label: "Addressed" },
 ] as const;
+
+const STATUS_LABEL: Record<MappingTableViewRow["gap_status"], string> = {
+  open: "Open",
+  partially_addressed: "Partially addressed",
+  addressed: "Addressed",
+};
+
+const STATUS_RANK: Record<MappingTableViewRow["gap_status"], number> = { open: 0, partially_addressed: 1, addressed: 2 };
+
+/**
+ * The row's status is the gap's, as the engine computes it; the AI's (or the
+ * saved row's) view is shown beside it only when it differs (KAN-68).
+ */
+function StatusSummary({ row }: { row: MappingTableViewRow }) {
+  const view = row.mapping_status;
+  return (
+    <div className="mb-2 grid gap-0.5" data-testid="mapping-gap-status">
+      <p className="text-[12px] text-foreground">{STATUS_LABEL[row.gap_status]}</p>
+      {view && view !== row.gap_status ? (
+        <p className="text-[10px] text-muted-foreground">
+          {row.source === "human" ? "Saved row" : "AI view"}: {STATUS_LABEL[view].toLowerCase()}
+          {STATUS_RANK[view] > STATUS_RANK[row.gap_status] ? " (proposed tactics don't count until planned)" : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function MappingTableWorkbench({
   rows,
@@ -26,7 +54,8 @@ export function MappingTableWorkbench({
   const filtered = useMemo(() => {
     if (filter === "proposal") return rows.filter((row) => row.source === "proposal");
     if (filter === "human") return rows.filter((row) => row.source === "human");
-    if (filter === "open") return rows.filter((row) => row.mapping_status === "open");
+    // The gap's own status, not the AI's view of it (KAN-68).
+    if (filter === "open") return rows.filter((row) => row.gap_status === "open");
     return rows;
   }, [filter, rows]);
 
@@ -79,6 +108,9 @@ export function MappingTableWorkbench({
             ? "Accept, reject or edit any row — a saved row wins over later AI mapping runs, and a removed or rejected tactic is never mapped to that gap again."
             : "Pick the tactics and a status for each row and save it with a rationale."}
         </span>
+        <div className="ml-auto">
+          <RerunMappingButton />
+        </div>
       </div>
 
       <div className="overflow-x-auto border border-border bg-card rounded-lg">
@@ -235,7 +267,9 @@ function MappingRowEditor({
         </p>
       </td>
       <td className="px-3 py-3">
+        <StatusSummary row={row} />
         <select
+          aria-label="Row status to save"
           className="h-8 w-full min-w-[9.5rem] max-w-[12rem] rounded-md border border-input bg-card px-2 text-[12px]"
           value={status ?? ""}
           onChange={(event) => setStatus(event.target.value as MappingTableViewRow["mapping_status"])}
@@ -267,7 +301,7 @@ function MappingRowEditor({
       <td className="px-3 py-3">
         {status ? null : (
           <p className="mb-2 text-[11px] text-muted-foreground">
-            {ai ? "Pick a status, or run AI mapping, before saving." : "Pick a status before saving."}
+            {ai ? "Pick a status, or choose Re-run mapping, before saving." : "Pick a status before saving."}
           </p>
         )}
         <LockForm label="Save row" action="save_mapping_row" confirmLabel="Save mapping row">

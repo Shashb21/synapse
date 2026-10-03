@@ -142,6 +142,18 @@ async function addMember(args: { workspace_id: string; principal: string; role: 
  * `demo` only records the flag; the caller loads the demo contents
  * (modules/workspaces/contents.ts).
  */
+/** Long enough for "Brand X · EU5 launch 2027–2029", short enough for the sidebar and lists. */
+export const WORKSPACE_NAME_MAX = 80;
+
+function workspaceName(raw: string): string {
+  const name = raw.trim();
+  if (name.length < 2) throw new Error("Give the workspace a name.");
+  if (name.length > WORKSPACE_NAME_MAX) {
+    throw new Error(`Keep the workspace name to ${WORKSPACE_NAME_MAX} characters or fewer.`);
+  }
+  return name;
+}
+
 export async function createWorkspace(args: {
   name: string;
   owner: string;
@@ -149,8 +161,7 @@ export async function createWorkspace(args: {
   /** AI assistance starts off in a new workspace (owner feedback, KAN-52); the owner turns it on. */
   ai_enabled?: boolean;
 }): Promise<Workspace> {
-  const name = args.name.trim();
-  if (name.length < 2) throw new Error("Give the workspace a name.");
+  const name = workspaceName(args.name);
   const id = `w${randomBytes(6).toString("hex")}`;
   const schemaName = `ws_${id}`;
   await ensureWorkspaceSchema(schemaName);
@@ -205,8 +216,7 @@ export async function setWorkspaceAiColumn(workspaceId: string, enabled: boolean
 
 export async function renameWorkspace(args: { workspace_id: string; name: string; by: string }): Promise<void> {
   if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new Error("Only the workspace owner can rename it.");
-  const name = args.name.trim();
-  if (name.length < 2) throw new Error("Give the workspace a name.");
+  const name = workspaceName(args.name);
   await rows(sql`update workspaces set name = ${name} where id = ${args.workspace_id}`);
 }
 

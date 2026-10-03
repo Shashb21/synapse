@@ -40,8 +40,16 @@ function ensureSettingsTable() {
   return settingsReady;
 }
 
+/**
+ * What a customer reads when a step is refused because an admin switched AI off.
+ * Customers are not told about AI (KAN-53) and have no switch, so it names the
+ * manual path and the administrator only.
+ */
 export const AI_OFF_MESSAGE =
-  "AI is turned off. Do this step by hand, or ask your workspace owner or Synapse administrator to turn AI on.";
+  "This step isn't available right now. Do it by hand, or contact your Synapse administrator.";
+
+/** The same refusal on owner-only surfaces (accuracy lab, harness), where the switch is theirs. */
+export const AI_OFF_ADMIN_MESSAGE = "AI is turned off platform-wide. Turn it on in AI & routing to run this.";
 
 /** Thrown by every AI entry point while the switch is off. */
 export class AiDisabledError extends Error {

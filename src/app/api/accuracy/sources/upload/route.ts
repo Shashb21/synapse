@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
 import { runAccuracyModule } from "@/accuracy/kernel/run";
-import { AI_OFF_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
+import { AI_OFF_ADMIN_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
 import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { getWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
 
     // With AI off there is no parser; gaps and tactics are entered by hand.
     if (!(await aiEnabled())) {
-      return NextResponse.json({ ok: false, error: AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
+      return NextResponse.json({ ok: false, error: AI_OFF_ADMIN_MESSAGE, code: "ai_off" }, { status: 409 });
     }
 
     const workspace = await getWorkspace(workspace_id);

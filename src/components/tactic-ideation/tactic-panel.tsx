@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { CustomTypeFields } from "@/components/custom-type-fields";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 import {
   ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
@@ -142,6 +143,15 @@ function PanelForm({
 
     if (Object.keys(fields).length === 0 && !customChanged && !statusChanged) {
       setError("Nothing changed.");
+      return;
+    }
+    // The dates as they will stand after the save, checked like the server does (KAN-68).
+    const dateError = tacticDatesError(
+      fields.start_date ?? current.start_date,
+      fields.evidence_available ?? current.evidence_available,
+    );
+    if (dateError) {
+      setError(dateError);
       return;
     }
     if (rationale.length < 3) {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 
 export type ActionField = {
   name: string;
@@ -40,6 +41,16 @@ export type ActionIdentity = {
  * always collects the rationale when the action records an edit, and posts to the
  * module API.
  */
+/**
+ * Many rows share a button label ("Set dates"); a title that starts with it
+ * ("Set dates for an activity under …") tells them apart for a screen reader,
+ * and still contains the visible words.
+ */
+export function triggerName(label: string, title?: string): string | undefined {
+  if (!title || title === label) return undefined;
+  return title.toLowerCase().startsWith(label.toLowerCase()) ? title : undefined;
+}
+
 export function ActionDialog({
   endpoint,
   payload,
@@ -74,7 +85,7 @@ export function ActionDialog({
   /** A check across fields (by name, as typed) once each field passes its own; message or null. */
   validateForm?: (values: Record<string, string>) => string | null;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const formId = useId();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -110,7 +121,10 @@ export function ActionDialog({
         return;
       }
     }
-    const invalid = validateForm?.(typed);
+    // A tactic's dates, checked as the server will (KAN-68); a server page can't pass validateForm.
+    const invalid =
+      ("evidence_available" in typed ? tacticDatesError(typed.start_date, typed.evidence_available) : null) ??
+      validateForm?.(typed);
     if (invalid) {
       setError(invalid);
       return;
@@ -134,8 +148,8 @@ export function ActionDialog({
       return;
     }
     setError(null);
-    setOpen(false);
-    router.refresh();
+    // The dialog closes as the refreshed data arrives, so the page never shows the old value.
+    refresh(() => setOpen(false));
   }
 
   function onOpenChange(next: boolean) {
@@ -149,7 +163,10 @@ export function ActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={trigger ?? <Button size={size} variant={variant} className={className} />}>
+      <DialogTrigger
+        render={trigger ?? <Button size={size} variant={variant} className={className} />}
+        aria-label={triggerName(label, title)}
+      >
         {label}
       </DialogTrigger>
       <DialogContent className="z-[60] sm:max-w-md">
@@ -167,7 +184,9 @@ export function ActionDialog({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {fields.map((field) => (
-              <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+              // A new default (the page refreshed after a save) remounts the control: Base UI
+              // refuses to change an uncontrolled field's default in place (KAN-68).
+              <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
                 {field.label}
                 {field.type === "textarea" ? (
                   <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder} />
@@ -237,11 +256,15 @@ export function ActionDialog({
                 </label>
               </div>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : (confirmLabel ?? "Save")}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : (confirmLabel ?? "Save")}
             </Button>
           </DialogFooter>
         </form>

@@ -1,6 +1,7 @@
 "use client";
 
 import { LockForm } from "@/components/lock-form";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import {
   ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
@@ -172,6 +173,7 @@ export function MapExistingTactic({
   availableTactics: TacticLibraryItem[];
   mappedTacticIds: string[];
 }) {
+  const ai = useAiEnabled("mapping");
   const unmapped = availableTactics.filter((tactic) => !mappedTacticIds.includes(tactic.id));
   if (unmapped.length === 0) return null;
   return (
@@ -213,7 +215,7 @@ export function MapExistingTactic({
         </select>
         <span className="text-[11px] text-muted-foreground/80">
           A planned, ongoing or completed tactic that is not assessed leaves the gap Partially Addressed.
-          With AI on, AI mapping can assess it; otherwise set it here or later on the gap page.
+          {ai ? "Re-run mapping can assess it, or set it here or later on the gap page." : "Set it here or later on the gap page."}
         </span>
       </label>
     </LockForm>

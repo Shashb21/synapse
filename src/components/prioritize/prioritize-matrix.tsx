@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { SettingChips } from "@/components/gap-settings-editor";
 import { placementGapError, scoreError } from "@/components/prioritize/score-input";
 import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
@@ -168,7 +168,7 @@ export function AxisChooser({
   submitLabel: string;
   onCancel?: () => void;
 }) {
-  const router = useRouter();
+  const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const [xAxis, setXAxis] = useState(initialX);
   const [yAxis, setYAxis] = useState(initialY);
@@ -201,13 +201,15 @@ export function AxisChooser({
       if (!result.ok) {
         setPending(false);
         setError(result.error ?? "Prioritization failed");
-        router.refresh();
+        refresh();
         return;
       }
     }
-    setPending(false);
-    onCancel?.();
-    router.refresh();
+    // The chooser gives way to the matrix once the placements have arrived.
+    refresh(() => {
+      setPending(false);
+      onCancel?.();
+    });
   }
 
   const x = axes.find((axis) => axis.id === xAxis);
@@ -237,7 +239,11 @@ export function AxisChooser({
           {unfavourableLabel(y)} and {unfavourableLabel(x)}.
         </p>
       ) : null}
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {error}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -319,6 +325,7 @@ function GapDetail({
   identity: ActionIdentity;
   mayPrioritize: boolean;
 }) {
+  const ai = useAiEnabled("prioritization");
   const point = pointOf(gap, xAxis, yAxis);
   const band = gap.band ?? gap.suggested_band;
   const quadrant = point ? bandAt(point, xAxis, yAxis) : null;
@@ -365,8 +372,8 @@ function GapDetail({
       ) : null}
       {quadrant && band && quadrant !== band ? (
         <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-          This gap&apos;s band ({BAND_LABELS[band]}) was set on a different pair of axes. It sits in the{" "}
-          {BAND_LABELS[quadrant]} quadrant here — drag it to change its priority.
+          Its band ({BAND_LABELS[band]}) differs from the quadrant it sits in here ({BAND_LABELS[quadrant]}). Drag
+          it, or edit its scores or band, to match.
         </p>
       ) : null}
       {gap.validated ? (
@@ -412,7 +419,10 @@ function GapDetail({
                 { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
                 ...BANDS.map((value) => ({ value, label: BAND_LABELS[value] })),
               ],
-              hint: "A band you set here is yours: a later model run keeps it and only updates its own suggestion.",
+              // Customers aren't told about AI when it is off (KAN-53).
+              hint: ai
+                ? "A band you set here is yours: a later model run keeps it and only updates its own suggestion."
+                : "A band you set here is kept until you change it.",
             },
             {
               name: "validate",
@@ -434,7 +444,11 @@ function GapDetail({
           }
           label={point ? "Edit scores" : "Type scores"}
           title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
-          description="Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
+          description={
+            ai
+              ? "Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
+              : "Type the exact axis scores and, if you want, the band."
+          }
           confirmLabel="Save placement"
           requireRationale
           identity={identity}
@@ -482,7 +496,7 @@ export function PrioritizeMatrix({
   identity: ActionIdentity;
   mayPrioritize: boolean;
 }) {
-  const router = useRouter();
+  const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const plotRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -499,7 +513,9 @@ export function PrioritizeMatrix({
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const [bands, setBands] = useState<Record<string, { band: Band; validated: boolean }>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  // An error is announced as an alert; a summary (re-suggest finished) is quiet text.
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const showError = (text: string) => setMessage({ text, error: true });
 
   // Server data is the truth once it refreshes; drop local drag overrides then.
   const [seenGaps, setSeenGaps] = useState(gaps);
@@ -526,11 +542,13 @@ export function PrioritizeMatrix({
       setting: scope,
       onlyMissing: true,
     }).then((result) => {
-      setBusy(null);
-      if (!result.ok) setMessage(result.error ?? "Could not place the new gaps.");
-      router.refresh();
+      // "Placing…" stays up until the placed gaps are on the matrix, not just saved.
+      refresh(() => {
+        setBusy(null);
+        if (!result.ok) setMessage({ text: result.error ?? "Could not place the new gaps.", error: true });
+      });
     });
-  }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, router]);
+  }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, refresh]);
 
   const view = gaps.map((gap) => {
     const point = positions[gap.gap_id] ?? pointOf(gap, xAxis, yAxis);
@@ -578,7 +596,7 @@ export function PrioritizeMatrix({
       placement?: { band: Band; validated: boolean };
     };
     if (!res.ok || !json.placement) {
-      setMessage(json.error ?? "Could not move the gap.");
+      showError(json.error ?? "Could not move the gap.");
       setPositions((current) => {
         const next = { ...current };
         delete next[gapId];
@@ -587,7 +605,7 @@ export function PrioritizeMatrix({
       return;
     }
     setBands((current) => ({ ...current, [gapId]: json.placement! }));
-    router.refresh();
+    refresh();
   }
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
@@ -705,9 +723,11 @@ export function PrioritizeMatrix({
       setting: scope,
       onlyMissing: false,
     });
-    setBusy(null);
-    setMessage(result.ok ? (result.summary ?? null) : (result.error ?? "Re-suggest failed"));
-    router.refresh();
+    refresh(() => {
+      setBusy(null);
+      if (!result.ok) showError(result.error ?? "Re-suggest failed");
+      else setMessage(result.summary ? { text: result.summary, error: false } : null);
+    });
   }
 
   /** Axes change in place (owner feedback, KAN-56): save them, then place any gap missing scores on them. */
@@ -718,7 +738,7 @@ export function PrioritizeMatrix({
     const saveError = await saveAxes(scope, nextX, nextY);
     if (saveError) {
       setBusy(null);
-      setMessage(saveError);
+      showError(saveError);
       return;
     }
     if (ai && gaps.length > 0) {
@@ -731,10 +751,9 @@ export function PrioritizeMatrix({
         setting: scope,
         onlyMissing: true,
       });
-      if (!result.ok) setMessage(result.error ?? "Prioritization failed");
+      if (!result.ok) showError(result.error ?? "Prioritization failed");
     }
-    setBusy(null);
-    router.refresh();
+    refresh(() => setBusy(null));
   }
 
   return (
@@ -817,7 +836,13 @@ export function PrioritizeMatrix({
           ) : null}
         </div>
       </div>
-      {message ? <p className="text-[12px] text-muted-foreground">{message}</p> : null}
+      {message?.error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {message.text}
+        </p>
+      ) : message ? (
+        <p className="text-[12px] text-muted-foreground">{message.text}</p>
+      ) : null}
 
       {/* The matrix and its side panel share one screen (KAN-56): the matrix shrinks to the
           window height, so a gap in "Not placed yet" can be dragged on without scrolling. */}

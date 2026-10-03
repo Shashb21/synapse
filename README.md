@@ -62,14 +62,16 @@ Passwords: at least 12 characters, not your email, not a common password; stored
 
 ### AI on and off
 
-Two switches decide whether AI runs, and both must be on:
+The Synapse admin decides whether AI runs, in the owner console (`/admin/control`), for every customer at once (KAN-53):
 
-- the **master switch** in the owner console (`/admin/control`, "AI for all workspaces"): one click, no reason, applies to every workspace;
-- each workspace's own **AI assistance** setting, which only that workspace's owner can change (workspace menu or the workspace settings page). The change is audited in that workspace; members see it read-only, and it is disabled while the master switch is off.
+- the **master switch** ("AI for all workspaces") turns all AI on or off;
+- each **AI section** (ingestion, gap extraction, tactic extraction, mapping, partial split, prioritization, ideation) has its own switch, so one step can run by hand while the rest use AI.
+
+Customers have no AI switch of their own and are not told when a section is off: the screens simply offer the manual path.
 
 With AI off no model is called and nothing is uploaded or parsed: the first place is **Start**, where gaps and tactics are added by hand, and every later step works by hand. With AI on, every manual path is still there.
 
-With AI on, the first visit is **Upload** on `/`. Upload a source; the LLM chosen for the parse stage parses every file type (PDF, PPTX, DOCX, XLSX, text) into blocks. There is no separate parser service. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
+With AI on, the first visit is **Upload** on `/`. Upload a source (PDF, DOCX, PPTX, XLSX, .txt or .md, up to 3 MB) or paste its text; the LLM chosen for the parse stage parses every file type into blocks. Old .doc, .ppt and .xls files must be saved as the newer formats first. There is no separate parser service. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
 
 Gap status after mapping (not the Plan High / Medium / Low bands):
 
@@ -83,14 +85,13 @@ Customer app:
 | --- | --- |
 | `/` | Sidebar places: Upload (or Start with AI off) → Gaps → Prioritize → Tactics. Query `?place=` |
 | `/timeline` | The IEGP timeline, built by hand: every prioritized gap with its activities beneath it; create, date, drag and sequence activities with no model, warnings for broken dependencies, detail on click, image (PNG) export, save as final (Medical Affairs) |
-| `/ideation` | Tactic ideas for validated open gaps, AI-proposed or added by hand |
+| `/ideation` | Tactic ideas for High-priority open gaps, AI-proposed or added by hand (Medium and Low gaps get tactics from the library or by hand on the gap) |
 | `/needs`, `/residuals`, `/roadmap`, `/mappings` | Secondary lists: constituent needs, residual gaps, forward roadmap, gap × tactic mapping table |
-| `/room`, `/room/audience` | Presenter console and the audience window that follows it. There is no PowerPoint export (the timeline exports as a PNG image) |
-| `/breakouts` | Workshop breakout groups, each group's room in its own window |
-| `/presentation` | Read-only chaptered walkthrough (context → gaps → tactics → timeline) |
+| `/room`, `/room/audience`, `/presentation` | **Hidden for now** (KAN-52): redirect to the plan. The presenter console and audience window come back by setting `ROOM_ENABLED` in `src/lib/room/enabled.ts`. The timeline exports as a PNG image |
+| `/breakouts` | **Hidden for now** (KAN-57): redirects to the plan. Comes back by setting `BREAKOUTS_ENABLED` in `src/lib/breakouts-enabled.ts` |
 | `/setup` | Setup wizard for the plan's context |
 | `/sources` | Upload and review sources and their parsed blocks (read only with AI off) |
-| `/workspaces`, `/workspaces/[id]` | Your workspaces; settings (rename, members, AI assistance, load demo / reset to blank) |
+| `/workspaces`, `/workspaces/[id]` | Your workspaces; settings (rename, members, load demo / reset to blank) |
 | `/login`, `/account` | SSO sign-in for seat holders (plus staff email and password); your account and, for staff, your password |
 
 `/matrix` is kept only as a redirect to Prioritize (`/?place=plan`) so old bookmarks work.

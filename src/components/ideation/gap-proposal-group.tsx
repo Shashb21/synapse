@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
+import { plural } from "@/lib/plural";
 
 export type GapProposalGroup = {
   gap_id: string;
@@ -33,7 +34,7 @@ export function AddIdeaDialog({
       fields={proposalFields()}
       label="Add idea by hand"
       title={`Add an idea for ${gapName}`}
-      description="Write the tactic yourself — no model run needed. It joins the ideas awaiting a decision and is accepted or rejected the same way."
+      description="Write the tactic yourself. It joins the ideas awaiting a decision and is accepted or rejected the same way."
       confirmLabel="Add idea"
       requireRationale
       identity={identity}
@@ -86,7 +87,7 @@ export function GapProposalGroupCard({
         </Link>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
-          {group.proposals.length} proposal(s) · {open} awaiting a decision · {accepted} accepted
+          {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
         </p>
         {mayIdeate ? (
           <div>

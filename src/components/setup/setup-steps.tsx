@@ -89,6 +89,7 @@ export function AssetStep({ form, set, errors }: StepProps) {
       </div>
       <ListField<SetupIndication>
         label="Indications"
+        itemLabel="Indication"
         required
         hint="Current indications and the ones planned in this plan's horizon."
         items={form.indications}
@@ -191,6 +192,7 @@ export function ObjectivesStep({ form, set, errors }: StepProps) {
     >
       <ListField<SetupObjective>
         label="Objectives"
+        itemLabel="Objective"
         required
         items={form.objectives}
         onChange={(items) => set("objectives", items)}
@@ -259,6 +261,7 @@ export function LandscapeStep({ form, set, errors }: StepProps) {
       />
       <ListField<SetupCompetitor>
         label="Competitors"
+        itemLabel="Competitor"
         items={form.competitors}
         onChange={(items) => set("competitors", items)}
         blank={() => ({ name: "", pressure: "medium", note: "" })}
@@ -291,6 +294,7 @@ export function LandscapeStep({ form, set, errors }: StepProps) {
       <TagField label="Key payer / HTA bodies" values={form.payer_hta_bodies} onChange={(v) => set("payer_hta_bodies", v)} suggestions={PAYERS} />
       <ListField<SetupMilestone>
         label="Regulatory milestones"
+        itemLabel="Milestone"
         items={form.regulatory_milestones}
         onChange={(items) => set("regulatory_milestones", items)}
         blank={() => ({ name: "", date: "" })}
@@ -317,6 +321,7 @@ export function StakeholdersStep({ form, set, errors }: StepProps) {
     >
       <ListField<SetupStakeholder>
         label="Functions involved"
+        itemLabel="Function"
         required
         items={form.stakeholders}
         onChange={(items) => set("stakeholders", items)}

@@ -7,7 +7,8 @@ import { NoWorkspaceError, selectedWorkspaceId } from "@/modules/workspaces/cont
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 import { currentSession, SESSION_COOKIE, type Session } from "./session";
-import { NoRouteError } from "@/modules/llm/provider";
+import { NoRouteError, ProviderError } from "@/modules/llm/provider";
+import { customerErrorMessage, isAdminOnlyError, stageOf } from "@/modules/kernel/stage-errors";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { ownerAccess } from "./owner";
 import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./roles";
@@ -168,10 +169,30 @@ export async function readJsonBody(request: Request): Promise<Record<string, unk
  * /admin/control link.
  */
 export async function noLlmResponse(detail: string): Promise<NextResponse> {
-  const owner = await ownerAccess()
+  return NextResponse.json(noLlmBody(detail, await requestIsOwner()), { status: 409 });
+}
+
+async function requestIsOwner(): Promise<boolean> {
+  return ownerAccess()
     .then((access) => access.owner)
     .catch(() => false);
-  return NextResponse.json(noLlmBody(detail, owner), { status: 409 });
+}
+
+/**
+ * The body for a failed AI step (KAN-68). The owner gets the technical message
+ * (route remedies, provider and key detail); anyone else gets customer wording
+ * from stage-errors.ts, never /admin/control or a provider's raw reply. `stage`
+ * says which step failed, so a page can offer to run it again.
+ */
+export function stageFailureBody(error: unknown, owner: boolean, fallback = "Request failed") {
+  const message = error instanceof Error ? error.message : fallback;
+  const customer = customerErrorMessage(error);
+  const stage = stageOf(error);
+  return {
+    error: owner || customer === null ? message : customer,
+    ...(error instanceof ProviderError ? { code: "provider_error", provider_error: error.kind } : {}),
+    ...(stage ? { stage } : {}),
+  };
 }
 
 export async function apiErrorResponse(error: unknown, fallback = "Request failed"): Promise<NextResponse> {
@@ -188,6 +209,8 @@ export async function apiErrorResponse(error: unknown, fallback = "Request faile
     return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
   }
   if (error instanceof NoRouteError) return noLlmResponse(error.message);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
+  // Only an owner-worded error needs the audience check.
+  const owner = isAdminOnlyError(error) ? await requestIsOwner() : true;
+  const status = error instanceof ProviderError ? 502 : 400;
+  return NextResponse.json(stageFailureBody(error, owner, fallback), { status });
 }
