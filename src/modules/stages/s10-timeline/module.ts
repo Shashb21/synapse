@@ -1060,9 +1060,9 @@ export async function savePlan(args: {
   const [model, state] = await Promise.all([timelineModel(), loadState()]);
   if (args.status === "final" && model.pending.length > 0) {
     throw new Error(
-      `${model.pending.length} activity(ies) have no schedule yet (${model.pending
+      `${model.pending.length === 1 ? "1 activity has" : `${model.pending.length} activities have`} no schedule yet (${model.pending
         .map((row) => row.tactic_name)
-        .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or rebuild the timeline, then save it as final.`,
+        .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or remove it, then save the plan as final.`,
     );
   }
   const previous = await latestPlan();
