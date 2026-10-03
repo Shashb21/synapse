@@ -368,6 +368,7 @@ export function IdeationBoard({
   /** Editable tactic records for the side panel (KAN-50); a tactic without one opens its page. */
   tactics?: Record<string, TacticEditModel>;
 }) {
+  const ai = useAiEnabled("ideation");
   const [editingId, setEditingId] = useState<string | null>(null);
   const openEditor = (tacticId: string) => {
     if (!tactics[tacticId]) return false;
@@ -435,8 +436,8 @@ export function IdeationBoard({
             priority on the matrix — the ones this plan must close.
           </li>
           <li>
-            <span className="font-semibold text-foreground">2. Give it a tactic.</span> Assign one from the library, write a
-            custom tactic, or accept a suggestion when AI is on.
+            <span className="font-semibold text-foreground">2. Give it a tactic.</span> Assign one from the library
+            {ai ? ", write a custom tactic, or accept a suggestion." : " or write a custom tactic."}
           </li>
           <li>
             <span className="font-semibold text-foreground">3. Plan it.</span> A proposed tactic is an idea; set it to planned
