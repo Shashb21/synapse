@@ -1,9 +1,9 @@
 import postgres from "postgres";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
-import { listClaims } from "@/accuracy/store/claim-store";
+import { applyClaimValidation, listClaims, listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { decideItemRelationship, publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
@@ -368,5 +368,46 @@ describe("assembly store", () => {
     expect(read?.items[0]?.canonical_claim_id).toBe(draftClaim.id);
     expect((await resolveAssemblyItems(seeded.scope.workspace_id, [{ item_version_id: seeded.gapVersion.id, reason: "now" }]))[0]?.canonical_claim_id)
       .toBe(finalClaim.id);
+  });
+
+  it("saves valid-origin malformed raw provenance as a blocked inspectable assembly", async () => {
+    const scope = await fixture();
+    const malformedRaw = { id: "gap-malformed", statement: "Malformed raw quote", external_id: null,
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id }] };
+    const finalGap = gap(scope, "Final source-backed gap");
+    const final = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [finalGap] };
+    const run_id = await extractionRun(scope, "gap", [{ ...final, gaps: [malformedRaw] }], final);
+    await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [{
+      id: finalGap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: finalGap.statement,
+    }] });
+    const versions = await accuracyDb().select().from(t.accuracyItemVersions)
+      .where(and(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id), eq(t.accuracyItemVersions.item_index, 0)));
+    const version = versions.find(row => (row.payload as Record<string, unknown>).statement === malformedRaw.statement);
+
+    const assembly = await createAssembly({ workspace_id: scope.workspace_id, actor, source_file_ids: [scope.source_file_id],
+      selections: [{ item_version_id: version!.id, reason: "raw malformed but retained" }],
+      mappings: [], coverage_run_ids: [], linking_complete: true, generation_key: "malformed:raw" });
+
+    expect(assembly.output.gaps).toEqual([malformedRaw]);
+    expect(assembly.checks.status).toBe("blocked");
+    expect(assembly.checks.findings.map(finding => finding.code)).toContain("malformed_provenance_span");
+    expect((await readAssembly(scope.workspace_id, assembly.id))?.checks.status).toBe("blocked");
+  });
+
+  it("does not change downstream readers or validation state when creating an assembly", async () => {
+    const seeded = await seedMixed();
+    await applyClaimValidation({ workspace_id: seeded.scope.workspace_id, claim_ids: [seeded.finalGap.id],
+      action: "validate", rationale: "Clinically reviewed source", actor });
+    const beforeDownstream = await listDownstreamClaims(seeded.scope.workspace_id, { limit: null });
+    const beforeValidation = await listClaims(seeded.scope.workspace_id);
+
+    await createAssembly({ workspace_id: seeded.scope.workspace_id, actor, source_file_ids: [seeded.scope.source_file_id],
+      selections: [{ item_version_id: seeded.gapVersion.id, reason: "review-only alternative" },
+        { item_version_id: seeded.tacticVersion.id, reason: "selected tactic" }],
+      mappings: [], coverage_run_ids: [], linking_complete: false });
+
+    expect(await listDownstreamClaims(seeded.scope.workspace_id, { limit: null })).toEqual(beforeDownstream);
+    expect((await listClaims(seeded.scope.workspace_id)).map(row => [row.id, row.status, row.validated, row.metadata]))
+      .toEqual(beforeValidation.map(row => [row.id, row.status, row.validated, row.metadata]));
   });
 });

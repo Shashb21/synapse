@@ -7,6 +7,7 @@ import {
   checkAssembly,
   type Assembly,
   type AssemblyCoverage,
+  type AssemblyExtractionRun,
   type AssemblyMapping,
   type AssemblySelection,
   type ResolvedAssemblyItem,
@@ -251,6 +252,7 @@ function assemblyFromRows(
     items: itemRows.map((row) => row.resolved_item as ResolvedAssemblyItem),
     mappings: header.mappings as AssemblyMapping[],
     coverage: header.coverage as AssemblyCoverage[],
+    extraction_runs: (header.extraction_runs as AssemblyExtractionRun[] | null) ?? null,
     linking_complete: header.linking_complete,
     output: header.output as Assembly["output"],
     checks: header.checks as Assembly["checks"],
@@ -301,6 +303,7 @@ export async function createAssembly(args: {
   selections: AssemblySelection[];
   mappings: AssemblyMapping[];
   coverage_run_ids: string[];
+  extraction_runs?: AssemblyExtractionRun[] | null;
   linking_complete: boolean;
   generation_key?: string;
 }): Promise<Assembly> {
@@ -328,6 +331,7 @@ export async function createAssembly(args: {
       items,
       mappings: args.mappings,
       coverage,
+      extraction_runs: args.extraction_runs ?? null,
       linking_complete: args.linking_complete,
     });
 
@@ -359,6 +363,7 @@ export async function createAssembly(args: {
       source_file_ids: args.source_file_ids,
       mappings: args.mappings,
       coverage,
+      extraction_runs: args.extraction_runs ?? null,
       linking_complete: args.linking_complete,
       output,
       checks,

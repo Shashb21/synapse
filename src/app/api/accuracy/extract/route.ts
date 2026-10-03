@@ -40,10 +40,11 @@ const bodySchema = z.object({
     .default(["need", "inventory"]),
   actor_name: z.string().min(1).optional(),
   actor_function: z.string().min(1).optional(),
-});
+}).strict();
 
 const resumeSchema = z.object({ action: z.literal("resume"), workspace_id: z.string().min(1), source_file_id: z.string().min(1),
-  extraction_batch_id: z.string().min(1), idempotency_key: z.string().trim().min(1) });
+  extraction_batch_id: z.string().min(1), idempotency_key: z.string().trim().min(1),
+  actor_name: z.string().min(1).optional(), actor_function: z.string().min(1).optional() }).strict();
 
 const MAX_EXTRACT_BLOCKS = 80;
 
@@ -69,9 +70,24 @@ async function attachAssembly<T extends { workspace_id: string; source_file_id: 
     actor: args.actor,
     source_file_ids: [response.source_file_id],
     extraction_run_ids: batch.run_ids,
+    requested_kinds: batch.requested_kinds as Array<"need_extract" | "inventory_extract">,
     generation_key: batch.id,
   });
   return { ...response, assembly_id: assembly.id, assembly_checks: assembly.checks };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assemblyIncompleteResponse<T extends { extraction_batch_id: string; runs?: unknown; gaps_inserted?: number; tactics_inserted?: number }>(response: T, error: unknown) {
+  console.error("Extraction assembly generation failed", error);
+  return NextResponse.json({
+    ...response,
+    ok: false,
+    assembly_incomplete: true,
+    error: "Complete proposal linking failed. Retry resume to finish the saved extraction batch.",
+  }, { status: 500 });
 }
 
 /**
@@ -81,7 +97,8 @@ async function attachAssembly<T extends { workspace_id: string; source_file_id: 
 export async function POST(req: Request) {
   try {
     const raw = await req.json();
-    if (raw && raw.action === "resume") {
+    if (!isRecord(raw)) return NextResponse.json({ ok: false, error: "Expected a JSON object." }, { status: 400 });
+    if (raw.action === "resume") {
       const identity = await requestIdentity(raw);
       if (!identity.signed_in) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
       assertCan(identity.role, "validate");
@@ -107,7 +124,12 @@ export async function POST(req: Request) {
             tactics_inserted: runs.filter(run => run.call_kind === "inventory_extract").reduce((sum, run) => sum + run.count, 0),
             merge: downstream.merge.output, statuses: downstream.status.output, runs: [...runs, ...downstream.runs] };
         } });
-      return NextResponse.json(await attachAssembly(response, { org_id, actor: identity.actor }));
+      try {
+        return NextResponse.json(await attachAssembly(response, { org_id, actor: identity.actor }));
+      } catch (error) {
+        if (error instanceof AssemblyError) throw error;
+        return assemblyIncompleteResponse(response, error);
+      }
     }
     const body = bodySchema.parse(raw);
     const identity = await requestIdentity(raw);
@@ -265,13 +287,20 @@ export async function POST(req: Request) {
             runs: [...runs, ...downstream.runs], stub: gate.stub, provider_id: gate.stub ? null : gate.provider_id,
             provider_label: gate.stub ? null : gate.provider_label, auth: gate.stub ? null : gate.auth };
         } });
-      return NextResponse.json(await attachAssembly(response, { org_id, actor }));
+      try {
+        return NextResponse.json(await attachAssembly(response, { org_id, actor }));
+      } catch (error) {
+        if (error instanceof AssemblyError) throw error;
+        return assemblyIncompleteResponse(response, error);
+      }
     } catch (error) {
       if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers,
         extraction_batch_id: batch.id, runs, gaps_inserted, tactics_inserted }, { status: 409 });
       throw error;
     }
   } catch (error) {
+    if (error instanceof SyntaxError) return NextResponse.json({ ok: false, error: "Invalid JSON request." }, { status: 400 });
+    if (error instanceof z.ZodError) return NextResponse.json({ ok: false, error: error.issues.map(issue => issue.message).join("; ") }, { status: 400 });
     if (error instanceof ItemHistoryError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
     if (error instanceof AssemblyError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
     if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
@@ -283,7 +312,7 @@ export async function POST(req: Request) {
         return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
       }
     }
-    const message = error instanceof Error ? error.message : "Extract failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    console.error("Extract request failed", error);
+    return NextResponse.json({ ok: false, error: "Extract failed" }, { status: 500 });
   }
 }

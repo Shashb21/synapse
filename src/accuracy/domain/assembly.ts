@@ -21,6 +21,14 @@ export type AssemblyCoverage = AssemblyMapping & {
   output: unknown;
   mode: "llm" | "stub";
 };
+export type AssemblyExtractionRun = {
+  call_kind: "need_extract" | "inventory_extract";
+  run_id: string;
+  source_file_id: string;
+  item_count: number;
+  outcome: "items" | "empty";
+  evaluation_context?: "production" | "experiment";
+};
 export type AssemblyCheckReport = {
   checker_version: string;
   status: "passed" | "blocked";
@@ -41,6 +49,7 @@ export type Assembly = {
   items: ResolvedAssemblyItem[];
   mappings: AssemblyMapping[];
   coverage: AssemblyCoverage[];
+  extraction_runs: AssemblyExtractionRun[] | null;
   linking_complete: boolean;
   output: { gaps: Record<string, unknown>[]; tactics: Record<string, unknown>[] };
   checks: AssemblyCheckReport;
@@ -85,9 +94,9 @@ function duplicateFindings(findings: Finding[], code: string, idsByKey: Map<stri
   }
 }
 
-function collectProvenance(payload: Record<string, unknown>): ProvenanceSpan[] {
+function collectProvenance(payload: Record<string, unknown>): Record<string, unknown>[] {
   return Array.isArray(payload.provenance)
-    ? payload.provenance.filter((span): span is ProvenanceSpan => Boolean(span) && typeof span === "object") as ProvenanceSpan[]
+    ? payload.provenance.filter((span): span is Record<string, unknown> => Boolean(span) && typeof span === "object" && !Array.isArray(span))
     : [];
 }
 
@@ -125,12 +134,13 @@ function payloadMatches(a: unknown, b: unknown): boolean {
 }
 
 /** Build the deterministic content fingerprint for an immutable assembly body. */
-export function assemblyFingerprint(args: Pick<Assembly, "source_file_ids" | "items" | "mappings" | "coverage" | "linking_complete">): string {
+export function assemblyFingerprint(args: Pick<Assembly, "source_file_ids" | "items" | "mappings" | "coverage" | "extraction_runs" | "linking_complete">): string {
   return createHash("sha256").update(canonicalString({
     source_file_ids: args.source_file_ids,
     items: args.items,
     mappings: args.mappings,
     coverage: args.coverage,
+    extraction_runs: args.extraction_runs,
     linking_complete: args.linking_complete,
   })).digest("hex");
 }
@@ -187,15 +197,25 @@ export function checkAssembly(args: {
       addFinding(findings, "missing_provenance", [item.id], "Selected item must include at least one provenance span.");
     }
     for (const span of spans) {
-      if (!sourceScope.has(span.source_file_id)) {
-        addFinding(findings, "source_out_of_scope", [item.id], `Evidence source ${span.source_file_id} is outside the assembly source scope.`);
-      }
-      const block = blocksById.get(span.block_id);
-      if (!block) {
-        addFinding(findings, "unknown_evidence_block", [item.id], `Evidence block ${span.block_id} is not available for checking.`);
+      if (typeof span.source_file_id !== "string" || !span.source_file_id.trim()
+        || typeof span.block_id !== "string" || !span.block_id.trim()
+        || typeof span.quote !== "string") {
+        addFinding(findings, "malformed_provenance_span", [item.id], "Evidence provenance must include string source_file_id, block_id, and quote fields.");
         continue;
       }
-      const quote = validateProvenance({ block, span });
+      const checkedSpan: ProvenanceSpan = { source_file_id: span.source_file_id, block_id: span.block_id, quote: span.quote };
+      if (checkedSpan.source_file_id !== item.source_file_id) {
+        addFinding(findings, "evidence_source_mismatch", [item.id], `Evidence source ${checkedSpan.source_file_id} does not match selected item source ${item.source_file_id}.`);
+      }
+      if (!sourceScope.has(checkedSpan.source_file_id)) {
+        addFinding(findings, "source_out_of_scope", [item.id], `Evidence source ${checkedSpan.source_file_id} is outside the assembly source scope.`);
+      }
+      const block = blocksById.get(checkedSpan.block_id);
+      if (!block) {
+        addFinding(findings, "unknown_evidence_block", [item.id], `Evidence block ${checkedSpan.block_id} is not available for checking.`);
+        continue;
+      }
+      const quote = validateProvenance({ block, span: checkedSpan });
       if (!quote.ok) {
         addFinding(findings, "invalid_evidence_quote", [item.id], `Evidence quote failed validation: ${quote.reason}.`);
       }
@@ -283,8 +303,8 @@ export function checkAssembly(args: {
     decidedPairs.add(pair);
 
     const allowedBlocks = new Set([
-      ...collectProvenance(gaps.get(row.gap_version_id)?.payload ?? {}).map((span) => span.block_id),
-      ...collectProvenance(tactics.get(row.tactic_version_id)?.payload ?? {}).map((span) => span.block_id),
+      ...collectProvenance(gaps.get(row.gap_version_id)?.payload ?? {}).flatMap((span) => typeof span.block_id === "string" ? [span.block_id] : []),
+      ...collectProvenance(tactics.get(row.tactic_version_id)?.payload ?? {}).flatMap((span) => typeof span.block_id === "string" ? [span.block_id] : []),
     ]);
     const inputBlockBundle = coverageInputBlockBundle(row.input);
     if (!inputBlockBundle) {
