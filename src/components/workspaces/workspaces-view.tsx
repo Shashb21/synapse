@@ -52,6 +52,7 @@ export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boole
         <Input
           name="workspace-name"
           value={name}
+          maxLength={80}
           autoFocus={autoFocus}
           placeholder="e.g. Brand X · EU launch"
           onChange={(event) => setName(event.target.value)}

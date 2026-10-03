@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2, UserMinus, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ export function WorkspaceSettings({
   isCurrent?: boolean;
 }) {
   const owner = workspace.role === "owner";
+  const router = useRouter();
   const [name, setName] = useState(workspace.name);
   const [savedName, setSavedName] = useState(workspace.name);
   const [members, setMembers] = useState(initialMembers);
@@ -65,12 +67,14 @@ export function WorkspaceSettings({
                 await sendJson(base, { name }, "PATCH");
                 setSavedName(name.trim());
                 setNotice("Workspace renamed.");
+                // The page heading and the sidebar's workspace name are server-rendered.
+                router.refresh();
               });
             }}
           >
             <label className="grid min-w-56 flex-1 gap-1 text-[12px] text-muted-foreground">
               Workspace name
-              <Input value={name} onChange={(event) => setName(event.target.value)} />
+              <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
             </label>
             <Button type="submit" disabled={pending !== null || name.trim() === savedName || name.trim().length < 2}>
               {pending === "rename" ? <Loader2 className="size-4 animate-spin" /> : null}
