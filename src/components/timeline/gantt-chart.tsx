@@ -1,7 +1,7 @@
 "use client";
 
 import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
-import { useMemo, type RefObject } from "react";
+import { useMemo, useSyncExternalStore, type RefObject } from "react";
 import { useIsDark } from "@/components/theme-toggle";
 import type { TimelineActivity, TimelineBand, TimelineModel } from "@/modules/stages/s10-timeline/build";
 
@@ -36,7 +36,7 @@ export const FALLBACK = {
   unprioritized: "#6b7280",
   addressed: "#059669",
   readout: "#2563eb",
-  today: "#e11d48",
+  today: "#7e22ce",
   grid: "#e5e7eb",
   card: "#ffffff",
   background: "#f4f5f7",
@@ -48,10 +48,10 @@ export const FALLBACK = {
 
 export type Palette = typeof FALLBACK;
 
-const TOKENS: Record<keyof Palette, string> = {
+export const PALETTE_TOKENS: Record<keyof Palette, string> = {
   high: "--chart-5",
   medium: "--chart-4",
-  low: "--chart-3",
+  low: "--opportunity", // as on the prioritize matrix
   unprioritized: "--muted-foreground",
   addressed: "--known",
   readout: "--opportunity",
@@ -73,19 +73,26 @@ export function readPalette(): Palette {
   if (typeof document === "undefined") return FALLBACK;
   const computed = getComputedStyle(document.documentElement);
   const next = { ...FALLBACK };
-  for (const key of Object.keys(TOKENS) as (keyof Palette)[]) {
-    const value = computed.getPropertyValue(TOKENS[key]).trim();
+  for (const key of Object.keys(PALETTE_TOKENS) as (keyof Palette)[]) {
+    const value = computed.getPropertyValue(PALETTE_TOKENS[key]).trim();
     if (value) next[key] = value;
   }
   return next;
 }
 
-/** The palette, re-read whenever the light/dark theme on <html> changes. */
+const noSubscription = () => () => {};
+
+/**
+ * The palette, re-read whenever the light/dark theme on <html> changes. The first
+ * client render uses FALLBACK, exactly as the server did, so hydration matches
+ * (KAN-68); the stylesheet's tokens are read on the render after it.
+ */
 export function usePalette(): Palette {
   const dark = useIsDark();
+  const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
   // `dark` is the trigger: the tokens behind the palette change with the theme.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => readPalette(), [dark]);
+  return useMemo(() => (hydrated ? readPalette() : FALLBACK), [dark, hydrated]);
 }
 
 export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
