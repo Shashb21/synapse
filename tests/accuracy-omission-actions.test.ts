@@ -6,6 +6,7 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import * as store from "@/accuracy/store/omission-review-store";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { insertClaim } from "@/accuracy/store/claim-store";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -56,9 +57,10 @@ async function claims(f: Awaited<ReturnType<typeof fixture>>) {
   return accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, f.workspace_id));
 }
 async function candidate(f: Awaited<ReturnType<typeof fixture>>, opts: { statement?: string; kind?: "gap" | "tactic"; status?: string; metadata?: Record<string, unknown>; workspace_id?: string } = {}) {
-  return insertClaim({ workspace_id: opts.workspace_id ?? f.workspace_id, claim_type: opts.kind ?? f.issue.item_kind,
+  // Candidate rows model existing extraction material. Keep the contributor decision outside this scope.
+  return withAssemblyPreparation(() => insertClaim({ workspace_id: opts.workspace_id ?? f.workspace_id, claim_type: opts.kind ?? f.issue.item_kind,
     source_file_id: f.source_file_id, statement: opts.statement ?? f.issue.summary, status: opts.status,
-    metadata: { provenance: [{ ...f.issue.source_ref, quote: f.issue.evidence_quote }], ...opts.metadata } });
+    metadata: { provenance: [{ ...f.issue.source_ref, quote: f.issue.evidence_quote }], ...opts.metadata } }));
 }
 async function post(body: unknown) {
   const { POST } = await import("@/app/api/accuracy/omissions/route");

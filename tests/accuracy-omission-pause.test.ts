@@ -12,11 +12,17 @@ import { CALL_KINDS, type CallKind } from "@/accuracy/kernel/contracts";
 import { activateAccuracyModule, activeAccuracyModuleId, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { mechanicalModule } from "@/accuracy/modules/_factory";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
+import { createAssembly } from "@/accuracy/store/assembly-store";
+import { reviewAssembly } from "@/accuracy/store/assembly-review-store";
+import { publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
+import { applyExtractionBatch, createExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { insertSourceFile } from "@/accuracy/store/source-store";
 import { claimMetadata, getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
-import { listCoverageJoins, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { projectWorkspaceGantt, saveFinalGanttPlan } from "@/accuracy/modules/gantt-project/save-final";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -47,20 +53,69 @@ async function fixture(importance: "important" | "advisory" | null = "important"
   await ensureAccuracySchema();
   const org_id = await createOrganization(newId("org-label"));
   const workspace_id = await createWorkspace({ org_id, name: "Pause checks", slug: newId("slug") });
-  const source_file_id = newId("source");
+  const source_file_id = importance ? (await insertSourceFile({ workspace_id, org_id, filename: "source.txt", mime: "text/plain", checksum: newId("sum") })).id : newId("source");
   const run_id = newId("run");
   if (importance) {
+    const block_id = newId("block");
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id, source_file_id,
+      index: 0, kind: "paragraph", heading: null, text: "Comparator evidence missing", parser: "test", created_at: nowIso() });
+    const gapPayload = { id: newId("gap"), statement: "Need comparator evidence", external_id: null,
+      provenance: [{ source_file_id, block_id, quote: "Comparator evidence missing" }] };
+    const tacticPayload = { id: newId("tac"), name: "Comparator study", type: "publication", status: "planned",
+      evidence_question: "Will this address the gap?", origin: "inventory",
+      provenance: [{ source_file_id, block_id, quote: "Comparator evidence missing" }] };
+    const inventoryRunId = newId("run");
     await accuracyDb().insert(t.accuracyModuleRuns).values({ id: run_id, workspace_id, org_id, call_kind: "need_extract",
       agent_role: "proposer", module_id: "test", module_version: "1", status: "ok", started_at: nowIso(), finished_at: nowIso(),
-      actor_name: "test", actor_function: "medical_affairs", input: { workspace_id, source_file_id }, steps: [] });
+      actor_name: "test", actor_function: "medical_affairs", input: { workspace_id, source_file_id },
+      output: { workspace_id, source_file_id, gaps: [gapPayload] }, steps: [] });
+    await accuracyDb().insert(t.accuracyModuleRuns).values({ id: inventoryRunId, workspace_id, org_id, call_kind: "inventory_extract",
+      agent_role: "proposer", module_id: "test", module_version: "1", status: "ok", started_at: nowIso(), finished_at: nowIso(),
+      actor_name: "test", actor_function: "medical_affairs", input: { workspace_id, source_file_id },
+      output: { workspace_id, source_file_id, tactics: [tacticPayload] }, steps: [] });
     await appendAgentEvent({ workspace_id, run_id, event: { event_type: "critique", iteration: 3, score: null, issues: [],
-      completeness: { risk_level: importance, checked_block_ids: ["block"], unchecked_block_ids: [], prior_issue_resolutions: [],
+      completeness: { risk_level: importance, checked_block_ids: [block_id], unchecked_block_ids: [], prior_issue_resolutions: [],
         suspected_omissions: [{ issue_id: "missing-evidence", item_kind: "gap", summary: "Comparator evidence gap",
-          source_ref: { source_file_id, block_id: "block" }, evidence_quote: "Comparator evidence missing", basis: "explicit",
+          source_ref: { source_file_id, block_id }, evidence_quote: "Comparator evidence missing", basis: "explicit",
           importance, reason: "Absent from snapshot", suggested_action: "Add gap" }] },
       latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } });
-    await accuracyDb().insert(t.accuracyExtractionBatches).values({ id: newId("batch"), workspace_id, source_file_id,
-      requested_kinds: ["need_extract"], run_ids: [run_id], created_claim_ids: [], drafts_persisted: true, created_at: nowIso() });
+    const batch = await createExtractionBatch(workspace_id, source_file_id, ["need_extract", "inventory_extract"]);
+    const claimIds: string[] = [];
+    await applyExtractionBatch(batch, [run_id, inventoryRunId], claimIds, async () => {
+      claimIds.push(...(await publishGeneratedItemHistory({ workspace_id, source_file_id, run_id, claim_type: "gap",
+        final_claims: [{ id: gapPayload.id, workspace_id, source_file_id, claim_type: "gap", statement: gapPayload.statement }] })).claim_ids);
+      claimIds.push(...(await publishGeneratedItemHistory({ workspace_id, source_file_id, run_id: inventoryRunId, claim_type: "tactic",
+        final_claims: [{ id: tacticPayload.id, workspace_id, source_file_id, claim_type: "tactic", statement: tacticPayload.name }] })).claim_ids);
+    });
+    const versions = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, workspace_id));
+    const gapVersion = versions.find(version => version.run_id === run_id)!;
+    const tacticVersion = versions.find(version => version.run_id === inventoryRunId)!;
+    const coverageRunId = newId("run");
+    await accuracyDb().insert(t.accuracyModuleRuns).values({ id: coverageRunId, workspace_id, org_id, call_kind: "coverage_decide",
+      agent_role: "judge", module_id: "test", module_version: "1", status: "ok", started_at: nowIso(), finished_at: nowIso(),
+      actor_name: "test", actor_function: "medical_affairs",
+      input: { workspace_id, gap_id: gapVersion.id, tactic_id: tacticVersion.id, block_bundle_ids: [block_id],
+        selected_versions: { gap_version_id: gapVersion.id, tactic_version_id: tacticVersion.id,
+          gap_payload: gapVersion.payload, tactic_payload: tacticVersion.payload } },
+      output: { gap_id: gapVersion.id, tactic_id: tacticVersion.id, overall: "full", quote_block_ids: [block_id],
+        confidence: 0.8, rationale: "Source-backed pair." }, steps: [] });
+    const assembly = await createAssembly({ workspace_id, actor: { name: "test", function: "medical_affairs" }, source_file_ids: [source_file_id],
+      selections: [{ item_version_id: gapVersion.id, reason: "Current gap" }, { item_version_id: tacticVersion.id, reason: "Current tactic" }],
+      mappings: [{ gap_version_id: gapVersion.id, tactic_version_id: tacticVersion.id }], coverage_run_ids: [coverageRunId],
+      extraction_runs: [
+        { call_kind: "need_extract", run_id, source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" },
+        { call_kind: "inventory_extract", run_id: inventoryRunId, source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" },
+      ], linking_complete: true, generation_key: batch.id });
+    await reviewAssembly({ workspace_id, assembly_id: assembly.id, expected_fingerprint: assembly.fingerprint,
+      expected_review_id: null, decision: "approve", rationale: "Approve current source-backed pair.", advisory_overrides: [],
+      reviewer: { subject: "pause-test", provider: "test", actor: { name: "Reviewer", function: "medical_affairs" }, role: "medical_affairs" } });
+    const [storedGap] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, gapPayload.id));
+    await accuracyDb().update(t.accuracyClaims).set({ validated: true, status: "validated",
+      metadata: { ...(storedGap.metadata as Record<string, unknown>), priority: "high" } })
+      .where(eq(t.accuracyClaims.id, gapPayload.id));
+    const gap = (await getClaim(workspace_id, gapPayload.id))!;
+    const tactic = (await getClaim(workspace_id, tacticPayload.id))!;
+    return { org_id, workspace_id, source_file_id, run_id, gap, tactic };
   }
   const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need comparator evidence", validated: true,
     status: "open", metadata: { priority: "high" } });
@@ -87,7 +142,7 @@ function installMutationModule(call_kind: CallKind) {
     } }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "test" });
 }
-function run(scope: { workspace_id: string; org_id: string }, call_kind: CallKind, input = { workspace_id: scope.workspace_id }) {
+function run(scope: { workspace_id: string; org_id: string }, call_kind: CallKind, input: Record<string, unknown> = { workspace_id: scope.workspace_id }) {
   return runAccuracyModule({ ...scope, call_kind, input, actor: { name: "test", function: "medical_affairs" } });
 }
 
@@ -97,8 +152,8 @@ describe("downstream omission pause", () => {
     installMutationModule(kind);
     const before = await runs(scope.workspace_id);
     if (allowed.has(kind)) {
-      await expect(run(scope, kind)).resolves.toMatchObject({ call_kind: kind });
-      expect(await listClaims(scope.workspace_id)).toHaveLength(3);
+      await expect(withAssemblyPreparation(() => run(scope, kind))).resolves.toMatchObject({ call_kind: kind });
+      expect(await withAssemblyPreparation(() => listClaims(scope.workspace_id))).toHaveLength(3);
     } else {
       await expect(run(scope, kind)).rejects.toMatchObject({ name: "AccuracyPausedError", blockers: [expect.objectContaining({ workspace_id: scope.workspace_id, run_id: scope.run_id })] });
       expect(await runs(scope.workspace_id)).toEqual(before);
@@ -120,7 +175,8 @@ describe("downstream omission pause", () => {
   });
   it.each(["advisory", null] as const)("allows downstream progress with %s findings", async (importance) => {
     const scope = await fixture(importance);
-    await expect(run(scope, "status_derive")).resolves.toMatchObject({ call_kind: "status_derive" });
+    await expect(run(scope, "status_derive", { workspace_id: scope.workspace_id }))
+      .resolves.toMatchObject({ call_kind: "status_derive" });
   });
   it("does not leak another workspace's blockers", async () => {
     const paused = await fixture();
@@ -132,42 +188,48 @@ describe("downstream omission pause", () => {
   it("returns scoped 409 before coverage GET generates candidate pairs", async () => {
     const scope = await fixture();
     const other = await fixture();
+    const approvedCoverage = await listCoverageJoins(scope.workspace_id);
     const response = await coverageRead(new Request(`http://localhost/api/accuracy/coverage?workspace_id=${scope.workspace_id}`));
     expect(response.status).toBe(409);
     const body = await response.json();
     expect(body.blockers).toEqual([expect.objectContaining({ workspace_id: scope.workspace_id, run_id: scope.run_id })]);
     expect(JSON.stringify(body)).not.toContain(other.run_id);
     expect(body.pairs).toBeUndefined();
-    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual(approvedCoverage);
   });
   it("renders paused coverage without generating or rendering a new pair queue", async () => {
     const scope = await fixture();
+    const approvedCoverage = await listCoverageJoins(scope.workspace_id);
     const page = await AccuracyCoveragePage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
     const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
     expect(html).toContain("Coverage is paused until important source omissions are resolved.");
     expect(html).not.toContain("Need comparator evidence");
     expect(html).not.toContain("Comparator study");
     expect(html).not.toContain("Pair 1 of");
-    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual(approvedCoverage);
   });
   it.each(["advisory", null] as const)("continues coverage candidate generation with %s findings", async (importance) => {
     const scope = await fixture(importance);
     const response = await coverageRead(new Request(`http://localhost/api/accuracy/coverage?workspace_id=${scope.workspace_id}`));
     expect(response.status).toBe(200);
-    expect((await response.json()).pairs).toEqual([expect.objectContaining({ id: `pair_${scope.gap.id}_${scope.tactic.id}`, gap_id: scope.gap.id, tactic_id: scope.tactic.id })]);
+    expect((await response.json()).pairs).toEqual([expect.objectContaining({ gap_id: scope.gap.id, tactic_id: scope.tactic.id,
+      overall: importance === "advisory" ? "full" : null })]);
     const page = await AccuracyCoveragePage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
     const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
-    expect(html).toContain("Need comparator evidence");
-    expect(html).toContain("Comparator study");
+    if (importance === "advisory") {
+      expect(html).toContain("All 1 pair(s) decided");
+      expect(html).toContain("0 undecided");
+    } else {
+      expect(html).toContain("Need comparator evidence");
+      expect(html).toContain("Comparator study");
+    }
     expect(html).not.toContain("Coverage is paused");
   });
-  it("keeps saved coverage decisions readable through audit while paused", async () => {
+  it("keeps approved coverage decisions readable through audit while paused", async () => {
     const scope = await fixture();
-    await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id, overall: "covers", rationale: "Historical source review" });
     const page = await AccuracyAuditPage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
     const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
-    expect(html).toContain("Historical source review");
-    expect(html).toContain("coverage · covers");
+    expect(html).toContain("Source-backed pair.");
     expect(html).not.toContain("Accuracy work is paused");
   });
   it("renders a visible pause message when the timeline page calls projection directly", async () => {
@@ -186,6 +248,7 @@ describe("downstream omission pause", () => {
   });
   it.each(["snapshot", "scene", "add tag", "assign tag", "mark_addressed", "remap", "set_priority", "park"])("pauses workshop %s before changing frozen inventory or ledger", async (path) => {
     const scope = await fixture();
+    const approvedCoverage = await listCoverageJoins(scope.workspace_id);
     let snapshot = path === "snapshot" ? null : await createWorkshopSnapshot({ workspace_id: scope.workspace_id,
       actor: { name: "test", function: "medical_affairs" } });
     if (path === "assign tag") snapshot = await addFacilitatorTag({ workspace_id: scope.workspace_id, snapshot_id: snapshot!.id, label: "Evidence team" });
@@ -199,7 +262,7 @@ describe("downstream omission pause", () => {
     expect(response.status).toBe(409);
     expect((await response.json()).blockers).toEqual([expect.objectContaining({ workspace_id: scope.workspace_id, run_id: scope.run_id })]);
     expect(await latestWorkshopSnapshot(scope.workspace_id)).toEqual(before);
-    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual(approvedCoverage);
     expect(claimMetadata((await getClaim(scope.workspace_id, scope.gap.id))!).priority).toBe("high");
     // Pausing writes must leave the existing snapshot visible for review.
     const read = await workshopRead(new Request(`http://localhost/api/accuracy/workshop?workspace_id=${scope.workspace_id}`));
@@ -209,6 +272,7 @@ describe("downstream omission pause", () => {
   it.each(["coverage", "assist", "validate", "manual ideate", "live ideate", "priority", "claim insert validated", "claim insert draft", "gantt", "save-final"])("returns scoped 409 without direct changes for %s", async (path) => {
     const scope = await fixture();
     const before = await runs(scope.workspace_id);
+    const approvedCoverage = await listCoverageJoins(scope.workspace_id);
     const handlers: Record<string, () => Promise<Response>> = {
       coverage: () => coverage(request({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id, overall: "covers", rationale: "Source reviewed" })),
       assist: () => assist(request({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id })),
@@ -227,7 +291,7 @@ describe("downstream omission pause", () => {
     expect(body.blockers).toEqual([expect.objectContaining({ workspace_id: scope.workspace_id, run_id: scope.run_id })]);
     expect(await runs(scope.workspace_id)).toEqual(before);
     expect(await listClaims(scope.workspace_id)).toHaveLength(2);
-    expect(await listCoverageJoins(scope.workspace_id)).toEqual([]);
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual(approvedCoverage);
     expect(await latestAccuracyPlan(scope.workspace_id)).toBeNull();
     const gap = await getClaim(scope.workspace_id, scope.gap.id);
     expect(gap?.validated).toBe(true);

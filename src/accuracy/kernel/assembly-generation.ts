@@ -278,7 +278,6 @@ async function generateExtractionAssemblyInternal(args: {
     for (const tactic of tactics) {
       const input = {
         workspace_id: args.workspace_id,
-        generation_context: { evaluation_context },
         gap_id: gap.id,
         tactic_id: tactic.id,
         block_bundle_ids: evidenceBlockIds(gap, tactic),

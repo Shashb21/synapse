@@ -1,4 +1,3 @@
-import postgres from "postgres";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
