@@ -130,5 +130,9 @@ export async function extractionDownstreamState(workspace_id: string, source_fil
   catch (error) { if (error instanceof ExtractionBatchError) return "stale"; throw error; }
   const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
     eq(t.accuracyResumeJournals.workspace_id, workspace_id), eq(t.accuracyResumeJournals.batch_id, batch_id)));
-  return journal?.final_response != null ? "completed" : "resumable";
+  if (journal?.final_response == null) return "resumable";
+  const [assembly] = await accuracyDb().select({ id: t.accuracyAssemblies.id }).from(t.accuracyAssemblies).where(and(
+    eq(t.accuracyAssemblies.workspace_id, workspace_id), eq(t.accuracyAssemblies.generation_key, batch_id),
+  )).limit(1);
+  return assembly ? "completed" : "resumable";
 }

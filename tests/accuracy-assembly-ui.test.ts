@@ -96,6 +96,10 @@ const blockedAssembly = {
       output: { gap_id: "gap-v2", tactic_id: "tactic-v1", overall: "not_relevant", quote_block_ids: [], rationale: "Not relevant rationale" },
     },
   ],
+  extraction_runs: [
+    { call_kind: "need_extract", run_id: "run-gap", source_file_id: "source-1", item_count: 2, outcome: "items", evaluation_context: "production" },
+    { call_kind: "inventory_extract", run_id: "run-tactic", source_file_id: "source-1", item_count: 1, outcome: "items", evaluation_context: "production" },
+  ],
   linking_complete: false,
   output: { gaps: [gapPayload, uncoveredGapPayload], tactics: [tacticPayload] },
   checks: {

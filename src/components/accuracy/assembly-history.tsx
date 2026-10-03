@@ -166,6 +166,11 @@ function AssemblyDetail({ assembly }: { assembly: Assembly }) {
         <p className="font-medium">Unapproved proposal</p>
         <p className="break-words text-muted-foreground">Fingerprint: {assembly.fingerprint}</p>
         <p className="break-words text-muted-foreground">Source scope: {assembly.source_file_ids.join(", ") || "None recorded"}</p>
+        <p className="break-words text-muted-foreground">
+          Extraction scope: {assembly.extraction_runs
+            ? assembly.extraction_runs.map(run => `${run.call_kind} ${run.run_id} ${run.outcome} (${run.item_count})`).join(", ") || "Requested extractors returned no rows"
+            : "Unknown for this proposal"}
+        </p>
         <p className="text-muted-foreground">Actor: {assembly.actor.name} ({assembly.actor.function})</p>
         <p className="text-muted-foreground">{assembly.linking_complete ? "Linking complete" : "Linking incomplete"}</p>
       </section>

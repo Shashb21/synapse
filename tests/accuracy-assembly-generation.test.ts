@@ -60,7 +60,7 @@ async function extractionRun(scope: Awaited<ReturnType<typeof fixture>>, claim_t
   return id;
 }
 
-function installCoverage(overall: CoverageDecision["overall"] = "partial", options?: { failFirst?: boolean }) {
+function installCoverage(overall: CoverageDecision["overall"] = "partial", options?: { failFirst?: boolean; failAttempt?: number }) {
   const call_kind = "coverage_decide";
   const original = activeAccuracyModuleId(call_kind);
   if (original) originals.set(call_kind, original);
@@ -74,7 +74,7 @@ function installCoverage(overall: CoverageDecision["overall"] = "partial", optio
       quote_block_ids: z.array(z.string()), confidence: z.number(), rationale: z.string() }),
     run: async input => {
       attempts += 1;
-      if (options?.failFirst && attempts === 1) throw new Error("transient coverage failure");
+      if ((options?.failFirst && attempts === 1) || options?.failAttempt === attempts) throw new Error("transient coverage failure");
       return { output: { gap_id: input.gap_id, tactic_id: input.tactic_id, overall,
         quote_block_ids: overall === "not_relevant" ? [] : input.block_bundle_ids, confidence: 0.8, rationale: "Generated pairwise decision" },
         summary: "Generated coverage" };
@@ -110,8 +110,13 @@ describe("generateExtractionAssembly", () => {
     expect(assembly.mappings).toEqual([{ gap_version_id: assembly.items[0]!.id, tactic_version_id: assembly.items[1]!.id }]);
     expect(assembly.coverage).toHaveLength(1);
     expect(assembly.coverage[0]?.input).toMatchObject({ gap_id: assembly.items[0]!.id, tactic_id: assembly.items[1]!.id,
+      generation_context: { evaluation_context: "production" },
       selected_versions: { gap_version_id: assembly.items[0]!.id, tactic_version_id: assembly.items[1]!.id,
         gap_payload: judgedGap, tactic_payload: tactic } });
+    expect(assembly.extraction_runs).toEqual([
+      expect.objectContaining({ call_kind: "need_extract", run_id: gapRun, source_file_id: scope.source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" }),
+      expect.objectContaining({ call_kind: "inventory_extract", run_id: tacticRun, source_file_id: scope.source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" }),
+    ]);
     expect(assembly.checks.status).toBe("passed");
     expect(await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
       source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:one" }))
@@ -152,6 +157,7 @@ describe("generateExtractionAssembly", () => {
       source_file_ids: [scope.source_file_id], extraction_run_ids: [], generation_key: "batch:empty" });
     expect(empty.output).toEqual({ gaps: [], tactics: [] });
     expect(empty.coverage).toEqual([]);
+    expect(empty.extraction_runs).toEqual([]);
   });
 
   it("honors judged iteration before deterministic ties and final-only before snapshot fallback", async () => {
@@ -204,18 +210,22 @@ describe("generateExtractionAssembly", () => {
 
   it("does not complete an assembly after failed coverage and retries with new failed-attempt evidence", async () => {
     const scope = await fixture();
-    installCoverage("partial", { failFirst: true });
+    installCoverage("partial", { failAttempt: 2 });
     const gap = { id: "gap-retry", statement: "Retry gap", external_id: null,
       provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "evidence gap" }] };
     const tactic = { id: "tactic-retry", name: "Retry tactic", type: "rwe_study", status: "planned",
       evidence_question: "Retry?", origin: "inventory",
       provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "registry closes" }] };
+    const tacticTwo = { ...tactic, id: "tactic-retry-two", name: "Retry tactic two" };
     const gapRun = await extractionRun(scope, "gap", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [gap] });
-    const tacticRun = await extractionRun(scope, "tactic", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic] });
+    const tacticRun = await extractionRun(scope, "tactic", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic, tacticTwo] });
     await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
       final_claims: [{ id: gap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gap.statement }] });
     await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
-      final_claims: [{ id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name }] });
+      final_claims: [
+        { id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name },
+        { id: tacticTwo.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tacticTwo.name },
+      ] });
 
     await expect(generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
       source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:retry" }))
@@ -224,9 +234,39 @@ describe("generateExtractionAssembly", () => {
 
     const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
       source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:retry" });
-    expect(assembly.coverage).toHaveLength(1);
+    expect(assembly.coverage).toHaveLength(2);
     const coverageRuns = (await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id)))
       .filter(run => run.call_kind === "coverage_decide");
-    expect(coverageRuns.map(run => run.status).sort()).toEqual(["error", "ok"]);
+    expect(coverageRuns.map(run => run.status).sort()).toEqual(["error", "ok", "ok"]);
+    expect(new Set(coverageRuns.map(run => run.id)).size).toBe(3);
+  });
+
+  it("labels coverage runs from copied experiments with experiment evaluation context", async () => {
+    const scope = await fixture();
+    installCoverage("not_relevant");
+    const gap = { id: "gap-exp", statement: "Experiment gap", external_id: null,
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "evidence gap" }] };
+    const tactic = { id: "tactic-exp", name: "Experiment tactic", type: "rwe_study", status: "planned",
+      evidence_question: "Experiment?", origin: "inventory",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "registry closes" }] };
+    const gapRun = await extractionRun(scope, "gap", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [gap] });
+    const tacticRun = await extractionRun(scope, "tactic", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic] });
+    await accuracyDb().update(t.accuracyModuleRuns).set({ evaluation_context: "experiment" }).where(eq(t.accuracyModuleRuns.id, gapRun));
+    await accuracyDb().update(t.accuracyModuleRuns).set({ evaluation_context: "experiment" }).where(eq(t.accuracyModuleRuns.id, tacticRun));
+    await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
+      final_claims: [{ id: gap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gap.statement }] });
+    await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
+      final_claims: [{ id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name }] });
+
+    const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:experiment",
+      requested_kinds: ["need_extract", "inventory_extract"], evaluation_context: "experiment" });
+
+    expect(assembly.extraction_runs?.every(run => run.evaluation_context === "experiment")).toBe(true);
+    const coverageRuns = (await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id)))
+      .filter(run => run.call_kind === "coverage_decide");
+    expect(coverageRuns).toHaveLength(1);
+    expect(coverageRuns[0]).toMatchObject({ evaluation_context: "experiment" });
+    expect(coverageRuns[0]?.input).toMatchObject({ generation_context: { evaluation_context: "experiment" } });
   });
 });

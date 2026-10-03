@@ -46,7 +46,10 @@ async function fixture() {
   return { workspace_id, org_id, source_file_id: source.id, block_id };
 }
 function post(body: Record<string, unknown>) {
-  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(body) }));
+  const requestBody = { ...body };
+  delete requestBody.org_id;
+  delete requestBody.block_id;
+  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(requestBody) }));
 }
 function installExtractor(blocker = true, gap_id: string | string[] = newId("gap")) {
   const call_kind = "need_extract";
@@ -147,7 +150,7 @@ describe("extraction omission resume", () => {
     const scope = await fixture(); const body = await paused(scope);
     const claims = await listClaims(scope.workspace_id); installExtractor(false);
     vi.spyOn(historyStore, "publishGeneratedItemHistory").mockRejectedValueOnce(new Error("Injected history write failure"));
-    expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
+    expect((await post({ ...scope, kinds: ["need"] })).status).toBe(500);
     expect(await listClaims(scope.workspace_id)).toEqual(claims);
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([expect.objectContaining({ run_id: body.runs[0].run_id })]);
   });
@@ -161,7 +164,7 @@ describe("extraction omission resume", () => {
       return { output: { merged: 0 }, summary: "Recovered" };
     } })); activateAccuracyModule({ call_kind: kind, module_id: id, activated_by: "test" });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     const journal = (await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id)))[0];
     expect(journal.merge_state).toBe("reserved");
@@ -197,7 +200,7 @@ describe("extraction omission resume", () => {
       return originalPatch(args);
     });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "real-merge-retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(writes).toBe(2);
     expect(await listClaims(scope.workspace_id)).toEqual(before);
     expect(await runs(scope.workspace_id)).toHaveLength(1);

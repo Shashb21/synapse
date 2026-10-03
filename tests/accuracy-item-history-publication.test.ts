@@ -59,6 +59,10 @@ function gap(scope: Awaited<ReturnType<typeof fixture>>, statement: string, id =
   return { id, statement, external_id: null, provenance: [{ ...span, source_file_id: scope.source_file_id, block_id: scope.block_id }] };
 }
 
+function extractionRequest(scope: Awaited<ReturnType<typeof fixture>>) {
+  return { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, kinds: ["need"] };
+}
+
 afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorkspace(id); });
 
 
@@ -98,7 +102,7 @@ it("publishes stored production run snapshots and retains response counts while 
     } }));
   activateAccuracyModule({ call_kind: "need_extract", module_id: id, activated_by: "test" });
   try {
-    const response = await POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify({ ...scope, kinds: ["need"] }) }));
+    const response = await POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(extractionRequest(scope)) }));
     const body = await response.json(); expect(response.status, JSON.stringify(body)).toBe(200); expect(body.gaps_inserted).toBe(2);
     expect(body).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "blocked" }) });
     expect(body.assembly_checks.findings.map((finding: { code: string }) => finding.code)).toEqual(expect.arrayContaining([

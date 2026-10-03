@@ -173,6 +173,7 @@ export const accuracyAssemblies = pgTable("accuracy_assemblies", {
   source_file_ids: jsonb("source_file_ids").$type<string[]>().notNull(),
   mappings: jsonb("mappings").$type<Array<{ gap_version_id: string; tactic_version_id: string }>>().notNull(),
   coverage: jsonb("coverage").notNull(),
+  extraction_runs: jsonb("extraction_runs"),
   linking_complete: boolean("linking_complete").notNull(),
   output: jsonb("output").notNull(),
   checks: jsonb("checks").notNull(),
@@ -473,7 +474,7 @@ export const ACCURACY_DDL = [
     id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
     actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
     source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
-    linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    extraction_runs jsonb, linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
     generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
@@ -595,9 +596,10 @@ export const ACCURACY_MIGRATIONS = [
     id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
     actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
     source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
-    linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    extraction_runs jsonb, linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
     generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
   )`,
+  `ALTER TABLE accuracy_assemblies ADD COLUMN IF NOT EXISTS extraction_runs jsonb`,
   `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS accuracy_assembly_items (
     id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),

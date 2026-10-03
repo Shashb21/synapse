@@ -7,6 +7,7 @@ import { runAccuracyModule, type AccuracyRunResult } from "@/accuracy/kernel/run
 import { generatedItemFingerprint } from "@/accuracy/domain/item-history";
 import type { Assembly, AssemblyMapping, AssemblySelection, ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import { AssemblyError } from "@/accuracy/domain/assembly";
+import type { AssemblyExtractionRun } from "@/accuracy/domain/assembly";
 import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema";
 import { createAssembly, resolveAssemblyItems } from "@/accuracy/store/assembly-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
@@ -16,6 +17,7 @@ type ExtractionKind = "gap" | "tactic";
 type RunRow = typeof t.accuracyModuleRuns.$inferSelect;
 type VersionRow = typeof t.accuracyItemVersions.$inferSelect;
 type EventRow = typeof t.accuracyAgentEvents.$inferSelect;
+type EvaluationContext = "production" | "experiment";
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -121,6 +123,7 @@ async function runCoverageDecision(args: {
   actor: Actor;
   org_id: string;
   workspace_id: string;
+  evaluation_context: EvaluationContext;
 }): Promise<AccuracyRunResult<CoverageDecision>> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const reserved_run_id = coverageAttemptRunId(args.base_run_id, attempt);
@@ -129,7 +132,8 @@ async function runCoverageDecision(args: {
       eq(t.accuracyModuleRuns.id, reserved_run_id),
     )).limit(1);
     if (existing) {
-      if (existing.call_kind !== "coverage_decide" || existing.org_id !== args.org_id || !isDeepStrictEqual(existing.input, args.input)) {
+      if (existing.call_kind !== "coverage_decide" || existing.org_id !== args.org_id || existing.evaluation_context !== args.evaluation_context
+        || !isDeepStrictEqual(existing.input, args.input)) {
         throw new AssemblyError("conflict", "Reserved coverage run identity conflicts with this operation.");
       }
       if (existing.status === "ok") {
@@ -141,6 +145,7 @@ async function runCoverageDecision(args: {
           org_id: args.org_id,
           workspace_id: args.workspace_id,
           reserved_run_id,
+          evaluation_context: args.evaluation_context,
         });
       }
       if (existing.status === "running") {
@@ -156,6 +161,7 @@ async function runCoverageDecision(args: {
       org_id: args.org_id,
       workspace_id: args.workspace_id,
       reserved_run_id,
+      evaluation_context: args.evaluation_context,
     });
   }
   throw new AssemblyError("conflict", "Coverage retry attempts are exhausted.");
@@ -168,6 +174,21 @@ function sourceIdsFromRuns(rows: RunRow[]): string[] {
   }))];
 }
 
+function extractionRunScope(rows: RunRow[]): AssemblyExtractionRun[] {
+  return rows.map((row) => {
+    const { kind, items } = finalItems(row);
+    const input = row.input as Record<string, unknown>;
+    return {
+      call_kind: kind === "gap" ? "need_extract" : "inventory_extract",
+      run_id: row.id,
+      source_file_id: input.source_file_id as string,
+      item_count: items.length,
+      outcome: items.length > 0 ? "items" : "empty",
+      evaluation_context: row.evaluation_context === "experiment" ? "experiment" : "production",
+    };
+  });
+}
+
 /** Create or retrieve the immutable assembly for one applied extraction publication. */
 export async function generateExtractionAssembly(args: {
   workspace_id: string;
@@ -176,8 +197,11 @@ export async function generateExtractionAssembly(args: {
   source_file_ids: string[];
   extraction_run_ids: string[];
   generation_key: string;
+  requested_kinds?: Array<"need_extract" | "inventory_extract">;
+  evaluation_context?: EvaluationContext;
 }): Promise<Assembly> {
   await ensureAccuracySchema();
+  const evaluation_context = args.evaluation_context ?? "production";
   const runIds = args.extraction_run_ids.filter((id) => id.trim());
   if (runIds.length !== args.extraction_run_ids.length || new Set(runIds).size !== runIds.length) {
     throw new AssemblyError("invalid_input", "Extraction run IDs must be distinct nonempty IDs.");
@@ -192,12 +216,23 @@ export async function generateExtractionAssembly(args: {
   const orderedRuns = runIds.map((id) => runsById.get(id)!);
   for (const run of orderedRuns) {
     if (run.org_id !== args.org_id) throw new AssemblyError("not_found", "An extraction run is outside this organization.");
+    if (run.evaluation_context !== evaluation_context) throw new AssemblyError("invalid_input", "Extraction run evaluation context does not match assembly generation.");
     const input = run.input as Record<string, unknown> | null;
     if (input?.workspace_id !== args.workspace_id || typeof input.source_file_id !== "string") {
       throw new AssemblyError("invalid_input", "Extraction run input is not bound to this workspace and source.");
     }
     if (!args.source_file_ids.includes(input.source_file_id)) {
       throw new AssemblyError("invalid_input", "Extraction run source is outside the assembly source scope.");
+    }
+  }
+  if (args.requested_kinds) {
+    const requested = [...new Set(args.requested_kinds)];
+    if (requested.some(kind => kind !== "need_extract" && kind !== "inventory_extract")) {
+      throw new AssemblyError("invalid_input", "Assembly requested kinds are invalid.");
+    }
+    const actual = new Set(orderedRuns.map(row => row.call_kind));
+    if (requested.length !== orderedRuns.length || requested.some(kind => !actual.has(kind))) {
+      throw new AssemblyError("invalid_input", "Extraction runs do not match the requested assembly scope.");
     }
   }
 
@@ -229,6 +264,7 @@ export async function generateExtractionAssembly(args: {
     for (const tactic of tactics) {
       const input = {
         workspace_id: args.workspace_id,
+        generation_context: { evaluation_context },
         gap_id: gap.id,
         tactic_id: tactic.id,
         block_bundle_ids: evidenceBlockIds(gap, tactic),
@@ -245,6 +281,7 @@ export async function generateExtractionAssembly(args: {
         actor: args.actor,
         org_id: args.org_id,
         workspace_id: args.workspace_id,
+        evaluation_context,
       });
       coverage_run_ids.push(result.run_id);
       if (result.output.overall !== "not_relevant") {
@@ -260,6 +297,7 @@ export async function generateExtractionAssembly(args: {
     selections,
     mappings,
     coverage_run_ids,
+    extraction_runs: extractionRunScope(orderedRuns),
     linking_complete: true,
     generation_key: args.generation_key,
   });

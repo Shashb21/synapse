@@ -69,6 +69,18 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "pipeline test" });
 }
 
+function controlledCoverage(run: (input: Record<string, unknown>) => Promise<unknown>) {
+  const call_kind = "coverage_decide";
+  const original = activeAccuracyModuleId(call_kind);
+  if (original) originals.set(call_kind, original);
+  const id = newId("pipeline-coverage");
+  registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Controlled coverage", summary: "Controlled coverage",
+    inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()), selected_versions: z.unknown().optional(), generation_context: z.unknown().optional() }),
+    outputSchema: z.object({ gap_id: z.string(), tactic_id: z.string(), overall: z.enum(["full", "partial", "limited", "not_relevant"]), quote_block_ids: z.array(z.string()), confidence: z.number(), rationale: z.string() }),
+    run: async input => ({ output: await run(input as Record<string, unknown>), summary: "coverage" }) }));
+  activateAccuracyModule({ call_kind, module_id: id, activated_by: "pipeline test" });
+}
+
 describe("isolated extraction-pipeline experiments", () => {
   it.each(["single_call", "pipeline"] as const)("propagates three fixed passes through the actual %s path and retains terminal assessments", async mode => {
     const source = await sourceFixture();
@@ -266,6 +278,35 @@ describe("isolated extraction-pipeline experiments", () => {
     expect(experiment.evaluations).toEqual(expect.arrayContaining([expect.objectContaining({ evaluation: expect.objectContaining({ status: "model_error" }) })]));
     expect(journals).toEqual([expect.objectContaining({ merge_state: "reserved", status_state: "reserved", final_response: null })]);
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it("fails copied assembly coverage without appending a false status error version", async () => {
+    const source = await sourceFixture();
+    controlled("inventory_extract", async input => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"),
+      name: "Coverage tactic", type: "rwe_study", status: "planned", evidence_question: "Does it close?",
+      provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }));
+    controlled("need_extract", async input => ({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"),
+      statement: "Coverage gap", external_id: null,
+      provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }));
+    controlled("merge_dedupe", async input => ({ workspace_id: input.workspace_id, merged: 0, survivors: 2, contradictions: 0, merges: [], contradiction_rows: [] }));
+    controlled("status_derive", async () => ({ statuses: [], open: 1, partial: 0, addressed: 0 }));
+    controlledCoverage(async () => { throw new Error("controlled coverage failure"); });
+
+    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id,
+      source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {},
+      actor: { name: "test", function: "medical_affairs" } });
+    workspaces.push(experiment.workspace_id);
+
+    expect(experiment.status).toBe("failed");
+    expect(experiment.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ call_kind: "merge_dedupe", output: expect.objectContaining({ merged: 0 }), output_error: null }),
+      expect.objectContaining({ call_kind: "status_derive", output: expect.objectContaining({ open: 1 }), output_error: null }),
+    ]));
+    expect(experiment.calls.filter(call => call.call_kind === "status_derive").map(call => call.output_error)).toEqual([null]);
+    const coverageRuns = await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, experiment.workspace_id));
+    expect(coverageRuns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ call_kind: "coverage_decide", status: "error", error: "controlled coverage failure", evaluation_context: "experiment" }),
+    ]));
   });
 
   it("pauses the copied pipeline for an important extractor omission without touching the live workspace", async () => {

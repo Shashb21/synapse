@@ -147,18 +147,51 @@ describe("assembly domain checks", () => {
 
   it("makes fingerprints deterministic, order-sensitive, and independent of object key order", () => {
     const set = validSet();
-    const base = assemblyFingerprint({ source_file_ids: ["source-a"], ...set, linking_complete: true });
+    const base = assemblyFingerprint({ source_file_ids: ["source-a"], ...set, extraction_runs: null, linking_complete: true });
     const reorderedKeys = assemblyFingerprint({
       source_file_ids: ["source-a"],
       ...set,
+      extraction_runs: null,
       items: [{ ...set.items[0]!, payload: { provenance: set.items[0]!.payload.provenance, external_id: "GAP-1", statement: "Clinicians need clearer discontinuation guidance" } }, set.items[1]!],
       linking_complete: true,
     });
 
     expect(reorderedKeys).toBe(base);
-    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, items: [...set.items].reverse(), linking_complete: true })).not.toBe(base);
-    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, items: [{ ...set.items[0]!, reason: "new reason" }, set.items[1]!], linking_complete: true })).not.toBe(base);
-    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, coverage: [{ ...set.coverage[0]!, run_id: "coverage-run-2" }], linking_complete: true })).not.toBe(base);
+    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, extraction_runs: null, items: [...set.items].reverse(), linking_complete: true })).not.toBe(base);
+    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, extraction_runs: null, items: [{ ...set.items[0]!, reason: "new reason" }, set.items[1]!], linking_complete: true })).not.toBe(base);
+    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, extraction_runs: null, coverage: [{ ...set.coverage[0]!, run_id: "coverage-run-2" }], linking_complete: true })).not.toBe(base);
+    expect(assemblyFingerprint({ source_file_ids: ["source-a"], ...set, extraction_runs: [{ call_kind: "need_extract", run_id: "run", source_file_id: "source-a", item_count: 1, outcome: "items", evaluation_context: "production" }], linking_complete: true })).not.toBe(base);
+  });
+
+  it.each([
+    ["missing", { source_file_id: "source-a", block_id: "block-gap" }],
+    ["null", { source_file_id: "source-a", block_id: "block-gap", quote: null }],
+    ["numeric", { source_file_id: "source-a", block_id: "block-gap", quote: 12 }],
+  ])("blocks malformed raw %s quote fields without throwing", (_label, provenance) => {
+    const set = validSet();
+    set.items[0] = item("gap-malformed-quote", "gap", gapPayload({ provenance: [provenance] }));
+    set.mappings = [];
+    set.coverage = [];
+
+    const report = checkAssembly({ ...set, source_file_ids: ["source-a"], linking_complete: true });
+
+    expect(report.status).toBe("blocked");
+    expect(codes(report)).toContain("malformed_provenance_span");
+  });
+
+  it("blocks evidence borrowed from another selected source for the wrong item origin", () => {
+    const set = validSet();
+    set.items[0] = item("gap-wrong-origin-evidence", "gap", gapPayload({
+      provenance: [{ source_file_id: "source-b", block_id: "block-b", quote: "other source support" }],
+    }), { source_file_id: "source-a" });
+    set.blocks.push(block("block-b", "source-b", "The other source support is real."));
+    set.mappings = [];
+    set.coverage = [];
+
+    const report = checkAssembly({ ...set, source_file_ids: ["source-a", "source-b"], linking_complete: true });
+
+    expect(report.status).toBe("blocked");
+    expect(codes(report)).toContain("evidence_source_mismatch");
   });
 
   it("blocks missing required fields, missing quotes, unknown blocks, and wrong source evidence", () => {
@@ -268,6 +301,10 @@ describe("assembly domain checks", () => {
           tactic_id: set.items[1]!.id,
           block_bundle_ids: ["block-gap", "block-tactic"],
         },
+        output: {
+          ...(set.coverage[0]!.output as Record<string, unknown>),
+          gap_id: "other-gap-version",
+        },
       },
       {
         ...set.coverage[0]!,
@@ -286,7 +323,21 @@ describe("assembly domain checks", () => {
     expect(codes(report)).toEqual(expect.arrayContaining([
       "coverage_input_endpoint_mismatch",
       "coverage_quote_not_in_input_bundle",
+      "coverage_endpoint_mismatch",
     ]));
+  });
+
+  it("blocks coverage outputs with invalid confidence", () => {
+    const set = validSet();
+    set.coverage = [{
+      ...set.coverage[0]!,
+      output: {
+        ...(set.coverage[0]!.output as Record<string, unknown>),
+        confidence: 1.2,
+      },
+    }];
+
+    expect(codes(checkAssembly({ ...set, source_file_ids: ["source-a"], linking_complete: true }))).toContain("invalid_coverage_output");
   });
 
   it("blocks supported coverage outputs that cite no verified evidence blocks", () => {
