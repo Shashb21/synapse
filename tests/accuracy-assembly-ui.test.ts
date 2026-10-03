@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 /** Exercise immutable assembly proposal inspection through real React DOM interactions. */
 import { act, createElement } from "react";
+import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AssemblyHistory } from "@/components/accuracy/assembly-history";
@@ -221,15 +222,18 @@ it("announces loading, supports retry after failure and explains empty history",
 });
 
 it("announces detail errors and retries the same proposal successfully", async () => {
+  let finishDetail!: (value: ReturnType<typeof response>) => void;
   const fetcher = vi.fn()
     .mockResolvedValueOnce(response({ assemblies: [blockedAssembly] }))
-    .mockResolvedValueOnce(response({ error: "Detail unavailable" }, false))
+    .mockImplementationOnce(() => new Promise((resolve) => { finishDetail = resolve; }))
     .mockResolvedValueOnce(response({ assembly: blockedAssembly }));
   vi.stubGlobal("fetch", fetcher);
 
   await render();
   await click("Complete proposals");
   await click("Inspect proposal assembly-a");
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("Loading proposal detail");
+  await act(async () => finishDetail(response({ error: "Detail unavailable" }, false)));
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Detail unavailable");
   await click("Retry proposal");
   expect(host.textContent).toContain("Fingerprint: fingerprint-a");
@@ -237,22 +241,30 @@ it("announces detail errors and retries the same proposal successfully", async (
   expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws&assembly_id=assembly-a", { cache: "no-store" });
 });
 
-it("does not show stale proposals when workspace changes while a list request is in flight", async () => {
-  let finishOld!: (value: ReturnType<typeof response>) => void;
+it("does not show loaded or late old-workspace proposals after the workspace prop changes", async () => {
+  let finishOldDetail!: (value: ReturnType<typeof response>) => void;
   const workspaceAssembly = { ...blockedAssembly, id: "assembly-new", workspace_id: "ws-new", fingerprint: "fingerprint-new" };
   const fetcher = vi.fn()
-    .mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response({ assemblies: [blockedAssembly, passedAssembly] }))
+    .mockResolvedValueOnce(response({ assembly: blockedAssembly }))
+    .mockImplementationOnce(() => new Promise((resolve) => { finishOldDetail = resolve; }))
     .mockResolvedValueOnce(response({ assemblies: [workspaceAssembly] }));
   vi.stubGlobal("fetch", fetcher);
 
   await render("ws-old");
   await click("Complete proposals");
-  expect(host.querySelector('[role="status"]')?.textContent).toContain("Loading complete proposals");
+  await click("Inspect proposal assembly-a");
+  expect(host.textContent).toContain("Fingerprint: fingerprint-a");
+  await click("Inspect proposal assembly-b");
 
-  await render("ws-new");
-  await act(async () => finishOld(response({ assemblies: [blockedAssembly] })));
-  expect(host.textContent).not.toContain("assembly-a");
-  expect(host.textContent).not.toContain("Transient failure");
+  await act(async () => {
+    flushSync(() => root.render(createElement(AssemblyHistory, { workspaceId: "ws-new" })));
+    expect(host.textContent).not.toContain("assembly-a");
+    expect(host.textContent).not.toContain("Fingerprint: fingerprint-a");
+  });
+  await act(async () => finishOldDetail(response({ assembly: passedAssembly })));
+  expect(host.textContent).not.toContain("assembly-b");
+  expect(host.textContent).not.toContain("fingerprint-b");
 
   await click("Complete proposals");
   expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws-new", { cache: "no-store" });

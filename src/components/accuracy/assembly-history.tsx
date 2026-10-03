@@ -249,9 +249,14 @@ function AssemblyDetail({ assembly }: { assembly: Assembly }) {
 
 /** Render saved agent assemblies without approval or human-edit controls. */
 export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
+  return <AssemblyHistoryPanel key={workspaceId} workspaceId={workspaceId} />;
+}
+
+function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   const listPanelId = useId();
   const listRequestToken = useRef(0);
   const detailRequestToken = useRef(0);
+  const mounted = useRef(true);
   const [expanded, setExpanded] = useState(false);
   const [list, setList] = useState<AssemblyListState>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -262,17 +267,12 @@ export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
   const [detailError, setDetailError] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    listRequestToken.current += 1;
-    detailRequestToken.current += 1;
-    setExpanded(false);
-    setList(null);
-    setListLoading(false);
-    setListError(null);
-    setOpenAssemblyId(null);
-    setDetails({});
-    setDetailLoading(null);
-    setDetailError({});
-  }, [workspaceId]);
+    return () => {
+      mounted.current = false;
+      listRequestToken.current += 1;
+      detailRequestToken.current += 1;
+    };
+  }, []);
 
   async function loadList() {
     const token = listRequestToken.current + 1;
@@ -283,14 +283,14 @@ export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
       const query = new URLSearchParams({ workspace_id: workspaceId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
       const body = await response.json() as { assemblies?: Assembly[]; error?: string };
-      if (token !== listRequestToken.current) return;
+      if (!mounted.current || token !== listRequestToken.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not load complete proposals");
       setList({ assemblies: body.assemblies ?? [] });
     } catch (cause) {
-      if (token !== listRequestToken.current) return;
+      if (!mounted.current || token !== listRequestToken.current) return;
       setListError(cause instanceof Error ? cause.message : "Could not load complete proposals");
     } finally {
-      if (token === listRequestToken.current) setListLoading(false);
+      if (mounted.current && token === listRequestToken.current) setListLoading(false);
     }
   }
 
@@ -303,14 +303,14 @@ export function AssemblyHistory({ workspaceId }: { workspaceId: string }) {
       const query = new URLSearchParams({ workspace_id: workspaceId, assembly_id: assemblyId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
       const body = await response.json() as { assembly?: Assembly; error?: string };
-      if (token !== detailRequestToken.current) return;
+      if (!mounted.current || token !== detailRequestToken.current) return;
       if (!response.ok || !body.assembly) throw new Error(body.error ?? "Could not load proposal");
       setDetails((current) => ({ ...current, [assemblyId]: body.assembly! }));
     } catch (cause) {
-      if (token !== detailRequestToken.current) return;
+      if (!mounted.current || token !== detailRequestToken.current) return;
       setDetailError((current) => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not load proposal" }));
     } finally {
-      if (token === detailRequestToken.current) setDetailLoading(null);
+      if (mounted.current && token === detailRequestToken.current) setDetailLoading(null);
     }
   }
 
