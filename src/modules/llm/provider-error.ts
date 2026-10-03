@@ -41,13 +41,16 @@ const BILLING_PATTERN =
  */
 const CREDIT_PATTERN = /credit balance|insufficient[_ ]quota|insufficient[_ ]credits?|out of credits|payment required|spending limit/i;
 
+const AUTH_PATTERN = /api key not valid|api_key_invalid|invalid api key|incorrect api key|invalid x-api-key/i;
+
 /** Which of the handled cases a provider failure is. Billing wins over the status code. */
 export function classifyProviderError(status: number, error_type: string | null, message: string | null): ProviderErrorKind {
   const said = `${error_type ?? ""} ${message ?? ""}`;
   if (status === 402) return "billing";
   if (status === 429) return CREDIT_PATTERN.test(said) ? "billing" : "rate_limit";
   if (BILLING_PATTERN.test(said)) return "billing";
-  if (status === 401 || status === 403) return "auth";
+  // Google answers a bad key with HTTP 400 INVALID_ARGUMENT "API key not valid" (KAN-70).
+  if (status === 401 || status === 403 || AUTH_PATTERN.test(said)) return "auth";
   if (status >= 500) return "unavailable";
   if (status === 400 || status === 404 || status === 422) return "bad_request";
   return "other";

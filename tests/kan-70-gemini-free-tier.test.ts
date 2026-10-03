@@ -68,6 +68,9 @@ describe("KAN-70 Gemini free tier", () => {
     );
     expect(classifyProviderError(429, "insufficient_quota", "You exceeded your current quota")).toBe("billing");
     expect(classifyProviderError(400, "invalid_request_error", "Your credit balance is too low")).toBe("billing");
+    // Google's bad-key answer is a 400, but it is a key problem.
+    expect(classifyProviderError(400, "INVALID_ARGUMENT", "API key not valid. Please pass a valid API key.")).toBe("auth");
+    expect(classifyProviderError(400, "INVALID_ARGUMENT", "Invalid value at 'generation_config.max_output_tokens'")).toBe("bad_request");
   });
 
   it("waits what Gemini asks for after a per-minute 429, then succeeds", async () => {
