@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { eq, and } from "drizzle-orm";
-import { accuracyDb } from "@/accuracy/store/db";
+import { eq, and, sql } from "drizzle-orm";
+import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { listClaims } from "@/accuracy/store/claim-store";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
@@ -180,7 +180,101 @@ describe("assembly store", () => {
     expect(finalOnly[0]).toMatchObject({ snapshot_id: null, iteration: null, item_index: 0, reason: "final only" });
   });
 
-  it("rolls invalid writes back, cleans up tenant assembly rows, and leaves current claim readers unchanged", async () => {
+  it("preserves exact original array positions when resolving snapshot origins", async () => {
+    const scope = await fixture();
+    const rawGap = gap(scope, "Second positioned raw gap");
+    const finalGap = gap(scope, "Final source-backed gap");
+    const final = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [finalGap] };
+    const run_id = await extractionRun(scope, "gap", [{ ...final, gaps: [null, rawGap] }], final);
+    await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [{
+      id: finalGap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: finalGap.statement,
+    }] });
+    const [legitimate] = await accuracyDb().select().from(t.accuracyItemVersions)
+      .where(and(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id), eq(t.accuracyItemVersions.item_index, 1)));
+    expect(legitimate?.payload).toEqual(rawGap);
+
+    await expect(resolveAssemblyItems(scope.workspace_id, [{ item_version_id: legitimate.id, reason: "keeps index 1" }]))
+      .resolves.toMatchObject([{ id: legitimate.id, item_index: 1, payload: rawGap }]);
+
+    const forgedId = newId("iver");
+    await accuracyDb().insert(t.accuracyItemVersions).values({ ...legitimate, id: forgedId, origin_key: newId("origin"), item_index: 0 });
+    await expect(resolveAssemblyItems(scope.workspace_id, [{ item_version_id: forgedId, reason: "forged index" }]))
+      .rejects.toMatchObject({ code: "invalid_input" });
+  });
+
+  it("rejects coordinated source tampering across version and run input", async () => {
+    const seeded = await seedMixed();
+    const otherSource = await insertSourceFile({ workspace_id: seeded.scope.workspace_id, filename: "coordinated.txt", mime: "text/plain", checksum: newId("sum") });
+    const forgedId = newId("iver");
+    const forgedRun = newId("run");
+    const forgedSnapshot = newId("event");
+    const [run] = await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.id, seeded.gapRun));
+    const [snapshot] = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.id, seeded.gapVersion.snapshot_id!));
+    await accuracyDb().insert(t.accuracyModuleRuns).values({
+      ...run,
+      id: forgedRun,
+      input: { ...(run.input as Record<string, unknown>), source_file_id: otherSource.id },
+    });
+    await accuracyDb().insert(t.accuracyAgentEvents).values({
+      ...snapshot,
+      id: forgedSnapshot,
+      run_id: forgedRun,
+    });
+    await accuracyDb().insert(t.accuracyItemVersions).values({
+      ...seeded.gapVersion,
+      id: forgedId,
+      origin_key: newId("origin"),
+      run_id: forgedRun,
+      snapshot_id: forgedSnapshot,
+      source_file_id: otherSource.id,
+    });
+
+    await expect(resolveAssemblyItems(seeded.scope.workspace_id, [{ item_version_id: forgedId, reason: "coordinated tamper" }]))
+      .rejects.toMatchObject({ code: "invalid_input" });
+  });
+
+  it("rolls back a successful nested assembly write when the outer transaction fails", async () => {
+    const seeded = await seedMixed();
+    let assemblyId = "";
+    await expect(withAccuracyTransaction(async () => {
+      const assembly = await createAssembly({ workspace_id: seeded.scope.workspace_id, actor, source_file_ids: [seeded.scope.source_file_id],
+        selections: [{ item_version_id: seeded.gapVersion.id, reason: "written then rolled back" }],
+        mappings: [], coverage_run_ids: [], linking_complete: false });
+      assemblyId = assembly.id;
+      throw new Error("force rollback after assembly write");
+    })).rejects.toThrow("force rollback");
+
+    expect(assemblyId).toMatch(/^asm_/);
+    expect(await readAssembly(seeded.scope.workspace_id, assemblyId)).toBeNull();
+    expect(await accuracyDb().select().from(t.accuracyAssemblyItems).where(eq(t.accuracyAssemblyItems.assembly_id, assemblyId))).toEqual([]);
+  });
+
+  it("serializes concurrent assembly creation with identity decisions and keeps saved canonical lineage immutable", async () => {
+    const seeded = await seedMixed();
+    const [proposal] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.workspace_id, seeded.scope.workspace_id));
+    let assemblyPromise!: Promise<Awaited<ReturnType<typeof createAssembly>>>;
+    let decisionPromise!: ReturnType<typeof decideItemRelationship>;
+
+    await withAccuracyTransaction(async () => {
+      await accuracyDb().execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${seeded.scope.workspace_id}`}, 0))`);
+      assemblyPromise = createAssembly({ workspace_id: seeded.scope.workspace_id, actor, source_file_ids: [seeded.scope.source_file_id],
+        selections: [{ item_version_id: seeded.gapVersion.id, reason: "queued before decision" }],
+        mappings: [], coverage_run_ids: [], linking_complete: false });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      decisionPromise = decideItemRelationship({ workspace_id: seeded.scope.workspace_id, proposal_id: proposal.id,
+        action: "confirm", rationale: "Concurrent same item", actor });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const [assembly] = await Promise.all([assemblyPromise, decisionPromise.then(() => undefined)]);
+    const current = await resolveAssemblyItems(seeded.scope.workspace_id, [{ item_version_id: seeded.gapVersion.id, reason: "after decision" }]);
+    const saved = await readAssembly(seeded.scope.workspace_id, assembly.id);
+    expect(saved?.items[0]?.canonical_claim_id).toBe(seeded.gapVersion.claim_id);
+    expect(current[0]?.canonical_claim_id).toBe(seeded.finalGap.id);
+  });
+
+  it("cleans up tenant assembly rows and leaves current claim readers unchanged", async () => {
     const seeded = await seedMixed();
     await expect(createAssembly({ workspace_id: seeded.scope.workspace_id, actor, source_file_ids: [seeded.scope.source_file_id],
       selections: [{ item_version_id: seeded.gapVersion.id, reason: "" }], mappings: [], coverage_run_ids: [], linking_complete: false }))

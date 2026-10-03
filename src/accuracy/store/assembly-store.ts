@@ -70,11 +70,12 @@ function requireReason(selection: AssemblySelection): string {
   return reason;
 }
 
-function outputItems(claim_type: AccuracyClaimType, output: unknown): Record<string, unknown>[] {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return [];
+function outputItemAt(claim_type: AccuracyClaimType, output: unknown, item_index: number): Record<string, unknown> | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
   const rows = (output as Record<string, unknown>)[claim_type === "gap" ? "gaps" : "tactics"];
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((row) => row && typeof row === "object" && !Array.isArray(row) ? [row as Record<string, unknown>] : []);
+  if (!Array.isArray(rows)) return null;
+  const row = rows[item_index];
+  return row && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : null;
 }
 
 function assertExtractionRun(row: ItemVersionRow, run: ModuleRunRow | undefined) {
@@ -95,7 +96,7 @@ function assertVersionOrigin(row: ItemVersionRow, run: ModuleRunRow, snapshot: t
       throw new AssemblyError("invalid_input", "Selected item version snapshot origin is invalid.");
     }
     const payload = snapshot.payload as Record<string, unknown>;
-    const item = outputItems(row.claim_type as AccuracyClaimType, payload.output)[row.item_index];
+    const item = outputItemAt(row.claim_type as AccuracyClaimType, payload.output, row.item_index);
     if (!item || !sameJson(item, row.payload)) {
       throw new AssemblyError("invalid_input", "Selected item version payload does not match its snapshot origin.");
     }
@@ -104,7 +105,7 @@ function assertVersionOrigin(row: ItemVersionRow, run: ModuleRunRow, snapshot: t
   if (row.iteration !== null) {
     throw new AssemblyError("invalid_input", "Final-output item origins must not record an iteration.");
   }
-  const item = outputItems(row.claim_type as AccuracyClaimType, run.output)[row.item_index];
+  const item = outputItemAt(row.claim_type as AccuracyClaimType, run.output, row.item_index);
   if (!item || !sameJson(item, row.payload)) {
     throw new AssemblyError("invalid_input", "Selected item version payload does not match its final output origin.");
   }
@@ -151,6 +152,10 @@ export async function resolveAssemblyItems(workspace_id: string, selections: Ass
   const runs = await accuracyDb().select().from(t.accuracyModuleRuns)
     .where(and(eq(t.accuracyModuleRuns.workspace_id, workspace_id), inArray(t.accuracyModuleRuns.id, runIds)));
   const runsById = new Map(runs.map((run) => [run.id, run]));
+  const sourceIds = [...new Set(rows.map((row) => row.source_file_id))];
+  const sources = await accuracyDb().select().from(t.accuracySourceFiles)
+    .where(and(eq(t.accuracySourceFiles.workspace_id, workspace_id), inArray(t.accuracySourceFiles.id, sourceIds)));
+  const sourcesById = new Map(sources.map((source) => [source.id, source]));
   const snapshotIds = rows.flatMap((row) => row.snapshot_id ? [row.snapshot_id] : []);
   const snapshots = snapshotIds.length === 0 ? [] : await accuracyDb().select().from(t.accuracyAgentEvents)
     .where(and(eq(t.accuracyAgentEvents.workspace_id, workspace_id), inArray(t.accuracyAgentEvents.id, snapshotIds)));
@@ -163,8 +168,15 @@ export async function resolveAssemblyItems(workspace_id: string, selections: Ass
     if (!claim || claim.claim_type !== row.claim_type) {
       throw new AssemblyError("invalid_input", "Selected item version claim origin is invalid.");
     }
+    const source = sourcesById.get(row.source_file_id);
+    if (!source || claim.source_file_id !== row.source_file_id) {
+      throw new AssemblyError("invalid_input", "Selected item version source origin is invalid.");
+    }
     const run = runsById.get(row.run_id);
     assertExtractionRun(row, run);
+    if (run!.org_id !== source.org_id) {
+      throw new AssemblyError("invalid_input", "Selected item version run and source organizations do not match.");
+    }
     assertVersionOrigin(row, run!, row.snapshot_id ? snapshotsById.get(row.snapshot_id) : undefined);
     return {
       id: row.id,
