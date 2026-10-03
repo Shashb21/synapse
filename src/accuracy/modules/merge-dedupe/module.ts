@@ -8,7 +8,7 @@ import {
 } from "./engine";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
+  isDownstreamClaim,
   listClaims,
   persistClaimPatch,
   type AccuracyClaimMetadata,
@@ -131,7 +131,7 @@ export const mergeDedupeModule = mechanicalModule({
     const packBySource = new Map(
       sources.map((row) => [row.id, row.reference_pack_id ?? null]),
     );
-    const active = claims.filter(isActiveLedgerClaim);
+    const active = claims.filter(isDownstreamClaim);
     const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
     const result = mergeDedupeCandidates(candidates);
     const byId = new Map(active.map((row) => [row.id, row]));

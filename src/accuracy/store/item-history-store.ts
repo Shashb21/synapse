@@ -9,6 +9,9 @@ import { insertClaim, type AccuracyClaimType } from "./claim-store";
 import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 
+export { ItemHistoryError } from "@/accuracy/domain/item-history";
+import { validateQuoteAgainstBlock } from "./quote-validator";
+
 type ProposalKind = "same_item" | "split" | "merge";
 type PublishArgs = {
   workspace_id: string; source_file_id: string; run_id: string; claim_type: AccuracyClaimType;
@@ -65,7 +68,7 @@ function sourceBacked(payload: Record<string, unknown>, source_file_id: string,
     const ref = span as Record<string, unknown>;
     const text = typeof ref.block_id === "string" ? blocks.get(ref.block_id) : undefined;
     return ref.source_file_id === source_file_id && typeof ref.quote === "string" &&
-      ref.quote.trim().length > 0 && typeof text === "string" && text.includes(ref.quote);
+      ref.quote.trim().length > 0 && typeof text === "string" && validateQuoteAgainstBlock({ block: { text }, quote: ref.quote }).ok;
   });
 }
 

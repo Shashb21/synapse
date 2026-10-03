@@ -1,0 +1,38 @@
+/** History alternatives stay visible while mutation and downstream boundaries exclude them. */
+import { afterEach, expect, it } from "vitest";
+import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
+import { insertClaim, applyClaimValidation, updateClaimMetadata, persistClaimPatch, listClaims, tacticsForGantt, gapsForGantt } from "@/accuracy/store/claim-store";
+import { listCoveragePairs, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import { claimMetadata } from "@/accuracy/store/claim-store";
+import { POST as coverageAssist } from "@/app/api/accuracy/coverage/assist/route";
+import { buildWorkshopInventory } from "@/accuracy/store/workshop-store";
+import { newId } from "@/modules/kernel/ids";
+const workspaces: string[] = [];
+afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorkspace(id); });
+it("keeps history-only drafts reviewable but blocks promotion, metadata removal and coverage", async () => {
+  const org_id = await createOrganization("eligibility");
+  const workspace_id = await createWorkspace({ org_id, name: "eligibility", slug: newId("slug") }); workspaces.push(workspace_id);
+  const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Alternative", metadata: { history_only: true }, validated: true });
+  const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Alternative tactic", metadata: { history_only: true }, validated: true });
+  const legacy = await insertClaim({ workspace_id, claim_type: "gap", statement: "Legacy" });
+  expect((await listClaims(workspace_id)).map(row => row.id)).toContain(gap.id);
+  expect(gap.validated).toBe(false);
+  await expect(applyClaimValidation({ workspace_id, claim_ids: [gap.id], action: "validate", rationale: "Confirmed", actor: { name: "Reviewer", function: "medical_affairs" } })).rejects.toThrow(/history/i);
+  expect(claimMetadata(await updateClaimMetadata({ workspace_id, claim_id: gap.id, metadata: {} })).history_only).toBe(true);
+  expect(claimMetadata(await persistClaimPatch({ workspace_id, claim_id: tactic.id, metadata: {}, status: "validated" })).history_only).toBe(true);
+  expect(tacticsForGantt([tactic])).toEqual([]); expect(gapsForGantt([gap])).toEqual([]);
+  expect(await listCoveragePairs(workspace_id)).toEqual([]);
+  await expect(upsertCoverageDecision({ workspace_id, gap_id: gap.id, tactic_id: tactic.id, overall: "covers", rationale: "Confirmed" })).rejects.toThrow(/eligible/i);
+  registerAccuracyStack();
+  const actor = { name: "Reviewer", function: "medical_affairs" as const };
+  const merge = await runAccuracyModule<{ survivors: number }>({ workspace_id, org_id, actor, call_kind: "merge_dedupe", input: { workspace_id }, agent_role: "none" });
+  expect(merge.output.survivors).toBe(1);
+  const status = await runAccuracyModule<{ statuses: unknown[] }>({ workspace_id, org_id, actor, call_kind: "status_derive", input: { workspace_id, gap_ids: [gap.id], tactics: [{ id: tactic.id, status: "completed" }], coverages: [{ gap_id: gap.id, tactic_id: tactic.id, overall: "covers", validated: true }] }, agent_role: "none" });
+  expect(status.output.statuses).toEqual([]);
+  const response = await coverageAssist(new Request("http://localhost/api/accuracy/coverage/assist", { method: "POST", body: JSON.stringify({ workspace_id, gap_id: gap.id, tactic_id: tactic.id }) }));
+  expect(response.status).toBe(400);
+  const inventory = await buildWorkshopInventory(workspace_id);
+  expect(JSON.stringify(inventory)).not.toContain(gap.id);
+  expect((await applyClaimValidation({ workspace_id, claim_ids: [legacy.id], action: "validate", rationale: "Confirmed", actor: { name: "Reviewer", function: "medical_affairs" } })).updated).toBe(1);
+});

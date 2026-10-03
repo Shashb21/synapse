@@ -7,7 +7,7 @@ import {
 } from "./engine";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
+  isDownstreamClaim,
   listClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
@@ -46,7 +46,7 @@ export type CompletenessAuditOutput = z.infer<typeof outputSchema>;
 function claimsForAudit(
   rows: Awaited<ReturnType<typeof listClaims>>,
 ): AuditClaimLite[] {
-  return rows.filter(isActiveLedgerClaim).map((row: AccuracyClaimRow) => {
+  return rows.filter(isDownstreamClaim).map((row: AccuracyClaimRow) => {
     const meta = claimMetadata(row);
     const provenance = Array.isArray(meta.provenance)
       ? (meta.provenance as Array<{ block_id?: string | null }>)

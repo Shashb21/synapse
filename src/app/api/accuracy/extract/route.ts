@@ -8,7 +8,8 @@ import {
 } from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { type insertClaim } from "@/accuracy/store/claim-store";
+import { publishGeneratedItemHistory, ItemHistoryError } from "@/accuracy/store/item-history-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
@@ -159,7 +160,7 @@ export async function POST(req: Request) {
             reference_pack_id: source.reference_pack_id ?? null,
           },
         });
-        created_claim_ids.push(gap.id);
+
         gaps_inserted += 1;
       }
       runs.push({
@@ -202,7 +203,7 @@ export async function POST(req: Request) {
             reference_pack_id: source.reference_pack_id ?? null,
           },
         });
-        created_claim_ids.push(tactic.id);
+
         tactics_inserted += 1;
       }
       runs.push({
@@ -214,7 +215,12 @@ export async function POST(req: Request) {
     }
 
     await applyExtractionBatch(batch, runs.map(run => run.run_id), created_claim_ids, async () => {
-      for (const claim of draftClaims) await insertClaim(claim);
+      for (const run of runs) {
+        const claim_type = run.call_kind === "need_extract" ? "gap" : "tactic";
+        const published = await publishGeneratedItemHistory({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
+          run_id: run.run_id, claim_type, final_claims: draftClaims.filter(claim => claim.claim_type === claim_type) });
+        created_claim_ids.push(...published.claim_ids);
+      }
     });
     try {
       const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
@@ -235,6 +241,7 @@ export async function POST(req: Request) {
       throw error;
     }
   } catch (error) {
+    if (error instanceof ItemHistoryError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
     if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
     if (error instanceof ExtractionBatchError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 409 });
     if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers }, { status: 409 });

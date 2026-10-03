@@ -1,8 +1,12 @@
+/** Claim persistence, review visibility and protected downstream projections. */
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
+
+import { isDownstreamClaim } from "@/accuracy/domain/item-history";
+export { isDownstreamClaim } from "@/accuracy/domain/item-history";
 
 export type AccuracyClaimType = "gap" | "tactic";
 
@@ -73,7 +77,7 @@ export async function insertClaim(args: {
     claim_type: args.claim_type,
     statement: args.statement,
     status: args.status ?? "draft",
-    validated: args.validated ?? false,
+    validated: args.metadata?.history_only === true ? false : args.validated ?? false,
     source_file_id: args.source_file_id ?? null,
     metadata: (args.metadata ?? {}) as Record<string, unknown>,
     created_at: now,
@@ -99,7 +103,7 @@ export async function listClaims(
   return rows.filter((row) => row.claim_type === opts.claim_type);
 }
 
-/** Return every active gap and tactic for one source file, without the UI list limit. */
+/** Return eligible source inventory for extraction completeness, without the UI list limit. */
 export async function listActiveSourceClaims(
   workspace_id: string,
   source_file_id: string,
@@ -113,7 +117,7 @@ export async function listActiveSourceClaims(
       eq(t.accuracyClaims.source_file_id, source_file_id),
       inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
     ));
-  return rows.filter(isActiveLedgerClaim);
+  return rows.filter(isDownstreamClaim);
 }
 
 export async function getClaimsByIds(
@@ -159,6 +163,10 @@ export async function applyClaimValidation(args: {
     const found = new Set(existing.map((row) => row.id));
     const missing = args.claim_ids.filter((id) => !found.has(id));
     throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
+  }
+
+  if (args.action === "validate" && existing.some(claim => claimMetadata(claim).history_only === true)) {
+    throw new Error("History-only alternatives cannot be validated; approval requires a separate assembly decision.");
   }
 
   const now = nowIso();
@@ -220,17 +228,18 @@ export async function updateClaimMetadata(args: {
   await ensureAccuracySchema();
   const existing = await getClaim(args.workspace_id, args.claim_id);
   if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+  const metadata = claimMetadata(existing).history_only === true ? { ...args.metadata, history_only: true } : args.metadata;
   const now = nowIso();
   await accuracyDb()
     .update(t.accuracyClaims)
-    .set({ metadata: args.metadata as Record<string, unknown>, updated_at: now })
+    .set({ metadata: metadata as Record<string, unknown>, updated_at: now })
     .where(
       and(
         eq(t.accuracyClaims.id, args.claim_id),
         eq(t.accuracyClaims.workspace_id, args.workspace_id),
       ),
     );
-  return { ...existing, metadata: args.metadata as Record<string, unknown>, updated_at: now };
+  return { ...existing, metadata: metadata as Record<string, unknown>, updated_at: now };
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
@@ -252,7 +261,8 @@ export async function persistClaimPatch(args: {
   const existing = await getClaim(args.workspace_id, args.claim_id);
   if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
   const now = nowIso();
-  const metadata = args.metadata ?? ((existing.metadata ?? {}) as AccuracyClaimMetadata);
+  const metadata = { ...(args.metadata ?? claimMetadata(existing)),
+    ...(claimMetadata(existing).history_only === true ? { history_only: true } : {}) };
   const status = args.status ?? existing.status;
   await accuracyDb()
     .update(t.accuracyClaims)
@@ -282,7 +292,7 @@ function metaStringList(value: unknown): string[] {
 /** Map tactic claims into inputs for `projectGanttFromTactics`. */
 export function tacticsForGantt(claims: AccuracyClaimRow[]) {
   return claims
-    .filter((row) => row.claim_type === "tactic")
+    .filter((row) => row.claim_type === "tactic" && isDownstreamClaim(row))
     .map((row) => {
       const meta = claimMetadata(row);
       return {
@@ -304,7 +314,7 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
 /** Map gap claims into parent links for Gantt coverage continuity. */
 export function gapsForGantt(claims: AccuracyClaimRow[]) {
   return claims
-    .filter((row) => row.claim_type === "gap")
+    .filter((row) => row.claim_type === "gap" && isDownstreamClaim(row))
     .map((row) => {
       const meta = claimMetadata(row);
       return {

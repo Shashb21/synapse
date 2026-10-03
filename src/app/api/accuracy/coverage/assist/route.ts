@@ -4,7 +4,7 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema";
 import { mapCoverageOverallToUi } from "@/accuracy/modules/coverage-decide/overall-map";
-import { getClaimsByIds } from "@/accuracy/store/claim-store";
+import { getClaimsByIds, isDownstreamClaim } from "@/accuracy/store/claim-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     }
 
     await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
-    const claims = await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id]);
+    const claims = (await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id])).filter(isDownstreamClaim);
     const gap = claims.find((c) => c.id === body.gap_id);
     const tactic = claims.find((c) => c.id === body.tactic_id);
     if (!gap || gap.claim_type !== "gap") {

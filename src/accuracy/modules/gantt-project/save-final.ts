@@ -1,5 +1,5 @@
 import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
-import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import { gapsForGantt, isDownstreamClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import {
   latestAccuracyPlan,
@@ -71,10 +71,11 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   catalog: GanttCatalogEntry[];
 }> {
   await assertAccuracyCanProgress(workspace_id, "gantt_project");
-  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
+  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isDownstreamClaim);
   const tactics = tacticsForGantt(claims);
   const gaps = gapsForGantt(claims);
-  const coverages = (await listCoverageJoins(workspace_id)).map((row) => ({
+  const eligibleIds = new Set(claims.map(claim => claim.id));
+  const coverages = (await listCoverageJoins(workspace_id)).filter(row => eligibleIds.has(row.gap_id) && eligibleIds.has(row.tactic_id)).map((row) => ({
     gap_id: row.gap_id,
     tactic_id: row.tactic_id,
     overall: row.overall,
@@ -111,7 +112,7 @@ export async function saveFinalGanttPlan(args: {
   const projected = await projectWorkspaceGantt(args.workspace_id);
   const validatedIds = new Set(
     (await listClaims(args.workspace_id, { claim_type: "tactic" }))
-      .filter((c) => c.validated && isActiveLedgerClaim(c))
+      .filter((c) => c.validated && isDownstreamClaim(c))
       .map((c) => c.id),
   );
   assertSaveFinalActivities(projected.activities, validatedIds);

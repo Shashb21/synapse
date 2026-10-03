@@ -10,7 +10,8 @@ import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { type insertClaim } from "@/accuracy/store/claim-store";
+import { publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { getSourceFile } from "@/accuracy/store/source-store";
 import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
@@ -122,8 +123,13 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
       status: "draft", validated: false, source_file_id, metadata: { origin: "need_extract", source_badge: "extract", external_id: gap.external_id,
         si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null, provenance: gap.provenance, reference_pack_id: source.reference_pack_id ?? null } })),
   ];
-  await applyExtractionBatch(batch, [inventory.run_id, needs.run_id], drafts.map(draft => draft.id!), async () => {
-    for (const draft of drafts) await insertClaim(draft);
+  const created_claim_ids: string[] = [];
+  await applyExtractionBatch(batch, [inventory.run_id, needs.run_id], created_claim_ids, async () => {
+    for (const [claim_type, result] of [["tactic", inventory], ["gap", needs]] as const) {
+      const published = await publishGeneratedItemHistory({ workspace_id: context.workspace_id, source_file_id,
+        run_id: result.run_id, claim_type, final_claims: drafts.filter(draft => draft.claim_type === claim_type) });
+      created_claim_ids.push(...published.claim_ids);
+    }
   });
   const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null; merge: AccuracyRunResult<MergeDedupeOutput> | null; status: AccuracyRunResult<StatusDeriveOutput> | null } = { current: null, merge: null, status: null };
   try {

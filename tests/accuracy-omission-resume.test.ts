@@ -16,6 +16,7 @@ import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omission-review-store";
+import * as historyStore from "@/accuracy/store/item-history-store";
 import * as claimStore from "@/accuracy/store/claim-store";
 import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -141,7 +142,8 @@ describe("extraction omission resume", () => {
   });
   it("does not supersede a blocker when a successful extraction's draft cannot persist", async () => {
     const scope = await fixture(); const body = await paused(scope);
-    const claims = await listClaims(scope.workspace_id); installExtractor(false, [newId("gap"), claims[0].id]);
+    const claims = await listClaims(scope.workspace_id); installExtractor(false);
+    vi.spyOn(historyStore, "publishGeneratedItemHistory").mockRejectedValueOnce(new Error("Injected history write failure"));
     expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
     expect(await listClaims(scope.workspace_id)).toEqual(claims);
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([expect.objectContaining({ run_id: body.runs[0].run_id })]);
