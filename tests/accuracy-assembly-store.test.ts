@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import postgres from "postgres";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { eq, and, sql } from "drizzle-orm";
 import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
@@ -8,6 +9,21 @@ import { insertSourceFile } from "@/accuracy/store/source-store";
 import { decideItemRelationship, publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
 import { createAssembly, listAssemblies, readAssembly, resolveAssemblyItems } from "@/accuracy/store/assembly-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
+
+const { closePool } = vi.hoisted(() => ({ closePool: vi.fn() }));
+// Keep production store transaction code, but give its underlying pool enough
+// connections to exercise independent transactions inside this file.
+vi.mock("@/lib/iegp/db", async () => {
+  const { default: postgres } = await import("postgres");
+  const { drizzle } = await import("drizzle-orm/postgres-js");
+  const client = postgres(process.env.DATABASE_URL ?? "postgres://synapse:synapse@127.0.0.1:5432/synapse", {
+    max: 4,
+    connection: { application_name: "kan37-assembly-store-test" },
+  });
+  const database = drizzle(client);
+  closePool.mockImplementation(() => client.end({ timeout: 5 }));
+  return { db: () => database };
+});
 
 const workspaces: string[] = [];
 const actor = { name: "Assembly Agent", function: "medical_affairs" as const };
@@ -90,6 +106,8 @@ async function coverageRun(scope: Fixture, gap_version_id: string, tactic_versio
 afterEach(async () => {
   for (const id of workspaces.splice(0)) await deleteWorkspace(id);
 });
+
+afterAll(() => closePool());
 
 describe("assembly store", () => {
   it("creates, reads, and retries an immutable mixed-origin assembly with server-resolved coverage", async () => {
@@ -249,29 +267,68 @@ describe("assembly store", () => {
     expect(await accuracyDb().select().from(t.accuracyAssemblyItems).where(eq(t.accuracyAssemblyItems.assembly_id, assemblyId))).toEqual([]);
   });
 
-  it("serializes concurrent assembly creation with identity decisions and keeps saved canonical lineage immutable", async () => {
+  it("serializes independent assembly creation and identity decision transactions under the workspace lock", async () => {
     const seeded = await seedMixed();
     const [proposal] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
       .where(eq(t.accuracyItemRelationshipProposals.workspace_id, seeded.scope.workspace_id));
-    let assemblyPromise!: Promise<Awaited<ReturnType<typeof createAssembly>>>;
-    let decisionPromise!: ReturnType<typeof decideItemRelationship>;
+    const directUrl = process.env.DATABASE_URL ?? "postgres://synapse:synapse@127.0.0.1:5432/synapse";
+    const blocker = postgres(directUrl, { max: 1, connection: { application_name: "kan37-assembly-lock-blocker" } });
+    const monitor = postgres(directUrl, { max: 1, connection: { application_name: "kan37-assembly-lock-monitor" } });
+    let releaseLock: () => void = () => undefined;
+    let announceLock!: () => void;
+    const lockAcquired = new Promise<void>((resolve) => { announceLock = resolve; });
+    const holdLock = new Promise<void>((resolve) => { releaseLock = resolve; });
+    const blockerTransaction = blocker.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${`omission:${seeded.scope.workspace_id}`}, 0))`;
+      announceLock();
+      await holdLock;
+    });
+    let assemblyPromise: ReturnType<typeof createAssembly> | undefined;
+    let decisionPromise: ReturnType<typeof decideItemRelationship> | undefined;
 
-    await withAccuracyTransaction(async () => {
-      await accuracyDb().execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${seeded.scope.workspace_id}`}, 0))`);
+    try {
+      await lockAcquired;
       assemblyPromise = createAssembly({ workspace_id: seeded.scope.workspace_id, actor, source_file_ids: [seeded.scope.source_file_id],
         selections: [{ item_version_id: seeded.gapVersion.id, reason: "queued before decision" }],
         mappings: [], coverage_run_ids: [], linking_complete: false });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.waitFor(async () => {
+        await monitor`select pg_stat_clear_snapshot()`;
+        const waiters = await monitor<{ pid: number; wait_event: string | null }[]>`
+          select pid, wait_event from pg_stat_activity
+          where application_name = 'kan37-assembly-store-test'
+            and wait_event_type = 'Lock'`;
+        expect(waiters.some((row) => row.wait_event === "advisory")).toBe(true);
+      }, { timeout: 2_000, interval: 10 });
+
       decisionPromise = decideItemRelationship({ workspace_id: seeded.scope.workspace_id, proposal_id: proposal.id,
         action: "confirm", rationale: "Concurrent same item", actor });
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
+      await vi.waitFor(async () => {
+        await monitor`select pg_stat_clear_snapshot()`;
+        const waiters = await monitor<{ pid: number; wait_event: string | null }[]>`
+          select pid, wait_event from pg_stat_activity
+          where application_name = 'kan37-assembly-store-test'
+            and wait_event_type = 'Lock'`;
+        expect(waiters.filter((row) => row.wait_event === "advisory")).toHaveLength(2);
+        expect(new Set(waiters.map((row) => row.pid)).size).toBe(2);
+      }, { timeout: 2_000, interval: 10 });
 
-    const [assembly] = await Promise.all([assemblyPromise, decisionPromise.then(() => undefined)]);
-    const current = await resolveAssemblyItems(seeded.scope.workspace_id, [{ item_version_id: seeded.gapVersion.id, reason: "after decision" }]);
-    const saved = await readAssembly(seeded.scope.workspace_id, assembly.id);
-    expect(saved?.items[0]?.canonical_claim_id).toBe(seeded.gapVersion.claim_id);
-    expect(current[0]?.canonical_claim_id).toBe(seeded.finalGap.id);
+      expect(await accuracyDb().select().from(t.accuracyAssemblies).where(eq(t.accuracyAssemblies.workspace_id, seeded.scope.workspace_id))).toEqual([]);
+      expect(await accuracyDb().select().from(t.accuracyItemRelationshipDecisions).where(eq(t.accuracyItemRelationshipDecisions.proposal_id, proposal.id))).toEqual([]);
+      releaseLock();
+      await blockerTransaction;
+
+      const [assembly] = await Promise.all([assemblyPromise, decisionPromise.then(() => undefined)]);
+      const current = await resolveAssemblyItems(seeded.scope.workspace_id, [{ item_version_id: seeded.gapVersion.id, reason: "after decision" }]);
+      const saved = await readAssembly(seeded.scope.workspace_id, assembly.id);
+      expect(saved?.items[0]?.canonical_claim_id).toBe(seeded.gapVersion.claim_id);
+      expect(current[0]?.canonical_claim_id).toBe(seeded.finalGap.id);
+    } finally {
+      releaseLock();
+      await blockerTransaction.catch(() => undefined);
+      await Promise.allSettled([assemblyPromise, decisionPromise].filter((promise): promise is Promise<unknown> => Boolean(promise)));
+      await blocker.end({ timeout: 5 });
+      await monitor.end({ timeout: 5 });
+    }
   });
 
   it("cleans up tenant assembly rows and leaves current claim readers unchanged", async () => {
