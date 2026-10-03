@@ -63,7 +63,11 @@ describe("authorized assembly API", () => {
 
     const read = await get(`workspace_id=${scope.workspace_id}&assembly_id=${scope.assembly.id}`);
     expect(read.status).toBe(200);
-    expect(await read.json()).toEqual({ assembly: scope.assembly });
+    expect(await read.json()).toMatchObject({
+      assembly: scope.assembly,
+      can_review: false,
+      review_state: { assembly_id: scope.assembly.id, status: "stale", expected_review_id: null, latest_decision: null },
+    });
 
     sessionContext.mockResolvedValue({ ...session, signed_in: false, session: null });
     expect((await get(`workspace_id=${scope.workspace_id}`)).status).toBe(401);

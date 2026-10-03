@@ -50,6 +50,7 @@ export type AssemblyReviewState = {
   checks_fingerprint: string;
   status: AssemblyReviewStatus;
   head_status: "current" | "stale";
+  expected_review_id: string | null;
   latest_decision: AssemblyReview | null;
   checks: AssemblyCheckReport;
   advisories: AssemblyCheckReport["findings"];
@@ -65,10 +66,27 @@ export type ApprovedAssemblyBinding = {
   review_id: string;
 };
 
+export type ApprovedLiveItem = {
+  claim_id: string;
+  item_version_id: string;
+  claim_type: "gap" | "tactic";
+  source_file_id: string;
+  payload: Record<string, unknown>;
+};
+
+export type ApprovedLiveMapping = {
+  gap_id: string;
+  tactic_id: string;
+  gap_version_id: string;
+  tactic_version_id: string;
+};
+
 export type ApprovedLiveInventory = {
   claims: AccuracyClaimRow[];
   coverage: CoverageRow[];
   bindings: ApprovedAssemblyBinding[];
+  selected_items: ApprovedLiveItem[];
+  mappings: ApprovedLiveMapping[];
 };
 
 function reviewFromRow(row: ReviewRow): AssemblyReview {
@@ -390,6 +408,7 @@ export async function assemblyReviewState(workspace_id: string, assembly_id: str
     checks_fingerprint,
     status,
     head_status: current ? "current" : "stale",
+    expected_review_id: latest_decision?.id ?? null,
     latest_decision,
     checks,
     advisories: checks.findings.filter((finding) => finding.severity === "advisory"),
@@ -412,6 +431,7 @@ function metadataWithApprovedOverlay(existing: AccuracyClaimMetadata, item: Reso
   } else {
     metadata.tactic_type = typeof payload.type === "string" ? payload.type : null;
     metadata.tactic_status = typeof payload.status === "string" ? payload.status : null;
+    metadata.evidence_question = typeof payload.evidence_question === "string" ? payload.evidence_question : null;
   }
   metadata.provenance = payload.provenance ?? [];
   metadata.approved_assembly_item_version_id = item.id;
@@ -470,6 +490,8 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
     const selectedHeadAssemblies: Array<{ head: ProductionHead; assembly: Assembly }> = [];
     const coverageByPair = new Map<string, CoverageRow>();
     const bindings: ApprovedAssemblyBinding[] = [];
+    const selectedItems: ApprovedLiveItem[] = [];
+    const mappingsByPair = new Map<string, ApprovedLiveMapping>();
 
     for (const head of heads) {
       const { assembly, review } = await assemblyForHead(workspace_id, head);
@@ -486,11 +508,36 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
         if (priorVersion && priorVersion !== item.id) failApproval("Approved production heads conflict for a canonical item version.");
         selectedVersionsByCanonical.set(projected.id, item.id);
         claimsByCanonical.set(projected.id, projected);
+        selectedItems.push({
+          claim_id: projected.id,
+          item_version_id: item.id,
+          claim_type: item.claim_type,
+          source_file_id: item.source_file_id,
+          payload: item.payload,
+        });
       }
     }
 
     for (const { assembly } of selectedHeadAssemblies) {
       const itemsByVersion = new Map(assembly.items.map((item) => [item.id, item]));
+      for (const row of assembly.mappings) {
+        const gap = itemsByVersion.get(row.gap_version_id);
+        const tactic = itemsByVersion.get(row.tactic_version_id);
+        if (!gap || !tactic) continue;
+        const selectedGapVersion = selectedVersionsByCanonical.get(gap.canonical_claim_id);
+        const selectedTacticVersion = selectedVersionsByCanonical.get(tactic.canonical_claim_id);
+        if (selectedGapVersion !== row.gap_version_id || selectedTacticVersion !== row.tactic_version_id) continue;
+        const projected: ApprovedLiveMapping = {
+          gap_id: gap.canonical_claim_id,
+          tactic_id: tactic.canonical_claim_id,
+          gap_version_id: row.gap_version_id,
+          tactic_version_id: row.tactic_version_id,
+        };
+        const key = `${projected.gap_id}\u0000${projected.tactic_id}`;
+        const prior = mappingsByPair.get(key);
+        if (prior && !sameJson(prior, projected)) failApproval("Approved production heads conflict for a selected mapping.");
+        mappingsByPair.set(key, projected);
+      }
       for (const row of assembly.coverage) {
         const gap = itemsByVersion.get(row.gap_version_id);
         const tactic = itemsByVersion.get(row.tactic_version_id);
@@ -503,13 +550,17 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
         }
         const parsed = coverageDecisionSchema.safeParse(row.output);
         if (!parsed.success) failApproval("Approved coverage output is corrupted.");
+        const input = row.input && typeof row.input === "object" ? row.input as Record<string, unknown> : {};
+        const blockBundle = Array.isArray(input.block_bundle_ids)
+          ? input.block_bundle_ids.filter((id): id is string => typeof id === "string")
+          : [];
         const projected: CoverageRow = {
           id: `approved:${row.run_id}`,
           workspace_id,
           gap_id: gap.canonical_claim_id,
           tactic_id: tactic.canonical_claim_id,
           overall: parsed.data.overall,
-          dimensions: { quote_block_ids: parsed.data.quote_block_ids },
+          dimensions: { quote_block_ids: parsed.data.quote_block_ids, block_bundle_ids: blockBundle },
           confidence: String(parsed.data.confidence),
           validated: true,
           rationale: parsed.data.rationale,
@@ -520,17 +571,39 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
         coverageByPair.set(key, projected);
       }
     }
+    for (const mapping of mappingsByPair.values()) {
+      const tactic = claimsByCanonical.get(mapping.tactic_id);
+      if (!tactic) continue;
+      const meta = claimMetadata(tactic);
+      const gapIds = Array.isArray(meta.gap_ids) ? meta.gap_ids.filter((id): id is string => typeof id === "string") : [];
+      if (!gapIds.includes(mapping.gap_id)) {
+        claimsByCanonical.set(mapping.tactic_id, {
+          ...tactic,
+          metadata: { ...meta, gap_ids: [...gapIds, mapping.gap_id] } as Record<string, unknown>,
+        });
+      }
+    }
     return {
       claims: [...claimsByCanonical.values()].sort((a, b) => a.claim_type.localeCompare(b.claim_type) || a.id.localeCompare(b.id)),
       coverage: [...coverageByPair.values()].sort((a, b) => a.gap_id.localeCompare(b.gap_id) || a.tactic_id.localeCompare(b.tactic_id)),
       bindings,
+      selected_items: selectedItems.sort((a, b) => a.claim_id.localeCompare(b.claim_id)),
+      mappings: [...mappingsByPair.values()].sort((a, b) => a.gap_id.localeCompare(b.gap_id) || a.tactic_id.localeCompare(b.tactic_id)),
     };
   });
 }
 
 /** Revalidate a previously consumed live-inventory binding set before publishing durable effects. */
 export async function revalidateApprovedLiveBindings(workspace_id: string, expected: ApprovedAssemblyBinding[]): Promise<void> {
-  const live = await approvedLiveInventory(workspace_id);
+  let live: ApprovedLiveInventory | null;
+  try {
+    live = await approvedLiveInventory(workspace_id);
+  } catch (error) {
+    if (error instanceof AssemblyReviewError && error.code === "approval_required") {
+      throw new AssemblyReviewError("conflict", "Approved live inventory changed before publication.");
+    }
+    throw error;
+  }
   if (!live) throw new AssemblyReviewError("approval_required", "Workspace has no managed approved live inventory.");
   const actual = live.bindings.map((binding) => ({ ...binding })).sort((a, b) => a.batch_id.localeCompare(b.batch_id) || a.call_kind.localeCompare(b.call_kind));
   const wanted = expected.map((binding) => ({ ...binding })).sort((a, b) => a.batch_id.localeCompare(b.batch_id) || a.call_kind.localeCompare(b.call_kind));

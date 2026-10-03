@@ -13,6 +13,7 @@ export type AccuracyPlanSnapshot = {
   activities: GanttActivity[];
   tactic_ids: string[];
   counts: { activities: number; validated_tactics: number };
+  assembly_bindings?: unknown[];
   /** Gap/tactic statements frozen with the bars. */
   labels?: GanttCatalogEntry[];
   /** SHA-256 of the canonical snapshot payload (excludes this field). */

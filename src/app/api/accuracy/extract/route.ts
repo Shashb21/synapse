@@ -25,6 +25,7 @@ import { requestIdentity, type RequestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { NoRouteError } from "@/modules/llm/provider";
 import { runExtractionDownstream } from "@/accuracy/experiments/extraction-pipeline";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,8 +118,8 @@ export async function POST(req: Request) {
             const output = run.output as { gaps?: unknown[]; tactics?: unknown[] };
             return { call_kind: run.call_kind, run_id: id, summary: run.summary, count: output.gaps?.length ?? output.tactics?.length ?? 0 };
           });
-          const downstream = await runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
-            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
+          const downstream = await withAssemblyPreparation(() => runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
+            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id }));
           return { ok: true, workspace_id: request.workspace_id, source_file_id: request.source_file_id,
             extraction_batch_id: batch.id, gaps_inserted: runs.filter(run => run.call_kind === "need_extract").reduce((sum, run) => sum + run.count, 0),
             tactics_inserted: runs.filter(run => run.call_kind === "inventory_extract").reduce((sum, run) => sum + run.count, 0),
@@ -279,8 +280,8 @@ export async function POST(req: Request) {
       const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
         batch_id: batch.id, execute: async (_batch, journal) => {
           await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
-          const downstream = await runExtractionDownstream({ workspace_id: body.workspace_id, org_id, actor,
-            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
+          const downstream = await withAssemblyPreparation(() => runExtractionDownstream({ workspace_id: body.workspace_id, org_id, actor,
+            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id }));
           return { ok: true, workspace_id: body.workspace_id, source_file_id: body.source_file_id,
             extraction_batch_id: batch.id, block_count: allBlocks.length, blocks_used: blocks.length,
             gaps_inserted, tactics_inserted, merge: downstream.merge.output, statuses: downstream.status.output,

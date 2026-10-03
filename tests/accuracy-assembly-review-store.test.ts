@@ -181,6 +181,7 @@ describe("assembly review store", () => {
       rationale: "Competing decision.", advisory_overrides: [], reviewer })).rejects.toMatchObject({ code: "conflict" });
     await expect(assemblyReviewState(scope.workspace_id, assembly.id)).resolves.toMatchObject({
       status: "approved",
+      expected_review_id: first.id,
       latest_decision: expect.objectContaining({ id: first.id, decision: "approve" }),
     });
   });

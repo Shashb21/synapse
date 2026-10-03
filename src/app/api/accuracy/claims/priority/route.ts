@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { claimMetadata, getClaim, updateClaimMetadata } from "@/accuracy/store/claim-store";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
     const message = error instanceof Error ? error.message : "Priority update failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
