@@ -41,6 +41,16 @@ export type ActionIdentity = {
  * always collects the rationale when the action records an edit, and posts to the
  * module API.
  */
+/**
+ * Many rows share a button label ("Set dates"); a title that starts with it
+ * ("Set dates for an activity under …") tells them apart for a screen reader,
+ * and still contains the visible words.
+ */
+export function triggerName(label: string, title?: string): string | undefined {
+  if (!title || title === label) return undefined;
+  return title.toLowerCase().startsWith(label.toLowerCase()) ? title : undefined;
+}
+
 export function ActionDialog({
   endpoint,
   payload,
@@ -153,7 +163,10 @@ export function ActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={trigger ?? <Button size={size} variant={variant} className={className} />}>
+      <DialogTrigger
+        render={trigger ?? <Button size={size} variant={variant} className={className} />}
+        aria-label={triggerName(label, title)}
+      >
         {label}
       </DialogTrigger>
       <DialogContent className="z-[60] sm:max-w-md">
@@ -243,7 +256,11 @@ export function ActionDialog({
                 </label>
               </div>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending || refreshing}>
