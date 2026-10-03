@@ -18,7 +18,7 @@ export type ItemVersion = {
 export type ItemRelationship = {
   id: string; kind: "same_item" | "split" | "merge";
   predecessor_ids: string[]; successor_ids: string[]; rationale: string;
-  decision: "confirm" | "reject" | null;
+  decision: "confirm" | "reject" | null; stale: boolean;
 };
 
 export type ItemHistory = {

@@ -176,6 +176,45 @@ describe("authorized item history API", () => {
     await accuracyDb().insert(t.accuracyItemVersions).values({ ...version, id: newId("iver"), origin_key: newId("origin") });
     expect((await post(decision(scope, action))).status).toBe(409); expect(await decisions(scope.proposal_id)).toEqual([]);
   });
+  it("refreshes stale proposals without changing their audit record or bypassing fresh conflicts", async () => {
+    const scope = await fixture();
+    const [original] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.id, scope.proposal_id));
+    const [version] = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.claim_id, scope.claim_id));
+    const newVersion = newId("iver");
+    await accuracyDb().insert(t.accuracyItemVersions).values({ ...version, id: newVersion, origin_key: newId("origin") });
+    const before = await get(scope.workspace_id, scope.claim_id);
+    expect(await before.json()).toMatchObject({ history: { relationships: [{ id: scope.proposal_id, stale: true, decision: null }] } });
+    const body = { action: "propose", workspace_id: scope.workspace_id, kind: "same_item",
+      predecessor_ids: scope.predecessor_ids, successor_ids: scope.successor_ids, rationale: "Reviewed updated versions" };
+    const fresh = await post(body); expect(fresh.status).toBe(201);
+    const { proposal } = await fresh.json();
+    const [stored] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.id, proposal.id));
+    expect(stored.basis_version_ids).toContain(newVersion);
+    const pending = await get(scope.workspace_id, scope.claim_id);
+    const pendingBody = await pending.json();
+    expect(pendingBody.history.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: scope.proposal_id, stale: true, decision: null }),
+      expect.objectContaining({ id: proposal.id, stale: false, decision: null }),
+    ]));
+    expect((await post(body)).status).toBe(409);
+    for (const action of ["confirm", "reject"]) {
+      expect((await post(decision(scope, action))).status).toBe(409);
+      expect(await decisions(scope.proposal_id)).toEqual([]);
+    }
+    expect((await post({ ...decision(scope), proposal_id: proposal.id })).status).toBe(200);
+    expect(await decisions(proposal.id)).toMatchObject([{ action: "confirm" }]);
+    const [unchanged] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.id, scope.proposal_id));
+    expect(unchanged).toEqual(original);
+    const after = await get(scope.workspace_id, scope.predecessor_ids[0]);
+    expect((await after.json()).history.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: scope.proposal_id, stale: true, decision: null }),
+      expect.objectContaining({ id: proposal.id, stale: false, decision: "confirm" }),
+    ]));
+    expect((await post(body)).status).toBe(409);
+  });
   it("logs runtime read and write faults without exposing their details", async () => {
     const scope = await fixture(); const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(historyStore, "readItemHistory").mockRejectedValue(new Error("private database password"));

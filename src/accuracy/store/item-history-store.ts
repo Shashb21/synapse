@@ -104,10 +104,10 @@ export async function readItemHistory(workspace_id: string, claim_id: string): P
   const versions = await accuracyDb().select().from(t.accuracyItemVersions)
     .where(and(eq(t.accuracyItemVersions.workspace_id, workspace_id), inArray(t.accuracyItemVersions.claim_id, ownedIds)));
   const { proposals, decisions } = await allRelations(workspace_id);
-  const relationships = proposals.filter(p => [...p.predecessor_ids, ...p.successor_ids].some(id => ownedIds.includes(id)))
-    .map(p => ({ id: p.id, kind: p.kind as ProposalKind, predecessor_ids: p.predecessor_ids,
-      successor_ids: p.successor_ids, rationale: p.rationale,
-      decision: (decisions.get(p.id)?.action as "confirm" | "reject" | undefined) ?? null }));
+  const relationships = await Promise.all(proposals.filter(p => [...p.predecessor_ids, ...p.successor_ids].some(id => ownedIds.includes(id)))
+    .map(async p => ({ id: p.id, kind: p.kind as ProposalKind, predecessor_ids: p.predecessor_ids,
+      successor_ids: p.successor_ids, rationale: p.rationale, stale: await proposalIsStale(workspace_id, p),
+      decision: (decisions.get(p.id)?.action as "confirm" | "reject" | undefined) ?? null })));
   versions.sort((a, b) => a.created_at.localeCompare(b.created_at) || (a.iteration ?? Infinity) - (b.iteration ?? Infinity) || a.item_index - b.item_index);
   return { claim: byId.get(canonical_claim_id)!, versions: versions.map(row => ({ id: row.id, claim_id: row.claim_id,
     run_id: row.run_id, snapshot_id: row.snapshot_id, iteration: row.iteration, item_index: row.item_index,
@@ -140,6 +140,12 @@ async function basisVersionIds(workspace_id: string, ids: string[]): Promise<str
   return ids.flatMap(id => versions.filter(v => v.claim_id === id).map(v => v.id).sort());
 }
 
+/** Compare immutable proposal evidence with the current workspace-scoped version basis. */
+async function proposalIsStale(workspace_id: string, proposal: typeof t.accuracyItemRelationshipProposals.$inferSelect): Promise<boolean> {
+  const currentBasis = await basisVersionIds(workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
+  return JSON.stringify(currentBasis) !== JSON.stringify(proposal.basis_version_ids);
+}
+
 function validateShape(kind: ProposalKind, predecessors: string[], successors: string[]) {
   validateIds(predecessors, "Predecessors"); validateIds(successors, "Successors");
   if (predecessors.some(id => successors.includes(id))) throw new ItemHistoryError("invalid_input", "A claim cannot relate to itself.");
@@ -160,9 +166,14 @@ async function assertAvailable(workspace_id: string, kind: ProposalKind, predece
   }
   if (rows.some(row => row.status === "merged")) throw new ItemHistoryError("conflict", "A retired identity cannot enter another decision.");
   const { proposals, decisions } = await allRelations(workspace_id);
-  const incompatible = proposals.some(p => p.id !== exclude && ![...p.predecessor_ids, ...p.successor_ids].every(id => !ids.includes(id))
-    && decisions.get(p.id)?.action !== "reject");
-  if (incompatible) throw new ItemHistoryError("conflict", "An identity already participates in a pending or confirmed relationship.");
+  for (const proposal of proposals) {
+    if (proposal.id === exclude || ![...proposal.predecessor_ids, ...proposal.successor_ids].some(id => ids.includes(id))) continue;
+    const decision = decisions.get(proposal.id)?.action;
+    if (decision === "reject") continue;
+    // Stale undecided proposals remain audit records and permit review on a fresh basis.
+    if (!decision && await proposalIsStale(workspace_id, proposal)) continue;
+    throw new ItemHistoryError("conflict", "An identity already participates in a pending or confirmed relationship.");
+  }
   if (kind === "same_item" && rows.every(row => metadata(row).history_only !== true)) {
     throw new ItemHistoryError("conflict", "Two judged output entries cannot be joined automatically.");
   }
@@ -199,8 +210,7 @@ export async function decideItemRelationship(args: { workspace_id: string; propo
     const [prior] = await accuracyDb().select().from(t.accuracyItemRelationshipDecisions)
       .where(eq(t.accuracyItemRelationshipDecisions.proposal_id, proposal.id));
     if (prior) throw new ItemHistoryError("conflict", "Relationship has already been decided.");
-    const currentBasis = await basisVersionIds(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
-    if (JSON.stringify(currentBasis) !== JSON.stringify(proposal.basis_version_ids)) {
+    if (await proposalIsStale(args.workspace_id, proposal)) {
       throw new ItemHistoryError("conflict", "Relationship proposal is stale after new item versions.");
     }
     if (args.action === "confirm") {
