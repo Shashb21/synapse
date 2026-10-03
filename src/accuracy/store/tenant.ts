@@ -10,6 +10,8 @@ import {
 } from "@/accuracy/domain/plan-label";
 
 export type WorkspaceDeleteCounts = {
+  assembly_items: number;
+  assemblies: number;
   item_relationship_decisions: number;
   item_relationship_proposals: number;
   item_versions: number;
@@ -199,6 +201,8 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   const db = accuracyDb();
 
   const deleted: WorkspaceDeleteCounts = {
+    assembly_items: await deletedCount(await db.delete(t.accuracyAssemblyItems).where(eq(t.accuracyAssemblyItems.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyItems.id })),
+    assemblies: await deletedCount(await db.delete(t.accuracyAssemblies).where(eq(t.accuracyAssemblies.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblies.id })),
     item_relationship_decisions: await deletedCount(await db.delete(t.accuracyItemRelationshipDecisions).where(eq(t.accuracyItemRelationshipDecisions.workspace_id, workspace_id)).returning({ id: t.accuracyItemRelationshipDecisions.id })),
     item_relationship_proposals: await deletedCount(await db.delete(t.accuracyItemRelationshipProposals).where(eq(t.accuracyItemRelationshipProposals.workspace_id, workspace_id)).returning({ id: t.accuracyItemRelationshipProposals.id })),
     item_versions: await deletedCount(await db.delete(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, workspace_id)).returning({ id: t.accuracyItemVersions.id })),
