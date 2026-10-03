@@ -325,7 +325,7 @@ describe("assembly store", () => {
     } finally {
       releaseLock();
       await blockerTransaction.catch(() => undefined);
-      await Promise.allSettled([assemblyPromise, decisionPromise].filter((promise): promise is Promise<unknown> => Boolean(promise)));
+      await Promise.allSettled([assemblyPromise, decisionPromise].filter((promise): promise is NonNullable<typeof promise> => Boolean(promise)));
       await blocker.end({ timeout: 5 });
       await monitor.end({ timeout: 5 });
     }

@@ -13,6 +13,7 @@ import {
 } from "@/accuracy/domain/assembly";
 import type { AccuracyClaimType } from "./claim-store";
 import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import type { ParseBlock } from "./quote-validator";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import * as t from "./schema";
 
@@ -111,6 +112,15 @@ function assertVersionOrigin(row: ItemVersionRow, run: ModuleRunRow, snapshot: t
   }
 }
 
+function coverageMode(row: ModuleRunRow): "llm" | "stub" {
+  const input = row.input as Record<string, unknown>;
+  if (input.mode === "stub") return "stub";
+  const steps = Array.isArray(row.steps) ? row.steps : [];
+  const modeStep = steps.find((step) => step && typeof step === "object"
+    && (step as Record<string, unknown>).name === "coverage:mode") as Record<string, unknown> | undefined;
+  return modeStep?.data === "stub" ? "stub" : "llm";
+}
+
 async function lockWorkspace(workspace_id: string) {
   await accuracyDb().execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${workspace_id}`}, 0))`);
 }
@@ -127,10 +137,11 @@ async function requireSources(workspace_id: string, source_file_ids: string[]) {
 
 async function parseBlocks(workspace_id: string, source_file_ids: string[]) {
   if (source_file_ids.length === 0) return [];
-  return accuracyDb().select().from(t.accuracyParseBlocks).where(and(
+  const rows = await accuracyDb().select().from(t.accuracyParseBlocks).where(and(
     eq(t.accuracyParseBlocks.workspace_id, workspace_id),
     inArray(t.accuracyParseBlocks.source_file_id, source_file_ids),
   ));
+  return rows as ParseBlock[];
 }
 
 /** Resolve selected item versions, canonical identities, and immutable origins from the database. */
@@ -215,14 +226,13 @@ async function resolveCoverage(workspace_id: string, run_ids: string[], items: R
     if (!gap_version_id || !tactic_version_id || !itemsById.has(gap_version_id) || !itemsById.has(tactic_version_id)) {
       throw new AssemblyError("invalid_input", "Coverage run does not target selected item versions.");
     }
-    const mode = input.mode === "stub" ? "stub" : "llm";
     return {
       run_id: row.id,
       gap_version_id,
       tactic_version_id,
       input,
       output: row.output,
-      mode,
+      mode: coverageMode(row),
     };
   });
 }

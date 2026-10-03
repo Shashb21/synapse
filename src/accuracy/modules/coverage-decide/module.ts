@@ -19,6 +19,12 @@ const coverageDecideInputSchema = z.object({
   gap_id: z.string(),
   tactic_id: z.string(),
   block_bundle_ids: z.array(z.string()),
+  selected_versions: z.object({
+    gap_version_id: z.string(),
+    tactic_version_id: z.string(),
+    gap_payload: z.record(z.string(), z.unknown()),
+    tactic_payload: z.record(z.string(), z.unknown()),
+  }).optional(),
 });
 
 export const coverageDecideModule = agenticModule({
