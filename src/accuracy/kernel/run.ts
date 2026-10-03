@@ -29,8 +29,7 @@ import {
   type ApprovedLiveInventory,
 } from "../store/assembly-review-store";
 import { AssemblyReviewError } from "../domain/assembly-review";
-import { asTacticLifecycle, normalizeCoverageOverall } from "../modules/status-derive/engine";
-import { claimMetadata } from "../store/claim-store";
+import { resolveApprovedRunInput } from "./approved-input";
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -84,7 +83,8 @@ export async function runAccuracyModule<O = unknown>(args: {
     throw new Error("Workspace does not belong to the trusted organization.");
   }
   await assertAccuracyCanProgress(args.workspace_id, args.call_kind);
-  const consumedLiveInventory = await approvedLiveInventoryForRun(args.workspace_id, args.call_kind, evaluation_context);
+  const consumption = await assemblyConsumptionForRun(args.workspace_id, args.call_kind, evaluation_context);
+  const consumedLiveInventory = consumption.kind === "managed" ? consumption.live : null;
   const consumedAssemblyBindings = consumedLiveInventory?.bindings ?? null;
   const runInput = await resolveApprovedRunInput({
     workspace_id: args.workspace_id,
@@ -103,6 +103,7 @@ export async function runAccuracyModule<O = unknown>(args: {
       if (consumedAssemblyBindings && !isDeepStrictEqual(existingAssemblyBindings(existing.steps), consumedAssemblyBindings)) {
         throw new AssemblyReviewError("conflict", "Reserved run was produced from a different approved assembly binding.");
       }
+      await withAssemblyWorkspaceLock(args.workspace_id, () => revalidateConsumption(args.workspace_id, consumption));
       return { run_id: existing.id, call_kind: args.call_kind, module_id: existing.module_id,
         module_version: existing.module_version, summary: existing.summary ?? "", output: existing.output as O,
         evals: (existing.evals ?? []) as EvalScore[], cost_usd: Number(existing.cost_usd ?? 0),
@@ -232,9 +233,7 @@ export async function runAccuracyModule<O = unknown>(args: {
       return { result, parsedOutput };
     };
     const publish = async (summary: string, output: unknown, evals: EvalScore[] | undefined) => {
-      if (consumedAssemblyBindings) {
-        await revalidateApprovedLiveBindings(args.workspace_id, consumedAssemblyBindings);
-      }
+      await revalidateConsumption(args.workspace_id, consumption);
       await closeAccuracyRun({
         recorder,
         status: "ok",
@@ -244,15 +243,15 @@ export async function runAccuracyModule<O = unknown>(args: {
         evals,
       });
     };
-    const { result, parsedOutput } = consumedAssemblyBindings && !implementation.manifest.agentic
+    const { result, parsedOutput } = consumption.kind !== "exempt" && !implementation.manifest.agentic
       ? await withAssemblyWorkspaceLock(args.workspace_id, async () => {
-          await revalidateApprovedLiveBindings(args.workspace_id, consumedAssemblyBindings);
+          await revalidateConsumption(args.workspace_id, consumption);
           const executed = await execute();
           await publish(executed.result.summary, executed.parsedOutput.data, executed.result.evals);
           return executed;
         })
       : await execute();
-    if (!consumedAssemblyBindings || implementation.manifest.agentic) {
+    if (consumption.kind === "exempt" || implementation.manifest.agentic) {
       await withAssemblyWorkspaceLock(args.workspace_id, async () => {
         await publish(result.summary, parsedOutput.data, result.evals);
       });
@@ -293,139 +292,28 @@ const PRE_APPROVAL_CALL_KINDS = new Set<CallKind>([
   "completeness_audit",
 ]);
 
-async function approvedLiveInventoryForRun(
+type AssemblyConsumption =
+  | { kind: "exempt" }
+  | { kind: "legacy" }
+  | { kind: "managed"; live: ApprovedLiveInventory };
+
+async function revalidateConsumption(workspace_id: string, consumption: AssemblyConsumption): Promise<void> {
+  if (consumption.kind === "exempt") return;
+  if (consumption.kind === "managed") return revalidateApprovedLiveBindings(workspace_id, consumption.live.bindings);
+  // Legacy permission expires at the first applied production batch, including an unapproved head.
+  if (await approvedLiveInventory(workspace_id)) {
+    throw new AssemblyReviewError("conflict", "Legacy workspace entered managed mode before publication.");
+  }
+}
+
+async function assemblyConsumptionForRun(
   workspace_id: string,
   call_kind: CallKind,
   evaluation_context: "production" | "experiment",
-): Promise<ApprovedLiveInventory | null> {
+): Promise<AssemblyConsumption> {
   const scope = assemblyExecutionScope();
-  if (evaluation_context === "experiment" || scope.kind === "experiment" || scope.kind === "preparation") return null;
-  if (PRE_APPROVAL_CALL_KINDS.has(call_kind)) return null;
-  return approvedLiveInventory(workspace_id);
-}
-
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, field]) => [key, canonical(field)]));
-  }
-  return value;
-}
-
-function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function stringArray(value: unknown): string[] | null {
-  return Array.isArray(value) && value.every((item): item is string => typeof item === "string") ? value : null;
-}
-
-function provenanceBlockIds(payload: Record<string, unknown>): string[] {
-  const spans = Array.isArray(payload.provenance) ? payload.provenance : [];
-  return [...new Set(spans.flatMap((span) => {
-    const row = record(span);
-    const block = row?.block_id;
-    return typeof block === "string" && block.trim() ? [block] : [];
-  }))];
-}
-
-function coverageBlockBundle(row: ApprovedLiveInventory["coverage"][number] | undefined): string[] {
-  const dimensions = record(row?.dimensions);
-  return stringArray(dimensions?.block_bundle_ids) ?? stringArray(dimensions?.quote_block_ids) ?? [];
-}
-
-async function resolveApprovedRunInput<I>(args: {
-  workspace_id: string;
-  call_kind: CallKind;
-  input: I;
-  live: ApprovedLiveInventory | null;
-}): Promise<I> {
-  if (!args.live) return args.input;
-  if (args.call_kind === "coverage_decide") return resolveCoverageDecideInput(args.input, args.live) as I;
-  if (args.call_kind === "status_derive") {
-    validateStatusDeriveInput(args.input, args.live);
-  }
-  return args.input;
-}
-
-function resolveCoverageDecideInput(input: unknown, live: ApprovedLiveInventory): unknown {
-  const data = record(input);
-  if (!data) return input;
-  const gapId = typeof data.gap_id === "string" ? data.gap_id : "";
-  const tacticId = typeof data.tactic_id === "string" ? data.tactic_id : "";
-  const gap = live.selected_items.find((item) => item.claim_id === gapId && item.claim_type === "gap");
-  const tactic = live.selected_items.find((item) => item.claim_id === tacticId && item.claim_type === "tactic");
-  if (!gap || !tactic) {
-    throw new AssemblyReviewError("approval_required", "Coverage decision requires claims from the current approved assembly.");
-  }
-  const selected_versions = {
-    gap_version_id: gap.item_version_id,
-    tactic_version_id: tactic.item_version_id,
-    gap_payload: gap.payload,
-    tactic_payload: tactic.payload,
-  };
-  if (data.selected_versions !== undefined && !sameJson(data.selected_versions, selected_versions)) {
-    throw new AssemblyReviewError("conflict", "Supplied selected versions differ from the current approved assembly.");
-  }
-  const coverage = live.coverage.find((row) => row.gap_id === gapId && row.tactic_id === tacticId);
-  const approvedBundle = coverageBlockBundle(coverage);
-  const resolvedBundle = approvedBundle.length > 0 ? approvedBundle : [...new Set([
-    ...provenanceBlockIds(gap.payload),
-    ...provenanceBlockIds(tactic.payload),
-  ])];
-  const suppliedBundle = stringArray(data.block_bundle_ids) ?? [];
-  if (!sameJson(suppliedBundle, resolvedBundle)) {
-    throw new AssemblyReviewError("conflict", "Supplied coverage evidence bundle differs from the current approved assembly.");
-  }
-  return { ...data, block_bundle_ids: resolvedBundle, selected_versions };
-}
-
-function validateStatusDeriveInput(input: unknown, live: ApprovedLiveInventory): void {
-  const data = record(input);
-  if (!data) return;
-  const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
-  const coverage = new Map(live.coverage.map((row) => [`${row.gap_id}\u0000${row.tactic_id}`, row]));
-
-  for (const id of stringArray(data.gap_ids) ?? []) {
-    const claim = claims.get(id);
-    if (!claim || claim.claim_type !== "gap") {
-      throw new AssemblyReviewError("conflict", "Supplied gap IDs must match the current approved assembly.");
-    }
-  }
-  const tactics = Array.isArray(data.tactics) ? data.tactics : [];
-  for (const row of tactics) {
-    const tactic = record(row);
-    const id = typeof tactic?.id === "string" ? tactic.id : "";
-    const status = typeof tactic?.status === "string" ? tactic.status : "";
-    const claim = claims.get(id);
-    if (!claim || claim.claim_type !== "tactic") {
-      throw new AssemblyReviewError("conflict", "Supplied tactics must match the current approved assembly.");
-    }
-    const meta = claimMetadata(claim);
-    const approvedStatus = asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status);
-    if (status !== approvedStatus) {
-      throw new AssemblyReviewError("conflict", "Supplied tactic status differs from the current approved assembly.");
-    }
-  }
-  const coverages = Array.isArray(data.coverages) ? data.coverages : [];
-  for (const row of coverages) {
-    const supplied = record(row);
-    const gapId = typeof supplied?.gap_id === "string" ? supplied.gap_id : "";
-    const tacticId = typeof supplied?.tactic_id === "string" ? supplied.tactic_id : "";
-    const approved = coverage.get(`${gapId}\u0000${tacticId}`);
-    if (!approved) {
-      throw new AssemblyReviewError("conflict", "Supplied coverage must match the current approved assembly.");
-    }
-    const approvedOverall = normalizeCoverageOverall(approved.overall) ?? "not_relevant";
-    const suppliedOverall = normalizeCoverageOverall(typeof supplied?.overall === "string" ? supplied.overall : "") ?? "not_relevant";
-    if (suppliedOverall !== approvedOverall || supplied?.validated !== approved.validated) {
-      throw new AssemblyReviewError("conflict", "Supplied coverage differs from the current approved assembly.");
-    }
-  }
+  if (evaluation_context === "experiment" || scope.kind === "experiment" || scope.kind === "preparation") return { kind: "exempt" };
+  if (PRE_APPROVAL_CALL_KINDS.has(call_kind)) return { kind: "exempt" };
+  const live = await approvedLiveInventory(workspace_id);
+  return live ? { kind: "managed", live } : { kind: "legacy" };
 }

@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
+import * as legacySchema from "@/lib/iegp/schema";
 import { and, eq } from "drizzle-orm";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
-import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
+import { statusDeriveModule, type StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { GET as assembliesGet, POST as assembliesPost } from "@/app/api/accuracy/assemblies/route";
+import { POST as priorityPost } from "@/app/api/accuracy/claims/priority/route";
 import { POST as claimsPost } from "@/app/api/accuracy/claims/route";
 import { POST as coverageAssist } from "@/app/api/accuracy/coverage/assist/route";
 import { GET as missFlagGet, POST as missFlagPost } from "@/app/api/accuracy/review/route";
 import { withAssemblyExperiment, withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 import { createAssembly } from "@/accuracy/store/assembly-store";
-import { reviewAssembly } from "@/accuracy/store/assembly-review-store";
-import { insertClaim, listDownstreamClaims, persistClaimPatch, updateClaimMetadata } from "@/accuracy/store/claim-store";
+import { approvedLiveInventory, reviewAssembly } from "@/accuracy/store/assembly-review-store";
+import { applyClaimValidation, getClaim, insertClaim, listDownstreamClaims, persistClaimPatch, updateClaimMetadata } from "@/accuracy/store/claim-store";
 import { listCoveragePairs } from "@/accuracy/store/coverage-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import { applyExtractionBatch, createExtractionBatch } from "@/accuracy/store/extraction-batch-store";
@@ -65,12 +69,12 @@ function tactic(scope: Fixture, name = "Approved exact tactic", id = newId("tac"
     origin: "inventory", provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "supports the selected item" }] };
 }
 
-async function extractionRun(scope: Fixture, claim_type: "gap" | "tactic", payload: Record<string, unknown>) {
+async function extractionRun(scope: Fixture, claim_type: "gap" | "tactic", payload: Record<string, unknown> | Record<string, unknown>[]) {
   const id = newId("arun");
   const now = nowIso();
   const output = claim_type === "gap"
-    ? { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [payload] }
-    : { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [payload] };
+    ? { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: Array.isArray(payload) ? payload : [payload] }
+    : { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: Array.isArray(payload) ? payload : [payload] };
   await accuracyDb().insert(t.accuracyModuleRuns).values({ id, org_id: scope.org_id, workspace_id: scope.workspace_id,
     call_kind: claim_type === "gap" ? "need_extract" : "inventory_extract", agent_role: "judge", module_id: "test", module_version: "1",
     status: "ok", started_at: now, finished_at: now, actor_name: actor.name, actor_function: actor.function,
@@ -98,30 +102,36 @@ async function coverageRun(
   return id;
 }
 
-async function publishAssembly(scope: Fixture, gapPayload = gap(scope), tacticPayload = tactic(scope), overall = "partial", opts?: { map?: boolean }) {
+async function publishAssembly(scope: Fixture, gapPayload = gap(scope), tacticPayload = tactic(scope), overall = "partial", opts?: { map?: boolean; residual?: boolean }) {
   const gapRun = await extractionRun(scope, "gap", gapPayload);
-  const tacticRun = await extractionRun(scope, "tactic", tacticPayload);
+  const tacticPayloads = opts?.residual ? [tacticPayload, tactic(scope, "Residual partial tactic")] : [tacticPayload];
+  const tacticRun = await extractionRun(scope, "tactic", tacticPayloads);
   const batch = await createExtractionBatch(scope.workspace_id, scope.source_file_id, ["need_extract", "inventory_extract"]);
   const created: string[] = [];
   await applyExtractionBatch(batch, [gapRun, tacticRun], created, async () => {
     created.push(...(await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
       final_claims: [{ id: gapPayload.id as string, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gapPayload.statement as string }] })).claim_ids);
     created.push(...(await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
-      final_claims: [{ id: tacticPayload.id as string, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tacticPayload.name as string }] })).claim_ids);
+      final_claims: tacticPayloads.map(payload => ({ id: payload.id as string, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: payload.name as string })) })).claim_ids);
   });
   const versions = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id));
   const gapVersion = versions.find(row => row.run_id === gapRun)!;
-  const tacticVersion = versions.find(row => row.run_id === tacticRun)!;
+  const tacticVersion = versions.find(row => row.run_id === tacticRun && row.payload.name === tacticPayload.name)!;
+  const residualTacticVersion = versions.find(row => row.run_id === tacticRun && row.id !== tacticVersion.id);
   const coverage_run_id = await coverageRun(scope, gapVersion.id, tacticVersion.id, gapVersion.payload, tacticVersion.payload, overall);
+  const residualCoverage = residualTacticVersion ? await coverageRun(scope, gapVersion.id, residualTacticVersion.id,
+    gapVersion.payload, residualTacticVersion.payload, "partial") : null;
   const assembly = await createAssembly({ workspace_id: scope.workspace_id, actor, source_file_ids: [scope.source_file_id],
-    selections: [{ item_version_id: gapVersion.id, reason: "gap head" }, { item_version_id: tacticVersion.id, reason: "tactic head" }],
-    mappings: opts?.map === false ? [] : [{ gap_version_id: gapVersion.id, tactic_version_id: tacticVersion.id }], coverage_run_ids: [coverage_run_id],
+    selections: [{ item_version_id: gapVersion.id, reason: "gap head" }, { item_version_id: tacticVersion.id, reason: "tactic head" },
+      ...(residualTacticVersion ? [{ item_version_id: residualTacticVersion.id, reason: "residual evidence" }] : [])],
+    mappings: opts?.map === false ? [] : [{ gap_version_id: gapVersion.id, tactic_version_id: tacticVersion.id },
+      ...(residualTacticVersion ? [{ gap_version_id: gapVersion.id, tactic_version_id: residualTacticVersion.id }] : [])], coverage_run_ids: [coverage_run_id, ...(residualCoverage ? [residualCoverage] : [])],
     extraction_runs: [
       { call_kind: "need_extract", run_id: gapRun, source_file_id: scope.source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" },
-      { call_kind: "inventory_extract", run_id: tacticRun, source_file_id: scope.source_file_id, item_count: 1, outcome: "items", evaluation_context: "production" },
+      { call_kind: "inventory_extract", run_id: tacticRun, source_file_id: scope.source_file_id, item_count: tacticPayloads.length, outcome: "items", evaluation_context: "production" },
     ],
     linking_complete: true, generation_key: batch.id });
-  return { assembly, gapVersion, tacticVersion };
+  return { assembly, gapVersion, tacticVersion, residualTacticVersion };
 }
 
 async function publishInventoryOnlyAssembly(scope: Fixture, tacticPayload = tactic(scope)) {
@@ -270,6 +280,151 @@ describe("KAN-38 assembly approval enforcement", () => {
     expect(persistedRuns).toHaveLength(beforeRuns.length);
   });
 
+  it("rejects an unselected Gantt tactic before opening a run", async () => {
+    const scope = await fixture();
+    const { assembly } = await publishAssembly(scope);
+    await approve(scope, assembly);
+    await expect(runAccuracyModule({ call_kind: "gantt_project", agent_role: "none",
+      input: { workspace_id: scope.workspace_id, tactics: [{ id: "forged", validated: true, start: "2026-01-01", end: "2026-02-01" }] },
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor })).rejects.toMatchObject({ code: "conflict" });
+    const runs = await accuracyDb().select().from(t.accuracyModuleRuns)
+      .where(and(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id), eq(t.accuracyModuleRuns.call_kind, "gantt_project")));
+    expect(runs).toEqual([]);
+  });
+
+  it.each(["statement", "eligibility", "names"])("rejects forged ideation %s before opening a run", async (field) => {
+    const scope = await fixture();
+    const { assembly, gapVersion } = await publishAssembly(scope);
+    await approve(scope, assembly);
+    const row = { id: gapVersion.claim_id, statement: "Approved exact gap", status: "open", priority_band: null as string | null, validated: true };
+    if (field === "statement") row.statement = "Forged source question";
+    if (field === "eligibility") row.priority_band = "high";
+    await expect(runAccuracyModule({ call_kind: "ideate",
+      input: { workspace_id: scope.workspace_id, gaps: [row], existing_tactic_names: field === "names" ? [] : ["Approved exact tactic"] },
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor })).rejects.toMatchObject({ code: "conflict" });
+    const runs = await accuracyDb().select().from(t.accuracyModuleRuns)
+      .where(and(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id), eq(t.accuracyModuleRuns.call_kind, "ideate")));
+    expect(runs).toEqual([]);
+  });
+
+  it.each(["coverages", "tactics"])("rejects empty status %s without changing persisted metadata", async (field) => {
+    const scope = await fixture();
+    const { assembly, gapVersion } = await publishAssembly(scope, gap(scope), tactic(scope), "full");
+    await approve(scope, assembly);
+    const args = { call_kind: "status_derive" as const, agent_role: "none" as const,
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor };
+    const valid = await runAccuracyModule<StatusDeriveOutput>({ ...args, input: { workspace_id: scope.workspace_id } });
+    expect(valid.output.statuses).toMatchObject([{ computed: "addressed" }]);
+    await expect(runAccuracyModule({ ...args, input: { workspace_id: scope.workspace_id, [field]: [] } }))
+      .rejects.toMatchObject({ code: "conflict" });
+    const [stored] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, gapVersion.claim_id));
+    expect(stored.metadata).toMatchObject({ computed_status: "addressed" });
+  });
+
+  it.each(["coverages", "tactics"])("rejects partial status %s for full-plus-partial approved evidence", async (field) => {
+    const scope = await fixture();
+    const { assembly, gapVersion, tacticVersion } = await publishAssembly(scope, gap(scope), tactic(scope), "full", { residual: true });
+    await approve(scope, assembly);
+    const args = { call_kind: "status_derive" as const, workspace_id: scope.workspace_id, org_id: scope.org_id, actor };
+    const valid = await runAccuracyModule<StatusDeriveOutput>({ ...args, input: { workspace_id: scope.workspace_id, gap_ids: [gapVersion.claim_id] } });
+    expect(valid.output.statuses).toMatchObject([{ gap_id: gapVersion.claim_id, computed: "partial" }]);
+    const incomplete = field === "coverages"
+      ? [{ gap_id: gapVersion.claim_id, tactic_id: tacticVersion.claim_id, overall: "full", validated: true }]
+      : [{ id: tacticVersion.claim_id, status: "planned" }];
+    await expect(runAccuracyModule({ ...args, input: { workspace_id: scope.workspace_id, gap_ids: [gapVersion.claim_id], [field]: incomplete } }))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect((await getClaim(scope.workspace_id, gapVersion.claim_id))?.metadata).toMatchObject({ computed_status: "partial" });
+  });
+
+  it("selects gaps while retaining complete evidence and respecting persist false", async () => {
+    const scope = await fixture();
+    const first = await publishAssembly(scope);
+    await approve(scope, first.assembly);
+    const source = await insertSourceFile({ workspace_id: scope.workspace_id, filename: "second.txt", mime: "text/plain", checksum: newId("sum") });
+    const block_id = newId("block");
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id: scope.workspace_id, source_file_id: source.id,
+      index: 0, kind: "paragraph", heading: null, text: "Second source supports the selected item.", parser: "test", created_at: nowIso() });
+    const secondScope = { ...scope, source_file_id: source.id, block_id };
+    const second = await publishAssembly(secondScope, gap(secondScope, "Second gap"), tactic(secondScope, "Second tactic"), "full");
+    await approve(secondScope, second.assembly);
+    const live = (await approvedLiveInventory(scope.workspace_id))!;
+    const input = { workspace_id: scope.workspace_id, gap_ids: [second.gapVersion.claim_id],
+      tactics: live.claims.filter(row => row.claim_type === "tactic").map(row => ({ id: row.id, status: "planned" })),
+      coverages: live.coverage.map(row => ({ gap_id: row.gap_id, tactic_id: row.tactic_id, overall: row.overall, validated: row.validated })) };
+    const args = { call_kind: "status_derive" as const, workspace_id: scope.workspace_id, org_id: scope.org_id, actor };
+    const preview = await runAccuracyModule<StatusDeriveOutput>({ ...args, input: { ...input, persist: false } });
+    expect(preview.output.statuses).toEqual([{ gap_id: second.gapVersion.claim_id, computed: "addressed", status: "addressed", override: false }]);
+    expect((await getClaim(scope.workspace_id, second.gapVersion.claim_id))?.metadata).not.toHaveProperty("computed_status");
+    const result = await runAccuracyModule<StatusDeriveOutput>({ ...args, input });
+    expect(result.output.statuses).toEqual(preview.output.statuses);
+    expect((await getClaim(scope.workspace_id, second.gapVersion.claim_id))?.metadata).toMatchObject({ computed_status: "addressed" });
+    expect((await getClaim(scope.workspace_id, first.gapVersion.claim_id))?.metadata).not.toHaveProperty("computed_status");
+  });
+
+  it.each(["empty coverage", "empty tactics", "partial coverage", "partial tactics"])("guards direct status module against %s evidence", async (scenario) => {
+    registerAccuracyStack();
+    const original = activeAccuracyModuleId("status_derive")!;
+    const scope = await fixture();
+    const { assembly, gapVersion, tacticVersion } = await publishAssembly(scope, gap(scope), tactic(scope), "full", { residual: true });
+    await approve(scope, assembly);
+    const id = newId("direct-status");
+    const supplied = scenario.endsWith("coverage")
+      ? { coverages: scenario.startsWith("empty") ? [] : [{ gap_id: gapVersion.claim_id, tactic_id: tacticVersion.claim_id, overall: "full", validated: true }] }
+      : { tactics: scenario.startsWith("empty") ? [] : [{ id: tacticVersion.claim_id, status: "planned" as const }] };
+    const directModule: AccuracyModule<{ workspace_id: string }, StatusDeriveOutput> = {
+      manifest: { ...statusDeriveModule.manifest, id },
+      inputSchema: z.object({ workspace_id: z.string() }), outputSchema: statusDeriveModule.outputSchema,
+      run: (input, ctx) => statusDeriveModule.run({ ...input, ...supplied }, ctx),
+    };
+    registerAccuracyModule(directModule);
+    activateAccuracyModule({ call_kind: "status_derive", module_id: id, activated_by: "direct module boundary" });
+    try {
+      await expect(runAccuracyModule({ call_kind: "status_derive", input: { workspace_id: scope.workspace_id },
+        workspace_id: scope.workspace_id, org_id: scope.org_id, actor })).rejects.toMatchObject({ code: "conflict" });
+      expect((await getClaim(scope.workspace_id, gapVersion.claim_id))?.metadata).not.toHaveProperty("computed_status");
+    } finally {
+      activateAccuracyModule({ call_kind: "status_derive", module_id: original, activated_by: "restore" });
+    }
+  });
+
+  it.each(["coverage", "dependencies", "activity dependencies", "gap mapping", "parent gap", "validation", "tactic type"])("rejects altered Gantt %s before opening a run", async (field) => {
+    const scope = await fixture();
+    const { assembly, gapVersion, tacticVersion } = await publishAssembly(scope);
+    await approve(scope, assembly);
+    const input: Record<string, unknown> = { workspace_id: scope.workspace_id,
+      tactics: [{ id: tacticVersion.claim_id, validated: true, start: "2026-01-01", end: "2026-02-01" }] };
+    const row = (input.tactics as Record<string, unknown>[])[0];
+    if (field === "coverage") input.coverages = [];
+    if (field === "dependencies") row.depends_on = ["forged-tactic"];
+    if (field === "activity dependencies") input.activities = [{ tactic_id: tacticVersion.claim_id, depends_on: ["ACT-forged"] }];
+    if (field === "gap mapping") row.gap_ids = [];
+    if (field === "parent gap") input.gaps = [{ id: gapVersion.claim_id, parent_gap_id: "forged-parent" }];
+    if (field === "validation") row.validated = false;
+    if (field === "tactic type") row.tactic_type = "rwe_study";
+    await expect(runAccuracyModule({ call_kind: "gantt_project", input, workspace_id: scope.workspace_id, org_id: scope.org_id, actor }))
+      .rejects.toMatchObject({ code: "conflict" });
+    const runs = await accuracyDb().select().from(t.accuracyModuleRuns)
+      .where(and(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id), eq(t.accuracyModuleRuns.call_kind, "gantt_project")));
+    expect(runs).toEqual([]);
+  });
+
+  it("preserves approved Gantt relationships with scheduling overrides and ideation workflow options", async () => {
+    const scope = await fixture();
+    const { assembly, gapVersion, tacticVersion } = await publishAssembly(scope);
+    await approve(scope, assembly);
+    await updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: gapVersion.claim_id, metadata: { priority_band: "high" } });
+    const gantt = await runAccuracyModule<{ activities: Array<{ start: string; gap_ids: string[] }> }>({ call_kind: "gantt_project",
+      input: { workspace_id: scope.workspace_id, tactics: [{ id: tacticVersion.claim_id, validated: true, start: "2026-01-01", end: "2026-02-01" }],
+        activities: [{ tactic_id: tacticVersion.claim_id, start: "2026-01-10" }] },
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor });
+    expect(gantt.output.activities).toMatchObject([{ start: "2026-01-10", gap_ids: [gapVersion.claim_id] }]);
+    const ideation = await runAccuracyModule<{ eligible_gap_ids: string[] }>({ call_kind: "ideate",
+      input: { workspace_id: scope.workspace_id, gaps: [{ id: gapVersion.claim_id, statement: "Approved exact gap", status: "open", priority_band: "high", validated: true }],
+        existing_tactic_names: ["Approved exact tactic"], hints: "Prefer low burden research", per_gap: 2 },
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor });
+    expect(ideation.output.eligible_gap_ids).toEqual([gapVersion.claim_id]);
+  });
+
   it("persists only computed status fields for an approved assembly", async () => {
     registerAccuracyStack();
     const scope = await fixture();
@@ -344,6 +499,69 @@ describe("KAN-38 assembly approval enforcement", () => {
     await expect(updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: gapVersion.claim_id,
       metadata: { priority_band: "high", priority_rationale: "Workflow triage.", priority_origin: "workshop" } }))
       .resolves.toMatchObject({ id: gapVersion.claim_id });
+  });
+
+  it.each(["priority route", "metadata", "patch", "validation"])("serializes direct %s gate and write against publication", async (method) => {
+    // The normal test pool has one connection; use real independent requests for this race.
+    const client = postgres(process.env.DATABASE_URL!, { max: 8, onnotice: () => {} });
+    const shared = globalThis as unknown as { drizzle: ReturnType<typeof drizzle<typeof legacySchema>> };
+    const previous = shared.drizzle;
+    shared.drizzle = drizzle(client, { schema: legacySchema });
+    let unlock!: () => void;
+    let locked!: (pid: number) => void;
+    const held = new Promise<void>(resolve => { unlock = resolve; });
+    const acquired = new Promise<number>(resolve => { locked = resolve; });
+    let holder: Promise<unknown> | undefined;
+    let mutation: Promise<unknown> | undefined;
+    let publication: Promise<unknown> | undefined;
+    try {
+      const scope = await fixture();
+      const { assembly, gapVersion } = await publishAssembly(scope);
+      await approve(scope, assembly);
+      const nextRun = await extractionRun(scope, "gap", gap(scope, "Same canonical new version", gapVersion.claim_id));
+      const batch = await createExtractionBatch(scope.workspace_id, scope.source_file_id, ["need_extract"]);
+      holder = client.begin(async tx => {
+        const [row] = await tx`select pg_backend_pid() as pid from accuracy_claims where id = ${gapVersion.claim_id} for update`;
+        locked(Number(row.pid));
+        await held;
+      });
+      const holderPid = await acquired;
+      const args = { workspace_id: scope.workspace_id, claim_id: gapVersion.claim_id };
+      mutation = method === "priority route" ? priorityPost(new Request("http://localhost/api/accuracy/claims/priority", {
+        method: "POST", body: JSON.stringify({ ...args, priority: "high", rationale: "Atomic priority" }),
+      })) : method === "metadata" ? updateClaimMetadata({ ...args, metadata: { priority: "high" } })
+        : method === "patch" ? persistClaimPatch({ ...args, metadata: { priority: "high" } })
+          : applyClaimValidation({ workspace_id: scope.workspace_id, claim_ids: [gapVersion.claim_id], action: "reject", rationale: "Atomic rejection", actor });
+      let writerPid = 0;
+      await vi.waitFor(async () => {
+        const rows = await client`select pid from pg_stat_activity where ${holderPid} = any(pg_blocking_pids(pid))`;
+        expect(rows.length).toBeGreaterThan(0);
+        writerPid = Number(rows[0].pid);
+      }, { timeout: 5000, interval: 10 });
+      let published = false;
+      publication = applyExtractionBatch(batch, [nextRun], [], async () => {}).then(() => { published = true; });
+      // Wait until the competing request either publishes (the bug) or waits behind the writer.
+      await vi.waitFor(async () => {
+        const rows = await client`select pid from pg_stat_activity where ${writerPid} = any(pg_blocking_pids(pid))`;
+        expect(published || rows.length > 0).toBe(true);
+      }, { timeout: 5000, interval: 10 });
+      expect(published).toBe(false);
+      unlock();
+      await holder;
+      const result = await mutation;
+      if (result instanceof Response) expect(result.status).toBe(200);
+      await publication;
+      const stored = await getClaim(scope.workspace_id, gapVersion.claim_id);
+      if (method === "validation") expect(stored?.status).toBe("rejected");
+      else expect(stored?.metadata).toMatchObject({ priority: "high" });
+      await expect(updateClaimMetadata({ ...args, metadata: { priority: "low" } })).rejects.toBeInstanceOf(AssemblyReviewError);
+      expect((await getClaim(scope.workspace_id, gapVersion.claim_id))?.metadata).toEqual(stored?.metadata);
+    } finally {
+      unlock?.();
+      await Promise.allSettled([holder, mutation, publication].filter(Boolean));
+      shared.drizzle = previous;
+      await client.end({ timeout: 5 });
+    }
   });
 
   it("lists only approved coverage or mapping pairs for managed workspaces", async () => {
@@ -460,6 +678,75 @@ describe("KAN-38 assembly approval enforcement", () => {
     const businessRows = await accuracyDb().select().from(t.accuracyCoverageJoins)
       .where(eq(t.accuracyCoverageJoins.workspace_id, scope.workspace_id));
     expect(businessRows).toHaveLength(0);
+  });
+
+  it.each(["pending", "approved", "rejected", "missing"])("refuses legacy provider output after the first managed batch becomes %s", async (state) => {
+    registerAccuracyStack();
+    const original = activeAccuracyModuleId("coverage_decide")!;
+    const scope = await fixture();
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const id = newId("legacy-provider");
+    registerAccuracyModule({
+      manifest: { id, call_kind: "coverage_decide", version: "test", title: "Held provider", summary: "test", contract: 1, agentic: true },
+      inputSchema: z.object({ workspace_id: z.string() }), outputSchema: z.object({ answer: z.string() }),
+      run: async () => { entered(); await held; return { output: { answer: "legacy evidence" }, summary: "legacy" }; },
+    });
+    activateAccuracyModule({ call_kind: "coverage_decide", module_id: id, activated_by: "legacy race" });
+    const running = runAccuracyModule({ call_kind: "coverage_decide", input: { workspace_id: scope.workspace_id },
+      workspace_id: scope.workspace_id, org_id: scope.org_id, actor });
+    try {
+      await enteredPromise;
+      const { assembly } = await publishAssembly(scope);
+      if (state === "approved") await approve(scope, assembly);
+      if (state === "rejected") await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: assembly.id,
+        expected_fingerprint: assembly.fingerprint, expected_review_id: null, decision: "reject", rationale: "Rejected new head", advisory_overrides: [], reviewer });
+      if (state === "missing") {
+        const run = await extractionRun(scope, "gap", gap(scope, "Unassembled head"));
+        const batch = await createExtractionBatch(scope.workspace_id, scope.source_file_id, ["need_extract"]);
+        await applyExtractionBatch(batch, [run], [], async () => {});
+      }
+      release();
+      await expect(running).rejects.toBeInstanceOf(AssemblyReviewError);
+      const runs = await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.module_id, id));
+      expect(runs).toMatchObject([{ status: "error", output: null }]);
+    } finally {
+      release();
+      await running.catch(() => undefined);
+      activateAccuracyModule({ call_kind: "coverage_decide", module_id: original, activated_by: "restore" });
+    }
+  });
+
+  it("rolls back legacy mechanical writes when execution enters managed mode", async () => {
+    registerAccuracyStack();
+    const original = activeAccuracyModuleId("status_derive")!;
+    const scope = await fixture();
+    const claim = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy gap" });
+    const id = newId("legacy-mechanical");
+    registerAccuracyModule({
+      manifest: { id, call_kind: "status_derive", version: "test", title: "Legacy writer", summary: "test", contract: 1, agentic: false },
+      inputSchema: z.object({ workspace_id: z.string() }), outputSchema: z.object({ answer: z.string() }),
+      run: async () => {
+        await updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: claim.id, metadata: { computed_status: "addressed" } });
+        await publishAssembly(scope);
+        return { output: { answer: "written" }, summary: "legacy" };
+      },
+    });
+    activateAccuracyModule({ call_kind: "status_derive", module_id: id, activated_by: "legacy race" });
+    try {
+      await expect(runAccuracyModule({ call_kind: "status_derive", input: { workspace_id: scope.workspace_id },
+        workspace_id: scope.workspace_id, org_id: scope.org_id, actor })).rejects.toBeInstanceOf(AssemblyReviewError);
+      const [stored] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, claim.id));
+      expect(stored.metadata).not.toHaveProperty("computed_status");
+      const batches = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.workspace_id, scope.workspace_id));
+      expect(batches).toEqual([]);
+      const runs = await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.module_id, id));
+      expect(runs).toMatchObject([{ status: "error", output: null }]);
+    } finally {
+      activateAccuracyModule({ call_kind: "status_derive", module_id: original, activated_by: "restore" });
+    }
   });
 
   it("allows automatic version-bound generation before human approval", async () => {
