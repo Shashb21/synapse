@@ -151,11 +151,12 @@ export default async function TacticDetailPage({
   );
 }
 
-function Item({ k, v }: { k: string; v: string }) {
+function Item({ k, v }: { k: string; v: string | null | undefined }) {
   return (
     <div>
       <dt className="text-[11px] text-muted-foreground">{k}</dt>
-      <dd className="text-foreground">{v}</dd>
+      {/* An empty field reads "—", like the dates and budget, not a blank line. */}
+      <dd className="text-foreground">{v?.trim() ? v : "—"}</dd>
     </div>
   );
 }
