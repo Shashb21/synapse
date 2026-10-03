@@ -1095,7 +1095,8 @@ export function buildTacticLibrary(state: IegpState): TacticLibraryItem[] {
       const gaps = gapIds
         .map((id) => state.gaps.find((row) => row.id === id))
         .filter((row): row is NonNullable<typeof row> => Boolean(row))
-        .filter((row) => row.status !== "excluded")
+        // Retired (split or rewritten), excluded and parked gaps are not counted.
+        .filter(isLiveGap)
         .map((row) => ({ id: row.id, name: row.name }));
       return { id: t.id, name: t.name, type: t.type, custom_type: t.custom_type ?? null, status: t.status, gaps };
     })
