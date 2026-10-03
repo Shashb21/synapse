@@ -20,6 +20,7 @@ import {
 } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
+  buildTacticLibrary,
   displayedGapStatus,
   gapsReadyForPrioritize,
 } from "@/lib/iegp/engine";
@@ -87,6 +88,20 @@ describe("partial split and rewrite", () => {
     expect(after.gap_versions.some((v) => v.live_gap_id === addressed.id && v.retired_gap_id === gapId && v.event === "split")).toBe(true);
     expect(buildPlanWorkspace(after).review.some((c) => c.gap_id === original.id)).toBe(false);
     expect(gapsReadyForPrioritize(after)).toBe(true);
+  });
+
+  it("KAN-68: a tactic's gap list leaves out the retired parent of a split", async () => {
+    const { gapId, tacticId } = await makePartialGap();
+    const result = await splitPartialGap({
+      parent_gap_id: gapId,
+      addressed_name: "Elderly outcomes covered by the chart review",
+      open_name: "Comparator evidence versus regional SoC in frail elderly",
+      tactic_id: tacticId,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const item = buildTacticLibrary(await loadState()).find((t) => t.id === tacticId)!;
+    expect(item.gaps.map((g) => g.id)).toEqual([result.addressedId]);
   });
 
   it("rewrites a partial as Open and keeps the original in version history", async () => {
