@@ -18,6 +18,9 @@ import {
 } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { nowIso } from "@/modules/kernel/ids";
+import { assemblyExecutionScope } from "@/accuracy/kernel/assembly-context";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
+import { approvedLiveInventory } from "@/accuracy/store/assembly-review-store";
 
 export {
   asTacticLifecycle,
@@ -72,6 +75,39 @@ function overrideFromMeta(meta: ReturnType<typeof claimMetadata>): GapStatus | n
   return null;
 }
 
+function statusConflict(message: string): never {
+  throw new AssemblyReviewError("conflict", message);
+}
+
+async function assertSuppliedInputMatchesApprovedInventory(input: z.infer<typeof inputSchema>) {
+  if (assemblyExecutionScope().kind !== "production") return;
+  const live = await approvedLiveInventory(input.workspace_id);
+  if (!live) return;
+  const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
+  const coverage = new Map(live.coverage.map((row) => [`${row.gap_id}\u0000${row.tactic_id}`, row]));
+
+  for (const id of input.gap_ids ?? []) {
+    const claim = claims.get(id);
+    if (!claim || claim.claim_type !== "gap") statusConflict("Supplied gap IDs must match the current approved assembly.");
+  }
+  for (const tactic of input.tactics ?? []) {
+    const claim = claims.get(tactic.id);
+    if (!claim || claim.claim_type !== "tactic") statusConflict("Supplied tactics must match the current approved assembly.");
+    const meta = claimMetadata(claim);
+    const approvedStatus = asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status);
+    if (tactic.status !== approvedStatus) statusConflict("Supplied tactic status differs from the current approved assembly.");
+  }
+  for (const row of input.coverages ?? []) {
+    const approved = coverage.get(`${row.gap_id}\u0000${row.tactic_id}`);
+    if (!approved) statusConflict("Supplied coverage must match the current approved assembly.");
+    const approvedOverall = normalizeCoverageOverall(approved.overall) ?? "not_relevant";
+    const suppliedOverall = normalizeCoverageOverall(row.overall) ?? "not_relevant";
+    if (suppliedOverall !== approvedOverall || row.validated !== approved.validated) {
+      statusConflict("Supplied coverage differs from the current approved assembly.");
+    }
+  }
+}
+
 export const statusDeriveModule = mechanicalModule({
   id: "status-derive.engine-v1",
   call_kind: "status_derive",
@@ -80,6 +116,7 @@ export const statusDeriveModule = mechanicalModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
+    await assertSuppliedInputMatchesApprovedInventory(input);
     const claims = await listDownstreamClaims(input.workspace_id, { limit: 1000 });
     const active = claims.filter(isDownstreamClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
@@ -89,7 +126,12 @@ export const statusDeriveModule = mechanicalModule({
     const suppliedIds = [...(input.gap_ids ?? []), ...(input.tactics ?? []).map(row => row.id),
       ...(input.coverages ?? []).flatMap(row => [row.gap_id, row.tactic_id])];
     const explicitClaims = await getClaimsByIds(input.workspace_id, [...new Set(suppliedIds)]);
-    const excludedIds = new Set([...claims, ...explicitClaims].filter(row => !isDownstreamClaim(row)).map(row => row.id));
+    const eligibleIds = new Set(claims.map(row => row.id));
+    const excludedIds = new Set([
+      ...[...new Set(suppliedIds)].filter(id => !eligibleIds.has(id)),
+      ...claims.filter(row => !isDownstreamClaim(row)).map(row => row.id),
+      ...explicitClaims.filter(row => !isDownstreamClaim(row)).map(row => row.id),
+    ]);
     const gap_ids =
       input.gap_ids && input.gap_ids.length > 0
         ? input.gap_ids.filter(id => !excludedIds.has(id))

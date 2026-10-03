@@ -4,9 +4,10 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema";
 import { mapCoverageOverallToUi } from "@/accuracy/modules/coverage-decide/overall-map";
-import { getClaimsByIds, isDownstreamClaim } from "@/accuracy/store/claim-store";
+import { listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
     }
 
     await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
-    const claims = (await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id])).filter(isDownstreamClaim);
+    const claims = await listDownstreamClaims(body.workspace_id, { limit: null });
     const gap = claims.find((c) => c.id === body.gap_id);
     const tactic = claims.find((c) => c.id === body.tactic_id);
     if (!gap || gap.claim_type !== "gap") {
@@ -94,6 +95,9 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
+    }
+    if (error instanceof AssemblyReviewError) {
+      return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : error.code === "invalid_input" ? 400 : 409 });
     }
     const message = error instanceof Error ? error.message : "Coverage assist failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });

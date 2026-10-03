@@ -7,6 +7,8 @@ import {
   type AccuracyPlanRecord,
   type AccuracyPlanStatus,
 } from "@/accuracy/store/plan-store";
+import { approvedLiveInventory } from "@/accuracy/store/assembly-review-store";
+import { withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import {
   assertSaveFinalActivities,
@@ -118,6 +120,20 @@ export async function saveFinalGanttPlan(args: {
   snapshot_hash: string;
   audit_bundle: GanttAuditBundle;
 }> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => saveFinalGanttPlanLocked(args));
+}
+
+async function saveFinalGanttPlanLocked(args: {
+  workspace_id: string;
+  status?: AccuracyPlanStatus;
+  note: string;
+  actor: Actor;
+}): Promise<{
+  plan: AccuracyPlanRecord;
+  activities: GanttActivity[];
+  snapshot_hash: string;
+  audit_bundle: GanttAuditBundle;
+}> {
   const status = args.status ?? "final";
   const projected = await projectWorkspaceGantt(args.workspace_id);
   const validatedIds = new Set(
@@ -151,6 +167,7 @@ export async function saveFinalGanttPlan(args: {
       tactic_ids,
       counts,
       labels,
+      assembly_bindings: (await approvedLiveInventory(args.workspace_id))?.bindings ?? undefined,
       snapshot_hash,
     },
   });

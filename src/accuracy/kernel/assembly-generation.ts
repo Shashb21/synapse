@@ -12,6 +12,7 @@ import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema
 import { createAssembly, resolveAssemblyItems } from "@/accuracy/store/assembly-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
+import { withAssemblyPreparation } from "./assembly-context";
 
 type ExtractionKind = "gap" | "tactic";
 type RunRow = typeof t.accuracyModuleRuns.$inferSelect;
@@ -191,6 +192,19 @@ function extractionRunScope(rows: RunRow[]): AssemblyExtractionRun[] {
 
 /** Create or retrieve the immutable assembly for one applied extraction publication. */
 export async function generateExtractionAssembly(args: {
+  workspace_id: string;
+  org_id: string;
+  actor: Actor;
+  source_file_ids: string[];
+  extraction_run_ids: string[];
+  generation_key: string;
+  requested_kinds?: Array<"need_extract" | "inventory_extract">;
+  evaluation_context?: EvaluationContext;
+}): Promise<Assembly> {
+  return withAssemblyPreparation(() => generateExtractionAssemblyInternal(args));
+}
+
+async function generateExtractionAssemblyInternal(args: {
   workspace_id: string;
   org_id: string;
   actor: Actor;
