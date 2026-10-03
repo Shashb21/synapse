@@ -25,9 +25,9 @@ export default async function NewTypedSourcePage() {
   }
   return (
     <AppShell active="sources">
-      <PageIntro kicker="Manual entry · no AI" title="Type a source">
+      <PageIntro kicker="Manual entry" title="Type a source">
         Paste or type a source&apos;s text, split it into one block per paragraph, adjust the blocks and
-        save. No model runs: every block is stored as human-entered and is never replaced by a re-parse.{" "}
+        save. Every block is stored as human-entered and is never replaced by a re-parse.{" "}
         <Link href="/sources" className="underline-offset-2 hover:underline">
           All sources
         </Link>

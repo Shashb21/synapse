@@ -47,7 +47,7 @@ export function ManualDatesDialog({
       payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}) }}
       label={label}
       title={title}
-      description="Your dates are marked as yours and survive every rebuild; no model is needed. The change is recorded with its rationale."
+      description="Your dates are marked as yours and survive every rebuild. The change is recorded with its rationale."
       confirmLabel="Save dates"
       identity={identity}
       trigger={small ? SMALL_TRIGGER : undefined}

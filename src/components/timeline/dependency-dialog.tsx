@@ -111,8 +111,8 @@ export function DependencyDialog({
           <DialogHeader>
             <DialogTitle>Dependencies of {activity.tactic_name}</DialogTitle>
             <DialogDescription>
-              Tick what this activity must wait for. Your list is kept on every rebuild and the model is not asked
-              for it again. Tick nothing to say it waits on nothing.
+              Tick what this activity must wait for. Your list is kept on every rebuild. Tick nothing to say it
+              waits on nothing.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-3">
