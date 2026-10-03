@@ -80,9 +80,9 @@ function statusConflict(message: string): never {
 }
 
 async function assertSuppliedInputMatchesApprovedInventory(input: z.infer<typeof inputSchema>) {
-  if (assemblyExecutionScope().kind !== "production") return;
+  if (assemblyExecutionScope().kind !== "production") return false;
   const live = await approvedLiveInventory(input.workspace_id);
-  if (!live) return;
+  if (!live) return false;
   const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
   const coverage = new Map(live.coverage.map((row) => [`${row.gap_id}\u0000${row.tactic_id}`, row]));
 
@@ -106,6 +106,7 @@ async function assertSuppliedInputMatchesApprovedInventory(input: z.infer<typeof
       statusConflict("Supplied coverage differs from the current approved assembly.");
     }
   }
+  return true;
 }
 
 export const statusDeriveModule = mechanicalModule({
@@ -116,7 +117,7 @@ export const statusDeriveModule = mechanicalModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
-    await assertSuppliedInputMatchesApprovedInventory(input);
+    const approved = await assertSuppliedInputMatchesApprovedInventory(input);
     const claims = await listDownstreamClaims(input.workspace_id, { limit: 1000 });
     const active = claims.filter(isDownstreamClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
@@ -183,12 +184,11 @@ export const statusDeriveModule = mechanicalModule({
       for (const row of statuses) {
         const claim = gapById.get(row.gap_id);
         if (!claim) continue;
-        const meta = claimMetadata(claim);
         await persistClaimPatch({
           workspace_id: input.workspace_id,
           claim_id: row.gap_id,
           metadata: {
-            ...meta,
+            ...(approved ? {} : claimMetadata(claim)),
             computed_status: row.computed,
             derived_at: derivedAt,
           },

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { GET as assembliesGet, POST as assembliesPost } from "@/app/api/accuracy/assemblies/route";
 import { POST as claimsPost } from "@/app/api/accuracy/claims/route";
@@ -269,6 +270,49 @@ describe("KAN-38 assembly approval enforcement", () => {
     expect(persistedRuns).toHaveLength(beforeRuns.length);
   });
 
+  it("persists only computed status fields for an approved assembly", async () => {
+    registerAccuracyStack();
+    const scope = await fixture();
+    const { assembly, gapVersion, tacticVersion } = await publishAssembly(scope);
+    await approve(scope, assembly);
+
+    const [storedGap] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, gapVersion.claim_id));
+    const rawMetadata = { ...(storedGap.metadata as Record<string, unknown>), legacy_note: "Keep the raw ledger note" };
+    await accuracyDb().update(t.accuracyClaims).set({ metadata: rawMetadata }).where(eq(t.accuracyClaims.id, gapVersion.claim_id));
+    const approvedClaims = (await listDownstreamClaims(scope.workspace_id, { limit: null }))
+      .map(row => ({ id: row.id, statement: row.statement, source_file_id: row.source_file_id,
+        provenance: (row.metadata as Record<string, unknown>).provenance,
+        gap_ids: (row.metadata as Record<string, unknown>).gap_ids,
+        evidence_question: (row.metadata as Record<string, unknown>).evidence_question }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const approvedPairs = (await listCoveragePairs(scope.workspace_id))
+      .map(pair => ({ id: pair.id, gap_id: pair.gap.id, tactic_id: pair.tactic.id,
+        overall: pair.overall, rationale: pair.rationale, validated: pair.validated }));
+    const [rawGapBefore] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, gapVersion.claim_id));
+    const [rawTacticBefore] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, tacticVersion.claim_id));
+
+    const result = await runAccuracyModule<StatusDeriveOutput>({ call_kind: "status_derive", agent_role: "none",
+      input: { workspace_id: scope.workspace_id }, workspace_id: scope.workspace_id, org_id: scope.org_id, actor });
+
+    expect(result.output.statuses).toHaveLength(1);
+    const [rawGapAfter] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, gapVersion.claim_id));
+    const [rawTacticAfter] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, tacticVersion.claim_id));
+    expect(rawGapAfter.metadata).toEqual({ ...rawGapBefore.metadata as Record<string, unknown>,
+      computed_status: result.output.statuses[0].computed, derived_at: expect.any(String) });
+    expect(rawGapAfter.statement).toBe(rawGapBefore.statement);
+    expect(rawGapAfter.source_file_id).toBe(rawGapBefore.source_file_id);
+    expect(rawTacticAfter).toEqual(rawTacticBefore);
+    expect((await listDownstreamClaims(scope.workspace_id, { limit: null }))
+      .map(row => ({ id: row.id, statement: row.statement, source_file_id: row.source_file_id,
+        provenance: (row.metadata as Record<string, unknown>).provenance,
+        gap_ids: (row.metadata as Record<string, unknown>).gap_ids,
+        evidence_question: (row.metadata as Record<string, unknown>).evidence_question }))
+      .sort((a, b) => a.id.localeCompare(b.id))).toEqual(approvedClaims);
+    expect((await listCoveragePairs(scope.workspace_id))
+      .map(pair => ({ id: pair.id, gap_id: pair.gap.id, tactic_id: pair.tactic.id,
+        overall: pair.overall, rationale: pair.rationale, validated: pair.validated }))).toEqual(approvedPairs);
+  });
+
   it("blocks direct public and store claim insertion for managed heads before approval", async () => {
     const scope = await fixture();
     await publishAssembly(scope);
@@ -331,7 +375,7 @@ describe("KAN-38 assembly approval enforcement", () => {
     await approve(scope, assembly);
 
     const id = newId("mod");
-    const module: AccuracyModule<{ workspace_id: string }, { statuses: unknown[]; open: number; partial: number; addressed: number }> = {
+    const testModule: AccuracyModule<{ workspace_id: string }, { statuses: unknown[]; open: number; partial: number; addressed: number }> = {
       manifest: { id, call_kind: "status_derive", version: "test", title: "Race writer", summary: "test", contract: 1, agentic: false },
       inputSchema: z.object({ workspace_id: z.string() }),
       outputSchema: z.object({ statuses: z.array(z.unknown()), open: z.number(), partial: z.number(), addressed: z.number() }),
@@ -348,7 +392,7 @@ describe("KAN-38 assembly approval enforcement", () => {
         return { output: { statuses: [], open: 0, partial: 0, addressed: 0 }, summary: "wrote after stale head" };
       },
     };
-    registerAccuracyModule(module);
+    registerAccuracyModule(testModule);
     activateAccuracyModule({ call_kind: "status_derive", module_id: id, activated_by: "kan38 race test" });
     try {
       await expect(runAccuracyModule({ call_kind: "status_derive", agent_role: "none", input: { workspace_id: scope.workspace_id },
@@ -377,7 +421,7 @@ describe("KAN-38 assembly approval enforcement", () => {
     const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
     const releasePromise = new Promise<void>((resolve) => { release = resolve; });
     const moduleId = newId("mod");
-    const module: AccuracyModule<Record<string, unknown>, { gap_id: string; tactic_id: string; overall: "partial"; quote_block_ids: string[]; confidence: number; rationale: string }> = {
+    const testModule: AccuracyModule<Record<string, unknown>, { gap_id: string; tactic_id: string; overall: "partial"; quote_block_ids: string[]; confidence: number; rationale: string }> = {
       manifest: { id: moduleId, call_kind: "coverage_decide", version: "test", title: "Provider wait", summary: "test", contract: 1, agentic: true },
       inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()), selected_versions: z.unknown().optional() }),
       outputSchema: z.object({ gap_id: z.string(), tactic_id: z.string(), overall: z.literal("partial"), quote_block_ids: z.array(z.string()), confidence: z.number(), rationale: z.string() }),
@@ -387,7 +431,7 @@ describe("KAN-38 assembly approval enforcement", () => {
         return { output: { gap_id: String(input.gap_id), tactic_id: String(input.tactic_id), overall: "partial", quote_block_ids: [scope.block_id], confidence: 0.8, rationale: "Provider result." }, summary: "provider completed" };
       },
     };
-    registerAccuracyModule(module);
+    registerAccuracyModule(testModule);
     activateAccuracyModule({ call_kind: "coverage_decide", module_id: moduleId, activated_by: "kan38 agentic race test" });
     try {
       const running = runAccuracyModule({ call_kind: "coverage_decide", agent_role: "proposer",
