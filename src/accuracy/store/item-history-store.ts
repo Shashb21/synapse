@@ -106,7 +106,10 @@ export async function readItemHistory(workspace_id: string, claim_id: string): P
   const { proposals, decisions } = await allRelations(workspace_id);
   const relationships = await Promise.all(proposals.filter(p => [...p.predecessor_ids, ...p.successor_ids].some(id => ownedIds.includes(id)))
     .map(async p => ({ id: p.id, kind: p.kind as ProposalKind, predecessor_ids: p.predecessor_ids,
-      successor_ids: p.successor_ids, rationale: p.rationale, stale: await proposalIsStale(workspace_id, p),
+      successor_ids: p.successor_ids, rationale: p.rationale,
+      proposal_actor: { name: p.actor_name, function: p.actor_function },
+      decision_actor: decisions.has(p.id) ? { name: decisions.get(p.id)!.actor_name, function: decisions.get(p.id)!.actor_function } : null,
+      decision_rationale: decisions.get(p.id)?.rationale ?? null, stale: await proposalIsStale(workspace_id, p),
       decision: (decisions.get(p.id)?.action as "confirm" | "reject" | undefined) ?? null })));
   versions.sort((a, b) => a.created_at.localeCompare(b.created_at) || (a.iteration ?? Infinity) - (b.iteration ?? Infinity) || a.item_index - b.item_index);
   return { claim: byId.get(canonical_claim_id)!, versions: versions.map(row => ({ id: row.id, claim_id: row.claim_id,

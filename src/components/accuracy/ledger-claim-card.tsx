@@ -1,5 +1,7 @@
 "use client";
 
+/** Ledger claim summary, eligibility label, validation and immutable history disclosure. */
+import { ClaimHistory } from "@/components/accuracy/claim-history";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +14,7 @@ export type LedgerClaimCardModel = {
   statement: string;
   status: string;
   validated: boolean;
+  history_only?: boolean;
   source_badge: string;
   validation_rationale: string | null;
   computed_status?: string | null;
@@ -21,17 +24,20 @@ export type LedgerClaimCardModel = {
 };
 
 function validationLabel(claim: LedgerClaimCardModel): string {
+  if (claim.history_only) return "Draft for review";
   if (claim.validated) return "Validated";
   if (claim.status === "rejected") return "Rejected";
   return "Draft";
 }
 
 function validationTone(claim: LedgerClaimCardModel): string {
+  if (claim.history_only) return "text-[var(--unknown)]";
   if (claim.validated) return "text-[var(--known)]";
   if (claim.status === "rejected") return "text-destructive";
   return "text-[var(--unknown)]";
 }
 
+/** Display a claim without offering validation for history-only alternatives. */
 export function LedgerClaimCard({
   claim,
   workspaceId,
@@ -118,7 +124,7 @@ export function LedgerClaimCard({
           Last rationale: {claim.validation_rationale}
         </p>
       ) : null}
-      {!claim.validated || claim.status === "rejected" ? (
+      {claim.history_only ? null : !claim.validated || claim.status === "rejected" ? (
         <div className="mt-3 grid gap-2">
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Rationale (required)
@@ -175,6 +181,7 @@ export function LedgerClaimCard({
           </div>
         </div>
       )}
+      <ClaimHistory workspaceId={workspaceId} claimId={claim.id} />
     </li>
   );
 }

@@ -80,6 +80,11 @@ describe("generated item history store", () => {
     expect(proposal?.basis_version_ids).toHaveLength(2);
     expect((await readItemHistory(scope.workspace_id, b.id))?.versions).toHaveLength(1);
     const decided = await decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: proposal.id, action: "confirm", rationale: "Confirmed revision", actor });
+    expect(decided[0]?.relationships.find(row => row.id === proposal.id)).toMatchObject({
+      proposal_actor: { name: proposal.actor_name, function: proposal.actor_function },
+      decision_actor: actor, decision_rationale: "Confirmed revision", decision: "confirm",
+    });
+    expect(before?.relationships.find(row => row.id === proposal.id)).toMatchObject({ decision_actor: null, decision_rationale: null });
     expect(decided[0]?.versions).toHaveLength(2);
     expect(decided[0]?.versions.find(v => v.iteration === 0)?.claim_id).toBe(draftId);
     await expect(decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: proposal.id, action: "reject", rationale: "Too late", actor })).rejects.toMatchObject({ code: "conflict" });

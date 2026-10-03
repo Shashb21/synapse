@@ -19,6 +19,9 @@ export type ItemRelationship = {
   id: string; kind: "same_item" | "split" | "merge";
   predecessor_ids: string[]; successor_ids: string[]; rationale: string;
   decision: "confirm" | "reject" | null; stale: boolean;
+  proposal_actor: { name: string; function: string };
+  decision_actor: { name: string; function: string } | null;
+  decision_rationale: string | null;
 };
 
 export type ItemHistory = {
