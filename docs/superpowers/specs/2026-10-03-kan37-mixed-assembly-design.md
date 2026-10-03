@@ -1,6 +1,6 @@
 # KAN-37 mixed-version assembly design
 
-Status: Draft for review. Product implementation has not started.
+Status: Approved for implementation on 2026-10-03. Implementation is tracked by the KAN-37 plan and SDD ledger.
 
 Issue: [KAN-37](https://synapse21.atlassian.net/browse/KAN-37), under KAN-4.
 
@@ -87,9 +87,9 @@ Present the agent-generated complete assembly in the existing ledger/review flow
 
 Use existing ledger styling and semantic controls. Include labeled fields, keyboard-accessible actions, loading states, retry, and announced errors. Clearly label saved artifacts as unapproved and describe the limited meaning of deterministic checks. Do not offer assembly approval in this ticket.
 
-## Proposed implementation boundaries
+## Approved implementation boundaries
 
-After design review, write a task-by-task plan with these independently testable deliverables:
+Execute the task-by-task plan with these independently testable deliverables:
 
 1. Pure reconstruction and whole-set deterministic checks using resolved version/source/reference inputs.
 2. Immutable transactional persistence, scoped origin resolution, tenant cleanup, and eligibility regression coverage.
