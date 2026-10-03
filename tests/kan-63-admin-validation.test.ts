@@ -237,7 +237,9 @@ describe("KAN-63: routes only for stages that call a model", () => {
 
   it("the control panel's AI-off copy is for the owner, not the customer", () => {
     expect(AI_OFF_OWNER_MESSAGE).toBe("AI is off platform-wide. Turn it on above.");
-    expect(AI_OFF_MESSAGE).toMatch(/ask your workspace owner/);
+    expect(AI_OFF_MESSAGE).toMatch(/contact your Synapse administrator/);
+    // KAN-68: the customer is not told AI is off, nor sent to a workspace owner with no switch.
+    expect(AI_OFF_MESSAGE).not.toMatch(/\bAI\b|workspace owner/);
     const view = readFileSync(join(process.cwd(), "src/components/platform/control-panel-view.tsx"), "utf8");
     expect(view).toMatch(/!ai\.enabled\s*\?\s*AI_OFF_OWNER_MESSAGE/);
   });
