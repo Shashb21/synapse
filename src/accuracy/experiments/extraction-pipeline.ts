@@ -4,6 +4,7 @@ import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { Actor, CallKind, ExperimentCycleControl } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule, type AccuracyRunResult } from "@/accuracy/kernel/run";
+import { generateExtractionAssembly } from "@/accuracy/kernel/assembly-generation";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
@@ -143,6 +144,8 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
     } });
     if (downstream.merge) await retainResult({ ...context, call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, result: downstream.merge });
     if (downstream.status) await retainResult({ ...context, call_kind: "status_derive", input: { workspace_id: context.workspace_id }, result: downstream.status });
+    await generateExtractionAssembly({ workspace_id: context.workspace_id, org_id: context.org_id, actor: context.actor,
+      source_file_ids: [source_file_id], extraction_run_ids: [inventory.run_id, needs.run_id], generation_key: batch.id });
   } catch (error) {
     // resumeExtractionBatch rolls back its callback as one downstream unit. Keep
     // successfully computed stage evidence after that rollback, before returning
