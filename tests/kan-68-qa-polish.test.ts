@@ -43,4 +43,37 @@ describe("KAN-68 QA polish", () => {
     const dialog = src("src/components/platform/action-dialog.tsx");
     expect(dialog).toContain('<label key={`${field.name}:${field.defaultValue ?? ""}`}');
   });
+
+  it("customer screens never say AI is off (KAN-53)", () => {
+    for (const path of [
+      "src/components/walkthrough/tour-steps.ts",
+      "src/components/timeline/timeline-board.tsx",
+      "src/components/room/presenter-console.tsx",
+      "src/components/gap-tactic-actions.tsx",
+    ]) {
+      // Comments may explain the rule; shown text may not break it.
+      const shown = src(path).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      expect(shown, path).not.toMatch(/AI is off|while AI is off|>AI off<|With AI on/);
+    }
+  });
+
+  it("setup list items are named in the singular: Remove indication 1", () => {
+    const fields = src("src/components/setup/setup-fields.tsx");
+    expect(fields).toContain("aria-label={`Remove ${itemLabel.toLowerCase()} ${index + 1}`}");
+    const steps = src("src/components/setup/setup-steps.tsx");
+    for (const [list, item] of [
+      ["Indications", "Indication"],
+      ["Objectives", "Objective"],
+      ["Competitors", "Competitor"],
+      ["Regulatory milestones", "Milestone"],
+      ["Functions involved", "Function"],
+    ]) {
+      expect(steps).toContain(`label="${list}"\n        itemLabel="${item}"`);
+    }
+  });
+
+  it("Gaps with no gaps says to add gaps first, not '0 gaps still unconfirmed'", () => {
+    const workbench = src("src/components/gaps-workbench.tsx");
+    expect(workbench).toMatch(/cards\.length === 0 \? \([\s\S]*?Add gaps first/);
+  });
 });
