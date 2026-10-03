@@ -2,6 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId } from "@/modules/kernel/ids";
+import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 import {
   claimMetadata,
   getClaimsByIds,
@@ -21,15 +23,52 @@ export type CoveragePair = {
   validated: boolean;
 };
 
+async function approvedInventory(workspace_id: string) {
+  if (assemblyExecutionScope().kind !== "production") return null;
+  const { approvedLiveInventory } = await import("./assembly-review-store");
+  return approvedLiveInventory(workspace_id);
+}
+
+async function requireApprovedPair(workspace_id: string, gap_id: string, tactic_id: string): Promise<boolean> {
+  const live = await approvedInventory(workspace_id);
+  if (!live) return false;
+  const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
+  const gap = claims.get(gap_id);
+  const tactic = claims.get(tactic_id);
+  if (!gap || gap.claim_type !== "gap" || !tactic || tactic.claim_type !== "tactic") {
+    throw new AssemblyReviewError("approval_required", "Coverage requires claims from the current approved assembly.");
+  }
+  return true;
+}
+
 export async function listCoveragePairs(workspace_id: string): Promise<CoveragePair[]> {
   await ensureAccuracySchema();
+  const live = await approvedInventory(workspace_id);
+  if (live) {
+    const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
+    const joins = new Map(live.coverage.map((join) => [`${join.gap_id}::${join.tactic_id}`, join]));
+    const explicitPairs = new Map<string, { gap_id: string; tactic_id: string }>();
+    for (const row of live.coverage) explicitPairs.set(`${row.gap_id}::${row.tactic_id}`, { gap_id: row.gap_id, tactic_id: row.tactic_id });
+    for (const row of live.mappings) explicitPairs.set(`${row.gap_id}::${row.tactic_id}`, { gap_id: row.gap_id, tactic_id: row.tactic_id });
+    return [...explicitPairs.values()].flatMap(({ gap_id, tactic_id }) => {
+      const gap = claims.get(gap_id);
+      const tactic = claims.get(tactic_id);
+      if (!gap || !tactic) return [];
+      const existing = joins.get(`${gap_id}::${tactic_id}`);
+      return [{
+        id: existing?.id ?? `pair_${gap_id}_${tactic_id}`,
+        gap,
+        tactic,
+        overall: existing?.overall ?? null,
+        rationale: existing?.rationale ?? null,
+        validated: existing?.validated ?? false,
+      }];
+    }).slice(0, 80);
+  }
   const claims = await listDownstreamClaims(workspace_id, { limit: 500 });
   const gaps = claims.filter((c) => c.claim_type === "gap" && isDownstreamClaim(c));
   const tactics = claims.filter((c) => c.claim_type === "tactic" && isDownstreamClaim(c));
-  const joins = await accuracyDb()
-    .select()
-    .from(t.accuracyCoverageJoins)
-    .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
+  const joins = await listCoverageJoins(workspace_id);
   const joinKey = new Map(joins.map((j) => [`${j.gap_id}::${j.tactic_id}`, j]));
 
   const pairs: CoveragePair[] = [];
@@ -66,9 +105,25 @@ export async function upsertCoverageDecision(args: {
   overall: "covers" | "partial" | "none" | "unknown";
   rationale: string;
 }): Promise<void> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => upsertCoverageDecisionLocked(args));
+}
+
+async function upsertCoverageDecisionLocked(args: {
+  workspace_id: string;
+  gap_id: string;
+  tactic_id: string;
+  overall: "covers" | "partial" | "none" | "unknown";
+  rationale: string;
+}): Promise<void> {
   await ensureAccuracySchema();
-  const claims = await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
-  if (claims.length !== 2 || !claims.every(isDownstreamClaim)) throw new Error("Coverage requires eligible claims in this workspace.");
+  const approved = await requireApprovedPair(args.workspace_id, args.gap_id, args.tactic_id);
+  if (approved) {
+    throw new AssemblyReviewError("conflict", "Coverage changes require a revised approved assembly.");
+  }
+  if (!approved) {
+    const claims = await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
+    if (claims.length !== 2 || !claims.every(isDownstreamClaim)) throw new Error("Coverage requires eligible claims in this workspace.");
+  }
   const existing = await accuracyDb()
     .select()
     .from(t.accuracyCoverageJoins)
@@ -107,6 +162,8 @@ export async function upsertCoverageDecision(args: {
 
 export async function listCoverageJoins(workspace_id: string): Promise<CoverageJoinRow[]> {
   await ensureAccuracySchema();
+  const live = await approvedInventory(workspace_id);
+  if (live) return live.coverage;
   return accuracyDb()
     .select()
     .from(t.accuracyCoverageJoins)
@@ -121,7 +178,21 @@ export async function insertCoverageJoin(args: {
   validated?: boolean;
   rationale?: string | null;
 }): Promise<CoverageJoinRow> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => insertCoverageJoinLocked(args));
+}
+
+async function insertCoverageJoinLocked(args: {
+  workspace_id: string;
+  gap_id: string;
+  tactic_id: string;
+  overall: string;
+  validated?: boolean;
+  rationale?: string | null;
+}): Promise<CoverageJoinRow> {
   await ensureAccuracySchema();
+  if (await requireApprovedPair(args.workspace_id, args.gap_id, args.tactic_id)) {
+    throw new AssemblyReviewError("conflict", "Coverage changes require a revised approved assembly.");
+  }
   const row = {
     id: newId("cov"),
     workspace_id: args.workspace_id,

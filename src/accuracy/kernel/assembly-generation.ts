@@ -12,6 +12,7 @@ import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema
 import { createAssembly, resolveAssemblyItems } from "@/accuracy/store/assembly-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
+import { withAssemblyPreparation } from "./assembly-context";
 
 type ExtractionKind = "gap" | "tactic";
 type RunRow = typeof t.accuracyModuleRuns.$inferSelect;
@@ -200,6 +201,19 @@ export async function generateExtractionAssembly(args: {
   requested_kinds?: Array<"need_extract" | "inventory_extract">;
   evaluation_context?: EvaluationContext;
 }): Promise<Assembly> {
+  return withAssemblyPreparation(() => generateExtractionAssemblyInternal(args));
+}
+
+async function generateExtractionAssemblyInternal(args: {
+  workspace_id: string;
+  org_id: string;
+  actor: Actor;
+  source_file_ids: string[];
+  extraction_run_ids: string[];
+  generation_key: string;
+  requested_kinds?: Array<"need_extract" | "inventory_extract">;
+  evaluation_context?: EvaluationContext;
+}): Promise<Assembly> {
   await ensureAccuracySchema();
   const evaluation_context = args.evaluation_context ?? "production";
   const runIds = args.extraction_run_ids.filter((id) => id.trim());
@@ -264,7 +278,6 @@ export async function generateExtractionAssembly(args: {
     for (const tactic of tactics) {
       const input = {
         workspace_id: args.workspace_id,
-        generation_context: { evaluation_context },
         gap_id: gap.id,
         tactic_id: tactic.id,
         block_bundle_ids: evidenceBlockIds(gap, tactic),

@@ -51,6 +51,7 @@ export type Assembly = {
   coverage: AssemblyCoverage[];
   extraction_runs: AssemblyExtractionRun[] | null;
   linking_complete: boolean;
+  generation_key?: string | null;
   output: { gaps: Record<string, unknown>[]; tactics: Record<string, unknown>[] };
   checks: AssemblyCheckReport;
 };

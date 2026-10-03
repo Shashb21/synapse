@@ -4,6 +4,7 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { listCoveragePairs, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export async function GET(req: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
     const message = error instanceof Error ? error.message : "Coverage pair generation failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
@@ -73,6 +75,7 @@ export async function POST(req: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
     const message = error instanceof Error ? error.message : "Coverage decide failed";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }

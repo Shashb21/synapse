@@ -18,6 +18,9 @@ import {
 } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { nowIso } from "@/modules/kernel/ids";
+import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
+import { resolveApprovedRunInput } from "@/accuracy/kernel/approved-input";
+import { approvedLiveInventory } from "@/accuracy/store/assembly-review-store";
 
 export {
   asTacticLifecycle,
@@ -79,8 +82,11 @@ export const statusDeriveModule = mechanicalModule({
   summary: "Compute Open/Partial/Addressed from validated coverage joins.",
   inputSchema,
   outputSchema,
-  run: async (input, ctx) => {
-    const claims = await listDownstreamClaims(input.workspace_id, { limit: 1000 });
+  run: async (input, ctx) => withAssemblyWorkspaceLock(input.workspace_id, async () => {
+    const approved = assemblyExecutionScope().kind === "production" && ctx.evaluation_context !== "experiment"
+      ? await approvedLiveInventory(input.workspace_id) : null;
+    input = await resolveApprovedRunInput({ workspace_id: input.workspace_id, call_kind: "status_derive", input, live: approved });
+    const claims = approved?.claims ?? await listDownstreamClaims(input.workspace_id, { limit: 1000 });
     const active = claims.filter(isDownstreamClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
     const tacticRows = active.filter((row) => row.claim_type === "tactic");
@@ -89,7 +95,12 @@ export const statusDeriveModule = mechanicalModule({
     const suppliedIds = [...(input.gap_ids ?? []), ...(input.tactics ?? []).map(row => row.id),
       ...(input.coverages ?? []).flatMap(row => [row.gap_id, row.tactic_id])];
     const explicitClaims = await getClaimsByIds(input.workspace_id, [...new Set(suppliedIds)]);
-    const excludedIds = new Set([...claims, ...explicitClaims].filter(row => !isDownstreamClaim(row)).map(row => row.id));
+    const eligibleIds = new Set(claims.map(row => row.id));
+    const excludedIds = new Set([
+      ...[...new Set(suppliedIds)].filter(id => !eligibleIds.has(id)),
+      ...claims.filter(row => !isDownstreamClaim(row)).map(row => row.id),
+      ...explicitClaims.filter(row => !isDownstreamClaim(row)).map(row => row.id),
+    ]);
     const gap_ids =
       input.gap_ids && input.gap_ids.length > 0
         ? input.gap_ids.filter(id => !excludedIds.has(id))
@@ -141,12 +152,11 @@ export const statusDeriveModule = mechanicalModule({
       for (const row of statuses) {
         const claim = gapById.get(row.gap_id);
         if (!claim) continue;
-        const meta = claimMetadata(claim);
         await persistClaimPatch({
           workspace_id: input.workspace_id,
           claim_id: row.gap_id,
           metadata: {
-            ...meta,
+            ...(approved ? {} : claimMetadata(claim)),
             computed_status: row.computed,
             derived_at: derivedAt,
           },
@@ -162,5 +172,5 @@ export const statusDeriveModule = mechanicalModule({
       output: { statuses, open, partial, addressed },
       summary: `Derived ${statuses.length} gap status(es) — ${open} open, ${partial} partial, ${addressed} addressed`,
     };
-  },
+  }),
 });

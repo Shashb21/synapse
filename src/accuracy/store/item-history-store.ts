@@ -1,6 +1,7 @@
 /** Transactional, workspace-scoped persistence for generated alternatives and identity decisions. */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Actor } from "@/accuracy/kernel/contracts";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { ItemHistoryError, generatedItemFingerprint, type ItemHistory, type ItemVersion } from "@/accuracy/domain/item-history";
 import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module";
 import { inventoryExtractOutputSchema } from "@/accuracy/modules/inventory-extract/module";
@@ -377,7 +378,7 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
       if (!reusable) {
         const [sameId] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, claim_id));
         if (sameId) throw new ItemHistoryError("conflict", "Generated claim ID already exists.");
-        await insertClaim(draft);
+        await withAssemblyPreparation(() => insertClaim(draft));
         if (existingClaim && existingClaim.status !== "merged" && metadata(existingClaim).history_only === true) {
           autoJoins.push({ predecessor_id: existingClaim.id, successor_id: claim_id });
         }
@@ -407,9 +408,9 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
         if (matches.length === 1) claim_id = matches[0];
       }
       if (!claim_id) {
-        const claim = await insertClaim({ workspace_id: args.workspace_id, claim_type: args.claim_type,
+        const claim = await withAssemblyPreparation(() => insertClaim({ workspace_id: args.workspace_id, claim_type: args.claim_type,
           statement: reviewStatement(args.claim_type, origin.item, origin.item_index), source_file_id: args.source_file_id,
-          metadata: { history_only: true, provenance: origin.item.provenance ?? [] } });
+          metadata: { history_only: true, provenance: origin.item.provenance ?? [] } }));
         claim_id = claim.id;
       }
       owned.set(origin.fingerprint, claim_id);

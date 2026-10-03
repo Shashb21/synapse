@@ -38,6 +38,9 @@ import {
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { listCoverageJoins, upsertCoverageDecision } from "./coverage-store";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
+import { approvedLiveInventory } from "./assembly-review-store";
+import { withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
 
 export const WORKSHOP_SNAPSHOT_DDL = `CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
     id text PRIMARY KEY,
@@ -175,6 +178,20 @@ function toRecord(row: typeof t.accuracyWorkshopSnapshots.$inferSelect): Worksho
   };
 }
 
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, field]) => [key, canonical(field)]));
+  }
+  return value;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
 export async function latestWorkshopSnapshot(
   workspace_id: string,
 ): Promise<WorkshopSnapshotRecord | null> {
@@ -213,12 +230,22 @@ export async function createWorkshopSnapshot(args: {
   note?: string | null;
   scene?: WorkshopScene;
 }): Promise<WorkshopSnapshotRecord> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => createWorkshopSnapshotLocked(args));
+}
+
+async function createWorkshopSnapshotLocked(args: {
+  workspace_id: string;
+  actor: Actor;
+  note?: string | null;
+  scene?: WorkshopScene;
+}): Promise<WorkshopSnapshotRecord> {
   const { inventory, readiness } = await workshopReadiness(args.workspace_id);
   if (!readiness.ready) {
     throw new Error(readiness.blockers[0] ?? "Workspace is not ready for workshop.");
   }
   const previous = await latestWorkshopSnapshot(args.workspace_id);
   const payload = emptyWorkshopPayload(inventory);
+  payload.assembly_bindings = (await approvedLiveInventory(args.workspace_id))?.bindings ?? undefined;
   if (previous) {
     payload.facilitator_tags = previous.payload.facilitator_tags;
   }
@@ -248,6 +275,21 @@ export async function createWorkshopSnapshot(args: {
   };
 }
 
+async function assertSnapshotUsesCurrentInventory(snapshot: WorkshopSnapshotRecord): Promise<void> {
+  const current = await buildWorkshopInventory(snapshot.workspace_id);
+  const currentBindings = (await approvedLiveInventory(snapshot.workspace_id))?.bindings;
+  if ((snapshot.payload.assembly_bindings || currentBindings) && !sameJson(snapshot.payload.assembly_bindings ?? null, currentBindings ?? null)) {
+    throw new AssemblyReviewError("conflict", "Workshop snapshot is stale for the current approved assembly.");
+  }
+  const currentGaps = new Set(current.gaps.map(row => row.id));
+  const currentTactics = new Set(current.tactics.map(row => row.id));
+  const staleGap = snapshot.payload.inventory.gaps.some(row => !currentGaps.has(row.id));
+  const staleTactic = snapshot.payload.inventory.tactics.some(row => !currentTactics.has(row.id));
+  if (staleGap || staleTactic) {
+    throw new AssemblyReviewError("conflict", "Workshop snapshot is stale for the current approved assembly.");
+  }
+}
+
 async function persistPayload(record: WorkshopSnapshotRecord, payload: WorkshopSnapshotPayload) {
   await accuracyDb()
     .update(t.accuracyWorkshopSnapshots)
@@ -268,8 +310,17 @@ export async function setWorkshopScene(args: {
   snapshot_id: string;
   scene: WorkshopScene;
 }): Promise<WorkshopSnapshotRecord> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => setWorkshopSceneLocked(args));
+}
+
+async function setWorkshopSceneLocked(args: {
+  workspace_id: string;
+  snapshot_id: string;
+  scene: WorkshopScene;
+}): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
   if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  await assertSnapshotUsesCurrentInventory(snapshot);
   const payload = { ...snapshot.payload, scene: args.scene };
   await persistPayload(snapshot, payload);
   return { ...snapshot, scene: args.scene, payload };
@@ -280,8 +331,17 @@ export async function addFacilitatorTag(args: {
   snapshot_id: string;
   label: string;
 }): Promise<WorkshopSnapshotRecord> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => addFacilitatorTagLocked(args));
+}
+
+async function addFacilitatorTagLocked(args: {
+  workspace_id: string;
+  snapshot_id: string;
+  label: string;
+}): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
   if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  await assertSnapshotUsesCurrentInventory(snapshot);
   const label = normalizeTagLabel(args.label);
   if (label.length < 2) throw new Error("Facilitator tag needs a short label.");
   const tags = snapshot.payload.facilitator_tags;
@@ -303,8 +363,18 @@ export async function assignFacilitatorTag(args: {
   gap_id: string;
   tag_id: string;
 }): Promise<WorkshopSnapshotRecord> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => assignFacilitatorTagLocked(args));
+}
+
+async function assignFacilitatorTagLocked(args: {
+  workspace_id: string;
+  snapshot_id: string;
+  gap_id: string;
+  tag_id: string;
+}): Promise<WorkshopSnapshotRecord> {
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
   if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  await assertSnapshotUsesCurrentInventory(snapshot);
   const gap = snapshot.payload.inventory.gaps.find((row) => row.id === args.gap_id);
   if (!gap) throw new Error("Gap is not in this workshop snapshot.");
   const facilitator_tags = assignGapToTag(
@@ -335,9 +405,19 @@ export async function applyWorkshopAction(args: {
   actor: Actor;
   action: WorkshopActionInput;
 }): Promise<WorkshopSnapshotRecord> {
+  return withAssemblyWorkspaceLock(args.workspace_id, () => applyWorkshopActionLocked(args));
+}
+
+async function applyWorkshopActionLocked(args: {
+  workspace_id: string;
+  snapshot_id: string;
+  actor: Actor;
+  action: WorkshopActionInput;
+}): Promise<WorkshopSnapshotRecord> {
   const parsed = assertWorkshopAction(args.action);
   const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
   if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+  await assertSnapshotUsesCurrentInventory(snapshot);
   requireSnapshotGap(snapshot, parsed.gap_id);
 
   const overlays: Record<string, WorkshopGapOverlay> = { ...snapshot.payload.overlays };

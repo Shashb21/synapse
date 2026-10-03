@@ -10,6 +10,7 @@ import { activateAccuracyModule, activeAccuracyModuleId, registerAccuracyModule 
 import { mechanicalModule } from "@/accuracy/modules/_factory";
 import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
@@ -187,11 +188,12 @@ describe("extraction omission resume", () => {
     expect((await post({ ...scope, action: "resume", extraction_batch_id: latest.extraction_batch_id, idempotency_key: "latest" })).status).toBe(200);
   });
   it("rolls back a real merge interrupted after the duplicate patch, then recovers both claims", async () => {
-    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+    const scope = await fixture();
     // Legacy duplicates still exercise real merge rollback; generated histories need an explicit identity decision.
     const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
     const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
-    const before = await listClaims(scope.workspace_id);
+    const body = await paused(scope); await resolve(scope, body);
+    const before = await withAssemblyPreparation(() => listClaims(scope.workspace_id));
     const originalPatch = claimStore.persistClaimPatch;
     let writes = 0;
     const failure = vi.spyOn(claimStore, "persistClaimPatch").mockImplementation(async args => {
@@ -202,7 +204,7 @@ describe("extraction omission resume", () => {
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "real-merge-retry" };
     expect((await post(request)).status).toBe(500);
     expect(writes).toBe(2);
-    expect(await listClaims(scope.workspace_id)).toEqual(before);
+    expect(await withAssemblyPreparation(() => listClaims(scope.workspace_id))).toEqual(before);
     expect(await runs(scope.workspace_id)).toHaveLength(1);
     const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
     failure.mockRestore();
