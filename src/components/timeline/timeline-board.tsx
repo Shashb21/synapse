@@ -41,6 +41,7 @@ import {
   type TimelineModel,
 } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
+import { plural } from "@/lib/plural";
 
 export type PlanView = {
   version: number;
@@ -182,8 +183,8 @@ export function TimelineBoard({
           </p>
           {plan?.note ? <p className="mt-1 text-[11px] text-muted-foreground">“{plan.note}”</p> : null}
           <p className="mt-1 text-[11px] text-muted-foreground">
-            {model.activities.length} activity(ies) · {model.window.start} → {model.window.end} ·{" "}
-            {model.window.months} month(s)
+            {plural(model.activities.length, "activity", "activities")} · {model.window.start} → {model.window.end} ·{" "}
+            {plural(model.window.months, "month")}
             {stale ? " · the live plan has changed since the last save" : ""}
           </p>
           {history.length > 1 ? (
@@ -211,7 +212,7 @@ export function TimelineBoard({
           />
           {canSaveFinal && model.pending.length > 0 ? (
             <p className="max-w-56 text-[11px] text-muted-foreground">
-              {model.pending.length} activity(ies) not dated yet.{" "}
+              {plural(model.pending.length, "activity", "activities")} not dated yet.{" "}
               {ai
                 ? "Date them by hand or rebuild before saving as final."
                 : "Date them by hand or remove them before saving as final."}
@@ -588,7 +589,8 @@ function EmptyTimeline({
       </p>
       {unscheduled.length > 0 ? (
         <p className="mt-2 text-[12px] text-muted-foreground">
-          {unscheduled.length} open gap(s) have no tactic yet, so there is nothing to schedule for them.
+          {unscheduled.length === 1 ? "1 open gap has" : `${unscheduled.length} open gaps have`} no tactic yet, so there is nothing to schedule for{" "}
+          {unscheduled.length === 1 ? "it" : "them"}.
         </p>
       ) : null}
       {canRun ? (

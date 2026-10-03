@@ -4,6 +4,7 @@ import { IngestPanel } from "@/components/ingest-panel";
 import { loadState } from "@/lib/iegp/store";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
+import { plural } from "@/lib/plural";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,7 @@ export default async function SourcesPage() {
                   {source.id} · {source.title}
                 </Link>{" "}
                 <span className="text-[11px] text-muted-foreground">
-                  {blockCount.get(source.id) ?? 0} block(s) · {source.stakeholder_function}
+                  {plural(blockCount.get(source.id) ?? 0, "block")} · {source.stakeholder_function}
                 </span>
               </li>
             ))}

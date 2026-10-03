@@ -132,7 +132,7 @@ export default async function IdeationPage() {
               <span className="text-foreground">{rejected}</span> rejected
             </li>
             <li>
-              <span className="text-foreground">{eligibleCount}</span> open gap(s) validated as High
+              <span className="text-foreground">{eligibleCount}</span> open {eligibleCount === 1 ? "gap" : "gaps"} validated as High
             </li>
           </ul>
           {ai ? (

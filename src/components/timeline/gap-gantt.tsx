@@ -19,6 +19,7 @@ import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import type { TimelineActivity, TimelineBand } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineGroup, GapTimelineItem, GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
+import { plural } from "@/lib/plural";
 
 const LABEL_W = 300;
 const HEADER_H = 46;
@@ -404,7 +405,7 @@ export function GapGantt({
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Gantt timeline with ${view.counts.dated} activities by gap, ${view.prioritized.length} prioritized gap(s), from ${view.window.start} to ${view.window.end}`}
+        aria-label={`Gantt timeline with ${plural(view.counts.dated, "activity", "activities")} by gap, ${plural(view.prioritized.length, "prioritized gap")}, from ${view.window.start} to ${view.window.end}`}
         style={{
           fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif",
           touchAction: drag ? "none" : undefined,
@@ -521,7 +522,7 @@ export function GapGantt({
                   {BAND_TITLES[row.band].toUpperCase()}
                 </text>
                 <text x={LABEL_W - 10} y={row.y + 16} fill={palette.muted} fontSize={10} textAnchor="end">
-                  {`${row.count} gap(s)`}
+                  {plural(row.count, "gap")}
                 </text>
               </g>
             );

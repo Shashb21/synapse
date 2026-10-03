@@ -12,6 +12,7 @@ import {
 import { loadState } from "@/lib/iegp/store";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { sessionContext } from "@/modules/auth/session";
+import { plural } from "@/lib/plural";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
       <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="blocks" className="text-[12px] font-semibold text-foreground">
-            {blocks.length} block(s) · {humanCount} human
+            {plural(blocks.length, "block")} · {humanCount} human
           </h2>
           <ActionDialog
             endpoint={ENDPOINT}

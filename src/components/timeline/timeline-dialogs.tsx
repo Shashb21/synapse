@@ -362,6 +362,11 @@ export function ActivitySheetEditor({
       setError("The end date is before the start date.");
       return;
     }
+    const readout = value("readout_date");
+    if (readout && start && readout < start) {
+      setError("The readout cannot be before the activity starts.");
+      return;
+    }
 
     const schedule: Record<string, string> = {};
     if (start && start !== activity.start_date) schedule.start_date = start;

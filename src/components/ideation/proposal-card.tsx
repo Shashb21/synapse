@@ -3,6 +3,7 @@ import { ActionDialog, type ActionIdentity } from "@/components/platform/action-
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
 import type { IdeationProposalRecord } from "@/modules/stages/s9-ideation/module";
+import { plural } from "@/lib/plural";
 
 export type ProposalCardModel = IdeationProposalRecord;
 
@@ -88,7 +89,7 @@ export function ProposalCard({
           value={
             proposal.design.duration_months === null
               ? "Not set — the timeline estimates it"
-              : `${proposal.design.duration_months} month(s) to run · readout +${proposal.design.readout_lag_months ?? "?"}`
+              : `${plural(proposal.design.duration_months, "month")} to run · readout +${proposal.design.readout_lag_months ?? "?"}`
           }
         />
       </dl>

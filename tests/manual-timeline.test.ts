@@ -102,6 +102,20 @@ describe("S10 by hand", () => {
     await expect(
       addTimelineActivity({ tactic_id: first.tactic_id, start_date: "2026-09-01", end_date: "2026-08-01", rationale: "backwards", actor: ACTOR }),
     ).rejects.toThrow(/cannot end before/);
+    // KAN-68: a readout before the start, or a date that isn't one, is refused too.
+    await expect(
+      addTimelineActivity({
+        tactic_id: first.tactic_id,
+        start_date: "2026-09-01",
+        end_date: "2027-08-01",
+        readout_date: "2026-01-01",
+        rationale: "early readout",
+        actor: ACTOR,
+      }),
+    ).rejects.toThrow(/readout cannot be before/);
+    await expect(
+      addTimelineActivity({ tactic_id: first.tactic_id, start_date: "2026-13-45", end_date: "2027-08-01", rationale: "bad date", actor: ACTOR }),
+    ).rejects.toThrow(/not a valid date/);
 
     // Remove a pending one: it leaves the pending list and shows as removed.
     await removeTimelineActivity({ id: first.activity_id, rationale: "Not in scope this cycle", actor: ACTOR });
@@ -272,6 +286,37 @@ describe("S10 by hand", () => {
     expect(back.meta.schedule_rationale).toBe("Hand-written timing");
     expect(restored.removed).toHaveLength(0);
     expect(restored.activities.find((row) => row.id === b)!.depends_on).toEqual([a]);
+  });
+});
+
+describe("KAN-68: S10 readout and window", () => {
+  beforeAll(async () => {
+    await resetDemo();
+    await wipePlatform();
+    await ensurePlatformSchema();
+  }, 60_000);
+
+  it("moves an untouched readout with the bar, and the window holds the whole bar", async () => {
+    const first = (await timelineModel(ANCHOR)).pending[0]!;
+    const { id } = await addTimelineActivity({
+      tactic_id: first.tactic_id,
+      start_date: "2026-03-01",
+      end_date: "2028-12-31",
+      readout_date: "2027-06-01",
+      rationale: "Interim readout mid-study",
+      actor: ACTOR,
+    });
+    const model = await timelineModel(ANCHOR);
+    expect(model.window.end).toBe("2028-12-31");
+
+    // A drag sends only start and end; the readout keeps its offset from the start.
+    await updateTimelineActivity({ id, start_date: "2026-05-01", end_date: "2029-02-28", rationale: "Slipped two months", actor: ACTOR });
+    const moved = (await timelineModel(ANCHOR)).activities.find((row) => row.id === id)!;
+    expect(moved.readout_date).toBe("2027-08-01");
+
+    await expect(
+      updateTimelineActivity({ id, readout_date: "2026-01-01", rationale: "Too early", actor: ACTOR }),
+    ).rejects.toThrow(/readout cannot be before/);
   });
 });
 
