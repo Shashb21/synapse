@@ -36,12 +36,20 @@ function missingRequired(form: HTMLFormElement): FormControl[] {
 }
 
 /** The name a person sees for a field: its aria-label, its label's own text, or its placeholder. */
-function fieldName(el: FormControl): string {
+export function fieldName(el: FormControl): string {
   const aria = el.getAttribute("aria-label")?.trim();
   if (aria) return aria;
   const label = el.labels?.[0];
   if (label) {
-    // The label wraps the control; drop the control's own text (options, typed value).
+    // The label's own words come before the control; a hint after it is not part of the name.
+    let lead = "";
+    for (const node of Array.from(label.childNodes)) {
+      if (node === el || (node instanceof Element && node.contains(el))) break;
+      lead += node.textContent ?? "";
+    }
+    const leadText = lead.replace(/\s+/g, " ").replace(/\s*(?:\*|\(required\))\s*$/i, "").trim();
+    if (leadText) return leadText;
+    // Otherwise the whole label, without the control's own text (options, typed value).
     const copy = label.cloneNode(true) as HTMLElement;
     copy.querySelectorAll("input, select, textarea").forEach((node) => node.remove());
     const text = copy.textContent
