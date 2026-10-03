@@ -15,7 +15,9 @@ import type {
   EvalScore,
   Actor,
   ResolvedAccuracyRoute,
+  ExperimentCycleControl,
 } from "./contracts";
+import { validateExperimentCycleControl } from "./contracts";
 import { estimateCostUsd } from "./cost";
 import { getWorkspaceOrgId } from "../store/tenant";
 import { assertAccuracyCanProgress } from "./omission-pause";
@@ -50,9 +52,11 @@ export async function runAccuracyModule<O = unknown>(args: {
   workspace_id: string;
   /** Internal boundary for isolated experiments; production remains the default. */
   evaluation_context?: "production" | "experiment";
+  experiment_cycle_control?: ExperimentCycleControl;
 }): Promise<AccuracyRunResult<O>> {
   const agent_role = args.agent_role ?? "proposer";
   const evaluation_context = args.evaluation_context ?? "production";
+  const experiment_cycle_control = validateExperimentCycleControl(args.experiment_cycle_control, evaluation_context, args.call_kind);
   const implementation = await activeAccuracyModule(args.call_kind);
   await ensureAccuracySchema(implementation.migrations ?? []);
 
@@ -95,6 +99,7 @@ export async function runAccuracyModule<O = unknown>(args: {
     actor: args.actor,
     input: args.input,
     evaluation_context,
+    experiment_cycle_control,
   }, args.reserved_run_id);
   await openAccuracyRun(recorder);
 

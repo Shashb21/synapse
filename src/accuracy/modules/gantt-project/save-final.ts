@@ -1,5 +1,5 @@
 import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
-import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
+import { claimMetadata, getClaimsByIds, gapsForGantt, isDownstreamClaim, listDownstreamClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import {
   latestAccuracyPlan,
@@ -71,10 +71,21 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   catalog: GanttCatalogEntry[];
 }> {
   await assertAccuracyCanProgress(workspace_id, "gantt_project");
-  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
-  const tactics = tacticsForGantt(claims);
-  const gaps = gapsForGantt(claims);
-  const coverages = (await listCoverageJoins(workspace_id)).map((row) => ({
+  const claims = await listDownstreamClaims(workspace_id, { limit: 500 });
+  // Eligibility filtering removes review rows from inventory, so resolve stored references separately.
+  // The pure helpers need known excluded rows to remove dependency/parent links as well as bars.
+  const referencedIds = [...new Set(claims.flatMap(claim => {
+    const meta = claimMetadata(claim);
+    return [...(Array.isArray(meta.depends_on) ? meta.depends_on : []),
+      ...(Array.isArray(meta.gap_ids) ? meta.gap_ids : []), meta.parent_gap_id]
+      .filter((id): id is string => typeof id === "string");
+  }))];
+  const excludedReferences = (await getClaimsByIds(workspace_id, referencedIds)).filter(row => !isDownstreamClaim(row));
+  const projectionClaims = [...claims, ...excludedReferences];
+  const tactics = tacticsForGantt(projectionClaims);
+  const gaps = gapsForGantt(projectionClaims);
+  const eligibleIds = new Set(claims.map(claim => claim.id));
+  const coverages = (await listCoverageJoins(workspace_id)).filter(row => eligibleIds.has(row.gap_id) && eligibleIds.has(row.tactic_id)).map((row) => ({
     gap_id: row.gap_id,
     tactic_id: row.tactic_id,
     overall: row.overall,
@@ -110,8 +121,8 @@ export async function saveFinalGanttPlan(args: {
   const status = args.status ?? "final";
   const projected = await projectWorkspaceGantt(args.workspace_id);
   const validatedIds = new Set(
-    (await listClaims(args.workspace_id, { claim_type: "tactic" }))
-      .filter((c) => c.validated && isActiveLedgerClaim(c))
+    (await listDownstreamClaims(args.workspace_id, { claim_type: "tactic" }))
+      .filter((c) => c.validated && isDownstreamClaim(c))
       .map((c) => c.id),
   );
   assertSaveFinalActivities(projected.activities, validatedIds);

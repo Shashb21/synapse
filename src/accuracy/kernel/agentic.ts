@@ -1,4 +1,5 @@
 import type { JsonCompletion, RunHandle, TokenUsage } from "../kernel/contracts";
+import { validateExperimentCycleControl } from "./contracts";
 import type { CriticIssue, ProductionSignals } from "./agent-events";
 import { validateProvenance, type ProvenanceSpan } from "../store/quote-validator";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "../modules/completeness-audit/snapshot-inspector";
@@ -66,7 +67,8 @@ export async function runShallowAgenticCycle<T extends object>(args: {
   onCompleteness?: (draft: T, prior_open_issues: SuspectedOmission[]) => Promise<SnapshotCompletenessAssessment>;
   judge: (draft: T) => Promise<T>;
 }): Promise<AgenticExchangeResult<T>> {
-  const max = args.maxExchanges ?? 1;
+  const control = validateExperimentCycleControl(args.run.experiment_cycle_control, args.run.evaluation_context ?? "production");
+  const max = control?.critic_revision_passes ?? args.maxExchanges ?? 1;
   if (!Number.isInteger(max) || max < 0) throw new RangeError("maxExchanges must be a nonnegative integer");
   const trace: string[] = [];
   const measure = async <V>(fn: () => Promise<V>) => {
@@ -128,7 +130,7 @@ export async function runShallowAgenticCycle<T extends object>(args: {
     priorOpenIssues = completeness.suspected_omissions;
     if (structural) trace.push(`round${iteration + 1}:critic`);
     if (iteration === max || !structural) break;
-    if (structural.issues.length === 0 && structural.score >= 0.85 && importantIssues.length === 0) break;
+    if (!control && structural.issues.length === 0 && structural.score >= 0.85 && importantIssues.length === 0) break;
     const feedback = [
       ...structural.issues.map((issue) => issue.claim),
       ...importantIssues.map((issue) => `${issue.claim} Action: ${issue.suggested_action}`),

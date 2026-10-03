@@ -12,7 +12,7 @@ import type { IdeateOutput } from "@/accuracy/modules/ideate/module";
 import {
   claimMetadata,
   insertClaim,
-  listClaims,
+  listDownstreamClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
@@ -107,8 +107,8 @@ export async function POST(req: Request) {
     }
 
     await assertAccuracyCanProgress(body.workspace_id, "ideate");
-    const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
-    const tactics = await listClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
+    const gaps = await listDownstreamClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
+    const tactics = await listDownstreamClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
     const isManual = Boolean(body.title?.trim() && body.rationale?.trim());
 
     if (isManual) {

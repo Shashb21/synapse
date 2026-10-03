@@ -141,6 +141,47 @@ export const accuracyAgentEvents = pgTable(
   }),
 );
 
+/** Immutable generated alternatives, retaining the claim that first owned each origin. */
+export const accuracyItemVersions = pgTable("accuracy_item_versions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  claim_id: text("claim_id").notNull().references(() => accuracyClaims.id),
+  run_id: text("run_id").notNull().references(() => accuracyModuleRuns.id),
+  snapshot_id: text("snapshot_id").references(() => accuracyAgentEvents.id),
+  iteration: integer("iteration"),
+  item_index: integer("item_index").notNull(),
+  origin_key: text("origin_key").notNull(),
+  claim_type: text("claim_type").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  source_file_id: text("source_file_id").notNull().references(() => accuracySourceFiles.id),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  origin: unique("accuracy_item_versions_origin_key").on(table.workspace_id, table.origin_key),
+  claim: index("accuracy_item_versions_claim_idx").on(table.workspace_id, table.claim_id),
+  exact: index("accuracy_item_versions_exact_idx").on(table.workspace_id, table.claim_type, table.source_file_id, table.fingerprint),
+}));
+
+/** Uncertain identity or ancestry proposal; decisions are separate immutable records. */
+export const accuracyItemRelationshipProposals = pgTable("accuracy_item_relationship_proposals", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  kind: text("kind").notNull(), predecessor_ids: jsonb("predecessor_ids").$type<string[]>().notNull(),
+  successor_ids: jsonb("successor_ids").$type<string[]>().notNull(),
+  basis_version_ids: jsonb("basis_version_ids").$type<string[]>().notNull(),
+  rationale: text("rationale").notNull(), actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(), created_at: text("created_at").notNull(),
+}, (table) => ({ workspace: index("accuracy_item_relationship_proposals_workspace_idx").on(table.workspace_id, table.created_at) }));
+
+/** One final contributor decision per proposal. */
+export const accuracyItemRelationshipDecisions = pgTable("accuracy_item_relationship_decisions", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  proposal_id: text("proposal_id").notNull().references(() => accuracyItemRelationshipProposals.id),
+  action: text("action").notNull(), rationale: text("rationale").notNull(),
+  actor_name: text("actor_name").notNull(), actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({ proposal: unique("accuracy_item_relationship_decisions_proposal_key").on(table.proposal_id),
+  workspace: index("accuracy_item_relationship_decisions_workspace_idx").on(table.workspace_id, table.proposal_id) }));
+
 /** Append-only contributor decisions for individual source-linked omissions. */
 export const accuracyOmissionActions = pgTable("accuracy_omission_actions", {
   id: text("id").primaryKey(),
@@ -385,6 +426,27 @@ export const ACCURACY_DDL = [
     CONSTRAINT accuracy_agent_events_run_type_iteration_key UNIQUE (run_id, event_type, iteration)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_agent_events_run_workspace_idx ON accuracy_agent_events (run_id, workspace_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_versions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, claim_id text NOT NULL REFERENCES accuracy_claims(id),
+    run_id text NOT NULL REFERENCES accuracy_module_runs(id), snapshot_id text REFERENCES accuracy_agent_events(id),
+    iteration integer, item_index integer NOT NULL, origin_key text NOT NULL, claim_type text NOT NULL,
+    fingerprint text NOT NULL, payload jsonb NOT NULL, source_file_id text NOT NULL REFERENCES accuracy_source_files(id),
+    created_at text NOT NULL, CONSTRAINT accuracy_item_versions_origin_key UNIQUE (workspace_id, origin_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_versions_claim_idx ON accuracy_item_versions (workspace_id, claim_id)`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_versions_exact_idx ON accuracy_item_versions (workspace_id, claim_type, source_file_id, fingerprint)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_proposals (
+    id text PRIMARY KEY, workspace_id text NOT NULL, kind text NOT NULL, predecessor_ids jsonb NOT NULL,
+    successor_ids jsonb NOT NULL, basis_version_ids jsonb NOT NULL, rationale text NOT NULL, actor_name text NOT NULL,
+    actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_relationship_proposals_workspace_idx ON accuracy_item_relationship_proposals (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_decisions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, proposal_id text NOT NULL REFERENCES accuracy_item_relationship_proposals(id),
+    action text NOT NULL, rationale text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL,
+    created_at text NOT NULL, CONSTRAINT accuracy_item_relationship_decisions_proposal_key UNIQUE (proposal_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_relationship_decisions_workspace_idx ON accuracy_item_relationship_decisions (workspace_id, proposal_id)`,
   `CREATE TABLE IF NOT EXISTS accuracy_omission_actions (
     id text PRIMARY KEY, workspace_id text NOT NULL, source_file_id text NOT NULL,
     run_id text NOT NULL, issue_id text NOT NULL, action text NOT NULL,
@@ -466,6 +528,7 @@ export const ACCURACY_DDL = [
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_item_relationship_proposals ADD COLUMN IF NOT EXISTS basis_version_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
   `ALTER TABLE accuracy_module_runs ADD COLUMN IF NOT EXISTS evaluation_context text NOT NULL DEFAULT 'production'`,
   `ALTER TABLE accuracy_experiments ADD COLUMN IF NOT EXISTS source_org_id text`,
   `UPDATE accuracy_experiments AS experiment

@@ -33,6 +33,7 @@ function toCard(claim: Awaited<ReturnType<typeof listClaims>>[number]): LedgerCl
     statement: claim.statement,
     status: claim.status,
     validated: claim.validated,
+    history_only: meta.history_only === true,
     source_badge: String(meta.source_badge ?? claim.source_file_id ?? "unspecified source"),
     validation_rationale: meta.validation?.rationale ?? null,
     computed_status: typeof meta.computed_status === "string" ? meta.computed_status : null,

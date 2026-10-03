@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import * as copying from "@/accuracy/experiments/copy-workspace";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -21,6 +22,7 @@ const originals = new Map<string, string>();
 
 beforeAll(() => { registerAccuracyStack(); });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const [call_kind, module_id] of originals) {
     activateAccuracyModule({ call_kind: call_kind as never, module_id, activated_by: "experiment test restore" });
   }
@@ -52,6 +54,48 @@ function activateControlledModule(args: { call_kind: "need_extract" | "inventory
 }
 
 describe("isolated accuracy experiments", () => {
+  it.each([0, 4, 1.5, "2", null, undefined])("rejects an invalid condition pass count %s before workspace copying", async critic_revision_passes => {
+    const copy = vi.spyOn(copying, "copyExperimentWorkspace");
+    await expect(runAccuracyExperiment({ mode: "pipeline", source_workspace_id: "unused", source_file_ids: [],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes }, actor: { name: "test", function: "medical_affairs" },
+    })).rejects.toThrow(/critic_revision_passes/);
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it("rejects controlled non-extraction calls before workspace copying", async () => {
+    const copy = vi.spyOn(copying, "copyExperimentWorkspace");
+    await expect(runAccuracyExperiment({ mode: "single_call", source_workspace_id: "unused", source_file_ids: [],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes: 2 }, call: { call_kind: "merge_dedupe", input: {} }, actor: { name: "test", function: "medical_affairs" },
+    })).rejects.toThrow(/extraction/);
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it.each(["production", "experiment"] as const)("rejects unsupported trusted run controls in %s before opening a run", async evaluation_context => {
+    const source = await sourceFixture();
+    await expect(runAccuracyModule({ call_kind: "merge_dedupe", input: { workspace_id: source.workspace_id },
+      actor: { name: "test", function: "medical_affairs" }, org_id: source.org_id, workspace_id: source.workspace_id,
+      evaluation_context, ...{ experiment_cycle_control: { critic_revision_passes: 2 } },
+    })).rejects.toThrow();
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it.each([
+    { evaluation_context: "production" as const, passes: 2 },
+    { evaluation_context: "experiment" as const, passes: 0 },
+    { evaluation_context: "experiment" as const, passes: 4 },
+    { evaluation_context: "experiment" as const, passes: "2" },
+  ])("rejects extraction control $evaluation_context/$passes before module side effects", async ({ evaluation_context, passes }) => {
+    const source = await sourceFixture();
+    let called = false;
+    activateControlledModule({ call_kind: "need_extract", run: async () => { called = true; return { output: { gaps: [] }, summary: "unexpected" }; } });
+    await expect(runAccuracyModule({ call_kind: "need_extract", input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_id: source.block_id },
+      actor: { name: "test", function: "medical_affairs" }, org_id: source.org_id, workspace_id: source.workspace_id,
+      evaluation_context, experiment_cycle_control: { critic_revision_passes: passes as 2 },
+    })).rejects.toThrow();
+    expect(called).toBe(false);
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
   it("replaces an upload org_id supplied by the client with the copied organization", async () => {
     const source = await sourceFixture();
 

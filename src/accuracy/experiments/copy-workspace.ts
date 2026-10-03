@@ -106,6 +106,8 @@ function remapMetadata(value: unknown, maps: {
   if (Array.isArray(value)) return value.map((item) => remapMetadata(item, maps));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => {
+    // Baseline origins refer to the previous workspace, not copied snapshot ownership.
+    if (key === "baseline_origin") return [key, child];
     const ids = key === "source_file_id" ? maps.source : key === "block_id" ? maps.block
       : ["claim_id", "gap_id", "tactic_id", "parent_gap_id", "merged_into"].includes(key) ? maps.claim : null;
     if (ids) return [key, child === null ? null : remapReference(key, child, ids)];
@@ -247,7 +249,8 @@ export async function copyExperimentWorkspace(
     const copiedCoverage = copiedCoverageRows.filter((row) => copiedClaimIds.has(row.gap_id) && copiedClaimIds.has(row.tactic_id));
 
     const copiedMetadata = new Map(copiedClaimRows.map((claim) => [claim.id,
-      remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
+      { ...remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
+        baseline_origin: { workspace_id: args.source_workspace_id, claim_id: claim.id } },
     ]));
 
     const org_id = newId("org");

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import * as records from "@/accuracy/experiments/records";
 import { runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
+import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import { inventoryExtractModule } from "@/accuracy/modules/inventory-extract/module";
 import { runAccuracyExperiment } from "@/accuracy/experiments/run";
 import { activeAccuracyModuleId, activateAccuracyModule, registerAccuracyModule } from "@/accuracy/kernel/registry";
@@ -56,7 +57,7 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
     status_derive: z.object({ workspace_id: z.string() }),
   };
   const outputs = {
-    inventory_extract: z.object({ workspace_id: z.string(), source_file_id: z.string(), tactics: z.array(z.object({ id: z.string(), name: z.string(), type: z.string(), status: z.enum(["completed", "ongoing", "planned", "proposed", "cancelled"]), evidence_question: z.string(), provenance: z.array(z.object({ source_file_id: z.string(), block_id: z.string(), quote: z.string() })) })) }),
+    inventory_extract: z.object({ workspace_id: z.string(), source_file_id: z.string(), tactics: z.array(z.object({ id: z.string(), name: z.string(), origin: z.literal("inventory").default("inventory"), type: z.string(), status: z.enum(["completed", "ongoing", "planned", "proposed", "cancelled"]), evidence_question: z.string(), provenance: z.array(z.object({ source_file_id: z.string(), block_id: z.string(), quote: z.string() })) })) }),
     need_extract: z.object({ workspace_id: z.string(), source_file_id: z.string(), gaps: z.array(z.object({ id: z.string(), statement: z.string(), external_id: z.string().nullable(), provenance: z.array(z.object({ source_file_id: z.string(), block_id: z.string(), quote: z.string() })) })) }),
     merge_dedupe: z.object({ workspace_id: z.string(), merged: z.number(), survivors: z.number(), contradictions: z.number(), merges: z.array(z.unknown()), contradiction_rows: z.array(z.unknown()) }),
     status_derive: z.object({ statuses: z.array(z.unknown()), open: z.number(), partial: z.number(), addressed: z.number() }),
@@ -68,6 +69,44 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
 }
 
 describe("isolated extraction-pipeline experiments", () => {
+  it.each(["single_call", "pipeline"] as const)("propagates three fixed passes through the actual %s path and retains terminal assessments", async mode => {
+    const source = await sourceFixture();
+    const sourceRows = await accuracyDb().select().from(t.accuracySourceFiles).where(eq(t.accuracySourceFiles.workspace_id, source.workspace_id));
+    const blockRows = await accuracyDb().select().from(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.workspace_id, source.workspace_id));
+    for (const call_kind of ["inventory_extract", "need_extract"] as const) {
+      controlled(call_kind, async (input, context) => {
+        const result = await runShallowAgenticCycle({ run: context.run, maxExchanges: 0,
+          onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
+          proposer: async () => call_kind === "inventory_extract" ? { tactics: [] } : { gaps: [] },
+          critic: async () => ({ score: 1, issues: [] }), judge: async draft => draft });
+        return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, ...result.final };
+      }, true);
+    }
+    controlled("merge_dedupe", async (input, context) => {
+      expect(context.run).not.toHaveProperty("experiment_cycle_control", expect.anything());
+      return { workspace_id: input.workspace_id, merged: 0, survivors: 0, contradictions: 0, merges: [], contradiction_rows: [] };
+    });
+    controlled("status_derive", async () => ({ statuses: [], open: 0, partial: 0, addressed: 0 }));
+    const experiment = await runAccuracyExperiment({ mode, source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id],
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes: 3 }, actor: { name: "test", function: "medical_affairs" },
+      ...(mode === "single_call" ? { call: { call_kind: "inventory_extract" as const, input: { workspace_id: source.workspace_id, source_file_id: source.source_file_id, block_ids: [source.block_id] } } } : {}) });
+    workspaces.push(experiment.workspace_id);
+    expect(experiment.status).toBe("completed");
+    expect(experiment.condition).toMatchObject({ critic_revision_passes: 3 });
+    for (const call_kind of mode === "pipeline" ? ["inventory_extract", "need_extract"] : ["inventory_extract"]) {
+      const calls = experiment.calls.filter(call => call.call_kind === call_kind);
+      expect(calls.map(call => call.version_index)).toEqual([0, 1, 2, 3]);
+      const progression = await readAgentProgression({ workspace_id: experiment.workspace_id, run_id: calls[0].call_id });
+      expect(progression?.events.filter(row => row.event.event_type === "critique").map(row => row.event.event_type === "critique" && row.event.iteration)).toEqual([0, 1, 2, 3]);
+      expect(progression?.events.at(-1)?.event).toMatchObject({ event_type: "judgment", selected_iteration: 3 });
+    }
+    expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await accuracyDb().select().from(t.accuracySourceFiles).where(eq(t.accuracySourceFiles.workspace_id, source.workspace_id))).toEqual(sourceRows);
+    expect(await accuracyDb().select().from(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.workspace_id, source.workspace_id))).toEqual(blockRows);
+  });
+
   it.each(["single_call", "pipeline"] as const)("scores V0 and revision snapshots from the real inventory module in %s mode", async (mode) => {
     const source = await sourceFixture();
     const original = activeAccuracyModuleId("inventory_extract");
@@ -108,23 +147,23 @@ describe("isolated extraction-pipeline experiments", () => {
     }
   });
 
-  it.each([0, 1])("retains every snapshot and exports a separate error after critic failure at V%i", async (failedVersion) => {
+  it.each([0, 1, 2, 3])("retains every controlled snapshot and exports a separate error after critic failure at V%i", async (failedVersion) => {
     const source = await sourceFixture();
     controlled("inventory_extract", async (_input, context) => {
-      await runShallowAgenticCycle({ run: context.run, maxExchanges: 1,
+      await runShallowAgenticCycle({ run: context.run, maxExchanges: 0,
         onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
         proposer: async round => ({ tactics: [{ name: `Trial version ${round}` }] }),
         critic: async draft => {
           if (draft.tactics[0].name === `Trial version ${failedVersion}`) throw new Error("critic failed after snapshot");
-          return { score: 0, issues: [] };
+          return { score: 1, issues: [] };
         }, judge: async draft => draft });
       throw new Error("unreachable");
     }, true);
     const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id],
-      pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
+      pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes: 3 }, actor: { name: "test", function: "medical_affairs" } });
     workspaces.push(experiment.workspace_id);
     expect(experiment.status).toBe("failed");
-    const versions = failedVersion === 0 ? [0] : [0, 1];
+    const versions = Array.from({ length: failedVersion + 1 }, (_, version) => version);
     expect(experiment.calls.map(call => ({ version: call.version_index, output: call.output, error: call.output_error }))).toEqual([
       ...versions.map(version => ({ version, output: { tactics: [{ name: `Trial version ${version}` }] }, error: null })),
       { version: failedVersion + 1, output: null, error: "critic failed after snapshot" },
@@ -159,8 +198,8 @@ describe("isolated extraction-pipeline experiments", () => {
     const source = await sourceFixture();
     const second = await addSource({ workspace_id: source.workspace_id, org_id: source.org_id, filename: "second.txt" });
     const calls: Array<{ stage: string; source_file_id?: string }> = [];
-    controlled("inventory_extract", async (input) => { calls.push({ stage: "inventory", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"), name: "Tactic", type: "access", status: "planned", evidence_question: "Evidence?", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
-    controlled("need_extract", async (input) => { calls.push({ stage: "need", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"), statement: "Gap", external_id: "gap-1", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "Source evidence." }] }] }; });
+    controlled("inventory_extract", async (input) => { calls.push({ stage: "inventory", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, tactics: [{ id: newId("tactic"), name: "Tactic", type: "rwe_study", status: "planned", evidence_question: "Evidence?", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "evidence." }] }] }; });
+    controlled("need_extract", async (input) => { calls.push({ stage: "need", source_file_id: input.source_file_id as string }); return { workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: [{ id: newId("gap"), statement: "Gap", external_id: "gap-1", provenance: [{ source_file_id: input.source_file_id, block_id: (input.block_ids as string[])[0], quote: "evidence." }] }] }; });
     controlled("merge_dedupe", async (input) => { calls.push({ stage: "merge" }); const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, input.workspace_id as string)); expect(claims.map(c => c.statement)).toEqual(expect.arrayContaining(["Gap", "Tactic"])); return { workspace_id: input.workspace_id, merged: 0, survivors: claims.length, contradictions: 0, merges: [], contradiction_rows: [] }; });
     controlled("status_derive", async () => { calls.push({ stage: "status" }); return { statuses: [], open: 0, partial: 0, addressed: 0 }; });
 
@@ -237,7 +276,7 @@ describe("isolated extraction-pipeline experiments", () => {
     controlled("merge_dedupe", async () => { throw new Error("merge must be skipped while paused"); });
     controlled("status_derive", async () => { throw new Error("status must be skipped while paused"); });
 
-    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {}, actor: { name: "test", function: "medical_affairs" } });
+    const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: { critic_revision_passes: 3 }, actor: { name: "test", function: "medical_affairs" } });
     workspaces.push(experiment.workspace_id);
     const journals = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
 

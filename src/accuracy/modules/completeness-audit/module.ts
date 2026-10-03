@@ -7,8 +7,8 @@ import {
 } from "./engine";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
-  listClaims,
+  isDownstreamClaim,
+  listDownstreamClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { readAllParseBlocks } from "@/accuracy/store/parse-store";
@@ -44,9 +44,9 @@ const outputSchema = z.object({
 export type CompletenessAuditOutput = z.infer<typeof outputSchema>;
 
 function claimsForAudit(
-  rows: Awaited<ReturnType<typeof listClaims>>,
+  rows: Awaited<ReturnType<typeof listDownstreamClaims>>,
 ): AuditClaimLite[] {
-  return rows.filter(isActiveLedgerClaim).map((row: AccuracyClaimRow) => {
+  return rows.filter(isDownstreamClaim).map((row: AccuracyClaimRow) => {
     const meta = claimMetadata(row);
     const provenance = Array.isArray(meta.provenance)
       ? (meta.provenance as Array<{ block_id?: string | null }>)
@@ -74,7 +74,7 @@ export const completenessAuditModule = mechanicalModule({
   run: async (input, ctx) => {
     const [blocks, claims, resolved] = await Promise.all([
       readAllParseBlocks(input.workspace_id),
-      listClaims(input.workspace_id, { limit: 500 }),
+      listDownstreamClaims(input.workspace_id, { limit: 500 }),
       resolvedMissFlagBlockIds(input.workspace_id),
     ]);
     const { flags, skipped_noise, skipped_by_reason } = auditCompletenessDetailed({

@@ -38,6 +38,45 @@ function recordingRun() {
 }
 
 describe("agentic version capture", () => {
+  it.each([
+    { passes: 1, versions: [0, 1] },
+    { passes: 2, versions: [0, 1, 2] },
+    { passes: 3, versions: [0, 1, 2, 3] },
+  ])("retains exactly $passes revisions despite a clean critic and a zero module budget", async ({ passes, versions }) => {
+    const { run, events, charge } = recordingRun();
+    Object.assign(run, { evaluation_context: "experiment", experiment_cycle_control: { critic_revision_passes: passes } });
+    const result = await runShallowAgenticCycle({ run, maxExchanges: 0, onSnapshot: async () => signals,
+      proposer: async round => { charge(3, 0.03); return { round }; },
+      critic: async () => { charge(2, 0.02); return { score: 1, issues: [] }; },
+      onCompleteness: async () => clean, judge: async draft => draft,
+    });
+    expect(result.final).toEqual({ round: passes });
+    expect(events.filter(event => event.event_type === "snapshot").map(event => event.iteration)).toEqual(versions);
+    expect(events.filter(event => event.event_type === "critique").map(event => event.iteration)).toEqual(versions);
+    expect(events.at(-1)).toMatchObject({ event_type: "judgment", selected_iteration: passes });
+    expect(events.filter(event => event.event_type === "snapshot").every(event => event.evaluation_context === "experiment" && event.token_usage.total_tokens === 3)).toBe(true);
+    expect(result.trace.filter(entry => entry.endsWith(":reviser"))).toHaveLength(passes);
+  });
+
+  it.each([
+    { context: "production", passes: 1 },
+    { context: "experiment", passes: 0 },
+    { context: "experiment", passes: 4 },
+    { context: "experiment", passes: 1.5 },
+    { context: "experiment", passes: "2" },
+    { context: "experiment", passes: null },
+  ])("rejects invalid trusted control $context/$passes before proposal", async ({ context, passes }) => {
+    const { run, events } = recordingRun();
+    Object.assign(run, { evaluation_context: context, experiment_cycle_control: { critic_revision_passes: passes } });
+    let proposed = false;
+    await expect(runShallowAgenticCycle({ run, onSnapshot: async () => signals,
+      proposer: async () => { proposed = true; return { value: "V0" }; },
+      critic: async () => ({ score: 1, issues: [] }), judge: async draft => draft,
+    })).rejects.toThrow();
+    expect(proposed).toBe(false);
+    expect(events).toEqual([]);
+  });
+
   it("rejects an invalid revision budget before producing a snapshot", async () => {
     const { run, events } = recordingRun();
     await expect(runShallowAgenticCycle({ run, onSnapshot: async () => signals,

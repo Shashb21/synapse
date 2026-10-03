@@ -11,8 +11,9 @@ import {
 } from "./engine";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
-  listClaims,
+  getClaimsByIds,
+  isDownstreamClaim,
+  listDownstreamClaims,
   persistClaimPatch,
 } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
@@ -79,18 +80,23 @@ export const statusDeriveModule = mechanicalModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
-    const claims = await listClaims(input.workspace_id, { limit: 1000 });
-    const active = claims.filter(isActiveLedgerClaim);
+    const claims = await listDownstreamClaims(input.workspace_id, { limit: 1000 });
+    const active = claims.filter(isDownstreamClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
     const tacticRows = active.filter((row) => row.claim_type === "tactic");
 
+    // Explicit inputs may name a row outside the ordinary inventory list limit.
+    const suppliedIds = [...(input.gap_ids ?? []), ...(input.tactics ?? []).map(row => row.id),
+      ...(input.coverages ?? []).flatMap(row => [row.gap_id, row.tactic_id])];
+    const explicitClaims = await getClaimsByIds(input.workspace_id, [...new Set(suppliedIds)]);
+    const excludedIds = new Set([...claims, ...explicitClaims].filter(row => !isDownstreamClaim(row)).map(row => row.id));
     const gap_ids =
       input.gap_ids && input.gap_ids.length > 0
-        ? input.gap_ids
+        ? input.gap_ids.filter(id => !excludedIds.has(id))
         : gapRows.map((row) => row.id);
 
     const tactics: TacticLite[] =
-      input.tactics ??
+      input.tactics?.filter(row => !excludedIds.has(row.id)) ??
       tacticRows.flatMap((row) => {
         const meta = claimMetadata(row);
         const status = asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(row.status);
@@ -113,6 +119,8 @@ export const statusDeriveModule = mechanicalModule({
         validated: join.validated,
       }));
     }
+
+    coverages = coverages.filter(row => !excludedIds.has(row.gap_id) && !excludedIds.has(row.tactic_id));
 
     const overrides: Record<string, GapStatus | null> = {};
     for (const row of gapRows) {

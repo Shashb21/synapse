@@ -16,6 +16,7 @@ import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omission-review-store";
+import * as historyStore from "@/accuracy/store/item-history-store";
 import * as claimStore from "@/accuracy/store/claim-store";
 import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -141,7 +142,8 @@ describe("extraction omission resume", () => {
   });
   it("does not supersede a blocker when a successful extraction's draft cannot persist", async () => {
     const scope = await fixture(); const body = await paused(scope);
-    const claims = await listClaims(scope.workspace_id); installExtractor(false, [newId("gap"), claims[0].id]);
+    const claims = await listClaims(scope.workspace_id); installExtractor(false);
+    vi.spyOn(historyStore, "publishGeneratedItemHistory").mockRejectedValueOnce(new Error("Injected history write failure"));
     expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
     expect(await listClaims(scope.workspace_id)).toEqual(claims);
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([expect.objectContaining({ run_id: body.runs[0].run_id })]);
@@ -180,7 +182,9 @@ describe("extraction omission resume", () => {
   });
   it("rolls back a real merge interrupted after the duplicate patch, then recovers both claims", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
-    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Existing extracted need", source_file_id: scope.source_file_id });
+    // Legacy duplicates still exercise real merge rollback; generated histories need an explicit identity decision.
+    const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
+    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
     const before = await listClaims(scope.workspace_id);
     const originalPatch = claimStore.persistClaimPatch;
     let writes = 0;
@@ -199,6 +203,9 @@ describe("extraction omission resume", () => {
     const completed = await post(request); expect(completed.status).toBe(200);
     expect((await completed.json()).runs[1].run_id).toBe(journal.merge_operation_id);
     expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+    expect((await getClaim(scope.workspace_id, legacy.id))?.status).not.toBe("merged");
+    const generated = before.find(row => row.id !== legacy.id && row.id !== duplicate.id)!;
+    expect((await getClaim(scope.workspace_id, generated.id))?.status).not.toBe("merged");
   });
 
   it("serializes initial downstream work against an explicit resume", async () => {
