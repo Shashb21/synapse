@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findProvider, geminiText, RETRY } from "@/modules/llm/provider";
 import { classifyProviderError, ProviderError } from "@/modules/llm/provider-error";
+import { customerErrorMessage } from "@/modules/kernel/stage-errors";
 
 /** KAN-70: the free Gemini tier works as the test LLM. */
 const SECRET = "AIzaTEST-not-a-real-key-123456";
@@ -99,6 +100,7 @@ describe("KAN-70 Gemini free tier", () => {
     expect(error).toBeInstanceOf(ProviderError);
     expect(error.kind).toBe("rate_limit");
     expect(error.message).toMatch(/daily request quota/);
+    expect(customerErrorMessage(error)).toMatch(/limit for today/);
     expect(error.message).not.toContain(SECRET);
     expect(waits).toEqual([]);
   });
