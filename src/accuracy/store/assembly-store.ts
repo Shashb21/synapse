@@ -254,6 +254,7 @@ function assemblyFromRows(
     coverage: header.coverage as AssemblyCoverage[],
     extraction_runs: (header.extraction_runs as AssemblyExtractionRun[] | null) ?? null,
     linking_complete: header.linking_complete,
+    generation_key: header.generation_key,
     output: header.output as Assembly["output"],
     checks: header.checks as Assembly["checks"],
   };
