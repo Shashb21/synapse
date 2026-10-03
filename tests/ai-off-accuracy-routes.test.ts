@@ -13,7 +13,7 @@ import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import { sql } from "drizzle-orm";
 import { listAccuracyRuns } from "@/accuracy/kernel/observability";
-import { AI_OFF_MESSAGE, setAiEnabled } from "@/modules/kernel/ai-switch";
+import { AI_OFF_ADMIN_MESSAGE, setAiEnabled } from "@/modules/kernel/ai-switch";
 
 registerAccuracyStack();
 
@@ -78,7 +78,7 @@ function post(url: string, body: unknown) {
 async function expectAiOff(res: Response) {
   expect(res.status).toBe(409);
   const json = (await res.json()) as { ok?: boolean; code?: string; error?: string };
-  expect(json).toMatchObject({ ok: false, code: "ai_off", error: AI_OFF_MESSAGE });
+  expect(json).toMatchObject({ ok: false, code: "ai_off", error: AI_OFF_ADMIN_MESSAGE });
 }
 
 async function workspaceCount(): Promise<number> {
