@@ -372,8 +372,8 @@ function GapDetail({
       ) : null}
       {quadrant && band && quadrant !== band ? (
         <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-          This gap&apos;s band ({BAND_LABELS[band]}) was set on a different pair of axes. It sits in the{" "}
-          {BAND_LABELS[quadrant]} quadrant here — drag it to change its priority.
+          Its band ({BAND_LABELS[band]}) differs from the quadrant it sits in here ({BAND_LABELS[quadrant]}). Drag
+          it, or edit its scores or band, to match.
         </p>
       ) : null}
       {gap.validated ? (
