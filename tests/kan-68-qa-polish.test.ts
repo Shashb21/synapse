@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { missingFieldsMessage } from "@/components/lock-form";
 
 const src = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
@@ -13,5 +14,14 @@ describe("KAN-68 QA polish", () => {
     // Every failure path goes through the error flavour.
     expect(matrix).not.toMatch(/setMessage\((?:json|result)\.error/);
     expect(matrix).not.toMatch(/setMessage\(saveError\)/);
+  });
+
+  it("a dialog names the required fields that are still empty", () => {
+    expect(missingFieldsMessage(["Custom type name"])).toBe('Fill in "Custom type name", then try again.');
+    expect(missingFieldsMessage(["Name", "Domain", "Domain"])).toBe('Fill in "Name" and "Domain", then try again.');
+    expect(missingFieldsMessage(["Name", "Domain", "Why?"])).toBe('Fill in "Name", "Domain" and "Why?", then try again.');
+    const form = src("src/components/lock-form.tsx");
+    expect(form).not.toContain("Fill every required field");
+    expect(form).toMatch(/<p role="alert" className="[^"]*text-destructive/);
   });
 });

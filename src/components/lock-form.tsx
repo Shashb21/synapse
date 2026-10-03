@@ -17,7 +17,10 @@ import {
 /** The optional note a dialog collects. Only actions that store a note pass one. */
 export type LockFormNote = { label: string; required?: boolean; placeholder?: string };
 
-function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
+type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+function missingRequired(form: HTMLFormElement): FormControl[] {
+  const missing: FormControl[] = [];
   for (const el of Array.from(form.elements)) {
     if (
       !(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)
@@ -26,9 +29,35 @@ function firstMissingRequired(form: HTMLFormElement): HTMLElement | null {
     }
     if (el.disabled || el.type === "hidden" || el.type === "submit" || el.type === "button") continue;
     if (!el.required) continue;
-    if (!String(el.value || "").trim()) return el;
+    if (!String(el.value || "").trim()) missing.push(el);
   }
-  return null;
+  return missing;
+}
+
+/** The name a person sees for a field: its aria-label, its label's own text, or its placeholder. */
+function fieldName(el: FormControl): string {
+  const aria = el.getAttribute("aria-label")?.trim();
+  if (aria) return aria;
+  const label = el.labels?.[0];
+  if (label) {
+    // The label wraps the control; drop the control's own text (options, typed value).
+    const copy = label.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll("input, select, textarea").forEach((node) => node.remove());
+    const text = copy.textContent
+      ?.replace(/\s+/g, " ")
+      .replace(/\s*(?:\*|\(required\))\s*$/i, "")
+      .trim();
+    if (text) return text;
+  }
+  const placeholder = el instanceof HTMLSelectElement ? "" : el.placeholder.replace(/…$/, "").trim();
+  return placeholder || el.name || "the required field";
+}
+
+/** Names the empty required fields instead of a vague "fill every required field" (KAN-68). */
+export function missingFieldsMessage(names: string[]): string {
+  const unique = [...new Set(names)].map((name) => `"${name}"`);
+  if (unique.length === 1) return `Fill in ${unique[0]}, then try again.`;
+  return `Fill in ${unique.slice(0, -1).join(", ")} and ${unique.at(-1)}, then try again.`;
 }
 
 export function LockForm({
@@ -78,10 +107,10 @@ export function LockForm({
   async function onSubmit(form: HTMLFormElement) {
     const formData = new FormData(form);
     setError(null);
-    const missing = firstMissingRequired(form);
-    if (missing) {
-      setError("Fill every required field in this dialog, then try again.");
-      missing.focus();
+    const missing = missingRequired(form);
+    if (missing.length > 0) {
+      setError(missingFieldsMessage(missing.map(fieldName)));
+      missing[0]!.focus();
       return;
     }
     setPending(true);
@@ -144,7 +173,11 @@ export function LockForm({
                 />
               </label>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending || refreshing}>
