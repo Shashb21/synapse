@@ -239,7 +239,11 @@ export function AxisChooser({
           {unfavourableLabel(y)} and {unfavourableLabel(x)}.
         </p>
       ) : null}
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {error}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -501,7 +505,9 @@ export function PrioritizeMatrix({
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const [bands, setBands] = useState<Record<string, { band: Band; validated: boolean }>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  // An error is announced as an alert; a summary (re-suggest finished) is quiet text.
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const showError = (text: string) => setMessage({ text, error: true });
 
   // Server data is the truth once it refreshes; drop local drag overrides then.
   const [seenGaps, setSeenGaps] = useState(gaps);
@@ -531,7 +537,7 @@ export function PrioritizeMatrix({
       // "Placing…" stays up until the placed gaps are on the matrix, not just saved.
       refresh(() => {
         setBusy(null);
-        if (!result.ok) setMessage(result.error ?? "Could not place the new gaps.");
+        if (!result.ok) setMessage({ text: result.error ?? "Could not place the new gaps.", error: true });
       });
     });
   }, [ai, unplaced, mayPrioritize, identity, xAxis.id, yAxis.id, scope, refresh]);
@@ -582,7 +588,7 @@ export function PrioritizeMatrix({
       placement?: { band: Band; validated: boolean };
     };
     if (!res.ok || !json.placement) {
-      setMessage(json.error ?? "Could not move the gap.");
+      showError(json.error ?? "Could not move the gap.");
       setPositions((current) => {
         const next = { ...current };
         delete next[gapId];
@@ -711,7 +717,8 @@ export function PrioritizeMatrix({
     });
     refresh(() => {
       setBusy(null);
-      setMessage(result.ok ? (result.summary ?? null) : (result.error ?? "Re-suggest failed"));
+      if (!result.ok) showError(result.error ?? "Re-suggest failed");
+      else setMessage(result.summary ? { text: result.summary, error: false } : null);
     });
   }
 
@@ -723,7 +730,7 @@ export function PrioritizeMatrix({
     const saveError = await saveAxes(scope, nextX, nextY);
     if (saveError) {
       setBusy(null);
-      setMessage(saveError);
+      showError(saveError);
       return;
     }
     if (ai && gaps.length > 0) {
@@ -736,7 +743,7 @@ export function PrioritizeMatrix({
         setting: scope,
         onlyMissing: true,
       });
-      if (!result.ok) setMessage(result.error ?? "Prioritization failed");
+      if (!result.ok) showError(result.error ?? "Prioritization failed");
     }
     refresh(() => setBusy(null));
   }
@@ -821,7 +828,13 @@ export function PrioritizeMatrix({
           ) : null}
         </div>
       </div>
-      {message ? <p className="text-[12px] text-muted-foreground">{message}</p> : null}
+      {message?.error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {message.text}
+        </p>
+      ) : message ? (
+        <p className="text-[12px] text-muted-foreground">{message.text}</p>
+      ) : null}
 
       {/* The matrix and its side panel share one screen (KAN-56): the matrix shrinks to the
           window height, so a gap in "Not placed yet" can be dragged on without scrolling. */}
