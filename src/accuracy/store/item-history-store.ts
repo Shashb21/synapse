@@ -35,20 +35,26 @@ function finalItems(claim_type: AccuracyClaimType, output: unknown, workspace_id
   if (!parsed.success || parsed.data.workspace_id !== workspace_id || parsed.data.source_file_id !== source_file_id) {
     throw new ItemHistoryError("invalid_input", "Stored run final output is invalid for this source.");
   }
-  return claim_type === "gap" ? (parsed.data as { gaps: Record<string, unknown>[] }).gaps
-    : (parsed.data as { tactics: Record<string, unknown>[] }).tactics;
+  // Zod validates the shape but strips unknown fields. Identity and history use the stored bytes.
+  const stored = output as Record<string, unknown>;
+  return stored[claim_type === "gap" ? "gaps" : "tactics"] as Record<string, unknown>[];
 }
 
-function rawItems(claim_type: AccuracyClaimType, output: unknown): Record<string, unknown>[] {
+function rawItems(claim_type: AccuracyClaimType, output: unknown): Array<{ item: Record<string, unknown>; item_index: number }> {
   if (!output || typeof output !== "object" || Array.isArray(output)) return [];
   const items = (output as Record<string, unknown>)[claim_type === "gap" ? "gaps" : "tactics"];
   if (!Array.isArray(items)) return [];
-  return items.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item)
-    && typeof item[claim_type === "gap" ? "statement" : "name"] === "string");
+  return items.flatMap((item, item_index) => item !== null && typeof item === "object" && !Array.isArray(item)
+    ? [{ item: item as Record<string, unknown>, item_index }] : []);
 }
 
 function itemStatement(type: AccuracyClaimType, payload: Record<string, unknown>) {
   return String(payload[type === "gap" ? "statement" : "name"]);
+}
+
+function reviewStatement(type: AccuracyClaimType, payload: Record<string, unknown>, item_index: number): string {
+  const value = payload[type === "gap" ? "statement" : "name"];
+  return typeof value === "string" && value.trim() ? value : `Untitled ${type} draft ${item_index + 1}`;
 }
 
 function sourceBacked(payload: Record<string, unknown>, source_file_id: string,
@@ -128,8 +134,7 @@ async function requireClaims(workspace_id: string, ids: string[]) {
 async function basisVersionIds(workspace_id: string, ids: string[]): Promise<string[]> {
   const versions = await accuracyDb().select().from(t.accuracyItemVersions).where(and(
     eq(t.accuracyItemVersions.workspace_id, workspace_id), inArray(t.accuracyItemVersions.claim_id, ids)));
-  return ids.map(id => versions.filter(v => v.claim_id === id).sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.id)
-    .filter((id): id is string => Boolean(id));
+  return ids.flatMap(id => versions.filter(v => v.claim_id === id).map(v => v.id).sort());
 }
 
 function validateShape(kind: ProposalKind, predecessors: string[], successors: string[]) {
@@ -193,11 +198,15 @@ export async function decideItemRelationship(args: { workspace_id: string; propo
     if (prior) throw new ItemHistoryError("conflict", "Relationship has already been decided.");
     if (args.action === "confirm") {
       await assertAvailable(args.workspace_id, proposal.kind as ProposalKind, proposal.predecessor_ids, proposal.successor_ids, proposal.id);
+      const currentBasis = await basisVersionIds(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
+      if (JSON.stringify(currentBasis) !== JSON.stringify(proposal.basis_version_ids)) {
+        throw new ItemHistoryError("conflict", "Relationship proposal is stale after new item versions.");
+      }
       if (proposal.kind === "same_item") {
         const rows = await requireClaims(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
         const winner = rows.find(row => metadata(row).history_only !== true) ?? rows.find(row => proposal.successor_ids.includes(row.id))!;
         const loser = rows.find(row => row.id !== winner.id)!;
-        await accuracyDb().update(t.accuracyClaims).set({ status: "merged", validated: false,
+        await accuracyDb().update(t.accuracyClaims).set({ status: "merged",
           metadata: { ...metadata(loser), merged_into: winner.id, merge_reason: args.rationale.trim() }, updated_at: nowIso() })
           .where(and(eq(t.accuracyClaims.id, loser.id), eq(t.accuracyClaims.workspace_id, args.workspace_id)));
       }
@@ -242,6 +251,9 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
     const existingVersions = await accuracyDb().select().from(t.accuracyItemVersions).where(and(
       eq(t.accuracyItemVersions.workspace_id, args.workspace_id), eq(t.accuracyItemVersions.source_file_id, args.source_file_id),
       eq(t.accuracyItemVersions.claim_type, args.claim_type)));
+    const currentClaims = await accuracyDb().select().from(t.accuracyClaims)
+      .where(eq(t.accuracyClaims.workspace_id, args.workspace_id));
+    const currentById = new Map(currentClaims.map(row => [row.id, row]));
     const owned = new Map<string, string>();
     const autoJoins: Array<{ predecessor_id: string; successor_id: string }> = [];
     const ambiguousMatches: Array<{ predecessor_ids: string[]; successor_id: string }> = [];
@@ -250,6 +262,11 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
       if (draft.workspace_id !== args.workspace_id || draft.source_file_id !== args.source_file_id ||
         draft.claim_type !== args.claim_type || draft.id !== item.id || draft.statement !== itemStatement(args.claim_type, item)) {
         throw new ItemHistoryError("invalid_input", "Claim differs from stored final output.");
+      }
+      const sameBatchClaim = owned.get(finalFingerprints[index]);
+      if (sameBatchClaim) {
+        claim_ids.push(sameBatchClaim);
+        continue;
       }
       if (existingVersions.some(v => v.run_id === args.run_id && v.fingerprint === finalFingerprints[index] && v.claim_id === draft.id)) {
         claim_ids.push(draft.id!);
@@ -261,7 +278,7 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
         eq(t.accuracyItemVersions.workspace_id, args.workspace_id), eq(t.accuracyItemVersions.origin_key, key)));
       if (priorOrigin) { claim_ids.push(priorOrigin.claim_id); owned.set(finalFingerprints[index], priorOrigin.claim_id); continue; }
       const matches = [...new Set(existingVersions.filter(v => v.fingerprint === finalFingerprints[index] &&
-        sourceBacked(v.payload, args.source_file_id, blockText)).map(v => v.claim_id))];
+        sourceBacked(v.payload, args.source_file_id, blockText)).map(v => canonicalId(currentById, v.claim_id)))];
       const existingClaim = matches.length === 1 ? (await accuracyDb().select().from(t.accuracyClaims).where(and(
         eq(t.accuracyClaims.workspace_id, args.workspace_id), eq(t.accuracyClaims.id, matches[0]))))[0] : undefined;
       const reusable = existingClaim && existingClaim.status !== "merged" && metadata(existingClaim).history_only !== true;
@@ -283,7 +300,7 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
     for (const snapshot of snapshots) {
       const payload = snapshot.payload as Record<string, unknown>;
       const items = rawItems(args.claim_type, payload.output);
-      for (const [item_index, item] of items.entries()) rawOrigins.push({ key: `snapshot:${snapshot.id}:${args.claim_type}:${item_index}`,
+      for (const { item_index, item } of items) rawOrigins.push({ key: `snapshot:${snapshot.id}:${args.claim_type}:${item_index}`,
         item, fingerprint: generatedItemFingerprint(args.claim_type, item), snapshot_id: snapshot.id,
         iteration: snapshot.iteration!, item_index });
     }
@@ -294,12 +311,13 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
       let claim_id = owned.get(origin.fingerprint);
       if (!claim_id) {
         const matches = [...new Set(existingVersions.filter(v => v.fingerprint === origin.fingerprint &&
-          sourceBacked(origin.item, args.source_file_id, blockText) && sourceBacked(v.payload, args.source_file_id, blockText)).map(v => v.claim_id))];
+          sourceBacked(origin.item, args.source_file_id, blockText) && sourceBacked(v.payload, args.source_file_id, blockText))
+          .map(v => canonicalId(currentById, v.claim_id)))];
         if (matches.length === 1) claim_id = matches[0];
       }
       if (!claim_id) {
         const claim = await insertClaim({ workspace_id: args.workspace_id, claim_type: args.claim_type,
-          statement: itemStatement(args.claim_type, origin.item), source_file_id: args.source_file_id,
+          statement: reviewStatement(args.claim_type, origin.item, origin.item_index), source_file_id: args.source_file_id,
           metadata: { history_only: true, provenance: origin.item.provenance ?? [] } });
         claim_id = claim.id;
       }
@@ -335,7 +353,7 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
         proposal_id: id, action: "confirm", rationale: "Unique exact source-backed generated item match.",
         actor_name: "system", actor_function: "system", created_at: nowIso() });
       const [loser] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, join.predecessor_id));
-      await accuracyDb().update(t.accuracyClaims).set({ status: "merged", validated: false,
+      await accuracyDb().update(t.accuracyClaims).set({ status: "merged",
         metadata: { ...metadata(loser), merged_into: join.successor_id, merge_reason: "Unique exact source-backed generated item match." },
         updated_at: nowIso() }).where(and(eq(t.accuracyClaims.workspace_id, args.workspace_id), eq(t.accuracyClaims.id, join.predecessor_id)));
     }

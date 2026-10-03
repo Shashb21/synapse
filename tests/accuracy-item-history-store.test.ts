@@ -148,6 +148,7 @@ describe("generated item history store", () => {
       .where(eq(t.accuracyItemRelationshipProposals.workspace_id, scope.workspace_id));
     await decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: pending.id, action: "reject", rationale: "Separate questions", actor });
     const priorDraftId = pending.predecessor_ids[0];
+    await accuracyDb().update(t.accuracyClaims).set({ validated: true }).where(eq(t.accuracyClaims.id, priorDraftId));
     const judged = { ...alternative, id: newId("gap") };
     const secondOutput = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [judged] };
     const secondRun = await run(scope, [secondOutput], secondOutput);
@@ -160,5 +161,92 @@ describe("generated item history store", () => {
     expect(isDownstreamClaim(history!.claim)).toBe(true);
     const [retired] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, priorDraftId));
     expect(retired.metadata).toMatchObject({ history_only: true, merged_into: judged.id });
+    expect(retired.validated).toBe(true);
+  });
+
+  it("resolves retired exact owners before reusing a judged claim on later runs", async () => {
+    const scope = await fixture();
+    const alternative = gap(scope, "Earlier wording"); const firstFinal = gap(scope, "Different final");
+    const firstOutput = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [firstFinal] };
+    const firstRun = await run(scope, [{ ...firstOutput, gaps: [alternative] }], firstOutput);
+    await publishGeneratedItemHistory({ ...scope, run_id: firstRun, claim_type: "gap", final_claims: [{ id: firstFinal.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: firstFinal.statement, source_file_id: scope.source_file_id }] });
+    const [pending] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.workspace_id, scope.workspace_id));
+    await decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: pending.id, action: "reject", rationale: "Distinct", actor });
+    const judged = { ...alternative, id: newId("gap") };
+    const output = { ...firstOutput, gaps: [judged] };
+    const secondRun = await run(scope, [output], output);
+    await publishGeneratedItemHistory({ ...scope, run_id: secondRun, claim_type: "gap", final_claims: [{ id: judged.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: judged.statement, source_file_id: scope.source_file_id }] });
+    const third = { ...alternative, id: newId("gap") }; const next = { ...firstOutput, gaps: [third] };
+    const thirdRun = await run(scope, [next], next);
+    const published = await publishGeneratedItemHistory({ ...scope, run_id: thirdRun, claim_type: "gap", final_claims: [{ id: third.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: third.statement, source_file_id: scope.source_file_id }] });
+    expect(published.claim_ids).toEqual([judged.id]);
+    expect((await readItemHistory(scope.workspace_id, judged.id))?.versions).toHaveLength(3);
+    expect((await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, third.id)))).toHaveLength(0);
+  });
+
+  it("deduplicates equal finals in one batch while retaining original array positions", async () => {
+    const scope = await fixture();
+    const first = gap(scope, "Same question"); const second = { ...first, id: newId("gap") };
+    const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [first, second] };
+    const run_id = await run(scope, [output], output);
+    const published = await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [first, second].map(item => ({
+      id: item.id, workspace_id: scope.workspace_id, claim_type: "gap", statement: item.statement, source_file_id: scope.source_file_id,
+    })) });
+    expect(published.claim_ids).toEqual([first.id, first.id]);
+    expect((await readItemHistory(scope.workspace_id, first.id))?.versions.map(v => v.item_index)).toEqual([0, 1]);
+    expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, second.id))).toHaveLength(0);
+  });
+
+  it("rejects a stale proposal after a new version is published with no decision write", async () => {
+    const scope = await fixture(); const raw = gap(scope, "Raw question"); const judged = gap(scope, "Judged question");
+    const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [judged] };
+    const firstRun = await run(scope, [{ ...output, gaps: [raw] }], output);
+    await publishGeneratedItemHistory({ ...scope, run_id: firstRun, claim_type: "gap", final_claims: [{ id: judged.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: judged.statement, source_file_id: scope.source_file_id }] });
+    const [pending] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.workspace_id, scope.workspace_id));
+    const rerun = { ...judged, id: newId("gap") }; const next = { ...output, gaps: [rerun] };
+    const secondRun = await run(scope, [next], next);
+    await publishGeneratedItemHistory({ ...scope, run_id: secondRun, claim_type: "gap", final_claims: [{ id: rerun.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: rerun.statement, source_file_id: scope.source_file_id }] });
+    await expect(decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: pending.id,
+      action: "confirm", rationale: "Stale", actor })).rejects.toMatchObject({ code: "conflict" });
+    expect(await accuracyDb().select().from(t.accuracyItemRelationshipDecisions)
+      .where(eq(t.accuracyItemRelationshipDecisions.proposal_id, pending.id))).toHaveLength(0);
+  });
+
+  it("retains malformed raw objects and their true positions with safe review labels", async () => {
+    const scope = await fixture(); const judged = gap(scope, "Final question");
+    const malformed = { provenance: [{ ...span, source_file_id: scope.source_file_id, block_id: scope.block_id }], model_note: "missing statement" };
+    const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [judged] };
+    const run_id = await run(scope, [{ ...output, gaps: [malformed, judged] }], output);
+    await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [{ id: judged.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: judged.statement, source_file_id: scope.source_file_id }] });
+    const versions = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.run_id, run_id));
+    expect(versions.map(v => v.item_index).sort()).toEqual([0, 1]);
+    expect(versions.find(v => v.item_index === 0)?.payload).toEqual(malformed);
+    const malformedClaim = await readItemHistory(scope.workspace_id, versions.find(v => v.item_index === 0)!.claim_id);
+    expect(malformedClaim?.claim.statement).toMatch(/Untitled gap draft/);
+  });
+
+  it("preserves a retiring claim's validation and every unknown final payload field", async () => {
+    const scope = await fixture(); const raw = gap(scope, "Raw wording"); const judged = { ...gap(scope, "Judged wording"), model_note: { source: "agent" } };
+    const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [judged] };
+    const run_id = await run(scope, [{ ...output, gaps: [raw] }], output);
+    await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [{ id: judged.id,
+      workspace_id: scope.workspace_id, claim_type: "gap", statement: judged.statement, source_file_id: scope.source_file_id }] });
+    const [proposal] = await accuracyDb().select().from(t.accuracyItemRelationshipProposals)
+      .where(eq(t.accuracyItemRelationshipProposals.workspace_id, scope.workspace_id));
+    await accuracyDb().update(t.accuracyClaims).set({ validated: true }).where(eq(t.accuracyClaims.id, proposal.predecessor_ids[0]));
+    await decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: proposal.id,
+      action: "confirm", rationale: "Same item", actor });
+    const [retired] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, proposal.predecessor_ids[0]));
+    expect(retired.validated).toBe(true);
+    const history = await readItemHistory(scope.workspace_id, judged.id);
+    expect(history?.versions.find(v => v.claim_id === judged.id)?.payload).toMatchObject({ model_note: { source: "agent" } });
   });
 });
