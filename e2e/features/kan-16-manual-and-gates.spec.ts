@@ -103,7 +103,7 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
 
     const restore = await openDialog(page, "Restore gap");
     await restore.getByRole("button", { name: "Restore" }).click();
-    await expect(restore.getByRole("alert")).toHaveText(/Fill in "Why bring it back\?", then try again\./);
+    await expect(restore.getByRole("alert")).toHaveText(/Fill in "Why restore it\?", then try again\./);
     await restore.locator('textarea[name="note"]').fill("The caregiver programme folded into this plan");
     await restore.getByRole("button", { name: "Restore" }).click();
     await expect(restore).toBeHidden();

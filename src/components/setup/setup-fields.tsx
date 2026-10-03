@@ -290,7 +290,6 @@ export function ListField<T>({
           {items.map((item, index) => (
             <li
               key={index}
-              aria-label={`${itemLabel} ${index + 1}`}
               className="relative grid gap-2 rounded-md border border-border bg-card p-3 pr-9"
             >
               {renderItem(

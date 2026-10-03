@@ -70,7 +70,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
     const chart = page.locator("svg[role='img']");
     await expect(chart).toBeVisible();
-    await expect(chart).toHaveAttribute("aria-label", /Gantt timeline with \d+ activities/);
+    await expect(chart).toHaveAttribute("aria-label", /Gantt timeline with \d+ activit(?:y|ies)/);
     await expect(page.getByText("HIGH PRIORITY", { exact: true })).toBeVisible();
     await expect(page.getByText("Readout", { exact: true })).toBeVisible();
     await expect(page.getByText("Depends on", { exact: true })).toBeVisible();

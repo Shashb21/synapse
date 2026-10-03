@@ -57,7 +57,8 @@ test.describe("platform surfaces", () => {
 
     await page.goto("/admin/pipeline");
     await page.getByRole("button", { name: /^run s2$/i }).click();
-    await expect(page.getByText(/gap candidate\(s\) accepted/i)).toBeVisible({ timeout: 30_000 });
+    // The button's result and the page's last-run line say the same thing.
+    await expect(page.getByText(/gap candidate\(s\) accepted/i).first()).toBeVisible({ timeout: 30_000 });
 
     await page.goto("/admin/runs");
     await expect(page.getByRole("heading", { name: /^runs$/i })).toBeVisible();
