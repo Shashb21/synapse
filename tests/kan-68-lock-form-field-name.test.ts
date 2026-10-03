@@ -26,3 +26,13 @@ describe("LockForm field names", () => {
     expect(fieldName(control(`<input name="x" placeholder="Plan owner…" />`))).toBe("Plan owner");
   });
 });
+
+describe("ActionDialog trigger names", () => {
+  it("names a shared button by its dialog title when the title starts with the label", async () => {
+    const { triggerName } = await import("@/components/platform/action-dialog");
+    expect(triggerName("Set dates", "Set dates for ZEL-301")).toBe("Set dates for ZEL-301");
+    expect(triggerName("Set dates", "Set dates")).toBeUndefined();
+    expect(triggerName("Edit", "Change the owner")).toBeUndefined();
+    expect(triggerName("Add activity")).toBeUndefined();
+  });
+});
