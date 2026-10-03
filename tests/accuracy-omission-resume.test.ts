@@ -12,7 +12,7 @@ import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module"
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omission-review-store";
@@ -22,7 +22,7 @@ import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store"
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
-const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
+const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", subject: "resume-subject" as string | null, actor: { name: "Test", function: "heor" } }));
 vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
 
 // Concurrent HTTP requests need separate connections, as in the normal server pool.
@@ -32,20 +32,24 @@ const originals = new Map<CallKind, string>();
 afterEach(() => {
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind, module_id, activated_by: "restore" });
   originals.clear();
-  Object.assign(identity, { signed_in: true, demo: false, role: "contributor" });
+  Object.assign(identity, { signed_in: true, demo: false, role: "contributor", subject: "resume-subject" });
   vi.restoreAllMocks();
 });
 async function fixture() {
   registerAccuracyStack(); await ensureAccuracySchema();
   const org_id = await createOrganization(newId("org-label"));
   const workspace_id = await createWorkspace({ org_id, name: "Resume", slug: newId("slug") });
+  await grantOrganizationAccess({ subject: identity.subject!, org_id });
   const source = await insertSourceFile({ workspace_id, org_id, filename: "notes.txt", mime: "text/plain", checksum: newId("sum"), doc_role: "medical" });
   const block_id = newId("block");
   await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "local", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Comparator evidence missing" }] });
   return { workspace_id, org_id, source_file_id: source.id, block_id };
 }
 function post(body: Record<string, unknown>) {
-  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(body) }));
+  const requestBody = { ...body };
+  delete requestBody.org_id;
+  delete requestBody.block_id;
+  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(requestBody) }));
 }
 function installExtractor(blocker = true, gap_id: string | string[] = newId("gap")) {
   const call_kind = "need_extract";
@@ -84,6 +88,7 @@ describe("extraction omission resume", () => {
     await resolve(scope, body);
     const response = await post(request); expect(response.status).toBe(200);
     const completed = await response.json();
+    expect(completed).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     expect(completed.runs.map((r: { call_kind: string }) => r.call_kind)).toEqual(["need_extract", "merge_dedupe", "status_derive"]);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     expect(await (await post({ ...request, idempotency_key: "resume-2" })).json()).toEqual(completed);
@@ -92,6 +97,7 @@ describe("extraction omission resume", () => {
   it("replays initial success without repeating downstream work", async () => {
     const scope = await fixture(); installExtractor(false);
     const initial = await (await post({ ...scope, kinds: ["need"] })).json();
+    expect(initial).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     const review = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${initial.runs[0].run_id}`))).json();
     const before = await runs(scope.workspace_id);
     const replay = await post({ ...scope, action: "resume", extraction_batch_id: review.extraction_batch_id, idempotency_key: "repeat" });
@@ -116,10 +122,10 @@ describe("extraction omission resume", () => {
     Object.assign(identity, { signed_in, role });
     expect((await post(request)).status).toBe(status);
   });
-  it("preserves unsigned demo-mode resume", async () => {
+  it("rejects unsigned demo-mode resume before assembly generation can invent an actor", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
     Object.assign(identity, { signed_in: false, demo: true });
-    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(200);
+    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(401);
   });
   it("returns the server source and batch even when an applied run has no findings", async () => {
     const scope = await fixture(); installExtractor(false);
@@ -144,7 +150,7 @@ describe("extraction omission resume", () => {
     const scope = await fixture(); const body = await paused(scope);
     const claims = await listClaims(scope.workspace_id); installExtractor(false);
     vi.spyOn(historyStore, "publishGeneratedItemHistory").mockRejectedValueOnce(new Error("Injected history write failure"));
-    expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
+    expect((await post({ ...scope, kinds: ["need"] })).status).toBe(500);
     expect(await listClaims(scope.workspace_id)).toEqual(claims);
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([expect.objectContaining({ run_id: body.runs[0].run_id })]);
   });
@@ -158,7 +164,7 @@ describe("extraction omission resume", () => {
       return { output: { merged: 0 }, summary: "Recovered" };
     } })); activateAccuracyModule({ call_kind: kind, module_id: id, activated_by: "test" });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     const journal = (await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id)))[0];
     expect(journal.merge_state).toBe("reserved");
@@ -194,7 +200,7 @@ describe("extraction omission resume", () => {
       return originalPatch(args);
     });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "real-merge-retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(writes).toBe(2);
     expect(await listClaims(scope.workspace_id)).toEqual(before);
     expect(await runs(scope.workspace_id)).toHaveLength(1);

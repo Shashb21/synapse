@@ -12,14 +12,16 @@ import { type insertClaim } from "@/accuracy/store/claim-store";
 import { publishGeneratedItemHistory, ItemHistoryError } from "@/accuracy/store/item-history-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { getAuthorizedWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { and, eq, inArray } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { createExtractionBatch, applyExtractionBatch, resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
-import { requestIdentity } from "@/modules/auth/request";
+import { generateExtractionAssembly } from "@/accuracy/kernel/assembly-generation";
+import { AssemblyError } from "@/accuracy/domain/assembly";
+import { requestIdentity, type RequestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { NoRouteError } from "@/modules/llm/provider";
 import { runExtractionDownstream } from "@/accuracy/experiments/extraction-pipeline";
@@ -38,12 +40,55 @@ const bodySchema = z.object({
     .default(["need", "inventory"]),
   actor_name: z.string().min(1).optional(),
   actor_function: z.string().min(1).optional(),
-});
+}).strict();
 
 const resumeSchema = z.object({ action: z.literal("resume"), workspace_id: z.string().min(1), source_file_id: z.string().min(1),
-  extraction_batch_id: z.string().min(1), idempotency_key: z.string().trim().min(1) });
+  extraction_batch_id: z.string().min(1), idempotency_key: z.string().trim().min(1),
+  actor_name: z.string().min(1).optional(), actor_function: z.string().min(1).optional() }).strict();
 
 const MAX_EXTRACT_BLOCKS = 80;
+
+async function assertAuthorizedWorkspace(identity: RequestIdentity, workspace_id: string) {
+  if (!identity.subject) throw new AssemblyError("invalid_input", "Signed-in requests require a session subject.");
+  if (!await getAuthorizedWorkspace({ workspace_id, subject: identity.subject, role: identity.role })) {
+    throw new AssemblyError("not_found", "Workspace not found");
+  }
+}
+
+async function attachAssembly<T extends { workspace_id: string; source_file_id: string; extraction_batch_id: string }>(response: T, args: {
+  org_id: string;
+  actor: RequestIdentity["actor"];
+}) {
+  const [batch] = await accuracyDb().select().from(tables.accuracyExtractionBatches).where(and(
+    eq(tables.accuracyExtractionBatches.workspace_id, response.workspace_id),
+    eq(tables.accuracyExtractionBatches.id, response.extraction_batch_id),
+  ));
+  if (!batch) throw new AssemblyError("not_found", "Extraction batch not found");
+  const assembly = await generateExtractionAssembly({
+    workspace_id: response.workspace_id,
+    org_id: args.org_id,
+    actor: args.actor,
+    source_file_ids: [response.source_file_id],
+    extraction_run_ids: batch.run_ids,
+    requested_kinds: batch.requested_kinds as Array<"need_extract" | "inventory_extract">,
+    generation_key: batch.id,
+  });
+  return { ...response, assembly_id: assembly.id, assembly_checks: assembly.checks };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assemblyIncompleteResponse<T extends { extraction_batch_id: string; runs?: unknown; gaps_inserted?: number; tactics_inserted?: number }>(response: T, error: unknown) {
+  console.error("Extraction assembly generation failed", error);
+  return NextResponse.json({
+    ...response,
+    ok: false,
+    assembly_incomplete: true,
+    error: "Complete proposal linking failed. Retry resume to finish the saved extraction batch.",
+  }, { status: 500 });
+}
 
 /**
  * Run need_extract and/or inventory_extract for a source file's parse blocks,
@@ -52,16 +97,18 @@ const MAX_EXTRACT_BLOCKS = 80;
 export async function POST(req: Request) {
   try {
     const raw = await req.json();
-    if (raw && raw.action === "resume") {
+    if (!isRecord(raw)) return NextResponse.json({ ok: false, error: "Expected a JSON object." }, { status: 400 });
+    if (raw.action === "resume") {
       const identity = await requestIdentity(raw);
-      if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+      if (!identity.signed_in) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
       assertCan(identity.role, "validate");
       const request = resumeSchema.parse(raw);
+      await assertAuthorizedWorkspace(identity, request.workspace_id);
+      const org_id = await getWorkspaceOrgId(request.workspace_id);
+      if (!org_id) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
       const response = await resumeExtractionBatch({ workspace_id: request.workspace_id, source_file_id: request.source_file_id,
         batch_id: request.extraction_batch_id, execute: async (batch, journal) => {
           await assertAccuracyCanProgress(request.workspace_id, "merge_dedupe");
-          const org_id = await getWorkspaceOrgId(request.workspace_id);
-          if (!org_id) throw new Error("Unknown workspace");
           const actor = identity.actor;
           const extractionRuns = await accuracyDb().select().from(tables.accuracyModuleRuns).where(and(
             eq(tables.accuracyModuleRuns.workspace_id, request.workspace_id), inArray(tables.accuracyModuleRuns.id, batch.run_ids)));
@@ -77,9 +124,18 @@ export async function POST(req: Request) {
             tactics_inserted: runs.filter(run => run.call_kind === "inventory_extract").reduce((sum, run) => sum + run.count, 0),
             merge: downstream.merge.output, statuses: downstream.status.output, runs: [...runs, ...downstream.runs] };
         } });
-      return NextResponse.json(response);
+      try {
+        return NextResponse.json(await attachAssembly(response, { org_id, actor: identity.actor }));
+      } catch (error) {
+        if (error instanceof AssemblyError) throw error;
+        return assemblyIncompleteResponse(response, error);
+      }
     }
     const body = bodySchema.parse(raw);
+    const identity = await requestIdentity(raw);
+    if (!identity.signed_in) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    assertCan(identity.role, "validate");
+    await assertAuthorizedWorkspace(identity, body.workspace_id);
     const org_id = await getWorkspaceOrgId(body.workspace_id);
     if (!org_id) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
@@ -111,10 +167,7 @@ export async function POST(req: Request) {
       return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
     }
 
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy extractor",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
+    const actor = identity.actor;
 
     const kinds = body.kinds;
     const batch = await createExtractionBatch(body.workspace_id, body.source_file_id, kinds.map(kind => `${kind}_extract`));
@@ -234,14 +287,22 @@ export async function POST(req: Request) {
             runs: [...runs, ...downstream.runs], stub: gate.stub, provider_id: gate.stub ? null : gate.provider_id,
             provider_label: gate.stub ? null : gate.provider_label, auth: gate.stub ? null : gate.auth };
         } });
-      return NextResponse.json(response);
+      try {
+        return NextResponse.json(await attachAssembly(response, { org_id, actor }));
+      } catch (error) {
+        if (error instanceof AssemblyError) throw error;
+        return assemblyIncompleteResponse(response, error);
+      }
     } catch (error) {
       if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers,
         extraction_batch_id: batch.id, runs, gaps_inserted, tactics_inserted }, { status: 409 });
       throw error;
     }
   } catch (error) {
+    if (error instanceof SyntaxError) return NextResponse.json({ ok: false, error: "Invalid JSON request." }, { status: 400 });
+    if (error instanceof z.ZodError) return NextResponse.json({ ok: false, error: error.issues.map(issue => issue.message).join("; ") }, { status: 400 });
     if (error instanceof ItemHistoryError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
+    if (error instanceof AssemblyError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
     if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
     if (error instanceof ExtractionBatchError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 409 });
     if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers }, { status: 409 });
@@ -251,7 +312,7 @@ export async function POST(req: Request) {
         return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
       }
     }
-    const message = error instanceof Error ? error.message : "Extract failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    console.error("Extract request failed", error);
+    return NextResponse.json({ ok: false, error: "Extract failed" }, { status: 500 });
   }
 }

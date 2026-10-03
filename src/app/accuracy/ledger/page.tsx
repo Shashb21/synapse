@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
+import { AssemblyHistory } from "@/components/accuracy/assembly-history";
 import { LedgerClaimCard, type LedgerClaimCardModel } from "@/components/accuracy/ledger-claim-card";
 import { LedgerFilterBar } from "@/components/accuracy/ledger-filter-bar";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
@@ -163,6 +164,8 @@ export default async function AccuracyLedgerPage({
               workshopHref={`/accuracy/workshop?workspace_id=${encodeURIComponent(workspaceId)}`}
             />
           ) : null}
+
+          <AssemblyHistory workspaceId={workspaceId} />
 
           <LedgerFilterBar workspaceId={workspaceId} facets={facets} selected={filters} />
 
