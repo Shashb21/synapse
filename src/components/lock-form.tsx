@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 import {
   Dialog,
   DialogContent,
@@ -112,6 +113,17 @@ export function LockForm({
       setError(missingFieldsMessage(missing.map(fieldName)));
       missing[0]!.focus();
       return;
+    }
+    // A tactic's dates: the same check the server makes, before anything is sent (KAN-68).
+    if (form.elements.namedItem("evidence_available")) {
+      const dateError = tacticDatesError(
+        String(formData.get("start_date") ?? ""),
+        String(formData.get("evidence_available") ?? ""),
+      );
+      if (dateError) {
+        setError(dateError);
+        return;
+      }
     }
     setPending(true);
     // The actor is the signed-in person; the server takes it from the session.
