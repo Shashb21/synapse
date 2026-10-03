@@ -325,6 +325,7 @@ function GapDetail({
   identity: ActionIdentity;
   mayPrioritize: boolean;
 }) {
+  const ai = useAiEnabled("prioritization");
   const point = pointOf(gap, xAxis, yAxis);
   const band = gap.band ?? gap.suggested_band;
   const quadrant = point ? bandAt(point, xAxis, yAxis) : null;
@@ -418,7 +419,10 @@ function GapDetail({
                 { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
                 ...BANDS.map((value) => ({ value, label: BAND_LABELS[value] })),
               ],
-              hint: "A band you set here is yours: a later model run keeps it and only updates its own suggestion.",
+              // Customers aren't told about AI when it is off (KAN-53).
+              hint: ai
+                ? "A band you set here is yours: a later model run keeps it and only updates its own suggestion."
+                : "A band you set here is kept until you change it.",
             },
             {
               name: "validate",
@@ -440,7 +444,11 @@ function GapDetail({
           }
           label={point ? "Edit scores" : "Type scores"}
           title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
-          description="Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
+          description={
+            ai
+              ? "Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
+              : "Type the exact axis scores and, if you want, the band."
+          }
           confirmLabel="Save placement"
           requireRationale
           identity={identity}

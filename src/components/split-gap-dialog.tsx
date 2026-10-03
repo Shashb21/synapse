@@ -88,6 +88,24 @@ export function splitPayload(args: {
   };
 }
 
+/** Why the two split titles can't be saved, or null. Identical titles make two indistinguishable gaps (KAN-68). */
+export function splitTitlesError(addressedName: string, openName: string): string | null {
+  const addressed = addressedName.trim();
+  const open = openName.trim();
+  if (!addressed && !open) return "Fill in the Addressed title and the Open title.";
+  if (!addressed) return "Fill in the Addressed title.";
+  if (!open) return "Fill in the Open title.";
+  if (addressed.toLowerCase() === open.toLowerCase()) {
+    return "The Addressed title and the Open title are the same. Give each slice its own title.";
+  }
+  return null;
+}
+
+/** A leftover statement that differs from the gap's own title is a suggested split; otherwise it is filled in by hand. */
+export function hasSuggestedSplit(gapName: string, residualName: string): boolean {
+  return residualName.trim().toLowerCase() !== gapName.trim().toLowerCase();
+}
+
 export function SplitGapDialog({
   gapId,
   gapName,
@@ -122,6 +140,8 @@ export function SplitGapDialog({
   const [proposing, setProposing] = useState(false);
   const ai = useAiEnabled("partial_split");
   const [proposalNote, setProposalNote] = useState<string | null>(null);
+  /** A residual or an S6 proposal filled the split in; without one the person writes it. */
+  const [suggested, setSuggested] = useState(() => hasSuggestedSplit(gapName, residualName));
   /**
    * Tracks whether the user edited the split themselves, as opposed to just
    * accepting the suggested (default or proposed) split. A rationale is only
@@ -151,6 +171,7 @@ export function SplitGapDialog({
     setProposalNote(null);
     setProposing(false);
     setTouched(false);
+    setSuggested(hasSuggestedSplit(gapName, residualName));
   }
 
   /** S6 proposes the split; the user still validates every field before it applies. */
@@ -204,6 +225,7 @@ export function SplitGapDialog({
     }
     // A suggestion, not a user edit — accepting it as-is still needs no rationale.
     setTouched(false);
+    setSuggested(true);
     setProposalNote(
       `Proposed with confidence ${proposal.confidence}. ${proposal.rationale.slice(0, 2).join(" ")}`,
     );
@@ -211,8 +233,9 @@ export function SplitGapDialog({
 
   async function onSubmit() {
     if (mode === "split") {
-      if (!addressedName.trim() || !openName.trim()) {
-        setError("Both titles are required.");
+      const titlesError = splitTitlesError(addressedName, openName);
+      if (titlesError) {
+        setError(titlesError);
         return;
       }
       if (addressedTacticIds.length === 0) {
@@ -231,7 +254,7 @@ export function SplitGapDialog({
     }
     if (rationaleRequired && rationale.trim().length < 3) {
       setError(
-        mode === "split"
+        mode === "split" && suggested
           ? "You changed the suggested split — a short rationale is required."
           : "A short rationale is required. It is stored with the edit.",
       );
@@ -476,7 +499,11 @@ export function SplitGapDialog({
         )}
         <div className="grid gap-2">
           <label className="grid gap-1 text-[12px] text-muted-foreground">
-            {rationaleRequired ? "Rationale (required)" : "Rationale (optional — accepting the suggested split as-is)"}
+            {rationaleRequired
+              ? "Rationale (required)"
+              : suggested
+                ? "Rationale (optional — accepting the suggested split as-is)"
+                : "Rationale (optional)"}
             <Textarea
               value={rationale}
               rows={2}
@@ -484,21 +511,25 @@ export function SplitGapDialog({
               onChange={(e) => setRationale(e.target.value)}
             />
             <span className="text-[11px] text-muted-foreground/80">
-              {mode === "split"
+              {mode === "split" && suggested
                 ? touched
                   ? "Required because you changed the suggested split. Stored on the edit record."
                   : "Accepting the split as suggested needs no rationale."
                 : "Stored on the edit record."}
             </span>
           </label>
-          {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="text-[12px] text-destructive">
+              {error}
+            </p>
+          ) : null}
         </div>
         <DialogFooter>
           <DialogClose render={<Button type="button" size="sm" variant="outline" />}>
             Cancel
           </DialogClose>
           <Button type="button" size="sm" disabled={pending || refreshing} onClick={() => void onSubmit()}>
-            {pending || refreshing ? "Saving…" : mode === "split" ? "Accept split" : "Rewrite and retire original"}
+            {pending || refreshing ? "Saving…" : mode === "split" ? (suggested ? "Accept split" : "Split gap") : "Rewrite and retire original"}
           </Button>
         </DialogFooter>
       </DialogContent>
