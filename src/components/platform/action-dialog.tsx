@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 
 export type ActionField = {
   name: string;
@@ -110,7 +111,10 @@ export function ActionDialog({
         return;
       }
     }
-    const invalid = validateForm?.(typed);
+    // A tactic's dates, checked as the server will (KAN-68); a server page can't pass validateForm.
+    const invalid =
+      ("evidence_available" in typed ? tacticDatesError(typed.start_date, typed.evidence_available) : null) ??
+      validateForm?.(typed);
     if (invalid) {
       setError(invalid);
       return;
