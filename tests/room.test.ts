@@ -175,9 +175,9 @@ describe("room console render", () => {
     expect(html).not.toContain("AI off");
   });
 
-  it("works with AI off", () => {
+  it("works with AI off, without telling the customer (KAN-53)", () => {
     const html = render(false);
-    expect(html).toContain("AI off");
+    expect(html).not.toContain("AI off");
     expect(html).toContain('data-testid="room-current-frame"');
   });
 
