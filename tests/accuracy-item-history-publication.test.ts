@@ -1,9 +1,10 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
-import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, deleteWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
-import { publishGeneratedItemHistory, readItemHistory,  } from "@/accuracy/store/item-history-store";
+import { publishGeneratedItemHistory, readItemHistory } from "@/accuracy/store/item-history-store";
+import { listAssemblies } from "@/accuracy/store/assembly-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { eq } from "drizzle-orm";
 import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
@@ -15,6 +16,15 @@ import { mechanicalModule } from "@/accuracy/modules/_factory";
 import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { z } from "zod";
+const identity = vi.hoisted(() => ({
+  actor: { name: "Publication tester", function: "medical_affairs" as const },
+  role: "medical_affairs" as const,
+  signed_in: true,
+  demo: false,
+  subject: "publication-subject",
+}));
+vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
+
 const workspaces: string[] = [];
 const actor = { name: "Contributor", function: "medical_affairs" as const };
 const span = { source_file_id: "", block_id: "", quote: "Evidence" };
@@ -22,8 +32,9 @@ const span = { source_file_id: "", block_id: "", quote: "Evidence" };
 async function fixture() {
   const org_id = await createOrganization("history test");
   const workspace_id = await createWorkspace({ org_id, name: "history", slug: newId("slug") });
+  await grantOrganizationAccess({ subject: identity.subject, org_id });
   workspaces.push(workspace_id);
-  const source = await insertSourceFile({ workspace_id, filename: "input.txt", mime: "text/plain", checksum: newId("sum") });
+  const source = await insertSourceFile({ workspace_id, org_id, filename: "input.txt", mime: "text/plain", checksum: newId("sum") });
   const block_id = newId("block");
   await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id, source_file_id: source.id,
     index: 0, kind: "paragraph", heading: null, text: "Evidence", parser: "test", created_at: nowIso() });
@@ -88,9 +99,18 @@ it("publishes stored production run snapshots and retains response counts while 
   activateAccuracyModule({ call_kind: "need_extract", module_id: id, activated_by: "test" });
   try {
     const response = await POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify({ ...scope, kinds: ["need"] }) }));
-    const body = await response.json(); expect(response.status).toBe(200); expect(body.gaps_inserted).toBe(2);
+    const body = await response.json(); expect(response.status, JSON.stringify(body)).toBe(200); expect(body.gaps_inserted).toBe(2);
+    expect(body).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "blocked" }) });
+    expect(body.assembly_checks.findings.map((finding: { code: string }) => finding.code)).toEqual(expect.arrayContaining([
+      "duplicate_canonical_claim",
+      "duplicate_generated_fingerprint",
+      "duplicate_gap_statement",
+    ]));
     const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.id, body.extraction_batch_id));
     expect(batch.created_claim_ids).toEqual([judged.id, judged.id]);
+    const [assembly] = await listAssemblies(scope.workspace_id);
+    expect(assembly).toMatchObject({ id: body.assembly_id, actor: identity.actor, checks: body.assembly_checks });
+    expect(assembly?.output.gaps).toHaveLength(2);
     const history = await readItemHistory(scope.workspace_id, judged.id);
     expect(history?.versions.every(version => version.run_id === body.runs[0].run_id)).toBe(true);
     const rows = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, scope.workspace_id));
