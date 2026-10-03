@@ -64,6 +64,9 @@ const validSet = () => {
     tactic_version_id: tactic.id,
     mode: "llm",
     input: {
+      gap_id: gap.id,
+      tactic_id: tactic.id,
+      block_bundle_ids: ["block-gap", "block-tactic"],
       selected_versions: {
         gap_version_id: gap.id,
         tactic_version_id: tactic.id,
@@ -104,6 +107,9 @@ describe("assembly domain checks", () => {
       gap_version_id: "gap-raw-v0",
       tactic_version_id: "tactic-raw-v2",
       input: {
+        gap_id: "gap-raw-v0",
+        tactic_id: "tactic-raw-v2",
+        block_bundle_ids: ["block-gap", "block-tactic"],
         selected_versions: {
           gap_version_id: "gap-raw-v0",
           tactic_version_id: "tactic-raw-v2",
@@ -248,6 +254,61 @@ describe("assembly domain checks", () => {
       "coverage_stale_reference",
       "coverage_unknown_evidence_block",
     ]));
+  });
+
+  it("blocks coverage input with wrong top-level pair IDs or missing cited blocks in the recorded bundle", () => {
+    const set = validSet();
+    set.coverage = [
+      {
+        ...set.coverage[0]!,
+        run_id: "wrong-input-pair",
+        input: {
+          ...set.coverage[0]!.input,
+          gap_id: "other-gap-version",
+          tactic_id: set.items[1]!.id,
+          block_bundle_ids: ["block-gap", "block-tactic"],
+        },
+      },
+      {
+        ...set.coverage[0]!,
+        run_id: "missing-cited-input-block",
+        input: {
+          ...set.coverage[0]!.input,
+          gap_id: set.items[0]!.id,
+          tactic_id: set.items[1]!.id,
+          block_bundle_ids: ["block-gap"],
+        },
+      },
+    ];
+
+    const report = checkAssembly({ ...set, source_file_ids: ["source-a"], linking_complete: true });
+
+    expect(codes(report)).toEqual(expect.arrayContaining([
+      "coverage_input_endpoint_mismatch",
+      "coverage_quote_not_in_input_bundle",
+    ]));
+  });
+
+  it("blocks supported coverage outputs that cite no verified evidence blocks", () => {
+    const set = validSet();
+    set.coverage = [{
+      ...set.coverage[0]!,
+      input: {
+        ...set.coverage[0]!.input,
+        gap_id: set.items[0]!.id,
+        tactic_id: set.items[1]!.id,
+        block_bundle_ids: ["block-gap", "block-tactic"],
+      },
+      output: {
+        ...(set.coverage[0]!.output as Record<string, unknown>),
+        quote_block_ids: [],
+      },
+    }];
+
+    const report = checkAssembly({ ...set, source_file_ids: ["source-a"], linking_complete: true });
+
+    expect(codes(report)).toContain("coverage_missing_evidence");
+    expect(codes(report)).toContain("mapping_without_supported_coverage");
   });
 
   it("requires complete pair decisions and keeps not_relevant decisions out of supported mappings", () => {
