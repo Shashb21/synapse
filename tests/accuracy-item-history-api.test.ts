@@ -170,11 +170,11 @@ describe("authorized item history API", () => {
     expect((await post({ ...base, successor_ids: scope.predecessor_ids })).status).toBe(400);
     expect((await post({ ...base, successor_ids: [other.claim_id] })).status).toBe(404);
   });
-  it("returns 409 for a stale proposal without recording a decision", async () => {
+  it.each(["confirm", "reject"])("returns 409 for stale %s without recording a decision", async action => {
     const scope = await fixture();
     const [version] = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.claim_id, scope.claim_id));
     await accuracyDb().insert(t.accuracyItemVersions).values({ ...version, id: newId("iver"), origin_key: newId("origin") });
-    expect((await post(decision(scope))).status).toBe(409); expect(await decisions(scope.proposal_id)).toEqual([]);
+    expect((await post(decision(scope, action))).status).toBe(409); expect(await decisions(scope.proposal_id)).toEqual([]);
   });
   it("logs runtime read and write faults without exposing their details", async () => {
     const scope = await fixture(); const log = vi.spyOn(console, "error").mockImplementation(() => undefined);

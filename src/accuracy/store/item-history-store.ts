@@ -199,12 +199,12 @@ export async function decideItemRelationship(args: { workspace_id: string; propo
     const [prior] = await accuracyDb().select().from(t.accuracyItemRelationshipDecisions)
       .where(eq(t.accuracyItemRelationshipDecisions.proposal_id, proposal.id));
     if (prior) throw new ItemHistoryError("conflict", "Relationship has already been decided.");
+    const currentBasis = await basisVersionIds(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
+    if (JSON.stringify(currentBasis) !== JSON.stringify(proposal.basis_version_ids)) {
+      throw new ItemHistoryError("conflict", "Relationship proposal is stale after new item versions.");
+    }
     if (args.action === "confirm") {
       await assertAvailable(args.workspace_id, proposal.kind as ProposalKind, proposal.predecessor_ids, proposal.successor_ids, proposal.id);
-      const currentBasis = await basisVersionIds(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
-      if (JSON.stringify(currentBasis) !== JSON.stringify(proposal.basis_version_ids)) {
-        throw new ItemHistoryError("conflict", "Relationship proposal is stale after new item versions.");
-      }
       if (proposal.kind === "same_item") {
         const rows = await requireClaims(args.workspace_id, [...proposal.predecessor_ids, ...proposal.successor_ids]);
         const winner = rows.find(row => metadata(row).history_only !== true) ?? rows.find(row => proposal.successor_ids.includes(row.id))!;
