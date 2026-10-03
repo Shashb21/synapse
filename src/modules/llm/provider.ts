@@ -93,7 +93,8 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       error_type: parsed.error_type,
       provider_message: parsed.message ? redactSecrets(parsed.message, [target.api_key]).slice(0, 300) : null,
       // Gemini names the quota it hit, e.g. GenerateRequestsPerDayPerProjectPerModel-FreeTier.
-      daily_quota: res.status === 429 && /PerDay/.test(text),
+      // OpenRouter's free models say "free-models-per-day" (KAN-70).
+      daily_quota: res.status === 429 && /PerDay|per[- ]day/i.test(text),
     });
     // Gemini's free tier also answers "high demand" 503s and, now and then, a 404 with no
     // body for a model it serves; a real "model not found" always carries an error body.
@@ -161,6 +162,8 @@ async function chatCompletions(args: {
   auth: LlmAuth;
   target: Omit<CallTarget, "api_key">;
   headers?: Record<string, string>;
+  /** Ask for a JSON object reply (OpenAI-compatible `response_format`). */
+  json?: boolean;
 }): Promise<string> {
   const payload = await postJson(
     `${args.base.replace(/\/$/, "")}/chat/completions`,
@@ -173,9 +176,37 @@ async function chatCompletions(args: {
         { role: "system", content: args.request.system },
         { role: "user", content: args.request.user },
       ],
+      ...(args.json ? { response_format: { type: "json_object" } } : {}),
     },
     { ...args.target, api_key: args.auth.api_key },
   );
+  return chatText(payload, { ...args.target, api_key: args.auth.api_key });
+}
+
+/**
+ * The reply text, or a clear error: an upstream error OpenRouter sends inside an HTTP 200,
+ * or a reply cut off at max_tokens (reasoning tokens count toward it) (KAN-70).
+ */
+export function chatText(payload: Record<string, unknown>, target: CallTarget): string {
+  const error = payload.error as { code?: unknown; message?: unknown } | undefined;
+  if (error && typeof error === "object") {
+    const status = typeof error.code === "number" ? error.code : 502;
+    throw new ProviderError({
+      provider_id: target.provider_id,
+      provider_name: target.provider_name,
+      key_env: target.key_env,
+      status,
+      error_type: null,
+      provider_message:
+        typeof error.message === "string" ? redactSecrets(error.message, [target.api_key]).slice(0, 300) : null,
+    });
+  }
+  const finish = (payload.choices as { finish_reason?: string }[] | undefined)?.[0]?.finish_reason;
+  if (finish === "length") {
+    throw new Error(
+      `${target.provider_name}'s reply was cut off at its max_tokens limit. Raise Max tokens for this stage in AI & routing.`,
+    );
+  }
   return textFromPayload(payload);
 }
 
@@ -323,6 +354,8 @@ export const openRouter: LlmProvider = {
       request,
       auth,
       target: { provider_id: "openrouter", provider_name: "OpenRouter", key_env: "OPENROUTER_API_KEY" },
+      // Every stage parses a JSON object; models that can't honour it ignore the hint.
+      json: true,
       headers: {
         "http-referer": env("OPENROUTER_APP_URL", "https://github.com/Shashb21/synapse"),
         "x-title": "Synapse IEGP",

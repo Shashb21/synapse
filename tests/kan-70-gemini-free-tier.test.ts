@@ -121,3 +121,30 @@ describe("KAN-70 Gemini free tier", () => {
     expect(() => geminiText({ candidates: [{ content: { parts: [] }, finishReason: "RECITATION" }] })).toThrow(/stopped early/);
   });
 });
+
+describe("KAN-70 OpenRouter free models", () => {
+  const openrouter = () =>
+    findProvider("openrouter")!.complete({ ...REQUEST, model: "nvidia/nemotron-3-super-120b-a12b:free" }, { api_key: "sk-or-v1-test-key-1234567890" });
+  const reply = (body: unknown) => ({ status: 200, body: JSON.stringify(body) });
+
+  it("asks for a JSON object and returns the reply", async () => {
+    respond(reply({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] }));
+    await expect(openrouter()).resolves.toBe('{"ok":true}');
+    expect(bodies[0]!.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("treats the free per-day cap as a daily quota, not retried", async () => {
+    respond({ status: 429, body: JSON.stringify({ error: { code: 429, message: "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day" } }) });
+    const error = (await openrouter().catch((e: unknown) => e)) as ProviderError;
+    expect(error.kind).toBe("rate_limit");
+    expect(error.info.daily_quota).toBe(true);
+    expect(waits).toEqual([]);
+  });
+
+  it("turns an upstream error inside a 200 into a provider error, and names a cut-off", async () => {
+    respond(reply({ error: { code: 503, message: "Provider returned error" } }));
+    await expect(openrouter()).rejects.toMatchObject({ kind: "unavailable" });
+    respond(reply({ choices: [{ message: { content: '{"a":' }, finish_reason: "length" }] }));
+    await expect(openrouter()).rejects.toThrow(/cut off at its max_tokens limit/);
+  });
+});
