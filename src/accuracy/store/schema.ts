@@ -146,7 +146,8 @@ export const accuracyItemVersions = pgTable("accuracy_item_versions", {
   id: text("id").primaryKey(),
   workspace_id: text("workspace_id").notNull(),
   claim_id: text("claim_id").notNull().references(() => accuracyClaims.id),
-  run_id: text("run_id").notNull().references(() => accuracyModuleRuns.id),
+  run_id: text("run_id").references(() => accuracyModuleRuns.id),
+  human_origin: jsonb("human_origin").$type<import("@/accuracy/domain/item-history").HumanItemOrigin>(),
   snapshot_id: text("snapshot_id").references(() => accuracyAgentEvents.id),
   iteration: integer("iteration"),
   item_index: integer("item_index").notNull(),
@@ -216,6 +217,30 @@ export const accuracyAssemblyReviews = pgTable("accuracy_assembly_reviews", {
 }, (table) => ({
   assembly: index("accuracy_assembly_reviews_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
 }));
+
+/** Immutable reasoned human change; linking completions publish new assembly heads. */
+export const accuracyAssemblyRevisions = pgTable("accuracy_assembly_revisions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  baseline_assembly_id: text("baseline_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  parent_assembly_id: text("parent_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  initial_assembly_id: text("initial_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  change: jsonb("change").$type<import("@/accuracy/domain/assembly-revision").AssemblyRevision>().notNull(),
+});
+/** Mutable pointer only; all assemblies and changes remain immutable. */
+export const accuracyAssemblyRevisionHeads = pgTable("accuracy_assembly_revision_heads", {
+  baseline_assembly_id: text("baseline_assembly_id").primaryKey().references(() => accuracyAssemblies.id),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  revision_id: text("revision_id").notNull().references(() => accuracyAssemblyRevisions.id),
+});
+/** Append-only linking attempts record incomplete recovery and final checked assemblies. */
+export const accuracyAssemblyRevisionAttempts = pgTable("accuracy_assembly_revision_attempts", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  revision_id: text("revision_id").notNull().references(() => accuracyAssemblyRevisions.id),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  error: text("error"), created_at: text("created_at").notNull(),
+});
 
 /** Uncertain identity or ancestry proposal; decisions are separate immutable records. */
 export const accuracyItemRelationshipProposals = pgTable("accuracy_item_relationship_proposals", {
@@ -646,6 +671,24 @@ export const ACCURACY_MIGRATIONS = [
     created_at text NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
+  `ALTER TABLE accuracy_item_versions ALTER COLUMN run_id DROP NOT NULL`,
+  `ALTER TABLE accuracy_item_versions ADD COLUMN IF NOT EXISTS human_origin jsonb`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revisions (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    baseline_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    parent_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    initial_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id), change jsonb NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revision_heads (
+    baseline_assembly_id text PRIMARY KEY REFERENCES accuracy_assemblies(id), workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    revision_id text NOT NULL REFERENCES accuracy_assembly_revisions(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revision_attempts (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    revision_id text NOT NULL REFERENCES accuracy_assembly_revisions(id),
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id), error text, created_at text NOT NULL
+  )`,
   `DO $$ BEGIN
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint

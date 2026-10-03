@@ -93,7 +93,8 @@ function chooseVersion(args: {
   throw new AssemblyError("not_found", "No persisted item version exactly matches the judged extraction output.");
 }
 
-function evidenceBlockIds(...items: ResolvedAssemblyItem[]): string[] {
+/** Collect exact selected-pair provenance block IDs for provider input binding. */
+export function evidenceBlockIds(...items: ResolvedAssemblyItem[]): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const item of items) {
@@ -109,7 +110,8 @@ function evidenceBlockIds(...items: ResolvedAssemblyItem[]): string[] {
   return ids;
 }
 
-function reservedCoverageRunId(generation_key: string, gap_version_id: string, tactic_version_id: string): string {
+/** Reserve a stable provider run identity for one operation and exact version pair. */
+export function reservedCoverageRunId(generation_key: string, gap_version_id: string, tactic_version_id: string): string {
   const hash = createHash("sha256").update(`${generation_key}\u0000${gap_version_id}\u0000${tactic_version_id}`).digest("hex");
   return `arun_asm_${hash.slice(0, 40)}`;
 }
@@ -118,7 +120,8 @@ function coverageAttemptRunId(base: string, attempt: number): string {
   return attempt === 0 ? base : `${base}_retry_${attempt}`;
 }
 
-async function runCoverageDecision(args: {
+/** Reuse successful exact inputs and retry failed attempts without duplicating successful provider calls. */
+export async function runCoverageDecision(args: {
   base_run_id: string;
   input: Record<string, unknown>;
   actor: Actor;

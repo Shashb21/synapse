@@ -136,7 +136,7 @@ export async function readItemHistory(workspace_id: string, claim_id: string): P
       decision: (decisions.get(p.id)?.action as "confirm" | "reject" | undefined) ?? null })));
   versions.sort((a, b) => a.created_at.localeCompare(b.created_at) || (a.iteration ?? Infinity) - (b.iteration ?? Infinity) || a.item_index - b.item_index);
   return { claim: byId.get(canonical_claim_id)!, versions: versions.map(row => ({ id: row.id, claim_id: row.claim_id,
-    run_id: row.run_id, snapshot_id: row.snapshot_id, iteration: row.iteration, item_index: row.item_index,
+    run_id: row.run_id, human_origin: row.human_origin, snapshot_id: row.snapshot_id, iteration: row.iteration, item_index: row.item_index,
     payload: row.payload, source_file_id: row.source_file_id, created_at: row.created_at } satisfies ItemVersion)),
     relationships, canonical_claim_id };
 }

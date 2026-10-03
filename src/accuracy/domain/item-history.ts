@@ -9,8 +9,16 @@ export class ItemHistoryError extends Error {
   }
 }
 
+/** Explicit contributor origin, never represented as a model extraction run. */
+export type HumanItemOrigin = {
+  kind: "human"; revision_id: string; subject: string; provider: string;
+  actor: { name: string; function: string }; action: "add" | "edit"; reason: string;
+  parent_assembly_id: string; predecessor_version_id: string | null;
+  source_file_id: string; provenance: unknown[]; created_at: string;
+};
+
 export type ItemVersion = {
-  id: string; claim_id: string; run_id: string; snapshot_id: string | null;
+  id: string; claim_id: string; run_id: string | null; human_origin?: HumanItemOrigin | null; snapshot_id: string | null;
   iteration: number | null; item_index: number; payload: Record<string, unknown>;
   source_file_id: string; created_at: string;
 };
