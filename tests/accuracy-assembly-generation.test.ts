@@ -7,11 +7,13 @@ import { mechanicalModule } from "@/accuracy/modules/_factory";
 import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema";
 import { generateExtractionAssembly } from "@/accuracy/kernel/assembly-generation";
 import { publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
+import { listAssemblies } from "@/accuracy/store/assembly-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
+import { generatedItemFingerprint } from "@/accuracy/domain/item-history";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
 const workspaces: string[] = [];
@@ -58,18 +60,25 @@ async function extractionRun(scope: Awaited<ReturnType<typeof fixture>>, claim_t
   return id;
 }
 
-function installCoverage(overall: CoverageDecision["overall"] = "partial") {
+function installCoverage(overall: CoverageDecision["overall"] = "partial", options?: { failFirst?: boolean }) {
   const call_kind = "coverage_decide";
   const original = activeAccuracyModuleId(call_kind);
   if (original) originals.set(call_kind, original);
   const id = newId("coverage-module");
+  let attempts = 0;
   registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Generated coverage", summary: "Generated coverage",
-    inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()) }),
+    inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()),
+      selected_versions: z.object({ gap_version_id: z.string(), tactic_version_id: z.string(),
+        gap_payload: z.record(z.string(), z.unknown()), tactic_payload: z.record(z.string(), z.unknown()) }).optional() }),
     outputSchema: z.object({ gap_id: z.string(), tactic_id: z.string(), overall: z.enum(["full", "partial", "limited", "not_relevant"]),
       quote_block_ids: z.array(z.string()), confidence: z.number(), rationale: z.string() }),
-    run: async input => ({ output: { gap_id: input.gap_id, tactic_id: input.tactic_id, overall,
-      quote_block_ids: overall === "not_relevant" ? [] : input.block_bundle_ids, confidence: 0.8, rationale: "Generated pairwise decision" },
-      summary: "Generated coverage" }) }));
+    run: async input => {
+      attempts += 1;
+      if (options?.failFirst && attempts === 1) throw new Error("transient coverage failure");
+      return { output: { gap_id: input.gap_id, tactic_id: input.tactic_id, overall,
+        quote_block_ids: overall === "not_relevant" ? [] : input.block_bundle_ids, confidence: 0.8, rationale: "Generated pairwise decision" },
+        summary: "Generated coverage" };
+    } }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "assembly generation test" });
 }
 
@@ -122,16 +131,102 @@ describe("generateExtractionAssembly", () => {
     const gapRun = await extractionRun(scope, "gap", [], finalGap);
     await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
       final_claims: [{ id: gap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gap.statement }] });
-    const tacticFinal = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [] };
+    const tactic = { id: "tactic-irrelevant", name: "Irrelevant registry", type: "rwe_study", status: "planned",
+      evidence_question: "Unrelated question", origin: "inventory",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "registry closes" }] };
+    const tacticFinal = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic] };
     const tacticRun = await extractionRun(scope, "tactic", [], tacticFinal);
-    await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic", final_claims: [] });
+    await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
+      final_claims: [{ id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name }] });
 
     const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
       source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:empty-side" });
 
-    expect(assembly.output).toEqual({ gaps: [gap], tactics: [] });
-    expect(assembly.coverage).toEqual([]);
+    expect(assembly.output).toEqual({ gaps: [gap], tactics: [tactic] });
+    expect(assembly.coverage).toHaveLength(1);
+    expect(assembly.coverage[0]?.output).toMatchObject({ overall: "not_relevant" });
     expect(assembly.mappings).toEqual([]);
     expect(assembly.checks.status).toBe("passed");
+
+    const empty = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [], generation_key: "batch:empty" });
+    expect(empty.output).toEqual({ gaps: [], tactics: [] });
+    expect(empty.coverage).toEqual([]);
+  });
+
+  it("honors judged iteration before deterministic ties and final-only before snapshot fallback", async () => {
+    const scope = await fixture();
+    installCoverage("not_relevant");
+    const gap = { id: "same-gap", statement: "Same judged gap", external_id: "GAP-SAME",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "comparative evidence gap" }] };
+    const finalGap = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [gap] };
+    const gapRun = await extractionRun(scope, "gap", [finalGap, { ...finalGap, gaps: [{ ...gap, statement: "Other gap" }] }, finalGap], finalGap, 2);
+    await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
+      final_claims: [{ id: gap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gap.statement }] });
+
+    const tactic = { id: "same-tactic", name: "Same tactic", type: "rwe_study", status: "planned",
+      evidence_question: "Does it close?", origin: "inventory",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "registry closes" }] };
+    const tacticFinal = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic] };
+    const tacticRun = await extractionRun(scope, "tactic", [tacticFinal], tacticFinal);
+    await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
+      final_claims: [{ id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name }] });
+    const [snapshotVersion] = await accuracyDb().select().from(t.accuracyItemVersions)
+      .where(eq(t.accuracyItemVersions.run_id, tacticRun));
+    await accuracyDb().insert(t.accuracyItemVersions).values({ id: newId("iver"), workspace_id: scope.workspace_id,
+      claim_id: snapshotVersion!.claim_id, run_id: tacticRun, snapshot_id: null, iteration: null, item_index: 0,
+      origin_key: `manual-final:${tacticRun}`, claim_type: "tactic", fingerprint: generatedItemFingerprint("tactic", tactic),
+      payload: tactic, source_file_id: scope.source_file_id, created_at: nowIso() });
+
+    const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:preference" });
+
+    expect(assembly.items.find(item => item.claim_type === "gap")?.iteration).toBe(2);
+    expect(assembly.items.find(item => item.claim_type === "tactic")?.iteration).toBeNull();
+  });
+
+  it("preserves a judged final payload whose generated id differs from an earlier same-fingerprint snapshot", async () => {
+    const scope = await fixture();
+    const snapshotGap = { id: "gap-snapshot-id", statement: "Judged text", external_id: "GAP-ID",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "comparative evidence gap" }] };
+    const finalGap = { ...snapshotGap, id: "gap-final-id" };
+    const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [finalGap] };
+    const gapRun = await extractionRun(scope, "gap", [{ ...output, gaps: [snapshotGap] }], output);
+    await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
+      final_claims: [{ id: finalGap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: finalGap.statement }] });
+
+    const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun], generation_key: "batch:changed-id" });
+
+    expect(assembly.output.gaps).toEqual([finalGap]);
+    expect(assembly.items[0]?.snapshot_id).toBeNull();
+  });
+
+  it("does not complete an assembly after failed coverage and retries with new failed-attempt evidence", async () => {
+    const scope = await fixture();
+    installCoverage("partial", { failFirst: true });
+    const gap = { id: "gap-retry", statement: "Retry gap", external_id: null,
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "evidence gap" }] };
+    const tactic = { id: "tactic-retry", name: "Retry tactic", type: "rwe_study", status: "planned",
+      evidence_question: "Retry?", origin: "inventory",
+      provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "registry closes" }] };
+    const gapRun = await extractionRun(scope, "gap", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [gap] });
+    const tacticRun = await extractionRun(scope, "tactic", [], { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, tactics: [tactic] });
+    await publishGeneratedItemHistory({ ...scope, run_id: gapRun, claim_type: "gap",
+      final_claims: [{ id: gap.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: gap.statement }] });
+    await publishGeneratedItemHistory({ ...scope, run_id: tacticRun, claim_type: "tactic",
+      final_claims: [{ id: tactic.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "tactic", statement: tactic.name }] });
+
+    await expect(generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:retry" }))
+      .rejects.toThrow("transient coverage failure");
+    expect(await listAssemblies(scope.workspace_id)).toEqual([]);
+
+    const assembly = await generateExtractionAssembly({ workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+      source_file_ids: [scope.source_file_id], extraction_run_ids: [gapRun, tacticRun], generation_key: "batch:retry" });
+    expect(assembly.coverage).toHaveLength(1);
+    const coverageRuns = (await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, scope.workspace_id)))
+      .filter(run => run.call_kind === "coverage_decide");
+    expect(coverageRuns.map(run => run.status).sort()).toEqual(["error", "ok"]);
   });
 });

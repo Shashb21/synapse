@@ -12,7 +12,7 @@ import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module"
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omission-review-store";
@@ -22,7 +22,7 @@ import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store"
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
-const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
+const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", subject: "resume-subject" as string | null, actor: { name: "Test", function: "heor" } }));
 vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
 
 // Concurrent HTTP requests need separate connections, as in the normal server pool.
@@ -32,13 +32,14 @@ const originals = new Map<CallKind, string>();
 afterEach(() => {
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind, module_id, activated_by: "restore" });
   originals.clear();
-  Object.assign(identity, { signed_in: true, demo: false, role: "contributor" });
+  Object.assign(identity, { signed_in: true, demo: false, role: "contributor", subject: "resume-subject" });
   vi.restoreAllMocks();
 });
 async function fixture() {
   registerAccuracyStack(); await ensureAccuracySchema();
   const org_id = await createOrganization(newId("org-label"));
   const workspace_id = await createWorkspace({ org_id, name: "Resume", slug: newId("slug") });
+  await grantOrganizationAccess({ subject: identity.subject!, org_id });
   const source = await insertSourceFile({ workspace_id, org_id, filename: "notes.txt", mime: "text/plain", checksum: newId("sum"), doc_role: "medical" });
   const block_id = newId("block");
   await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "local", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Comparator evidence missing" }] });
@@ -84,6 +85,7 @@ describe("extraction omission resume", () => {
     await resolve(scope, body);
     const response = await post(request); expect(response.status).toBe(200);
     const completed = await response.json();
+    expect(completed).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     expect(completed.runs.map((r: { call_kind: string }) => r.call_kind)).toEqual(["need_extract", "merge_dedupe", "status_derive"]);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     expect(await (await post({ ...request, idempotency_key: "resume-2" })).json()).toEqual(completed);
@@ -92,6 +94,7 @@ describe("extraction omission resume", () => {
   it("replays initial success without repeating downstream work", async () => {
     const scope = await fixture(); installExtractor(false);
     const initial = await (await post({ ...scope, kinds: ["need"] })).json();
+    expect(initial).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     const review = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${initial.runs[0].run_id}`))).json();
     const before = await runs(scope.workspace_id);
     const replay = await post({ ...scope, action: "resume", extraction_batch_id: review.extraction_batch_id, idempotency_key: "repeat" });
@@ -116,10 +119,10 @@ describe("extraction omission resume", () => {
     Object.assign(identity, { signed_in, role });
     expect((await post(request)).status).toBe(status);
   });
-  it("preserves unsigned demo-mode resume", async () => {
+  it("rejects unsigned demo-mode resume before assembly generation can invent an actor", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
     Object.assign(identity, { signed_in: false, demo: true });
-    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(200);
+    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(401);
   });
   it("returns the server source and batch even when an applied run has no findings", async () => {
     const scope = await fixture(); installExtractor(false);

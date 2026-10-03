@@ -13,6 +13,7 @@ import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
+import { listAssemblies } from "@/accuracy/store/assembly-store";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
@@ -237,6 +238,12 @@ describe("isolated extraction-pipeline experiments", () => {
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual([]);
     expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, source.workspace_id))).toEqual([]);
     expect(await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.workspace_id, source.workspace_id))).toEqual([]);
+    expect(await listAssemblies(source.workspace_id)).toEqual([]);
+    const assemblies = await listAssemblies(experiment.workspace_id);
+    expect(assemblies).toHaveLength(2);
+    expect(new Set(assemblies.map(assembly => assembly.source_file_ids[0]))).toEqual(new Set(firstCopiedSources));
+    expect(JSON.stringify(assemblies)).not.toContain("beone-bgb-58067-prmt5i");
+    expect(JSON.stringify(assemblies)).not.toMatch(/gold/i);
   });
 
   it("retains successful merge evidence when status fails and keeps the journal replayable", async () => {
