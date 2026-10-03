@@ -8,7 +8,7 @@ import {
   resolveGapStatus,
   resolvePriorityBand,
 } from "@/accuracy/domain/iegp-semantics";
-import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
+import { claimMetadata, listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { listWorkspaces } from "@/accuracy/store/tenant";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
 
@@ -24,7 +24,7 @@ export default async function AccuracyPlanPage({
 }) {
   const { workspace_id: workspaceId = "" } = await searchParams;
   let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
-  let gaps: Awaited<ReturnType<typeof listClaims>> = [];
+  let gaps: Awaited<ReturnType<typeof listDownstreamClaims>> = [];
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
@@ -32,7 +32,7 @@ export default async function AccuracyPlanPage({
   try {
     workspaces = await listWorkspaces();
     if (workspaceId) {
-      gaps = await listClaims(workspaceId, { claim_type: "gap", limit: 200 });
+      gaps = await listDownstreamClaims(workspaceId, { claim_type: "gap", limit: 200 });
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));

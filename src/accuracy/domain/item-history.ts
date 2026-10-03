@@ -49,6 +49,6 @@ function canonical(value: unknown): unknown {
 /** Hash an exact generated item; only the model-assigned top-level ID is omitted. */
 export function generatedItemFingerprint(claim_type: AccuracyClaimType, payload: Record<string, unknown>): string {
   if (claim_type !== "gap" && claim_type !== "tactic") throw new ItemHistoryError("invalid_input", "Unsupported item type.");
-  const { id: _generatedId, ...content } = payload;
+  const content = Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "id"));
   return createHash("sha256").update(JSON.stringify([claim_type, canonical(content)])).digest("hex");
 }

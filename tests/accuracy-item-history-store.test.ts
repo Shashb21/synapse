@@ -255,3 +255,85 @@ describe("generated item history store", () => {
     expect(history?.versions.find(v => v.claim_id === judged.id)?.payload).toMatchObject({ model_note: { source: "agent" } });
   });
 });
+
+
+it("joins third and fourth alternatives through canonical groups without rewriting origins", async () => {
+  const scope = await fixture();
+  const [judged, a, b, c, otherJudged] = await seedClaims(scope, 5);
+  for (const id of [a, b, c]) await accuracyDb().update(t.accuracyClaims).set({ metadata: { history_only: true } }).where(eq(t.accuracyClaims.id, id));
+  const before = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id));
+  const base = { workspace_id: scope.workspace_id, rationale: "Contributor confirmed revision", actor, kind: "same_item" as const };
+  for (const [predecessor, successor] of [[a, judged], [b, a], [c, judged]]) {
+    const proposal = await proposeItemRelationship({ ...base, predecessor_ids: [predecessor], successor_ids: [successor] });
+    await expect(proposeItemRelationship({ ...base, predecessor_ids: [c === predecessor ? b : c], successor_ids: [judged] })).rejects.toMatchObject({ code: "conflict" });
+    await decideItemRelationship({ ...base, proposal_id: proposal.id, action: "confirm" });
+    await expect(decideItemRelationship({ ...base, proposal_id: proposal.id, action: "confirm" })).rejects.toMatchObject({ code: "conflict" });
+  }
+  for (const id of [judged, a, b, c]) {
+    const history = await readItemHistory(scope.workspace_id, id);
+    expect(history?.canonical_claim_id).toBe(judged);
+    expect(history?.versions).toHaveLength(4);
+    expect(history?.relationships.filter(row => row.decision === "confirm")).toHaveLength(3);
+    expect(isDownstreamClaim(history!.claim)).toBe(true);
+  }
+  expect(await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id))).toEqual(before);
+  await expect(proposeItemRelationship({ ...base, predecessor_ids: [a], successor_ids: [otherJudged] })).rejects.toMatchObject({ code: "conflict" });
+  await expect(proposeItemRelationship({ ...base, predecessor_ids: [a], successor_ids: [b] })).rejects.toMatchObject({ code: "conflict" });
+});
+
+it("continues confirmed ancestry with new descendants while rejecting cycles and reused descendants", async () => {
+  const scope = await fixture();
+  const [a, b, c, d, e, f] = await seedClaims(scope, 6);
+  for (const id of [b, c, d, e, f]) await accuracyDb().update(t.accuracyClaims).set({ metadata: { history_only: true } }).where(eq(t.accuracyClaims.id, id));
+  const before = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id));
+  const base = { workspace_id: scope.workspace_id, rationale: "Reviewed ancestry", actor };
+  const first = await proposeItemRelationship({ ...base, kind: "split", predecessor_ids: [a], successor_ids: [b, c] });
+  await decideItemRelationship({ ...base, proposal_id: first.id, action: "confirm" });
+  const next = await proposeItemRelationship({ ...base, kind: "merge", predecessor_ids: [b, c], successor_ids: [d] });
+  await decideItemRelationship({ ...base, proposal_id: next.id, action: "confirm" });
+  const last = await proposeItemRelationship({ ...base, kind: "split", predecessor_ids: [d], successor_ids: [e, f] });
+  await decideItemRelationship({ ...base, proposal_id: last.id, action: "confirm" });
+  await expect(proposeItemRelationship({ ...base, kind: "merge", predecessor_ids: [e, f], successor_ids: [b] })).rejects.toMatchObject({ code: "conflict" });
+  await expect(proposeItemRelationship({ ...base, kind: "same_item", predecessor_ids: [d], successor_ids: [a] })).rejects.toMatchObject({ code: "conflict" });
+  expect((await readItemHistory(scope.workspace_id, d))?.relationships.filter(row => row.decision === "confirm")).toHaveLength(2);
+  expect(await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, scope.workspace_id))).toEqual(before);
+});
+
+
+it("proposes later published alternatives after compatible confirmed joins", async () => {
+  const scope = await fixture(); const judged = gap(scope, "Judged question");
+  const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: [judged] };
+  const owners: string[] = [];
+  for (const statement of ["First alternative", "Second alternative", "Third alternative"]) {
+    const run_id = await run(scope, [{ ...output, gaps: [gap(scope, statement)] }], output);
+    const published = await publishGeneratedItemHistory({ ...scope, run_id, claim_type: "gap", final_claims: [{
+      id: judged.id, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, claim_type: "gap", statement: judged.statement,
+    }] });
+    expect(published.claim_ids).toEqual([judged.id]);
+    const history = await readItemHistory(scope.workspace_id, judged.id);
+    const pending = history!.relationships.filter(row => !row.decision && !row.stale);
+    expect(pending).toHaveLength(1);
+    owners.push(pending[0].predecessor_ids[0]);
+    await decideItemRelationship({ workspace_id: scope.workspace_id, proposal_id: pending[0].id, action: "confirm", rationale: "Confirmed alternative", actor });
+  }
+  const history = await readItemHistory(scope.workspace_id, judged.id);
+  expect(history?.relationships.filter(row => row.decision === "confirm")).toHaveLength(3);
+  expect(new Set(history?.versions.map(row => row.claim_id))).toEqual(new Set([judged.id, ...owners]));
+  expect(history?.versions).toHaveLength(6);
+});
+
+it("detects a stale alias proposal when another member of its canonical group gains a version", async () => {
+  const scope = await fixture(); const [a, b, judged] = await seedClaims(scope, 3);
+  for (const id of [a, b]) await accuracyDb().update(t.accuracyClaims).set({ metadata: { history_only: true } }).where(eq(t.accuracyClaims.id, id));
+  const base = { workspace_id: scope.workspace_id, rationale: "Reviewed group", actor, kind: "same_item" as const };
+  const first = await proposeItemRelationship({ ...base, predecessor_ids: [a], successor_ids: [b] });
+  await decideItemRelationship({ ...base, proposal_id: first.id, action: "confirm" });
+  const pending = await proposeItemRelationship({ ...base, predecessor_ids: [a], successor_ids: [judged] });
+  const [origin] = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.claim_id, b));
+  await accuracyDb().insert(t.accuracyItemVersions).values({ ...origin, id: newId("iver"), origin_key: newId("origin") });
+  for (const action of ["confirm", "reject"] as const) await expect(decideItemRelationship({ ...base, proposal_id: pending.id, action })).rejects.toMatchObject({ code: "conflict" });
+  expect(await accuracyDb().select().from(t.accuracyItemRelationshipDecisions).where(eq(t.accuracyItemRelationshipDecisions.proposal_id, pending.id))).toEqual([]);
+  const fresh = await proposeItemRelationship({ ...base, predecessor_ids: [a], successor_ids: [judged] });
+  await decideItemRelationship({ ...base, proposal_id: fresh.id, action: "confirm" });
+  expect((await readItemHistory(scope.workspace_id, a))?.versions).toHaveLength(4);
+});

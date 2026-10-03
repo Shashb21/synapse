@@ -1,5 +1,5 @@
 /** Claim persistence, review visibility and protected downstream projections. */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -96,11 +96,27 @@ export async function listClaims(
   const rows = await accuracyDb()
     .select()
     .from(t.accuracyClaims)
-    .where(eq(t.accuracyClaims.workspace_id, workspace_id))
+    .where(and(eq(t.accuracyClaims.workspace_id, workspace_id),
+      opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : undefined))
     .orderBy(desc(t.accuracyClaims.updated_at))
     .limit(limit);
-  if (!opts?.claim_type) return rows;
-  return rows.filter((row) => row.claim_type === opts.claim_type);
+  return rows;
+}
+
+/** Read downstream inventory with eligibility and item type applied before the SQL cap. */
+export async function listDownstreamClaims(
+  workspace_id: string,
+  opts?: { claim_type?: AccuracyClaimType; source_file_id?: string; limit?: number | null },
+): Promise<AccuracyClaimRow[]> {
+  await ensureAccuracySchema();
+  const query = accuracyDb().select().from(t.accuracyClaims).where(and(
+    eq(t.accuracyClaims.workspace_id, workspace_id),
+    notInArray(t.accuracyClaims.status, ["merged", "rejected"]),
+    sql`${t.accuracyClaims.metadata}->'history_only' IS DISTINCT FROM 'true'::jsonb`,
+    opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
+    opts?.source_file_id !== undefined ? eq(t.accuracyClaims.source_file_id, opts.source_file_id) : undefined,
+  )).orderBy(desc(t.accuracyClaims.updated_at));
+  return opts?.limit === null ? query : query.limit(opts?.limit ?? 200);
 }
 
 /** Return eligible source inventory for extraction completeness, without the UI list limit. */
@@ -108,16 +124,7 @@ export async function listActiveSourceClaims(
   workspace_id: string,
   source_file_id: string,
 ): Promise<AccuracyClaimRow[]> {
-  await ensureAccuracySchema();
-  const rows = await accuracyDb()
-    .select()
-    .from(t.accuracyClaims)
-    .where(and(
-      eq(t.accuracyClaims.workspace_id, workspace_id),
-      eq(t.accuracyClaims.source_file_id, source_file_id),
-      inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
-    ));
-  return rows.filter(isDownstreamClaim);
+  return listDownstreamClaims(workspace_id, { source_file_id, limit: null });
 }
 
 export async function getClaimsByIds(

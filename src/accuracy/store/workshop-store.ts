@@ -31,8 +31,7 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import {
   claimMetadata,
   getClaim,
-  isDownstreamClaim,
-  listClaims,
+  listDownstreamClaims,
   updateClaimMetadata,
   type AccuracyClaimRow,
 } from "./claim-store";
@@ -119,7 +118,7 @@ function toTacticLite(claim: AccuracyClaimRow): WorkshopTacticLite {
 
 export async function buildWorkshopInventory(workspace_id: string): Promise<WorkshopInventory> {
   await ensureWorkshopSchema();
-  const claims = (await listClaims(workspace_id, { limit: 1000 })).filter(isDownstreamClaim);
+  const claims = await listDownstreamClaims(workspace_id, { limit: 1000 });
   const gapRows = claims.filter((row) => row.claim_type === "gap");
   const tacticRows = claims.filter((row) => row.claim_type === "tactic");
   const eligibleIds = new Set(claims.map(claim => claim.id));

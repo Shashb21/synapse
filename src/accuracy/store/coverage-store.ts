@@ -6,7 +6,7 @@ import {
   claimMetadata,
   getClaimsByIds,
   isDownstreamClaim,
-  listClaims,
+  listDownstreamClaims,
   type AccuracyClaimRow,
 } from "./claim-store";
 
@@ -23,7 +23,7 @@ export type CoveragePair = {
 
 export async function listCoveragePairs(workspace_id: string): Promise<CoveragePair[]> {
   await ensureAccuracySchema();
-  const claims = await listClaims(workspace_id, { limit: 500 });
+  const claims = await listDownstreamClaims(workspace_id, { limit: 500 });
   const gaps = claims.filter((c) => c.claim_type === "gap" && isDownstreamClaim(c));
   const tactics = claims.filter((c) => c.claim_type === "tactic" && isDownstreamClaim(c));
   const joins = await accuracyDb()

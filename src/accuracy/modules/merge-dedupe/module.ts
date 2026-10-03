@@ -9,12 +9,13 @@ import {
 import {
   claimMetadata,
   isDownstreamClaim,
-  listClaims,
+  listDownstreamClaims,
   persistClaimPatch,
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
+import { listVersionedClaimIds } from "@/accuracy/store/item-history-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 
 export {
@@ -124,15 +125,19 @@ export const mergeDedupeModule = mechanicalModule({
   inputSchema: z.object({ workspace_id: z.string() }),
   outputSchema: mergeDedupeOutputSchema,
   run: async (input, ctx) => {
-    const [claims, sources] = await Promise.all([
-      listClaims(input.workspace_id, { limit: 1000 }),
+    const [claims, sources, versionedIds] = await Promise.all([
+      listDownstreamClaims(input.workspace_id, { limit: 1000 }),
       listSourceFiles(input.workspace_id),
+      listVersionedClaimIds(input.workspace_id),
     ]);
     const packBySource = new Map(
       sources.map((row) => [row.id, row.reference_pack_id ?? null]),
     );
     const active = claims.filter(isDownstreamClaim);
-    const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
+    // Generated identity is decided by exact publication or contributor review, never legacy hints.
+    // Exclude both sides of cross history/legacy matches before the heuristic engine groups them.
+    const protectedCount = active.filter(row => versionedIds.has(row.id)).length;
+    const candidates = active.filter(row => !versionedIds.has(row.id)).map((row) => claimToMergeCandidate(row, packBySource));
     const result = mergeDedupeCandidates(candidates);
     const byId = new Map(active.map((row) => [row.id, row]));
 
@@ -191,7 +196,7 @@ export const mergeDedupeModule = mechanicalModule({
     const output: MergeDedupeOutput = {
       workspace_id: input.workspace_id,
       merged: Object.keys(result.absorbed).length,
-      survivors: result.survivors.length,
+      survivors: result.survivors.length + protectedCount,
       contradictions: result.contradictions.length,
       merges: result.merges,
       contradiction_rows: result.contradictions,

@@ -13,7 +13,7 @@ import {
   claimMetadata,
   getClaimsByIds,
   isDownstreamClaim,
-  listClaims,
+  listDownstreamClaims,
   persistClaimPatch,
 } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
@@ -80,7 +80,7 @@ export const statusDeriveModule = mechanicalModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
-    const claims = await listClaims(input.workspace_id, { limit: 1000 });
+    const claims = await listDownstreamClaims(input.workspace_id, { limit: 1000 });
     const active = claims.filter(isDownstreamClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
     const tacticRows = active.filter((row) => row.claim_type === "tactic");

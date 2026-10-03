@@ -182,7 +182,9 @@ describe("extraction omission resume", () => {
   });
   it("rolls back a real merge interrupted after the duplicate patch, then recovers both claims", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
-    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Existing extracted need", source_file_id: scope.source_file_id });
+    // Legacy duplicates still exercise real merge rollback; generated histories need an explicit identity decision.
+    const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
+    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
     const before = await listClaims(scope.workspace_id);
     const originalPatch = claimStore.persistClaimPatch;
     let writes = 0;
@@ -201,6 +203,9 @@ describe("extraction omission resume", () => {
     const completed = await post(request); expect(completed.status).toBe(200);
     expect((await completed.json()).runs[1].run_id).toBe(journal.merge_operation_id);
     expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+    expect((await getClaim(scope.workspace_id, legacy.id))?.status).not.toBe("merged");
+    const generated = before.find(row => row.id !== legacy.id && row.id !== duplicate.id)!;
+    expect((await getClaim(scope.workspace_id, generated.id))?.status).not.toBe("merged");
   });
 
   it("serializes initial downstream work against an explicit resume", async () => {
