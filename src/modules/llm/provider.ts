@@ -54,26 +54,52 @@ function models(envName: string, fallback: string[]): string[] {
 /** Who a call goes to, for a typed error when it fails (KAN-68). */
 type CallTarget = { provider_id: string; provider_name: string; key_env: string; api_key: string };
 
+/**
+ * A 429 or 503 is retried a few times, waiting what the provider asks for (Retry-After,
+ * or Gemini's RetryInfo) or a growing backoff, capped. Free tiers allow only a few
+ * requests a minute (KAN-70). Billing, auth and per-day quota errors are never retried.
+ */
+export const RETRY = {
+  attempts: 4,
+  base_ms: 2_000,
+  max_wait_ms: 60_000,
+  sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+};
+
+/** How long the provider asked us to wait, in ms, or null. */
+function requestedWait(res: Response, text: string): number | null {
+  const header = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(header) && header > 0) return header * 1_000;
+  const delay = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(text);
+  return delay ? Number(delay[1]) * 1_000 : null;
+}
+
 async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) {
+  for (let attempt = 1; ; attempt += 1) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
     const parsed = parseProviderErrorBody(text);
-    throw new ProviderError({
+    const error = new ProviderError({
       provider_id: target.provider_id,
       provider_name: target.provider_name,
       key_env: target.key_env,
       status: res.status,
       error_type: parsed.error_type,
       provider_message: parsed.message ? redactSecrets(parsed.message, [target.api_key]).slice(0, 300) : null,
+      // Gemini names the quota it hit, e.g. GenerateRequestsPerDayPerProjectPerModel-FreeTier.
+      daily_quota: res.status === 429 && /PerDay/.test(text),
     });
+    const transient = (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503;
+    if (!transient || attempt >= RETRY.attempts) throw error;
+    const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
+    await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
   }
-  return JSON.parse(text) as Record<string, unknown>;
 }
 
 function textFromPayload(payload: Record<string, unknown>): string {
@@ -243,13 +269,35 @@ export const googleGemini: LlmProvider = {
         generationConfig: {
           temperature: request.temperature,
           maxOutputTokens: request.max_tokens,
+          // Every Synapse stage parses a JSON object from the reply (KAN-70).
+          responseMimeType: "application/json",
         },
       },
       { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
     );
-    return textFromPayload(payload);
+    return geminiText(payload);
   },
 };
+
+/**
+ * Gemini's text, or a clear error when it stopped early: cut off at the output budget
+ * (thinking tokens count toward it), or blocked. Otherwise a cut-off reply would surface
+ * later as a confusing "invalid JSON" (KAN-70).
+ */
+export function geminiText(payload: Record<string, unknown>): string {
+  const candidate = (payload.candidates as { finishReason?: string }[] | undefined)?.[0];
+  const blocked = (payload.promptFeedback as { blockReason?: string } | undefined)?.blockReason;
+  if (blocked) throw new Error(`Gemini blocked the prompt (${blocked}). Nothing was saved.`);
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    throw new Error(
+      "Gemini's reply was cut off at its max_tokens limit (its thinking counts toward it). Raise Max tokens for this stage in AI & routing.",
+    );
+  }
+  if (candidate?.finishReason && !["STOP", "FINISH_REASON_UNSPECIFIED"].includes(candidate.finishReason)) {
+    throw new Error(`Gemini stopped early (${candidate.finishReason}). Nothing was saved.`);
+  }
+  return textFromPayload(payload);
+}
 
 /** Any OpenRouter-hosted model, reached with OPENROUTER_API_KEY as a bearer token. */
 export const openRouter: LlmProvider = {
