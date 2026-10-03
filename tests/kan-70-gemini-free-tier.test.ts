@@ -4,7 +4,7 @@ import { classifyProviderError, ProviderError } from "@/modules/llm/provider-err
 
 /** KAN-70: the free Gemini tier works as the test LLM. */
 const SECRET = "AIzaTEST-not-a-real-key-123456";
-const REQUEST = { system: "s", user: "u", model: "gemini-2.5-flash", temperature: 0, max_tokens: 64 };
+const REQUEST = { system: "s", user: "u", model: "gemini-3.8-flash", temperature: 0, max_tokens: 64 };
 const OK = { candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: "STOP" }] };
 
 /** Gemini's free-tier 429 body, as the API sends it. */
@@ -82,6 +82,15 @@ describe("KAN-70 Gemini free tier", () => {
     await expect(gemini()).rejects.toMatchObject({ kind: "unavailable" });
     expect(bodies).toHaveLength(RETRY.attempts);
     expect(waits).toEqual([2_000, 4_000, 8_000]);
+  });
+
+  it("retries a bodiless 404 but not a real model-not-found", async () => {
+    respond({ status: 404, body: "" });
+    await expect(gemini()).resolves.toBe('{"ok":true}');
+    expect(waits).toEqual([2_000]);
+    respond({ status: 404, body: JSON.stringify({ error: { code: 404, status: "NOT_FOUND", message: "model not found" } }) });
+    await expect(gemini()).rejects.toMatchObject({ kind: "bad_request" });
+    expect(waits).toEqual([2_000]);
   });
 
   it("does not retry a per-day quota, and says so", async () => {

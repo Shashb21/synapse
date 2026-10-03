@@ -95,7 +95,10 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       // Gemini names the quota it hit, e.g. GenerateRequestsPerDayPerProjectPerModel-FreeTier.
       daily_quota: res.status === 429 && /PerDay/.test(text),
     });
-    const transient = (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503;
+    // Gemini's free tier also answers "high demand" 503s and, now and then, a 404 with no
+    // body for a model it serves; a real "model not found" always carries an error body.
+    const transient =
+      (error.kind === "rate_limit" && !error.info.daily_quota) || res.status === 503 || (res.status === 404 && !text.trim());
     if (!transient || attempt >= RETRY.attempts) throw error;
     const wait = requestedWait(res, text) ?? RETRY.base_ms * 2 ** (attempt - 1);
     await RETRY.sleep(Math.min(wait, RETRY.max_wait_ms));
@@ -256,8 +259,9 @@ export const googleGemini: LlmProvider = {
   label: "Google · Gemini",
   summary: "Gemini models on the Generative Language API, using the server's Gemini API key.",
   auth: "api_key",
-  models: models("GEMINI_MODELS", ["gemini-2.5-pro", "gemini-2.5-flash"]),
-  default_model: models("GEMINI_MODELS", ["gemini-2.5-pro"])[0]!,
+  // gemini-2.5-* is closed to new keys (Google, Oct 2026).
+  models: models("GEMINI_MODELS", ["gemini-3.8-flash", "gemini-3.1-pro-preview"]),
+  default_model: models("GEMINI_MODELS", ["gemini-3.8-flash"])[0]!,
   async complete(request, auth) {
     if (!auth) throw new NoRouteError("google-gemini has no API key: set GEMINI_API_KEY");
     const payload = await postJson(
