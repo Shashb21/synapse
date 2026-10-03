@@ -1,8 +1,9 @@
 /** Automatic assembly selection and version-bound pairwise linking for completed extraction batches. */
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Actor } from "@/accuracy/kernel/contracts";
-import { runAccuracyModule } from "@/accuracy/kernel/run";
+import { runAccuracyModule, type AccuracyRunResult } from "@/accuracy/kernel/run";
 import { generatedItemFingerprint } from "@/accuracy/domain/item-history";
 import type { Assembly, AssemblyMapping, AssemblySelection, ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import { AssemblyError } from "@/accuracy/domain/assembly";
@@ -66,20 +67,27 @@ function chooseVersion(args: {
     throw new AssemblyError("not_found", "No persisted item version matches the judged extraction output.");
   }
   const exact = candidates.filter((row) => sameJson(row.payload, args.item));
-  const pool = exact.length ? exact : candidates;
+  if (exact.length === 0) {
+    throw new AssemblyError("not_found", "No persisted item version exactly matches the judged extraction output.");
+  }
   const selected = selectedIteration(args.events, args.run.id);
-  const preferred = [
-    ...pool.filter((row) => row.snapshot_id && row.iteration === selected && row.item_index === args.item_index),
-    ...pool.filter((row) => row.snapshot_id && row.iteration === selected),
-    ...pool.filter((row) => !row.snapshot_id && row.item_index === args.item_index),
-    ...pool.filter((row) => !row.snapshot_id),
-    ...pool.filter((row) => row.item_index === args.item_index),
-    ...pool,
+  const tieBreak = (rows: VersionRow[]) => [...rows].sort((a, b) =>
+    a.item_index - b.item_index
+    || (a.iteration ?? Number.MAX_SAFE_INTEGER) - (b.iteration ?? Number.MAX_SAFE_INTEGER)
+    || a.id.localeCompare(b.id));
+  const tiers = [
+    exact.filter((row) => row.snapshot_id && row.iteration === selected && row.item_index === args.item_index),
+    exact.filter((row) => row.snapshot_id && row.iteration === selected),
+    exact.filter((row) => !row.snapshot_id && row.item_index === args.item_index),
+    exact.filter((row) => !row.snapshot_id),
+    exact.filter((row) => row.item_index === args.item_index),
+    exact,
   ];
-  return [...new Map(preferred.map((row) => [row.id, row])).values()]
-    .sort((a, b) => (a.snapshot_id ? 0 : 1) - (b.snapshot_id ? 0 : 1)
-      || (a.iteration ?? Number.MAX_SAFE_INTEGER) - (b.iteration ?? Number.MAX_SAFE_INTEGER)
-      || a.item_index - b.item_index || a.id.localeCompare(b.id))[0]!;
+  for (const tier of tiers) {
+    const unique = [...new Map(tier.map((row) => [row.id, row])).values()];
+    if (unique.length) return tieBreak(unique)[0]!;
+  }
+  throw new AssemblyError("not_found", "No persisted item version exactly matches the judged extraction output.");
 }
 
 function evidenceBlockIds(...items: ResolvedAssemblyItem[]): string[] {
@@ -101,6 +109,56 @@ function evidenceBlockIds(...items: ResolvedAssemblyItem[]): string[] {
 function reservedCoverageRunId(generation_key: string, gap_version_id: string, tactic_version_id: string): string {
   const hash = createHash("sha256").update(`${generation_key}\u0000${gap_version_id}\u0000${tactic_version_id}`).digest("hex");
   return `arun_asm_${hash.slice(0, 40)}`;
+}
+
+function coverageAttemptRunId(base: string, attempt: number): string {
+  return attempt === 0 ? base : `${base}_retry_${attempt}`;
+}
+
+async function runCoverageDecision(args: {
+  base_run_id: string;
+  input: Record<string, unknown>;
+  actor: Actor;
+  org_id: string;
+  workspace_id: string;
+}): Promise<AccuracyRunResult<CoverageDecision>> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const reserved_run_id = coverageAttemptRunId(args.base_run_id, attempt);
+    const [existing] = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(
+      eq(t.accuracyModuleRuns.workspace_id, args.workspace_id),
+      eq(t.accuracyModuleRuns.id, reserved_run_id),
+    )).limit(1);
+    if (existing) {
+      if (existing.call_kind !== "coverage_decide" || existing.org_id !== args.org_id || !isDeepStrictEqual(existing.input, args.input)) {
+        throw new AssemblyError("conflict", "Reserved coverage run identity conflicts with this operation.");
+      }
+      if (existing.status === "ok") {
+        return runAccuracyModule<CoverageDecision>({
+          call_kind: "coverage_decide",
+          agent_role: "proposer",
+          input: args.input,
+          actor: args.actor,
+          org_id: args.org_id,
+          workspace_id: args.workspace_id,
+          reserved_run_id,
+        });
+      }
+      if (existing.status === "running") {
+        throw new AssemblyError("conflict", "Reserved coverage run is still in progress.");
+      }
+      continue;
+    }
+    return runAccuracyModule<CoverageDecision>({
+      call_kind: "coverage_decide",
+      agent_role: "proposer",
+      input: args.input,
+      actor: args.actor,
+      org_id: args.org_id,
+      workspace_id: args.workspace_id,
+      reserved_run_id,
+    });
+  }
+  throw new AssemblyError("conflict", "Coverage retry attempts are exhausted.");
 }
 
 function sourceIdsFromRuns(rows: RunRow[]): string[] {
@@ -181,14 +239,12 @@ export async function generateExtractionAssembly(args: {
           tactic_payload: tactic.payload,
         },
       };
-      const result = await runAccuracyModule<CoverageDecision>({
-        call_kind: "coverage_decide",
-        agent_role: "proposer",
+      const result = await runCoverageDecision({
+        base_run_id: reservedCoverageRunId(args.generation_key, gap.id, tactic.id),
         input,
         actor: args.actor,
         org_id: args.org_id,
         workspace_id: args.workspace_id,
-        reserved_run_id: reservedCoverageRunId(args.generation_key, gap.id, tactic.id),
       });
       coverage_run_ids.push(result.run_id);
       if (result.output.overall !== "not_relevant") {

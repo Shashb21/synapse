@@ -21,7 +21,7 @@ import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kerne
 import { createExtractionBatch, applyExtractionBatch, resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
 import { generateExtractionAssembly } from "@/accuracy/kernel/assembly-generation";
 import { AssemblyError } from "@/accuracy/domain/assembly";
-import { requestIdentity } from "@/modules/auth/request";
+import { requestIdentity, type RequestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { NoRouteError } from "@/modules/llm/provider";
 import { runExtractionDownstream } from "@/accuracy/experiments/extraction-pipeline";
@@ -47,27 +47,8 @@ const resumeSchema = z.object({ action: z.literal("resume"), workspace_id: z.str
 
 const MAX_EXTRACT_BLOCKS = 80;
 
-async function identityForRequest(body: Record<string, unknown>) {
-  try {
-    return await requestIdentity(body);
-  } catch (error) {
-    if (process.env.NODE_ENV !== "test" && process.env.VITEST === undefined) throw error;
-    return {
-      actor: {
-        name: typeof body.actor_name === "string" && body.actor_name.trim() ? body.actor_name.trim() : "Accuracy extractor",
-        function: "medical_affairs" as const,
-      },
-      role: "medical_affairs" as const,
-      signed_in: false,
-      demo: true,
-      subject: null,
-    };
-  }
-}
-
-async function assertAuthorizedWorkspace(identity: Awaited<ReturnType<typeof requestIdentity>>, workspace_id: string) {
-  if (!identity.signed_in || identity.demo) return;
-  if (!identity.subject) return;
+async function assertAuthorizedWorkspace(identity: RequestIdentity, workspace_id: string) {
+  if (!identity.subject) throw new AssemblyError("invalid_input", "Signed-in requests require a session subject.");
   if (!await getAuthorizedWorkspace({ workspace_id, subject: identity.subject, role: identity.role })) {
     throw new AssemblyError("not_found", "Workspace not found");
   }
@@ -75,7 +56,7 @@ async function assertAuthorizedWorkspace(identity: Awaited<ReturnType<typeof req
 
 async function attachAssembly<T extends { workspace_id: string; source_file_id: string; extraction_batch_id: string }>(response: T, args: {
   org_id: string;
-  actor: Awaited<ReturnType<typeof requestIdentity>>["actor"];
+  actor: RequestIdentity["actor"];
 }) {
   const [batch] = await accuracyDb().select().from(tables.accuracyExtractionBatches).where(and(
     eq(tables.accuracyExtractionBatches.workspace_id, response.workspace_id),
@@ -101,8 +82,8 @@ export async function POST(req: Request) {
   try {
     const raw = await req.json();
     if (raw && raw.action === "resume") {
-      const identity = await identityForRequest(raw);
-      if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+      const identity = await requestIdentity(raw);
+      if (!identity.signed_in) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
       assertCan(identity.role, "validate");
       const request = resumeSchema.parse(raw);
       await assertAuthorizedWorkspace(identity, request.workspace_id);
@@ -129,8 +110,8 @@ export async function POST(req: Request) {
       return NextResponse.json(await attachAssembly(response, { org_id, actor: identity.actor }));
     }
     const body = bodySchema.parse(raw);
-    const identity = await identityForRequest(raw);
-    if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    const identity = await requestIdentity(raw);
+    if (!identity.signed_in) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     assertCan(identity.role, "validate");
     await assertAuthorizedWorkspace(identity, body.workspace_id);
     const org_id = await getWorkspaceOrgId(body.workspace_id);
