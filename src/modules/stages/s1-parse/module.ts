@@ -28,6 +28,7 @@ import {
   sourceFileContent,
   unparsedFileIds,
 } from "@/modules/stages/s0-upload/module";
+import { ProviderError } from "@/modules/llm/provider-error";
 import {
   PARSED_DOCUMENTS_DDL,
   parsedDocuments,
@@ -235,6 +236,9 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
         documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
         ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {
+        // A provider error (billing, key, rate limit, outage) fails every file the same
+        // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
+        if (error instanceof ProviderError) throw error;
         const reason = error instanceof Error ? error.message : String(error);
         await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });
