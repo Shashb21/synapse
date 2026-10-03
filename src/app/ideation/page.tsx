@@ -132,7 +132,7 @@ export default async function IdeationPage() {
               <span className="text-foreground">{rejected}</span> rejected
             </li>
             <li>
-              <span className="text-foreground">{eligibleCount}</span> open gap(s) with a validated band
+              <span className="text-foreground">{eligibleCount}</span> open {eligibleCount === 1 ? "gap" : "gaps"} with a validated band
             </li>
           </ul>
           {ai ? (

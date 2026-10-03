@@ -487,7 +487,10 @@ export function buildTimeline(args: {
     activities.push(activity);
   }
 
-  const dates = activities.flatMap((activity) => [activity.start_date, activity.readout_date ?? activity.end_date]);
+  // Start, end and readout: a readout can fall before the end, and the window must hold the whole bar.
+  const dates = activities.flatMap((activity) =>
+    [activity.start_date, activity.end_date, activity.readout_date].filter((date): date is string => Boolean(date)),
+  );
   const windowStart = dates.length ? dates.slice().sort()[0]! : anchor;
   const windowEnd = dates.length ? dates.slice().sort()[dates.length - 1]! : addMonths(anchor, 12);
 

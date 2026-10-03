@@ -612,8 +612,24 @@ function assertOnTimeline(row: ActivityRow | undefined, id: string): ActivityRow
   return row;
 }
 
-function assertWindow(start: string, end: string) {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+
+/** Moves an ISO day by the gap between two other ISO days, so a readout keeps its offset from the start. */
+function shiftBy(iso: string, from: string, to: string): string {
+  const delta = Date.parse(to) - Date.parse(from);
+  return new Date(Date.parse(iso) + Math.round(delta / DAY_MS) * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Dates are ISO days; the end is not before the start, and a readout is not before the start. */
+function assertWindow(start: string, end: string, readout?: string | null) {
+  for (const [label, value] of [["start", start], ["end", end], ["readout", readout]] as const) {
+    if (value && (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value)))) {
+      throw new Error(`The ${label} date is not a valid date (use YYYY-MM-DD).`);
+    }
+  }
   if (end < start) throw new Error("An activity cannot end before it starts.");
+  if (readout && readout < start) throw new Error("The readout cannot be before the activity starts.");
 }
 
 /**
@@ -642,15 +658,23 @@ export async function updateTimelineActivity(args: {
   const current = assertOnTimeline(await activityRow(args.id), args.id);
   const meta = rowMeta(current);
   const releaseLane = args.lane === "band";
+  const start_date = args.start_date ?? current.start_date;
+  // A readout the user did not touch moves with the start (a dragged bar keeps it in step).
+  const readoutUntouched = args.readout_date === undefined;
+  const readout_date = readoutUntouched
+    ? current.readout_date && ISO_DATE.test(start_date) && start_date !== current.start_date
+      ? shiftBy(current.readout_date, current.start_date, start_date)
+      : current.readout_date
+    : args.readout_date;
   const next = {
-    start_date: args.start_date ?? current.start_date,
+    start_date,
     end_date: args.end_date ?? current.end_date,
-    readout_date: args.readout_date === undefined ? current.readout_date : args.readout_date,
+    readout_date,
     lane: args.lane && !releaseLane ? args.lane : releaseLane ? (current.band ?? current.lane) : current.lane,
     updated_by: args.actor.name,
     updated_at: nowIso(),
   };
-  assertWindow(next.start_date, next.end_date);
+  assertWindow(next.start_date, next.end_date, readoutUntouched ? null : next.readout_date);
   const basis = (meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined) ?? {
     start: "saved",
     end: "saved",
@@ -808,9 +832,9 @@ export async function addTimelineActivity(args: {
   const start = args.start_date ?? (restoring && existing.start_date ? existing.start_date : undefined);
   const end = args.end_date ?? (restoring && existing.end_date ? existing.end_date : undefined);
   if (!start || !end) throw new Error("A start and an end date are required.");
-  assertWindow(start, end);
   const readout =
     args.readout_date !== undefined ? args.readout_date : restoring ? (existing.readout_date ?? null) : null;
+  assertWindow(start, end, readout);
 
   // Mapped tactics keep their gaps and band; an unmapped one is a manual activity.
   const others = overrides.filter((row) => row.id !== id);
@@ -894,7 +918,7 @@ export async function createTimelineActivity(args: {
   if (Boolean(args.start_date) !== Boolean(args.end_date)) {
     throw new Error("Give both a start and an end date, or neither to leave it unscheduled.");
   }
-  if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date);
+  if (args.start_date && args.end_date) assertWindow(args.start_date, args.end_date, args.readout_date);
   const state = await loadState();
   const gap = state.gaps.find((row) => row.id === args.gap_id);
   if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);

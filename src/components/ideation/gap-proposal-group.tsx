@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
+import { plural } from "@/lib/plural";
 
 export type GapProposalGroup = {
   gap_id: string;
@@ -86,7 +87,7 @@ export function GapProposalGroupCard({
         </Link>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
-          {group.proposals.length} proposal(s) · {open} awaiting a decision · {accepted} accepted
+          {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
         </p>
         {mayIdeate ? (
           <div>
