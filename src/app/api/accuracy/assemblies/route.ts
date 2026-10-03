@@ -1,8 +1,12 @@
 /** Authenticated, workspace-scoped inspection API for immutable extraction assemblies. */
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { assemblyRevisionChangeSchema } from "@/accuracy/domain/assembly-revision";
+import { createAssemblyRevision, retryAssemblyRevision } from "@/accuracy/kernel/assembly-revision";
+import { assemblyRevisionState } from "@/accuracy/store/assembly-revision-store";
 import { AssemblyError } from "@/accuracy/domain/assembly";
 import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
+import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listAssemblies, readAssembly } from "@/accuracy/store/assembly-store";
 import { assemblyReviewState, reviewAssembly } from "@/accuracy/store/assembly-review-store";
 import { getAuthorizedWorkspace } from "@/accuracy/store/tenant";
@@ -37,6 +41,16 @@ const reviewBodySchema = z.object({
   expected_review_id: z.string().min(1).nullable().optional(),
 }).strict();
 
+const revisionBodySchema = z.object({
+  action: z.literal("revise"), workspace_id: z.string().trim().min(1),
+  parent_assembly_id: z.string().trim().min(1), expected_fingerprint: z.string().min(1),
+  expected_head_id: z.string().min(1), change: assemblyRevisionChangeSchema,
+}).strict();
+const retryBodySchema = z.object({
+  action: z.literal("retry_revision"), workspace_id: z.string().trim().min(1),
+  assembly_id: z.string().trim().min(1), expected_fingerprint: z.string().min(1), expected_head_id: z.string().min(1),
+}).strict();
+
 function canReview(role: Role): boolean {
   return role === "medical_affairs" || role === "contributor";
 }
@@ -64,9 +78,17 @@ export async function GET(request: Request) {
       const assembly = await readAssembly(workspace_id, assembly_id);
       if (!assembly) return NextResponse.json({ error: "Assembly not found" }, { status: 404 });
       const review_state = await assemblyReviewState(workspace_id, assembly_id);
-      return NextResponse.json({ assembly, review_state, can_review: canReview(session.role) });
+      const revision_state = await assemblyRevisionState(workspace_id, assembly_id);
+      const evidence_blocks = (await Promise.all(assembly.source_file_ids.map(source_id => readParseBlocks(workspace_id, source_id))))
+        .flat().map(block => ({ id: block.id, source_file_id: block.source_file_id, text: block.text }));
+      return NextResponse.json({ assembly, review_state, revision_state, evidence_blocks, can_review: canReview(session.role),
+        can_revise: session.role === "contributor" && review_state.head_status === "current" && assembly.linking_complete,
+        can_retry_revision: session.role === "contributor" && review_state.head_status === "current" && revision_state.can_retry });
     }
-    return NextResponse.json({ assemblies: await listAssemblies(workspace_id) });
+    const assemblies = await listAssemblies(workspace_id);
+    const revision_states = Object.fromEntries(await Promise.all(assemblies.map(async assembly =>
+      [assembly.id, await assemblyRevisionState(workspace_id, assembly.id)] as const)));
+    return NextResponse.json({ assemblies, revision_states });
   } catch (error) {
     if (error instanceof AssemblyReviewError) {
       const status = assemblyReviewStatus(error);
@@ -87,7 +109,27 @@ export async function POST(request: Request) {
     const session = await sessionContext();
     if (!session.signed_in || !session.session) return NextResponse.json({ error: "Sign in to review assemblies" }, { status: 401 });
     if (!canReview(session.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    const body = reviewBodySchema.parse(await request.json());
+    const raw: unknown = await request.json();
+    const action = raw && typeof raw === "object" ? (raw as Record<string, unknown>).action : undefined;
+    if (action === "revise" || action === "retry_revision") {
+      if (session.role !== "contributor") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const author = { subject: session.session.subject, provider: session.session.provider_id, actor: session.actor, role: "contributor" as const };
+      if (action === "revise") {
+        const body = revisionBodySchema.parse(raw);
+        const workspace = await getAuthorizedWorkspace({ workspace_id: body.workspace_id, subject: session.session.subject, role: session.role });
+        if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+        const result = await createAssemblyRevision({ ...body, org_id: workspace.org_id, author });
+        const revision_state = await assemblyRevisionState(body.workspace_id, result.assembly.id);
+        return NextResponse.json({ ok: true, ...result, revision_state });
+      }
+      const body = retryBodySchema.parse(raw);
+      const workspace = await getAuthorizedWorkspace({ workspace_id: body.workspace_id, subject: session.session.subject, role: session.role });
+      if (!workspace) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+      const result = await retryAssemblyRevision({ ...body, org_id: workspace.org_id, author });
+      const revision_state = await assemblyRevisionState(body.workspace_id, result.assembly.id);
+      return NextResponse.json({ ok: true, ...result, revision_state });
+    }
+    const body = reviewBodySchema.parse(raw);
     if (!await getAuthorizedWorkspace({ workspace_id: body.workspace_id, subject: session.session.subject, role: session.role })) {
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
@@ -113,6 +155,10 @@ export async function POST(request: Request) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues.map(issue => issue.message).join("; ") }, { status: 400 });
     if (error instanceof AssemblyReviewError) {
       const status = assemblyReviewStatus(error);
+      return NextResponse.json({ error: status === 404 ? "Assembly not found" : error.message, code: error.code }, { status });
+    }
+    if (error instanceof AssemblyError) {
+      const status = { invalid_input: 400, not_found: 404, conflict: 409 }[error.code];
       return NextResponse.json({ error: status === 404 ? "Assembly not found" : error.message, code: error.code }, { status });
     }
     console.error("Could not review assembly", error);

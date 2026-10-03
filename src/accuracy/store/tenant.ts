@@ -201,6 +201,10 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
   const db = accuracyDb();
 
+  // Revision pointers and audit attempts depend on assemblies; delete them first.
+  await db.delete(t.accuracyAssemblyRevisionHeads).where(eq(t.accuracyAssemblyRevisionHeads.workspace_id, workspace_id));
+  await db.delete(t.accuracyAssemblyRevisionAttempts).where(eq(t.accuracyAssemblyRevisionAttempts.workspace_id, workspace_id));
+  await db.delete(t.accuracyAssemblyRevisions).where(eq(t.accuracyAssemblyRevisions.workspace_id, workspace_id));
   const deleted: WorkspaceDeleteCounts = {
     assembly_reviews: await deletedCount(await db.delete(t.accuracyAssemblyReviews).where(eq(t.accuracyAssemblyReviews.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyReviews.id })),
     assembly_items: await deletedCount(await db.delete(t.accuracyAssemblyItems).where(eq(t.accuracyAssemblyItems.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyItems.id })),
