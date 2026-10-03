@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { missingFieldsMessage } from "@/components/lock-form";
+import { FALLBACK, PALETTE_TOKENS } from "@/components/timeline/gantt-chart";
 
 const src = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
@@ -23,5 +24,17 @@ describe("KAN-68 QA polish", () => {
     const form = src("src/components/lock-form.tsx");
     expect(form).not.toContain("Fill every required field");
     expect(form).toMatch(/<p role="alert" className="[^"]*text-destructive/);
+  });
+
+  it("the timeline's first render uses the same palette on server and client", () => {
+    // Every fallback colour equals its light-theme token, so hydration has nothing to differ on.
+    const css = src("src/app/globals.css");
+    const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
+    const token = (name: string) => root.match(new RegExp(`${name}:\\s*(#[0-9a-f]{3,8});`, "i"))?.[1];
+    for (const [key, name] of Object.entries(PALETTE_TOKENS)) {
+      expect(FALLBACK[key as keyof typeof FALLBACK], `${key} (${name})`).toBe(token(name));
+    }
+    const chart = src("src/components/timeline/gantt-chart.tsx");
+    expect(chart).toMatch(/hydrated \? readPalette\(\) : FALLBACK/);
   });
 });
