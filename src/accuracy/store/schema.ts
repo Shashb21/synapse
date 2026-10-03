@@ -162,6 +162,40 @@ export const accuracyItemVersions = pgTable("accuracy_item_versions", {
   exact: index("accuracy_item_versions_exact_idx").on(table.workspace_id, table.claim_type, table.source_file_id, table.fingerprint),
 }));
 
+/** Immutable whole-set extraction assemblies. */
+export const accuracyAssemblies = pgTable("accuracy_assemblies", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  created_at: text("created_at").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  source_file_ids: jsonb("source_file_ids").$type<string[]>().notNull(),
+  mappings: jsonb("mappings").$type<Array<{ gap_version_id: string; tactic_version_id: string }>>().notNull(),
+  coverage: jsonb("coverage").notNull(),
+  linking_complete: boolean("linking_complete").notNull(),
+  output: jsonb("output").notNull(),
+  checks: jsonb("checks").notNull(),
+  generation_key: text("generation_key"),
+}, (table) => ({
+  workspace: index("accuracy_assemblies_workspace_idx").on(table.workspace_id, table.created_at),
+  generation: unique("accuracy_assemblies_workspace_generation_key").on(table.workspace_id, table.generation_key),
+}));
+
+/** Ordered selected version references and resolved immutable lineage. */
+export const accuracyAssemblyItems = pgTable("accuracy_assembly_items", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  item_version_id: text("item_version_id").notNull().references(() => accuracyItemVersions.id),
+  position: integer("position").notNull(),
+  reason: text("reason").notNull(),
+  resolved_item: jsonb("resolved_item").notNull(),
+}, (table) => ({
+  assemblyPosition: unique("accuracy_assembly_items_position_key").on(table.assembly_id, table.position),
+  workspace: index("accuracy_assembly_items_workspace_idx").on(table.workspace_id, table.assembly_id),
+}));
+
 /** Uncertain identity or ancestry proposal; decisions are separate immutable records. */
 export const accuracyItemRelationshipProposals = pgTable("accuracy_item_relationship_proposals", {
   id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
@@ -435,6 +469,21 @@ export const ACCURACY_DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_item_versions_claim_idx ON accuracy_item_versions (workspace_id, claim_id)`,
   `CREATE INDEX IF NOT EXISTS accuracy_item_versions_exact_idx ON accuracy_item_versions (workspace_id, claim_type, source_file_id, fingerprint)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assemblies (
+    id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
+    source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
+    linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_items (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    item_version_id text NOT NULL REFERENCES accuracy_item_versions(id), position integer NOT NULL,
+    reason text NOT NULL, resolved_item jsonb NOT NULL,
+    CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
   `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_proposals (
     id text PRIMARY KEY, workspace_id text NOT NULL, kind text NOT NULL, predecessor_ids jsonb NOT NULL,
     successor_ids jsonb NOT NULL, basis_version_ids jsonb NOT NULL, rationale text NOT NULL, actor_name text NOT NULL,
@@ -542,6 +591,21 @@ export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_experiments ALTER COLUMN source_org_id SET NOT NULL`,
   `ALTER TABLE accuracy_omission_actions ADD COLUMN IF NOT EXISTS contributor_statement text`,
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assemblies (
+    id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
+    source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
+    linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_items (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    item_version_id text NOT NULL REFERENCES accuracy_item_versions(id), position integer NOT NULL,
+    reason text NOT NULL, resolved_item jsonb NOT NULL,
+    CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
   `DO $$ BEGIN
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint
