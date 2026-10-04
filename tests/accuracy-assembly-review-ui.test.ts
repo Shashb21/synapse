@@ -277,6 +277,7 @@ it("handles concurrent review conflicts without optimistic approval and refreshe
   expect(host.querySelector("[role='alert']")?.textContent).toContain("Review decision identity is stale.");
   expect(host.querySelector("[role='alert']")?.textContent).toContain("Refresh proposal");
   expect(host.textContent).toContain("Review status: pending");
+  expect((host.querySelector("button[aria-label='Approve proposal']") as HTMLButtonElement).disabled).toBe(true);
 
   await click("Refresh proposal");
   expect(host.textContent).toContain("Review status: approved");

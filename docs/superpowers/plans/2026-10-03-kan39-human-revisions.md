@@ -33,14 +33,14 @@
 
 **Interfaces:** Produce server revision creation/retry functions and authorized API responses containing saved successor assembly, revision/change lineage, and review state. Request supplies workspace/parent assembly, expected fingerprint/head, action, required reason, selected version for edit/remove, and validated content/source for add/edit; authors and origins are server-owned. Define and document exact exported types in the report for Task 2.
 
-- [ ] Write failing tests for reasoned add/edit/remove and exact unedited baseline preservation; malformed reasons/payloads/quotes and cross-workspace IDs reject.
-- [ ] Run `npx vitest run tests/accuracy-assembly-revision.test.ts --silent` and confirm failures target missing revision behavior.
-- [ ] Implement explicit human-origin persistence, atomic revision head publication and cleanup, preserving generated origin validation.
-- [ ] Reuse version-bound linking; retain unaffected coverage, remove obsolete pairs, and save/retry incomplete successors without holding transactions across provider calls.
-- [ ] Extend exact approval/current-head/inventory/publication revalidation to successors. Add tests for old approval refusal, stale parents, competing writers, new extraction during linking, incomplete linking retry, and fresh approval projecting edited/added content.
-- [ ] Add strict authenticated contributor API tests, rollback and unchanged experiment/gold score tests.
-- [ ] Run focused revision/approval/history/generation tests, `npm run typecheck`, and lint changed files. Record commands/results and exact interfaces for the reviewer and Task 2.
-- [ ] Controller reviews and commits the accepted task.
+- [x] Write failing tests for reasoned add/edit/remove and exact unedited baseline preservation; malformed reasons/payloads/quotes and cross-workspace IDs reject.
+- [x] Run `npx vitest run tests/accuracy-assembly-revision.test.ts --silent` and confirm failures target missing revision behavior.
+- [x] Implement explicit human-origin persistence, atomic revision head publication and cleanup, preserving generated origin validation.
+- [x] Reuse version-bound linking; retain unaffected coverage, remove obsolete pairs, and save/retry incomplete successors without holding transactions across provider calls.
+- [x] Extend exact approval/current-head/inventory/publication revalidation to successors. Add tests for old approval refusal, stale parents, competing writers, new extraction during linking, incomplete linking retry, and fresh approval projecting edited/added content.
+- [x] Add strict authenticated contributor API tests, rollback and unchanged experiment/gold score tests.
+- [x] Run focused revision/approval/history/generation tests, `npm run typecheck`, and lint changed files. Record commands/results and exact interfaces for the reviewer and Task 2.
+- [x] Controller reviews and commits the accepted task.
 
 ### Task 2: Contributor review controls and final integration
 
