@@ -21,6 +21,7 @@ import {
   servedModel,
 } from "@/modules/llm/provider";
 import { estimateCostUsd, usageFromMessages } from "./cost";
+import { DEFAULT_MAX_TOKENS } from "@/modules/kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
 
 /**
@@ -54,7 +55,7 @@ function defaultConfig(call_kind: CallKind, agent_role: AgentRole | "none"): Acc
     agent_role,
     provider_id: DEFAULT_ROUTE_PROVIDER,
     model: provider.default_model,
-    params: { temperature: 0, max_tokens: 8192 },
+    params: { temperature: 0, max_tokens: DEFAULT_MAX_TOKENS },
     fallbacks: [...DEFAULT_ROUTE_FALLBACKS],
     updated_by: "default (Grok → Claude → OpenAI)",
     updated_at: "—",
@@ -115,7 +116,7 @@ export async function setAccuracyRouteConfig(args: {
     model: args.model || provider.default_model,
     params: {
       temperature: args.temperature ?? 0,
-      max_tokens: args.max_tokens ?? 8192,
+      max_tokens: args.max_tokens ?? DEFAULT_MAX_TOKENS,
     },
     fallbacks: args.fallbacks?.length ? args.fallbacks : [...DEFAULT_ROUTE_FALLBACKS],
     updated_by: args.actor_name,

@@ -14,6 +14,12 @@ import {
   servedModel,
 } from "@/modules/llm/provider";
 
+/**
+ * Output budget for one model call when a route sets none (KAN-66). Thinking models
+ * count it toward their reasoning, and S4/S9 replies are long.
+ */
+export const DEFAULT_MAX_TOKENS = 16000;
+
 /** Removed from the product; strip from stored fallbacks when resolving routes. */
 const LEGACY_OFFLINE_PROVIDER = "deterministic-local";
 
@@ -90,7 +96,7 @@ function defaultConfig(stage: StageId): RouteConfig {
     stage,
     provider_id: DEFAULT_PROVIDER_ID,
     model: findProvider(DEFAULT_PROVIDER_ID)?.default_model ?? "grok-4",
-    params: { temperature: 0, max_tokens: 8192 },
+    params: { temperature: 0, max_tokens: DEFAULT_MAX_TOKENS },
     fallbacks: DEFAULT_FALLBACKS,
     updated_by: "default (locked: Grok)",
     updated_at: "—",
