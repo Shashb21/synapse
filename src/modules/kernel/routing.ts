@@ -14,6 +14,12 @@ import {
   servedModel,
 } from "@/modules/llm/provider";
 
+/**
+ * Output budget for one model call when a route sets none (KAN-66). Thinking models
+ * count it toward their reasoning, and S4/S9 replies are long.
+ */
+export const DEFAULT_MAX_TOKENS = 16000;
+
 /** Removed from the product; strip from stored fallbacks when resolving routes. */
 const LEGACY_OFFLINE_PROVIDER = "deterministic-local";
 
@@ -90,7 +96,7 @@ function defaultConfig(stage: StageId): RouteConfig {
     stage,
     provider_id: DEFAULT_PROVIDER_ID,
     model: findProvider(DEFAULT_PROVIDER_ID)?.default_model ?? "grok-4",
-    params: { temperature: 0, max_tokens: 8192 },
+    params: { temperature: 0, max_tokens: DEFAULT_MAX_TOKENS },
     fallbacks: DEFAULT_FALLBACKS,
     updated_by: "default (locked: Grok)",
     updated_at: "—",
@@ -264,23 +270,42 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
     // Read at call time and handed straight to the provider; never logged or traced.
     const api_key = providerApiKey(route.provider_id);
     if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
-    const text = await run.step(
-      `llm:${purpose}`,
-      () =>
-        provider.complete(
-          {
-            system,
-            user,
-            model: route.model,
-            temperature: route.params.temperature,
-            max_tokens: maxTokens ?? route.params.max_tokens,
-          },
-          { api_key },
-        ),
-      `${route.provider_label} · ${route.model}`,
+    let invalid: string | null = null;
+    for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {
+      const text = await run.step(
+        `llm:${purpose}`,
+        () =>
+          provider.complete(
+            {
+              // A reply that wasn't valid JSON is asked for again, saying why (KAN-66).
+              system: invalid ? `${system}\n\n${invalidJsonNote(invalid)}` : system,
+              user,
+              model: route.model,
+              temperature: route.params.temperature,
+              max_tokens: maxTokens ?? route.params.max_tokens,
+            },
+            { api_key },
+          ),
+        `${route.provider_label} · ${route.model}`,
+      );
+      try {
+        return extractJsonObject(text);
+      } catch (error) {
+        invalid = error instanceof Error ? error.message : String(error);
+        run.note(`llm:${purpose}:invalid-json`, { attempt, error: invalid });
+      }
+    }
+    throw new Error(
+      `${route.provider_label} did not return valid JSON for ${purpose} after ${JSON_REPLY_ATTEMPTS} attempts (${invalid}). Nothing was saved; try again.`,
     );
-    return extractJsonObject(text);
   };
+}
+
+/** How many times one model call is asked for again when its reply is not valid JSON. */
+export const JSON_REPLY_ATTEMPTS = 3;
+
+export function invalidJsonNote(error: string): string {
+  return `Your previous reply was not valid JSON (${error}). Reply with exactly one valid JSON object and nothing else: escape every double quote inside strings, and put a comma between array elements.`;
 }
 
 export function stageLabel(stage: StageId): string {

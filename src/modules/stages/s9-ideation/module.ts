@@ -406,7 +406,31 @@ type PromptGap = IdeationGap & {
   problems?: string[];
 };
 
+/**
+ * Gaps per proposer call, tactics per critic call and gaps per judge call. Asking
+ * for every High gap in one reply runs past the output budget (KAN-66), so each
+ * step asks in slices, in parallel.
+ */
+export const PROPOSER_GAPS_PER_CALL = 2;
+export const CRITIC_TACTICS_PER_CALL = 4;
+export const JUDGE_GAPS_PER_CALL = 2;
+
+/** Runs `ask` on consecutive slices of `items` in parallel and returns every answer. */
+async function inBatches<T, R>(items: T[], size: number, ask: (slice: T[]) => Promise<R>): Promise<R[]> {
+  const slices: T[][] = [];
+  for (let i = 0; i < items.length; i += size) slices.push(items.slice(i, i + size));
+  return Promise.all(slices.map(ask));
+}
+
 async function askProposer(
+  ctx: ModuleContext,
+  args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
+): Promise<Record<string, unknown>[]> {
+  const answers = await inBatches(args.gaps, PROPOSER_GAPS_PER_CALL, (gaps) => askProposerOnce(ctx, { ...args, gaps }));
+  return answers.flat();
+}
+
+async function askProposerOnce(
   ctx: ModuleContext,
   args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
 ): Promise<Record<string, unknown>[]> {
@@ -618,61 +642,63 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         what: "judgement",
         describe: describeGap,
         remedy: REMEDY,
-        ask: async (missing) => {
-          const payload = (await ctx.complete({
-            system: JUDGE_SYSTEM,
-            user: JSON.stringify({
-              reviewer_corrections: reviewerHints || undefined,
-              max_per_gap: input.per_gap,
-              gaps: missing.map((gapId) => ({
-                ...gapById.get(gapId)!,
-                problem: problems.get(gapId),
-                candidates: candidates
-                  .filter((proposal) => proposal.gap_id === gapId)
-                  .map((proposal) => {
-                    const review = lastReview.get(proposal.id);
-                    return {
-                      ...promptTactic(proposal),
-                      critic: review ? { verdict: review.verdict, confidence: review.confidence, note: review.note } : undefined,
-                    };
-                  }),
-              })),
-            }),
-            purpose: "ideation-judge",
-          })) as { gaps?: { gap_id?: unknown; decisions?: unknown }[] };
+        ask: async (missingAll) => {
           const done = new Map<string, true>();
-          for (const row of Array.isArray(payload?.gaps) ? payload.gaps : []) {
-            const gapId = text(row?.gap_id);
-            if (!missing.includes(gapId)) continue;
-            const ids = candidates.filter((proposal) => proposal.gap_id === gapId).map((proposal) => proposal.id);
-            const got = new Map<string, Decision>();
-            for (const raw of Array.isArray(row.decisions) ? (row.decisions as Record<string, unknown>[]) : []) {
-              const id = text(raw?.id);
-              const reason = text(raw?.reason);
-              if (!ids.includes(id) || !reason || !finite(raw.confidence)) continue;
-              if (raw.verdict !== "accept" && raw.verdict !== "reject") continue;
-              if (raw.verdict === "accept" && !finite(raw.rank)) continue;
-              got.set(id, {
-                verdict: raw.verdict,
-                rank: raw.verdict === "accept" ? (raw.rank as number) : null,
-                confidence: Math.max(0, Math.min(100, Math.round(raw.confidence))),
-                reason,
-              });
+          await inBatches(missingAll, JUDGE_GAPS_PER_CALL, async (missing) => {
+            const payload = (await ctx.complete({
+              system: JUDGE_SYSTEM,
+              user: JSON.stringify({
+                reviewer_corrections: reviewerHints || undefined,
+                max_per_gap: input.per_gap,
+                gaps: missing.map((gapId) => ({
+                  ...gapById.get(gapId)!,
+                  problem: problems.get(gapId),
+                  candidates: candidates
+                    .filter((proposal) => proposal.gap_id === gapId)
+                    .map((proposal) => {
+                      const review = lastReview.get(proposal.id);
+                      return {
+                        ...promptTactic(proposal),
+                        critic: review ? { verdict: review.verdict, confidence: review.confidence, note: review.note } : undefined,
+                      };
+                    }),
+                })),
+              }),
+              purpose: "ideation-judge",
+            })) as { gaps?: { gap_id?: unknown; decisions?: unknown }[] };
+            for (const row of Array.isArray(payload?.gaps) ? payload.gaps : []) {
+              const gapId = text(row?.gap_id);
+              if (!missing.includes(gapId)) continue;
+              const ids = candidates.filter((proposal) => proposal.gap_id === gapId).map((proposal) => proposal.id);
+              const got = new Map<string, Decision>();
+              for (const raw of Array.isArray(row.decisions) ? (row.decisions as Record<string, unknown>[]) : []) {
+                const id = text(raw?.id);
+                const reason = text(raw?.reason);
+                if (!ids.includes(id) || !reason || !finite(raw.confidence)) continue;
+                if (raw.verdict !== "accept" && raw.verdict !== "reject") continue;
+                if (raw.verdict === "accept" && !finite(raw.rank)) continue;
+                got.set(id, {
+                  verdict: raw.verdict,
+                  rank: raw.verdict === "accept" ? (raw.rank as number) : null,
+                  confidence: Math.max(0, Math.min(100, Math.round(raw.confidence))),
+                  reason,
+                });
+              }
+              const undecided = ids.filter((id) => !got.has(id));
+              const accepted = [...got.values()].filter((decision) => decision.verdict === "accept").length;
+              if (undecided.length > 0) {
+                problems.set(gapId, `An earlier answer left ${undecided.join(", ")} without a complete decision. Decide every candidate.`);
+                continue;
+              }
+              if (accepted > input.per_gap) {
+                problems.set(gapId, `An earlier answer accepted ${accepted} tactics; accept at most ${input.per_gap}.`);
+                continue;
+              }
+              for (const [id, decision] of got) decisions.set(id, decision);
+              done.set(gapId, true);
             }
-            const undecided = ids.filter((id) => !got.has(id));
-            const accepted = [...got.values()].filter((decision) => decision.verdict === "accept").length;
-            if (undecided.length > 0) {
-              problems.set(gapId, `An earlier answer left ${undecided.join(", ")} without a complete decision. Decide every candidate.`);
-              continue;
-            }
-            if (accepted > input.per_gap) {
-              problems.set(gapId, `An earlier answer accepted ${accepted} tactics; accept at most ${input.per_gap}.`);
-              continue;
-            }
-            for (const [id, decision] of got) decisions.set(id, decision);
-            done.set(gapId, true);
-          }
-          for (const gapId of missing) if (!done.has(gapId) && !problems.has(gapId)) problems.set(gapId, "No judgement was returned for this gap.");
+            for (const gapId of missing) if (!done.has(gapId) && !problems.has(gapId)) problems.set(gapId, "No judgement was returned for this gap.");
+          });
           return done;
         },
       });
@@ -712,41 +738,43 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           what: "review",
           describe: (id) => byId.get(id)?.name ?? id,
           remedy: REMEDY,
-          ask: async (missing, attempt) => {
-            const payload = (await ctx.complete({
-              system: CRITIC_SYSTEM,
-              user: JSON.stringify({
-                reviewer_corrections: reviewerHints || undefined,
-                exchange: `${round} of ${PROPOSER_CRITIC_EXCHANGES}`,
-                note: attempt > 1 ? "An earlier answer left these tactics without a complete review. Review each." : undefined,
-                library,
-                tactics: missing.map((id) => {
-                  const proposal = byId.get(id)!;
-                  const gap = gapById.get(proposal.gap_id)!;
-                  return { ...promptTactic(proposal), gap: { name: gap.name, statement: gap.statement, domain: gap.domain } };
-                }),
-              }),
-              purpose: "ideation-critic",
-            })) as { reviews?: Record<string, unknown>[] };
+          ask: async (missingAll, attempt) => {
             const map = new Map<string, Review>();
-            for (const row of Array.isArray(payload?.reviews) ? payload.reviews : []) {
-              const id = text(row?.id);
-              if (!missing.includes(id)) continue;
-              if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") continue;
-              if (!finite(row.confidence)) continue;
-              const note = text(row.note);
-              if (!note) continue;
-              const duplicate = row.duplicate_of == null || row.duplicate_of === "" ? null : text(row.duplicate_of);
-              // A duplicate must name a tactic that is actually in the library.
-              if (duplicate !== null && !libraryIds.has(duplicate)) continue;
-              map.set(id, {
-                verdict: row.verdict,
-                confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
-                note,
-                issues: Array.isArray(row.issues) ? row.issues.map(text).filter(Boolean) : [],
-                duplicate_of: duplicate,
-              });
-            }
+            await inBatches(missingAll, CRITIC_TACTICS_PER_CALL, async (missing) => {
+              const payload = (await ctx.complete({
+                system: CRITIC_SYSTEM,
+                user: JSON.stringify({
+                  reviewer_corrections: reviewerHints || undefined,
+                  exchange: `${round} of ${PROPOSER_CRITIC_EXCHANGES}`,
+                  note: attempt > 1 ? "An earlier answer left these tactics without a complete review. Review each." : undefined,
+                  library,
+                  tactics: missing.map((id) => {
+                    const proposal = byId.get(id)!;
+                    const gap = gapById.get(proposal.gap_id)!;
+                    return { ...promptTactic(proposal), gap: { name: gap.name, statement: gap.statement, domain: gap.domain } };
+                  }),
+                }),
+                purpose: "ideation-critic",
+              })) as { reviews?: Record<string, unknown>[] };
+              for (const row of Array.isArray(payload?.reviews) ? payload.reviews : []) {
+                const id = text(row?.id);
+                if (!missing.includes(id)) continue;
+                if (row.verdict !== "keep" && row.verdict !== "revise" && row.verdict !== "drop") continue;
+                if (!finite(row.confidence)) continue;
+                const note = text(row.note);
+                if (!note) continue;
+                const duplicate = row.duplicate_of == null || row.duplicate_of === "" ? null : text(row.duplicate_of);
+                // A duplicate must name a tactic that is actually in the library.
+                if (duplicate !== null && !libraryIds.has(duplicate)) continue;
+                map.set(id, {
+                  verdict: row.verdict,
+                  confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
+                  note,
+                  issues: Array.isArray(row.issues) ? row.issues.map(text).filter(Boolean) : [],
+                  duplicate_of: duplicate,
+                });
+              }
+            });
             return map;
           },
         });
