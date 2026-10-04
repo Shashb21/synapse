@@ -58,7 +58,7 @@ It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login
 
 Passwords: at least 12 characters, not your email, not a common password; stored only as scrypt hashes. Five wrong passwords in a row lock the account for 15 minutes (an admin can unlock it sooner).
 
-**Deploy to Vercel:** [`docs/deploy-checklist.md`](docs/deploy-checklist.md) (operator list) and [`docs/deployment-vercel.md`](docs/deployment-vercel.md) — Postgres via Vercel Postgres / `DATABASE_URL`; LLM provider logins and routing in the owner console at `/admin/control`.
+**Deploy to Vercel:** [`docs/deploy-checklist.md`](docs/deploy-checklist.md) (operator list) and [`docs/deployment-vercel.md`](docs/deployment-vercel.md) — Postgres via Vercel Postgres / `DATABASE_URL`; LLM provider API keys in the host environment; key status and routing in the owner console at `/admin/control`.
 
 ### AI on and off
 
@@ -84,7 +84,7 @@ Customer app:
 | Route | What |
 | --- | --- |
 | `/` | Sidebar places: Upload (or Start with AI off) → Gaps → Prioritize → Tactics. Query `?place=` |
-| `/timeline` | The IEGP timeline, built by hand: every prioritized gap with its activities beneath it; create, date, drag and sequence activities with no model, warnings for broken dependencies, detail on click, image (PNG) export, save as final (Medical Affairs) |
+| `/timeline` | The IEGP Gantt timeline (S10): every prioritized gap with its activities beneath it. Create, date, drag and sequence activities by hand with no model; with AI on, **Rebuild** has the model infer dependencies and estimate any start, duration or readout lag nobody set (human values always survive). Warnings for broken dependencies, detail on click, image (PNG) export, save as final (Medical Affairs) |
 | `/ideation` | Tactic ideas for High-priority open gaps, AI-proposed or added by hand (Medium and Low gaps get tactics from the library or by hand on the gap) |
 | `/needs`, `/residuals`, `/roadmap`, `/mappings` | Secondary lists: constituent needs, residual gaps, forward roadmap, gap × tactic mapping table |
 | `/room`, `/room/audience`, `/presentation` | **Hidden for now** (KAN-52): redirect to the plan. The presenter console and audience window come back by setting `ROOM_ENABLED` in `src/lib/room/enabled.ts`. The timeline exports as a PNG image |
@@ -100,7 +100,7 @@ Owner console (owner only: `OWNER_EMAILS` or an admin/operator account). The old
 
 | Route | What |
 | --- | --- |
-| `/admin/control` | AI master switch, LLM provider logins, per-stage model routing |
+| `/admin/control` | AI master switch and per-section switches, provider API key status (keys are env-only), per-stage model routing |
 | `/admin/customers` | Customers, seats sold and assigned |
 | `/admin/users` | Staff email and password accounts |
 | `/admin/accuracy` | The accuracy lab (owner testing tool) |
@@ -154,8 +154,9 @@ npm run test:e2e    # Playwright against port 43217
 | [problem-and-solution.md](docs/problem-and-solution.md) | Problem statement and proposed IEGP |
 | [iegp-model.md](docs/iegp-model.md) | Locked objects, gates, priority, refresh |
 | [consultant-ux-spec.md](docs/consultant-ux-spec.md) | Consultant UX: nav IA, readiness strip, Gaps workbench, Prep \| Room |
-| [presentation-and-breakouts.md](docs/presentation-and-breakouts.md) | Presentation view + multi-window breakout groups |
+| [presentation-and-breakouts.md](docs/presentation-and-breakouts.md) | Presentation view + multi-window breakout groups (both hidden for now: `ROOM_ENABLED` / `BREAKOUTS_ENABLED` are `false`) |
 | [deploy-checklist.md](docs/deploy-checklist.md) | Operator checklist: env, admin account, SSO and seats, smoke tests |
 | [modules.md](docs/modules.md) | Kernel, stages S0–S10 and module contracts |
+| [sdlc/13-testing.md](docs/sdlc/13-testing.md) | How the code is tested today: Vitest, Playwright, LLM stub, CI, gold |
 | [sdlc/01-requirements.md](docs/sdlc/01-requirements.md) | Requirements (v2) and the [compliance check](docs/sdlc/requirements-compliance.md) |
 | [docs/sdlc/](docs/sdlc/) | Architecture, process and flows. Files marked *Retired* describe the v1 insights engine and are kept for lineage |

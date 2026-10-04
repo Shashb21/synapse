@@ -14,7 +14,7 @@ flowchart TD
   ask --> create["Create: Start blank or Start with demo data"]
   create --> open
   open --> setup["Setup wizard: asset, plan, objectives, landscape, settings"]
-  setup --> ai{"AI on? master switch AND workspace setting"}
+  setup --> ai{"AI on? admin master switch AND section switch"}
   ai -->|yes| upload["Upload sources; the routed LLM parses them"]
   ai -->|no| start["Start: add gaps and tactics by hand"]
   upload --> extract["AI proposes gaps, tactics and coverage"]
@@ -22,10 +22,9 @@ flowchart TD
   start --> gaps
   gaps --> prioritize["Prioritize: place open gaps on the matrix, validate bands"]
   prioritize --> tactics["Tactics: map existing tactics, create new ones, ideate"]
-  tactics --> timeline["Timeline: create, date, drag and sequence activities by hand"]
+  tactics --> timeline["Timeline: create, date, drag and sequence activities; AI can infer dependencies and dates"]
   timeline --> final["Medical Affairs saves the plan as final; export the chart as an image"]
-  final --> room["Room: present and decide with the audience window"]
-  room --> gaps
+  final --> gaps
 ```
 
 ## What each box means
@@ -36,13 +35,13 @@ flowchart TD
 | Sign-in | Customers use SSO and need a seat; staff use a password account. There is no self sign-up. | Identity provider verifies the email; Synapse checks the seat. |
 | Workspace | One workspace holds one IEGP. A new one starts blank; demo data only when chosen, with a Demo badge. | Workspace owner. |
 | Setup | The plan's context, which prioritization, ideation and the timeline use. | The team. |
-| AI switch | AI runs only when the owner's master switch and the workspace's AI assistance setting are both on. | Owner (master), workspace owner (setting). |
+| AI switch | An AI section (ingestion, extraction, mapping, split, prioritization, ideation) runs only when the admin's master switch and that section's switch are both on. Customers have no switch. | Synapse admin, in `/admin/control`. |
 | Upload | PDF, PPTX, DOCX, XLSX and text files are parsed into blocks by the LLM routed to the parse stage. | Model proposes; people edit blocks. |
 | Gaps | Each gap has needs with verbatim quotes. Status is Open, Partially Addressed or Addressed, from recorded coverage or a person's override with a reason. | Model proposes; people validate. |
 | Prioritize | Open gaps sit on a two-axis matrix per treatment setting; the quadrant is the band. | Model suggests scores; a person validates the band. |
 | Tactics | Existing tactics are mapped with coverage; new tactics are created or ideated for validated open gaps. | Model proposes; people accept, edit or reject. |
-| Timeline | Every prioritized gap with its activities beneath it; dated, moved and sequenced by hand, with broken dependencies flagged. | The team; Medical Affairs saves final. |
-| Room | A presenter view whose slides are the real pages, with an audience window. | The team. |
+| Timeline | Every prioritized gap with its activities beneath it; dated, moved and sequenced by hand, with broken dependencies flagged. With AI on, a rebuild infers dependencies and estimates missing dates; hand values win. | The team; Medical Affairs saves final. |
+| Room | A presenter view whose slides are the real pages, with an audience window. **Switched off for now** (`ROOM_ENABLED = false`, KAN-52); `/room` redirects to the plan. | The team. |
 
 ## What this loop refuses
 
@@ -59,6 +58,6 @@ flowchart TD
 | Upload or Start, Gaps, Prioritize, Tactics | `/?place=upload`, `gaps`, `plan`, `tactics` |
 | The timeline | `/timeline` |
 | Ideas for open gaps | `/ideation` |
-| Present | `/room` |
+| Present | `/room` (switched off for now; redirects to the plan) |
 | Workspaces and settings | `/workspaces` |
 | Owner console | `/admin` |

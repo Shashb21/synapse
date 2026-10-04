@@ -135,7 +135,7 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 
 | ID | Requirement | Pri |
 |---|---|---|
-| REQ-ADM-001 | A separate `/admin` console holds the AI master switch, model routing and provider logins, customers and seats, staff users, the accuracy lab, pipeline, runs, evals, catalog, module versions and docs. It is reachable only by the owner (the operator role, an admin account or `OWNER_EMAILS`). Old top-level URLs (`/control`, `/pipeline`, `/runs`, …) redirect into it. | Must |
+| REQ-ADM-001 | A separate `/admin` console holds the AI master switch and section switches, model routing and provider API key status (keys are set only in the server environment), customers and seats, staff users, the accuracy lab, pipeline, runs, evals, catalog, module versions and docs. It is reachable only by the owner (the operator role, an admin account or `OWNER_EMAILS`). Old top-level URLs (`/control`, `/pipeline`, `/runs`, …) redirect into it. | Must |
 | REQ-ADM-002 | The customer app never links to or shows owner surfaces. | Must |
 
 ## 12. User experience (Jira-inspired)
