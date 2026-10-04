@@ -15,7 +15,7 @@ Branch: `cursor/accuracy-first-modular-b7b5`
 | Extraction depth | Default **1 propose + 1 checklist critic + 1 revise**; hillclimb adds rounds |
 | Gold | Per-source gold in `reference/<slug>/gold/` — never mix across sources |
 | Module delivery | Independent modules + unit tests; combine via kernel registry |
-| Parse | PDF/PPTX → **LlamaParse**; DOCX/text/etc → local (+ LLM assist in parse module when needed) |
+| Parse | Originally PDF/PPTX → LlamaParse. **Now:** text is extracted locally for every file type and the routed LLM decides blocks, kinds and headings; LlamaParse is disabled (`src/accuracy/modules/parse/parse-policy.ts`) |
 
 ## Code map
 

@@ -1,6 +1,6 @@
 # Synapse IEGP: problem statement and proposed solution
 
-Status: v1 product paper for the digital **Integrated Evidence Generation Plan (IEGP)**. Locked model: [`iegp-model.md`](iegp-model.md). Historical CIR/theme SDLC pack remains under [`sdlc/`](sdlc/) as design lineage, not the live system of record.
+Status: v1 product paper for the digital **Integrated Evidence Generation Plan (IEGP)**. Locked model: [`iegp-model.md`](iegp-model.md). Requirements (v2) and their compliance check are in [`sdlc/`](sdlc/); pages there marked *Retired* are the earlier CIR/theme insights engine, kept as design lineage.
 
 Demo corpus is fictional (Velmara / velmaratinib). No real patient or payer data.
 
@@ -31,10 +31,10 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 | Nested document trees as the store | Needs, gaps, tactics, coverages are flat rows plus joins. |
 | Embedding clusters as the catalog | Gaps are named decision objects a TA lead can brief. IDs do not drift. |
 | Copying the sentence onto every gap or tactic | `need_gap_links` and `coverages` store IDs. The statement lives once. |
-| Auto-naming / auto-closing | Humans lock every gate. Engine drafts; it does not write Addressed. |
+| Auto-naming / auto-closing | Humans lock every gate. Models propose and the engine computes status; a person validates before anything is final. |
 | Overwriting the parent when residual | Original gap remains. Residual is a child. |
 | “A tactic exists” = “the gap is closed” | Ten coverage dimensions + overall degree. |
-| Coverage = priority | Separate locked band on the residual. Effort/cost sit on the tactic. |
+| Coverage = priority | Separate, human-validated band on the residual. Effort/cost sit on the tactic. |
 | Publications as non-objects | Generation and dissemination are both tactics; dissemination can be `not_relevant` for coverage. |
 
 ---
@@ -43,9 +43,9 @@ The unit of work is not a document, a study, or a cluster. It is an **atomic evi
 
 Synapse IEGP is a **dynamic evidence-planning system**:
 
-Strategic objectives → sources → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps.
+Strategic objectives → sources → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps → **Timeline**.
 
-### IEGP process (Upload → Gaps → Prioritize → Tactics)
+### IEGP process (Upload → Gaps → Prioritize → Tactics → Timeline)
 
 ```mermaid
 flowchart TD
@@ -53,20 +53,22 @@ flowchart TD
   extract["Extract gaps and tactics already mapped"]
   gaps["Gaps workbench: engine status, validate, split or rewrite"]
   create["Add Open gap · Add Addressed gap with library or missed tactic"]
-  pri["Prioritize: High / Medium / Low on Open gaps"]
-  tac["Tactics: ideate proposed tactics for Open gaps"]
+  pri["Prioritize: matrix bands on Open gaps, validated by a person"]
+  tac["Tactics: ideate proposed tactics for High-priority Open gaps"]
+  tl["Timeline: Gantt of dated activities, save as final"]
   later["Later ingest"]
   upload --> extract
   extract --> gaps
   create --> gaps
   gaps --> pri
   pri --> tac
+  tac --> tl
   later --> upload
 ```
 
-Gaps is the combined mapped + status workbench. There is no Review / Mappings wizard step and no candidate accept/reject inbox. Gap cards show an evidence-topic title once. Partial cannot stay: split LEFT = Addressed + tactic, RIGHT = Open leftover, or rewrite the original as Open or Addressed. The original is retired into version history. Gantt / gates timeline is parked (docs only).
+Gaps is the combined mapped + status workbench. There is no Review / Mappings wizard step and no candidate accept/reject inbox. Gap cards show an evidence-topic title once. Partial cannot stay: split LEFT = Addressed + tactic, RIGHT = Open leftover, or rewrite the original as Open or Addressed. The original is retired into version history. The plan ends on a **Gantt timeline** (`/timeline`): dated activities with dependencies, saved as final by Medical Affairs.
 
-Gap status is **computed**: **Open** (no completed/ongoing/planned tactics and no published literature; proposed does not count), **Partially Addressed** (some evidence, residual leftover — must split or rewrite), or **Addressed** (evidence sufficient to fully close). Humans validate every live gap before Prioritize. Click Open or Addressed to override with a reason. Override wins until cleared or marked stale on ingest/coverage refresh (disagreement is shown; the engine does not silent-clobber). Plan High / Medium / Low remain priority bands, not those statuses.
+Gap status is **computed**: **Open** (no completed/ongoing/planned tactics and no published literature; proposed does not count), **Partially Addressed** (some evidence, residual leftover — must split or rewrite), or **Addressed** (evidence sufficient to fully close). Humans validate every live gap before Prioritize. Click Open or Addressed to override with a reason. Override wins until cleared or marked stale on ingest/coverage refresh (disagreement is shown; the engine does not silent-clobber). Plan High / Medium / Low / Defer remain priority bands, not those statuses.
 
 ### Traceability
 
@@ -76,7 +78,7 @@ Source → candidate need → gap → associated tactics → coverage → residu
 
 Interview: “We don’t have enough evidence in elderly patients.”
 
-The system extracts a **candidate evidence need** and a **live gap** already mapped to extracted tactics, with engine-computed status. It does not dump a residual paragraph onto the card and does not present an accept/reject inbox. Pressure-test is a backend engine: when extracted tactics only partially cover the parent, Gaps shows **Partially Addressed**. The user must split or rewrite before Prioritize. Click Open or Addressed to override with a reason.
+The system extracts a **candidate evidence need** and a **live gap** already mapped to extracted tactics, with engine-computed status. It does not dump a residual paragraph onto the card and does not present an accept/reject inbox. Mapping is a model judgement (S4: proposer, critic over three exchanges, judge) that gives each gap–tactic pair a coverage verdict; when the mapped tactics only partially cover the parent, the engine computes **Partially Addressed** and Gaps shows it. The user must split or rewrite before Prioritize. Click Open or Addressed to override with a reason.
 
 ### Worked mapping (Velmara seed)
 
@@ -95,7 +97,7 @@ Tactic: retrospective RWE in patients aged ≥65, no comparator.
 
 Residual (parent retired into version history; leftover is a **new Open gap** after split): comparative outcomes versus relevant regional SoC.
 
-Priority: human-locked High (HTA decision date, uncovered comparator). The engine does not propose a band.
+Priority: validated High (HTA decision date, uncovered comparator). The model scores the matrix axes and the quadrant suggests the band; a person validates it.
 
 ### One tactic, several gaps
 
@@ -114,9 +116,9 @@ flowchart TD
   elderly -.->|"chart review only, no comparator"| partial["Overall: partial"]
 ```
 
-### Priority (locked)
+### Priority (human validated)
 
-Humans lock High / Medium / Low. The engine does not assign a band. Effort and cost live on the tactic. Engine never places a residual on the roadmap.
+Gaps are placed on a two-axis matrix. With AI on, a model scores each Open gap on the axes and the band is the quadrant (High / Medium / Low / Defer); it stays a suggestion until a person validates it, and human placements survive re-runs. Effort and cost live on the tactic. Engine never places a residual on the roadmap.
 
 ### Refresh
 
@@ -126,8 +128,10 @@ Living plan. Tactic status change or ingest unlocks residuals for a human to rea
 
 ## 4. v1 slice
 
-Shipped on Postgres with a rich Velmara seed (objectives, interviews, TLR, CDP/HEOR/RWE sources, 20+ needs, 12 gaps, 12 tactics, dimensional mappings, residuals, priorities, forward roadmap).
+Shipped on Postgres. Every new workspace starts blank; **Start with demo data (Velmara)** loads a rich worked example (objectives, interviews, TLR, CDP/HEOR/RWE sources, needs, gaps, tactics, dimensional mappings, residuals, validated bands and a dated timeline).
 
-Not in v1: login, AI tactic ideation, multi-asset/franchise overlays, annual snapshots, embedding catalog.
+Shipped beyond the first slice: SSO sign-in for seat holders plus staff password accounts, roles, workspaces, AI tactic ideation for High-priority gaps (S9, a person accepts or rejects each proposal), and the Gantt timeline (S10).
+
+Not in v1: multi-asset/franchise overlays, annual snapshots, embedding catalog.
 
 Run: `npm install && npm test && npm run dev` after Postgres (`DATABASE_URL`). App: [http://127.0.0.1:43217](http://127.0.0.1:43217).

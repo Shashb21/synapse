@@ -1,6 +1,8 @@
 # Presentation view and breakout groups
 
-**Status:** Implemented (v1) · builds on [`consultant-ux-spec.md`](consultant-ux-spec.md) Phase A
+> **Switched off (2026-10-04).** Room/Presentation and Breakouts are hidden in the app: `ROOM_ENABLED` (`src/lib/room/enabled.ts`, KAN-52) and `BREAKOUTS_ENABLED` (`src/lib/breakouts-enabled.ts`, KAN-57) are `false`, and `/room`, `/presentation` and `/breakouts` redirect to the plan. The code stays so they can come back by flipping those flags. This page also predates sign-in: the app now has SSO for seat holders and staff password accounts, and every action records the signed-in person (see [`iegp-model.md`](iegp-model.md)).
+
+**Status:** Implemented (v1), currently switched off · builds on [`consultant-ux-spec.md`](consultant-ux-spec.md) Phase A
 **What this covers:** the spec's own Phase C ("Presentation view — read-only chaptered walkthrough") plus a new capability requested alongside it: **breakout groups** — group gaps by workshop theme, and open one browser window per group (one per screen) so two themes can run side by side, each independently facilitated.
 
 ## Why this is a new surface, not an extension of `/accuracy/workshop`

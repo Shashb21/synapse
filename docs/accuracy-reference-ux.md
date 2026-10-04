@@ -84,9 +84,11 @@ Both decks end in **year/quarter bars** tied to tactics and milestones (2026–2
 
 ---
 
-## Parsing notes (LlamaParse for these PPTXs)
+## Parsing notes (these PPTXs)
 
-- Heavy **tables and timeline graphics** — use LlamaParse agentic tier; preserve table rows as separate blocks.
+LlamaParse is disabled; every file is parsed by the routed LLM after local text extraction (`src/accuracy/modules/parse/parse-policy.ts`).
+
+- Heavy **tables and timeline graphics** — preserve table rows as separate blocks.
 - **Slide masters / icons** — expect empty blocks; completeness audit should use text + table blocks only.
 - Two decks share **BeOne** branding but **must not** share eval gold (different assets, ID schemes).
 

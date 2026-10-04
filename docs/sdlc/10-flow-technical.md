@@ -9,7 +9,7 @@ flowchart TB
   subgraph gate["Gates on every request"]
     proxy["proxy.ts: session and workspace cookies"]
     guard["api-guard: session, membership, role"]
-    aisw["aiEnabled: master switch AND workspace setting"]
+    aisw["AI switch: admin master switch AND section switch"]
   end
 
   subgraph ingest["Ingest, AI on only"]
@@ -61,7 +61,7 @@ sequenceDiagram
   participant DB as Workspace schema
 
   User->>API: a file or pasted text
-  API->>API: aiEnabled check
+  API->>API: AI section check
   API->>Route: S2 S3 S4 each have a model
   Route-->>API: ok, or no_llm before anything is written
   API->>Kernel: S0 upload
@@ -91,7 +91,7 @@ The timeline API (`POST /api/plan`) takes `create_activity`, `add_activity`, `mo
 | `timeline_activities`, `iegp_plans` | S10 activities and saved versions |
 | `edit_records`, audit | Every edit with its rationale, before and after, and actor |
 
-Shared tables: `workspaces` (with `ai_enabled`, `demo`), `workspace_members`, `user_accounts`, `customers`, `seat_assignments`, `platform_settings` (the AI master switch).
+Shared tables: `workspaces` (with `demo`; the legacy `ai_enabled` column no longer counts), `workspace_members`, `user_accounts`, `customers`, `seat_assignments`, `platform_settings` (the AI master switch and per-section switches).
 
 ## Code map
 
@@ -99,8 +99,8 @@ Shared tables: `workspaces` (with `ai_enabled`, `demo`), `workspace_members`, `u
 | --- | --- |
 | Request gate | `src/proxy.ts`, `src/modules/auth/gate.ts`, `src/modules/auth/api-guard.ts` |
 | Sign-in and seats | `src/modules/auth/idp.ts`, `session.ts`, `customers.ts`, `accounts.ts`, `password-login.ts` |
-| Workspaces, blank and demo | `src/modules/workspaces/store.ts`, `contents.ts`, `ai-setting.ts` |
-| AI switch | `src/modules/kernel/ai-switch.ts` |
+| Workspaces, blank and demo | `src/modules/workspaces/store.ts`, `contents.ts` |
+| AI switch | `src/modules/kernel/ai-switch.ts`, `ai-sections.ts` |
 | Stage runner and routing | `src/modules/kernel/run.ts`, `routing.ts`, `agentic.ts` |
 | Parsing | `src/lib/ingest/local-parse.ts`, `llm-structure.ts`, `src/modules/stages/s1-parse/` |
 | Ingest sequencing | `src/app/api/iegp/ingest-pipeline.ts` |
@@ -115,6 +115,6 @@ Shared tables: `workspaces` (with `ai_enabled`, `demo`), `workspace_members`, `u
 | `/sources` | sources and blocks | `/api/iegp` ingest, `/api/sources/blocks` |
 | `/ideation` | `ideation_proposals` | `/api/plan` |
 | `/timeline` | timeline model and plan history | `/api/plan` |
-| `/room`, `/room/audience` | room state | `/api/room` |
-| `/workspaces/[id]` | workspace, members, AI setting | `/api/workspaces/[id]`, `/members`, `/ai`; `/api/iegp` `load_demo` and `reset` |
+| `/room`, `/room/audience` | room state (switched off: `ROOM_ENABLED = false`, redirects to the plan) | `/api/room` |
+| `/workspaces/[id]` | workspace, members, the AI state (read only) | `/api/workspaces/[id]`, `/members`; `/api/iegp` `load_demo` and `reset`. `/api/workspaces/[id]/ai` refuses every change since KAN-53 |
 | `/admin/*` | owner console | `/api/admin/*`, `/api/control`, `/api/accuracy/*` |

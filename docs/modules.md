@@ -24,7 +24,9 @@ plan the team keeps outside this repo. This file describes what the code does.
 | `baselines.ts` | Per-stage, per-prompt-version metric baselines (`prompt_baselines`). |
 | `prompt-versions.ts` / `prompt-variant.ts` | Registered variants and `AsyncLocalStorage` scope for hillclimb evals. |
 | `evals.ts` | Per-stage eval runs and the harness runner. |
-| `agentic.ts` | The shared loop: propose → critique → revise, three exchanges, then judge. Both the LLM path and the local path. |
+| `agentic.ts` | The shared loop: propose → critique → revise, three exchanges, then judge. Model calls only; the local proposers run solely under the test stub. |
+| `llm.ts` / `no-llm.ts` / `stage-errors.ts` | `requireLlm`, `completeAll` (re-ask, never fill in), the test-stub guard, and the customer- vs owner-facing wording when a model is missing or fails. |
+| `ai-switch.ts` / `ai-sections.ts` / `stage-ai.ts` | The admin's AI master switch and per-section switches, and which stages the kernel refuses while AI is off. |
 | `db.ts` / `schema.ts` | Platform tables. Module-owned DDL is applied by the kernel on first run. |
 
 A module declares its own tables. `source_files`, `parsed_documents`,
@@ -64,24 +66,23 @@ is scored on every run: `exchanges`, `dialogue_retention`, `critic_score_gain`, 
 
 ## Stages
 
-| Stage | Module id | Reads | Writes |
-| --- | --- | --- | --- |
-| S0 Upload | `s0-upload.local-store` | user files, demo pack | `source_files` |
-| S1 Parse | `s1-parse.local` | `source_files` | `parsed_documents`, domain `sources` + `source_blocks` |
-| S2 Gap extraction | `s2-gap-extract.pcj` | `parsed_documents` | `gap_candidates`, domain `gaps` + `needs` + links |
-| S3 Tactic extraction | `s3-tactic-extract.pcj` | `parsed_documents` | `tactic_candidates`, domain `tactics` |
-| S4 Knowledge graph | `s4-kg-mapping.scored-pcj` | domain gaps + tactics | `mapping_candidates`, domain `coverages` |
-| S5 Validation gate | `s5-validation.human-gate` | domain state | domain state, `edit_records`, `hillclimb_signals` |
-| S6 Partial split | `s6-partial-split.pcj` | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
-| S7 Consolidation | `s7-consolidation.derived` | validated state | nothing |
-| S8 Prioritization | `s8-prioritization.axes` | open gaps, axis config | `priority_placements` |
-| S9 Ideation | `s9-ideation.pcj` | High open gaps | `ideation_proposals`, domain `tactics` on accept |
-| S10 Gantt timeline | `s10-timeline.gantt` | validated state, placements | `timeline_activities`, `iegp_plans` |
+| Stage | Module id (version) | Kind | Reads | Writes |
+| --- | --- | --- | --- | --- |
+| S0 Upload | `s0-upload.local-store` (1.0.0) | records files; AI section *ingestion* | user files, demo pack | `source_files` |
+| S1 Parse | `s1-parse.llm` (2.0.0) | LLM decides blocks, kinds and headings for PDF, PPTX, DOCX, XLSX and text; LlamaParse is disabled | `source_files` | `parsed_documents`, domain `sources` + `source_blocks` |
+| S2 Gap extraction | `s2-gap-extract.pcj` (1.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `gap_candidates`, domain `gaps` + `needs` + links |
+| S3 Tactic extraction | `s3-tactic-extract.pcj` (2.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `tactic_candidates`, domain `tactics` |
+| S4 Mapping | `s4-kg-mapping.scored-pcj` (3.0.0) | LLM mapping table: one row per gap with a coverage verdict, confidence and rationale per tactic; critic ×3 → judge | domain gaps + tactics | `mapping_candidates`, domain `coverages` |
+| S5 Validation gate | `s5-validation.human-gate` (1.0.0) | human gate, no model | domain state | domain state, `edit_records`, `hillclimb_signals` |
+| S6 Partial split | `s6-partial-split.pcj` (2.0.0) | model proposes the split, critic ×3 → judge; applies only what the user validates | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
+| S7 Consolidation | `s7-consolidation.derived` (1.0.0) | derived, no model | validated state | nothing |
+| S8 Prioritization | `s8-prioritization.axes` (2.0.0) | model scores every axis, critic ×3; the band is the quadrant, the user validates it | open gaps, axis config | `priority_placements` |
+| S9 Ideation | `s9-ideation.pcj` (2.0.0) | model designs tactics for gaps validated High, critic ×3 → judge, per-gap cap | High open gaps | `ideation_proposals`, domain `tactics` (status `proposed`) on accept |
+| S10 Gantt timeline | `s10-timeline.gantt` (2.0.0) | AI optional: model infers dependencies and estimates missing dates; human dates always win | validated state, placements | `timeline_activities`, `iegp_plans` |
 
-The original `ingestNeedFromText` still exists as the monolith path. It is now
-composed of `persistSourceAndBlocks` (S1) and `commitExtractedRecords` (S2/S3),
-with `applyEngineMappings` for S4, so the modular stages and the monolith write
-through the same domain code.
+The S4 module id keeps its historical `scored-pcj` slug; the deterministic scorer it once used (`scoreGapTacticMapping` in `src/lib/iegp/mapping.ts`) now runs only under the test stub, and every row it produces says no model was called.
+
+Ingest (`src/app/api/iegp/ingest-pipeline.ts`) is the stage chain S0 → S1 → S2 → S3 → S4 through `runStage`; it refuses before writing anything if a judgement stage has no connected model. S1 writes through `persistSourceAndBlocks` and S2/S3 through `commitExtractedRecords` (`src/lib/iegp/store.ts`), so the stages and the hand-entry paths write through the same domain code.
 
 ## Cross-cutting
 
@@ -98,11 +99,12 @@ through the same domain code.
   fallback (the removed `deterministic-local` route id is stripped from stored
   routing). S1 parse is an LLM stage too: every file type is parsed by the model
   routed to it.
-- **AI switch** — `src/modules/kernel/ai-switch.ts` and
-  `src/modules/workspaces/ai-setting.ts`. AI runs only when the owner's master
-  switch (`/admin/control`) and the workspace's own AI assistance setting (its
-  owner changes it) are both on. With AI off every entry point refuses and the UI
-  shows only the hand-entry paths.
+- **AI switch** — `src/modules/kernel/ai-switch.ts` and `ai-sections.ts`. The
+  Synapse admin decides, for every customer, on `/admin/control`: a master
+  switch turns all AI off, and each AI section (ingestion, gap extraction,
+  tactic extraction, mapping, partial split, prioritization, ideation) has its
+  own switch. Every section starts off. Customers have no AI switch. With a
+  section off its entry points refuse and the UI shows only the hand-entry path.
 - **Identity and roles** — `src/modules/auth/`. Customers sign in with SSO
   (Google, Microsoft Entra ID, GitHub) and need a seat (`customers.ts`,
   `/admin/customers`); staff use email and password accounts (`accounts.ts`,
@@ -118,47 +120,36 @@ through the same domain code.
 
 | Route | Binds to |
 | --- | --- |
-| `/` (Upload → Gaps → Prioritize → Tactics) | existing domain flow, S5/S6 gates |
+| `/` (Plan context, Upload, Evidence Inventory, Prioritization Matrix, Tactic Ideation) | ingest chain S0–S4, S5/S6 gates, S9 on `?place=tactics` |
+| `/setup` | Plan context wizard (feeds S8, S9 and S10) |
+| `/mappings` | S4 mapping table: accept, reject or restore proposed mappings |
 | `/?place=plan` | S8 prioritization matrix with configurable axes (`/matrix` redirects here) |
 | `/ideation` | S9 proposal review and ideas added by hand |
 | `/timeline` | S10 timeline, built by hand or from a run: the final IEGP, saved as final and exportable as an image |
 | `/admin/pipeline` | owner only: run a stage S0–S10 or a chain, see module, route and last run |
 | `/admin/runs`, `/admin/runs/[id]` | owner only: stage health, run traces, edit rationales, signals, eval runs |
-| `/admin/control` | owner only: AI master switch, per-provider key status, per-stage routing |
+| `/admin/control` | owner only: AI master and section switches, per-provider key status, per-stage routing |
+| `/admin/harness` | owner only: run each AI use case on its own against the live model |
+| `/admin/evals`, `/admin/catalog` | owner only: gold evals, registered modules and prompt variants |
+| `/admin/accuracy` | owner only: the accuracy lab (reference packs, ledger, coverage, plan, timeline) |
 | `/admin/modules` | owner only: module versions |
 
 ## Testing
 
+The full picture (Vitest, Playwright, the LLM stub, CI and gold) is in
+[`sdlc/13-testing.md`](sdlc/13-testing.md). In short:
+
 | Command | What it runs |
 | --- | --- |
-| `npm test` | Vitest: kernel contracts, the three-exchange loop, per-stage pure logic, and an S0→S10 pipeline suite against Postgres. |
+| `npm test` | Vitest (`tests/*.test.ts`): kernel contracts, the three-exchange loop, per-stage logic with the LLM stub, KAN regression tests, against Postgres. |
 | `npm run test:e2e` | Every Playwright spec. |
-| `npm run test:e2e:features` | Feature-by-feature end-to-end specs under `e2e/features/`, one file per locked feature. |
-| `npm run test:evals` | Only the gold-case harness tests, one per stage that ships one. |
+| `npm run test:e2e:features` | The specs under `e2e/features/`: one per stage S0–S10 plus feature and KAN specs. |
+| `npm run test:evals` | Only the gold-case tests in `e2e/features/`. |
 | `npm run test:e2e:feature -- "S8 prioritization"` | One feature, by name. |
-
-`e2e/features/` holds one spec per locked feature, so a feature fails on its own:
-
-| Spec | Feature |
-| --- | --- |
-| `s0-upload.spec.ts` | Upload, checksum, dedupe, no extraction |
-| `s1-parse.spec.ts` | Parse to blocks, quality signals, per-file failure |
-| `s2-gap-extract.spec.ts` | Gap extraction, three exchanges, provenance on every gap |
-| `s3-tactic-extract.spec.ts` | Tactic extraction, library dedupe via mid-dialogue withdrawal |
-| `s4-kg-mapping.spec.ts` | Many-to-many edges, rationale per edge, per-gap budget |
-| `s5-validation.spec.ts` | Classification, validation, rationale mandatory, override needs a reason |
-| `s6-partial-split.spec.ts` | Split proposal, dialog fill, apply only what the user validates |
-| `s7-consolidation.spec.ts` | Open/addressed lists, disjointness, consistency flags |
-| `s8-prioritization.spec.ts` | Configurable axes, matrix cards, band validation, re-run safety |
-| `s9-ideation.spec.ts` | High-only ideation, runnable designs, accept/reject with rationale |
-| `s10-timeline.spec.ts` | Gantt render, activity detail, PNG export, save as final, dependency gating |
-| `control-panel-provider-keys.spec.ts` | Five providers with key status and env var, Grok default, Claude one-click, no API-key field |
-| `observability-trace.spec.ts` | Run traces, all three rounds on the page, failed runs kept |
-| `hillclimb-rationale.spec.ts` | Edit rationale → signal → next proposer brief |
 
 Specs seed their own state through the module API (`e2e/support/synapse.ts`) and assert on the run
 ledger rather than page text, so a click that lands before hydration cannot produce a false pass. Under the
-test LLM stub (`SYNAPSE_TEST_STUB_LLM=1`, never set in production) the agentic stages use local
+test LLM stub (`SYNAPSE_TEST_STUB_LLM=1`, refused in a production build) the agentic stages use local
 proposers so the specs run without a live model.
 
 ## Adding or upgrading a module

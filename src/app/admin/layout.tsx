@@ -6,7 +6,7 @@ import { requireOwnerPage } from "@/modules/auth/owner";
 
 export const metadata: Metadata = {
   title: "Synapse Admin",
-  description: "Owner console: AI switch, routing, provider logins, the accuracy lab, pipeline, runs and evals.",
+  description: "Owner console: AI switch, routing, provider key status, the accuracy lab, pipeline, runs and evals.",
   robots: { index: false, follow: false },
 };
 

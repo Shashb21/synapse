@@ -22,7 +22,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     id: "control",
     href: "/admin/control",
     label: "AI & routing",
-    summary: "The AI on/off switch, provider logins and per-stage model routing.",
+    summary: "The AI on/off switches, provider API key status (keys are set in the environment) and per-stage model routing.",
   },
   {
     id: "customers",

@@ -29,7 +29,7 @@ Push both with `./scripts/push-both.sh` (or `git push origin` and `git push gith
 
 - Every AI judgement goes through a routed LLM; no keyword, threshold or similarity rule decides anything (REQ-AI-001), and a missing model fails clearly (REQ-AI-002).
 - Every AI output has a manual create and edit path, and a later run never overwrites a person's edit (REQ-MAN-001, REQ-MAN-002).
-- With AI off (master switch or the workspace setting) the change still works by hand and calls no model (REQ-AI-004, REQ-AI-006).
+- With AI off (the master switch or that section's switch in `/admin/control`) the change still works by hand and calls no model (REQ-AI-004).
 - Server-side role and workspace checks on every mutating API; the actor comes from the session, never the request body (REQ-AUTH-005, REQ-AUTH-006).
 - Customer copy has no internal jargon: no stage codes, "hillclimb" or owner-console links (REQ-UX-008, REQ-ADM-002).
 - Docs that the change makes stale (README, deploy checklist, `.env.example`, these specs) are updated in the same branch (REQ-OPS-005).

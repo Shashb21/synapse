@@ -131,7 +131,7 @@ export function db() {
   return globalForDb.drizzle;
 }
 
-/** Platform-wide tables: users, workspaces, sessions, routing, provider logins, settings, accuracy. */
+/** Platform-wide tables: users, workspaces, sessions, routing, settings, accuracy. */
 export function sharedDb() {
   if (!globalForDb.sharedDrizzle) globalForDb.sharedDrizzle = drizzle(client(), { schema });
   return globalForDb.sharedDrizzle;
