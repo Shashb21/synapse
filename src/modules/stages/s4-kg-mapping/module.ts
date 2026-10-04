@@ -424,7 +424,7 @@ async function llmReviews(
       reviewer_corrections: shared.hints || undefined,
       exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
       note: args.retry
-        ? "An earlier answer left these rows unreviewed or gave no verdict for some of their mappings. Review each row and every mapping in it."
+        ? "An earlier answer left these rows unreviewed, gave no verdict for some of their mappings, or objected to a mapping without a note. Review each row and every mapping in it; give a note for every revise or drop."
         : undefined,
       rows: args.rows.map((row) => ({ gap: promptGap(shared, row.gap_id), ...promptRow(row) })),
       tactics: promptTactics(shared.tactics),
@@ -452,10 +452,13 @@ async function llmReviews(
     const mappings: Review["mappings"] = [];
     let valid = Array.isArray(raw.mappings) || row.mappings.length === 0;
     for (const item of raw.mappings ?? []) {
+      // The critic reviews the row's own mappings. A tactic the row doesn't map is the
+      // proposer's to add, so it is skipped rather than voiding the whole review (KAN-69).
+      if (!row.mappings.some((mapping) => mapping.tactic_id === item?.tactic_id)) continue;
       const mappingVerdict = verdicts.safeParse(item?.verdict);
       const mappingNote = typeof item?.note === "string" ? item.note.trim() : "";
-      const known = row.mappings.some((mapping) => mapping.tactic_id === item?.tactic_id);
-      if (!known || !mappingVerdict.success || !mappingNote) {
+      // An objection needs its reason; a plain "keep" may stand without one (KAN-69).
+      if (!mappingVerdict.success || (!mappingNote && mappingVerdict.data !== "keep")) {
         valid = false;
         break;
       }

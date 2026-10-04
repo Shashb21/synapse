@@ -200,6 +200,66 @@ describe("S4 on the model path", () => {
     });
   });
 
+  it("accepts a critic that keeps mappings without a note or names a tactic the row doesn't map (KAN-69)", async () => {
+    const [t1, t2] = tacticIds as [string, string];
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") {
+        const rows = call.body.rows as { gap: { id: string }; mappings: { tactic_id: string }[] }[];
+        return {
+          reviews: rows.map((row) => ({
+            gap_id: row.gap.id,
+            verdict: "keep",
+            confidence: 80,
+            note: "Row is right.",
+            mappings: [
+              ...row.mappings.map((m) => ({ tactic_id: m.tactic_id, verdict: "keep", note: "" })),
+              { tactic_id: t2, verdict: "keep", note: "Added mapping the proposer missed." },
+            ],
+          })),
+        };
+      }
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map((id) => mapped(id, t1)) };
+    });
+
+    const { output } = await kgMappingModule.run(input(), ctx);
+
+    // One critic call per exchange: nothing was re-asked.
+    expect(calls.filter((call) => call.purpose === "mapping-table-critic")).toHaveLength(3);
+    expect(output.rows).toHaveLength(2);
+  });
+
+  it("still re-asks when the critic objects to a mapping without saying why (KAN-69)", async () => {
+    const [t1] = tacticIds as [string, string];
+    let first = true;
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "mapping-table-critic") {
+        if (first) {
+          first = false;
+          const rows = call.body.rows as { gap: { id: string }; mappings: { tactic_id: string }[] }[];
+          return {
+            reviews: rows.map((row) => ({
+              gap_id: row.gap.id,
+              verdict: "revise",
+              confidence: 60,
+              note: "Coverage looks too high.",
+              mappings: row.mappings.map((m) => ({ tactic_id: m.tactic_id, verdict: "revise", note: "" })),
+            })),
+          };
+        }
+        return reviewsFor(call);
+      }
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map((id) => mapped(id, t1)) };
+    });
+
+    await kgMappingModule.run(input(), ctx);
+
+    const critics = calls.filter((call) => call.purpose === "mapping-table-critic");
+    expect(critics.length).toBeGreaterThan(3);
+    expect(critics[1]!.body.note).toMatch(/note for every revise or drop/);
+  });
+
   it("tells the model why a row was rejected: open with a limited mapping must be partially_addressed (KAN-66)", async () => {
     const [a, b] = gapIds as [string, string];
     const [t1] = tacticIds as [string, string];
