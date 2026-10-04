@@ -27,7 +27,7 @@ test.describe("S3 tactic extraction", () => {
 
   test("extracts the tactics the sources already describe", async ({ page, request }) => {
     const run = await clickRunStage(page, request, "S3");
-    expect(run.summary).toMatch(/tactic candidate\(s\) accepted/);
+    expect(run.summary).toMatch(/tactic candidates? accepted/);
     expectRouteIsHonest(run);
   });
 

@@ -30,9 +30,9 @@ test.describe("S2 evidence gap extraction", () => {
     request,
   }) => {
     const run = await clickRunStage(page, request, "S2");
-    expect(run.summary).toMatch(/new gap\(s\) committed/);
+    expect(run.summary).toMatch(/new gaps? committed/);
     expectRouteIsHonest(run);
-    await expect(page.getByText(/gap candidate\(s\) accepted/).first()).toBeVisible();
+    await expect(page.getByText(/gap candidates? accepted/).first()).toBeVisible();
   });
 
   test("debates three proposer↔critic exchanges before the judge", async ({ request }) => {
