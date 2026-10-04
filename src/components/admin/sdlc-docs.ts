@@ -19,6 +19,8 @@ export const SPEC_DOCS = [
   { slug: "10-flow-technical.md", rel: "docs/sdlc/10-flow-technical.md", id: "TECH", title: "Flow (technical)", retired: false },
   { slug: "11-regression.md", rel: "docs/sdlc/11-regression.md", id: "REG", title: "Regression", retired: true },
   { slug: "12-gold-set.md", rel: "docs/sdlc/12-gold-set.md", id: "GOLD", title: "Gold set", retired: true },
+  { slug: "13-testing.md", rel: "docs/sdlc/13-testing.md", id: "TEST", title: "Testing", retired: false },
+  { slug: "requirements-compliance.md", rel: "docs/sdlc/requirements-compliance.md", id: "CMP", title: "Requirements compliance", retired: false },
 ] as const;
 
 export type SpecDoc = (typeof SPEC_DOCS)[number];
