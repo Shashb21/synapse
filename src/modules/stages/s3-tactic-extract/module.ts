@@ -25,6 +25,7 @@ import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, tacticCandidates } from "./schema";
+import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
   document_ids: z.array(z.string()).optional(),
@@ -712,7 +713,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         rejected: rejected.map(toOut),
         committed_tactic_ids,
       },
-      summary: `${accepted.length} of ${outcome.proposed.length} tactic candidate(s) accepted${
+      summary: `${accepted.length} of ${plural(outcome.proposed.length, "tactic candidate")} accepted${
         input.dry_run ? " (dry run)" : `, ${committed_tactic_ids.length} added to the library`
       }`,
       evals: withJudgeMetrics(outcome.metrics, judged),

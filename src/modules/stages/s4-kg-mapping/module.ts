@@ -13,6 +13,7 @@ import { COVERAGE_DIMENSIONS, DIMENSION_VALUES, OVERALL_COVERAGE } from "@/lib/i
 import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
 import type { IegpState } from "@/lib/iegp/types";
 import { MAPPING_CANDIDATES_DDL, mappingCandidates } from "./schema";
+import { plural } from "@/lib/plural";
 
 export const mappingStatusSchema = z.enum(["open", "addressed", "partially_addressed"]);
 export type MappingStatus = z.infer<typeof mappingStatusSchema>;
@@ -735,8 +736,8 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
           ).length,
         },
       },
-      summary: `${acceptedRows.length} of ${outcome.proposed.length} mapping row(s) accepted${
-        input.dry_run ? " (dry run)" : `, ${committed.length} gap row(s) joined`
+      summary: `${acceptedRows.length} of ${plural(outcome.proposed.length, "mapping row")} accepted${
+        input.dry_run ? " (dry run)" : `, ${plural(committed.length, "gap row")} joined`
       }`,
       evals: [
         ...outcome.metrics,

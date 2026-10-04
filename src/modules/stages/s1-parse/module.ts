@@ -35,6 +35,7 @@ import {
   type ParseQuality,
   type ParsedDocumentBlock,
 } from "./schema";
+import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
   /** Defaults to every uploaded file that has not been parsed yet. */
@@ -253,7 +254,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
 
     return {
       output: { documents, failures },
-      summary: `${documents.length} document(s) parsed, ${failures.length} failed`,
+      summary: `${plural(documents.length, "document")} parsed, ${failures.length} failed`,
       evals: [
         { name: "documents_parsed", value: documents.length, unit: "count" },
         { name: "with_need_language", value: Number(cueRatio.toFixed(3)), unit: "ratio", target: 0.5 },

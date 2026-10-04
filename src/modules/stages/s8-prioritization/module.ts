@@ -24,6 +24,7 @@ import {
   type PriorityAxis,
   type StoredAxes,
 } from "./axes";
+import { plural } from "@/lib/plural";
 
 /**
  * The kernel's `priority_placements` table plus the human markers S8 owns:
@@ -507,7 +508,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         placements: outcome.accepted,
         skipped: outcome.rejected.length,
       },
-      summary: `${outcome.accepted.length} open gap(s) ${
+      summary: `${plural(outcome.accepted.length, "open gap")} ${
         pairChosen
           ? `placed on ${xAxis.label} × ${yAxis.label}`
           : `scored on every axis; no axis pair was chosen, so no working band was set (suggestion shown on ${xAxis.label} × ${yAxis.label})`

@@ -76,7 +76,7 @@ export function GapProposalGroupCard({
             {group.domain_label}
           </span>
           <span className="text-[10px] text-muted-foreground">
-            {group.mapped_tactic_count} mapped tactic(s)
+            {plural(group.mapped_tactic_count, "mapped tactic")}
           </span>
         </div>
         <Link

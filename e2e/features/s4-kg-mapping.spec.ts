@@ -29,7 +29,7 @@ test.describe("S4 LLM mapping table", () => {
 
   test("produces mapping rows from the pipeline page", async ({ page, request }) => {
     const run = await clickRunStage(page, request, "S4");
-    expect(run.summary).toMatch(/mapping row\(s\) accepted/);
+    expect(run.summary).toMatch(/mapping rows? accepted/);
     expectRouteIsHonest(run);
   });
 
