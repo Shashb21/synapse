@@ -245,7 +245,7 @@ it("announces detail errors and retries the same proposal successfully", async (
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("Detail unavailable");
   await click("Retry proposal");
   expect(host.textContent).toContain("Fingerprint: fingerprint-a");
-  expect(host.textContent).toContain("Selected generated items");
+  expect(host.textContent).toContain("Selected items");
   expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/assemblies?workspace_id=ws&assembly_id=assembly-a", { cache: "no-store" });
 });
 
