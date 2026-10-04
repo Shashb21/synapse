@@ -18,6 +18,8 @@ export type ProviderErrorInfo = {
   error_type: string | null;
   /** The provider's own error message, trimmed and with any key redacted. */
   provider_message: string | null;
+  /** A 429 for a per-day quota (Gemini's free tier): waiting a minute won't help (KAN-70). */
+  daily_quota?: boolean;
 };
 
 /** Where each provider's owner adds credit. */
@@ -32,11 +34,23 @@ const BILLING_HINT: Record<string, string> = {
 const BILLING_PATTERN =
   /credit balance|insufficient[_ ]quota|insufficient[_ ]credits?|out of credits|exceeded your current quota|billing|payment required|spending limit/i;
 
+/**
+ * Out of money, as opposed to out of requests. A 429 only counts as billing when it
+ * says so outright: Gemini's free-tier 429 reads "You exceeded your current quota,
+ * please check your plan and billing details" but is a rate or daily limit (KAN-70).
+ */
+const CREDIT_PATTERN = /credit balance|insufficient[_ ]quota|insufficient[_ ]credits?|out of credits|payment required|spending limit/i;
+
+const AUTH_PATTERN = /api key not valid|api_key_invalid|invalid api key|incorrect api key|invalid x-api-key/i;
+
 /** Which of the handled cases a provider failure is. Billing wins over the status code. */
 export function classifyProviderError(status: number, error_type: string | null, message: string | null): ProviderErrorKind {
-  if (status === 402 || BILLING_PATTERN.test(`${error_type ?? ""} ${message ?? ""}`)) return "billing";
-  if (status === 401 || status === 403) return "auth";
-  if (status === 429) return "rate_limit";
+  const said = `${error_type ?? ""} ${message ?? ""}`;
+  if (status === 402) return "billing";
+  if (status === 429) return CREDIT_PATTERN.test(said) ? "billing" : "rate_limit";
+  if (BILLING_PATTERN.test(said)) return "billing";
+  // Google answers a bad key with HTTP 400 INVALID_ARGUMENT "API key not valid" (KAN-70).
+  if (status === 401 || status === 403 || AUTH_PATTERN.test(said)) return "auth";
   if (status >= 500) return "unavailable";
   if (status === 400 || status === 404 || status === 422) return "bad_request";
   return "other";
@@ -80,7 +94,9 @@ function ownerMessage(info: ProviderErrorInfo, kind: ProviderErrorKind): string 
     case "auth":
       return `${name} rejected the request: the API key in ${info.key_env} was rejected (HTTP ${info.status}). Replace it in the server environment with a valid key, then run the stage again.`;
     case "rate_limit":
-      return `${name} is rate-limiting this account (HTTP 429). Wait a minute and run the stage again, or raise the account's rate limit.${said}`;
+      return info.daily_quota
+        ? `${name} has used this model's daily request quota (HTTP 429). It resets daily; until then switch the route to another model or provider in /admin/control.${said}`
+        : `${name} is rate-limiting this account (HTTP 429). Wait a minute and run the stage again, or raise the account's rate limit.${said}`;
     case "unavailable":
       return `${name} is overloaded or unavailable (HTTP ${info.status}). Run the stage again in a few minutes, or switch its route in /admin/control.`;
     case "bad_request":

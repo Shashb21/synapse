@@ -76,8 +76,15 @@ export function isAdminOnlyError(error: unknown): boolean {
  * The customer's message for an error, or null when its own message is already
  * fine to show (validation errors, "Nothing to ingest." and the like).
  */
+const DAILY_QUOTA_CUSTOMER_MESSAGE =
+  "The AI has reached its limit for today. Your work is saved; try again tomorrow, or contact your Synapse administrator.";
+
 export function customerErrorMessage(error: unknown): string | null {
-  if (error instanceof ProviderError) return PROVIDER_CUSTOMER_MESSAGE[error.kind];
+  if (error instanceof ProviderError) {
+    // A daily cap won't lift in a minute (KAN-70).
+    if (error.info.daily_quota) return DAILY_QUOTA_CUSTOMER_MESSAGE;
+    return PROVIDER_CUSTOMER_MESSAGE[error.kind];
+  }
   if (!isAdminOnlyError(error)) return null;
   const stage = stageOf(error);
   const step = (stage && STEP_NAME[stage]) ?? "The AI step";

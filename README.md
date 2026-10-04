@@ -125,6 +125,15 @@ naming the env var, and the manual path stays available; nothing falls back to
 rules. Copy `.env.example` to `.env.local` and fill in what you need; never commit
 a credential.
 
+To test the AI steps without paid credit, use the free Gemini tier: put a free
+Google AI Studio key in `GEMINI_API_KEY`, set `GEMINI_MODELS=gemini-3.8-flash`, restart,
+and choose **Route every stage to → Google · Gemini** in AI & routing. A free-tier
+rate limit (HTTP 429) or "high demand" (HTTP 503) is waited out and retried a few times. A per-day quota is
+reported to the owner and not retried. Google's free tier can be as low as 20
+requests a day per model, so for a full run use OpenRouter's free models instead:
+`OPENROUTER_API_KEY` plus `OPENROUTER_MODELS` naming a `:free` model that supports
+JSON (see `.env.example`), routed the same way.
+
 Every edit, lock and audit row records the signed-in person.
 
 ## Sharing (Origin + GitHub)
