@@ -13,6 +13,7 @@ import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-a
 import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
+import { NewSourceNote } from "@/components/gap-suggestions";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { sessionContext } from "@/modules/auth/session";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
@@ -127,8 +128,29 @@ export default async function GapDetailPage({
         )}
       </div>
       <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
+      {gap.new_source_at ? (
+        <div className="mb-4">
+          <NewSourceNote gapId={gap.id} newSource={newSourceOf(state, gap.new_source_at, gap.new_source_need_id ?? null)} />
+        </div>
+      ) : null}
       <div className="mb-4 border border-border bg-card p-3 rounded-lg">
         <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
+        {(gap.related_gap_ids ?? []).length > 0 ? (
+          <p className="mt-2 text-[12px] text-muted-foreground" data-testid="related-gaps">
+            Related:{" "}
+            {(gap.related_gap_ids ?? []).map((id, index) => {
+              const related = state.gaps.find((row) => row.id === id);
+              return (
+                <span key={id}>
+                  {index > 0 ? ", " : null}
+                  <Link href={`/gaps/${id}`} className="text-foreground underline-offset-2 hover:underline">
+                    {related ? `${gapNumberLabel(related.number)} ${related.name}` : id}
+                  </Link>
+                </span>
+              );
+            })}
+          </p>
+        ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
           {gap.retired ? null : (
@@ -661,4 +683,11 @@ export default async function GapDetailPage({
       )}
     </AppShell>
   );
+}
+
+/** The need that joined after the gap was validated, for its "New source added" note (KAN-74). */
+function newSourceOf(state: Awaited<ReturnType<typeof loadState>>, at: string, needId: string | null) {
+  const need = state.needs.find((row) => row.id === needId);
+  const source = need ? state.sources.find((row) => row.id === need.source_id) : undefined;
+  return { at, statement: need?.statement ?? null, source_title: source?.title ?? null };
 }

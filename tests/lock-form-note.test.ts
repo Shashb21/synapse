@@ -41,7 +41,20 @@ describe("LockForm note field", () => {
     );
     expect([...withNote].sort()).toEqual(
       // lock_gap (exclude) and unpark_gap store theirs as the rationale on the lock, audit and edit record (KAN-16).
-      ["assign_tactic", "confirm_coverage_review", "lock_gap", "lock_need", "lock_priority", "unpark_gap", "validate_gap"].sort(),
+      // The overlap decisions and the new-source review store theirs on the suggestion and edit record (KAN-74/75).
+      [
+        "accept_gap_merge",
+        "accept_gap_split",
+        "assign_tactic",
+        "clear_new_source_flag",
+        "confirm_coverage_review",
+        "lock_gap",
+        "lock_need",
+        "lock_priority",
+        "reject_gap_suggestion",
+        "unpark_gap",
+        "validate_gap",
+      ].sort(),
     );
     for (const { file, tag } of lockFormTags()) {
       const action = actionOf(tag);

@@ -10,6 +10,8 @@ import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { GapDetailsEditor } from "@/components/gap-metadata";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { GapSuggestions, NewSourceNote, NewSourcePill } from "@/components/gap-suggestions";
+import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
 const STATUS_BAND: Record<string, string> = {
   validated_open: "border-l-rose-500",
@@ -205,6 +207,20 @@ function GapDetailPane({
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <p className="mt-3 text-[13px] leading-5 text-muted-foreground">{card.statement}</p>
+      {card.related.length > 0 ? (
+        <p className="mt-2 text-[12px] text-muted-foreground">
+          Related:{" "}
+          {card.related.map((row, index) => (
+            <span key={row.gap_id}>
+              {index > 0 ? ", " : null}
+              <Link href={`/gaps/${row.gap_id}`} className="text-foreground underline-offset-2 hover:underline">
+                {gapNumberLabel(row.number)} {row.name}
+              </Link>
+            </span>
+          ))}
+        </p>
+      ) : null}
+      {card.new_source ? <NewSourceNote gapId={card.gap_id} newSource={card.new_source} /> : null}
       <div className="mt-4">
         {/* Keyed by gap so switching the selected gap resets the editor's local tags. */}
         <GapSettingsEditor
@@ -339,6 +355,7 @@ export function GapsWorkbench({
   initialFilter,
   settingOptions = [],
   priorities = {},
+  suggestions = [],
 }: {
   cards: ReviewGapCard[];
   availableTactics: TacticLibraryItem[];
@@ -347,6 +364,8 @@ export function GapsWorkbench({
   settingOptions?: string[];
   /** Each gap's band on the Prioritization Matrix, when it has one. */
   priorities?: Record<string, GapPriority>;
+  /** Overlaps waiting on a person: merge, split or reject (KAN-75). */
+  suggestions?: GapSuggestionCard[];
 }) {
   const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
   const [query, setQuery] = useState("");
@@ -417,6 +436,7 @@ export function GapsWorkbench({
         <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
+      <GapSuggestions suggestions={suggestions} />
       {cards.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">
           {ai
@@ -551,6 +571,7 @@ export function GapsWorkbench({
                                   {card.gap_status === "validated_partial" ? "Split or rewrite" : "Unconfirmed"}
                                 </span>
                               ) : null}
+                              {card.new_source ? <NewSourcePill /> : null}
                             </span>
                           </button>
                         </td>
