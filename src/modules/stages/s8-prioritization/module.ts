@@ -610,6 +610,25 @@ export async function listPlacements(): Promise<PlacementRecord[]> {
 }
 
 /**
+ * Puts a gap's validated band back to draft (KAN-75): its question changed, so the
+ * band a person validated was for different wording. Scores, the band and any
+ * human markers stay as they were; only the validation is withdrawn. Returns
+ * whether there was a validated band to reset.
+ */
+export async function resetPlacementValidation(gapId: string): Promise<boolean> {
+  await ensurePlacementSchema();
+  const current = await currentPlacement(gapId);
+  if (!current?.validated) return false;
+  await db().update(placementsTable).set({ validated: false, at: nowIso() }).where(eq(placementsTable.gap_id, gapId));
+  return true;
+}
+
+/** Gaps whose band a person validated: a new source on one is flagged for a look (KAN-74). */
+export async function validatedPlacementGapIds(): Promise<string[]> {
+  return (await listPlacements()).filter((row) => row.validated).map((row) => row.gap_id);
+}
+
+/**
  * How far Prioritize has got: the Open gaps (the ones the matrix places) and
  * how many of them have a validated band. The same count the Prioritize
  * footer shows.

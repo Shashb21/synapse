@@ -248,6 +248,16 @@ CREATE TABLE IF NOT EXISTS breakout_group_gaps (
   group_id text NOT NULL, gap_id text NOT NULL,
   PRIMARY KEY (group_id, gap_id)
 );
+CREATE TABLE IF NOT EXISTS gap_suggestions (
+  id text PRIMARY KEY, gap_id text NOT NULL, run_id text NOT NULL, candidate_row_id text,
+  source_id text NOT NULL, name text NOT NULL, statement text NOT NULL, domain text NOT NULL,
+  source_quote text NOT NULL, shared_part text NOT NULL, new_part text NOT NULL,
+  merged_name text NOT NULL, merged_statement text NOT NULL,
+  split_name text NOT NULL, split_statement text NOT NULL,
+  extra_sources jsonb NOT NULL DEFAULT '[]'::jsonb, status text NOT NULL,
+  result_gap_id text, decided_by text, rationale text,
+  created_at text NOT NULL, decided_at text
+);
 `;
 
 /** Every statement that brings a schema's IEGP tables up to date. */
@@ -277,6 +287,10 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS number integer",
     "ALTER TABLE tactics ADD COLUMN IF NOT EXISTS source_quote text NOT NULL DEFAULT ''",
     "ALTER TABLE needs ALTER COLUMN confidence DROP NOT NULL",
+    // KAN-74/75: a new source on a validated gap, and gaps split from a shared question.
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_at text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_need_id text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS related_gap_ids jsonb NOT NULL DEFAULT '[]'::jsonb",
     // Kernel, source-block, room, walkthrough and stage-module tables.
     ...workspaceTableStatements(),
   ];
@@ -368,6 +382,7 @@ export async function ensureCurrentSchemaTables(): Promise<void> {
 export async function wipeIegp() {
   const d = db();
   const tables = [
+    "gap_suggestions",
     "gold_coverages",
     "gold_needs",
     "audit",

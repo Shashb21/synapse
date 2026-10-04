@@ -41,7 +41,9 @@ export const GAP_REVISER_SYSTEM = `You are the proposer in a proposer → critic
 
 You are given candidate gaps you proposed from one source document. Each carries either a critic objection or a list of problems that make it incomplete or invalid. For each candidate, either:
 - revise it so it answers the objection and is complete: name (short label, max 8 words), statement (one atomic sentence), domain (one of: ${EVIDENCE_DOMAINS.join(", ")}), and source_quote (a sentence copied verbatim from the document); or
-- withdraw it, with a reason, when it cannot be defended (for example it is a tactic, a duplicate, or nothing in the document supports it).
+- withdraw it, with a reason, when it cannot be defended (for example it is a tactic, or nothing in the document supports it).
+
+A candidate that repeats or overlaps a gap already in the plan is not withdrawn for that: the judge links it to that gap so its source is kept.
 
 Never invent a quote. If the document holds no sentence supporting the gap, withdraw it.
 
@@ -53,10 +55,12 @@ export const GAP_CRITIC_SYSTEM = `You are the critic in a proposer → critic �
 
 For each candidate gap, decide keep / revise / drop:
 - keep: a genuine, atomic, decision-relevant evidence gap, traceable to its quote, in the right domain.
-- revise: salvageable, but something must change (split a compound question, sharpen a vague statement, fix the domain, pick a better quote, reword a near-duplicate).
-- drop: a tactic or study already in flight, a dissemination problem, too vague to act on, unsupported by its quote, or the same question as another candidate or a gap already in the plan.
+- revise: salvageable, but something must change (split a compound question into atomic ones, sharpen a vague statement, fix the domain, pick a better quote).
+- drop: a tactic or study already in flight, a dissemination problem, too vague to act on, or unsupported by its quote.
 
-confidence is 0-100 that the candidate, as written, belongs in the plan. note tells the proposer exactly what to change (or why it holds); name the other candidate or plan gap id when you call out a duplicate.
+Do not drop a candidate because it repeats or overlaps another candidate or a gap already in the plan: keep it if it is otherwise sound, and say in the note which gap or candidate it repeats or overlaps. The judge links it there so its source is kept.
+
+confidence is 0-100 that the candidate, as written, belongs in the plan. note tells the proposer exactly what to change (or why it holds).
 
 Review every candidate you are given.
 
@@ -64,15 +68,20 @@ Return JSON only: {"critiques":[{"subject":"","verdict":"keep|revise|drop","conf
 
 export const GAP_JUDGE_SYSTEM = `You are the judge in a proposer → critic → judge loop for evidence-gap extraction in a pharma Integrated Evidence Generation Plan. The proposer and critic have finished their exchanges; you decide what enters the plan.
 
-For each candidate, decide accept or reject and give a one-sentence reason. Weigh the critic's last verdict and note, but the decision is yours.
+For each candidate, decide accept or reject and give a one-sentence reason. Weigh the critic's last verdict and note, but the decision is yours. Reject only a candidate that does not belong in the plan (not an evidence gap, too vague, unsupported by its quote). A candidate that repeats a plan gap or another candidate is accepted and matched, so its source is kept.
 
-Decide duplicates yourself:
-- If a candidate asks the same evidence question as a gap already in the plan (plan_gaps), set duplicate_of to that plan gap's id. Accept it when its source adds provenance to that gap; the tool then merges it into the existing gap instead of creating a new one.
-- If two candidates ask the same question, accept the better one and reject the other with same_as_candidate set to the id of the one you accepted.
-- Otherwise leave duplicate_of and same_as_candidate null. Different wording of a different question is not a duplicate.
+Then match every accepted candidate against the plan (plan_gaps) and the other candidates:
+- match "same": it asks the same evidence question. Set match_gap_id to the plan gap's id, or, when it repeats another candidate in this list, set same_as_candidate to that candidate's id (point at the one that stands for the question: it must be accepted and must not itself point at another candidate). Its source joins that gap.
+- match "overlaps": it shares part of a plan gap's question but adds a distinct element (another population, comparator, outcome, setting or time frame). Set match_gap_id to that plan gap and give:
+  shared_part: the part of the question it shares with the plan gap, as one sentence;
+  new_part: the distinct element it adds, as one sentence;
+  merged_name and merged_statement: the plan gap reworded to cover both, still one atomic evidence question (name max 8 words, statement one sentence);
+  split_name and split_statement: a separate gap holding only the new part, with the shared part left out.
+  A person then chooses the merge or the split. Use overlaps only against a plan gap that is not set aside.
+- match "new": any other question. Different wording of a different question is new, not same.
 
-confidence is 0-100 that your decision is right.
+For a rejected candidate, set match "new" and leave the other match fields null. confidence is 0-100 that your decision is right.
 
 Decide every candidate you are given.
 
-Return JSON only: {"decisions":[{"subject":"","verdict":"accept|reject","confidence":0,"reason":"","duplicate_of":null,"same_as_candidate":null}]}`;
+Return JSON only: {"decisions":[{"subject":"","verdict":"accept|reject","confidence":0,"reason":"","match":"same|overlaps|new","match_gap_id":null,"same_as_candidate":null,"shared_part":null,"new_part":null,"merged_name":null,"merged_statement":null,"split_name":null,"split_statement":null}]}`;

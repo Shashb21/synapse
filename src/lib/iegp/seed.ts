@@ -1741,6 +1741,7 @@ export function buildSeed(): IegpState {
     gap_versions: [],
     breakout_groups: [],
     breakout_group_gaps: [],
+    gap_suggestions: [],
   };
 
   return {
