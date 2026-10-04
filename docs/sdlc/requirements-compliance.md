@@ -4,7 +4,7 @@ This checks [the requirements (v2.1)](01-requirements.md) against the code at `m
 
 Jira: [KAN-7](https://synapse21.atlassian.net/browse/KAN-7). Each gap links to its follow-up issue.
 
-**Met** means the behaviour exists in the code, with tests where cited. **Partial** means it exists with a known gap. **Missing** means it is not built. **Off** means the code exists but the feature is switched off in the app by an owner decision; requirement priorities are unchanged.
+**Met** means the behaviour exists in the code, with tests where cited. **Partial** means it exists with a known gap. **Missing** means it is not built. **Off** means the code exists but the feature is switched off in the app by an owner decision; requirement priorities are unchanged. **Dropped** means the owner withdrew the requirement; it is listed for traceability and not counted.
 
 ## Summary
 
@@ -17,13 +17,13 @@ Jira: [KAN-7](https://synapse21.atlassian.net/browse/KAN-7). Each gap links to i
 | Needs and gaps | 6 | 0 | 0 | 0 |
 | Tactics and mapping | 5 | 0 | 0 | 0 |
 | Prioritization, ideation, timeline | 5 | 4 | 0 | 0 |
-| AI governance | 5 | 0 | 1 | 0 |
+| AI governance | 5 | 0 | 0 | 0 |
 | Manual control and audit | 2 | 1 | 0 | 0 |
 | Room | 0 | 0 | 0 | 4 |
 | Owner tool | 2 | 0 | 0 | 0 |
 | User experience | 2 | 7 | 1 | 0 |
 | Quality and operations | 1 | 3 | 2 | 0 |
-| **Total (77)** | **52** | **16** | **5** | **4** |
+| **Total (76; REQ-AI-006 dropped)** | **52** | **16** | **4** | **4** |
 
 Since 26 Sep: the security items (KAN-10, KAN-11, KAN-12), workspace-scoped tables (KAN-13), restore paths and manual start (KAN-16), dead-code removal (KAN-21), seats (KAN-28), per-section AI switches (KAN-53), env-only provider keys (KAN-65) and the upload limit (KAN-68) landed. The five v2.1 rows (REQ-AUTH-008, REQ-AUTH-009, REQ-WS-008, REQ-AI-006, REQ-TIM-004) are checked here for the first time.
 
@@ -119,7 +119,7 @@ Since 26 Sep: the security items (KAN-10, KAN-11, KAN-12), workspace-scoped tabl
 | REQ-AI-003 | Met | `completeAll` re-asks, then throws `IncompleteAnswerError`. `tests/llm-parse.test.ts`. | — |
 | REQ-AI-004 | Met | Master switch plus per-section switches (`ai-switch.ts`, `ai-sections.ts`); the kernel refuses; the UI read now fails closed (`src/app/layout.tsx`). `tests/ai-switch.test.ts`, `tests/kan-53-ai-sections.test.ts`, e2e `ai-off.spec.ts`, `ai-toggle-settings.spec.ts`. | — |
 | REQ-AI-005 | Met | With AI on, gaps and tactics can be added by hand before anything is ingested (`src/app/page.tsx`). `tests/kan-16-manual-start.test.ts`. | — |
-| REQ-AI-006 | **Missing** (superseded) | The per-workspace AI setting was removed by owner decision (KAN-53): `ai-switch.ts` says the old `workspaces.ai_enabled` "no longer counts", and `/api/workspaces/[id]/ai` refuses every change. AI is now per section, platform-wide. The requirement text needs an owner update. | [KAN-53](https://synapse21.atlassian.net/browse/KAN-53) |
+| REQ-AI-006 | Dropped | Dropped by owner decision (4 Oct 2026). There is no per-workspace AI setting: the owner controls AI in the admin panel (`/admin/control`) with the master switch and one switch per section (KAN-53, `src/modules/kernel/ai-switch.ts`). Not counted in the summary. | [KAN-53](https://synapse21.atlassian.net/browse/KAN-53) |
 
 ### 9. Manual control and audit
 
@@ -179,4 +179,4 @@ Room and Breakouts are **switched off** in code by owner decision: `ROOM_ENABLED
 2. **Abuse limits:** [KAN-20](https://synapse21.atlassian.net/browse/KAN-20) (workspace creation, parse volume, `xlsx`).
 3. **Remaining manual-control gaps:** [KAN-16](https://synapse21.atlassian.net/browse/KAN-16) (rationale on every edit, manual ideas for any Open gap), [KAN-18](https://synapse21.atlassian.net/browse/KAN-18) (save-as-final checks).
 4. **Views:** [KAN-8](https://synapse21.atlassian.net/browse/KAN-8) (Summary, List bulk actions, Board, Calendar, consistency).
-5. **Owner decisions:** update REQ-AI-006 to the per-section switches, and decide when Room and Breakouts come back.
+5. **Owner decisions:** decide when Room and Breakouts come back. (REQ-AI-006 was dropped on 4 Oct 2026; AI is controlled in the admin panel.)

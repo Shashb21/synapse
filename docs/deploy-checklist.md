@@ -39,7 +39,7 @@ Set in **Vercel → Project → Settings → Environment Variables**. Documented
 - [ ] Optional: `ALLOWED_EMAIL_DOMAINS` restricts sign-in to your organisation's domains.
 - [ ] At least one SSO provider configured for customers (§3a). There is no self sign-up.
 
-AI is not an environment setting. After deploy, the owner turns the **master switch** ("AI for all workspaces") on or off in `/admin/control` with one click; each workspace owner then has an **AI assistance** setting for their own workspace (workspace menu or settings page). AI runs only when both are on. With AI off there is no upload or parsing and every step is done by hand.
+AI is not an environment setting. After deploy, the owner turns the **master switch** ("AI for all workspaces") on or off in `/admin/control` with one click, and can switch each AI section (ingestion, extraction, mapping, split, prioritization, ideation) on or off there. Workspaces have no AI setting of their own. With AI off there is no upload or parsing and every step is done by hand.
 
 ### Admin account (email and password)
 

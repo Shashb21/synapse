@@ -2,7 +2,7 @@
 
 Status: **v2.1, 28 Sep 2026** (replaces the v1 "Velmara Insights Engine" requirements, archived in [archive-01-requirements-insights-engine.md](archive-01-requirements-insights-engine.md)).
 
-v2.1 ([KAN-21](https://synapse21.atlassian.net/browse/KAN-21)) records owner decisions made since v2: customers sign in with SSO only and need a seat; staff use password accounts; there is no self sign-up (KAN-22, KAN-28); AI has a per-workspace setting under the owner's master switch; workspaces start blank, with demo data only by choice (KAN-26); the timeline is built by hand (KAN-25); the PowerPoint export is removed. New IDs: REQ-AUTH-008, REQ-AUTH-009, REQ-WS-008, REQ-AI-006, REQ-TIM-004.
+v2.1 ([KAN-21](https://synapse21.atlassian.net/browse/KAN-21)) records owner decisions made since v2: customers sign in with SSO only and need a seat; staff use password accounts; there is no self sign-up (KAN-22, KAN-28); AI is controlled by the owner's master switch (per-section switches since KAN-53; the per-workspace setting, REQ-AI-006, was later dropped); workspaces start blank, with demo data only by choice (KAN-26); the timeline is built by hand (KAN-25); the PowerPoint export is removed. New IDs: REQ-AUTH-008, REQ-AUTH-009, REQ-WS-008, REQ-AI-006, REQ-TIM-004.
 
 IDs are stable: tests, the audit and the [compliance check](requirements-compliance.md) cite them. Priorities are **Must**, **Should** and **Could**.
 
@@ -112,7 +112,7 @@ AI drafts; people decide. Everything the AI does, a person can do by hand, and a
 | REQ-AI-003 | Incomplete or invalid model output is re-asked, then fails. Nothing is filled in by rule. | Must |
 | REQ-AI-004 | The owner can switch AI on or off for every workspace (the master switch in `/admin/control`) with one click, with no reason required. With AI off:<br>• no model is called and no automatic AI step runs;<br>• AI controls are hidden;<br>• there is no upload or parsing, and the first screen is Add gaps and Add tactics;<br>• everything else still works by hand. | Must |
 | REQ-AI-005 | With AI **on**, every manual path is still available. A person can start by adding gaps and tactics by hand without ingesting anything. | Must |
-| REQ-AI-006 | Each workspace has its own AI assistance setting. Only the workspace owner changes it (members see it read only); the change is audited in that workspace and never affects another. AI runs only when both the master switch and the workspace setting are on, and the UI says which switch turned it off. | Must |
+| REQ-AI-006 | ~~Each workspace has its own AI assistance setting.~~ **Dropped** (owner decision, 4 Oct 2026): AI is controlled only in the admin panel (`/admin/control`): the master switch and one switch per AI section (KAN-53). Workspaces have no AI setting of their own. | Dropped |
 
 ## 9. Manual control and audit
 
