@@ -83,7 +83,7 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
 /**
  * Workspace-scoped module tables. Resetting the workspace must clear these too,
  * or a stage would read artifacts pointing at domain records that no longer
- * exist. Routing, provider logins, module activation, run history and hillclimb
+ * exist. Routing, module activation, run history and hillclimb
  * signals are configuration or learning, so they survive a reset.
  */
 const WORKSPACE_TABLES = [
