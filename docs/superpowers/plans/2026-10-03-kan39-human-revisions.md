@@ -48,11 +48,11 @@
 
 **Interfaces:** Consume Task 1's strict API and server-provided revision/review state. Never fabricate actor or lineage fields.
 
-- [ ] Read installed Next.js route/component guides and applicable frontend styling skill before edits.
-- [ ] Write failing tests for contributor add/edit/remove controls, required reason/provenance, baseline/revision labels, viewer read-only behavior, stale/failed refresh invalidation, and retry of incomplete links.
-- [ ] Implement schema-specific labeled forms using existing Ledger styling, keyboard controls and announced errors. Reload saved successor and reuse its fresh approval controls; preserve baseline navigation.
-- [ ] Add usage guide with explicit workflow, limits and verification commands.
-- [ ] Run focused UI/API/revision tests, typecheck, changed-file lint and diff whitespace check.
-- [ ] Controller reviews and commits accepted task; run full `npx vitest run --silent` once, then fresh whole-branch review.
+- [x] Read installed Next.js route/component guides and applicable frontend styling skill before edits.
+- [x] Write failing tests for contributor add/edit/remove controls, required reason/provenance, baseline/revision labels, viewer read-only behavior, stale/failed refresh invalidation, and retry of incomplete links.
+- [x] Implement schema-specific labeled forms using existing Ledger styling, keyboard controls and announced errors. Reload saved successor and reuse its fresh approval controls; preserve baseline navigation.
+- [x] Add usage guide with explicit workflow, limits and verification commands.
+- [x] Run focused UI/API/revision tests, typecheck, changed-file lint and diff whitespace check.
+- [x] Controller reviews and commits accepted task; run full `npx vitest run --silent` once, then fresh whole-branch review.
 - [ ] Fix material findings and verify affected tests. Publish branch to both remotes and create/attach PR against KAN38.
 - [ ] Record verification and limitations in Jira; transition KAN-39 Done only after successful comment and checks. Select next eligible issue and arm the one-shot handoff per AGENTS.md.
