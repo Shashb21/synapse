@@ -24,4 +24,3 @@ export function heuristicScores(args: {
       : "No axis cues found in the gap text; scored at the neutral baseline.",
   };
 }
-
