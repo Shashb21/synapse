@@ -89,7 +89,13 @@ export async function runMixedComparison(request: MixedComparisonRequest): Promi
       else if (copy) await deleteWorkspace(copy.workspace_id).catch(() => undefined);
     }
     const primary_error = failure(error, "setup");
-    return finishMixedComparison({ ...scope, result: { status: primary_error.code === "identity_mismatch" ? "blocked" : "failed", candidates, evaluation: null, primary_error } });
+    try {
+      return await finishMixedComparison({ ...scope, result: { status: primary_error.code === "identity_mismatch" ? "blocked" : "failed", candidates, evaluation: null, primary_error } });
+    } catch (persistenceError) {
+      // Match the downstream terminal-error shape: keep the primary diagnosis
+      // and expose the failed retention write only as secondary context.
+      throw Object.assign(new Error(primary_error.message), { cause: persistenceError, code: primary_error.code });
+    }
   }
 
   let primary_error: MixedPrimaryError | null = null;

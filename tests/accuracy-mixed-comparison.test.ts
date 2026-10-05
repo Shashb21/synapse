@@ -103,6 +103,23 @@ describe("matched paired replay with real Postgres and kernel", () => {
     expect(runner).not.toHaveBeenCalled();
     expect(record.links).toBeNull();
   });
+  it("setup_failure_survives_failure_result_persistence_error", async () => {
+    const request = await fixture();
+    const setupError = Object.assign(new Error("Original setup configuration failure"), { code: "configuration_unavailable" });
+    const storageError = new Error("Failure-result store unavailable");
+    vi.spyOn(pipeline, "captureMixedPipelineConfiguration").mockRejectedValue(setupError);
+    const persist = vi.spyOn(records, "finishMixedComparison").mockRejectedValue(storageError);
+    const runner = vi.spyOn(pipeline, "runMixedCandidatePipeline");
+
+    await expect(runMixedComparison(request)).rejects.toMatchObject({
+      message: setupError.message, code: setupError.code, cause: storageError,
+    });
+
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({
+      status: "failed", primary_error: expect.objectContaining({ phase: "setup", code: setupError.code, message: setupError.message }),
+    }) }));
+    expect(runner).not.toHaveBeenCalled();
+  });
   it("independent_candidate_failure_does_not_cancel_valid_peer", async () => {
     const request = await fixture(), original = pipeline.runMixedCandidatePipeline;
     vi.spyOn(pipeline, "runMixedCandidatePipeline").mockImplementation(async args => args.evidence.label === "mixed"
