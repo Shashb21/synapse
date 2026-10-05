@@ -7,6 +7,7 @@ import {
   assignGapToBreakoutGroup,
   assignTacticToGap,
   clearGapStatusOverride,
+  clearNewSourceFlag,
   completeWizard,
   saveProductSetup,
   createAddressedGap,
@@ -75,6 +76,11 @@ import type { SourceType } from "@/lib/iegp/enums";
 import { ingestThroughStages, type IngestPayload } from "./ingest-pipeline";
 import { MAX_UPLOAD_BYTES, TOO_LARGE, uploadKindOf } from "@/lib/ingest/upload-formats";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
+import {
+  acceptGapMergeSuggestion,
+  acceptGapSplitSuggestion,
+  rejectGapSuggestionKeepingCandidate,
+} from "@/modules/stages/s2-gap-extract/suggestions";
 
 export const runtime = "nodejs";
 
@@ -592,6 +598,39 @@ export async function POST(request: Request) {
           actor_function,
           note: body.note,
         });
+        break;
+      // An overlap suggestion from S2 (KAN-75): merge into the gap, split off a new gap, or reject.
+      // The person may edit the proposed wording; a blank field keeps the proposal's.
+      case "accept_gap_merge":
+        await acceptGapMergeSuggestion({
+          suggestion_id: body.suggestion_id,
+          name: typeof body.name === "string" && body.name.trim() ? body.name : undefined,
+          statement: typeof body.statement === "string" && body.statement.trim() ? body.statement : undefined,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "accept_gap_split":
+        await acceptGapSplitSuggestion({
+          suggestion_id: body.suggestion_id,
+          name: typeof body.name === "string" && body.name.trim() ? body.name : undefined,
+          statement: typeof body.statement === "string" && body.statement.trim() ? body.statement : undefined,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "reject_gap_suggestion":
+        await rejectGapSuggestionKeepingCandidate({
+          suggestion_id: body.suggestion_id,
+          rationale: rationaleOf(body),
+          actor_name,
+          actor_function,
+        });
+        break;
+      case "clear_new_source_flag":
+        await clearNewSourceFlag({ gap_id: body.gap_id, rationale: rationaleOf(body), actor_name, actor_function });
         break;
       case "modify_gap":
         await modifyGap({

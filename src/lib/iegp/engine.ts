@@ -896,6 +896,14 @@ export type PlanGapCard = {
   parent_gap_id: string | null;
 };
 
+/** The source that joined a validated gap, for its "New source added" note (KAN-74). */
+function newSourceOf(state: IegpState, gap: EvidenceGap): ReviewGapCard["new_source"] {
+  if (!gap.new_source_at) return null;
+  const need = state.needs.find((row) => row.id === gap.new_source_need_id);
+  const source = need ? state.sources.find((row) => row.id === need.source_id) : undefined;
+  return { at: gap.new_source_at, statement: need?.statement ?? null, source_title: source?.title ?? null };
+}
+
 export type ReviewNeedSnippet = {
   id: string;
   statement: string;
@@ -922,6 +930,13 @@ export type ReviewGapCard = {
   settings: string[];
   metadata: GapMetadata;
   number: number;
+  /**
+   * A source that joined after a person validated the gap or its priority (KAN-74):
+   * when it arrived and what it said. Null once a person marks it reviewed.
+   */
+  new_source: { at: string; statement: string | null; source_title: string | null } | null;
+  /** Gaps split from a shared question (KAN-75). */
+  related: { gap_id: string; number: number; name: string }[];
 };
 
 export type OpenGapCard = {
@@ -1145,6 +1160,11 @@ export function buildPlanWorkspace(state: IegpState): {
       settings: gap.settings ?? [],
       metadata: gap.metadata,
       number: gap.number,
+      new_source: newSourceOf(state, gap),
+      related: (gap.related_gap_ids ?? [])
+        .map((id) => state.gaps.find((row) => row.id === id))
+        .filter((row): row is EvidenceGap => Boolean(row))
+        .map((row) => ({ gap_id: row.id, number: row.number, name: row.name })),
     });
   }
   review.sort(compareReviewGapCards);

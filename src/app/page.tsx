@@ -4,6 +4,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
+import { pendingSuggestionCards } from "@/lib/iegp/gap-suggestion-cards";
 import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
 import { loadTacticIdeation } from "@/components/tactic-ideation/data";
@@ -179,6 +180,7 @@ export default async function HomePage({
           initialFilter={gapFilter}
           settingOptions={settingOptions(state)}
           priorities={priorities}
+          suggestions={pendingSuggestionCards(state)}
         />
         <SetAsideGaps gaps={state.gaps} />
       </>

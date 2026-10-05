@@ -81,6 +81,8 @@ function card(id: string, number: number, overrides: Partial<ReviewGapCard> = {}
     settings: [],
     metadata: {} as ReviewGapCard["metadata"],
     number,
+    new_source: null,
+    related: [],
     ...overrides,
   };
 }

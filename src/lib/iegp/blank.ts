@@ -43,6 +43,7 @@ function emptyState(asset: Asset, detail: string): IegpState {
     gap_versions: [],
     breakout_groups: [],
     breakout_group_gaps: [],
+    gap_suggestions: [],
   };
 }
 

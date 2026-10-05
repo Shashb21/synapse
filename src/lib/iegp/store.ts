@@ -7,7 +7,15 @@ import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import type { GapMetadata, IegpState, Lock, GapStatusOverride } from "./types";
+import type {
+  GapMetadata,
+  GapStatusOverride,
+  GapSuggestion,
+  GapSuggestionSource,
+  GapSuggestionStatus,
+  IegpState,
+  Lock,
+} from "./types";
 import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
 import { tacticDateError, tacticDateOrderError, type TacticDateField } from "./tactic-dates";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
@@ -167,6 +175,7 @@ async function readState(): Promise<IegpState> {
     gap_versions,
     breakout_groups,
     breakout_group_gaps,
+    gap_suggestions,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -188,6 +197,7 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.gapVersions),
     d.select().from(t.breakoutGroups),
     d.select().from(t.breakoutGroupGaps),
+    d.select().from(t.gapSuggestions),
   ]);
   const asset = assetRows[0]!;
   return {
@@ -228,6 +238,9 @@ async function readState(): Promise<IegpState> {
       settings: normalizeSettings(g.settings),
       metadata: normalizeGapMetadata(g.metadata),
       number: g.number ?? 0,
+      new_source_at: g.new_source_at ?? null,
+      new_source_need_id: g.new_source_need_id ?? null,
+      related_gap_ids: Array.isArray(g.related_gap_ids) ? g.related_gap_ids.map(String) : [],
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -303,6 +316,14 @@ async function readState(): Promise<IegpState> {
       actor_function: row.actor_function as ActorFunction,
     })),
     breakout_group_gaps: breakout_group_gaps,
+    gap_suggestions: gap_suggestions.map((row) => ({
+      ...row,
+      domain: row.domain as IegpState["gaps"][0]["domain"],
+      status: row.status as IegpState["gap_suggestions"][0]["status"],
+      extra_sources: Array.isArray(row.extra_sources)
+        ? (row.extra_sources as IegpState["gap_suggestions"][0]["extra_sources"])
+        : [],
+    })),
   };
 }
 
@@ -361,6 +382,7 @@ export async function persistState(state: IegpState) {
   if (state.breakout_group_gaps.length) {
     await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
   }
+  if (state.gap_suggestions?.length) await d.insert(t.gapSuggestions).values(state.gap_suggestions);
 }
 
 /**
@@ -2818,13 +2840,38 @@ export type CandidateNeedRow = {
 };
 
 /**
+ * A candidate the S2 judge found to overlap an existing gap (KAN-74): it becomes a
+ * suggestion for a person, never a gap, until someone accepts a merge or a split.
+ */
+export type OverlapRow = {
+  /** The candidate's id in this run. */
+  id: string;
+  gap_id: string;
+  run_id: string;
+  candidate_row_id?: string | null;
+  name: string;
+  statement: string;
+  domain: EvidenceDomain;
+  source_quote: string;
+  shared_part: string;
+  new_part: string;
+  merged_name: string;
+  merged_statement: string;
+  split_name: string;
+  split_statement: string;
+};
+
+/**
  * Commits a judged candidate set against an existing source. The S2/S3 LLM
  * stages decide what the set is and which rows repeat an existing record; this
  * function only persists those decisions:
  * - a gap with `duplicate_of` joins that live gap (its need is linked there);
  *   otherwise it is inserted as a new gap. An unknown id throws.
+ * - an overlap row becomes a pending suggestion on its gap; no gap is created.
  * - a need links to the gap named by `gap_id`, or to the gap row with its
  *   candidate id. A need with neither throws: nothing is linked by similarity.
+ * - a need joining a gap a person already validated (its status, or its priority
+ *   in `validated_gap_ids`) flags the gap "new source added" (KAN-74).
  * - a tactic with `duplicate_of` is skipped (the id must exist); otherwise it is
  *   inserted. Only rows the S3 judge accepted are passed here, so they are
  *   stored accepted as that judge's decision unless a row says `candidate`.
@@ -2839,6 +2886,9 @@ export async function commitExtractedRecords(args: {
   needs: CandidateNeedRow[];
   gaps: ExtractedGap[];
   tactics: ExtractedTactic[];
+  overlaps?: OverlapRow[];
+  /** Gaps whose priority a person validated (S8 keeps those), so a new source on them is flagged. */
+  validated_gap_ids?: string[];
   /** @deprecated Ignored. Mapping runs only as S4. */
   apply_mappings?: boolean;
 }): Promise<{
@@ -2847,6 +2897,12 @@ export async function commitExtractedRecords(args: {
   tactic_ids: string[];
   merged_gap_ids: string[];
   skipped_tactic_ids: string[];
+  /** The gap each gap row (or need with a gap_id) joined or became, by candidate id. */
+  gap_id_by_row: Record<string, string>;
+  /** The suggestion each overlap row became, by candidate id. */
+  suggestion_id_by_row: Record<string, string>;
+  /** Validated gaps a new source joined; they now show "New source added". */
+  flagged_gap_ids: string[];
 }> {
   const state = await loadState();
   const sourceId = args.source_id;
@@ -2874,6 +2930,13 @@ export async function commitExtractedRecords(args: {
       );
     }
   }
+  for (const overlap of args.overlaps ?? []) {
+    if (!liveGaps.has(overlap.gap_id) && !setAsideGaps.has(overlap.gap_id)) {
+      throw new Error(
+        `Gap candidate ${overlap.id} is marked as overlapping ${overlap.gap_id}, which is not a gap in the plan. Nothing was saved.`,
+      );
+    }
+  }
   for (const tac of args.tactics) {
     if (tac.duplicate_of && !tacticIdsKnown.has(tac.duplicate_of)) {
       throw new Error(
@@ -2885,7 +2948,8 @@ export async function commitExtractedRecords(args: {
   const needsOnExistingGaps: CandidateNeedRow[] = [];
   for (const need of args.needs) {
     if (need.gap_id) {
-      if (!liveGaps.has(need.gap_id)) {
+      // A repeat of a gap a person set aside joins it too, and leaves it set aside.
+      if (!liveGaps.has(need.gap_id) && !setAsideGaps.has(need.gap_id)) {
         throw new Error(`Need candidate ${need.id} links to ${need.gap_id}, which is not a live gap. Nothing was saved.`);
       }
       needsOnExistingGaps.push(need);
@@ -2905,6 +2969,25 @@ export async function commitExtractedRecords(args: {
   const createdNeedIds: string[] = [];
   const createdGapIds: string[] = [];
   const mergedGapIds: string[] = [];
+  const gapIdByRow: Record<string, string> = {};
+  const suggestionIdByRow: Record<string, string> = {};
+  const flaggedGapIds: string[] = [];
+  // A person has already judged these: a new source on them is worth a second look.
+  const validatedPriority = new Set(args.validated_gap_ids ?? []);
+  const reviewed = new Set(
+    state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
+  );
+
+  // A gap holds each source sentence once: re-running extraction on a document, or two
+  // candidates quoting the same sentence, must not attach it again (KAN-74).
+  const quoteKey = (gapId: string, quote: string) =>
+    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim()}`;
+  const attached = new Set(
+    state.need_gap_links.flatMap((link) => {
+      const need = state.needs.find((row) => row.id === link.need_id);
+      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+    }),
+  );
 
   const addNeed = async (args2: {
     gapId: string;
@@ -2912,6 +2995,9 @@ export async function commitExtractedRecords(args: {
     quote: string;
     domain: EvidenceDomain;
   }) => {
+    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    if (attached.has(key)) return;
+    attached.add(key);
     const needId = nextId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
@@ -2928,6 +3014,13 @@ export async function commitExtractedRecords(args: {
     const role = hasPrimary.has(args2.gapId) ? "supporting" : "primary";
     hasPrimary.add(args2.gapId);
     await linkNeedOntoGap(needId, args2.gapId, role);
+    if (reviewed.has(args2.gapId)) {
+      await db()
+        .update(t.gaps)
+        .set({ new_source_at: now(), new_source_need_id: needId })
+        .where(eq(t.gaps.id, args2.gapId));
+      if (!flaggedGapIds.includes(args2.gapId)) flaggedGapIds.push(args2.gapId);
+    }
   };
 
   for (const gapRow of args.gaps) {
@@ -2944,6 +3037,7 @@ export async function commitExtractedRecords(args: {
       });
       createdGapIds.push(gapId);
     }
+    gapIdByRow[gapRow.id] = gapId;
     const need = needByGapRow.get(gapRow.id);
     await addNeed({
       gapId,
@@ -2953,13 +3047,42 @@ export async function commitExtractedRecords(args: {
     });
   }
   for (const need of needsOnExistingGaps) {
-    const gap = liveGaps.get(need.gap_id!)!;
+    const gap = (liveGaps.get(need.gap_id!) ?? setAsideGaps.get(need.gap_id!))!;
     await addNeed({
       gapId: gap.id,
       statement: need.statement,
       quote: need.source_quote,
       domain: gap.domain,
     });
+    gapIdByRow[need.id] = gap.id;
+  }
+  for (const overlap of args.overlaps ?? []) {
+    const id = newId("gsug");
+    await db().insert(t.gapSuggestions).values({
+      id,
+      gap_id: overlap.gap_id,
+      run_id: overlap.run_id,
+      candidate_row_id: overlap.candidate_row_id ?? null,
+      source_id: sourceId,
+      name: overlap.name,
+      statement: overlap.statement,
+      domain: overlap.domain,
+      source_quote: overlap.source_quote,
+      shared_part: overlap.shared_part,
+      new_part: overlap.new_part,
+      merged_name: overlap.merged_name,
+      merged_statement: overlap.merged_statement,
+      split_name: overlap.split_name,
+      split_statement: overlap.split_statement,
+      extra_sources: [],
+      status: "pending",
+      result_gap_id: null,
+      decided_by: null,
+      rationale: null,
+      created_at: now(),
+      decided_at: null,
+    });
+    suggestionIdByRow[overlap.id] = id;
   }
 
   const tacticIds = state.tactics.map((x) => x.id);
@@ -3006,7 +3129,7 @@ export async function commitExtractedRecords(args: {
     "source",
     sourceId,
     "ingest",
-    `Committed ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined as duplicates, ${createdTacticIds.length} tactic(s), ${skippedTacticIds.length} duplicate tactic(s) skipped.`,
+    `Committed ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined as duplicates, ${Object.keys(suggestionIdByRow).length} overlap(s) to review, ${createdTacticIds.length} tactic(s), ${skippedTacticIds.length} duplicate tactic(s) skipped.`,
   );
   await syncComputedGapStatuses();
   return {
@@ -3015,7 +3138,262 @@ export async function commitExtractedRecords(args: {
     tactic_ids: createdTacticIds,
     merged_gap_ids: mergedGapIds,
     skipped_tactic_ids: skippedTacticIds,
+    gap_id_by_row: gapIdByRow,
+    suggestion_id_by_row: suggestionIdByRow,
+    flagged_gap_ids: flaggedGapIds,
   };
+}
+
+/**
+ * More sources for a pending suggestion: repeats of its candidate from other
+ * documents in the same run (KAN-74). They follow the suggestion's outcome, so
+ * no source is dropped whichever way a person decides.
+ */
+export async function addSuggestionSources(
+  suggestionId: string,
+  sources: GapSuggestionSource[],
+): Promise<void> {
+  if (sources.length === 0) return;
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === suggestionId);
+  if (!suggestion) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
+  await db()
+    .update(t.gapSuggestions)
+    .set({ extra_sources: [...suggestion.extra_sources, ...sources] })
+    .where(eq(t.gapSuggestions.id, suggestionId));
+}
+
+type SuggestionDecision = {
+  suggestion_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+};
+
+async function pendingSuggestion(id: string) {
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === id);
+  if (!suggestion) throw new Error("Suggestion not found.");
+  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  const gap = state.gaps.find((row) => row.id === suggestion.gap_id);
+  if (!gap || gap.retired) {
+    throw new Error("The gap this suggestion is about was split or rewritten. Reject it, or add the source by hand.");
+  }
+  return { state, suggestion, gap };
+}
+
+async function closeSuggestion(
+  id: string,
+  status: Exclude<GapSuggestionStatus, "pending">,
+  args: SuggestionDecision & { result_gap_id?: string | null },
+) {
+  await db()
+    .update(t.gapSuggestions)
+    .set({
+      status,
+      result_gap_id: args.result_gap_id ?? null,
+      decided_by: args.actor_name,
+      rationale: args.rationale,
+      decided_at: now(),
+    })
+    .where(eq(t.gapSuggestions.id, id));
+}
+
+/** Every source a suggestion carries: its own candidate first, then repeats. */
+function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+  return [
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    ...suggestion.extra_sources,
+  ];
+}
+
+/**
+ * Accepts an overlap as a merge (KAN-75): the gap is reworded to cover the new
+ * part (a person's wording, locked like any edit), the incoming source joins it
+ * as a supporting need, and its tactic mappings are flagged for review because
+ * they were judged against the old wording. The caller resets the gap's
+ * validated priority (S8 owns that table).
+ */
+export async function acceptGapMerge(
+  args: SuggestionDecision & { name?: string; statement?: string },
+): Promise<{ gap_id: string }> {
+  const rationale = requireRationale(args.rationale);
+  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const name = (args.name ?? suggestion.merged_name).trim();
+  const statement = (args.statement ?? suggestion.merged_statement).trim();
+  if (!name) throw new Error("Give the merged gap a name.");
+  if (!statement) throw new Error("Give the merged gap a statement.");
+  const changes = diffFields(gap, { name, statement });
+  if (changes.length > 0) {
+    await db()
+      .update(t.gaps)
+      .set({ name, statement, lock: makeLock(args.actor_name, args.actor_function, rationale) })
+      .where(eq(t.gaps.id, gap.id));
+    await recordFieldEdits({
+      stage: "S2",
+      entity_type: "gap",
+      entity_id: gap.id,
+      changes,
+      rationale,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+  }
+  for (const source of suggestionSources(suggestion)) {
+    await insertNeedForGap({
+      gapId: gap.id,
+      sourceId: source.source_id,
+      statement: source.statement,
+      sourceQuote: source.source_quote,
+      role: "supporting",
+      actor_function: args.actor_function,
+    });
+  }
+  // Mappings were judged against the old wording.
+  await db().update(t.coverages).set({ needs_review: true }).where(eq(t.coverages.gap_id, gap.id));
+  await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "merge_suggestion", rationale);
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "suggestion",
+    action: "accept",
+    before: gap.statement,
+    after: `merged: ${statement}`,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_accepted_proposal",
+  });
+  await syncComputedGapStatuses(gap.id);
+  return { gap_id: gap.id };
+}
+
+/**
+ * Accepts an overlap as a split (KAN-75): a new gap holds only the new part, with
+ * the incoming source as its primary need; the shared part joins the existing gap
+ * as a supporting need; and the two gaps are linked as related.
+ */
+export async function acceptGapSplit(
+  args: SuggestionDecision & { name?: string; statement?: string },
+): Promise<{ gap_id: string; new_gap_id: string }> {
+  const rationale = requireRationale(args.rationale);
+  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const name = (args.name ?? suggestion.split_name).trim();
+  const statement = (args.statement ?? suggestion.split_statement).trim();
+  if (!name) throw new Error("Give the new gap a name.");
+  if (!statement) throw new Error("Give the new gap a statement.");
+  const newGapId = await createGap({
+    name,
+    statement,
+    domain: suggestion.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: rationale,
+    source_id: suggestion.source_id,
+    source_quote: suggestion.source_quote,
+  });
+  for (const source of suggestion.extra_sources) {
+    await insertNeedForGap({
+      gapId: newGapId,
+      sourceId: source.source_id,
+      statement: source.statement,
+      sourceQuote: source.source_quote,
+      role: "supporting",
+      actor_function: args.actor_function,
+    });
+  }
+  await insertNeedForGap({
+    gapId: gap.id,
+    sourceId: suggestion.source_id,
+    statement: suggestion.shared_part,
+    sourceQuote: suggestion.source_quote,
+    role: "supporting",
+    actor_function: args.actor_function,
+  });
+  await linkRelatedGaps(gap.id, newGapId);
+  await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "split_suggestion", `${newGapId}: ${rationale}`);
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "suggestion",
+    action: "split",
+    before: gap.statement,
+    after: `${newGapId}: ${statement}`,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_accepted_proposal",
+  });
+  return { gap_id: gap.id, new_gap_id: newGapId };
+}
+
+/** Each gap lists the other as related; a link is never added twice. */
+async function linkRelatedGaps(a: string, b: string) {
+  const state = await loadState();
+  for (const [from, to] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    const gap = state.gaps.find((row) => row.id === from);
+    if (!gap) continue;
+    const related = gap.related_gap_ids ?? [];
+    if (related.includes(to)) continue;
+    await db().update(t.gaps).set({ related_gap_ids: [...related, to] }).where(eq(t.gaps.id, from));
+  }
+}
+
+/** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
+export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
+  if (!suggestion) throw new Error("Suggestion not found.");
+  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  await closeSuggestion(suggestion.id, "rejected", { ...args, rationale });
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: suggestion.gap_id,
+    field: "suggestion",
+    action: "reject",
+    before: null,
+    after: suggestion.statement,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_rejected_proposal",
+  });
+  return suggestion;
+}
+
+/** A person has looked at the source that joined a validated gap (KAN-74). */
+export async function clearNewSourceFlag(args: {
+  gap_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<void> {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const gap = state.gaps.find((row) => row.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (!gap.new_source_at) throw new Error("This gap has no new source to review.");
+  await db()
+    .update(t.gaps)
+    .set({ new_source_at: null, new_source_need_id: null })
+    .where(eq(t.gaps.id, gap.id));
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "new_source",
+    action: "validate",
+    before: gap.new_source_need_id ?? null,
+    after: "reviewed",
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
 }
 
 export async function lockTacticReview(args: {

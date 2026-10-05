@@ -146,6 +146,9 @@ describe("S2 on the model path", () => {
       tactic_ids: [],
       merged_gap_ids: [],
       skipped_tactic_ids: [],
+      gap_id_by_row: {},
+      suggestion_id_by_row: {},
+      flagged_gap_ids: [],
     }));
     const { ctx, calls } = context((call) => {
       if (call.purpose.startsWith("gap-proposer:")) {
@@ -215,7 +218,7 @@ describe("S2 on the model path", () => {
     await expect(gapExtractModule.run(input(), ctx)).rejects.toThrow(/did not return a complete review/);
   });
 
-  it("sends objections to the proposer and lets the judge reject a sibling duplicate", async () => {
+  it("sends objections to the proposer and keeps a sibling duplicate as a repeat of the one it matches (KAN-74)", async () => {
     let critiques = 0;
     let judged = 0;
     const { ctx, calls } = context((call) => {
@@ -240,7 +243,7 @@ describe("S2 on the model path", () => {
       return {
         decisions: [
           { subject: L1(), verdict: "accept", confidence: 90, reason: "the stronger wording", duplicate_of: bogus },
-          { subject: L2(), verdict: "reject", confidence: 85, reason: "repeats the first", same_as_candidate: L1() },
+          { subject: L2(), verdict: "accept", confidence: 85, reason: "repeats the first", match: "same", same_as_candidate: L1() },
         ],
       };
     });
@@ -259,10 +262,14 @@ describe("S2 on the model path", () => {
     expect(retry.find((row) => row.subject === L1())!.problems!.join(" ")).toMatch(/not a plan gap id/);
     expect(retry.find((row) => row.subject === L2())).toMatchObject({ decide: false });
 
-    expect(output.accepted.map((row) => [row.id, row.score, row.duplicate_of])).toEqual([[L1(), 90, null]]);
-    expect(output.rejected).toHaveLength(1);
-    expect(output.rejected[0]).toMatchObject({ id: L2(), score: 85, statement: "Is the asset more effective than standard of care?" });
-    expect(output.rejected[0]!.critic_note).toMatch(/repeats the first/);
+    expect(output.accepted.map((row) => [row.id, row.score, row.duplicate_of])).toEqual([
+      [L1(), 90, null],
+      [L2(), 85, null],
+    ]);
+    expect(output.rejected).toHaveLength(0);
+    const repeat = output.accepted.find((row) => row.id === L2())!;
+    expect(repeat).toMatchObject({ match: "same", same_as_candidate: L1(), statement: "Is the asset more effective than standard of care?" });
+    expect(repeat.critic_note).toMatch(/repeats the first/);
   });
 
   it("keeps no rule-based judgement in the production path", () => {

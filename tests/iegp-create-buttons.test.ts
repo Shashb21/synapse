@@ -128,7 +128,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
     expect(badges).not.toContain("Outdated coverage");
     expect(badges).not.toContain("StaleFlag");
-    expect(badges).toContain("Review coverage — also mapped elsewhere");
+    expect(badges).toContain("Review coverage");
     expect(badges).toContain("Tooltip");
     expect(badges).toContain("delay={0}");
     expect(badges).not.toContain("nativeButton");

@@ -147,18 +147,19 @@ export function LockMeta({ lock }: { lock: Lock }) {
 }
 
 /**
- * A sibling live gap mapped to the same tactic had a dimension or overall
- * change. Values were not copied onto this gap.
+ * Coverage to confirm again: a sibling live gap mapped to the same tactic changed
+ * a dimension or overall, or this gap's wording changed in a merge (KAN-75).
+ * Values were not copied onto this gap.
  */
 export function NeedsReviewFlag({ needsReview }: { needsReview: boolean }) {
   if (!needsReview) return null;
   return (
-    <BadgeHelp help="Another live gap that uses this tactic changed a dimension or overall. Confirm or edit this gap’s own coverage. Values were not copied.">
+    <BadgeHelp help="Something this coverage depends on changed: the gap’s wording was merged with a new source, or another gap that uses this tactic changed its coverage. Confirm or edit this gap’s own coverage.">
       <Badge
         variant="outline"
         className="h-auto max-w-full whitespace-normal border-amber-500/40 bg-amber-500/15 text-left text-amber-700 dark:text-amber-200"
       >
-        Review coverage — also mapped elsewhere
+        Review coverage
       </Badge>
     </BadgeHelp>
   );

@@ -13,7 +13,8 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { EVIDENCE_DOMAINS, type EvidenceDomain } from "@/lib/iegp/enums";
-import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { addSuggestionSources, commitExtractedRecords, loadState } from "@/lib/iegp/store";
+import { validatedPlacementGapIds } from "@/modules/stages/s8-prioritization/module";
 import { extractCandidateGaps, isLiveGap } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
 import { GAP_CANDIDATES_DDL, gapCandidates } from "./schema";
@@ -51,6 +52,10 @@ const candidateSchema = z.object({
   critic_note: z.string(),
   /** Existing live plan gap the judge found this candidate to be the same as. */
   duplicate_of: z.string().nullable(),
+  /** The judge's match (KAN-74): same as a gap or candidate, overlapping a gap, or new. */
+  match: z.enum(["same", "overlaps", "new"]),
+  match_gap_id: z.string().nullable(),
+  same_as_candidate: z.string().nullable(),
 });
 
 const outputSchema = z.object({
@@ -60,6 +65,10 @@ const outputSchema = z.object({
   rejected: z.array(candidateSchema),
   committed_gap_ids: z.array(z.string()),
   committed_need_ids: z.array(z.string()),
+  /** Existing gaps an accepted candidate's source joined. */
+  joined_gap_ids: z.array(z.string()),
+  /** Overlap suggestions waiting on a person (KAN-75). */
+  suggestion_ids: z.array(z.string()),
 });
 
 export type GapExtractInput = z.infer<typeof inputSchema>;
@@ -75,17 +84,48 @@ type GapCandidate = {
   source_quote: string;
   /** Set only by the model judge. Null until then, and for a new gap. */
   duplicate_of: string | null;
+} & Partial<MatchFields>;
+
+type Match = "same" | "overlaps" | "new";
+
+/** What an overlap needs before a person can choose a merge or a split (KAN-74). */
+type OverlapParts = {
+  shared_part: string;
+  new_part: string;
+  merged_name: string;
+  merged_statement: string;
+  split_name: string;
+  split_statement: string;
+};
+
+const OVERLAP_FIELDS = [
+  "shared_part",
+  "new_part",
+  "merged_name",
+  "merged_statement",
+  "split_name",
+  "split_statement",
+] as const satisfies readonly (keyof OverlapParts)[];
+
+/** The judge's match, carried on an accepted candidate into commit. */
+type MatchFields = {
+  match: Match;
+  /** The plan gap a "same" or "overlaps" candidate matches. */
+  match_gap_id: string | null;
+  /** The candidate a "same" candidate repeats, in this run. */
+  same_as_candidate: string | null;
+  overlap: OverlapParts | null;
 };
 
 /**
  * A gap already in the plan. `set_aside` marks one a person excluded or parked:
- * it is still shown to the critic and judge so a repeat maps onto it
- * (duplicate_of) instead of re-creating a gap the person set aside.
+ * it is still shown to the critic and judge so a repeat maps onto it (match
+ * "same") instead of re-creating a gap the person set aside.
  */
 type PlanGap = { id: string; name: string; statement: string; set_aside?: "excluded" | "parked" };
 
 const SET_ASIDE_NOTE =
-  "plan_gaps marked set_aside were excluded or parked by a person. A candidate asking the same question is still a duplicate: set duplicate_of to that gap's id. It joins as provenance and the gap stays set aside.";
+  'plan_gaps marked set_aside were excluded or parked by a person. A candidate asking the same question is still "same": set match_gap_id to that gap\'s id. It joins as provenance and the gap stays set aside. Do not use "overlaps" against a set-aside gap.';
 
 type RawGap = {
   id?: unknown;
@@ -101,9 +141,19 @@ type JudgeDecision = {
   verdict: "accept" | "reject";
   confidence: number;
   reason: string;
-  duplicate_of: string | null;
-  same_as_candidate: string | null;
-};
+} & MatchFields;
+
+type RawDecision = {
+  subject?: unknown;
+  verdict?: unknown;
+  confidence?: unknown;
+  reason?: unknown;
+  match?: unknown;
+  match_gap_id?: unknown;
+  /** The judge contract before KAN-74; still read as match "same". */
+  duplicate_of?: unknown;
+  same_as_candidate?: unknown;
+} & Partial<Record<keyof OverlapParts, unknown>>;
 
 const REMEDY = "run gap extraction again or switch the S2 route in /admin/control.";
 
@@ -351,12 +401,94 @@ async function reviewWithModel(
   });
 }
 
+/**
+ * Checks one judge decision (KAN-74). A decision with any problem is asked for
+ * again with the problems listed; nothing is filled in here. The judge contract
+ * before KAN-74 (duplicate_of, a rejected sibling) is read where it still makes
+ * sense: duplicate_of counts as match "same".
+ */
+export function parseJudgeDecision(
+  row: RawDecision,
+  scope: { subject: string; candidateIds: Set<string>; planIds: Set<string>; setAsideIds: Set<string> },
+): { decision: JudgeDecision; problems?: never } | { decision?: never; problems: string[] } {
+  const problems: string[] = [];
+  const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
+  if (!verdict) problems.push('verdict must be "accept" or "reject"');
+  const confidence =
+    typeof row.confidence === "number" && Number.isFinite(row.confidence)
+      ? Math.max(0, Math.min(100, Math.round(row.confidence)))
+      : null;
+  if (confidence === null) problems.push("confidence must be a number from 0 to 100");
+  const reason = text(row.reason);
+  if (!reason) problems.push("reason is missing");
+  const matchGapId = text(row.match_gap_id) || text(row.duplicate_of) || null;
+  const sameAs = text(row.same_as_candidate) || null;
+  const rawMatch = text(row.match);
+  const match: Match | null = rawMatch
+    ? rawMatch === "same" || rawMatch === "overlaps" || rawMatch === "new"
+      ? rawMatch
+      : null
+    : matchGapId || sameAs
+      ? "same"
+      : "new";
+  if (!match) problems.push(`match "${rawMatch}" must be "same", "overlaps" or "new"`);
+  if (matchGapId && !scope.planIds.has(matchGapId)) problems.push(`match_gap_id "${matchGapId}" is not a plan gap id`);
+  if (sameAs && (sameAs === scope.subject || !scope.candidateIds.has(sameAs))) {
+    problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
+  }
+  if (verdict === "reject") {
+    if (sameAs) {
+      problems.push(
+        'a candidate that repeats another candidate is accepted with match "same" so its source is kept; reject only a candidate that does not belong in the plan',
+      );
+    }
+    if (problems.length > 0) return { problems };
+    return {
+      decision: { verdict, confidence: confidence!, reason, match: "new", match_gap_id: null, same_as_candidate: null, overlap: null },
+    };
+  }
+  if (match === "same") {
+    if (matchGapId && sameAs) problems.push('give match_gap_id or same_as_candidate for match "same", not both');
+    if (!matchGapId && !sameAs) {
+      problems.push('match "same" needs match_gap_id (a plan gap) or same_as_candidate (another candidate)');
+    }
+  }
+  if (match === "new" && (matchGapId || sameAs)) {
+    problems.push('match "new" takes no match_gap_id or same_as_candidate; use "same" or "overlaps"');
+  }
+  let overlap: OverlapParts | null = null;
+  if (match === "overlaps") {
+    if (!matchGapId) problems.push('match "overlaps" needs match_gap_id (the plan gap it overlaps)');
+    if (matchGapId && scope.setAsideIds.has(matchGapId)) {
+      problems.push(`${matchGapId} is set aside; use "same" if it asks the same question, otherwise "new"`);
+    }
+    if (sameAs) problems.push('match "overlaps" is only against a plan gap; leave same_as_candidate null');
+    const missing = OVERLAP_FIELDS.filter((field) => !text(row[field]));
+    if (missing.length > 0) problems.push(`match "overlaps" needs ${missing.join(", ")}`);
+    else overlap = Object.fromEntries(OVERLAP_FIELDS.map((field) => [field, text(row[field])])) as OverlapParts;
+  }
+  if (problems.length > 0) return { problems };
+  return {
+    decision: {
+      verdict: verdict!,
+      confidence: confidence!,
+      reason,
+      match: match!,
+      match_gap_id: matchGapId,
+      same_as_candidate: match === "same" ? sameAs : null,
+      overlap,
+    },
+  };
+}
+
 async function judgeWithModel(
   ctx: ModuleContext,
   args: { candidates: GapCandidate[]; critiques: Critique[]; planGaps: PlanGap[]; hints: string },
 ): Promise<Map<string, JudgeDecision>> {
   const byId = new Map(args.candidates.map((candidate) => [candidate.id, candidate]));
   const planIds = new Set(args.planGaps.map((gap) => gap.id));
+  const setAsideIds = new Set(args.planGaps.filter((gap) => gap.set_aside).map((gap) => gap.id));
+  const candidateIds = new Set(byId.keys());
   const lastProblems = new Map<string, string[]>();
   return completeAll<JudgeDecision>({
     ids: args.candidates.map((candidate) => candidate.id),
@@ -392,52 +524,17 @@ async function judgeWithModel(
           }),
         }),
         purpose: "gap-judge",
-      })) as {
-        decisions?: {
-          subject?: unknown;
-          verdict?: unknown;
-          confidence?: unknown;
-          reason?: unknown;
-          duplicate_of?: unknown;
-          same_as_candidate?: unknown;
-        }[];
-      } | null;
+      })) as { decisions?: RawDecision[] } | null;
       const map = new Map<string, JudgeDecision>();
       for (const row of payload?.decisions ?? []) {
         const subject = text(row.subject);
         if (!missing.includes(subject) || map.has(subject)) continue;
-        const problems: string[] = [];
-        const verdict = row.verdict === "accept" || row.verdict === "reject" ? row.verdict : null;
-        if (!verdict) problems.push('verdict must be "accept" or "reject"');
-        const confidence =
-          typeof row.confidence === "number" && Number.isFinite(row.confidence)
-            ? Math.max(0, Math.min(100, Math.round(row.confidence)))
-            : null;
-        if (confidence === null) problems.push("confidence must be a number from 0 to 100");
-        const reason = text(row.reason);
-        if (!reason) problems.push("reason is missing");
-        const duplicateOf = text(row.duplicate_of) || null;
-        if (duplicateOf && !planIds.has(duplicateOf)) {
-          problems.push(`duplicate_of "${duplicateOf}" is not a plan gap id`);
-        }
-        const sameAs = text(row.same_as_candidate) || null;
-        if (sameAs && (sameAs === subject || !byId.has(sameAs))) {
-          problems.push(`same_as_candidate "${sameAs}" is not another candidate id`);
-        }
-        if (sameAs && verdict === "accept") {
-          problems.push("a candidate that repeats another candidate must be rejected");
-        }
-        if (problems.length > 0) {
-          lastProblems.set(subject, problems);
+        const parsed = parseJudgeDecision(row, { subject, candidateIds, planIds, setAsideIds });
+        if (parsed.problems) {
+          lastProblems.set(subject, parsed.problems);
           continue;
         }
-        map.set(subject, {
-          verdict: verdict!,
-          confidence: confidence!,
-          reason,
-          duplicate_of: duplicateOf,
-          same_as_candidate: sameAs,
-        });
+        map.set(subject, parsed.decision);
       }
       return map;
     },
@@ -471,6 +568,8 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           rejected: [],
           committed_gap_ids: [],
           committed_need_ids: [],
+          joined_gap_ids: [],
+          suggestion_ids: [],
         },
         summary: "No parsed documents to extract from; no model was called",
       };
@@ -597,11 +696,21 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           }
           const note = decision.same_as_candidate
             ? `${decision.reason} (same as candidate ${decision.same_as_candidate})`
-            : decision.duplicate_of
-              ? `${decision.reason} (same as plan gap ${decision.duplicate_of})`
-              : decision.reason;
+            : decision.match === "same"
+              ? `${decision.reason} (same as plan gap ${decision.match_gap_id})`
+              : decision.match === "overlaps"
+                ? `${decision.reason} (overlaps plan gap ${decision.match_gap_id})`
+                : decision.reason;
           return {
-            candidate: { ...candidate, duplicate_of: decision.duplicate_of },
+            candidate: {
+              ...candidate,
+              match: decision.match,
+              match_gap_id: decision.match_gap_id,
+              same_as_candidate: decision.same_as_candidate,
+              overlap: decision.overlap,
+              // Only a "same" match onto a plan gap merges straight away.
+              duplicate_of: decision.match === "same" ? decision.match_gap_id : null,
+            },
             subject: candidate.id,
             verdict: decision.verdict,
             score: decision.confidence,
@@ -611,8 +720,11 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       },
     });
 
+    // The candidate row each judged candidate became: an overlap keeps a pointer to it,
+    // so a rejected suggestion can still be promoted by hand later.
+    const rowIdByCandidate = new Map(outcome.judged.map((item) => [item.candidate.id, newId("gc")]));
     const rows = outcome.judged.map((item) => ({
-      id: newId("gc"),
+      id: rowIdByCandidate.get(item.candidate.id)!,
       run_id: ctx.run.id,
       document_id: item.candidate.document_id,
       source_id: item.candidate.source_id,
@@ -631,26 +743,51 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
 
     const committed_gap_ids: string[] = [];
     const committed_need_ids: string[] = [];
+    const joined_gap_ids: string[] = [];
+    const suggestion_ids: string[] = [];
     if (!input.dry_run) {
-      for (const document of documents) {
-        const accepted = outcome.accepted.filter(
-          (candidate) => candidate.document_id === document.id,
-        );
-        if (accepted.length === 0) continue;
+      const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
+      // A candidate that repeats another follows the one it repeats (KAN-74); one whose
+      // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
+      // its own as a new gap, so its source is never dropped.
+      const representative = new Map<string, GapCandidate>();
+      for (const candidate of outcome.accepted) {
+        const target = followSameAs(candidate, accepted);
+        if (target && target.id !== candidate.id) representative.set(candidate.id, target);
+      }
+      const validatedGapIds = await validatedPlacementGapIds();
+      const gapByCandidate = new Map<string, string>();
+      const suggestionByCandidate = new Map<string, string>();
+      const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
         const source = state.sources.find((row) => row.id === document.source_id);
+        return commitExtractedRecords({
+          source_id: document.source_id,
+          title: source?.title ?? document.source_id,
+          stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
+          actor_name: ctx.actor.name,
+          actor_function: ctx.actor.function,
+          tactics: [],
+          validated_gap_ids: validatedGapIds,
+          ...rows,
+        });
+      };
+      // First every candidate that stands for its own question: a new gap, a source
+      // joining a plan gap, or an overlap suggestion.
+      for (const document of documents) {
+        const own = outcome.accepted.filter(
+          (candidate) => candidate.document_id === document.id && !representative.has(candidate.id),
+        );
+        if (own.length === 0) continue;
+        const asGap = own.filter((candidate) => candidate.match !== "overlaps");
+        const asOverlap = own.filter((candidate) => candidate.match === "overlaps" && candidate.overlap);
         const result = await ctx.run.step(`commit:${document.id}`, () =>
-          commitExtractedRecords({
-            source_id: document.source_id,
-            title: source?.title ?? document.source_id,
-            stakeholder_function: source?.stakeholder_function ?? ctx.actor.function,
-            actor_name: ctx.actor.name,
-            actor_function: ctx.actor.function,
-            needs: accepted.map((candidate) => ({
+          commitFor(document, {
+            needs: asGap.map((candidate) => ({
               id: candidate.id,
               statement: candidate.statement,
               source_quote: candidate.source_quote,
             })),
-            gaps: accepted.map((candidate) => ({
+            gaps: asGap.map((candidate) => ({
               id: candidate.id,
               name: candidate.name,
               statement: candidate.statement,
@@ -660,12 +797,56 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               // The model judge's call; commit merges only when it is set.
               duplicate_of: candidate.duplicate_of,
             })),
-            tactics: [],
-            apply_mappings: false,
+            overlaps: asOverlap.map((candidate) => ({
+              id: candidate.id,
+              gap_id: candidate.match_gap_id!,
+              run_id: ctx.run.id,
+              candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+              name: candidate.name,
+              statement: candidate.statement,
+              domain: candidate.domain,
+              source_quote: candidate.source_quote,
+              ...candidate.overlap!,
+            })),
           }),
         );
         committed_gap_ids.push(...result.gap_ids);
         committed_need_ids.push(...result.need_ids);
+        joined_gap_ids.push(...result.merged_gap_ids);
+        for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
+        for (const [id, suggestionId] of Object.entries(result.suggestion_id_by_row)) {
+          suggestionByCandidate.set(id, suggestionId);
+          suggestion_ids.push(suggestionId);
+        }
+      }
+      // Then the repeats: each joins whatever the candidate it repeats became.
+      for (const document of documents) {
+        const repeats = outcome.accepted.filter(
+          (candidate) => candidate.document_id === document.id && representative.has(candidate.id),
+        );
+        if (repeats.length === 0) continue;
+        const onGap = repeats.filter((candidate) => gapByCandidate.has(representative.get(candidate.id)!.id));
+        for (const candidate of repeats) {
+          const suggestionId = suggestionByCandidate.get(representative.get(candidate.id)!.id);
+          if (!suggestionId) continue;
+          await addSuggestionSources(suggestionId, [
+            { source_id: candidate.source_id, statement: candidate.statement, source_quote: candidate.source_quote },
+          ]);
+        }
+        if (onGap.length === 0) continue;
+        const result = await ctx.run.step(`commit-repeats:${document.id}`, () =>
+          commitFor(document, {
+            needs: onGap.map((candidate) => ({
+              id: candidate.id,
+              statement: candidate.statement,
+              source_quote: candidate.source_quote,
+              gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
+            })),
+            gaps: [],
+          }),
+        );
+        committed_need_ids.push(...result.need_ids);
+        joined_gap_ids.push(...Object.values(result.gap_id_by_row));
       }
     }
 
@@ -681,6 +862,9 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       verdict: item.verdict,
       critic_note: item.note,
       duplicate_of: item.candidate.duplicate_of,
+      match: item.candidate.match ?? ("new" as const),
+      match_gap_id: item.candidate.match_gap_id ?? null,
+      same_as_candidate: item.candidate.same_as_candidate ?? null,
     });
 
     return {
@@ -691,9 +875,15 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         rejected: outcome.rejected.map(toOut),
         committed_gap_ids,
         committed_need_ids,
+        joined_gap_ids,
+        suggestion_ids,
       },
       summary: `${outcome.accepted.length} of ${plural(outcome.proposed.length, "gap candidate")} accepted${
-        input.dry_run ? " (dry run)" : `, ${plural(committed_gap_ids.length, "new gap")} committed`
+        input.dry_run
+          ? " (dry run)"
+          : `: ${plural(committed_gap_ids.length, "new gap")} committed, ${
+              joined_gap_ids.length === 1 ? "1 joined an existing gap" : `${joined_gap_ids.length} joined existing gaps`
+            }, ${plural(suggestion_ids.length, "overlap")} to review`
       }`,
       evals: outcome.metrics,
     };
@@ -730,6 +920,21 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
 };
 
 registerModule(gapExtractModule);
+
+/**
+ * The candidate a "same" candidate stands for: follows same_as_candidate links to
+ * one that points nowhere. Null for a cycle or a link to a candidate not accepted.
+ */
+function followSameAs(candidate: GapCandidate, accepted: Map<string, GapCandidate>): GapCandidate | null {
+  const seen = new Set<string>();
+  let current: GapCandidate | undefined = candidate;
+  while (current?.same_as_candidate) {
+    if (seen.has(current.id)) return null;
+    seen.add(current.id);
+    current = accepted.get(current.same_as_candidate);
+  }
+  return current ?? null;
+}
 
 export async function listGapCandidates(limit = 200) {
   await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
