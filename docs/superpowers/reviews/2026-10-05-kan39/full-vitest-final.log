@@ -234,4 +234,3 @@
       Tests  1010 passed (1010)
    Start at  06:07:02
    Duration  169.08s (transform 1.51s, setup 0ms, collect 27.45s, tests 122.14s, environment 2.47s, prepare 3.21s)
-

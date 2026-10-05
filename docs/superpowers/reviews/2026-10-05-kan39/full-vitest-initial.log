@@ -49,7 +49,7 @@ If this is a long-running test, pass a timeout value as the last argument or con
     saved_function text NOT NULL,
     saved_at text NOT NULL
   )
-params: 
+params:
    × KAN-38 assembly approval enforcement > serializes direct patch gate and write against publication 354ms
      → Failed query: select "id", "org_id", "name", "slug", "planning_context", "created_at", "archived_at" from "accuracy_workspaces" where "accuracy_workspaces"."id" = $1 limit $2
 params: ws_20261004T084209_0687_7f46,1
@@ -422,7 +422,7 @@ Error: Test timed out in 20000ms.
 If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
  ❯ tests/accuracy-assembly-approval-integration.test.ts:504:64
     502|   });
-    503| 
+    503|
     504|   it.each(["priority route", "metadata", "patch", "validation"])("seri…
        |                                                                ^
     505|     // The normal test pool has one connection; use real independent r…
@@ -465,7 +465,7 @@ Error: Failed query: CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
     saved_function text NOT NULL,
     saved_at text NOT NULL
   )
-params: 
+params:
  ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
  ❯ ensureAccuracySchema src/accuracy/store/db.ts:75:7
      73|     const d = accuracyDb();
@@ -935,7 +935,7 @@ If this is a long-running test, pass a timeout value as the last argument or con
 Error: Test timed out in 60000ms.
 If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
  ❯ tests/accuracy-seed-from-gold.test.ts:7:3
-      5| 
+      5|
       6| describe("seed workspace from gold", () => {
       7|   it("creates workspace with BGB gold gaps and tactics and parses pptx…
        |   ^
@@ -949,4 +949,3 @@ If this is a long-running test, pass a timeout value as the last argument or con
       Tests  24 failed | 984 passed (1008)
    Start at  09:13:07
    Duration  5483.31s (transform 2.36s, setup 0ms, collect 44.09s, tests 4974.57s, environment 2.42s, prepare 4.95s)
-
