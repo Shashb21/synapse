@@ -54,5 +54,5 @@
 - [x] Add usage guide with explicit workflow, limits and verification commands.
 - [x] Run focused UI/API/revision tests, typecheck, changed-file lint and diff whitespace check.
 - [x] Controller reviews and commits accepted task; run full `npx vitest run --silent` once, then fresh whole-branch review.
-- [ ] Fix material findings and verify affected tests. Publish branch to both remotes and create/attach PR against KAN38.
-- [ ] Record verification and limitations in Jira; transition KAN-39 Done only after successful comment and checks. Select next eligible issue and arm the one-shot handoff per AGENTS.md.
+- [x] Fix material findings and verify affected tests. Publish branch to both remotes and create/attach PR against KAN38.
+- [x] Record verification and limitations in Jira; transition KAN-39 Done only after successful comment and checks. Select next eligible issue and arm the one-shot handoff per AGENTS.md.
