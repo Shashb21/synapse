@@ -385,6 +385,50 @@ export const accuracyExperimentEvaluations = pgTable("accuracy_experiment_evalua
   version_index: integer("version_index").notNull(), evaluator_version: text("evaluator_version").notNull(), evaluation: jsonb("evaluation").notNull(), recorded_at: text("recorded_at").notNull(),
 }, (table) => ({ version: unique("accuracy_experiment_evaluations_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
 
+/** Immutable request and original assembly snapshots; status is derived from the result. */
+export const accuracyMixedComparisons = pgTable("accuracy_mixed_comparisons", {
+  id: text("id").primaryKey(), source_workspace_id: text("source_workspace_id").notNull(), source_org_id: text("source_org_id").notNull(),
+  request: jsonb("request").$type<import("../experiments/mixed-types").MixedComparisonRequest>().notNull(),
+  original_assemblies: jsonb("original_assemblies").$type<import("../experiments/mixed-types").MixedOriginalAssemblies>().notNull(),
+  pack_fingerprint: text("pack_fingerprint").notNull(), evaluator_version: text("evaluator_version").notNull(),
+  gate_policy: text("gate_policy").notNull(), gate_policy_fingerprint: text("gate_policy_fingerprint").notNull(), created_at: text("created_at").notNull(),
+}, (table) => ({ workspace: index("accuracy_mixed_comparisons_workspace_idx").on(table.source_workspace_id, table.created_at) }));
+
+/** Both newly created attempts are bound atomically once, before any replay call. */
+export const accuracyMixedCandidateLinks = pgTable("accuracy_mixed_candidate_links", {
+  comparison_id: text("comparison_id").primaryKey().references(() => accuracyMixedComparisons.id, { onDelete: "cascade" }),
+  mixed_experiment_id: text("mixed_experiment_id").notNull().unique().references(() => accuracyExperiments.id),
+  baseline_experiment_id: text("baseline_experiment_id").notNull().unique().references(() => accuracyExperiments.id),
+  linked_at: text("linked_at").notNull(),
+});
+
+/** Exactly one append-only terminal evidence row for each comparison. */
+export const accuracyMixedComparisonResults = pgTable("accuracy_mixed_comparison_results", {
+  comparison_id: text("comparison_id").primaryKey().references(() => accuracyMixedComparisons.id, { onDelete: "cascade" }),
+  evidence: jsonb("evidence").$type<import("../experiments/mixed-types").MixedComparisonResult>().notNull(),
+  finished_at: text("finished_at").notNull(),
+});
+
+/** Additive bootstrap DDL, safe for new and existing accuracy databases. */
+export const ACCURACY_MIXED_COMPARISON_DDL = [
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_comparisons (
+    id text PRIMARY KEY, source_workspace_id text NOT NULL, source_org_id text NOT NULL, request jsonb NOT NULL,
+    original_assemblies jsonb NOT NULL, pack_fingerprint text NOT NULL, evaluator_version text NOT NULL,
+    gate_policy text NOT NULL, gate_policy_fingerprint text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_mixed_comparisons_workspace_idx ON accuracy_mixed_comparisons (source_workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_candidate_links (
+    comparison_id text PRIMARY KEY REFERENCES accuracy_mixed_comparisons(id) ON DELETE CASCADE,
+    mixed_experiment_id text NOT NULL UNIQUE REFERENCES accuracy_experiments(id),
+    baseline_experiment_id text NOT NULL UNIQUE REFERENCES accuracy_experiments(id),
+    linked_at text NOT NULL, CHECK (mixed_experiment_id <> baseline_experiment_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_comparison_results (
+    comparison_id text PRIMARY KEY REFERENCES accuracy_mixed_comparisons(id) ON DELETE CASCADE,
+    evidence jsonb NOT NULL, finished_at text NOT NULL
+  )`,
+];
+
 export const ACCURACY_DDL = [
   `CREATE TABLE IF NOT EXISTS accuracy_organizations (
     id text PRIMARY KEY,
@@ -628,6 +672,7 @@ export const ACCURACY_DDL = [
     id text PRIMARY KEY, experiment_id text NOT NULL, workspace_id text NOT NULL, call_id text NOT NULL, version_index integer NOT NULL,
     evaluator_version text NOT NULL, evaluation jsonb NOT NULL, recorded_at text NOT NULL, UNIQUE (experiment_id, call_id, version_index)
   )`,
+  ...ACCURACY_MIXED_COMPARISON_DDL,
 ];
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */

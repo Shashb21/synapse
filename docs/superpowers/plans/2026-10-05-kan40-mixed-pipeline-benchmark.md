@@ -58,7 +58,7 @@
 
 **Files:** Create mixed-materialize.ts and `tests/accuracy-mixed-materialize.test.ts`; extend copy-workspace.ts only if candidate-only copy mode is needed.
 
-**Interfaces:** Consume Task 1 types. Produce `resolveMixedCandidates(request: MixedComparisonRequest): Promise<{ mixed: Assembly; baseline: Assembly }>` and `materializeMixedCandidate(args: { assembly: Assembly; copy: CopyExperimentWorkspaceResult }): Promise<MixedCandidateEvidence>` with an initial pending stage state. Use existing Assembly and copy types directly.
+**Interfaces:** Consume Task 1 types. Produce `resolveMixedCandidates(request: MixedComparisonRequest): Promise<{ mixed: Assembly; baseline: Assembly }>` and `materializeMixedCandidate(args: { label: "mixed" | "baseline"; assembly: Assembly; copy: CopyExperimentWorkspaceResult }): Promise<MixedCandidateEvidence>` with an initial pending stage state. Use existing Assembly and copy types directly.
 
 - [ ] Write failing tests `selected_versions_are_the_only_materialized_inventory`, `remapped_quotes_match_original_blocks`, `stale_or_cross_workspace_candidates_fail_before_writes`, and `human_revision_origin_is_rejected`. Assert raw original payloads/IDs/reasons remain evidence, copied references resolve, unrelated claims/coverage are absent, and live rows are unchanged.
 - [ ] Run `npm test -- tests/accuracy-mixed-materialize.test.ts`; confirm expected failure.
@@ -82,7 +82,7 @@
 
 **Files:** Create eval/mixed-comparison.ts and `tests/accuracy-mixed-evaluation.test.ts`.
 
-**Interfaces:** Produce `evaluateMixedComparison(args: { mixed: MixedCandidateEvidence; baseline: MixedCandidateEvidence; pack_id: string }): Promise<MixedComparisonRecord["result"]>`. Own evaluator version `mixed-downstream-v1`; consume existing evaluateExperimentVersion and experimentPackFingerprint, without passing gold into pipeline code.
+**Interfaces:** Produce `evaluateMixedComparison(args: { mixed: MixedCandidateEvidence; baseline: MixedCandidateEvidence; pack_id: string }): Promise<MixedComparisonEvaluation>`. Own evaluator version `mixed-downstream-v1`; consume existing evaluateExperimentVersion and experimentPackFingerprint, without passing gold into pipeline code.
 
 - [ ] Write failing tests `assembly_gold_is_not_last_snapshot_gold`, `lost_supported_items_are_regressions`, `generated_proposals_are_not_false_extracted_items`, `unlabelled_dimensions_remain_unscored`, and `identity_mismatch_prevents_matched_gain`. Assert exact/partial/missed/wrong plus precision/recall/F1 for source inventory; no invented downstream F1; descriptive coverage/status differences distinguish proven invariant failures.
 - [ ] Run `npm test -- tests/accuracy-mixed-evaluation.test.ts`; confirm expected failure.
