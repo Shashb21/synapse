@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { HumanItemOrigin } from "@/accuracy/domain/item-history";
 import { ClaimHistory } from "@/components/accuracy/claim-history";
 import { LedgerClaimCard } from "@/components/accuracy/ledger-claim-card";
 const refresh = vi.hoisted(() => vi.fn());
@@ -26,6 +27,45 @@ it("reads only on disclosure and preserves exact content and lineage", async () 
   await click("Item history"); expect(fetcher).toHaveBeenCalledWith("/api/accuracy/claims/history?workspace_id=ws&claim_id=claim", expect.any(Object));
   for (const value of ["Exact raw question?", "Original rationale", "G-9", "original", "source", "run", "snapshot", "Iteration: 2", "Item index: 4", "exact quote", "old", "new"]) expect(host.textContent).toContain(value);
   expect(refresh).not.toHaveBeenCalled(); await click("Item history"); await click("Item history"); expect(fetcher).toHaveBeenCalledOnce();
+});
+it.each([
+  { snapshot_id: "snapshot", iteration: 2, snapshotLabel: "Snapshot: snapshot", iterationLabel: "Iteration: 2" },
+  { snapshot_id: null, iteration: null, snapshotLabel: "Snapshot: Judged final output (no snapshot)", iterationLabel: "Iteration: Judged final output" },
+])("shows human authorship and lineage alongside generated history with snapshot $snapshot_id", async generatedOrigin => {
+  const humanOrigin: HumanItemOrigin = {
+    kind: "human", revision_id: "revision-edit", subject: "reviewer-subject", provider: "test",
+    actor: { name: "Casey Reviewer", function: "medical_affairs" }, action: "edit",
+    reason: "Correct the question using the cited source", parent_assembly_id: "parent-proposal",
+    predecessor_version_id: "version", source_file_id: "source",
+    provenance: [{ block_id: "b1", quote: "exact quote" }], created_at: "2026-10-03",
+  };
+  const generatedVersion = { ...history.versions[0], snapshot_id: generatedOrigin.snapshot_id, iteration: generatedOrigin.iteration };
+  const humanVersion = {
+    ...generatedVersion, id: "human-version", run_id: null, snapshot_id: null, iteration: null,
+    human_origin: humanOrigin, created_at: "2026-10-03",
+    payload: { ...generatedVersion.payload, question: "Corrected human question?" },
+  };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
+    history: { ...history, versions: [generatedVersion, humanVersion], relationships: [] }, can_decide: false,
+  })));
+
+  await render();
+  await click("Item history");
+
+  const rows = [...host.querySelectorAll("ol > li")];
+  expect(rows).toHaveLength(2);
+  expect(rows[0].textContent).toContain("Original claim: original");
+  expect(rows[0].textContent).toContain("Run: run");
+  expect(rows[0].textContent).toContain(generatedOrigin.snapshotLabel);
+  expect(rows[0].textContent).toContain(generatedOrigin.iterationLabel);
+  expect(rows[0].textContent).not.toContain("Human contributor");
+  for (const value of [
+    "Original claim: original", "Human contributor: Casey Reviewer (medical_affairs)",
+    "Change: edit", "Correct the question using the cited source", "Revision: revision-edit",
+    "Parent proposal: parent-proposal", "Predecessor version: version", "Corrected human question?",
+  ]) expect(rows[1].textContent).toContain(value);
+  for (const value of ["Judged final output", "Run:", "Snapshot:", "Iteration:"])
+    expect(rows[1].textContent).not.toContain(value);
 });
 it("announces loading and supports retry after failure", async () => {
   let finish!: (value: ReturnType<typeof response>) => void;
