@@ -170,4 +170,30 @@ describe("mixed supported inventory evaluation", () => {
     for (const dimension of ["coverage", "residual"]) expect(result.changes).toContainEqual(expect.objectContaining({ dimension, kind: "invariant_failure", proven_error: true }));
   });
 
+  it.each([
+    { scenario: "unknown addressed identity", addressed: "missing-gap", parent: "mixed-gap", recordedRun: "split-run", completed: true, invalid: true },
+    { scenario: "different existing addressed identity", addressed: "other-gap", parent: "mixed-gap", recordedRun: "split-run", completed: true, invalid: true },
+    { scenario: "crossed-parent residual lineage", addressed: "mixed-gap", parent: "other-gap", recordedRun: "split-run", completed: true, invalid: true },
+    { scenario: "unrecorded split run", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "other-run", completed: true, invalid: true },
+    { scenario: "incomplete split run", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "split-run", completed: false, invalid: true },
+    { scenario: "matching branches and completed split lineage", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "split-run", completed: true, invalid: false },
+  ])("validates residual contract: $scenario", async ({ addressed, parent, recordedRun, completed, invalid }) => {
+    const mixed = candidate("mixed");
+    const other = { ...structuredClone(mixed.entry_source_inventory[0]), claim_id: "other-gap", original_item_version_ids: ["other-version"] };
+    mixed.entry_source_inventory.push(other);
+    mixed.final_source_inventory!.push(structuredClone(other));
+    mixed.final_outputs!.inventory = structuredClone(mixed.final_source_inventory!);
+    mixed.final_outputs!.statuses.push({ gap_id: "other-gap", status: "open", computed: "open", override: false });
+    const residual = { parent_gap_id: "mixed-gap", addressed_gap_id: addressed, open_residual_gap_id: "mixed-gap-R" };
+    mixed.final_outputs!.residuals.push(residual);
+    mixed.lineage.push({ kind: "residual", copied_claim_id: "mixed-gap-R", parent_claim_ids: [parent], run_id: "split-run", stage: "partial_split", payload: { statement: "Residual need" }, copied_evidence_ids: [] });
+    if (completed) mixed.stages.push({ stage: "partial_split", status: "completed", run_ids: [recordedRun], calls: [], module_id: "partial-split.agent-v1", module_version: "v1", prompt_version: null, model: null, configuration_fingerprint: "configuration", usage: { latency_ms: null, input_tokens: null, output_tokens: null, estimated_cost: null }, output: { residuals: [residual] } });
+    else mixed.stages.push({ stage: "partial_split", status: "pending" });
+    mixed.setup!.configuration.modules.push({ stage: "partial_split", module_id: "partial-split.agent-v1", module_version: "v1", prompt_version: null, model: null, parameters: {} });
+    const baseline = candidate("baseline");
+    baseline.setup = structuredClone(mixed.setup);
+    const result = await run(mixed, baseline);
+    expect(result.changes.some(row => row.dimension === "residual" && row.kind === "invariant_failure" && row.proven_error)).toBe(invalid);
+  });
+
 });

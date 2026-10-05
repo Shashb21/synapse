@@ -216,8 +216,14 @@ function inspectOutputs(candidate: MixedCandidateEvidence, add: Add) {
   }
   for (const gap of gaps) if (!output.statuses.some(row => row.gap_id === gap)) fail("status", "source gap lacks a final status", [gap]);
   for (const row of output.residuals) {
-    if (!gaps.has(row.parent_gap_id) || !generatedGaps.has(row.open_residual_gap_id) || row.addressed_gap_id === row.open_residual_gap_id)
-      fail("residual", "residual lacks valid parent/generated lineage or has duplicate branch identities", [row.parent_gap_id, row.open_residual_gap_id]);
+    const recordedSplit = candidate.lineage.some(lineage => lineage.kind === "residual" &&
+      lineage.copied_claim_id === row.open_residual_gap_id && lineage.stage === "partial_split" &&
+      lineage.parent_claim_ids.length === 1 && lineage.parent_claim_ids[0] === row.parent_gap_id &&
+      candidate.stages.some(stage => stage.stage === "partial_split" && stage.status === "completed" && stage.run_ids.includes(lineage.run_id)));
+    // The current partial-split contract retains its input gap as the addressed branch.
+    if (!gaps.has(row.parent_gap_id) || row.addressed_gap_id !== row.parent_gap_id ||
+      row.addressed_gap_id === row.open_residual_gap_id || !recordedSplit)
+      fail("residual", "residual branches violate the split contract or lack matching parent lineage and a completed split run", [row.parent_gap_id, row.addressed_gap_id, row.open_residual_gap_id]);
   }
   for (const row of output.priorities) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id)) fail("priority", "priority references an unknown gap", [row.gap_id]);
   for (const row of output.proposals) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id))
