@@ -24,6 +24,7 @@ import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
+import { captureProposalDecision } from "@/lib/iegp/learning-capture";
 
 /**
  * The designed study. Every field, the timing included, comes from the model:
@@ -438,7 +439,7 @@ async function askProposerOnce(
   const payload = (await ctx.complete({
     system: IDEATION_SYSTEM,
     user: JSON.stringify({
-      reviewer_corrections: args.hints || undefined,
+      worked_examples: args.hints || undefined,
       exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
       candidates_per_gap: args.perGap,
       // The IEGP context from setup: asset, objectives, key decisions, landscape.
@@ -649,7 +650,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             const payload = (await ctx.complete({
               system: JUDGE_SYSTEM,
               user: JSON.stringify({
-                reviewer_corrections: reviewerHints || undefined,
+                worked_examples: reviewerHints || undefined,
                 max_per_gap: input.per_gap,
                 gaps: missing.map((gapId) => ({
                   ...gapById.get(gapId)!,
@@ -745,7 +746,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
               const payload = (await ctx.complete({
                 system: CRITIC_SYSTEM,
                 user: JSON.stringify({
-                  reviewer_corrections: reviewerHints || undefined,
+                  worked_examples: reviewerHints || undefined,
                   exchange: `${round} of ${PROPOSER_CRITIC_EXCHANGES}`,
                   note: attempt > 1 ? "An earlier answer left these tactics without a complete review. Review each." : undefined,
                   library,
@@ -836,7 +837,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             };
           });
       },
-    });
+    }, { kinds: ["s9_proposal"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     if (!input.dry_run && outcome.accepted.length > 0) {
       await ensurePlatformSchema();
@@ -1279,6 +1280,8 @@ export async function decideIdeationProposal(args: {
   const rationale = requireRationale(args.rationale);
   let proposal = await proposalRow(args.id);
   if (proposal.status !== "proposed") throw new Error(`${args.id} was already ${proposal.status}.`);
+  // The idea as the model left it, before this decision's edits (KAN-78 learning).
+  const asProposed = proposal;
   if (args.decision === "accept" && args.fields && Object.keys(args.fields).length > 0) {
     try {
       await editIdeationProposal({
@@ -1348,6 +1351,22 @@ export async function decideIdeationProposal(args: {
     rationale,
     actor: args.actor,
   });
+
+  // A model-written idea teaches the next runs; a hand-written one has no AI output to learn from.
+  if (splitDesign(asProposed.design).meta.origin !== "human") {
+    const gap = (await loadState().catch(() => null))?.gaps.find((row) => row.id === asProposed.gap_id);
+    await captureProposalDecision({
+      proposal: asProposed,
+      gap: gap ? { name: gap.name, statement: gap.statement } : null,
+      decision: args.decision,
+      final:
+        args.decision === "accept"
+          ? { name: proposal.name, type: proposal.type, evidence_question: proposal.evidence_question, rationale: proposal.rationale }
+          : null,
+      rationale,
+      workspace_id: args.workspace_id,
+    });
+  }
 
   return { tactic_id };
 }

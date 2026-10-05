@@ -192,7 +192,7 @@ export default async function RunsPage() {
             Hillclimb signals
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Replayed into the next proposal at the same stage as reviewer corrections.
+            Scored in the hillclimb sweep. Runs learn from similar past decisions as worked examples, not from these rationales as rules.
           </p>
           {signals.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No signals yet.</p>

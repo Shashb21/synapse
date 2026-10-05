@@ -221,7 +221,7 @@ async function answerRows(
       const payload = (await ctx.complete({
         system: augmentSystemPrompt(TACTIC_REVISER_SYSTEM),
         user: JSON.stringify({
-          reviewer_corrections: args.hints || undefined,
+          worked_examples: args.hints || undefined,
           source: args.document.source_id,
           note:
             attempt > 1
@@ -352,7 +352,7 @@ async function llmReviews(
   const payload = (await ctx.complete({
     system: augmentSystemPrompt(TACTIC_CRITIC_SYSTEM),
     user: JSON.stringify({
-      reviewer_corrections: args.hints || undefined,
+      worked_examples: args.hints || undefined,
       exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
       note: args.retry ? "An earlier answer left these candidates unreviewed. Review each." : undefined,
       library: args.library,
@@ -396,7 +396,7 @@ async function llmDecisions(
   const payload = (await ctx.complete({
     system: augmentSystemPrompt(TACTIC_JUDGE_SYSTEM),
     user: JSON.stringify({
-      reviewer_corrections: args.hints || undefined,
+      worked_examples: args.hints || undefined,
       note: args.retry
         ? "An earlier answer left these candidates undecided or invalid. Decide each; duplicate_of must be null, a library id, or another candidate's id (and a candidate that repeats another candidate is rejected)."
         : undefined,
@@ -496,7 +496,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge decides what enters the library and what duplicates it. Needs a connected LLM.",
     contract: 1,
     agentic: true,
-    capabilities: ["llm-proposer", "llm-critic", "llm-judge", "hillclimb-hints"],
+    capabilities: ["llm-proposer", "llm-critic", "llm-judge", "worked-examples"],
   },
   inputSchema,
   outputSchema,
@@ -524,7 +524,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       status: tactic.status,
       evidence_question: tactic.evidence_question,
     }));
-    // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
+    // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
 
     const outcome = await runAgenticCycle<TacticCandidate>(ctx, "S3", {
@@ -601,7 +601,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
             note: critique?.note ?? "not reviewed",
           };
         }),
-    });
+    }, { kinds: [], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     const survivors = outcome.judged.map((item) => item.candidate);
     const decisions = await ctx.run.step(

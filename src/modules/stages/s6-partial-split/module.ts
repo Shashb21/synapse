@@ -68,7 +68,7 @@ Return JSON only: {"addressed_name":"","addressed_statement":"","addressed_tacti
 
 const SPLIT_CRITIC_SYSTEM = `You review a proposed split of a partially addressed evidence gap from a pharma Integrated Evidence Generation Plan into an addressed child and an open leftover child.
 
-Check the proposal against the parent gap, its evidence needs, and the coverage verdicts of the mapped tactics. Challenge an addressed slice the named tactics do not actually close, a leftover that some mapped tactic already answers or that misses what is still uncovered, uncovered dimensions the coverage does not support, children that restate the parent or overlap each other, and anything that contradicts a reviewer correction.
+Check the proposal against the parent gap, its evidence needs, and the coverage verdicts of the mapped tactics. Challenge an addressed slice the named tactics do not actually close, a leftover that some mapped tactic already answers or that misses what is still uncovered, uncovered dimensions the coverage does not support, children that restate the parent or overlap each other, and anything a closely matching worked example (a past reviewer decision) shows was wrong before.
 
 verdict is "keep" when the split is defensible and "revise" when anything should change. confidence is 0–100 that the split is right. note names what should change and why; for "keep" say briefly why it holds. issues is a list of short snake_case defect labels (empty for "keep").
 
@@ -247,7 +247,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
       coverage_dimensions: COVERAGE_DIMENSIONS,
     };
 
-    // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
+    // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
     let judgement: Judgement | null = null;
 
@@ -269,7 +269,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
           const payload = await ctx.complete({
             system: args.system,
             user: JSON.stringify({
-              reviewer_corrections: reviewerHints || undefined,
+              worked_examples: reviewerHints || undefined,
               note: attempt > 1 ? args.retryNote : undefined,
               ...facts,
               ...args.body,
@@ -394,7 +394,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
             note: ruling.note,
           };
         }),
-    });
+    }, { kinds: ["residual_split"], text: `${gap.name} ${gap.statement}` });
 
     // Only a split the model judge accepted is shown. A rejected split is never
     // swapped for an earlier draft; the user fills the split in or runs S6 again.

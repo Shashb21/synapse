@@ -92,8 +92,10 @@ export type HillclimbDigest = {
 };
 
 /**
- * What an agentic stage reads before it proposes: the user's own rationales for
- * previous corrections at this stage. This is the hillclimb feedback path.
+ * A summary of the open signals at a stage, for the admin and the hillclimb sweep.
+ * Stages no longer paste these rationales into prompts as rules (KAN-79): a run
+ * learns from similar past decisions as worked examples instead
+ * (decision-examples.ts).
  */
 export async function hillclimbDigest(stage: StageId, take = 8): Promise<HillclimbDigest> {
   const signals = await listSignals({ stage, status: "open", limit: 200 });
@@ -111,13 +113,4 @@ export async function hillclimbDigest(stage: StageId, take = 8): Promise<Hillcli
     if (corrections.length >= take) break;
   }
   return { stage, open: signals.length, corrections, by_kind };
-}
-
-/** Renders the digest as prompt text. Empty string when there is nothing learned yet. */
-export function digestAsPrompt(digest: HillclimbDigest): string {
-  if (digest.corrections.length === 0) return "";
-  return [
-    "Reviewer corrections from earlier runs of this stage. Respect them:",
-    ...digest.corrections.map((line) => `- ${line}`),
-  ].join("\n");
 }

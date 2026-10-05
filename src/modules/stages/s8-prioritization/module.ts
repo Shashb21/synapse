@@ -25,6 +25,7 @@ import {
   type StoredAxes,
 } from "./axes";
 import { plural } from "@/lib/plural";
+import { captureBandDecision } from "@/lib/iegp/learning-capture";
 
 /**
  * The kernel's `priority_placements` table plus the human markers S8 owns:
@@ -110,7 +111,7 @@ type Placement = z.infer<typeof placementSchema>;
 
 const PRIORITY_SYSTEM = `You place open evidence gaps from a pharma Integrated Evidence Generation Plan on a two-axis prioritization matrix.
 
-Score each given axis from 0 to 100 for each gap, where 0 is the axis's "low" end and 100 its "high" end, using the gap, the asset, treatment setting, company context and any reviewer corrections. Score the axis as described — for a cost-style axis a high score means high cost. Do not assign the band yourself; the tool derives it from the quadrant and the user validates it. Keep each rationale to one or two sentences naming what drove the scores.
+Score each given axis from 0 to 100 for each gap, where 0 is the axis's "low" end and 100 its "high" end, using the gap, the asset, treatment setting, company context, and any worked_examples of similar past reviewer decisions (examples, not rules). Score the axis as described — for a cost-style axis a high score means high cost. Do not assign the band yourself; the tool derives it from the quadrant and the user validates it. Keep each rationale to one or two sentences naming what drove the scores.
 
 When a gap carries a previous placement and a critic objection, answer the objection: move the scores it names, or keep them and say why in the rationale.
 
@@ -120,7 +121,7 @@ Return JSON only: {"gaps":[{"gap_id":"","scores":{"<axis_id>":0},"rationale":""}
 
 const CRITIC_SYSTEM = `You review suggested placements of open evidence gaps on a two-axis prioritization matrix for a pharma Integrated Evidence Generation Plan.
 
-For each gap, judge whether each axis score is defensible given the gap statement, the axis definition, the asset, treatment setting, company context and any reviewer corrections. Challenge scores that the gap text does not support, that ignore the context, or that contradict a reviewer correction.
+For each gap, judge whether each axis score is defensible given the gap statement, the axis definition, the asset, treatment setting, company context and any worked_examples of similar past reviewer decisions (examples, not rules). Challenge scores that the gap text does not support or that ignore the context.
 
 verdict is "keep" when the placement is defensible and "revise" when any score should move. A gap is never dropped. confidence is 0–100 that the placement is right. note names the axis, the direction it should move and why; for "keep" say briefly why it holds.
 
@@ -157,7 +158,7 @@ function promptContext(args: {
   hints: string;
 }) {
   return {
-    reviewer_corrections: args.hints || undefined,
+    worked_examples: args.hints || undefined,
     // Only what setup has entered: a blank plan sends no asset rather than empty strings.
     asset: enteredAssetDetails(args.asset),
     setting: args.setting || "All treatment settings",
@@ -296,7 +297,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
 
     const gapById = new Map(openGaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
-    // The kernel hands reviewer corrections to the proposer; the critic weighs them too.
+    // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic sees them too.
     let reviewerHints = "";
     const shared = () => ({
       asset: state.asset,
@@ -432,7 +433,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             note: critique?.note ?? "not reviewed",
           };
         }),
-    });
+    }, { kinds: ["s8_band"], text: openGaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     if (!input.dry_run) {
       await ensurePlacementSchema();
@@ -761,6 +762,21 @@ export async function validatePlacement(args: {
     actor: args.actor,
   });
   await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
+  // Validating a band the model suggested is a learning example (KAN-78); a band
+  // placed purely by hand has no AI output to compare against.
+  if (current?.suggested_band) {
+    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === args.gap_id);
+    if (gap) {
+      await captureBandDecision({
+        gap: { id: gap.id, name: gap.name, statement: gap.statement },
+        suggested_band: current.suggested_band,
+        suggested_rationale: current.suggested_rationale,
+        band: args.band,
+        rationale,
+        workspace_id: args.workspace_id,
+      });
+    }
+  }
   return toRecord(row);
 }
 

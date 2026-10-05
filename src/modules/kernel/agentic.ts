@@ -1,8 +1,8 @@
 import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
-import { digestAsPrompt, hillclimbDigest } from "./hillclimb";
 import { isTestStub } from "./llm";
+import { similarExamples, workedExamplesAsPrompt, type DecisionKind } from "./decision-examples";
 
 /**
  * Locked shape of every agentic stage: propose → critique → revise, three times,
@@ -33,7 +33,10 @@ export type JudgedCandidate<C> = {
 };
 
 export type ProposerArgs<C> = {
-  /** Reviewer corrections from earlier runs of this stage. */
+  /**
+   * Worked examples: past reviewer decisions on similar cases, for calibration
+   * (KAN-79). Empty when there are none. They are examples, never standing rules.
+   */
   hints: string;
   /** 1 on the first proposal; 2 and 3 are revisions answering the critic. */
   round: number;
@@ -98,19 +101,50 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+/** What a stage tells the kernel so it can find similar past decisions (KAN-79). */
+export type LearningInput = {
+  /** The decision kinds this stage's output is later accepted, edited or rejected as. */
+  kinds: DecisionKind[];
+  /** The case text this run works on (documents, gaps); similarity is measured against it. */
+  text: string;
+};
+
+/**
+ * Up to four past decisions like this run's case, as worked examples. Same-plan
+ * cases may be shown as they were; other plans only as scrubbed lessons. A lookup
+ * failure never fails the stage: it runs without examples.
+ */
+async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: LearningInput | undefined): Promise<string> {
+  if (!learning || !learning.text.trim()) {
+    ctx.run.note("learning:worked-examples", { used: [] });
+    return "";
+  }
+  try {
+    const examples = await similarExamples({ stage, kinds: learning.kinds, text: learning.text, workspace_id: ctx.workspace_id });
+    ctx.run.note(
+      "learning:worked-examples",
+      { used: examples.map((example) => ({ id: example.id, scope: example.scope, kind: example.kind })) },
+      `${examples.length} similar past decision(s) shown as examples`,
+    );
+    return workedExamplesAsPrompt(examples);
+  } catch (error) {
+    ctx.run.note("learning:worked-examples", { used: [], error: error instanceof Error ? error.message : String(error) });
+    return "";
+  }
+}
+
 /**
  * The loop every agentic stage shares. Stages supply the three roles; the kernel
- * supplies routing, the hillclimb hints that precede the first proposal, the
+ * supplies routing, the worked examples that precede the first proposal, the
  * fixed number of exchanges, and a trace with every round in it.
  */
 export async function runAgenticCycle<C>(
   ctx: ModuleContext,
   stage: StageId,
   cycle: AgenticCycle<C>,
+  learning?: LearningInput,
 ): Promise<AgenticOutcome<C>> {
-  const digest = await hillclimbDigest(stage);
-  const hints = digestAsPrompt(digest);
-  ctx.run.note("hillclimb:hints", { open: digest.open, corrections: digest.corrections });
+  const hints = await workedExamplesFor(ctx, stage, learning);
 
   const propose = async (args: ProposerArgs<C>): Promise<{ candidates: C[]; via: "llm" | "local" }> => {
     if (isTestStub()) {
