@@ -10,6 +10,8 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import * as copies from "@/accuracy/experiments/copy-workspace";
 import * as pipeline from "@/accuracy/experiments/mixed-pipeline";
 import * as records from "@/accuracy/experiments/mixed-records";
+import { mixedCandidateEvidenceSchema } from "@/accuracy/experiments/mixed-types";
+import * as routing from "@/accuracy/kernel/routing";
 import * as evaluator from "@/accuracy/eval/mixed-comparison";
 import { runMixedComparison } from "@/accuracy/experiments/mixed-comparison";
 
@@ -70,6 +72,44 @@ async function fixture(withGap = false, reversedMixed = false) {
   }
   return { source_workspace_id: workspace_id, source_file_ids: [source.id], pack_id: "beone-bgb-58067-prmt5i", actor,
     mixed: { assembly_id: mixedAssembly.id, fingerprint: mixedAssembly.fingerprint }, baseline: { assembly_id: assembly.id, fingerprint: assembly.fingerprint } };
+}
+function controlledProvider(scenario?: string) {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "0");
+    vi.spyOn(routing, "resolveAccuracyRoute").mockImplementation(async ({ call_kind, agent_role }) => ({ call_kind, role: agent_role, provider_id: "xai-grok", provider_label: "Controlled fixture", model: "controlled-fixture", auth: "api_key", connected: true, params: { temperature: 0, max_tokens: 100 }, fallbacks: [], degraded: false, reason: null }));
+    return vi.spyOn(routing, "accuracyCompletionFor").mockImplementation(({ onUsage }) => async args => {
+      let output: unknown;
+      if (args.purpose.startsWith("coverage-decide:")) {
+        const input = JSON.parse(args.user);
+        output = { gap_id: input.gap_id, tactic_id: input.tactic_id, overall: "partial", confidence: 0.8, rationale: "Selected tactic covers survival; quality of life remains open", quote_block_ids: input.evidence_blocks.map((block: { id: string }) => block.id) };
+      } else if (args.purpose.startsWith("coverage-critic:")) output = { accept: true, issues: [] };
+      else if (args.purpose === "partial-split-proposer") {
+        const input = JSON.parse(args.user);
+        output = { addressed: { statement: "Survival evidence provided by the selected tactic" }, residual: { statement: "Quality of life evidence needed for the launch decision" }, tactic_ids: input.tactics.map((row: { id: string }) => row.id), coverage_ids: input.coverage.map((row: { id: string }) => row.id), rationale: "The committed tactic supports the survival slice only", source_context: input.parent.payload.provenance };
+        const split = output as { addressed: { statement: string }; residual: { statement: string }; tactic_ids: string[]; source_context: Array<{ quote: string }> };
+        if (scenario === "parent copy") split.addressed.statement = input.parent.statement;
+        if (scenario === "duplicate children") split.addressed.statement = split.residual.statement;
+        if (scenario === "unsupported context") split.source_context[0].quote = "Invented quotation";
+        if (scenario === "crossed tactic") split.tactic_ids = ["other-workspace-tactic"];
+      } else if (args.purpose === "priority-suggester") {
+        const input = JSON.parse(args.user);
+        output = { gaps: input.gaps.map((gap: { id: string }) => ({ gap_id: gap.id, scores: Object.fromEntries(input.axes.axes.map((axis: { id: string }) => [axis.id, 90])), rationale: "Launch decision requires the remaining evidence" })) };
+      } else if (args.purpose.startsWith("ideate:proposer:")) {
+        const gap_id = /- gap_id=([^\n]+)/.exec(args.user)![1];
+        output = { proposals: [{ gap_id, name: "Prospective quality of life study", type: "rwe_study", origin: "ideated", status: "proposed", design_summary: "Prospective patient survey to measure quality of life using validated outcomes", not_from_reference: true }] };
+      } else throw new Error(`Unexpected fixture purpose ${args.purpose}`);
+      const usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 };
+      onUsage(usage, 0);
+      return { raw: JSON.stringify(output), usage };
+    });
+}
+async function sourceSnapshot(workspace_id: string) {
+  return Promise.all([
+    accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id)),
+    accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id)),
+    accuracyDb().select().from(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.workspace_id, workspace_id)),
+    accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, workspace_id)),
+    accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, workspace_id)),
+  ]);
 }
 async function run(request: Awaited<ReturnType<typeof fixture>>) {
   const record = await runMixedComparison(request);
@@ -197,9 +237,9 @@ describe("matched paired replay with real Postgres and kernel", () => {
     expect(record.result!.evidence.primary_error).toMatchObject({ phase: "persistence", message: "terminal write failed" });
     expect(record.result!.evidence.candidates.mixed!.status).toBe("completed");
   });
-  it("real_gap_tactic_coverage_and_status_are_retained_before_priority_block", async () => {
+  it("real_nonempty_open_pipeline_completes_with_durable_priorities", async () => {
     const record = await run(await fixture(true));
-    expect(record.status).toBe("blocked");
+    expect(record.status).toBe("completed");
     for (const label of ["mixed", "baseline"] as const) {
       const evidence = record.result!.evidence.candidates[label]!, attempt = record.attempts[label]!;
       expect(evidence.stages.find(row => row.stage === "coverage_decide")?.status).toBe("completed");
@@ -207,7 +247,75 @@ describe("matched paired replay with real Postgres and kernel", () => {
       expect(evidence.gates.some(row => row.object_type === "coverage" && row.decision === "pass")).toBe(true);
       expect(attempt.calls.some(row => row.call_kind === "coverage_decide" && row.output)).toBe(true);
       expect(attempt.evaluations.length).toBe(attempt.calls.length);
-      expect(evidence.primary_error?.stage).toBe("prioritize");
+      expect(evidence.final_outputs!.priorities).toHaveLength(1);
+      expect(evidence.stages.find(row => row.stage === "prioritize")?.status).toBe("completed");
     }
   });
+  it("controlled_provider_completes_paired_partial_children_ideation_and_full_export", async () => {
+    // The test controls only routing and the completion adapter; native modules,
+    // kernel parsing, gates, stores, evaluator and paired orchestration all execute.
+    const request = await fixture(true);
+    const before = await sourceSnapshot(request.source_workspace_id);
+    const completion = controlledProvider();
+    try {
+      const record = await run(request);
+      expect(record.status, JSON.stringify(record.result?.evidence.primary_error)).toBe("completed");
+      for (const label of ["mixed", "baseline"] as const) {
+        const evidence = record.result!.evidence.candidates[label]!;
+        const final = evidence.final_outputs!;
+        const split = final.residuals[0];
+        expect(final.residuals).toHaveLength(1);
+        expect(new Set([split.parent_gap_id, split.addressed_gap_id, split.open_residual_gap_id]).size).toBe(3);
+        expect(final.statuses).toEqual(expect.arrayContaining([
+          expect.objectContaining({ gap_id: split.parent_gap_id, status: "partial" }),
+          expect.objectContaining({ gap_id: split.addressed_gap_id, status: "addressed" }),
+          expect.objectContaining({ gap_id: split.open_residual_gap_id, status: "open" }),
+        ]));
+        expect(final.priorities.map(row => row.gap_id)).toEqual([split.open_residual_gap_id]);
+        expect(final.proposals.map(row => row.gap_id)).toEqual([split.open_residual_gap_id]);
+        expect(final.plan.activities).toHaveLength(1); // Proposed tactic has no dates.
+        expect(final.plan.activities[0].gap_ids).toContain(split.addressed_gap_id);
+        expect(evidence.lineage.filter(row => row.kind === "residual")).toHaveLength(2);
+        expect(evidence.final_source_inventory).toEqual(evidence.entry_source_inventory);
+        expect(mixedCandidateEvidenceSchema.safeParse({ ...evidence, lineage: evidence.lineage.filter(row => row.kind !== "residual" || row.copied_claim_id !== split.addressed_gap_id) }).success).toBe(false);
+        const forged = structuredClone(evidence);
+        forged.final_outputs!.statuses.find(row => row.gap_id === split.addressed_gap_id)!.computed = "open";
+        expect(mixedCandidateEvidenceSchema.safeParse(forged).success).toBe(false);
+        expect(evidence.setup!.pack_fingerprint).toBe(record.header.pack_fingerprint);
+        expect(evidence.setup!.downstream_evaluator_version).toBe("mixed-downstream-v2");
+        const generatedIds = evidence.lineage.flatMap(row => row.kind === "residual" || row.kind === "ideated" ? [row.copied_claim_id] : []);
+        const durable = await accuracyDb().select().from(t.accuracyClaims).where(inArray(t.accuracyClaims.id, generatedIds));
+        expect(durable).toHaveLength(3);
+        expect(durable.every(row => row.validated)).toBe(true);
+        const retained = record.attempts[label]!;
+        expect(retained.calls.length).toBe(retained.evaluations.length);
+        expect(retained.calls.filter(row => row.call_kind === "partial_split")).toHaveLength(2);
+        expect(retained.calls.some(row => row.call_kind === "gantt_project" && row.output)).toBe(true);
+      }
+      const json = await records.exportMixedComparison({ source_workspace_id: request.source_workspace_id, comparison_id: record.header.id, format: "json" });
+      const jsonl = await records.exportMixedComparison({ source_workspace_id: request.source_workspace_id, comparison_id: record.header.id, format: "jsonl" });
+      expect(json).toContain("source_context"); expect(jsonl).toContain("Prospective quality of life study");
+      expect(record.result!.evidence.evaluation!.changes.filter(row => row.proven_error)).toEqual([]);
+      expect(completion).toHaveBeenCalled();
+      expect(await sourceSnapshot(request.source_workspace_id)).toEqual(before);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it.each(["parent copy", "duplicate children", "unsupported context", "crossed tactic"])("rejects generated %s before child materialization", async scenario => {
+    const request = await fixture(true);
+    controlledProvider(scenario);
+    try {
+      const record = await run(request);
+      expect(record.status).toBe("blocked");
+      for (const label of ["mixed", "baseline"] as const) {
+        const candidate = record.result!.evidence.candidates[label]!;
+        expect(candidate.primary_error).toMatchObject({ code: "deterministic_gate_blocked", stage: "partial_split" });
+        expect(candidate.gates.some(gate => gate.object_type === "residual" && gate.decision === "block")).toBe(true);
+        expect(candidate.lineage.filter(row => row.kind === "residual")).toEqual([]);
+        expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, candidate.copied_workspace_id!))).toHaveLength(2);
+        expect(record.attempts[label]!.calls.some(row => row.call_kind === "partial_split" && row.output)).toBe(true);
+      }
+    } finally { vi.unstubAllEnvs(); }
+  });
+
 });

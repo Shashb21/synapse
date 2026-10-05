@@ -497,7 +497,7 @@ describe("KAN-38 assembly approval enforcement", () => {
       .rejects.toMatchObject({ code: "conflict" });
 
     await expect(updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: gapVersion.claim_id,
-      metadata: { priority_band: "high", priority_rationale: "Workflow triage.", priority_origin: "workshop" } }))
+      metadata: { priority_band: "high", priority_rationale: "Workflow triage.", priority_origin: "workshop", priority_scoring: { score: 75, validated: false } } }))
       .resolves.toMatchObject({ id: gapVersion.claim_id });
   });
 

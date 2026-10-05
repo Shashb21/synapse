@@ -206,15 +206,16 @@ function candidate(label: "mixed" | "baseline", assembly: Awaited<ReturnType<typ
   const copied_payload = { ...selected.payload, id: copied_claim, provenance: [{ ...provenance[0], source_file_id: copied_source, block_id: copied_block }] };
   const inventory = [{ claim_id: copied_claim, claim_type: "gap" as const, payload: copied_payload, original_item_version_ids: [selected.id], original_provenance: provenance }];
   const statuses = [{ gap_id: copied_claim, status: "open" as const, computed: "open" as const, override: false }];
-  const priorities = [{ gap_id: copied_claim, band: "medium" as const }];
+  const priorities = [{ gap_id: copied_claim, band: "medium" as const, axis_scores: { decision_impact: 50, time_pressure: 50, external_scrutiny: 50, feasibility: 50 }, score: 50, rationale: "Fixture evidence", mode: "deterministic" as const, scoring_identity: "s8-default-weighted-cues-v1" }];
   const gate = { id: `${label}-gate`, policy: MIXED_GATE_POLICY, policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT,
     object_type: "claim" as const, object_ids: [copied_claim], content_fingerprint: "checked-content", check_fingerprint: "checked-checks", checker_version: "checks-v1",
     decision: "pass" as const, rationale: "Deterministic checks passed without edits", automatic: true as const, findings: [] };
+  const gates = [gate, { ...gate, id: `${gate.id}-priority`, object_type: "priority" as const }];
   const config = { fingerprint: "config-v1", modules: MIXED_PIPELINE_STAGES.map(stage => ({
     stage, module_id: "fixture", module_version: "1", prompt_version: "1", model: null, parameters: {} })) };
   const identity = { source_fingerprint: "original-source", baseline_fingerprint: "original-baseline", original_baseline_snapshot: { claims: [] },
     pack_fingerprint: experimentPackFingerprint("beone-bgb-58067-prmt5i"), evaluator_version: EXPERIMENT_EVALUATOR_VERSION,
-    downstream_evaluator_version: "mixed-downstream-v1", gate_policy: MIXED_GATE_POLICY, gate_policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT,
+    downstream_evaluator_version: "mixed-downstream-v2", gate_policy: MIXED_GATE_POLICY, gate_policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT,
     configuration: config, code_identity: "fixture-code", source_files: [{ id: source_id, checksum: "original-checksum", content_fingerprint: "source-content" }],
     parse_blocks: [{ id: provenance[0].block_id, source_file_id: source_id, content_fingerprint: "block-content" }] };
   const metadata = { run_ids: [], calls: [], module_id: "fixture", module_version: "1", prompt_version: "1", model: null, configuration_fingerprint: "config-v1",
@@ -225,13 +226,13 @@ function candidate(label: "mixed" | "baseline", assembly: Awaited<ReturnType<typ
     lineage: [{ kind: "selected", original_item_version_id: selected.id, original_claim_id: selected.claim_id, original_run_id: selected.run_id!, original_snapshot_id: selected.snapshot_id,
       original_iteration: selected.iteration, original_item_index: selected.item_index, selection_reason: selected.reason,
       copied_claim_id: copied_claim, copied_evidence_ids: [`${copied_workspace_id}-prov`], original_payload: selected.payload, copied_payload }],
-    gates: [gate], entry_source_inventory: inventory, final_source_inventory: inventory, primary_error: null,
+    gates, entry_source_inventory: inventory, final_source_inventory: inventory, primary_error: null,
     stages: [
       { stage: "inventory_validate", status: "completed", ...metadata, output: { claim_ids: [copied_claim], findings: [] } },
       { stage: "pair_generate", status: "completed", ...metadata, output: { pairs: [] } },
       { stage: "coverage_decide", status: "skipped", reason: "No candidate pairs", applicable: false, input_count: 0 },
       { stage: "coverage_critic", status: "skipped", reason: "No coverage decisions", applicable: false, input_count: 0 },
-      { stage: "validation_gate", status: "completed", ...metadata, output: { decisions: [gate] } },
+      { stage: "validation_gate", status: "completed", ...metadata, output: { decisions: gates } },
       { stage: "partial_split", status: "skipped", reason: "No partial gaps", applicable: false, input_count: 0 },
       { stage: "status_derive", status: "completed", ...metadata, output: { statuses, open: 1, partial: 0, addressed: 0 } },
       { stage: "prioritize", status: "completed", ...metadata, output: { placements: priorities } },
@@ -252,7 +253,7 @@ function literalAssembly() {
 
 function completedResult(mixed: MixedCandidateEvidence, baseline: MixedCandidateEvidence): MixedComparisonResult {
   return { status: "completed", candidates: { mixed: mixed as Extract<MixedCandidateEvidence, { status: "completed" }>, baseline: baseline as Extract<MixedCandidateEvidence, { status: "completed" }> }, primary_error: null,
-    evaluation: { evaluator_version: "mixed-downstream-v1", source_evaluations: ([mixed, baseline] as const).flatMap(candidate => (["entry", "final"] as const).flatMap(point => (["gap", "tactic"] as const).map(claim_type => ({
+    evaluation: { evaluator_version: "mixed-downstream-v2", source_evaluations: ([mixed, baseline] as const).flatMap(candidate => (["entry", "final"] as const).flatMap(point => (["gap", "tactic"] as const).map(claim_type => ({
       candidate: candidate.label, point, claim_type, evaluation: { ...evaluateExperimentVersion({ pack_id: "beone-bgb-58067-prmt5i", call_kind: claim_type === "gap" ? "need_extract" : "inventory_extract",
         output: { [claim_type === "gap" ? "gaps" : "tactics"]: (point === "entry" ? candidate.entry_source_inventory : candidate.final_source_inventory ?? []).filter(row => row.claim_type === claim_type).map(row => row.payload) } }), call_kind: claim_type === "gap" ? "need_extract" as const : "inventory_extract" as const },
     })))), changes: [], applicability: [

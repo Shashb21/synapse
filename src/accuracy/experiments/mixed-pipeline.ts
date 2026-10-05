@@ -16,7 +16,7 @@ import { getClaimsByIds, insertClaim, claimMetadata, listDownstreamClaims } from
 import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { inspectMixedPlan } from "@/accuracy/domain/mixed-plan-invariants";
 import { checkAssembly, type ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
-import { provenanceSpanSchema, type ParseBlock } from "@/accuracy/store/quote-validator";
+import { provenanceSpanSchema, validateProvenance, type ParseBlock } from "@/accuracy/store/quote-validator";
 import { coverageDecisionSchema, coverageCriticOutputSchema } from "@/accuracy/modules/coverage-decide/schema";
 import * as coveragePrompts from "@/accuracy/modules/coverage-decide/prompts";
 import * as ideatePrompts from "@/accuracy/modules/ideate/prompts";
@@ -28,11 +28,17 @@ import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, MIXED_PIPELINE_STAGES
   mixedStageEvidenceSchema, mixedFinalOutputsSchema, type MixedCandidateEvidence, type MixedGateDecision,
   type MixedSetupIdentity, type MixedStageEvidence, type MixedFinalOutputs } from "./mixed-types";
 
+import { partialSplitOutputSchema, PRIORITY_SCORING_IDENTITY } from "@/accuracy/modules/partial-split/schema";
+import { splitChildIds } from "@/accuracy/modules/partial-split/module";
+import { materializeSplit } from "@/accuracy/modules/partial-split/materialize";
+import * as splitPrompts from "@/accuracy/modules/partial-split/prompts";
+import { DEFAULT_AXES, bandFor, weightedScore } from "@/modules/stages/s8-prioritization/axes";
+
 type Stage = typeof MIXED_PIPELINE_STAGES[number];
 type Configuration = MixedSetupIdentity["configuration"];
 type ModuleConfiguration = Configuration["modules"][number];
 type Finding = MixedGateDecision["findings"][number];
-const CHECKER = "mixed-deterministic-checks-v1";
+const CHECKER = "mixed-deterministic-checks-v2";
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonical(child)]));
@@ -46,7 +52,7 @@ function remapSelected(value: unknown, source: Record<string, string>, block: Re
   return value;
 }
 function promptIdentity(stage: Stage): string | null {
-  const prompts = stage === "coverage_decide" || stage === "coverage_critic" ? coveragePrompts : stage === "ideate" ? ideatePrompts : null;
+  const prompts = stage === "coverage_decide" || stage === "coverage_critic" ? coveragePrompts : stage === "ideate" ? ideatePrompts : stage === "partial_split" || stage === "prioritize" ? splitPrompts : null;
   return prompts ? hash(Object.fromEntries(Object.entries(prompts).map(([key, value]) => [key, typeof value === "function" ? value.toString() : value]))) : null;
 }
 function routeIdentity(route: ResolvedAccuracyRoute | null) {
@@ -73,6 +79,7 @@ async function settings(stage: Stage): Promise<ModuleConfiguration> {
     parameters: { agentic: implementation.manifest.agentic, role, route: routeIdentity(route),
       configured_route: { provider_id: configured.provider_id, model: configured.model, params: configured.params, fallbacks: configured.fallbacks },
       behavior_fingerprint: hash(implementation.run.toString()), test_stub: process.env.SYNAPSE_TEST_STUB_LLM === "1",
+      ...(stage === "prioritize" ? { axes: DEFAULT_AXES, scoring_identity: PRIORITY_SCORING_IDENTITY } : {}),
       ...(stage === "coverage_critic" ? { enabled: true, applicability: "every_recomputed_pair" } : {}),
       ...(stage === "pair_generate" ? { pairing: "assembly-generation_all_selected_pairs_v1" } : {}),
       ...(stage === "validation_gate" ? { policy: MIXED_GATE_POLICY, policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT } : {}) } };
@@ -315,16 +322,17 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
       stage = "validation_gate";
       await artifact(stage, { gates: evidence.gates, policy: MIXED_GATE_POLICY }, { decisions: evidence.gates }, "decisions");
       complete(stage, { decisions: evidence.gates });
+      const operationalGaps = gaps.map(row => ({ claim_id: row.claim_id, payload: row.payload }));
       const tacticStatus = tactics.map(row => ({ id: row.claim_id, status: row.payload.status }));
       async function derive(key: string) {
-        const result = await run<{ statuses: MixedFinalOutputs["statuses"]; open: number; partial: number; addressed: number }>("status_derive", { workspace_id: workspace, gap_ids: gaps.map(row => row.claim_id), tactics: tacticStatus, coverages: coverage, persist: true }, key);
+        const result = await run<{ statuses: MixedFinalOutputs["statuses"]; open: number; partial: number; addressed: number }>("status_derive", { workspace_id: workspace, gap_ids: operationalGaps.map(row => row.claim_id), tactics: tacticStatus, coverages: coverage, persist: true }, key);
         const overrides: Record<string, GapStatus | null> = {};
-        for (const gap of gaps) {
+        for (const gap of operationalGaps) {
           const override = gap.payload.status_override;
           const value = override && typeof override === "object" && !Array.isArray(override) ? override.status : null;
           overrides[gap.claim_id] = value === "open" || value === "partial" || value === "addressed" ? value : null;
         }
-        const computed = deriveWorkspaceGapStatuses({ gap_ids: gaps.map(row => row.claim_id), coverages: coverage,
+        const computed = deriveWorkspaceGapStatuses({ gap_ids: operationalGaps.map(row => row.claim_id), coverages: coverage,
           tactics: tacticStatus.flatMap(row => { const status = asTacticLifecycle(row.status); return status ? [{ id: row.id, status }] : []; }), overrides });
         if (!isDeepStrictEqual(result.output.statuses, computed) || result.output.open !== computed.filter(row => row.status === "open").length ||
           result.output.partial !== computed.filter(row => row.status === "partial").length || result.output.addressed !== computed.filter(row => row.status === "addressed").length) blocked("invalid_status_derivation", "Status output does not match exact validated coverage and tactic lifecycle");
@@ -336,30 +344,70 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
       const partials = status.statuses.filter(row => row.status === "partial");
       if (partials.length) {
         for (const partial of partials) {
-          const result = await run<{ addressed_gap_id: string; open_residual_gap_id: string }>("partial_split", { workspace_id: workspace, gap_id: partial.gap_id }, partial.gap_id);
-          const durable = await getClaimsByIds(workspace!, [result.output.open_residual_gap_id]);
-          const child = durable.find(row => row.id === result.output.open_residual_gap_id && row.claim_type === "gap" && claimMetadata(row).parent_gap_id === partial.gap_id);
-          if (!child || inventory.some(row => row.claim_id === child.id)) blocked("missing_durable_residual", "Partial split did not create a durable residual with parent lineage");
-          // Current production stub never reaches here. A future implementation must provide source-bound payload/evidence before automatic validation.
-          blocked("unsupported_residual_gate", "Durable residual requires supported deterministic payload/provenance checks");
+          const result = await run("partial_split", { workspace_id: workspace, gap_id: partial.gap_id }, partial.gap_id);
+          const parsed = partialSplitOutputSchema.safeParse(result.output);
+          const errors: Finding[] = [];
+          const parent = gaps.find(row => row.claim_id === partial.gap_id)!;
+          if (!parsed.success) {
+            gate("residual", [partial.gap_id], result.output, [finding("invalid_split_output", "Split proposal lacks full child payloads and evidence", [partial.gap_id])], { parent });
+            blocked("deterministic_gate_blocked", "Split failed deterministic checks");
+          }
+          const output = parsed.data!;
+          const ids = splitChildIds(result.run_id, partial.gap_id);
+          const children = [output.addressed, output.residual];
+          const textKey = (value: unknown) => String(value).trim().toLowerCase().replace(/\s+/g, " ");
+          if (!isDeepStrictEqual(ids, { addressed_gap_id: output.addressed_gap_id, open_residual_gap_id: output.open_residual_gap_id }) ||
+            output.addressed.id !== output.addressed_gap_id || output.residual.id !== output.open_residual_gap_id || output.addressed.branch !== "addressed" || output.residual.branch !== "open" ||
+            children.some(child => child.parent_gap_id !== partial.gap_id || child.split_run_id !== result.run_id || child.split_rationale !== output.rationale || !isDeepStrictEqual(child.support_tactic_ids, output.tactic_ids) || !isDeepStrictEqual(child.support_coverage_ids, output.coverage_ids) || inventory.some(row => row.claim_id === child.id) || textKey(child.statement) === textKey(parent.payload.statement)) ||
+            textKey(output.addressed.statement) === textKey(output.residual.statement)) errors.push(finding("invalid_split_binding", "Split requires two distinct generated children with exact run/parent identities", children.map(child => child.id)));
+          const parentSpans = Array.isArray(parent.payload.provenance) ? parent.payload.provenance.map(span => provenanceSpanSchema.parse(span)) : [];
+          for (const child of children) for (const span of child.source_context) {
+            const block = blocks.find(block => block.id === span.block_id);
+            if (!block || !validateProvenance({ block: block as ParseBlock, span }).ok || !parentSpans.some(parentSpan => isDeepStrictEqual(parentSpan, span))) errors.push(finding("unsupported_split_context", "Generated child context must be unchanged validated parent source spans", [child.id, span.block_id]));
+          }
+          const support = coverage.filter(row => output.coverage_ids.includes(row.id));
+          if (new Set(output.coverage_ids).size !== output.coverage_ids.length || new Set(output.tactic_ids).size !== output.tactic_ids.length || support.length !== output.coverage_ids.length ||
+            support.some(row => row.gap_id !== partial.gap_id || !row.validated || !["partial", "limited"].includes(row.overall) || !output.tactic_ids.includes(row.tactic_id)) ||
+            output.tactic_ids.some(id => !support.some(row => row.tactic_id === id) || !tactics.some(tactic => tactic.claim_id === id && ["planned", "ongoing", "completed"].includes(String(tactic.payload.status))))) errors.push(finding("unsupported_split_coverage", "Addressed slice requires exact validated parent partial coverage and committed tactic support", children.map(child => child.id)));
+          const decision = gate("residual", children.map(child => child.id), output, errors, { parent, support, blocks, tacticStatus });
+          if (decision.decision === "block") blocked("deterministic_gate_blocked", "Split failed deterministic checks");
+          const materialized = await materializeSplit({ workspace_id: workspace!, run_id: result.run_id, output, passing_gate: true });
+          for (const child of children) {
+            evidence.lineage.push({ kind: "residual", copied_claim_id: child.id, parent_claim_ids: [partial.gap_id], run_id: result.run_id, stage: "partial_split", payload: child, copied_evidence_ids: materialized.evidenceIds[child.id] });
+            operationalGaps.push({ claim_id: child.id, payload: child });
+          }
+          await run("validation_gate", { workspace_id: workspace, claim_ids: children.map(child => child.id), action: "validate", rationale: MIXED_GATE_POLICY }, result.run_id);
+          const validatedChildren = await getClaimsByIds(workspace!, children.map(child => child.id));
+          if (validatedChildren.length !== 2 || children.some(child => !validatedChildren.some(row => row.id === child.id && row.validated && row.statement === child.statement && Object.entries(child).every(([key, value]) => isDeepStrictEqual(claimMetadata(row)[key], value))))) blocked("validation_content_changed", "Split child validation did not preserve the exact generated payloads");
+          for (const row of materialized.coverage) {
+            const childCoverage = { id: row.id, gap_id: output.addressed_gap_id, tactic_id: row.tactic_id, overall: "full" as const, confidence: Math.min(...support.map(row => row.confidence)), quote_block_ids: output.addressed.source_context.map(span => span.block_id), rationale: row.rationale!, validated: true };
+            coverage.push(childCoverage);
+            gate("coverage", [row.id], childCoverage, [], { split_run_id: result.run_id, split_gate_id: decision.id, support });
+          }
+          residuals.push({ parent_gap_id: partial.gap_id, addressed_gap_id: output.addressed_gap_id, open_residual_gap_id: output.open_residual_gap_id });
         }
+        await artifact("partial_split", { splits: evidence.lineage.filter(row => row.kind === "residual"), gates: evidence.gates.filter(row => row.object_type === "residual") }, { residuals }, "completed-splits");
         complete("partial_split", { residuals });
         status = await derive("after-split"); complete("status_derive", status);
+        await artifact("coverage_decide", { splits: residuals, gates: evidence.gates.filter(row => row.object_type === "coverage") }, { decisions: coverage }, "split-coverage");
+        complete("coverage_decide", { decisions: coverage });
       } else skip("partial_split", "No partial gaps");
-      const eligible = status.statuses.filter(row => row.status !== "addressed").map(row => row.gap_id);
+      const eligible = status.statuses.filter(row => row.status !== "addressed" && !residuals.some(split => split.parent_gap_id === row.gap_id)).map(row => row.gap_id);
       let priorities: MixedFinalOutputs["priorities"] = [];
       if (eligible.length) {
         const result = await run<{ placements: MixedFinalOutputs["priorities"] }>("prioritize", { workspace_id: workspace, gap_ids: eligible });
         priorities = result.output.placements;
         const durable = await getClaimsByIds(workspace!, eligible);
-        if (priorities.length !== eligible.length || new Set(priorities.map(row => row.gap_id)).size !== eligible.length || eligible.some(id => !priorities.some(row => row.gap_id === id)) || priorities.some(row => !durable.some(claim => claim.id === row.gap_id && claimMetadata(claim).priority_band === row.band))) blocked("missing_priority_placement", "Prioritize did not persist a placement for every applicable gap");
+        if (priorities.length !== eligible.length || new Set(priorities.map(row => row.gap_id)).size !== eligible.length || eligible.some(id => !priorities.some(row => row.gap_id === id)) || priorities.some(row => !durable.some(claim => claim.id === row.gap_id && claimMetadata(claim).priority_band === row.band && isDeepStrictEqual(claimMetadata(claim).priority_rationale, row.rationale) && isDeepStrictEqual((claimMetadata(claim).priority_scoring as Record<string, unknown>)?.axis_scores, row.axis_scores)) || row.scoring_identity !== PRIORITY_SCORING_IDENTITY ||
+          !isDeepStrictEqual(Object.keys(row.axis_scores).sort(), DEFAULT_AXES.axes.map(axis => axis.id).sort()) || Object.values(row.axis_scores).some(score => !Number.isFinite(score) || score < 0 || score > 100) || row.score !== weightedScore(row.axis_scores, DEFAULT_AXES.axes) || row.band !== bandFor(row.score, DEFAULT_AXES.bands))) blocked("missing_priority_placement", "Prioritize did not persist a placement for every applicable gap");
         gate("priority", eligible, priorities, [], { eligible, durable });
+        await artifact("prioritize", { eligible, native_run_id: result.run_id, output: result.output }, { placements: priorities }, "completed-placements");
         complete("prioritize", { placements: priorities });
       } else skip("prioritize", "No open or partial gaps");
       let proposals: MixedFinalOutputs["proposals"] = [];
       const high = priorities.filter(row => row.band === "high" && status.statuses.some(status => status.gap_id === row.gap_id && status.status === "open"));
       if (high.length) {
-        const input = { workspace_id: workspace, gaps: gaps.map(row => ({ id: row.claim_id, statement: row.payload.statement, status: status.statuses.find(status => status.gap_id === row.claim_id)?.status,
+        const input = { workspace_id: workspace, gaps: operationalGaps.filter(row => !residuals.some(split => split.parent_gap_id === row.claim_id)).map(row => ({ id: row.claim_id, statement: row.payload.statement, status: status.statuses.find(status => status.gap_id === row.claim_id)?.status,
           priority_band: priorities.find(priority => priority.gap_id === row.claim_id)?.band ?? null, validated: true })), existing_tactic_names: tactics.map(row => row.payload.name) };
         const result = await run("ideate", input);
         const output = ideateOutputSchema.parse(result.output); proposals = output.proposals;
@@ -375,15 +423,19 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
           if (!previous) await insertClaim({ id, workspace_id: workspace!, claim_type: "tactic", statement: proposal.name, status: "proposed", validated: false, metadata: { ...proposal, parent_gap_id: proposal.gap_id } });
           evidence.lineage.push({ kind: "ideated", copied_claim_id: id, parent_claim_ids: [proposal.gap_id], run_id: result.run_id, stage: "ideate", payload: proposal, copied_evidence_ids: [] });
           await run("validation_gate", { workspace_id: workspace, claim_ids: [id], action: "validate", rationale: MIXED_GATE_POLICY }, id);
+          const [validatedProposal] = await getClaimsByIds(workspace!, [id]);
+          if (!validatedProposal?.validated || validatedProposal.statement !== proposal.name || Object.entries(proposal).some(([key, value]) => !isDeepStrictEqual(claimMetadata(validatedProposal)[key], value))) blocked("validation_content_changed", "Generated proposal validation did not preserve its payload");
         }
         complete("ideate", output);
       } else skip("ideate", "No validated high-priority open gaps");
-      const planInput = { workspace_id: workspace, tactics: tactics.map(row => ({ ...row.payload, id: row.claim_id, validated: true, tactic_type: row.payload.type })), coverages: coverage, gaps: gaps.map(row => ({ id: row.claim_id, validated: true })) };
+      const generatedTactics = evidence.lineage.flatMap(row => row.kind === "ideated" ? [{ claim_id: row.copied_claim_id, payload: row.payload }] : []);
+      const allTactics = [...tactics, ...generatedTactics];
+      const planInput = { workspace_id: workspace, tactics: allTactics.map(row => ({ ...row.payload, id: row.claim_id, validated: true, tactic_type: row.payload.type })), coverages: coverage, gaps: operationalGaps.map(row => ({ id: row.claim_id, validated: true, parent_gap_id: typeof row.payload.parent_gap_id === "string" ? row.payload.parent_gap_id : null })) };
       const plan = (await run<MixedFinalOutputs["plan"]>("gantt_project", planInput)).output;
       const projected = projectGanttFromTactics({ tactics: planInput.tactics as GanttTacticInput[], coverages: coverage, gaps: planInput.gaps });
       const planFindings: Finding[] = inspectMixedPlan({
-        plan, workspace_id: workspace, tactic_ids: tactics.map(row => row.claim_id),
-        gap_ids: gaps.map(row => row.claim_id),
+        plan, workspace_id: workspace, tactic_ids: allTactics.map(row => row.claim_id),
+        gap_ids: operationalGaps.map(row => row.claim_id),
       });
       if (!isDeepStrictEqual(plan.activities, projected)) planFindings.push({
         code: "invalid_plan_binding", severity: "blocking",

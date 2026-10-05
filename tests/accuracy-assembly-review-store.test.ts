@@ -228,7 +228,7 @@ describe("assembly review store", () => {
         priority: "high",
         priority_band: "high",
         priority_rationale: "Workflow reprioritization.",
-        priority_origin: "review",
+        priority_origin: "review", priority_scoring: { mode: "deterministic", validated: false, score: 75 },
       },
     }).where(eq(t.accuracyClaims.id, gapPub.version.claim_id));
     await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: assembly.id,
@@ -242,7 +242,7 @@ describe("assembly review store", () => {
       true,
     ]);
     const projectedGap = live?.claims.find((claim) => claim.id === gapPub.version.claim_id);
-    expect(projectedGap?.metadata).toMatchObject({ priority: "high", priority_band: "high", priority_rationale: "Workflow reprioritization.", priority_origin: "review" });
+    expect(projectedGap?.metadata).toMatchObject({ priority: "high", priority_band: "high", priority_rationale: "Workflow reprioritization.", priority_origin: "review", priority_scoring: { mode: "deterministic", validated: false, score: 75 } });
     expect(projectedGap?.metadata).not.toHaveProperty("gap_ids");
     expect(projectedGap?.metadata).not.toHaveProperty("parent_gap_id");
     expect(live?.coverage).toHaveLength(1);

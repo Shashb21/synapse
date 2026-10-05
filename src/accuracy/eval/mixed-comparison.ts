@@ -5,10 +5,10 @@ import { asTacticLifecycle, deriveGapStatus } from "../modules/status-derive/eng
 import { evaluateExperimentVersion, experimentPackFingerprint, EXPERIMENT_EVALUATOR_VERSION } from "./experiment-gold";
 import {
   MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, mixedComparisonEvaluationSchema,
-  type MixedCandidateEvidence, type MixedComparisonEvaluation, type MixedSourceInventory,
+  type MixedItemLineage, type MixedCandidateEvidence, type MixedComparisonEvaluation, type MixedSourceInventory,
 } from "../experiments/mixed-types";
 
-export const MIXED_DOWNSTREAM_EVALUATOR_VERSION = "mixed-downstream-v1";
+export const MIXED_DOWNSTREAM_EVALUATOR_VERSION = "mixed-downstream-v2";
 type Change = MixedComparisonEvaluation["changes"][number];
 type Dimension = Change["dimension"];
 type Evaluated = MixedComparisonEvaluation["source_evaluations"][number];
@@ -195,7 +195,7 @@ function inspectOutputs(candidate: MixedCandidateEvidence, add: Add) {
   const generatedTactics = new Set(candidate.lineage.flatMap(row => row.kind === "ideated" ? [row.copied_claim_id] : []));
   if (candidate.final_source_inventory && !isDeepStrictEqual(output.inventory, inventory)) fail("source_gaps", "retained final inventory differs from source inventory");
   for (const row of output.coverage) {
-    if (!gaps.has(row.gap_id) || !tactics.has(row.tactic_id)) fail("coverage", "coverage references an unknown source gap or tactic", [row.id]);
+    if ((!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id)) || (!tactics.has(row.tactic_id) && !generatedTactics.has(row.tactic_id))) fail("coverage", "coverage references an unknown source gap or tactic", [row.id]);
     if (row.quote_block_ids.some(id => !candidate.copy?.block_id_map || !Object.values(candidate.copy.block_id_map).includes(id)))
       fail("coverage", "coverage references a block outside the copied source", [row.id]);
   }
@@ -210,22 +210,21 @@ function inspectOutputs(candidate: MixedCandidateEvidence, add: Add) {
     if (!row.override && row.status !== row.computed) fail("status", "status differs from computed status without an override", [row.gap_id]);
     // Missing lifecycle labels prevent recomputation; do not invent a default.
     const applicable = output.coverage.filter(coverage => coverage.gap_id === row.gap_id && coverage.validated && coverage.overall !== "not_relevant");
-    if (gaps.has(row.gap_id) && applicable.every(coverage => tacticLifecycles.some(tactic => tactic.id === coverage.tactic_id))) {
+    if ((gaps.has(row.gap_id) || generatedGaps.has(row.gap_id)) && applicable.every(coverage => tacticLifecycles.some(tactic => tactic.id === coverage.tactic_id))) {
       if (row.computed !== deriveGapStatus({ gap_id: row.gap_id, coverages: output.coverage, tactics: tacticLifecycles }))
         fail("status", "computed status disagrees with retained validated coverage and tactic lifecycle", [row.gap_id]);
     } else if (gaps.has(row.gap_id)) add("output_changed", "status", `${candidate.label}: computed status consistency unavailable because tactic lifecycle evidence is missing`, [row.gap_id], false, "advisory");
   }
-  for (const gap of gaps) if (!output.statuses.some(row => row.gap_id === gap)) fail("status", "source gap lacks a final status", [gap]);
+  for (const gap of [...gaps, ...generatedGaps]) if (!output.statuses.some(row => row.gap_id === gap)) fail("status", "source gap lacks a final status", [gap]);
   for (const row of output.residuals) {
-    const recordedSplit = candidate.lineage.some(lineage => lineage.kind === "residual" &&
-      lineage.copied_claim_id === row.open_residual_gap_id && lineage.stage === "partial_split" &&
-      lineage.parent_claim_ids.length === 1 && lineage.parent_claim_ids[0] === row.parent_gap_id &&
-      candidate.stages.some(stage => stage.stage === "partial_split" && stage.status === "completed" && stage.run_ids.includes(lineage.run_id)));
-    // The current partial-split contract retains its input gap as the addressed branch.
-    if (!gaps.has(row.parent_gap_id) || row.addressed_gap_id !== row.parent_gap_id ||
-      row.addressed_gap_id === row.open_residual_gap_id || !recordedSplit)
-      fail("residual", "residual branches violate the split contract or lack matching parent lineage and a completed split run", [row.parent_gap_id, row.addressed_gap_id, row.open_residual_gap_id]);
+    const children = [row.addressed_gap_id, row.open_residual_gap_id];
+    const branches = children.map(id => candidate.lineage.find((lineage): lineage is Extract<MixedItemLineage, { kind: "residual" | "ideated" }> => lineage.kind === "residual" && lineage.copied_claim_id === id && lineage.stage === "partial_split" && lineage.parent_claim_ids.length === 1 && lineage.parent_claim_ids[0] === row.parent_gap_id && candidate.stages.some(stage => stage.stage === "partial_split" && stage.status === "completed" && stage.run_ids.includes(lineage.run_id))));
+    if (!gaps.has(row.parent_gap_id) || new Set([row.parent_gap_id, ...children]).size !== 3 || branches.some(branch => !branch) || branches[0]?.run_id !== branches[1]?.run_id)
+      fail("residual", "split requires two generated branches with matching parent lineage and a completed split run", [row.parent_gap_id, ...children]);
+    if (output.statuses.find(status => status.gap_id === row.parent_gap_id)?.status !== "partial" || output.statuses.find(status => status.gap_id === row.addressed_gap_id)?.computed !== "addressed" || output.statuses.find(status => status.gap_id === row.open_residual_gap_id)?.computed !== "open") fail("residual", "split branch statuses disagree with retained historical parent and generated evidence", [row.parent_gap_id, ...children]);
   }
+  const eligible = output.statuses.filter(row => row.status !== "addressed" && !output.residuals.some(split => split.parent_gap_id === row.gap_id)).map(row => row.gap_id).sort();
+  if (canonical(output.priorities.map(row => row.gap_id).sort()) !== canonical(eligible)) fail("priority", "priority placements do not match exact operational eligible gaps");
   for (const row of output.priorities) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id)) fail("priority", "priority references an unknown gap", [row.gap_id]);
   for (const row of output.proposals) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id))
     fail("ideation", "proposal references an unknown gap", [row.gap_id]);

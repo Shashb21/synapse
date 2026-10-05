@@ -4,6 +4,10 @@ import { z } from "zod";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import { coverageDecisionSchema, coverageCriticOutputSchema } from "@/accuracy/modules/coverage-decide/schema";
+import { priorityPlacementSchema, splitChildSchema } from "@/accuracy/modules/partial-split/schema";
+import { asTacticLifecycle, deriveGapStatus } from "@/accuracy/modules/status-derive/engine";
+import { DEFAULT_AXES, bandFor, weightedScore } from "@/modules/stages/s8-prioritization/axes";
+import { PRIORITY_SCORING_IDENTITY } from "@/accuracy/modules/partial-split/schema";
 import type { ExperimentRecord } from "./records";
 import type * as tables from "../store/schema";
 
@@ -96,7 +100,7 @@ export const mixedSourceInventorySchema = z.array(z.object({ claim_id: id, claim
   original_item_version_ids: distinctIds.min(1), original_provenance: z.array(provenance).min(1) }).strict());
 export type MixedSourceInventory = z.infer<typeof mixedSourceInventorySchema>;
 const statusRow = z.object({ gap_id: id, status: z.enum(["open", "partial", "addressed"]), computed: z.enum(["open", "partial", "addressed"]), override: z.boolean() }).strict();
-const priority = z.object({ gap_id: id, band: z.enum(["high", "medium", "low"]) }).strict();
+const priority = priorityPlacementSchema;
 const residual = z.object({ parent_gap_id: id, addressed_gap_id: id, open_residual_gap_id: id }).strict();
 const proposal = z.object({ gap_id: id, name: id, type: id, origin: z.literal("ideated"), status: z.literal("proposed"), design_summary: id, not_from_reference: z.literal(true) }).strict();
 export const mixedPlanProjectionSchema = z.object({ workspace_id: id, activities: z.array(z.object({
@@ -222,6 +226,41 @@ export const mixedCompletedCandidateSchema = z.object({ ...candidateFields, stat
       candidate.stages.some(stage => stage.stage === row.stage && stage.status === "completed" && stage.run_ids.includes(row.run_id)));
     if (!transformation) issue("Changed final source inventory requires explicit lineage backed by a completed stage run");
   }
+  const generated = candidate.lineage.filter((row): row is Extract<MixedItemLineage, { kind: "residual" | "ideated" }> => row.kind === "residual" || row.kind === "ideated");
+  if (new Set(generated.map(row => row.copied_claim_id)).size !== generated.length || generated.some(row => candidate.entry_source_inventory.some(item => item.claim_id === row.copied_claim_id))) issue("Generated identities must be distinct and separate from source inventory");
+  const allGaps = new Set([...final.inventory.filter(row => row.claim_type === "gap").map(row => row.claim_id), ...generated.filter(row => row.kind === "residual").map(row => row.copied_claim_id)]);
+  const allTactics = new Set([...final.inventory.filter(row => row.claim_type === "tactic").map(row => row.claim_id), ...generated.filter(row => row.kind === "ideated").map(row => row.copied_claim_id)]);
+  const lifecycles = [...final.inventory.filter(row => row.claim_type === "tactic").map(row => ({ id: row.claim_id, payload: row.payload })), ...generated.filter(row => row.kind === "ideated").map(row => ({ id: row.copied_claim_id, payload: row.payload }))].flatMap(row => { const status = asTacticLifecycle(row.payload.status); return status ? [{ id: row.id, status }] : []; });
+  for (const row of generated) {
+    if (!candidate.stages.some(stage => stage.stage === row.stage && stage.status === "completed" && stage.run_ids.includes(row.run_id)) || !row.parent_claim_ids.every(id => allGaps.has(id))) issue("Generated lineage requires valid parents and a completed generation run");
+    const gateType = row.kind === "residual" ? "residual" : "proposal";
+    if (!candidate.gates.some(gate => gate.object_type === gateType && gate.decision === "pass" && gate.object_ids.includes(row.copied_claim_id))) issue("Generated claims require a passing no-edit generation gate");
+    if (row.kind === "residual") {
+      const parsed = splitChildSchema.safeParse(row.payload);
+      if (!parsed.success || parsed.data.id !== row.copied_claim_id || row.parent_claim_ids.length !== 1 || parsed.data.parent_gap_id !== row.parent_claim_ids[0] || !row.copied_evidence_ids.length) issue("Split child lineage requires full source-context payload and durable evidence IDs");
+      if (parsed.success) {
+        const parent = final.inventory.find(item => item.claim_id === parsed.data.parent_gap_id && item.claim_type === "gap");
+        const parentSpans = Array.isArray(parent?.payload.provenance) ? parent.payload.provenance : [];
+        if (!parent || String(parent.payload.statement).trim().toLowerCase().replace(/\s+/g, " ") === parsed.data.statement.trim().toLowerCase().replace(/\s+/g, " ") || parsed.data.source_context.some(span => !parentSpans.some(parentSpan => same(parentSpan, span)))) issue("Generated child source context must retain exact parent spans");
+        const support = final.coverage.filter(coverage => parsed.data.support_coverage_ids.includes(coverage.id));
+        if (parsed.data.split_run_id !== row.run_id || support.length !== new Set(parsed.data.support_coverage_ids).size || support.some(coverage => coverage.gap_id !== parsed.data.parent_gap_id || !coverage.validated || !["partial", "limited"].includes(coverage.overall) || !parsed.data.support_tactic_ids.includes(coverage.tactic_id)) || parsed.data.support_tactic_ids.some(id => !support.some(coverage => coverage.tactic_id === id) || !lifecycles.some(tactic => tactic.id === id && ["planned", "ongoing", "completed"].includes(tactic.status)))) issue("Split child support must bind retained validated parent coverage and committed tactics");
+      }
+    }
+  }
+  for (const split of final.residuals) {
+    const children = [split.addressed_gap_id, split.open_residual_gap_id];
+    const lineages = children.map(id => generated.find(row => row.kind === "residual" && row.copied_claim_id === id));
+    if (!final.inventory.some(row => row.claim_id === split.parent_gap_id && row.claim_type === "gap") || new Set([split.parent_gap_id, ...children]).size !== 3 || lineages.some(row => !row || row.kind !== "residual" || row.parent_claim_ids.length !== 1 || row.parent_claim_ids[0] !== split.parent_gap_id) || lineages[0]?.run_id !== lineages[1]?.run_id || lineages[0]?.payload.branch !== "addressed" || lineages[1]?.payload.branch !== "open" || lineages[0]?.payload.statement === lineages[1]?.payload.statement) issue("A split requires two distinct child branches and shared parent/run lineage");
+    if (final.statuses.find(row => row.gap_id === split.parent_gap_id)?.status !== "partial" || final.statuses.find(row => row.gap_id === split.addressed_gap_id)?.computed !== "addressed" || final.statuses.find(row => row.gap_id === split.open_residual_gap_id)?.computed !== "open") issue("Split must retain historical parent partial and justified addressed/open child statuses");
+    if (!final.coverage.some(row => row.gap_id === split.addressed_gap_id && row.overall === "full" && row.validated && lifecycles.some(tactic => tactic.id === row.tactic_id && ["planned", "ongoing", "completed"].includes(tactic.status))) || final.coverage.some(row => row.gap_id === split.open_residual_gap_id && row.overall !== "not_relevant")) issue("Split child coverage must justify addressed slice and uncovered remainder");
+  }
+  if (final.coverage.some(row => !allGaps.has(row.gap_id) || !allTactics.has(row.tactic_id) || !candidate.gates.some(gate => gate.object_type === "coverage" && gate.decision === "pass" && gate.object_ids.includes(row.id)))) issue("Every coverage reference requires a candidate claim and passing gate");
+  if (new Set(final.statuses.map(row => row.gap_id)).size !== allGaps.size || final.statuses.length !== allGaps.size || final.statuses.some(row => !allGaps.has(row.gap_id) || row.computed !== deriveGapStatus({ gap_id: row.gap_id, coverages: final.coverage, tactics: lifecycles }))) issue("Every source/generated gap requires one coverage-derived status");
+  const eligible = final.statuses.filter(row => row.status !== "addressed" && !final.residuals.some(split => split.parent_gap_id === row.gap_id)).map(row => row.gap_id).sort();
+  if (!same(final.priorities.map(row => row.gap_id).sort(), eligible)) issue("Priorities must cover every exact operational eligible gap once");
+  if (final.priorities.some(row => row.scoring_identity !== PRIORITY_SCORING_IDENTITY || !same(Object.keys(row.axis_scores).sort(), DEFAULT_AXES.axes.map(axis => axis.id).sort()) || row.score !== weightedScore(row.axis_scores, DEFAULT_AXES.axes) || row.band !== bandFor(row.score, DEFAULT_AXES.bands) || !candidate.gates.some(gate => gate.object_type === "priority" && gate.decision === "pass" && gate.object_ids.includes(row.gap_id)))) issue("Priority suggestions require exact fixed scoring and passing placement gates");
+  if (final.proposals.some(row => !final.priorities.some(priority => priority.gap_id === row.gap_id && priority.band === "high") || !final.statuses.some(status => status.gap_id === row.gap_id && status.status === "open"))) issue("Ideation proposals require high-priority operational open parents");
+  if (final.plan.activities.some(row => !allTactics.has(row.tactic_id) || row.gap_ids.some(id => !allGaps.has(id)))) issue("Plan references require complete validated source/generated inventory");
   const stage = (name: typeof MIXED_PIPELINE_STAGES[number]) => candidate.stages.find(row => row.stage === name);
   const projection = stage("gantt_project");
   if (projection?.status === "completed" && projection.stage === "gantt_project" && !same(projection.output, final.plan)) issue("Final plan must be the exact full pipeline projection");
@@ -244,7 +283,7 @@ export const mixedCompletedCandidateSchema = z.object({ ...candidateFields, stat
   if (stage("coverage_decide")?.status === "skipped" && ((pairs?.status === "completed" && pairs.stage === "pair_generate" && pairs.output.pairs.length) || final.coverage.length)) issue("Nonempty coverage input cannot be skipped");
   if (stage("coverage_critic")?.status === "skipped" && final.coverage.length && candidate.setup.configuration.modules.find(row => row.stage === "coverage_critic")?.parameters.enabled !== false) issue("Configured coverage critic cannot be skipped for nonempty coverage");
   if (stage("partial_split")?.status === "skipped" && (final.residuals.length || final.statuses.some(row => row.status === "partial"))) issue("Applicable partial splitting cannot be skipped");
-  if (stage("prioritize")?.status === "skipped" && (final.priorities.length || final.statuses.some(row => row.status === "open" || row.status === "partial"))) issue("Applicable prioritization cannot be skipped");
+  if (stage("prioritize")?.status === "skipped" && (final.priorities.length || eligible.length > 0)) issue("Applicable prioritization cannot be skipped");
   if (stage("ideate")?.status === "skipped" && (final.proposals.length || final.priorities.some(row => row.band === "high" && final.statuses.some(status => status.gap_id === row.gap_id && status.status !== "addressed")))) issue("Applicable ideation cannot be skipped");
   if (candidate.setup.configuration.modules.length !== MIXED_PIPELINE_STAGES.length || new Set(candidate.setup.configuration.modules.map(row => row.stage)).size !== MIXED_PIPELINE_STAGES.length) issue("Completed setup requires unique configuration for every downstream stage");
   if (candidate.gates.some(gate => gate.decision === "block")) ctx.addIssue({ code: "custom", message: "Blocked gate prevents completion" });

@@ -22,7 +22,7 @@ function candidate(label: "mixed" | "baseline"): MixedCandidateEvidence {
       items: entry.map((item, i) => ({ id: item.original_item_version_ids[0], claim_id: `original-${i}`, run_id: `run-${i}`, snapshot_id: null, iteration: null, item_index: i, payload: item.payload, source_file_id: "source", created_at: "now", claim_type: item.claim_type, canonical_claim_id: `original-${i}`, reason: "Exact selection" })),
       mappings: [], coverage: [], extraction_runs: null, linking_complete: true, output: { gaps: [entry[0].payload], tactics: [entry[1].payload] }, checks: { checker_version: "checker", status: "passed", findings: [] } },
     copy: { source_id_map: { source: `${label}-source` }, block_id_map: { block: `${label}-block` }, claim_id_map: {}, provenance_id_map: {}, original_content_fingerprint: "original", remapped_content_fingerprint: label },
-    setup: { source_fingerprint: "source-fingerprint", baseline_fingerprint: "baseline-fingerprint", original_baseline_snapshot: {}, pack_fingerprint: experimentPackFingerprint(pack_id), evaluator_version: "experiment-evaluator-v1", downstream_evaluator_version: "mixed-downstream-v1", gate_policy: MIXED_GATE_POLICY, gate_policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT, code_identity: "code", configuration: { fingerprint: "configuration", modules: [] }, source_files: [{ id: "source", checksum: "checksum", content_fingerprint: "content" }], parse_blocks: [{ id: "block", source_file_id: "source", content_fingerprint: "block-content" }] },
+    setup: { source_fingerprint: "source-fingerprint", baseline_fingerprint: "baseline-fingerprint", original_baseline_snapshot: {}, pack_fingerprint: experimentPackFingerprint(pack_id), evaluator_version: "experiment-evaluator-v1", downstream_evaluator_version: "mixed-downstream-v2", gate_policy: MIXED_GATE_POLICY, gate_policy_fingerprint: MIXED_GATE_POLICY_FINGERPRINT, code_identity: "code", configuration: { fingerprint: "configuration", modules: [] }, source_files: [{ id: "source", checksum: "checksum", content_fingerprint: "content" }], parse_blocks: [{ id: "block", source_file_id: "source", content_fingerprint: "block-content" }] },
     lineage: entry.map((item, i) => ({ kind: "selected", original_item_version_id: item.original_item_version_ids[0], original_claim_id: `original-${i}`, original_run_id: `run-${i}`, original_snapshot_id: null, original_iteration: null, original_item_index: i, selection_reason: "Exact selection", copied_claim_id: item.claim_id, copied_evidence_ids: [], original_payload: item.payload, copied_payload: item.payload })),
     gates: [], stages: [], entry_source_inventory: entry, final_source_inventory: structuredClone(entry),
     final_outputs: { inventory: structuredClone(entry), coverage: [], statuses: [{ gap_id: entry[0].claim_id, status: "open", computed: "open", override: false }], residuals: [], priorities: [], proposals: [], plan: { workspace_id: `${label}-workspace`, activities: [] } },
@@ -36,7 +36,7 @@ describe("mixed supported inventory evaluation", () => {
   it("assembly_gold_is_not_last_snapshot_gold", async () => {
     const result = await run();
     expect(mixedComparisonEvaluationSchema.safeParse(result).success).toBe(true);
-    expect(result.evaluator_version).toBe("mixed-downstream-v1");
+    expect(result.evaluator_version).toBe("mixed-downstream-v2");
     expect(result.source_evaluations).toHaveLength(8);
     const gap = result.source_evaluations.find(row => row.candidate === "mixed" && row.point === "final" && row.claim_type === "gap")!;
     expect(gap.evaluation.score).toMatchObject({ found: 1, partial: 0, missed: 42, wrong: 0, precision: 1, recall: 1 / 43 });
@@ -207,7 +207,7 @@ describe("mixed supported inventory evaluation", () => {
     { scenario: "crossed-parent residual lineage", addressed: "mixed-gap", parent: "other-gap", recordedRun: "split-run", completed: true, invalid: true },
     { scenario: "unrecorded split run", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "other-run", completed: true, invalid: true },
     { scenario: "incomplete split run", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "split-run", completed: false, invalid: true },
-    { scenario: "matching branches and completed split lineage", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "split-run", completed: true, invalid: false },
+    { scenario: "legacy parent reused as addressed branch", addressed: "mixed-gap", parent: "mixed-gap", recordedRun: "split-run", completed: true, invalid: true },
   ])("validates residual contract: $scenario", async ({ addressed, parent, recordedRun, completed, invalid }) => {
     const mixed = candidate("mixed");
     const other = { ...structuredClone(mixed.entry_source_inventory[0]), claim_id: "other-gap", original_item_version_ids: ["other-version"] };

@@ -124,7 +124,7 @@ const APPROVED_METADATA_OVERLAY_KEYS = new Set([
   "priority",
   "priority_band",
   "priority_rationale",
-  "priority_origin",
+  "priority_origin", "priority_scoring",
 ]);
 
 const APPROVED_PATCH_STATUS_VALUES = new Set(["validated", "rejected"]);
