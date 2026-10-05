@@ -15,7 +15,7 @@ import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { getClaimsByIds, insertClaim, claimMetadata, listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { checkAssembly, type ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
-import type { ParseBlock } from "@/accuracy/store/quote-validator";
+import { provenanceSpanSchema, type ParseBlock } from "@/accuracy/store/quote-validator";
 import { coverageDecisionSchema, coverageCriticOutputSchema } from "@/accuracy/modules/coverage-decide/schema";
 import * as coveragePrompts from "@/accuracy/modules/coverage-decide/prompts";
 import * as ideatePrompts from "@/accuracy/modules/ideate/prompts";
@@ -157,11 +157,16 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
       throw error;
     }
     (results[name] ??= []).push(result);
+    // Reserve version 0 for native success before optional metadata reads. Snapshot
+    // versions always start at 1, so metadata recovery cannot change retry identity.
+    await retain(name, result.run_id, input, result.output, result.module_version, result.route);
     const progression = await readAgentProgression({ workspace_id: workspace!, run_id: result.run_id });
     const snapshots = progression?.events.flatMap(row => row.event.event_type === "snapshot" ? [row.event.output] : []) ?? [];
-    const outputs: unknown[] = [...snapshots];
-    if (!outputs.length || !isDeepStrictEqual(outputs[outputs.length - 1], result.output)) outputs.push(result.output);
-    for (const [index, output] of outputs.entries()) await retain(name, result.run_id, input, output, result.module_version, result.route, undefined, index);
+    for (const [index, output] of snapshots.entries()) await retain(name, result.run_id, input, output, result.module_version, result.route, undefined, index + 1);
+    // Completed stage artifacts bind the native final output, even when snapshots
+    // were appended later. Storage version identity remains independent of order.
+    calls[name] = [...(calls[name] ?? []).filter(row => row.call_id !== result.run_id || row.version_index !== 0),
+      { call_id: result.run_id, version_index: 0 }];
     const runtime = await reservedAccuracyRun(workspace!, result.run_id);
     const elapsed = runtime?.finished_at ? Date.parse(runtime.finished_at) - Date.parse(runtime.started_at) : NaN;
     (latency[name] ??= []).push(Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null);
@@ -220,6 +225,14 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
         if (selected?.kind !== "selected" || !isDeepStrictEqual(selected.copied_payload, entry.payload)) findings.push(finding("payload_changed", "Copied payload differs from retained selected payload", [entry.claim_id]));
         if (selected?.kind === "selected") {
           const item = original!.items.find(item => item.id === selected.original_item_version_id);
+          const originalProvenance = Array.isArray(item?.payload.provenance) ? item.payload.provenance.flatMap(span => {
+            const parsed = provenanceSpanSchema.safeParse(span);
+            if (!parsed.success) return [];
+            const { source_file_id, block_id, quote } = parsed.data;
+            return [{ source_file_id, block_id, quote }];
+          }) : [];
+          if (!isDeepStrictEqual(entry.original_provenance, originalProvenance)) findings.push(finding(
+            "original_provenance_mismatch", "Inventory provenance differs from exact preserved selected payload provenance", [entry.claim_id]));
           const payload = item && remapSelected(item.payload, copy!.source_id_map, copy!.block_id_map) as Record<string, unknown> | undefined;
           const expectedPayload = payload && (Object.hasOwn(item!.payload, "id") ? { ...payload, id: entry.claim_id } : payload);
           if (!item || !isDeepStrictEqual(item.payload, selected.original_payload) || !isDeepStrictEqual(expectedPayload, entry.payload) ||

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { readAgentProgression } from "@/accuracy/kernel/agent-events";
+import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import { captureMixedPipelineConfiguration, runMixedCandidatePipeline } from "@/accuracy/experiments/mixed-pipeline";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, MIXED_PIPELINE_STAGES, mixedCandidateEvidenceSchema, type MixedCandidateEvidence } from "@/accuracy/experiments/mixed-types";
 
@@ -39,6 +41,58 @@ async function candidate(gap = false): Promise<MixedCandidateEvidence> {
 async function run(evidence: MixedCandidateEvidence) { return runMixedCandidatePipeline({ evidence, actor, pack_id: "fixture-pack" }); }
 beforeEach(() => { f.calls.length = 0; f.evaluations.length = 0; f.inputs.length = 0; f.drift = false; f.actualDrift = false; f.fail = ""; f.overall = "full"; f.review = false; f.evaluateFail = false; f.evaluateFailStage = ""; f.emptyPairs = false; });
 describe("retained mixed pipeline", () => {
+  it("differing_in_scope_provenance_is_blocked_before_execution", async () => {
+    const input = await candidate(true);
+    input.copy!.block_id_map.alternate = "alternate-copy";
+    input.setup!.parse_blocks.push({ id: "alternate", source_file_id: "s", content_fingerprint: "alternate-content" });
+    for (const entry of input.entry_source_inventory) {
+      entry.original_provenance = [{ source_file_id: "s", block_id: "alternate", quote: "Alternate evidence." }];
+    }
+    vi.spyOn(await import("@/accuracy/store/parse-store"), "readParseBlocksByIds").mockResolvedValueOnce([
+      { id: "cb", workspace_id: "copy", source_file_id: "cs", index: 0, kind: "prose", heading: null, text: "Selected evidence.", parser: "fixture", created_at: "now" },
+      { id: "alternate-copy", workspace_id: "copy", source_file_id: "cs", index: 1, kind: "prose", heading: null, text: "Alternate evidence.", parser: "fixture", created_at: "now" },
+    ]);
+    expect(mixedCandidateEvidenceSchema.safeParse(input).success).toBe(true);
+
+    const result = await run(input);
+
+    expect(result.status).toBe("blocked");
+    expect(result.gates.flatMap(gate => gate.findings).some(row => row.code === "original_provenance_mismatch")).toBe(true);
+    expect(f.inputs).toHaveLength(0);
+    expect(readParseBlocksByIds).toHaveBeenCalled();
+  });
+  it("progression_failure_retains_native_success_and_retry_versions", async () => {
+    const input = await candidate();
+    const progression = vi.spyOn(await import("@/accuracy/kernel/agent-events"), "readAgentProgression");
+    progression.mockRejectedValueOnce(new Error("progression metadata unavailable"));
+
+    const failed = await run(input);
+    const native = f.calls.find(row => row.call_kind === "validation_gate" && (row.output as { action?: string } | null)?.action === "validate");
+
+    expect(failed.status).toBe("failed");
+    expect(failed.primary_error?.message).toBe("progression metadata unavailable");
+    expect(native).toMatchObject({ version_index: 0, output: { claim_ids: ["ct"], action: "validate", validated: 1 } });
+    expect(failed.stages.find(row => row.stage === "validation_gate")).toMatchObject({
+      calls: [{ call_id: native!.call_id, version_index: 0 }], run_ids: [native!.call_id],
+    });
+
+    const recovered: Awaited<ReturnType<typeof readAgentProgression>> = {
+      run_id: String(native!.call_id), workspace_id: "copy",
+      events: [{ id: "snapshot", run_id: String(native!.call_id), workspace_id: "copy", event_type: "snapshot", iteration: 0, recorded_at: "now",
+        event: { event_type: "snapshot", iteration: 0, output: { earlier: "draft" }, evaluation_context: "experiment",
+          signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" },
+          latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } }],
+    };
+    progression.mockResolvedValue(recovered);
+    expect((await run(input)).status).toBe("completed");
+    const retained = structuredClone(f.calls.filter(row => row.call_id === native!.call_id));
+    expect(retained.map(row => ({ version: row.version_index, output: row.output }))).toEqual([
+      { version: 0, output: native!.output }, { version: 1, output: { earlier: "draft" } },
+    ]);
+    expect((await run(input)).status).toBe("completed");
+    expect(f.calls.filter(row => row.call_id === native!.call_id)).toEqual(retained);
+    progression.mockRestore();
+  });
   it("replay_reaches_final_gantt_without_extraction", async () => { const input = await candidate(); const result = await run(input); expect(result.status).toBe("completed"); expect(result.final_outputs?.plan.activities[0].tactic_id).toBe("ct"); expect(mixedCandidateEvidenceSchema.safeParse(result).success).toBe(true); expect(f.inputs.map(row => row.call_kind)).not.toContain("inventory_extract"); expect(input.status).toBe("pending"); expect(f.calls.length).toBe(f.evaluations.length); });
   it("blocking_gate_stops_only_its_candidate", async () => { const input = await candidate(); input.entry_source_inventory[0].payload.provenance = [{ source_file_id: "cs", block_id: "cb", quote: "Not in source" }]; const result = await run(input); expect(result.status).toBe("blocked"); expect(result.gates.some(g => g.decision === "block")).toBe(true); expect(f.inputs).toHaveLength(0); const peer = await candidate(); peer.attempt_id = "peer-attempt"; expect((await run(peer)).status).toBe("completed"); });
   it("advisories_are_recorded_without_content_edits", async () => { const input = await candidate(true); f.review = true; const result = await run(input); expect(result.status).toBe("completed"); expect(result.gates.flatMap(g => g.findings).some(row => row.severity === "advisory")).toBe(true); expect(result.final_source_inventory).toEqual(input.entry_source_inventory); const coverageInput = f.inputs.find(row => row.call_kind === "coverage_decide")!.input as Record<string, unknown>; expect(coverageInput.block_bundle_ids).toEqual(["cb"]); expect(coverageInput.selected_versions).toMatchObject({ gap_version_id: "v1", tactic_version_id: "v0", gap_payload: input.entry_source_inventory[1].payload }); expect(JSON.stringify(f.inputs)).not.toMatch(/gold|fixture-pack/); });
