@@ -22,6 +22,7 @@ import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/se
 import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
 import { aiSwitch, setAiEnabled, setAiSection, storedAiSections } from "@/modules/kernel/ai-switch";
 import { AI_SECTION_IDS, isAiSectionId } from "@/modules/kernel/ai-sections";
+import { computePendingLessons } from "@/modules/kernel/decision-examples";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ const OWNER_ACTIONS = new Set([
   "set_route",
   "set_default_provider",
   "activate_module",
+  "compute_lessons",
 ]);
 
 /**
@@ -139,6 +141,11 @@ export async function POST(request: Request) {
           actor_name: identity.actor.name,
         });
         return NextResponse.json({ ok: true, stages: configs.length });
+      }
+      // Works out the de-identified lessons still pending (AI was off or no route at the time; KAN-78).
+      case "compute_lessons": {
+        const tally = await computePendingLessons(typeof body.limit === "number" ? body.limit : 50);
+        return NextResponse.json({ ok: true, lessons: tally });
       }
       case "activate_module": {
         const stage = String(body.stage ?? "") as StageId;
