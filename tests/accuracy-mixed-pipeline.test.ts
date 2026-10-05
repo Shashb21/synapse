@@ -26,13 +26,13 @@ vi.mock("@/accuracy/kernel/run", () => ({ runAccuracyModule: async (args: Record
     kind === "validation_gate" ? { claim_ids: input.claim_ids, action: "validate", validated: (input.claim_ids as string[]).length } :
     kind === "status_derive" ? { statuses: (input.gap_ids as string[]).map(gap_id => ({ gap_id, status: f.overall === "full" ? "addressed" : f.overall === "partial" ? "partial" : "open", computed: f.overall === "full" ? "addressed" : f.overall === "partial" ? "partial" : "open", override: false })), open: f.overall === "not_relevant" ? 1 : 0, partial: f.overall === "partial" ? 1 : 0, addressed: f.overall === "full" ? (input.gap_ids as string[]).length : 0 } :
     kind === "partial_split" ? { addressed_gap_id: "cg", open_residual_gap_id: "cg-R" } : kind === "prioritize" ? { placements: [] } :
-    kind === "ideate" ? { mode: "stub", eligible_gap_ids: [], proposals: [] } : { workspace_id: "copy", activities: [{ id: "ACT-ct", tactic_id: "ct", start: "2026-01-01", end: "2026-12-01", readout: null, depends_on: [], gap_ids: f.inventory.some(row => row.claim_id === "cg") && f.overall !== "not_relevant" ? ["cg"] : [] }] };
+    kind === "ideate" ? { mode: "stub", eligible_gap_ids: [], proposals: [] } : { workspace_id: "copy", activities: [{ id: "ACT-ct", tactic_id: "ct", start: "2026-01-01", end: String((f.inventory.find(row => row.claim_id === "ct")!.payload as Record<string, unknown>).end), readout: null, depends_on: [], gap_ids: f.inventory.some(row => row.claim_id === "cg") && f.overall !== "not_relevant" ? ["cg"] : [] }] };
   return { run_id: args.reserved_run_id, module_id: `${kind}.fixture`, module_version: f.actualDrift ? "2" : "1", output, route: { call_kind: kind, role: ["coverage_decide", "coverage_critic", "ideate", "partial_split", "prioritize"].includes(kind) ? "proposer" : "none", provider_id: "fixture", model: "fixture", params: { temperature: 0, max_tokens: 100 }, fallbacks: [], connected: false, auth: "none", degraded: false, reason: null, provider_label: "fixture" }, token_usage: { prompt_tokens: 1, completion_tokens: 2 }, cost_usd: 0 };
 } }));
 const actor = { name: "fixture", function: "medical_affairs" as const };
-async function candidate(gap = false): Promise<MixedCandidateEvidence> {
+async function candidate(gap = false, end = "2026-12-01"): Promise<MixedCandidateEvidence> {
   const provenance = [{ source_file_id: "s", block_id: "b", quote: "Selected evidence." }];
-  const payloads = [{ id: "t", name: "Selected tactic", type: "rwe_study", status: "completed", origin: "inventory", evidence_question: "Question?", provenance, start: "2026-01-01", end: "2026-12-01" }, ...(gap ? [{ id: "g", statement: "Selected gap", external_id: null, provenance }] : [])];
+  const payloads = [{ id: "t", name: "Selected tactic", type: "rwe_study", status: "completed", origin: "inventory", evidence_question: "Question?", provenance, start: "2026-01-01", end }, ...(gap ? [{ id: "g", statement: "Selected gap", external_id: null, provenance }] : [])];
   const items = payloads.map((payload, index) => ({ id: `v${index}`, claim_id: payload.id, run_id: `r${index}`, snapshot_id: null, iteration: null, item_index: 0, payload, source_file_id: "s", created_at: "now", claim_type: index ? "gap" : "tactic", canonical_claim_id: payload.id, reason: "Selected" }));
   const lineage = items.map(item => ({ kind: "selected", original_item_version_id: item.id, original_claim_id: item.claim_id, original_run_id: item.run_id, original_snapshot_id: null, original_iteration: null, original_item_index: 0, selection_reason: "Selected", copied_claim_id: `c${item.claim_id}`, copied_evidence_ids: [`p${item.id}`], original_payload: item.payload, copied_payload: { ...item.payload, id: `c${item.claim_id}`, provenance: [{ source_file_id: "cs", block_id: "cb", quote: "Selected evidence." }] } }));
   f.inventory = structuredClone(lineage.map((row, index) => ({ claim_id: row.copied_claim_id, claim_type: items[index].claim_type, payload: row.copied_payload })));
@@ -41,6 +41,33 @@ async function candidate(gap = false): Promise<MixedCandidateEvidence> {
 async function run(evidence: MixedCandidateEvidence) { return runMixedCandidatePipeline({ evidence, actor, pack_id: "fixture-pack" }); }
 beforeEach(() => { f.calls.length = 0; f.evaluations.length = 0; f.inputs.length = 0; f.drift = false; f.actualDrift = false; f.fail = ""; f.overall = "full"; f.review = false; f.evaluateFail = false; f.evaluateFailStage = ""; f.emptyPairs = false; });
 describe("retained mixed pipeline", () => {
+  it("reversed_plan_dates_block_before_approval_and_preserve_valid_peer", async () => {
+    // Arrange: original, copied inventory, and native projection share the same reversed date.
+    const input = await candidate(false, "2025-12-01");
+
+    // Act: the deterministic projection is unchanged, but structurally invalid.
+    const result = await run(input);
+
+    // Assert: retain the native result and blocking findings without approving the plan.
+    expect(result.status).toBe("blocked");
+    expect(result.primary_error).toMatchObject({ code: "invalid_plan_structure", stage: "gantt_project" });
+    expect(result.gates.filter(gate => gate.object_type === "plan")).toEqual([
+      expect.objectContaining({ decision: "block", findings: expect.arrayContaining([
+        expect.objectContaining({ code: "reversed_plan_dates", severity: "blocking", object_ids: ["ACT-ct"] }),
+      ]) }),
+    ]);
+    expect(f.calls.find(row => row.call_kind === "gantt_project")!.output).toMatchObject({
+      activities: [expect.objectContaining({ start: "2026-01-01", end: "2025-12-01" })],
+    });
+    expect(result.stages.find(row => row.stage === "gantt_project")).toMatchObject({
+      status: "blocked", calls: [expect.objectContaining({ version_index: 0 })],
+    });
+    expect(result.final_outputs).toBeNull();
+
+    const peer = await candidate();
+    peer.attempt_id = "valid-peer";
+    expect((await run(peer)).status).toBe("completed");
+  });
   it("differing_in_scope_provenance_is_blocked_before_execution", async () => {
     const input = await candidate(true);
     input.copy!.block_id_map.alternate = "alternate-copy";

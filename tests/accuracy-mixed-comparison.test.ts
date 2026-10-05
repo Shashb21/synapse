@@ -23,7 +23,7 @@ vi.mock("@/lib/iegp/db", async () => {
 });
 const workspaces: string[] = [];
 const actor = { name: "Server fixture actor", function: "medical_affairs" as const };
-async function fixture(withGap = false) {
+async function fixture(withGap = false, reversedMixed = false) {
   const org_id = await createOrganization("KAN-40 paired fixture");
   const workspace_id = await createWorkspace({ org_id, name: "source", slug: newId("slug") });
   workspaces.push(workspace_id);
@@ -32,11 +32,13 @@ async function fixture(withGap = false) {
   await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id, source_file_id: source.id, index: 0,
     kind: "prose", heading: null, text: "Original evidence supports the selected need and tactic.", parser: "fixture", created_at: nowIso() });
   const provenance = [{ source_file_id: source.id, block_id, quote: "supports the selected need" }];
+  let selectedTactic: Record<string, unknown> | undefined;
   const selections: { item_version_id: string; reason: string }[] = [];
   for (const claim_type of withGap ? ["tactic", "gap"] as const : ["tactic"] as const) {
     const payload = claim_type === "tactic" ? { id: newId("tac"), name: "Selected tactic", type: "publication", status: "planned",
       origin: "inventory", evidence_question: "Does this meet the need?", start: "2026-01-01", end: "2026-02-01", provenance }
       : { id: newId("gap"), statement: "Selected need", external_id: "G-1", provenance };
+    if (claim_type === "tactic") selectedTactic = payload;
     const run_id = newId("run"), now = nowIso(), field = claim_type === "gap" ? "gaps" : "tactics";
     await accuracyDb().insert(t.accuracyModuleRuns).values({ id: run_id, org_id, workspace_id,
       call_kind: claim_type === "gap" ? "need_extract" : "inventory_extract", agent_role: "judge", module_id: "fixture", module_version: "1",
@@ -48,8 +50,26 @@ async function fixture(withGap = false) {
     selections.push({ item_version_id: version.id, reason: "Exact original selection" });
   }
   const assembly = await createAssembly({ workspace_id, actor, source_file_ids: [source.id], selections, mappings: [], coverage_run_ids: [], linking_complete: !withGap });
+  let mixedAssembly = assembly;
+  if (reversedMixed) {
+    const payload = { ...selectedTactic!, id: newId("tac"), end: "2025-12-01" };
+    const run_id = newId("run"), now = nowIso();
+    await accuracyDb().insert(t.accuracyModuleRuns).values({
+      id: run_id, org_id, workspace_id, call_kind: "inventory_extract", agent_role: "judge",
+      module_id: "fixture", module_version: "1", status: "ok", started_at: now, finished_at: now,
+      actor_name: actor.name, actor_function: actor.function,
+      input: { workspace_id, source_file_id: source.id },
+      output: { workspace_id, source_file_id: source.id, tactics: [payload] }, steps: [],
+    });
+    await publishGeneratedItemHistory({ workspace_id, source_file_id: source.id, run_id, claim_type: "tactic",
+      final_claims: [{ id: String(payload.id), workspace_id, source_file_id: source.id, claim_type: "tactic", statement: "Selected tactic" }] });
+    const [version] = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.run_id, run_id));
+    mixedAssembly = await createAssembly({ workspace_id, actor, source_file_ids: [source.id],
+      selections: [{ item_version_id: version.id, reason: "Exact reversed timing selection" }],
+      mappings: [], coverage_run_ids: [], linking_complete: true });
+  }
   return { source_workspace_id: workspace_id, source_file_ids: [source.id], pack_id: "beone-bgb-58067-prmt5i", actor,
-    mixed: { assembly_id: assembly.id, fingerprint: assembly.fingerprint }, baseline: { assembly_id: assembly.id, fingerprint: assembly.fingerprint } };
+    mixed: { assembly_id: mixedAssembly.id, fingerprint: mixedAssembly.fingerprint }, baseline: { assembly_id: assembly.id, fingerprint: assembly.fingerprint } };
 }
 async function run(request: Awaited<ReturnType<typeof fixture>>) {
   const record = await runMixedComparison(request);
@@ -66,6 +86,30 @@ afterEach(async () => {
 });
 afterAll(async () => { await closePool(); });
 describe("matched paired replay with real Postgres and kernel", () => {
+  it("reversed_plan_dates_terminalize_blocked_while_valid_baseline_completes", async () => {
+    // Arrange: immutable nominations share source context, with invalid timing only in mixed.
+    const request = await fixture(false, true);
+
+    // Act: use the real copy, materialization, kernel, evaluator, and terminal persistence path.
+    const record = await run(request);
+
+    // Assert: the comparison retains a blocker; generic experiment attempts use failed for any non-completion.
+    expect(record.status).toBe("blocked");
+    expect(record.attempts.mixed!.status).toBe("failed");
+    expect(record.attempts.baseline!.status).toBe("completed");
+    const mixed = record.result!.evidence.candidates.mixed!;
+    expect(mixed.status).toBe("blocked");
+    expect(mixed.primary_error).toMatchObject({ code: "invalid_plan_structure", stage: "gantt_project" });
+    expect(mixed.gates.filter(gate => gate.object_type === "plan")).toEqual([
+      expect.objectContaining({ decision: "block", findings: expect.arrayContaining([
+        expect.objectContaining({ code: "reversed_plan_dates", severity: "blocking" }),
+      ]) }),
+    ]);
+    expect(record.attempts.mixed!.calls.find(row => row.call_kind === "gantt_project")!.output).toMatchObject({
+      activities: [expect.objectContaining({ start: "2026-01-01", end: "2025-12-01" })],
+    });
+    expect(record.result!.evidence.candidates.baseline!.final_outputs!.plan.activities).toHaveLength(1);
+  });
   it("both_copies_match_before_any_execution", async () => {
     const request = await fixture();
     const copy = vi.spyOn(copies, "copyExperimentWorkspace"), runner = vi.spyOn(pipeline, "runMixedCandidatePipeline");

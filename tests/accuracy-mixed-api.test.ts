@@ -2,15 +2,19 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixedComparisonError, MIXED_GATE_POLICY } from "@/accuracy/experiments/mixed-types";
 
-const { closePool } = vi.hoisted(() => ({ closePool: vi.fn() }));
+// Keep the real pool closer outside mock reset/restore state.
+const poolCleanup = vi.hoisted(() => ({ close: null as (() => Promise<void>) | null }));
 vi.mock("@/lib/iegp/db", async () => {
   const { default: postgres } = await import("postgres");
   const { drizzle } = await import("drizzle-orm/postgres-js");
   const client = postgres(process.env.DATABASE_URL!, { max: 4 });
-  closePool.mockImplementation(() => client.end({ timeout: 5 }));
+  poolCleanup.close = () => client.end({ timeout: 5 });
   return { db: () => drizzle(client) };
 });
-afterAll(async () => { await closePool(); });
+afterAll(async () => {
+  expect(poolCleanup.close).toBeTypeOf("function");
+  await poolCleanup.close!();
+});
 
 const mocks = vi.hoisted(() => ({ sessionContext: vi.fn(), authorizedSourceWorkspace: vi.fn(), runMixedComparison: vi.fn(), exportMixedComparison: vi.fn() }));
 vi.mock("@/accuracy", () => ({ registerAccuracyStack: vi.fn() }));
@@ -31,7 +35,8 @@ function post(value: unknown = body) { return POST(new Request(url, { method: "P
 function get(query = "source_workspace_id=source&comparison_id=comparison") { return GET(new Request(`${url}?${query}`)); }
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  // Reset request-boundary behavior while preserving the database cleanup implementation.
+  for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.sessionContext.mockResolvedValue(session);
   mocks.authorizedSourceWorkspace.mockImplementation(async id => id === "source" ? { id } : null);
   mocks.runMixedComparison.mockResolvedValue({ status: "blocked", header: { id: "comparison" } });

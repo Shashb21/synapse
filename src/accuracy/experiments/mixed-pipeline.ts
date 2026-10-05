@@ -14,6 +14,7 @@ import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
 import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { getClaimsByIds, insertClaim, claimMetadata, listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { inspectMixedPlan } from "@/accuracy/domain/mixed-plan-invariants";
 import { checkAssembly, type ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import { provenanceSpanSchema, type ParseBlock } from "@/accuracy/store/quote-validator";
 import { coverageDecisionSchema, coverageCriticOutputSchema } from "@/accuracy/modules/coverage-decide/schema";
@@ -380,8 +381,19 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
       const planInput = { workspace_id: workspace, tactics: tactics.map(row => ({ ...row.payload, id: row.claim_id, validated: true, tactic_type: row.payload.type })), coverages: coverage, gaps: gaps.map(row => ({ id: row.claim_id, validated: true })) };
       const plan = (await run<MixedFinalOutputs["plan"]>("gantt_project", planInput)).output;
       const projected = projectGanttFromTactics({ tactics: planInput.tactics as GanttTacticInput[], coverages: coverage, gaps: planInput.gaps });
-      if (plan.workspace_id !== workspace || !isDeepStrictEqual(plan.activities, projected)) blocked("invalid_plan_binding", "Plan differs from deterministic projection of validated candidate inventory");
-      if (plan.activities.length) gate("plan", plan.activities.map(row => row.id), plan, [], { input: planInput });
+      const planFindings: Finding[] = inspectMixedPlan({
+        plan, workspace_id: workspace, tactic_ids: tactics.map(row => row.claim_id),
+        gap_ids: gaps.map(row => row.claim_id),
+      });
+      if (!isDeepStrictEqual(plan.activities, projected)) planFindings.push({
+        code: "invalid_plan_binding", severity: "blocking",
+        message: "Plan differs from deterministic projection of validated candidate inventory", object_ids: [],
+      });
+      if (plan.activities.length || planFindings.length) {
+        const ids = [...new Set(plan.activities.map(row => row.id))];
+        const decision = gate("plan", ids.length ? ids : [workspace!], plan, planFindings, { input: planInput });
+        if (decision.decision === "block") blocked("invalid_plan_structure", "Plan failed deterministic structural checks");
+      }
       complete("gantt_project", plan);
       stage = "validation_gate";
       await artifact(stage, { gates: evidence.gates, policy: MIXED_GATE_POLICY }, { decisions: evidence.gates }, "final-decisions");

@@ -1,5 +1,6 @@
 /** Supported source gold and descriptive downstream evidence; never a promotion score. */
 import { isDeepStrictEqual } from "node:util";
+import { inspectMixedPlan } from "../domain/mixed-plan-invariants";
 import { asTacticLifecycle, deriveGapStatus } from "../modules/status-derive/engine";
 import { evaluateExperimentVersion, experimentPackFingerprint, EXPERIMENT_EVALUATOR_VERSION } from "./experiment-gold";
 import {
@@ -228,29 +229,10 @@ function inspectOutputs(candidate: MixedCandidateEvidence, add: Add) {
   for (const row of output.priorities) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id)) fail("priority", "priority references an unknown gap", [row.gap_id]);
   for (const row of output.proposals) if (!gaps.has(row.gap_id) && !generatedGaps.has(row.gap_id))
     fail("ideation", "proposal references an unknown gap", [row.gap_id]);
-  const activities = output.plan.activities;
-  if (candidate.copied_workspace_id && output.plan.workspace_id !== candidate.copied_workspace_id) fail("plan", "plan workspace differs from copied workspace");
-  const activityIds = new Set(activities.map(row => row.id));
-  if (activityIds.size !== activities.length) fail("plan", "duplicate Gantt activity identities");
-  for (const row of activities) {
-    if (!tactics.has(row.tactic_id) && !generatedTactics.has(row.tactic_id)) fail("plan", "Gantt activity references an unknown tactic", [row.id]);
-    if (row.gap_ids.some(id => !gaps.has(id) && !generatedGaps.has(id))) fail("plan", "Gantt activity references an unknown gap", [row.id]);
-    if (row.depends_on.some(id => !activityIds.has(id) || id === row.id)) fail("plan", "Gantt dependency is missing or self-referential", [row.id]);
-    if (row.start > row.end) fail("plan", "Gantt activity ends before it starts", [row.id]);
-  }
-  const byId = new Map(activities.map(row => [row.id, row]));
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const cyclic = (id: string): boolean => {
-    if (visiting.has(id)) return true;
-    if (visited.has(id)) return false;
-    visiting.add(id);
-    const found = byId.get(id)?.depends_on.some(dependency => byId.has(dependency) && cyclic(dependency)) ?? false;
-    visiting.delete(id);
-    visited.add(id);
-    return found;
-  };
-  if (activities.some(row => cyclic(row.id))) fail("plan", "Gantt dependency graph contains a cycle");
+  for (const finding of inspectMixedPlan({
+    plan: output.plan, workspace_id: candidate.copied_workspace_id,
+    tactic_ids: [...tactics, ...generatedTactics], gap_ids: [...gaps, ...generatedGaps],
+  })) fail("plan", finding.message, finding.object_ids);
 }
 
 /** Report decisions as descriptive changes unless a deterministic invariant proves an error. */

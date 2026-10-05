@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { inspectMixedPlan } from "@/accuracy/domain/mixed-plan-invariants";
 import { evaluateMixedComparison } from "@/accuracy/eval/mixed-comparison";
 import { experimentPackFingerprint, evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, mixedComparisonEvaluationSchema, type MixedCandidateEvidence, type MixedSourceInventory } from "@/accuracy/experiments/mixed-types";
@@ -88,6 +89,36 @@ describe("mixed supported inventory evaluation", () => {
     mixed.final_outputs!.statuses[0] = { gap_id: "mixed-gap", status: "addressed", computed: "addressed", override: false };
     const result = await run(mixed);
     expect(result.changes).toContainEqual(expect.objectContaining({ dimension: "status", kind: "invariant_failure", proven_error: true }));
+  });
+  it.each([
+    { scenario: "reversed dates", patch: { end: "2025-12-01" }, code: "reversed_plan_dates" },
+    { scenario: "unknown tactic", patch: { tactic_id: "missing" }, code: "invalid_plan_tactic" },
+    { scenario: "unknown gap", patch: { gap_ids: ["missing"] }, code: "invalid_plan_gap" },
+    { scenario: "missing dependency", patch: { depends_on: ["missing"] }, code: "invalid_plan_dependency" },
+    { scenario: "self dependency", patch: { depends_on: ["a"] }, code: "invalid_plan_dependency" },
+    { scenario: "duplicate identity", patch: {}, code: "duplicate_plan_identity" },
+    { scenario: "crossed workspace", patch: {}, code: "invalid_plan_workspace" },
+    { scenario: "valid plan", patch: {}, code: null },
+  ])("gate checks and retained evaluator agree: $scenario", async ({ scenario, patch, code }) => {
+    const mixed = candidate("mixed");
+    const plan = mixed.final_outputs!.plan;
+    plan.activities = [{
+      id: "a", tactic_id: "mixed-tactic", start: "2026-01-01", end: "2026-02-01",
+      readout: null, depends_on: [], gap_ids: ["mixed-gap"], ...patch,
+    }];
+    if (scenario === "duplicate identity") plan.activities.push(structuredClone(plan.activities[0]));
+    if (scenario === "crossed workspace") plan.workspace_id = "other-workspace";
+
+    const findings = inspectMixedPlan({
+      plan, workspace_id: mixed.copied_workspace_id,
+      tactic_ids: ["mixed-tactic"], gap_ids: ["mixed-gap"],
+    });
+    const evaluated = await run(mixed);
+    const planErrors = evaluated.changes.filter(row => row.dimension === "plan" && row.kind === "invariant_failure");
+
+    if (code) expect(findings).toContainEqual(expect.objectContaining({ code, severity: "blocking" }));
+    else expect(findings).toEqual([]);
+    expect(planErrors.map(row => row.message)).toEqual(findings.map(row => `mixed: ${row.message}`));
   });
   it("cyclic_gantt_dependencies_are_proven_structural_failures", async () => {
     const mixed = candidate("mixed");
