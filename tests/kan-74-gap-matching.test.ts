@@ -132,11 +132,29 @@ describe("KAN-74 commit", () => {
   });
 
   it("flags a gap whose priority a person validated when a new source joins it", async () => {
-    const result = await commit({ gaps: [sameRow("S-2")], validated_gap_ids: [gapId] });
+    const result = await commit({
+      gaps: [{ ...sameRow("S-2"), source_quote: "HTA bodies want the comparison against current standard care." }],
+      validated_gap_ids: [gapId],
+    });
     expect(result.flagged_gap_ids).toEqual([gapId]);
     const gap = (await loadState()).gaps.find((row) => row.id === gapId)!;
     expect(gap.new_source_at).toBeTruthy();
     expect(gap.new_source_need_id).toBe(result.need_ids[0]);
+  });
+
+  it("never attaches the same source sentence to a gap twice (re-run, or two twins quoting it)", async () => {
+    const quote = "Payers repeated that they need data versus standard of care.";
+    const twin = (id: string) => ({ ...sameRow(id), source_quote: quote });
+    const first = await commit({ gaps: [twin("D-1"), twin("D-2")] });
+    expect(first.need_ids).toHaveLength(1);
+    const rerun = await commit({ gaps: [twin("D-3")], validated_gap_ids: [gapId] });
+    expect(rerun.need_ids).toEqual([]);
+    expect(rerun.flagged_gap_ids).toEqual([]);
+    const state = await loadState();
+    const sameQuote = state.need_gap_links.filter(
+      (link) => link.gap_id === gapId && state.needs.find((need) => need.id === link.need_id)?.source_quote === quote,
+    );
+    expect(sameQuote).toHaveLength(1);
   });
 
   it("files an overlap as a pending suggestion and creates no gap", async () => {

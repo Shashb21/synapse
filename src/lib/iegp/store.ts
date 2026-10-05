@@ -2978,12 +2978,26 @@ export async function commitExtractedRecords(args: {
     state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
   );
 
+  // A gap holds each source sentence once: re-running extraction on a document, or two
+  // candidates quoting the same sentence, must not attach it again (KAN-74).
+  const quoteKey = (gapId: string, quote: string) =>
+    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim()}`;
+  const attached = new Set(
+    state.need_gap_links.flatMap((link) => {
+      const need = state.needs.find((row) => row.id === link.need_id);
+      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+    }),
+  );
+
   const addNeed = async (args2: {
     gapId: string;
     statement: string;
     quote: string;
     domain: EvidenceDomain;
   }) => {
+    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    if (attached.has(key)) return;
+    attached.add(key);
     const needId = nextId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);

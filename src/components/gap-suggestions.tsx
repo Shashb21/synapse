@@ -66,6 +66,7 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
           <div className="mt-2">
             <LockForm
               label="Accept merge"
+              triggerName={`Accept merge into gap ${label}`}
               action="accept_gap_merge"
               extra={{ suggestion_id: suggestion.id }}
               confirmLabel="Merge"
@@ -84,6 +85,7 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
           <div className="mt-2">
             <LockForm
               label="Accept split"
+              triggerName={`Accept split from gap ${label}`}
               action="accept_gap_split"
               extra={{ suggestion_id: suggestion.id }}
               confirmLabel="Add separate gap"
@@ -98,6 +100,7 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
       <div className="mt-3">
         <LockForm
           label="Reject"
+              triggerName={`Reject the suggestion for gap ${label}`}
           action="reject_gap_suggestion"
           extra={{ suggestion_id: suggestion.id }}
           confirmLabel="Reject suggestion"

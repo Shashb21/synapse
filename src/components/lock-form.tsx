@@ -80,8 +80,14 @@ export function LockForm({
   note,
   size = "md",
   href,
+  triggerName,
 }: {
   label: string;
+  /**
+   * The button's accessible name when several on a page share a label (e.g. one
+   * "Accept merge" per suggestion). Starts with the label, so it still matches it.
+   */
+  triggerName?: string;
   action: string;
   extra?: Record<string, string>;
   children?: React.ReactNode;
@@ -162,7 +168,7 @@ export function LockForm({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" variant={variant} />}>
+      <DialogTrigger render={<Button size="sm" variant={variant} />} aria-label={triggerName}>
         {label}
       </DialogTrigger>
       <DialogContent className={size === "lg" ? "z-[60] sm:max-w-2xl" : "z-[60] sm:max-w-md"} initialFocus={note ? noteRef : undefined}>
