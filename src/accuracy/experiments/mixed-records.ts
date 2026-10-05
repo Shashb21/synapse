@@ -1,8 +1,7 @@
 /** Workspace-scoped, append-only paired replay history. */
 import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { EXPERIMENT_EVALUATOR_VERSION, experimentPackFingerprint } from "@/accuracy/eval/experiment-gold";
-import { assemblyFingerprint } from "@/accuracy/domain/assembly";
-import { readAssembly, resolveAssemblyItems } from "@/accuracy/store/assembly-store";
+import { resolveMixedCandidates } from "./mixed-materialize";
 import { accuracyDb, accuracyTransactionActive, withAccuracyTransaction } from "@/accuracy/store/db";
 import { getWorkspace } from "@/accuracy/store/tenant";
 import * as t from "@/accuracy/store/schema";
@@ -30,21 +29,7 @@ export async function createMixedComparison(args: MixedComparisonRequest): Promi
     if (sources.length !== request.source_file_ids.length || sources.some(row => row.reference_pack_id)) {
       throw new MixedComparisonError("invalid_input", "Source set is missing, crossed, or gold-seeded.");
     }
-    const assemblies = { mixed: await readAssembly(source.id, request.mixed.assembly_id), baseline: await readAssembly(source.id, request.baseline.assembly_id) };
-    for (const label of ["mixed", "baseline"] as const) {
-      const assembly = assemblies[label];
-      if (!assembly || assembly.fingerprint !== request[label].fingerprint || assemblyFingerprint(assembly) !== assembly.fingerprint ||
-        !identical([...assembly.source_file_ids].sort(), [...request.source_file_ids].sort()) ||
-        !assembly.items.length || assembly.items.some(item => item.human_origin || !item.run_id)) {
-        throw new MixedComparisonError("invalid_input", `Invalid ${label} assembly identity, source scope, or model origin.`);
-      }
-      try {
-        const resolved = await resolveAssemblyItems(source.id, assembly.items.map(item => ({ item_version_id: item.id, reason: item.reason })));
-        if (!identical(resolved, assembly.items)) throw new Error("Lineage changed");
-      } catch {
-        throw new MixedComparisonError("invalid_input", "Original assembly lineage no longer resolves exactly.");
-      }
-    }
+    const assemblies = await resolveMixedCandidates(request);
     let pack_fingerprint: string;
     try { pack_fingerprint = experimentPackFingerprint(request.pack_id); }
     catch { throw new MixedComparisonError("invalid_input", "Unknown or unavailable reference pack."); }
