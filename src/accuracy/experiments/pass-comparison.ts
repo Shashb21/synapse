@@ -19,7 +19,8 @@ export class PassComparisonNotFoundError extends Error {
   constructor() { super("Pass comparison experiments were not found in this source workspace."); this.name = "PassComparisonNotFoundError"; }
 }
 
-async function loadEvidence(experiments: ExperimentRecord[]): Promise<ComparisonEvidence[]> {
+/** Load stored runtime and progression evidence for already source-scoped attempts. */
+export async function loadPassComparisonEvidence(experiments: ExperimentRecord[]): Promise<ComparisonEvidence[]> {
   return Promise.all(experiments.map(async experiment => {
     const runs = await Promise.all([...new Set(experiment.calls.map(call => call.call_id))].map(async call_id => {
       const runtime = await reservedAccuracyRun(experiment.workspace_id, call_id);
@@ -61,7 +62,7 @@ export async function runPassComparison(request: AccuracyExperimentRequest): Pro
       break;
     }
   }
-  return { comparison_id, experiments, comparison: evaluatePassComparison(await loadEvidence(experiments)) };
+  return { comparison_id, experiments, comparison: evaluatePassComparison(await loadPassComparisonEvidence(experiments)) };
 }
 
 /** Recompute a versioned comparison after validating every ID against source scope. */
@@ -69,5 +70,5 @@ export async function readPassComparison(args: { source_workspace_id: string; ex
   if (!args.experiment_ids.length || args.experiment_ids.length > 3) throw new PassComparisonValidationError("Supply between one and three experiment IDs.");
   const experiments = await Promise.all(args.experiment_ids.map(experiment_id => getExperimentForSourceWorkspace({ source_workspace_id: args.source_workspace_id, experiment_id })));
   if (experiments.some(row => row === null)) throw new PassComparisonNotFoundError();
-  return evaluatePassComparison(await loadEvidence(experiments as ExperimentRecord[]));
+  return evaluatePassComparison(await loadPassComparisonEvidence(experiments as ExperimentRecord[]));
 }

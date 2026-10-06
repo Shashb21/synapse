@@ -118,6 +118,19 @@ export async function readMixedComparison(args: MixedComparisonScope): Promise<M
   return accuracyTransactionActive() ? loadComparison(args) : withAccuracyTransaction(() => loadComparison(args), { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
+/** List every retained mixed header, including running and unlinked comparisons. */
+export async function listMixedComparisonsForSourceWorkspace(args: { source_workspace_id: string }): Promise<MixedComparisonRecord[]> {
+  const operation = async () => {
+    const headers = await accuracyDb().select({ id: t.accuracyMixedComparisons.id })
+      .from(t.accuracyMixedComparisons)
+      .where(eq(t.accuracyMixedComparisons.source_workspace_id, args.source_workspace_id))
+      .orderBy(asc(t.accuracyMixedComparisons.created_at), asc(t.accuracyMixedComparisons.id));
+    const records = await Promise.all(headers.map(row => loadComparison({ source_workspace_id: args.source_workspace_id, comparison_id: row.id })));
+    return records.filter((row): row is MixedComparisonRecord => row !== null);
+  };
+  return accuracyTransactionActive() ? operation() : withAccuracyTransaction(operation, { isolationLevel: "repeatable read", accessMode: "read only" });
+}
+
 
 type Header = MixedComparisonRecord["header"];
 type Attempt = NonNullable<MixedComparisonRecord["attempts"]["mixed"]>;
