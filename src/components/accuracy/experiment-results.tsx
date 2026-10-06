@@ -31,17 +31,36 @@ function PassVersionRow({ version, previous }: { version: ComparedVersion; previ
   </tr>;
 }
 
-function PassCallDetail({ condition, call }: { condition: ComparedCondition; call: ComparedCall }) {
+function PassCallDetail({ condition, call, standalone = false }: { condition: ComparedCondition; call: ComparedCall; standalone?: boolean }) {
   return <details className="border-t border-border py-2">
-    <summary className="cursor-pointer text-sm font-medium break-all">{condition.pass_count ?? "Unknown"} pass · {call.call_kind} · {call.call_id}</summary>
+    <summary className="cursor-pointer text-sm font-medium break-all">{standalone ? "Standalone" : `${condition.pass_count ?? "Unknown"} pass`} · {call.call_kind} · {call.call_id}</summary>
     <p className="mt-2 text-sm">Module: {unknown(call.runtime?.module_id)} / {unknown(call.runtime?.module_version)} · Cost: {money(call.runtime?.cost_usd)} · Latency: {milliseconds(call.runtime?.duration_ms)}</p>
     <div className="overflow-x-auto"><table aria-label="Per-call version outcomes" className="mt-2 w-full min-w-[650px] border-collapse text-left text-sm">
       <caption className="mb-1 text-left">Per-call version outcomes</caption>
       <thead><tr className="border-b border-border"><th scope="col" className="p-2">Version</th><th scope="col" className="p-2">Found / partial / missed / wrong</th><th scope="col" className="p-2">Must-find keys</th><th scope="col" className="p-2">From previous</th><th scope="col" className="p-2">From V0</th><th scope="col" className="p-2">Regressions</th></tr></thead>
       <tbody>{call.versions.map((version, index) => <PassVersionRow key={version.version_index} version={version} previous={call.versions[index - 1]} />)}</tbody>
     </table></div>
+    {call.versions.map(version => <details key={version.version_index} className="mt-2 text-sm">
+      <summary className="cursor-pointer">V{version.version_index} item outcomes and reasons ({version.outcomes.length})</summary>
+      {version.outcomes.length ? <div className="overflow-x-auto"><table aria-label={`${call.call_id} V${version.version_index} item outcomes`} className="mt-2 w-full min-w-[560px] border-collapse text-left">
+        <thead><tr className="border-b border-border"><th scope="col" className="p-2">Outcome</th><th scope="col" className="p-2">Gold key</th><th scope="col" className="p-2">Model index</th><th scope="col" className="p-2">Reason</th></tr></thead>
+        <tbody>{version.outcomes.map((outcome, index) => <tr key={index} className="border-b border-border align-top"><th scope="row" className="p-2">{outcome.outcome}</th><td className="p-2 break-all">{unknown(outcome.gold_item_key)}</td><td className="p-2">{unknown(outcome.model_item_index)}</td><td className="p-2">{outcome.reason}</td></tr>)}</tbody>
+      </table></div> : <p className="mt-2">No retained item outcomes for this version.</p>}
+    </details>)}
     <EvidenceJson label="Exact critic, judge, route and version evidence" value={{ route: call.runtime?.route, events: call.runtime?.events, versions: call.versions }} />
   </details>;
+}
+
+function StandaloneEvidence({ entry }: { entry: ExperimentResultsEntry }) {
+  const condition = entry.evidence.standalone_condition;
+  if (!condition) return null;
+  return <section aria-label="Standalone extraction details" className="mt-4 space-y-3 text-sm">
+    <h3 className="font-medium">Standalone extraction details</h3>
+    <p>Status: {condition.status} · Source-gold attribution: Descriptive · Evaluator: {unknown(entry.evidence.experiments[0]?.evaluator_version)}</p>
+    <p>Distinct exact found: {condition.totals.distinct_exact_found_count} · {list(condition.totals.distinct_exact_found_keys)} · Must-find: {unknown(condition.totals.distinct_exact_must_find_found_count)}</p>
+    {condition.reasons.length ? <ul className="list-disc pl-5">{condition.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul> : null}
+    {condition.calls.map(call => <PassCallDetail key={call.call_id} condition={condition} call={call} standalone />)}
+  </section>;
 }
 
 function PassConditionRow({ condition }: { condition: ComparedCondition }) {
@@ -152,16 +171,16 @@ function MixedEvidence({ entry }: { entry: ExperimentResultsEntry }) {
 }
 
 function Entry({ entry, report }: { entry: ExperimentResultsEntry; report: ExperimentResultsReport }) {
-  const series = report.repeat_series.find(row => row.member_ids.includes(entry.id));
+  const series = report.repeat_series.filter(row => row.member_ids.includes(entry.id));
   return <article id={`entry-${encodeURIComponent(entry.id)}`} className="border-t border-border py-5 scroll-mt-8">
     <h2 className="text-base font-semibold break-all">{entry.kind.replaceAll("_", " ")} · {entry.id}</h2>
     <p className="mt-1 text-sm">{entry.attribution.label} · {entry.matched ? "matched" : "descriptive / unmatched"} · scope: source-gold only · {entry.created_at || "Time unknown"}</p>
     <p className="text-sm">Experiment IDs: {list(entry.experiment_ids)} · Call IDs: {list(entry.call_ids)}</p>
     {entry.attribution.reasons.length ? <ul aria-label="Attribution reasons" className="mt-2 list-disc pl-5 text-sm">{entry.attribution.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul> : null}
     {entry.mismatch_reasons.length ? <ul aria-label="Mismatch reasons" className="mt-2 list-disc pl-5 text-sm">{entry.mismatch_reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul> : null}
-    {series ? <div className="mt-2 text-sm"><p>Repeat series: {series.rationale}</p><p>Retained members: {series.member_ids.map((id, index) => <span key={id}>{index ? ", " : ""}<a className="underline break-all" href={`#entry-${encodeURIComponent(id)}`}>{id}</a></span>)}</p></div> : null}
+    {series.map((row, index) => <div key={index} className="mt-2 text-sm"><p>Repeat series: {row.rationale}</p><p>Retained members: {row.member_ids.map((id, memberIndex) => <span key={id}>{memberIndex ? ", " : ""}<a className="underline break-all" href={`#entry-${encodeURIComponent(id)}`}>{id}</a></span>)}</p></div>)}
     <p className="mt-2 text-sm break-all">Original identities: {entry.evidence.experiments.map(row => `${row.id}: document ${row.source_fingerprint}, baseline ${row.baseline_fingerprint}, gold ${row.pack_id} / ${row.pack_fingerprint}, evaluator ${row.evaluator_version}, status ${row.status}`).join("; ") || "Unknown"}</p>
-    <PassEvidence entry={entry} /><MixedEvidence entry={entry} />
+    <PassEvidence entry={entry} /><MixedEvidence entry={entry} /><StandaloneEvidence entry={entry} />
     <EvidenceJson label="Complete retained inputs, outputs, evaluations and raw comparison" value={entry.evidence} />
   </article>;
 }

@@ -47,6 +47,36 @@ it("renders source-gold scope, versions, per-call recovery, repeat members, unkn
   expect(host.querySelectorAll("table caption").length).toBeGreaterThan(0);
 });
 
+it("renders standalone version deltas, item outcomes, runtime and unknown metering as descriptive evidence", async () => {
+  const standalone = structuredClone(report);
+  const entry = standalone.entries[0];
+  entry.id = "experiment:alone";
+  entry.kind = "standalone_attempt";
+  entry.attribution.label = "Descriptive";
+  entry.matched = false;
+  entry.evidence.pass_comparison = undefined;
+  const condition = structuredClone(report.entries[0].evidence.pass_comparison!.conditions[1]);
+  condition.pass_count = null;
+  condition.calls[0].runtime!.cost_usd = 0.25;
+  condition.calls[0].runtime!.duration_ms = 73;
+  condition.calls[0].runtime!.events = [{ event_type: "judgment", selected_iteration: 1, reason: "Improved", latency_ms: 1,
+    cost_usd: 0.01, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }];
+  condition.calls[0].versions[0].outcomes = [{ outcome: "found", gold_item_key: "gap-a", model_item_index: 0, reason: "Exact match" }];
+  condition.calls.push({ ...structuredClone(condition.calls[0]), call_id: "unknown-run", runtime: null });
+  entry.evidence.standalone_condition = condition;
+  vi.stubGlobal("fetch", vi.fn(async () => response(standalone)));
+
+  await render("source-a");
+  expect(host.textContent).toContain("Descriptive");
+  expect(host.textContent).toContain("Standalone extraction details");
+  expect(host.textContent).toContain("$0.2500");
+  expect(host.textContent).toContain("73 ms");
+  expect(host.textContent).toContain("Cost: Unknown");
+  expect(host.textContent).toContain("gap-b");
+  expect(host.textContent).toContain("Exact match");
+  expect(host.textContent).toContain("judgment");
+});
+
 it("shows loading, empty, and failed states", async () => {
   let finish!: (value: ReturnType<typeof response>) => void;
   vi.stubGlobal("fetch", vi.fn(() => new Promise(resolve => { finish = resolve; })));

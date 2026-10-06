@@ -134,6 +134,38 @@ describe("experiment results report", () => {
       .find(line => line.entry.id === partial.id).entry.evidence.pass_comparison.conditions).toHaveLength(1);
   });
 
+  it("lets a retained one/two-pass cohort block a missing three-pass repeat", () => {
+    const input = args([passComparison("first"), passComparison("second"), passComparison("partial")]);
+    for (const comparison of input.pass_comparisons.slice(0, 2)) {
+      comparison.conditions[1].totals.distinct_exact_found_count = 1;
+      comparison.conditions[2].totals.distinct_exact_found_count = 2;
+      comparison.conditions[2].totals.distinct_exact_must_find_found_count = 2;
+    }
+    input.pass_comparisons[2].conditions = input.pass_comparisons[2].conditions.slice(0, 2);
+    input.pass_comparisons[2].conditions[1].status = "failed";
+    input.experiments = input.experiments.filter(row => row.id !== "partial-3");
+
+    const report = buildExperimentResultsReport(input);
+    const threePassSeries = report.repeat_series.find(series => series.member_ids.includes("pass:first:3"))!;
+    expect(threePassSeries.member_ids).toEqual(["pass:first:3", "pass:second:3", "pass:partial:2"]);
+    expect(report.repeat_series.find(series => series.member_ids.includes("pass:first:2"))?.member_ids)
+      .toContain("pass:partial:2");
+    expect(report.entries.filter(entry => entry.attribution.label === "Consistent improvement")).toHaveLength(0);
+    expect(report.entries.find(entry => entry.id === "pass:partial:2")?.evidence.pass_comparison?.conditions).toHaveLength(2);
+  });
+
+  it("lets a retained one/three-pass cohort block a missing two-pass repeat once", () => {
+    const input = args([passComparison("first"), passComparison("second"), passComparison("partial")]);
+    input.pass_comparisons[2].conditions = [input.pass_comparisons[2].conditions[0], input.pass_comparisons[2].conditions[2]];
+    input.experiments = input.experiments.filter(row => row.id !== "partial-2");
+
+    const report = buildExperimentResultsReport(input);
+    const members = report.repeat_series.find(series => series.member_ids.includes("pass:first:2"))!.member_ids;
+    expect(members).toEqual(["pass:first:2", "pass:second:2", "pass:partial:3"]);
+    expect(new Set(members).size).toBe(members.length);
+    expect(report.entries.find(entry => entry.id === "pass:first:2")?.attribution.label).toBe("Observed gain");
+  });
+
   it("rejects a drifted mixed downstream evaluator while preserving null usage", () => {
     const mixed = mixedComparison("downstream-drift");
     mixed.result!.evidence.evaluation!.evaluator_version = "unexpected-downstream";

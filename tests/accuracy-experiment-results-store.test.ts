@@ -4,16 +4,17 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
-import { createExperiment, finishExperiment, recordExperimentCall } from "@/accuracy/experiments/records";
+import { createExperiment, finishExperiment, recordExperimentCall, recordVersionEvaluation } from "@/accuracy/experiments/records";
 import { readExperimentResults } from "@/accuracy/experiments/results";
+import { serializeExperimentResultsReport } from "@/accuracy/experiments/results-report";
 import { PASS_COMPARISON_EVALUATOR_VERSION } from "@/accuracy/eval/pass-comparison";
 import { newId } from "@/modules/kernel/ids";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
 import { eq } from "drizzle-orm";
-import { EXPERIMENT_EVALUATOR_VERSION } from "@/accuracy/eval/experiment-gold";
+import { evaluateExperimentVersion, EXPERIMENT_EVALUATOR_VERSION } from "@/accuracy/eval/experiment-gold";
 import * as experimentGold from "@/accuracy/eval/experiment-gold";
-import { getReferencePack } from "@/accuracy/eval/reference-gold";
+import { getReferencePack, loadReferenceGold } from "@/accuracy/eval/reference-gold";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT } from "@/accuracy/experiments/mixed-types";
 
 const workspaces: string[] = [];
@@ -68,6 +69,62 @@ async function withLocalGold<T>(gaps: unknown, tactics: unknown, action: () => P
 }
 
 describe("retained experiment results store", () => {
+  it("loads standalone version outcomes and scoped runtime, critic and judge evidence into both exports", async () => {
+    const scope = await fixture();
+    const row = await attempt(scope, { label: "standalone extraction" });
+    const gold = loadReferenceGold(pack_id).gaps.gaps[0] as { id: string; statement: string };
+    const outputs = [{ gaps: [] }, { gaps: [{ external_id: gold.id, statement: gold.statement }] }];
+    for (const [version_index, output] of outputs.entries()) {
+      await recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: row.id, call_id: "standalone-run",
+        call_kind: "need_extract", version_index, input: { source_file_id: "copied" }, output,
+        module_version: "extract-v1", route: { model: "local" } });
+      await recordVersionEvaluation({ workspace_id: scope.workspace_id, experiment_id: row.id, call_id: "standalone-run",
+        version_index, evaluation: evaluateExperimentVersion({ pack_id, call_kind: "need_extract", output }) });
+    }
+    await accuracyDb().insert(tables.accuracyModuleRuns).values({ id: "standalone-run", org_id: scope.org_id,
+      workspace_id: scope.workspace_id, call_kind: "need_extract", agent_role: "extract", module_id: "extract",
+      module_version: "extract-v1", status: "ok", started_at: row.created_at, finished_at: row.created_at,
+      duration_ms: 73, actor_name: "fixture", actor_function: "test", input: {}, output: {}, steps: [],
+      route: { model: "local" }, token_usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      cost_usd: "0.25", evaluation_context: "experiment" });
+    const metering = { latency_ms: 1, cost_usd: 0.01, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } };
+    const events = [
+      { event_type: "snapshot", iteration: 0, output: outputs[0], evaluation_context: "experiment", signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }, ...metering },
+      { event_type: "critique", iteration: 0, score: 0.5, issues: [], completeness: { risk_level: "none_detected", checked_block_ids: [], unchecked_block_ids: [], suspected_omissions: [], prior_issue_resolutions: [] }, ...metering },
+      { event_type: "snapshot", iteration: 1, output: outputs[1], evaluation_context: "experiment", signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }, ...metering },
+      { event_type: "critique", iteration: 1, score: 0.8, issues: [], completeness: { risk_level: "none_detected", checked_block_ids: [], unchecked_block_ids: [], suspected_omissions: [], prior_issue_resolutions: [] }, ...metering },
+      { event_type: "judgment", selected_iteration: 1, reason: "Improved", ...metering },
+    ];
+    await accuracyDb().insert(tables.accuracyAgentEvents).values(events.map((event, index) => ({
+      id: newId("standalone-event"), run_id: "standalone-run", workspace_id: scope.workspace_id,
+      event_type: event.event_type, iteration: event.event_type === "judgment" ? -1 : (event as { iteration: number }).iteration,
+      payload: event, recorded_at: `${row.created_at}-${index}`,
+    })));
+    await recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: row.id, call_id: "unknown-run",
+      call_kind: "need_extract", version_index: 0, input: { source_file_id: "copied" }, output: outputs[0],
+      module_version: "extract-v1", route: { model: "local" } });
+    await recordVersionEvaluation({ workspace_id: scope.workspace_id, experiment_id: row.id, call_id: "unknown-run",
+      version_index: 0, evaluation: evaluateExperimentVersion({ pack_id, call_kind: "need_extract", output: outputs[0] }) });
+
+    const report = await readExperimentResults({ source_workspace_id: scope.source_workspace_id });
+    const entry = report.entries.find(item => item.id === `experiment:${row.id}`)!;
+    expect(entry.attribution.label).toBe("Descriptive");
+    expect(entry.evidence.standalone_condition?.calls[0].runtime).toMatchObject({ cost_usd: 0.25, duration_ms: 73,
+      events: expect.arrayContaining([expect.objectContaining({ event_type: "critique" }), expect.objectContaining({ event_type: "judgment" })]) });
+    expect(entry.evidence.standalone_condition?.calls[0].versions[1]).toMatchObject({
+      counts: expect.objectContaining({ found: 1 }), delta_from_previous: expect.objectContaining({ found: 1 }),
+      recovered_from_previous: expect.arrayContaining([gold.id]),
+    });
+    expect(entry.evidence.standalone_condition?.calls.find(call => call.call_id === "unknown-run")?.runtime).toBeNull();
+    for (const exportText of [serializeExperimentResultsReport(report, "json"), serializeExperimentResultsReport(report, "jsonl")]) {
+      expect(exportText).toContain('"event_type":"judgment"');
+      expect(exportText).toContain('"cost_usd":0.25');
+      expect(exportText).toContain('"recovered_from_previous"');
+      expect(exportText).toContain('"call_id":"unknown-run"');
+      expect(exportText).toContain('"runtime":null');
+    }
+  });
+
   it("retains independent pass cohorts, a failed candidate, running standalone raw evidence and source scope", async () => {
     // Arrange: two separately retained baseline/candidate cohorts and a standalone attempt.
     const source = await fixture();

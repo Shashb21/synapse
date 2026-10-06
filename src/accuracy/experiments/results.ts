@@ -74,8 +74,17 @@ export async function readExperimentResults(args: { source_workspace_id: string 
       comparison.mismatch_reasons.push("Current reference gold is unavailable or malformed; source-gold attribution is unavailable.");
       return comparison;
     }));
+    const mixedAttemptIds = new Set(mixed_comparisons.flatMap(record =>
+      [record.attempts.mixed?.id, record.attempts.baseline?.id].filter((id): id is string => !!id)));
+    const standaloneRows = experiments.filter(row => !passCohortId(row) && !mixedAttemptIds.has(row.id));
+    const standalone_conditions = Object.fromEntries(await Promise.all(standaloneRows.map(async row => {
+      const [evidence] = await loadPassComparisonEvidence([row]);
+      const comparison = loaded_pack_fingerprints[row.pack_id] === null
+        ? comparePassExperiments([evidence], null) : evaluatePassComparison([evidence]);
+      return [row.id, comparison.conditions[0]] as const;
+    })));
     const report = buildExperimentResultsReport({ source_workspace_id: args.source_workspace_id,
-      experiments, pass_comparisons, mixed_comparisons, loaded_pack_fingerprints });
+      experiments, pass_comparisons, mixed_comparisons, loaded_pack_fingerprints, standalone_conditions });
     report.entries.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
     return report;
   }, { isolationLevel: "repeatable read", accessMode: "read only" });

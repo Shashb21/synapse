@@ -23,6 +23,7 @@ export type ExperimentResultsEntry = {
     experiments: ExperimentRecord[];
     pass_comparison?: PassComparison;
     mixed_comparison?: MixedComparisonRecord;
+    standalone_condition?: ComparedCondition;
   };
 };
 export type ExperimentResultsRepeatSeries = {
@@ -75,6 +76,10 @@ function passEntry(comparison: PassComparison, candidate: ComparedCondition, exp
   const baseline = comparison.conditions.find(row => row.pass_count === 1);
   const relevant = comparison.conditions.map(row => experiments.find(item => item.id === row.experiment_id)).filter((row): row is ExperimentRecord => !!row);
   const reasons = [...comparison.mismatch_reasons, ...candidate.reasons, ...(baseline?.reasons ?? [])];
+  if (comparison.conditions.length !== 3 || [1, 2, 3].some(pass =>
+    comparison.conditions.filter(row => row.pass_count === pass).length !== 1)) {
+    reasons.push("Pass cohort lacks exactly one retained condition for each of one, two and three passes.");
+  }
   const retained = relevant.length === comparison.conditions.length && relevant.every(row => row.source_workspace_id === source_workspace_id);
   if (!retained) reasons.push("A retained experiment in this pass cohort is unavailable.");
   const loadedIdentity = comparison.loaded_pack_identity;
@@ -194,20 +199,26 @@ function mixedEntry(record: MixedComparisonRecord, loaded: Record<string, string
 export function buildExperimentResultsReport(args: {
   source_workspace_id: string; experiments: ExperimentRecord[]; pass_comparisons: PassComparison[];
   mixed_comparisons: MixedComparisonRecord[]; loaded_pack_fingerprints: Record<string, string | null>;
+  standalone_conditions?: Record<string, ComparedCondition>;
 }): ExperimentResultsReport {
   const entries: ExperimentResultsEntry[] = [];
   const consumed = new Set<string>();
   const nominalByEntry = new Map<string, string[]>();
   for (const comparison of args.pass_comparisons) {
     const candidates = comparison.conditions.filter(row => row.pass_count !== 1);
+    const missing = [2, 3].filter(pass => !candidates.some(candidate => candidate.pass_count === pass));
     if (!candidates.length) {
       const entry = partialPassEntry(comparison, args.experiments, args.source_workspace_id);
       entries.push(entry); nominalByEntry.set(entry.id, [2, 3].flatMap(pass => passNominalKey(comparison, pass) ?? []));
       entry.experiment_ids.forEach(id => consumed.add(id));
     }
-    for (const candidate of candidates) {
+    for (const [index, candidate] of candidates.entries()) {
       const entry = passEntry(comparison, candidate, args.experiments, args.loaded_pack_fingerprints, args.source_workspace_id);
-      entries.push(entry); nominalByEntry.set(entry.id, candidate.pass_count === null ? [] : [passNominalKey(comparison, candidate.pass_count)].filter((key): key is string => !!key));
+      const represented = candidate.pass_count === null ? [] : [candidate.pass_count];
+      // One retained candidate represents absent conditions for this incomplete cohort.
+      // This keeps the history in each nominal series without duplicating a candidate.
+      if (index === 0) represented.push(...missing);
+      entries.push(entry); nominalByEntry.set(entry.id, unique(represented.flatMap(pass => passNominalKey(comparison, pass) ?? [])));
       entry.experiment_ids.forEach(id => consumed.add(id));
     }
   }
@@ -219,7 +230,8 @@ export function buildExperimentResultsReport(args: {
   for (const row of args.experiments) if (!consumed.has(row.id)) entries.push({
     id: `experiment:${row.id}`, kind: "standalone_attempt", created_at: row.created_at,
     attribution: attribution("Descriptive", ["Standalone retained attempt; no matched comparison supports attribution."]),
-    matched: false, mismatch_reasons: [], repeat_key: null, experiment_ids: [row.id], call_ids: ids([row]), evidence: { experiments: [row] },
+    matched: false, mismatch_reasons: [], repeat_key: null, experiment_ids: [row.id], call_ids: ids([row]),
+    evidence: { experiments: [row], standalone_condition: args.standalone_conditions?.[row.id] },
   });
   const groups = new Map<string, ExperimentResultsEntry[]>();
   for (const entry of entries) {
