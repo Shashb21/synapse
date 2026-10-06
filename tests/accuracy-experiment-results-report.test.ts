@@ -21,7 +21,7 @@ function mixedComparison(id: string, gain = true): MixedComparisonRecord {
   const setup = { source_fingerprint: "documents", baseline_fingerprint: "baseline", original_baseline_snapshot: {}, pack_fingerprint: "gold-v1", evaluator_version: "experiment-evaluator-v1", downstream_evaluator_version: "mixed-downstream-v2", gate_policy: "deterministic_checks_pass_no_edits_v1", gate_policy_fingerprint: "policy", code_identity: "code", configuration: { fingerprint: "config", modules: [] }, source_files: [{ id: "doc", checksum: "checksum", content_fingerprint: "content" }], parse_blocks: [] };
   const original = (fingerprint: string) => ({ fingerprint });
   const evaluation = (candidate: "mixed" | "baseline", point: "entry" | "final", claim_type: "gap" | "tactic") => ({ candidate, point, claim_type, evaluation: { evaluator_version: "experiment-evaluator-v1", pack_id: "gold", pack_fingerprint: "gold-v1", call_kind: claim_type === "gap" ? "need_extract" : "inventory_extract", status: "scored", output_shape: { valid: true }, score: { found: 1, partial: 0, missed: 0, wrong: 0 }, outcomes: (candidate === "mixed" && point === "final" && claim_type === "gap" && gain ? ["one", "two"] : ["one"]).map(gold_item_key => ({ outcome: "found", gold_item_key })) } });
-  return { header: { id, source_workspace_id: "source", created_at: "2026-10-06", request: { source_file_ids: ["doc"], pack_id: "gold", mixed: { fingerprint: "mixed-assembly" }, baseline: { fingerprint: "baseline-assembly" } }, original_assemblies: { mixed: original("mixed-assembly"), baseline: original("baseline-assembly") }, pack_fingerprint: "gold-v1", evaluator_version: "experiment-evaluator-v1", gate_policy: setup.gate_policy, gate_policy_fingerprint: setup.gate_policy_fingerprint }, status: "completed", links: { mixed_experiment_id: `${id}-mixed`, baseline_experiment_id: `${id}-baseline` }, attempts: { mixed: experiment(`${id}-mixed`, id, 0), baseline: experiment(`${id}-baseline`, id, 0) }, result: { evidence: { status: "completed", candidates: { mixed: { status: "completed", setup, original_assembly: original("mixed-assembly") }, baseline: { status: "completed", setup, original_assembly: original("baseline-assembly") } }, evaluation: { source_evaluations: (["mixed", "baseline"] as const).flatMap(candidate => (["entry", "final"] as const).flatMap(point => (["gap", "tactic"] as const).map(claim_type => evaluation(candidate, point, claim_type)))), applicability: [{ dimension: "source_gaps", status: "scored", reference_keys: ["one"] }, { dimension: "source_tactics", status: "scored", reference_keys: ["one"] }, { dimension: "plan", status: "unscored", reason: "No curated labels" }], changes: [] } } } } as unknown as MixedComparisonRecord;
+  return { header: { id, source_workspace_id: "source", created_at: "2026-10-06", request: { source_file_ids: ["doc"], pack_id: "gold", mixed: { fingerprint: "mixed-assembly" }, baseline: { fingerprint: "baseline-assembly" } }, original_assemblies: { mixed: original("mixed-assembly"), baseline: original("baseline-assembly") }, pack_fingerprint: "gold-v1", evaluator_version: "experiment-evaluator-v1", gate_policy: setup.gate_policy, gate_policy_fingerprint: setup.gate_policy_fingerprint }, status: "completed", links: { mixed_experiment_id: `${id}-mixed`, baseline_experiment_id: `${id}-baseline` }, attempts: { mixed: experiment(`${id}-mixed`, id, 0), baseline: experiment(`${id}-baseline`, id, 0) }, result: { evidence: { status: "completed", candidates: { mixed: { status: "completed", setup, original_assembly: original("mixed-assembly") }, baseline: { status: "completed", setup, original_assembly: original("baseline-assembly") } }, evaluation: { evaluator_version: "mixed-downstream-v2", source_evaluations: (["mixed", "baseline"] as const).flatMap(candidate => (["entry", "final"] as const).flatMap(point => (["gap", "tactic"] as const).map(claim_type => evaluation(candidate, point, claim_type)))), applicability: [{ dimension: "source_gaps", status: "scored", reference_keys: ["one"] }, { dimension: "source_tactics", status: "scored", reference_keys: ["one"] }, { dimension: "plan", status: "unscored", reason: "No curated labels" }], changes: [] } } } } as unknown as MixedComparisonRecord;
 }
 
 describe("experiment results report", () => {
@@ -110,5 +110,52 @@ describe("experiment results report", () => {
     mixed.result = null;
     mixed.status = "running";
     expect(buildExperimentResultsReport({ ...args([]), mixed_comparisons: [mixed] }).entries.find(row => row.id === "mixed:unavailable")?.attribution.label).toBe("Descriptive");
+  });
+
+  it("keeps a missing candidate identity in the nominal repeat series as a blocker", () => {
+    const input = args([passComparison("first"), passComparison("second"), passComparison("failed")]);
+    input.pass_comparisons[2].conditions[1].identity = null;
+    input.pass_comparisons[2].conditions[1].status = "failed";
+    const report = buildExperimentResultsReport(input);
+    expect(report.entries.find(row => row.id === "pass:first:2")?.attribution.label).toBe("Observed gain");
+    expect(report.repeat_series.find(row => row.member_ids.includes("pass:first:2"))?.member_ids).toContain("pass:failed:2");
+  });
+
+  it("preserves a baseline-only partial pass comparison in both exports and the repeat series", () => {
+    const input = args([passComparison("first"), passComparison("second"), passComparison("partial")]);
+    input.pass_comparisons[2].conditions = input.pass_comparisons[2].conditions.slice(0, 1);
+    input.experiments = input.experiments.filter(row => !row.id.startsWith("partial-") || row.id === "partial-1");
+    const report = buildExperimentResultsReport(input);
+    const partial = report.entries.find(row => row.id === "pass:partial:partial")!;
+    expect(partial.attribution.label).toBe("Descriptive");
+    expect(partial.evidence.pass_comparison).toBe(input.pass_comparisons[2]);
+    expect(report.repeat_series.find(row => row.member_ids.includes("pass:first:2"))?.member_ids).toContain(partial.id);
+    expect(serializeExperimentResultsReport(report, "jsonl").trim().split("\n").map(line => JSON.parse(line))
+      .find(line => line.entry.id === partial.id).entry.evidence.pass_comparison.conditions).toHaveLength(1);
+  });
+
+  it("rejects a drifted mixed downstream evaluator while preserving null usage", () => {
+    const mixed = mixedComparison("downstream-drift");
+    mixed.result!.evidence.evaluation!.evaluator_version = "unexpected-downstream";
+    (mixed.result!.evidence.candidates.mixed as unknown as { stages: unknown[] }).stages = [{ usage: { latency_ms: null, estimated_cost: null } }];
+    const report = buildExperimentResultsReport({ ...args([]), mixed_comparisons: [mixed] });
+    expect(report.entries[0].attribution.label).toBe("Descriptive");
+    expect(JSON.parse(serializeExperimentResultsReport(report, "jsonl")).entry.evidence.mixed_comparison.result.evidence.candidates.mixed.stages[0].usage.estimated_cost).toBeNull();
+  });
+
+  it("rejects duplicate mixed attempts and a missing scored source slot", () => {
+    const duplicate = mixedComparison("duplicate");
+    duplicate.attempts.baseline = duplicate.attempts.mixed;
+    expect(buildExperimentResultsReport({ ...args([]), mixed_comparisons: [duplicate] }).entries[0].attribution.label).toBe("Descriptive");
+    const missing = mixedComparison("missing-slot");
+    missing.result!.evidence.evaluation!.source_evaluations.pop();
+    expect(buildExperimentResultsReport({ ...args([]), mixed_comparisons: [missing] }).entries[0].attribution.label).toBe("Descriptive");
+  });
+
+  it("does not attribute evidence to a different requested source workspace", () => {
+    const pass = args([passComparison("foreign")]);
+    expect(buildExperimentResultsReport({ ...pass, source_workspace_id: "other" }).entries[0].attribution.label).toBe("Descriptive");
+    const mixed = mixedComparison("foreign-mixed");
+    expect(buildExperimentResultsReport({ ...args([]), source_workspace_id: "other", mixed_comparisons: [mixed] }).entries[0].attribution.label).toBe("Descriptive");
   });
 });

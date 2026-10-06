@@ -1,5 +1,6 @@
 /** Pure, conservative attribution and lossless presentation of retained experiment evidence. */
 import { canonicalComparisonJson, type PassComparison, type ComparedCondition } from "../eval/pass-comparison";
+import { MIXED_DOWNSTREAM_EVALUATOR_VERSION } from "../eval/mixed-comparison";
 import type { ExperimentRecord } from "./records";
 import type { MixedComparisonRecord, MixedComparisonEvaluation } from "./mixed-types";
 
@@ -49,33 +50,32 @@ function exactKey(value: unknown): string | null {
 function attribution(label: ResultsAttribution["label"], reasons: string[]): ResultsAttribution {
   return { label, reasons: unique(reasons), scope: "source_gold" };
 }
-function passNominalKey(comparison: PassComparison, candidate: ComparedCondition): string | null {
-  const identity = object(candidate.identity);
+function passNominalKey(comparison: PassComparison, passCount: number): string | null {
+  const identity = object(comparison.conditions.find(row => row.pass_count === 1)?.identity);
   if (!identity || !nonempty(identity.source_workspace_id) || !nonempty(identity.source_fingerprint)
     || !nonempty(identity.baseline_fingerprint) || !nonempty(identity.pack_id) || !nonempty(identity.pack_fingerprint)
-    || !nonempty(identity.evaluator_version) || !nonempty(identity.original_request_fingerprint)
-    || candidate.pass_count === null) return null;
+    || !nonempty(identity.evaluator_version) || !nonempty(identity.original_request_fingerprint)) return null;
   return exactKey({ kind: "pass", source_workspace_id: identity.source_workspace_id,
     source_fingerprint: identity.source_fingerprint, baseline_fingerprint: identity.baseline_fingerprint,
     pack_id: identity.pack_id, pack_fingerprint: identity.pack_fingerprint,
     evaluator_version: identity.evaluator_version, original_request_fingerprint: identity.original_request_fingerprint,
-    baseline_pass_count: 1, candidate_pass_count: candidate.pass_count,
+    baseline_pass_count: 1, candidate_pass_count: passCount,
     comparison_evaluator_version: comparison.comparison_evaluator_version });
 }
 function passExactKey(comparison: PassComparison, baseline: ComparedCondition | undefined, candidate: ComparedCondition): string | null {
   const left = object(baseline?.identity); const right = object(candidate.identity);
-  if (!left || !right || !passNominalKey(comparison, candidate)
+  if (!left || !right || candidate.pass_count === null || !passNominalKey(comparison, candidate.pass_count)
     || !object(right.original_request_identity) || !Array.isArray(right.calls) || !right.calls.length
     || !Array.isArray(left.calls) || !left.calls.length
     || [...right.calls, ...left.calls].some(call => { const row = object(call); return !row || !nonempty(row.module_id) || !nonempty(row.module_version) || !object(row.route); })) return null;
-  return exactKey({ nominal: passNominalKey(comparison, candidate), original_request_identity: right.original_request_identity,
+  return exactKey({ nominal: passNominalKey(comparison, candidate.pass_count), original_request_identity: right.original_request_identity,
     configuration: right.calls, baseline_configuration: left.calls });
 }
-function passEntry(comparison: PassComparison, candidate: ComparedCondition, experiments: ExperimentRecord[], loaded: Record<string, string | null>): ExperimentResultsEntry {
+function passEntry(comparison: PassComparison, candidate: ComparedCondition, experiments: ExperimentRecord[], loaded: Record<string, string | null>, source_workspace_id: string): ExperimentResultsEntry {
   const baseline = comparison.conditions.find(row => row.pass_count === 1);
   const relevant = comparison.conditions.map(row => experiments.find(item => item.id === row.experiment_id)).filter((row): row is ExperimentRecord => !!row);
   const reasons = [...comparison.mismatch_reasons, ...candidate.reasons, ...(baseline?.reasons ?? [])];
-  const retained = relevant.length === comparison.conditions.length && relevant.every(row => row.source_workspace_id === experiments[0]?.source_workspace_id);
+  const retained = relevant.length === comparison.conditions.length && relevant.every(row => row.source_workspace_id === source_workspace_id);
   if (!retained) reasons.push("A retained experiment in this pass cohort is unavailable.");
   const loadedIdentity = comparison.loaded_pack_identity;
   if (!loadedIdentity?.matches_retained || !nonempty(loadedIdentity.pack_fingerprint)
@@ -100,6 +100,19 @@ function passEntry(comparison: PassComparison, candidate: ComparedCondition, exp
   return { id, kind: "pass_candidate", created_at: relevant[0]?.created_at ?? "", attribution: attribution(!matched ? "Descriptive" : gain ? "Observed gain" : "Matched results", reasons),
     matched, mismatch_reasons: unique([...comparison.mismatch_reasons, ...(!matched ? reasons : [])]), repeat_key: passExactKey(comparison, baseline, candidate),
     experiment_ids: relevant.map(row => row.id), call_ids: ids(relevant), evidence: { experiments: relevant, pass_comparison: comparison } };
+}
+
+function partialPassEntry(comparison: PassComparison, experiments: ExperimentRecord[], source_workspace_id: string): ExperimentResultsEntry {
+  const relevant = comparison.conditions.map(row => experiments.find(item => item.id === row.experiment_id))
+    .filter((row): row is ExperimentRecord => !!row);
+  const reasons = unique([...comparison.mismatch_reasons, ...comparison.conditions.flatMap(row => row.reasons),
+    "Pass cohort has no retained candidate condition; exact source-gold attribution is unavailable.",
+    ...(relevant.length !== comparison.conditions.length || relevant.some(row => row.source_workspace_id !== source_workspace_id)
+      ? ["A retained experiment in this pass cohort is unavailable or belongs to a different source workspace."] : [])]);
+  return { id: `pass:${comparison.comparison_id ?? "unknown"}:partial`, kind: "pass_candidate", created_at: relevant[0]?.created_at ?? "",
+    attribution: attribution("Descriptive", reasons), matched: false, mismatch_reasons: reasons,
+    repeat_key: null, experiment_ids: relevant.map(row => row.id), call_ids: ids(relevant),
+    evidence: { experiments: relevant, pass_comparison: comparison } };
 }
 
 function mixedNominalKey(record: MixedComparisonRecord): string | null {
@@ -133,7 +146,7 @@ function scoredKeys(evaluation: MixedComparisonEvaluation, candidate: "mixed" | 
   result.keys = unique(result.keys);
   return result;
 }
-function mixedEntry(record: MixedComparisonRecord, loaded: Record<string, string | null>): ExperimentResultsEntry {
+function mixedEntry(record: MixedComparisonRecord, loaded: Record<string, string | null>, source_workspace_id: string): ExperimentResultsEntry {
   const attempts = [record.attempts.mixed, record.attempts.baseline].filter((row): row is ExperimentRecord => !!row);
   const result = record.result?.evidence;
   const reasons: string[] = [];
@@ -142,7 +155,7 @@ function mixedEntry(record: MixedComparisonRecord, loaded: Record<string, string
     || !record.links || record.links.mixed_experiment_id !== attempts[0]?.id || record.links.baseline_experiment_id !== attempts[1]?.id) reasons.push("Two distinct completed linked attempts are required.");
   if (attempts[0] && attempts[1] && ids([attempts[0]]).some(id => ids([attempts[1]]).includes(id))) reasons.push("Mixed and baseline attempts share a call identity.");
   const h = record.header;
-  if (h.source_workspace_id !== attempts[0]?.source_workspace_id || h.source_workspace_id !== attempts[1]?.source_workspace_id
+  if (h.source_workspace_id !== source_workspace_id || h.source_workspace_id !== attempts[0]?.source_workspace_id || h.source_workspace_id !== attempts[1]?.source_workspace_id
     || attempts.some(row => row.pack_id !== h.request.pack_id || row.pack_fingerprint !== h.pack_fingerprint || row.evaluator_version !== h.evaluator_version)) reasons.push("Attempt source workspace, gold or evaluator identity differs from the comparison header.");
   if (loaded[h.request.pack_id] !== h.pack_fingerprint || h.evaluator_version !== result?.candidates.mixed?.setup?.evaluator_version) reasons.push("Loaded gold or evaluator identity differs from retained mixed comparison.");
   if (!mixedExactKey(record)) reasons.push("Captured document, assembly, evaluator or configuration identity is incomplete or mismatched.");
@@ -157,6 +170,8 @@ function mixedEntry(record: MixedComparisonRecord, loaded: Record<string, string
       || result.candidates.mixed.original_assembly.fingerprint !== h.original_assemblies.mixed.fingerprint
       || result.candidates.baseline.original_assembly.fingerprint !== h.original_assemblies.baseline.fingerprint) reasons.push("Captured setup differs from header or linked attempt identity.");
     const evaluations = result.evaluation;
+    if (evaluations.evaluator_version !== setup.downstream_evaluator_version
+      || evaluations.evaluator_version !== MIXED_DOWNSTREAM_EVALUATOR_VERSION) reasons.push("Retained downstream evaluator identity differs from captured setup or supported evaluator.");
     for (const dimension of ["source_gaps", "source_tactics"] as const) if (!evaluations.applicability.some(row => row.dimension === dimension && row.status === "scored")) reasons.push(`${dimension} source gold is unscored.`);
     const evaluatedSlots = evaluations.source_evaluations.map(row => `${row.candidate}:${row.point}:${row.claim_type}`);
     if (evaluations.source_evaluations.length !== 8 || unique(evaluatedSlots).length !== 8 || evaluations.source_evaluations.some(row => row.evaluation.pack_id !== h.request.pack_id || row.evaluation.pack_fingerprint !== h.pack_fingerprint || row.evaluation.evaluator_version !== h.evaluator_version || row.evaluation.call_kind !== (row.claim_type === "gap" ? "need_extract" : "inventory_extract") || row.evaluation.status !== "scored" || !row.evaluation.output_shape.valid || !row.evaluation.score)) reasons.push("Retained source evaluations are missing or have mismatched identities.");
@@ -182,17 +197,23 @@ export function buildExperimentResultsReport(args: {
 }): ExperimentResultsReport {
   const entries: ExperimentResultsEntry[] = [];
   const consumed = new Set<string>();
-  const nominalByEntry = new Map<string, string | null>();
+  const nominalByEntry = new Map<string, string[]>();
   for (const comparison of args.pass_comparisons) {
-    for (const candidate of comparison.conditions.filter(row => row.pass_count !== 1)) {
-      const entry = passEntry(comparison, candidate, args.experiments, args.loaded_pack_fingerprints);
-      entries.push(entry); nominalByEntry.set(entry.id, passNominalKey(comparison, candidate));
+    const candidates = comparison.conditions.filter(row => row.pass_count !== 1);
+    if (!candidates.length) {
+      const entry = partialPassEntry(comparison, args.experiments, args.source_workspace_id);
+      entries.push(entry); nominalByEntry.set(entry.id, [2, 3].flatMap(pass => passNominalKey(comparison, pass) ?? []));
+      entry.experiment_ids.forEach(id => consumed.add(id));
+    }
+    for (const candidate of candidates) {
+      const entry = passEntry(comparison, candidate, args.experiments, args.loaded_pack_fingerprints, args.source_workspace_id);
+      entries.push(entry); nominalByEntry.set(entry.id, candidate.pass_count === null ? [] : [passNominalKey(comparison, candidate.pass_count)].filter((key): key is string => !!key));
       entry.experiment_ids.forEach(id => consumed.add(id));
     }
   }
   for (const comparison of args.mixed_comparisons) {
-    const entry = mixedEntry(comparison, args.loaded_pack_fingerprints);
-    entries.push(entry); nominalByEntry.set(entry.id, mixedNominalKey(comparison));
+    const entry = mixedEntry(comparison, args.loaded_pack_fingerprints, args.source_workspace_id);
+    entries.push(entry); nominalByEntry.set(entry.id, [mixedNominalKey(comparison)].filter((key): key is string => !!key));
     entry.experiment_ids.forEach(id => consumed.add(id));
   }
   for (const row of args.experiments) if (!consumed.has(row.id)) entries.push({
@@ -202,8 +223,7 @@ export function buildExperimentResultsReport(args: {
   });
   const groups = new Map<string, ExperimentResultsEntry[]>();
   for (const entry of entries) {
-    const nominal = nominalByEntry.get(entry.id);
-    if (nominal) groups.set(nominal, [...(groups.get(nominal) ?? []), entry]);
+    for (const nominal of nominalByEntry.get(entry.id) ?? []) groups.set(nominal, [...(groups.get(nominal) ?? []), entry]);
   }
   const repeat_series: ExperimentResultsRepeatSeries[] = [];
   for (const members of groups.values()) {
