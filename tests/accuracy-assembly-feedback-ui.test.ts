@@ -152,17 +152,56 @@ it("ignores late detail responses after a workspace change", async () => {
   expect(host.textContent).not.toContain("Dr Contributor");
 });
 
-it("does not refresh or display the old assembly after switching during submission", async () => {
+it("refreshes the submitting assembly after reopening it when feedback completes during navigation", async () => {
   const posted = deferred<ReturnType<typeof reply>>();
+  const nextDetail = deferred<ReturnType<typeof reply>>();
+  const refreshedOldDetail = deferred<ReturnType<typeof reply>>();
   const fetcher = vi.fn().mockResolvedValueOnce(list([assembly, successor]))
     .mockResolvedValueOnce(detail()).mockReturnValueOnce(posted.promise)
-    .mockResolvedValueOnce(detail(successor, { runs: [], entries: [] }));
+    .mockReturnValueOnce(nextDetail.promise).mockReturnValueOnce(refreshedOldDetail.promise);
   vi.stubGlobal("fetch", fetcher);
   await render(); await open(); await fill("Feedback rationale", "Observed in deployment.");
   await act(async () => { (host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement).click(); });
   await click("Inspect proposal assembly-new");
   await act(async () => posted.resolve(reply({ ok: true, feedback })));
   expect(fetcher).toHaveBeenCalledTimes(4);
+  await act(async () => nextDetail.resolve(detail(successor, { runs: [], entries: [] })));
   expect(host.textContent).not.toContain("Dr Contributor");
   expect(host.textContent).toContain("No feedback recorded for this proposal.");
+  await click("Inspect proposal assembly-old");
+  expect(fetcher).toHaveBeenCalledTimes(5);
+  expect(fetcher.mock.calls[4][0]).toBe("/api/accuracy/assemblies?workspace_id=ws&assembly_id=assembly-old");
+  const submitWhileRefreshing = host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement | null;
+  expect(submitWhileRefreshing === null || submitWhileRefreshing.disabled).toBe(true);
+  expect(host.textContent).not.toContain("Dr Contributor");
+  await act(async () => refreshedOldDetail.resolve(detail(assembly, { entries: [feedback] })));
+  expect(host.textContent).toContain("Dr Contributor");
+  await fill("Feedback rationale", "A new observation.");
+  expect((host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("requires a fresh detail GET after an uncertain feedback response resolves away from the assembly", async () => {
+  const posted = deferred<ReturnType<typeof reply>>();
+  const nextDetail = deferred<ReturnType<typeof reply>>();
+  const refreshedOldDetail = deferred<ReturnType<typeof reply>>();
+  const fetcher = vi.fn().mockResolvedValueOnce(list([assembly, successor]))
+    .mockResolvedValueOnce(detail()).mockReturnValueOnce(posted.promise)
+    .mockReturnValueOnce(nextDetail.promise).mockReturnValueOnce(refreshedOldDetail.promise);
+  vi.stubGlobal("fetch", fetcher);
+  await render(); await open(); await fill("Feedback rationale", "Observed in deployment.");
+  await act(async () => { (host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement).click(); });
+  await click("Inspect proposal assembly-new");
+  await act(async () => posted.resolve(reply({ error: "Response uncertain" }, false)));
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  await act(async () => nextDetail.resolve(detail(successor, { runs: [], entries: [] })));
+  expect(host.textContent).toContain("No feedback recorded for this proposal.");
+  await click("Inspect proposal assembly-old");
+  expect(fetcher).toHaveBeenCalledTimes(5);
+  expect(fetcher.mock.calls[4][0]).toBe("/api/accuracy/assemblies?workspace_id=ws&assembly_id=assembly-old");
+  const submitWhileRefreshing = host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement | null;
+  expect(submitWhileRefreshing === null || submitWhileRefreshing.disabled).toBe(true);
+  await act(async () => refreshedOldDetail.resolve(detail(assembly, { entries: [feedback] })));
+  expect(host.textContent).toContain("Dr Contributor");
+  await fill("Feedback rationale", "A new observation.");
+  expect((host.querySelector('button[aria-label="Record feedback"]') as HTMLButtonElement).disabled).toBe(false);
 });

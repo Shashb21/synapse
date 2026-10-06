@@ -667,6 +667,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     setDetails(current => Object.fromEntries(Object.entries(current).map(([id, detail]) => [id, { ...detail, fresh: false }])));
   }
 
+  function requireFeedbackRefresh(assemblyId: string) {
+    setDetails(current => current[assemblyId]
+      ? { ...current, [assemblyId]: { ...current[assemblyId], fresh: false } }
+      : current);
+    setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: true }));
+  }
+
   async function loadList() {
     const token = listRequestToken.current + 1;
     listRequestToken.current = token;
@@ -768,15 +775,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
       const body = await response.json() as { error?: string };
       if (!mounted.current || token !== feedbackRequestToken.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not record feedback");
+      requireFeedbackRefresh(assemblyId);
       if (activeAssemblyId.current !== assemblyId) return;
-      setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: true }));
-      invalidateControls();
       await loadDetail(assemblyId, true);
     } catch (cause) {
       if (!mounted.current || token !== feedbackRequestToken.current) return;
+      requireFeedbackRefresh(assemblyId);
       if (activeAssemblyId.current !== assemblyId) return;
-      invalidateControls();
-      setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: true }));
       setFeedbackErrors(current => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not record feedback" }));
     } finally {
       if (mounted.current && token === feedbackRequestToken.current) {
