@@ -313,10 +313,11 @@ export async function listAssemblyFeedback(workspace_id: string, assembly_id: st
   await ensureAccuracySchema();
   const assembly = await readAssembly(workspace_id, assembly_id);
   if (!assembly) return [];
-  await verifySelectedItems(workspace_id, assembly);
   const rows = await accuracyDb().select().from(t.accuracyAssemblyFeedback).where(and(
     eq(t.accuracyAssemblyFeedback.workspace_id, workspace_id), eq(t.accuracyAssemblyFeedback.assembly_id, assembly_id),
   )).orderBy(asc(t.accuracyAssemblyFeedback.created_at), asc(t.accuracyAssemblyFeedback.id));
+  if (rows.length === 0) return [];
+  await verifySelectedItems(workspace_id, assembly);
   return rows.map(row => feedbackFromRow(row, assembly));
 }
 

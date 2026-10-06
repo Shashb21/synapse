@@ -79,13 +79,13 @@ async function item(scope: Scope, kind: Kind, label: string, human = false) {
   return { resolved, run_id, batch_id, call_kind, source_file_id: scope.source_file_id };
 }
 
-async function assembly(scope: Scope, items: Awaited<ReturnType<typeof item>>[], decision: "approve" | "reject" | null = "approve") {
+async function assembly(scope: Scope, items: Awaited<ReturnType<typeof item>>[], decision: "approve" | "reject" | null = "approve", with_extraction_lineage = true) {
   const id = newId("assembly");
   const body = {
     source_file_ids: [...new Set(items.map(entry => entry.source_file_id))],
     items: items.map(entry => entry.resolved), mappings: [], coverage: [], linking_complete: true,
-    extraction_runs: items.map(entry => ({ call_kind: entry.call_kind, run_id: entry.run_id, source_file_id: entry.source_file_id,
-      item_count: 1, outcome: "items" as const, evaluation_context: "production" as const })),
+    extraction_runs: with_extraction_lineage ? items.map(entry => ({ call_kind: entry.call_kind, run_id: entry.run_id, source_file_id: entry.source_file_id,
+      item_count: 1, outcome: "items" as const, evaluation_context: "production" as const })) : null,
   };
   const fingerprint = assemblyFingerprint(body);
   const checks: Assembly["checks"] = { checker_version: "test", status: "passed", findings: [] };
@@ -131,6 +131,27 @@ afterEach(async () => { for (const workspace_id of workspaces.splice(0)) await d
 afterAll(() => closePool());
 
 describe("assembly feedback store", () => {
+  it("returns empty history for an older assembly without extraction lineage", async () => {
+    const scope = await fixture();
+    const gap = await item(scope, "need_extract", "Historical gap");
+    const older = await assembly(scope, [gap], null, false);
+
+    expect(await listAssemblyFeedback(scope.workspace_id, older.id)).toEqual([]);
+  });
+
+  it("still validates extraction lineage when feedback history exists", async () => {
+    const scope = await fixture();
+    const gap = await item(scope, "need_extract", "Consumed gap");
+    const saved = await assembly(scope, [gap]);
+    const run_id = await consumer(scope, [binding(saved, gap)]);
+    await createAssemblyFeedback(feedback(scope, saved, run_id));
+    await accuracyDb().update(t.accuracyAssemblies).set({ extraction_runs: null })
+      .where(eq(t.accuracyAssemblies.id, saved.id));
+
+    await expect(listAssemblyFeedback(scope.workspace_id, saved.id))
+      .rejects.toMatchObject({ code: "invalid_input" });
+  });
+
   it("records exact consumed items and immutable evidence for whole and subset feedback", async () => {
     const scope = await fixture();
     const gap = await item(scope, "need_extract", "Gap");
