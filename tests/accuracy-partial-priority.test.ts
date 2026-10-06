@@ -45,7 +45,21 @@ describe("native partial and priority modules", () => {
     vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "1");
     f.claims[0].metadata = { ...(f.claims[0].metadata as object), priority: "low", priority_band: "low", priority_origin: "workshop" };
     await prioritizeModule.run({ workspace_id: "w", gap_ids: ["g"] }, ctx);
-    expect(f.patches[0]).toMatchObject({ metadata: { priority: "low", priority_band: "low", priority_origin: "workshop", priority_scoring: { validated: false } } });
+    expect(f.patches[0]).toMatchObject({ merge: true, metadata: { priority_scoring: { validated: false } } });
+    expect(Object.keys(f.patches[0].metadata as object)).toEqual(["priority_scoring"]);
+  });
+  it("prioritizes_computed_addressed_gap_with_retained_open_override", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "1");
+    f.claims[0].metadata = { ...(f.claims[0].metadata as object), computed_status: "addressed", status_override: { status: "open", rationale: "Review retained an open need." } };
+    const result = await withAssemblyExperiment(() => prioritizeModule.run({ workspace_id: "w", gap_ids: ["g"] }, ctx));
+    expect(result.output.placements.map(row => row.gap_id)).toEqual(["g"]);
+    expect(f.patches[0]).toMatchObject({ metadata: { computed_status: "addressed", status_override: { status: "open" } } });
+  });
+  it("rejects_computed_open_gap_with_retained_addressed_override", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "1");
+    f.claims[0].metadata = { ...(f.claims[0].metadata as object), computed_status: "open", status_override: { status: "addressed", rationale: "Review closed the need." } };
+    await expect(prioritizeModule.run({ workspace_id: "w", gap_ids: ["g"] }, ctx)).rejects.toThrow(/eligible/);
+    expect(f.patches).toEqual([]);
   });
   it("rejects_missing_nonfinite_or_crossed_scores_before_mutation", async () => {
     complete.mockResolvedValue({ raw: JSON.stringify({ gaps: [{ gap_id: "other", scores: { decision_impact: 100 }, rationale: "Wrong gap" }] }) });

@@ -7,8 +7,11 @@ import { getWorkspace } from "@/accuracy/store/tenant";
 import * as t from "@/accuracy/store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, MixedComparisonError, mixedComparisonRequestSchema, mixedComparisonResultSchema, mixedOriginalAssemblySchema,
-  type MixedComparisonRequest, type MixedComparisonRecord, type MixedComparisonResult, type MixedComparisonScope, type MixedCandidateEvidence } from "./mixed-types";
+  type MixedComparisonRequest, type MixedComparisonRecord, type MixedComparisonResult, type MixedComparisonScope, type MixedCandidateEvidence, type MixedItemLineage } from "./mixed-types";
 import { getExperimentForSourceWorkspace } from "./records";
+import { partialSplitOutputSchema, splitChildSchema, splitContextEvidenceIds } from "@/accuracy/modules/partial-split/schema";
+import { ideateOutputSchema } from "@/accuracy/modules/ideate/module";
+import { mixedContentFingerprint } from "./mixed-types";
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -177,6 +180,7 @@ function validateCandidate(header: Header, evidence: MixedCandidateEvidence, lab
   }
   if (evidence.status === "completed" && attempt.status !== "completed") throw new MixedComparisonError("invalid_attempt", "A completed candidate requires a completed linked attempt.");
   if (evidence.status !== "completed" && attempt.status === "completed") throw new MixedComparisonError("invalid_attempt", "Non-completed candidate cannot reference a completed attempt.");
+  if (evidence.status === "completed") validateGeneratedOutputs(evidence, attempt);
   for (const stage of evidence.stages) {
     if (stage.status === "pending" || stage.status === "skipped") continue;
     if (stage.status === "completed" && !stage.calls.length) throw new MixedComparisonError("incomplete_evidence", "Successful stages require linked retained call evidence.");
@@ -200,6 +204,32 @@ function validateCandidate(header: Header, evidence: MixedCandidateEvidence, lab
   }
 }
 
+/** Aggregated stage artifacts cannot substitute for exact native generation outputs. */
+function validateGeneratedOutputs(evidence: Extract<MixedCandidateEvidence, { status: "completed" }>, attempt: Attempt) {
+  for (const lineage of evidence.lineage) {
+    if (lineage.kind !== "residual" && lineage.kind !== "ideated") continue;
+    const stage = evidence.stages.find(row => row.stage === lineage.stage && row.status === "completed");
+    const call = attempt.calls.find(row => row.call_id === lineage.run_id && row.version_index === 0);
+    if (!stage || stage.status !== "completed" || !stage.calls.some(row => row.call_id === lineage.run_id && row.version_index === 0) || !call || call.workspace_id !== attempt.workspace_id || call.call_kind !== lineage.stage || call.output_error || call.module_version !== stage.module_version) {
+      throw new MixedComparisonError("incomplete_evidence", "Generated lineage is missing its exact native generation output.");
+    }
+    if (lineage.kind === "residual") {
+      const parsed = partialSplitOutputSchema.safeParse(call.output);
+      if (!parsed.success || ![parsed.data.addressed, parsed.data.residual].some(child => child.id === lineage.copied_claim_id && identical(child, lineage.payload)) ||
+        !evidence.gates.some(gate => gate.object_type === "residual" && gate.decision === "pass" && identical(gate.object_ids, [parsed.data.addressed_gap_id, parsed.data.open_residual_gap_id]) && gate.content_fingerprint === mixedContentFingerprint(call.output))) {
+        throw new MixedComparisonError("incomplete_evidence", "Generated child payload or gate differs from its exact native generation output.");
+      }
+    } else {
+      const parsed = ideateOutputSchema.safeParse(call.output);
+      const generatedId = `tac_mixed_${mixedContentFingerprint({ attempt: attempt.id, run_id: lineage.run_id, proposal: lineage.payload }).slice(0, 40)}`;
+      if (!parsed.success || !parsed.data.proposals.some(proposal => identical(proposal, lineage.payload)) || lineage.copied_claim_id !== generatedId ||
+        !evidence.gates.some(gate => gate.object_type === "proposal" && gate.decision === "pass" && identical(gate.object_ids, [lineage.copied_claim_id]) && gate.content_fingerprint === mixedContentFingerprint(lineage.payload))) {
+        throw new MixedComparisonError("incomplete_evidence", "Generated proposal payload, identity or gate differs from its exact native generation output.");
+      }
+    }
+  }
+}
+
 /** Self-contained, source-scoped JSON or one complete record per JSONL line. */
 export async function exportMixedComparison(args: MixedComparisonScope & { format: "json" | "jsonl" }): Promise<string | null> {
   if (args.format !== "json" && args.format !== "jsonl") throw new MixedComparisonError("invalid_input", "Unsupported comparison export format.");
@@ -212,8 +242,9 @@ async function validateCopiedScope(evidence: Extract<MixedCandidateEvidence, { s
   const sourceIds = Object.values(evidence.copy.source_id_map);
   const blockIds = Object.values(evidence.copy.block_id_map);
   const selected = evidence.lineage.filter(row => row.kind === "selected");
-  const claimIds = [...new Set([...selected.map(row => row.copied_claim_id), ...evidence.final_source_inventory.map(row => row.claim_id)])];
-  const evidenceIds = [...new Set(selected.flatMap(row => row.copied_evidence_ids))];
+  const generated = evidence.lineage.filter((row): row is Extract<MixedItemLineage, { kind: "residual" | "ideated" }> => row.kind === "residual" || row.kind === "ideated");
+  const claimIds = [...new Set([...selected.map(row => row.copied_claim_id), ...generated.map(row => row.copied_claim_id), ...evidence.final_source_inventory.map(row => row.claim_id)])];
+  const evidenceIds = [...new Set([...selected, ...generated].flatMap(row => row.copied_evidence_ids))];
   const sources = await accuracyDb().select().from(t.accuracySourceFiles).where(and(eq(t.accuracySourceFiles.workspace_id, attempt.workspace_id), inArray(t.accuracySourceFiles.id, sourceIds)));
   const blocks = blockIds.length ? await accuracyDb().select().from(t.accuracyParseBlocks).where(and(eq(t.accuracyParseBlocks.workspace_id, attempt.workspace_id), inArray(t.accuracyParseBlocks.id, blockIds))) : [];
   const claims = claimIds.length ? await accuracyDb().select().from(t.accuracyClaims).where(and(eq(t.accuracyClaims.workspace_id, attempt.workspace_id), inArray(t.accuracyClaims.id, claimIds))) : [];
@@ -223,6 +254,25 @@ async function validateCopiedScope(evidence: Extract<MixedCandidateEvidence, { s
     claims.some(row => row.source_file_id !== null && !sourceIds.includes(row.source_file_id)) || provenance.length !== evidenceIds.length ||
     selected.some(row => !row.copied_evidence_ids.length || row.copied_evidence_ids.some(id => !provenance.some(span => span.id === id && span.claim_id === row.copied_claim_id && sourceIds.includes(span.source_file_id) && blockIds.includes(span.block_id))))) {
     throw new MixedComparisonError("identity_mismatch", "Copied sources, blocks, selected claims, or evidence cross the linked workspace scope.");
+  }
+  for (const lineage of generated) {
+    const claim = claims.find(row => row.id === lineage.copied_claim_id);
+    const metadata = (claim?.metadata ?? {}) as Record<string, unknown>;
+    const expectedType = lineage.kind === "residual" ? "gap" : "tactic";
+    const statement = lineage.kind === "residual" ? lineage.payload.statement : lineage.payload.name;
+    if (!claim || claim.claim_type !== expectedType || !claim.validated || claim.source_file_id !== null || claim.statement !== statement ||
+      Object.entries(lineage.payload).some(([key, value]) => !identical(metadata[key], value)) ||
+      (lineage.kind === "ideated" && metadata.parent_gap_id !== lineage.parent_claim_ids[0])) {
+      throw new MixedComparisonError("identity_mismatch", "Generated durable claim differs from its exact validated lineage payload.");
+    }
+    if (lineage.kind === "residual") {
+      const child = splitChildSchema.parse(lineage.payload);
+      if (!identical(lineage.copied_evidence_ids, splitContextEvidenceIds(child)) || child.source_context.some((context, index) => {
+        const span = provenance.find(row => row.id === lineage.copied_evidence_ids[index]);
+        return !span || span.claim_id !== lineage.copied_claim_id || span.source_file_id !== context.source_file_id || span.block_id !== context.block_id || span.quote !== context.quote ||
+          !sourceIds.includes(span.source_file_id) || !blockIds.includes(span.block_id) || !blocks.some(block => block.id === span.block_id && block.source_file_id === span.source_file_id);
+      })) throw new MixedComparisonError("identity_mismatch", "Generated durable provenance differs from its exact copied source-context references.");
+    }
   }
   for (const original of evidence.setup.source_files) {
     const copied = sources.find(row => row.id === evidence.copy.source_id_map[original.id]);

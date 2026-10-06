@@ -1,12 +1,11 @@
 /** Atomic experiment-only materialization after passing the retained no-edit gate. */
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { claimMetadata, getClaimsByIds, insertClaim } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
-import type { PartialSplitOutput } from "./schema";
+import { splitContextEvidenceIds, type PartialSplitOutput } from "./schema";
 
 /** Insert both draft children, their context spans and supported coverage in one transaction. */
 export async function materializeSplit(args: { workspace_id: string; run_id: string; output: PartialSplitOutput; passing_gate: boolean }) {
@@ -20,7 +19,7 @@ export async function materializeSplit(args: { workspace_id: string; run_id: str
       const metadata = { ...child, split_run_id: args.run_id, split_rationale: output.rationale, support_tactic_ids: output.tactic_ids, support_coverage_ids: output.coverage_ids };
       const previous = existing.find(row => row.id === child.id);
       if (previous && (previous.claim_type !== "gap" || previous.statement !== child.statement || Object.entries(metadata).some(([key, value]) => !isDeepStrictEqual(claimMetadata(previous)[key], value)))) throw new Error("Generated split identity has different durable content.");
-      evidenceIds[child.id] = child.source_context.map((span, index) => `prov_split_${createHash("sha256").update(JSON.stringify({ id: child.id, index, span })).digest("hex").slice(0, 40)}`);
+      evidenceIds[child.id] = splitContextEvidenceIds(child);
       if (!previous) {
         await insertClaim({ id: child.id, workspace_id: args.workspace_id, claim_type: "gap", statement: child.statement, status: "draft", validated: false, metadata });
         await accuracyDb().insert(t.accuracyProvenance).values(child.source_context.map((span, index) => ({ id: evidenceIds[child.id][index], workspace_id: args.workspace_id, claim_id: child.id, source_file_id: span.source_file_id, block_id: span.block_id, quote: span.quote })));

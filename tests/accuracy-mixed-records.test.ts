@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
@@ -264,6 +265,38 @@ function completedResult(mixed: MixedCandidateEvidence, baseline: MixedCandidate
 }
 
 describe("mixed comparison evidence contract", () => {
+  it("requires generated proposals to retain their exact generation gate and quote-free lineage", () => {
+    const full = candidate("mixed", literalAssembly());
+    const priority = { ...full.final_outputs.priorities[0], band: "high" as const, score: 90,
+      axis_scores: { decision_impact: 90, time_pressure: 90, external_scrutiny: 90, feasibility: 90 } };
+    const proposal = { gap_id: priority.gap_id, name: "Prospective patient study", type: "rwe_study", origin: "ideated" as const,
+      status: "proposed" as const, design_summary: "Measure the remaining patient outcomes", not_from_reference: true as const };
+    full.final_outputs.priorities = [priority];
+    full.final_outputs.proposals = [proposal];
+    const priorityStage = full.stages.find(row => row.stage === "prioritize" && row.status === "completed")!;
+    if (priorityStage.stage !== "prioritize" || priorityStage.status !== "completed") throw new Error("Missing fixture priority stage");
+    priorityStage.output.placements = [priority];
+    full.stages = full.stages.map(row => row.stage === "ideate" ? { ...priorityStage, stage: "ideate", run_ids: ["ideate-run"], calls: [{ call_id: "ideate-run", version_index: 0 }], output: { mode: "llm", eligible_gap_ids: [priority.gap_id], proposals: [proposal] } } : row);
+    full.lineage.push({ kind: "ideated", copied_claim_id: "generated-proposal", parent_claim_ids: [priority.gap_id], run_id: "ideate-run", stage: "ideate", payload: proposal, copied_evidence_ids: [] });
+    const checked = Object.fromEntries(Object.entries(proposal).sort(([a], [b]) => a.localeCompare(b)));
+    full.gates.push({ ...full.gates[0], id: "proposal-gate", object_type: "proposal", object_ids: ["generated-proposal"], content_fingerprint: createHash("sha256").update(JSON.stringify(checked)).digest("hex") });
+    const validation = full.stages.find(row => row.stage === "validation_gate")!;
+    if (validation.stage !== "validation_gate" || validation.status !== "completed") throw new Error("Missing fixture gate stage");
+    validation.output.decisions = full.gates;
+    expect(mixedCandidateEvidenceSchema.safeParse(full).success).toBe(true);
+
+    const changed = structuredClone(full);
+    const generated = changed.lineage.find(row => row.kind === "ideated")!;
+    if (generated.kind !== "ideated") throw new Error("Missing proposal lineage");
+    generated.payload = { ...generated.payload, design_summary: "Replacement content never checked" };
+    expect(mixedCandidateEvidenceSchema.safeParse(changed).success).toBe(false);
+    const quoted = structuredClone(full);
+    const quotedProposal = quoted.lineage.find(row => row.kind === "ideated")!;
+    if (quotedProposal.kind !== "ideated") throw new Error("Missing proposal lineage");
+    quotedProposal.copied_evidence_ids = ["invented-source-evidence"];
+    expect(mixedCandidateEvidenceSchema.safeParse(quoted).success).toBe(false);
+  });
+
   it("requires both full projections and concrete terminal stage outputs", () => {
     const mixed = candidate("mixed", literalAssembly());
     const baseline = candidate("baseline", literalAssembly());

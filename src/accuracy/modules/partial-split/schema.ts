@@ -1,5 +1,6 @@
 /** Draft split and priority evidence contracts shared with replay terminal validation. */
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { provenanceSpanSchema } from "@/accuracy/store/quote-validator";
 const id = z.string().trim().min(1);
 export const splitChildSchema = z.object({
@@ -13,6 +14,10 @@ export const partialSplitOutputSchema = z.object({
   residual: splitChildSchema, tactic_ids: z.array(id).min(1), coverage_ids: z.array(id).min(1), rationale: id,
 }).strict();
 export type PartialSplitOutput = z.infer<typeof partialSplitOutputSchema>;
+/** Exact provenance identities created for each generated child's ordered context. */
+export function splitContextEvidenceIds(child: z.infer<typeof splitChildSchema>): string[] {
+  return child.source_context.map((span, index) => `prov_split_${createHash("sha256").update(JSON.stringify({ id: child.id, index, span })).digest("hex").slice(0, 40)}`);
+}
 export const priorityPlacementSchema = z.object({
   gap_id: id, band: z.enum(["high", "medium", "low"]),
   axis_scores: z.record(id, z.number().finite().min(0).max(100)), score: z.number().finite().min(0).max(100),

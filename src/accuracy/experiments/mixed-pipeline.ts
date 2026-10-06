@@ -26,7 +26,7 @@ import { projectGanttFromTactics, type GanttTacticInput } from "@/accuracy/modul
 import { getExperiment, recordExperimentCall, recordVersionEvaluation } from "./records";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT, MIXED_PIPELINE_STAGES, mixedCandidateEvidenceSchema,
   mixedStageEvidenceSchema, mixedFinalOutputsSchema, type MixedCandidateEvidence, type MixedGateDecision,
-  type MixedSetupIdentity, type MixedStageEvidence, type MixedFinalOutputs } from "./mixed-types";
+  mixedContentFingerprint, type MixedSetupIdentity, type MixedStageEvidence, type MixedFinalOutputs } from "./mixed-types";
 
 import { partialSplitOutputSchema, PRIORITY_SCORING_IDENTITY } from "@/accuracy/modules/partial-split/schema";
 import { splitChildIds } from "@/accuracy/modules/partial-split/module";
@@ -198,7 +198,7 @@ export async function runMixedCandidatePipeline(args: { evidence: MixedCandidate
         estimated_cost: actual.length ? actual.reduce((sum, row) => sum + row.cost_usd, 0) : null } }));
   }
   function gate(object_type: MixedGateDecision["object_type"], object_ids: string[], content: unknown, findings: Finding[], checked: unknown): MixedGateDecision {
-    const content_fingerprint = hash(content);
+    const content_fingerprint = mixedContentFingerprint(content);
     const check_fingerprint = hash({ checker: CHECKER, checked, findings });
     const decision = findings.some(row => row.severity === "blocking") ? "block" : "pass";
     const row: MixedGateDecision = { id: `gate_${hash({ attempt, object_type, object_ids, content_fingerprint, check_fingerprint })}`, policy: MIXED_GATE_POLICY,

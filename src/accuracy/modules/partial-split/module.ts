@@ -12,6 +12,7 @@ import { DEFAULT_AXES, bandFor, weightedScore } from "@/modules/stages/s8-priori
 import { heuristicScores } from "@/modules/stages/s8-prioritization/scoring";
 import { partialSplitOutputSchema, priorityPlacementSchema, PRIORITY_SCORING_IDENTITY } from "./schema";
 import { PARTIAL_SPLIT_SYSTEM, PRIORITY_SYSTEM } from "./prompts";
+import { effectiveGapStatus, gapStatusSchema } from "@/accuracy/modules/status-derive/engine";
 
 /** Child identities remain stable across retries of the same reserved kernel run. */
 export function splitChildIds(run_id: string, parent_gap_id: string) {
@@ -49,7 +50,13 @@ export const prioritizeModule = agenticModule({
   outputSchema: z.object({ mode: z.enum(["llm", "deterministic"]), scoring_identity: z.string(), placements: z.array(priorityPlacementSchema) }),
   async run(input, ctx) {
     const gaps = (await listDownstreamClaims(input.workspace_id, { claim_type: "gap", limit: null })).filter(row => input.gap_ids.includes(row.id));
-    if (gaps.length !== input.gap_ids.length || gaps.some(row => row.claim_type !== "gap" || !row.validated || claimMetadata(row).computed_status === "addressed")) throw new Error("Priority requires exact validated eligible gaps.");
+    if (gaps.length !== input.gap_ids.length || gaps.some(row => {
+      const meta = claimMetadata(row);
+      const computed = gapStatusSchema.safeParse(meta.computed_status);
+      const override = gapStatusSchema.safeParse(meta.status_override?.status);
+      const effective = effectiveGapStatus({ computed: computed.success ? computed.data : "open", override: override.success ? override.data : null });
+      return row.claim_type !== "gap" || !row.validated || effective.status === "addressed";
+    })) throw new Error("Priority requires exact validated eligible gaps.");
     const mode = process.env.SYNAPSE_TEST_STUB_LLM !== "1" && ctx.route.connected && ["api_key", "oauth"].includes(ctx.route.auth) ? "llm" as const : "deterministic" as const;
     const draft = mode === "llm" ? z.object({ gaps: z.array(z.object({ gap_id: z.string(), scores: z.record(z.string(), z.number().finite().min(0).max(100)), rationale: z.string().trim().min(1) }).strict()) }).strict().parse(await completeJson(ctx.complete, { system: PRIORITY_SYSTEM, purpose: "priority-suggester", user: JSON.stringify({ axes: DEFAULT_AXES, gaps: gaps.map(row => ({ id: row.id, statement: row.statement, payload: claimMetadata(row) })) }) })).gaps : gaps.map(row => {
       const meta = claimMetadata(row);
@@ -63,10 +70,11 @@ export const prioritizeModule = agenticModule({
     });
     for (const placement of placements) {
       const current = gaps.find(row => row.id === placement.gap_id)!;
-      await updateClaimMetadata({ workspace_id: input.workspace_id, claim_id: current.id, metadata: {
-        ...claimMetadata(current),
-        // Production retains a suggestion until the existing human workflow accepts a band.
-        ...(assemblyExecutionScope().kind === "experiment" ? { priority_band: placement.band, priority_rationale: placement.rationale, priority_origin: mode, priority: placement.band } : {}),
+      const experiment = assemblyExecutionScope().kind === "experiment";
+      await updateClaimMetadata({ workspace_id: input.workspace_id, claim_id: current.id, merge: !experiment, metadata: {
+        // Production submits a sparse suggestion overlay; immutable approved payload
+        // fields may differ from raw metadata and must never become mutation requests.
+        ...(experiment ? { ...claimMetadata(current), priority_band: placement.band, priority_rationale: placement.rationale, priority_origin: mode, priority: placement.band } : {}),
         priority_scoring: { ...placement, axes: DEFAULT_AXES, validated: false },
       } });
     }

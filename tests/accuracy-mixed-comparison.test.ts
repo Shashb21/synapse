@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
@@ -11,6 +12,7 @@ import * as copies from "@/accuracy/experiments/copy-workspace";
 import * as pipeline from "@/accuracy/experiments/mixed-pipeline";
 import * as records from "@/accuracy/experiments/mixed-records";
 import { mixedCandidateEvidenceSchema } from "@/accuracy/experiments/mixed-types";
+import type { MixedComparisonResult, MixedItemLineage } from "@/accuracy/experiments/mixed-types";
 import * as routing from "@/accuracy/kernel/routing";
 import * as evaluator from "@/accuracy/eval/mixed-comparison";
 import { runMixedComparison } from "@/accuracy/experiments/mixed-comparison";
@@ -115,6 +117,36 @@ async function run(request: Awaited<ReturnType<typeof fixture>>) {
   const record = await runMixedComparison(request);
   for (const attempt of Object.values(record.attempts)) if (attempt) workspaces.push(attempt.workspace_id);
   return record;
+}
+function fingerprint(value: unknown): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object"
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonical(child)])) : value;
+  return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+}
+/** Execute real generation but hold the initial terminal append for mutation tests. */
+async function beforeTerminal() {
+  controlledProvider();
+  const finish = records.finishMixedComparison;
+  let terminal: Parameters<typeof finish>[0] | undefined;
+  vi.spyOn(records, "finishMixedComparison").mockImplementationOnce(async args => {
+    terminal = structuredClone(args);
+    return (await records.readMixedComparison(args))!;
+  });
+  const record = await run(await fixture(true));
+  expect(terminal?.result.status).toBe("completed");
+  return { finish, terminal: terminal! as Parameters<typeof finish>[0] & { result: Extract<MixedComparisonResult, { status: "completed" }> }, record };
+}
+/** Retain an aggregate independently of native output for adversarial binding checks. */
+async function retainAggregate(candidate: Extract<MixedComparisonResult, { status: "completed" }>["candidates"]["mixed"], record: Awaited<ReturnType<typeof beforeTerminal>>["record"], stageName: "validation_gate" | "ideate") {
+  const stage = candidate.stages.find(row => row.stage === stageName)!;
+  if (stage.status !== "completed") throw new Error("Missing completed fixture stage");
+  const previous = record.attempts.mixed!.calls.find(row => row.call_kind === stageName)!;
+  const call_id = newId("aggregate");
+  // Test-only direct fixture insertion models a retained aggregate that agrees
+  // with forged terminal evidence while leaving the native final call intact.
+  await accuracyDb().insert(t.accuracyExperimentCalls).values({ ...previous, id: newId("call"), call_id, version_index: 0, output: stage.output, route: { kind: "deterministic_artifact" } });
+  stage.calls.push({ call_id, version_index: 0 });
+  stage.run_ids.push(call_id);
 }
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -299,6 +331,66 @@ describe("matched paired replay with real Postgres and kernel", () => {
       expect(completion).toHaveBeenCalled();
       expect(await sourceSnapshot(request.source_workspace_id)).toEqual(before);
     } finally { vi.unstubAllEnvs(); }
+  });
+
+  it.each(["residual", "ideated"] as const)("terminal rejects changed %s payload while original IDs, gates and aggregates remain", async kind => {
+    const { finish, terminal } = await beforeTerminal();
+    const lineage = terminal.result.candidates.mixed.lineage.find(row => row.kind === kind)!;
+    if (lineage.kind !== "residual" && lineage.kind !== "ideated") throw new Error("Missing generated fixture lineage");
+    lineage.payload[kind === "residual" ? "statement" : "design_summary"] = "Replacement content never checked by the retained gate";
+
+    await expect(finish(terminal).then(() => "accepted")).rejects.toMatchObject({ code: "incomplete_evidence" });
+    expect((await records.readMixedComparison(terminal))!.status).toBe("running");
+  });
+
+  it.each(["residual", "ideated"] as const)("terminal binds %s payload to native final output even with a recomputed gate", async kind => {
+    const { finish, terminal, record } = await beforeTerminal();
+    const candidate = terminal.result.candidates.mixed;
+    const lineage = candidate.lineage.find(row => row.kind === kind)!;
+    if (lineage.kind !== "residual" && lineage.kind !== "ideated") throw new Error("Missing generated fixture lineage");
+    const gate = candidate.gates.find(row => row.object_ids.includes(lineage.copied_claim_id) && row.object_type === (kind === "residual" ? "residual" : "proposal"))!;
+    lineage.payload[kind === "residual" ? "statement" : "design_summary"] = "Replacement content with a forged current gate";
+    if (kind === "residual") {
+      const native = structuredClone(record.attempts.mixed!.calls.find(row => row.call_id === lineage.run_id && row.version_index === 0)!.output) as Record<string, unknown>;
+      native.addressed = lineage.payload;
+      gate.content_fingerprint = fingerprint(native);
+    } else {
+      gate.content_fingerprint = fingerprint(lineage.payload);
+      candidate.final_outputs.proposals[0] = lineage.payload as never;
+      const stage = candidate.stages.find(row => row.stage === "ideate")!;
+      if (stage.stage !== "ideate" || stage.status !== "completed") throw new Error("Missing ideation stage");
+      stage.output.proposals[0] = lineage.payload as never;
+      await retainAggregate(candidate, record, "ideate");
+    }
+    const validation = candidate.stages.find(row => row.stage === "validation_gate")!;
+    if (validation.stage !== "validation_gate" || validation.status !== "completed") throw new Error("Missing gate stage");
+    validation.output.decisions = candidate.gates;
+    await retainAggregate(candidate, record, "validation_gate");
+    const parsed = mixedCandidateEvidenceSchema.safeParse(candidate);
+    expect(parsed.success, parsed.success ? undefined : parsed.error.message).toBe(true);
+
+    await expect(finish(terminal).then(() => "accepted")).rejects.toThrow(/native generation output/);
+    expect((await records.readMixedComparison(terminal))!.status).toBe("running");
+  });
+
+  it.each(["child payload", "proposal payload", "unvalidated claim", "missing provenance", "changed provenance", "crossed provenance"])("terminal rejects durable generated %s drift", async scenario => {
+    const { finish, terminal } = await beforeTerminal();
+    const generated = terminal.result.candidates.mixed.lineage.filter((row): row is Extract<MixedItemLineage, { kind: "residual" | "ideated" }> => row.kind === "residual" || row.kind === "ideated");
+    const child = generated.find(row => row.kind === "residual")!, proposal = generated.find(row => row.kind === "ideated")!;
+    if (scenario === "child payload" || scenario === "proposal payload") {
+      const id = scenario === "child payload" ? child.copied_claim_id : proposal.copied_claim_id;
+      const [claim] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, id));
+      await accuracyDb().update(t.accuracyClaims).set({ metadata: { ...(claim.metadata as Record<string, unknown>), [scenario === "child payload" ? "statement" : "design_summary"]: "Durable replacement never generated" } }).where(eq(t.accuracyClaims.id, id));
+    } else if (scenario === "unvalidated claim") {
+      await accuracyDb().update(t.accuracyClaims).set({ validated: false }).where(eq(t.accuracyClaims.id, proposal.copied_claim_id));
+    } else if (scenario === "missing provenance") {
+      await accuracyDb().delete(t.accuracyProvenance).where(eq(t.accuracyProvenance.id, child.copied_evidence_ids[0]));
+    } else {
+      await accuracyDb().update(t.accuracyProvenance).set(scenario === "changed provenance" ? { quote: "Invented quote" } : { claim_id: proposal.copied_claim_id }).where(eq(t.accuracyProvenance.id, child.copied_evidence_ids[0]));
+    }
+
+    await expect(finish(terminal).then(() => "accepted")).rejects.toMatchObject({ code: "identity_mismatch" });
+    expect((await records.readMixedComparison(terminal))!.status).toBe("running");
   });
 
   it.each(["parent copy", "duplicate children", "unsupported context", "crossed tactic"])("rejects generated %s before child materialization", async scenario => {

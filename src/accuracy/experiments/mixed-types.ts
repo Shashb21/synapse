@@ -146,6 +146,11 @@ function canonicalJson(value: unknown): unknown {
   return value;
 }
 
+/** Canonical content identity shared by generation gates and terminal checks. */
+export function mixedContentFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(canonicalJson(value))).digest("hex");
+}
+
 /** Only copied identity fields change; every other selected payload byte is retained. */
 function remappedPayload(value: MixedJson, copy: MixedCopyIdentity): MixedJson {
   if (Array.isArray(value)) return value.map(child => remappedPayload(child, copy));
@@ -238,6 +243,7 @@ export const mixedCompletedCandidateSchema = z.object({ ...candidateFields, stat
     if (row.kind === "residual") {
       const parsed = splitChildSchema.safeParse(row.payload);
       if (!parsed.success || parsed.data.id !== row.copied_claim_id || row.parent_claim_ids.length !== 1 || parsed.data.parent_gap_id !== row.parent_claim_ids[0] || !row.copied_evidence_ids.length) issue("Split child lineage requires full source-context payload and durable evidence IDs");
+      if (row.stage !== "partial_split" || final.residuals.filter(split => [split.addressed_gap_id, split.open_residual_gap_id].includes(row.copied_claim_id)).length !== 1) issue("Every generated child requires one retained split branch");
       if (parsed.success) {
         const parent = final.inventory.find(item => item.claim_id === parsed.data.parent_gap_id && item.claim_type === "gap");
         const parentSpans = Array.isArray(parent?.payload.provenance) ? parent.payload.provenance : [];
@@ -245,12 +251,25 @@ export const mixedCompletedCandidateSchema = z.object({ ...candidateFields, stat
         const support = final.coverage.filter(coverage => parsed.data.support_coverage_ids.includes(coverage.id));
         if (parsed.data.split_run_id !== row.run_id || support.length !== new Set(parsed.data.support_coverage_ids).size || support.some(coverage => coverage.gap_id !== parsed.data.parent_gap_id || !coverage.validated || !["partial", "limited"].includes(coverage.overall) || !parsed.data.support_tactic_ids.includes(coverage.tactic_id)) || parsed.data.support_tactic_ids.some(id => !support.some(coverage => coverage.tactic_id === id) || !lifecycles.some(tactic => tactic.id === id && ["planned", "ongoing", "completed"].includes(tactic.status)))) issue("Split child support must bind retained validated parent coverage and committed tactics");
       }
+    } else {
+      const parsed = proposal.safeParse(row.payload);
+      if (!parsed.success || row.stage !== "ideate" || !same(row.parent_claim_ids, [parsed.data.gap_id]) || row.copied_evidence_ids.length || final.proposals.filter(item => same(item, row.payload)).length !== 1) issue("Ideated lineage must retain the exact final proposal, parent and quote-free origin");
+      if (!candidate.gates.some(gate => gate.object_type === "proposal" && gate.decision === "pass" && same(gate.object_ids, [row.copied_claim_id]) && gate.content_fingerprint === mixedContentFingerprint(row.payload))) issue("Proposal generation gate must bind its exact unchanged payload");
     }
   }
+  if (generated.filter(row => row.kind === "ideated").length !== final.proposals.length) issue("Every final proposal requires one generated lineage entry");
   for (const split of final.residuals) {
     const children = [split.addressed_gap_id, split.open_residual_gap_id];
     const lineages = children.map(id => generated.find(row => row.kind === "residual" && row.copied_claim_id === id));
     if (!final.inventory.some(row => row.claim_id === split.parent_gap_id && row.claim_type === "gap") || new Set([split.parent_gap_id, ...children]).size !== 3 || lineages.some(row => !row || row.kind !== "residual" || row.parent_claim_ids.length !== 1 || row.parent_claim_ids[0] !== split.parent_gap_id) || lineages[0]?.run_id !== lineages[1]?.run_id || lineages[0]?.payload.branch !== "addressed" || lineages[1]?.payload.branch !== "open" || lineages[0]?.payload.statement === lineages[1]?.payload.statement) issue("A split requires two distinct child branches and shared parent/run lineage");
+    const addressed = splitChildSchema.safeParse(lineages[0]?.payload), remainder = splitChildSchema.safeParse(lineages[1]?.payload);
+    if (addressed.success && remainder.success) {
+      const output = { addressed_gap_id: split.addressed_gap_id, open_residual_gap_id: split.open_residual_gap_id,
+        addressed: addressed.data, residual: remainder.data, tactic_ids: addressed.data.support_tactic_ids,
+        coverage_ids: addressed.data.support_coverage_ids, rationale: addressed.data.split_rationale };
+      if (!same(addressed.data.support_tactic_ids, remainder.data.support_tactic_ids) || !same(addressed.data.support_coverage_ids, remainder.data.support_coverage_ids) || addressed.data.split_rationale !== remainder.data.split_rationale ||
+        !candidate.gates.some(gate => gate.object_type === "residual" && gate.decision === "pass" && same(gate.object_ids, children) && gate.content_fingerprint === mixedContentFingerprint(output))) issue("Split generation gate must bind both exact unchanged child payloads and shared support");
+    }
     if (final.statuses.find(row => row.gap_id === split.parent_gap_id)?.status !== "partial" || final.statuses.find(row => row.gap_id === split.addressed_gap_id)?.computed !== "addressed" || final.statuses.find(row => row.gap_id === split.open_residual_gap_id)?.computed !== "open") issue("Split must retain historical parent partial and justified addressed/open child statuses");
     if (!final.coverage.some(row => row.gap_id === split.addressed_gap_id && row.overall === "full" && row.validated && lifecycles.some(tactic => tactic.id === row.tactic_id && ["planned", "ongoing", "completed"].includes(tactic.status))) || final.coverage.some(row => row.gap_id === split.open_residual_gap_id && row.overall !== "not_relevant")) issue("Split child coverage must justify addressed slice and uncovered remainder");
   }
