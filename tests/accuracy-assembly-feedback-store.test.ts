@@ -39,6 +39,16 @@ async function fixture() {
 type Scope = Awaited<ReturnType<typeof fixture>>;
 type Kind = "need_extract" | "inventory_extract";
 
+async function anotherSource(scope: Scope): Promise<Scope> {
+  const source = await insertSourceFile({ workspace_id: scope.workspace_id, filename: "other-evidence.txt",
+    mime: "text/plain", checksum: newId("sum") });
+  const block_id = newId("block");
+  await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id: scope.workspace_id,
+    source_file_id: source.id, index: 0, kind: "paragraph", heading: null,
+    text: "A source quote supports the item.", parser: "test", created_at: now() });
+  return { ...scope, source_file_id: source.id, block_id };
+}
+
 async function item(scope: Scope, kind: Kind, label: string, human = false) {
   const call_kind = kind;
   const claim_type = kind === "need_extract" ? "gap" : "tactic";
@@ -255,6 +265,22 @@ describe("assembly feedback store", () => {
     expect(await listAssemblyFeedback(scope.workspace_id, gapAssembly.id)).toEqual([]);
   });
 
+  it("validates every review even when two bindings reuse a cached assembly", async () => {
+    const scope = await fixture();
+    const other = await anotherSource(scope);
+    const gap = await item(scope, "need_extract", "First gap");
+    const tactic = await item(scope, "inventory_extract", "First tactic");
+    const shared = await assembly(scope, [gap, tactic]);
+    const otherGap = await item(other, "need_extract", "Other gap");
+    const target = await assembly(other, [otherGap]);
+    const run_id = await consumer(scope, [binding(shared, gap), { ...binding(shared, tactic), review_id: "forged-review" },
+      binding(target, otherGap)]);
+
+    await expect(createAssemblyFeedback(feedback(scope, target, run_id))).rejects.toMatchObject({ code: "invalid_input" });
+    expect(await listAssemblyFeedbackRuns(scope.workspace_id, target.id)).toEqual([]);
+    expect(await listAssemblyFeedback(scope.workspace_id, target.id)).toEqual([]);
+  });
+
   it("rejects an applied batch whose complete run ownership is ambiguous", async () => {
     const scope = await fixture();
     const gap = await item(scope, "need_extract", "Gap");
@@ -267,6 +293,24 @@ describe("assembly feedback store", () => {
 
     await expect(createAssemblyFeedback(feedback(scope, saved, run_id))).rejects.toMatchObject({ code: "invalid_input" });
     expect(await listAssemblyFeedback(scope.workspace_id, saved.id)).toEqual([]);
+  });
+
+  it("rejects a batch that lists a successful downstream call as an extraction kind", async () => {
+    const scope = await fixture();
+    const gap = await item(scope, "need_extract", "Gap");
+    const saved = await assembly(scope, [gap]);
+    const run_id = await consumer(scope, [binding(saved, gap)]);
+    const downstream_id = newId("arun");
+    await accuracyDb().insert(t.accuracyModuleRuns).values({ id: downstream_id, org_id: scope.org_id,
+      workspace_id: scope.workspace_id, call_kind: "merge_dedupe", agent_role: "judge", module_id: "test",
+      module_version: "1", status: "ok", started_at: now(), finished_at: now(), actor_name: "Agent",
+      actor_function: "medical_affairs", input: { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id },
+      output: {}, steps: [], evaluation_context: "production" });
+    await accuracyDb().update(t.accuracyExtractionBatches).set({ requested_kinds: ["need_extract", "merge_dedupe"],
+      run_ids: [gap.run_id, downstream_id] }).where(eq(t.accuracyExtractionBatches.id, gap.batch_id));
+
+    await expect(createAssemblyFeedback(feedback(scope, saved, run_id))).rejects.toMatchObject({ code: "invalid_input" });
+    expect(await listAssemblyFeedbackRuns(scope.workspace_id, saved.id)).toEqual([]);
   });
 
   it("removes feedback before its review, assembly and consumer parents on workspace deletion", async () => {

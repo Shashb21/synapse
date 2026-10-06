@@ -82,13 +82,7 @@ function parseBindings(steps: unknown): HistoricalBinding[] {
   return bindings;
 }
 
-async function verifyAssembly(binding: HistoricalBinding, workspace_id: string): Promise<Assembly> {
-  const assembly = await readAssembly(workspace_id, binding.assembly_id);
-  if (!assembly || assembly.fingerprint !== binding.assembly_fingerprint
-    || assemblyFingerprint(assembly) !== assembly.fingerprint
-    || !assembly.source_file_ids.includes(binding.source_file_id)) {
-    invalid("Recorded assembly identity or fingerprint does not match immutable production output.");
-  }
+async function verifyHistoricalApproval(binding: HistoricalBinding, workspace_id: string, assembly: Assembly): Promise<void> {
   const [review] = await accuracyDb().select().from(t.accuracyAssemblyReviews).where(and(
     eq(t.accuracyAssemblyReviews.workspace_id, workspace_id),
     eq(t.accuracyAssemblyReviews.id, binding.review_id),
@@ -98,6 +92,16 @@ async function verifyAssembly(binding: HistoricalBinding, workspace_id: string):
     || review.checks_fingerprint !== assemblyCheckFingerprint(assembly.checks)) {
     invalid("Recorded assembly binding does not have an exact historical approval.");
   }
+}
+
+async function verifyAssembly(binding: HistoricalBinding, workspace_id: string): Promise<Assembly> {
+  const assembly = await readAssembly(workspace_id, binding.assembly_id);
+  if (!assembly || assembly.fingerprint !== binding.assembly_fingerprint
+    || assemblyFingerprint(assembly) !== assembly.fingerprint
+    || !assembly.source_file_ids.includes(binding.source_file_id)) {
+    invalid("Recorded assembly identity or fingerprint does not match immutable production output.");
+  }
+  await verifyHistoricalApproval(binding, workspace_id, assembly);
   if (!assembly.linking_complete || assembly.checks.status !== "passed") {
     invalid("Recorded assembly is not a complete passing selection.");
   }
@@ -115,6 +119,7 @@ async function verifyExtractionOwnership(binding: HistoricalBinding, workspace_i
   if (!batch || !batch.drafts_persisted || batch.source_file_id !== binding.source_file_id
     || !Array.isArray(batch.requested_kinds) || !Array.isArray(batch.run_ids)
     || batch.requested_kinds.length === 0 || batch.requested_kinds.length !== batch.run_ids.length
+    || batch.requested_kinds.some(kind => kind !== "need_extract" && kind !== "inventory_extract")
     || new Set(batch.requested_kinds).size !== batch.requested_kinds.length
     || new Set(batch.run_ids).size !== batch.run_ids.length
     || !batch.requested_kinds.includes(binding.call_kind) || !batch.run_ids.includes(binding.run_id)
@@ -199,6 +204,8 @@ async function proofForRun(workspace_id: string, run: RunRow): Promise<Consumpti
     } else if (assembly.fingerprint !== binding.assembly_fingerprint
       || !assembly.source_file_ids.includes(binding.source_file_id)) {
       invalid("Recorded binding conflicts with another binding for its assembly.");
+    } else {
+      await verifyHistoricalApproval(binding, workspace_id, assembly);
     }
     await verifyExtractionOwnership(binding, workspace_id, assembly);
     bindings.push({ ...binding, assembly });
