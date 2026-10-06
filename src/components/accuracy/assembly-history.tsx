@@ -4,9 +4,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Assembly, AssemblyCoverage, ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import type { AssemblyReview } from "@/accuracy/domain/assembly-review";
+import type { AssemblyFeedback, AssemblyFeedbackRun } from "@/accuracy/domain/assembly-feedback";
 import type { AssemblyRevisionChange, AssemblyRevisionState } from "@/accuracy/domain/assembly-revision";
 import type { AssemblyReviewState } from "@/accuracy/store/assembly-review-store";
 import { AssemblyRevisionForm, type RevisionEvidenceBlock, type RevisionFormTarget } from "@/components/accuracy/assembly-revision-form";
+import { AssemblyFeedbackSection, type FeedbackForm } from "@/components/accuracy/assembly-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -19,6 +21,9 @@ type AssemblyDetailState = {
   canRetryRevision: boolean;
   revisionState: AssemblyRevisionState | null;
   evidenceBlocks: RevisionEvidenceBlock[];
+  feedback: AssemblyFeedback[];
+  feedbackRuns: AssemblyFeedbackRun[];
+  canFeedback: boolean;
   fresh: boolean;
 };
 type AdvisoryFormState = Record<string, { acknowledged: boolean; reason: string }>;
@@ -414,6 +419,15 @@ function AssemblyDetail({
   onRevise,
   onRetryRevision,
   onNavigate,
+  workspaceId,
+  feedback,
+  feedbackRuns,
+  canFeedback,
+  feedbackSubmitting,
+  feedbackRefreshRequired,
+  feedbackError,
+  onFeedback,
+  onFeedbackRefresh,
 }: {
   assembly: Assembly;
   reviewState: AssemblyReviewState | null;
@@ -435,6 +449,15 @@ function AssemblyDetail({
   onRevise: (change: AssemblyRevisionChange) => void;
   onRetryRevision: () => void;
   onNavigate: (assemblyId: string) => void;
+  workspaceId: string;
+  feedback: AssemblyFeedback[];
+  feedbackRuns: AssemblyFeedbackRun[];
+  canFeedback: boolean;
+  feedbackSubmitting: boolean;
+  feedbackRefreshRequired: boolean;
+  feedbackError: string | null;
+  onFeedback: (form: FeedbackForm) => void;
+  onFeedbackRefresh: () => void;
 }) {
   const [revisionTarget, setRevisionTarget] = useState<RevisionFormTarget | null>(null);
   const selectedMappedGapIds = mappedGapIds(assembly);
@@ -508,6 +531,14 @@ function AssemblyDetail({
           fresh={fresh}
         />
       </section>
+
+      <AssemblyFeedbackSection
+        key={`${workspaceId}:${assembly.id}`}
+        workspaceId={workspaceId} runs={feedbackRuns} entries={feedback}
+        canFeedback={canFeedback} fresh={fresh} busy={busy || feedbackSubmitting}
+        refreshRequired={feedbackRefreshRequired} error={feedbackError}
+        onSubmit={onFeedback} onRefresh={onFeedbackRefresh}
+      />
 
       <section className="grid gap-2" aria-label="Selected items">
         <p className="font-medium">Selected items</p>
@@ -596,6 +627,8 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   const listRequestToken = useRef(0);
   const detailRequestToken = useRef(0);
   const reviewRequestToken = useRef(0);
+  const feedbackRequestToken = useRef(0);
+  const activeAssemblyId = useRef<string | null>(null);
   const reviewInFlight = useRef(false);
   const mounted = useRef(true);
   const [expanded, setExpanded] = useState(false);
@@ -611,6 +644,9 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
   const [revisionSubmitting, setRevisionSubmitting] = useState<string | null>(null);
   const [revisionErrors, setRevisionErrors] = useState<Record<string, string>>({});
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState<string | null>(null);
+  const [feedbackRefreshRequired, setFeedbackRefreshRequired] = useState<Record<string, boolean>>({});
+  const [feedbackErrors, setFeedbackErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     mounted.current = true;
@@ -619,6 +655,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
       listRequestToken.current += 1;
       detailRequestToken.current += 1;
       reviewRequestToken.current += 1;
+      feedbackRequestToken.current += 1;
       reviewInFlight.current = false;
     };
   }, []);
@@ -651,11 +688,12 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  async function loadDetail(assemblyId: string) {
+  async function loadDetail(assemblyId: string, preserve = false) {
     const token = detailRequestToken.current + 1;
     detailRequestToken.current = token;
     setDetailLoading(assemblyId);
     setDetails((current) => {
+      if (preserve) return { ...current, ...(current[assemblyId] ? { [assemblyId]: { ...current[assemblyId], fresh: false } } : {}) };
       const next = { ...current };
       delete next[assemblyId];
       return next;
@@ -669,6 +707,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
       const body = await response.json() as {
         assembly?: Assembly; review_state?: AssemblyReviewState; revision_state?: AssemblyRevisionState;
         evidence_blocks?: RevisionEvidenceBlock[]; can_review?: boolean; can_revise?: boolean; can_retry_revision?: boolean; error?: string;
+        feedback?: AssemblyFeedback[]; feedback_runs?: AssemblyFeedbackRun[]; can_feedback?: boolean;
       };
       if (!mounted.current || token !== detailRequestToken.current) return;
       if (!response.ok || !body.assembly) throw new Error(body.error ?? "Could not load proposal");
@@ -689,15 +728,61 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
           canRetryRevision: Boolean(body.can_retry_revision),
           revisionState: body.revision_state ?? null,
           evidenceBlocks: body.evidence_blocks ?? [],
+          feedback: body.feedback ?? [],
+          feedbackRuns: body.feedback_runs ?? [],
+          canFeedback: Boolean(body.can_feedback),
           fresh: true,
         },
       }));
+      setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: false }));
+      setFeedbackErrors(current => ({ ...current, [assemblyId]: "" }));
     } catch (cause) {
       if (!mounted.current || token !== detailRequestToken.current) return;
       invalidateControls();
       setDetailError((current) => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not load proposal" }));
     } finally {
       if (mounted.current && token === detailRequestToken.current) setDetailLoading(null);
+    }
+  }
+
+  async function submitFeedback(assemblyId: string, form: FeedbackForm) {
+    const detail = details[assemblyId];
+    if (reviewInFlight.current || !detail?.fresh || !detail.canFeedback || feedbackRefreshRequired[assemblyId]) return;
+    const run = detail.feedbackRuns.find(candidate => candidate.run_id === form.consumerRunId);
+    if (!run || !form.rationale.trim() || form.selectedItemVersionIds.some(id => !run.consumed_item_version_ids.includes(id))) return;
+    const token = feedbackRequestToken.current + 1;
+    feedbackRequestToken.current = token;
+    reviewInFlight.current = true;
+    setFeedbackSubmitting(assemblyId);
+    setFeedbackErrors(current => ({ ...current, [assemblyId]: "" }));
+    try {
+      const response = await fetch("/api/accuracy/assemblies", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "feedback", workspace_id: workspaceId, assembly_id: assemblyId,
+          expected_fingerprint: detail.assembly.fingerprint, approval_review_id: run.approval_review_id,
+          consumer_run_id: run.run_id, selected_item_version_ids: form.selectedItemVersionIds,
+          category: form.category, rationale: form.rationale.trim(),
+        }),
+      });
+      const body = await response.json() as { error?: string };
+      if (!mounted.current || token !== feedbackRequestToken.current) return;
+      if (!response.ok) throw new Error(body.error ?? "Could not record feedback");
+      if (activeAssemblyId.current !== assemblyId) return;
+      setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: true }));
+      invalidateControls();
+      await loadDetail(assemblyId, true);
+    } catch (cause) {
+      if (!mounted.current || token !== feedbackRequestToken.current) return;
+      if (activeAssemblyId.current !== assemblyId) return;
+      invalidateControls();
+      setFeedbackRefreshRequired(current => ({ ...current, [assemblyId]: true }));
+      setFeedbackErrors(current => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not record feedback" }));
+    } finally {
+      if (mounted.current && token === feedbackRequestToken.current) {
+        reviewInFlight.current = false;
+        setFeedbackSubmitting(null);
+      }
     }
   }
 
@@ -790,6 +875,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
         revisionStates: { ...(current?.revisionStates ?? {}), ...(body.revision_state ? { [successor.id]: body.revision_state } : {}) },
       }));
       setOpenAssemblyId(successor.id);
+      activeAssemblyId.current = successor.id;
       await loadList();
       if (!mounted.current || token !== reviewRequestToken.current) return;
       await loadDetail(successor.id);
@@ -806,6 +892,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   }
 
   function navigateDetail(assemblyId: string) {
+    activeAssemblyId.current = assemblyId;
     setOpenAssemblyId(assemblyId);
     void loadDetail(assemblyId);
   }
@@ -818,6 +905,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
 
   function toggleDetail(assemblyId: string) {
     const next = openAssemblyId === assemblyId ? null : assemblyId;
+    activeAssemblyId.current = next;
     setOpenAssemblyId(next);
     if (next && (!details[assemblyId] || !details[assemblyId].fresh) && detailLoading !== assemblyId) void loadDetail(assemblyId);
   }
@@ -904,6 +992,15 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
                             onRevise={change => void submitRevision(assemblyId, change)}
                             onRetryRevision={() => void submitRevision(assemblyId)}
                             onNavigate={navigateDetail}
+                            workspaceId={workspaceId}
+                            feedback={details[assemblyId].feedback}
+                            feedbackRuns={details[assemblyId].feedbackRuns}
+                            canFeedback={details[assemblyId].canFeedback}
+                            feedbackSubmitting={feedbackSubmitting === assemblyId}
+                            feedbackRefreshRequired={Boolean(feedbackRefreshRequired[assemblyId])}
+                            feedbackError={feedbackErrors[assemblyId] || null}
+                            onFeedback={form => void submitFeedback(assemblyId, form)}
+                            onFeedbackRefresh={() => void loadDetail(assemblyId, true)}
                           />
                         ) : null}
                       </div>
