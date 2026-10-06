@@ -13,3 +13,7 @@ Material limits: this verifies local code/test contracts; deployed migrations, r
 - Ruling: Resume at KAN-43 rather than repeat KAN-31–KAN-42 — Jira reports all earlier slices Done and latest checkout retains them — if wrong, earlier unintegrated gaps require follow-up after review.
 - Ruling: Reuse the clean isolated temporary clone on a new codex/kan43-pipeline-review branch — it contains KAN-42 and preserves user files in older checkouts — if wrong, branch integration needs adjustment.
 - Ruling: Use repository Vitest for TypeScript verification — pytest preference cannot directly exercise this TypeScript system — if wrong, testing policy needs an adapter.
+
+## Jira lifecycle
+
+KAN-43 completion comment `10390` records implementation, verification and limits; Jira transition `41` confirmed Done. Parent KAN-4 comment `10391` records unresolved earlier-version judgment/live evidence; parent stays In Progress. Post-Done search found no assigned To Do issues. This Jira site has no Ready status, as confirmed by JQL validation, so no eligible next issue exists and no terminal handoff is armed.
