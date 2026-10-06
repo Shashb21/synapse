@@ -67,6 +67,18 @@ it("names exact must-find keys recovered and lost between retained versions", as
   expect(host.textContent).toContain("must-find from previous: recovered gap-b; lost gap-lost");
 });
 
+it("shows all four outcome deltas for previous and V0 comparisons", async () => {
+  const changed = structuredClone(report);
+  const version = changed.entries[0].evidence.pass_comparison!.conditions[1].calls[0].versions[0];
+  version.delta_from_previous = { found: 2, partial: 1, missed: -3, wrong: 1 };
+  version.delta_from_v0 = { found: 3, partial: -1, missed: -2, wrong: 2 };
+  vi.stubGlobal("fetch", vi.fn(async () => response(changed)));
+  await render("source-a");
+  const row = host.querySelector("table[aria-label='Per-call version outcomes'] tbody tr");
+  expect(row?.textContent).toContain("Found +2, partial +1, missed -3, wrong +1");
+  expect(row?.textContent).toContain("Found +3, partial -1, missed -2, wrong +2");
+});
+
 it("discards a late response from a previous workspace", async () => {
   let finishOld!: (value: ReturnType<typeof response>) => void;
   vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("source-a")
@@ -95,7 +107,7 @@ it("keeps mixed full-pipeline status separate from scored source outcomes and sh
     attribution: { label: "Descriptive", scope: "source_gold", reasons: ["No complete labels for downstream stages."] }, matched: false,
     mismatch_reasons: ["Assembly fingerprint differs."], repeat_key: null, experiment_ids: ["attempt-mixed"], call_ids: [],
     evidence: { experiments: [], mixed_comparison: { status: "completed", header: { source_workspace_id: "source-a", request: { pack_id: "gold-a" }, pack_fingerprint: "gold-v1", evaluator_version: "source-evaluator-v1" }, attempts: { mixed: { id: "attempt-mixed" }, baseline: null },
-      result: { evidence: { candidates: { mixed: candidate, baseline: null }, evaluation: { source_evaluations: [{ candidate: "mixed", point: "final", claim_type: "gap", evaluation: { status: "scored", score: { found: 1, partial: 0, missed: 0, wrong: 0 } } }], applicability: [{ dimension: "source_gaps", status: "scored", reference_keys: ["gap-a"] }, { dimension: "plan", status: "unscored", reason: "No curated plan labels" }], changes: [{ dimension: "source_gaps", kind: "reference_lost", severity: "advisory", message: "Lost gap-b", item_ids: ["gap-b"] }] } } } } }
+      result: { evidence: { candidates: { mixed: candidate, baseline: null }, evaluation: { source_evaluations: [{ candidate: "mixed", point: "final", claim_type: "gap", evaluation: { status: "scored", score: { found: 1, partial: 0, missed: 0, wrong: 0 }, outcomes: [{ outcome: "found", gold_item_key: "gold-gap-a", model_item_index: 2, reason: "Exact source match" }, { outcome: "missed", gold_item_key: "gold-gap-b", reason: "No output item" }], errors: [] } }, { candidate: "mixed", point: "final", claim_type: "tactic", evaluation: { status: "gold_not_applicable", outcomes: [], errors: [] } }], applicability: [{ dimension: "source_gaps", status: "scored", reference_keys: ["gap-a"] }, { dimension: "plan", status: "unscored", reason: "No curated plan labels" }], changes: [{ dimension: "source_gaps", kind: "reference_lost", severity: "advisory", message: "Lost gap-b", item_ids: ["gap-b"] }] } } } } }
   }] } as unknown as ExperimentResultsReport;
   vi.stubGlobal("fetch", vi.fn(async () => response(mixed)));
   await render("source-a");
@@ -105,4 +117,11 @@ it("keeps mixed full-pipeline status separate from scored source outcomes and sh
   expect(host.textContent).toContain("original-v1 → copied-gap");
   expect(host.textContent).toContain("ideate-module v3 · Unknown · Unknown");
   expect(host.textContent).toContain("Full-pipeline improvement remains unscored");
+  const outcomeTable = host.querySelector('table[aria-label="mixed final gap item outcomes"]');
+  expect(outcomeTable?.textContent).toContain("gold-gap-a");
+  expect(outcomeTable?.textContent).toContain("2");
+  expect(outcomeTable?.textContent).toContain("Exact source match");
+  expect(outcomeTable?.textContent).toContain("gold-gap-b");
+  expect(outcomeTable?.textContent).toContain("No output item");
+  expect(host.textContent).toContain("No item outcomes; gold not applicable");
 });
