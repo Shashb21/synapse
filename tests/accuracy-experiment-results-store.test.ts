@@ -1,5 +1,8 @@
 /** Real Postgres coverage for source-scoped retained result history. */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { createExperiment, finishExperiment, recordExperimentCall } from "@/accuracy/experiments/records";
 import { readExperimentResults } from "@/accuracy/experiments/results";
@@ -9,6 +12,8 @@ import { accuracyDb } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
 import { eq } from "drizzle-orm";
 import { EXPERIMENT_EVALUATOR_VERSION } from "@/accuracy/eval/experiment-gold";
+import * as experimentGold from "@/accuracy/eval/experiment-gold";
+import { getReferencePack } from "@/accuracy/eval/reference-gold";
 import { MIXED_GATE_POLICY, MIXED_GATE_POLICY_FINGERPRINT } from "@/accuracy/experiments/mixed-types";
 
 const workspaces: string[] = [];
@@ -31,9 +36,36 @@ async function attempt(scope: Awaited<ReturnType<typeof fixture>>, condition: Re
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const id of mixedIds.splice(0)) await accuracyDb().delete(tables.accuracyMixedComparisons).where(eq(tables.accuracyMixedComparisons.id, id));
   for (const id of workspaces.splice(0)) await deleteWorkspace(id);
 });
+
+async function passPair(scope: Awaited<ReturnType<typeof fixture>>, id: string) {
+  const condition = (critic_revision_passes: number) => ({ comparison_id: id,
+    comparison_evaluator_version: PASS_COMPARISON_EVALUATOR_VERSION,
+    original_request_identity: { source_workspace_id: scope.source_workspace_id },
+    original_request_fingerprint: "same-request", critic_revision_passes });
+  const baseline = await attempt(scope, condition(1), "completed");
+  const candidate = await attempt(scope, condition(2), "completed");
+  return { baseline, candidate };
+}
+
+async function withLocalGold<T>(gaps: unknown, tactics: unknown, action: () => Promise<T>): Promise<T> {
+  const prior = process.cwd();
+  const dir = mkdtempSync(join(tmpdir(), "results-gold-"));
+  const goldDir = join(dir, "reference", pack_id, getReferencePack(pack_id)!.gold);
+  mkdirSync(goldDir, { recursive: true });
+  if (gaps !== undefined) writeFileSync(join(goldDir, "gaps.json"), JSON.stringify(gaps));
+  if (tactics !== undefined) writeFileSync(join(goldDir, "tactics.json"), JSON.stringify(tactics));
+  try {
+    process.chdir(dir);
+    return await action();
+  } finally {
+    process.chdir(prior);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("retained experiment results store", () => {
   it("retains independent pass cohorts, a failed candidate, running standalone raw evidence and source scope", async () => {
@@ -119,5 +151,34 @@ describe("retained experiment results store", () => {
 
     expect(report.entries[0].attribution.label).toBe("Descriptive");
     expect(report.entries[0].evidence.experiments[0]).toMatchObject({ id: row.id, pack_id: "retired-pack" });
+  });
+
+  it.each([
+    ["missing gaps object", { source_pack_id: pack_id, source_filename: "fixture" }, { source_pack_id: pack_id, source_filename: "fixture", tactics: [] }],
+    ["numeric must-find IDs", { source_pack_id: pack_id, source_filename: "fixture", gaps: [], must_find_gap_ids: 42 }, { source_pack_id: pack_id, source_filename: "fixture", tactics: [] }],
+  ])("keeps pass history descriptive for parseable malformed gold: %s", async (_label, gaps, tactics) => {
+    const scope = await fixture();
+    await withLocalGold(gaps, tactics, async () => {
+      const { baseline, candidate } = await passPair(scope, newId("malformed-cohort"));
+      const report = await readExperimentResults({ source_workspace_id: scope.source_workspace_id });
+      const entry = report.entries.find(row => row.experiment_ids.includes(candidate.id));
+      expect(entry?.kind).toBe("pass_candidate");
+      expect(entry?.attribution.label).toBe("Descriptive");
+      expect(entry?.attribution.reasons.join(" ")).toMatch(/gold|pack|reference/i);
+      expect(entry?.evidence.experiments.map(row => row.id)).toEqual(expect.arrayContaining([baseline.id, candidate.id]));
+      expect(entry?.evidence.experiments[0].baseline_snapshot).toEqual({ sources: [{ id: "original-document", checksum: "unchanged" }] });
+    });
+  });
+
+  it("treats ENOENT as unavailable but propagates an unexpected coded read fault", async () => {
+    const scope = await fixture();
+    const pair = await passPair(scope, newId("unavailable-cohort"));
+    await withLocalGold(undefined, undefined, async () => {
+      const report = await readExperimentResults({ source_workspace_id: scope.source_workspace_id });
+      expect(report.entries.find(row => row.experiment_ids.includes(pair.candidate.id))?.attribution.label).toBe("Descriptive");
+    });
+    const internal = Object.assign(new Error("internal coded failure"), { code: "EIO" });
+    vi.spyOn(experimentGold, "experimentPackFingerprint").mockImplementation(() => { throw internal; });
+    await expect(readExperimentResults({ source_workspace_id: scope.source_workspace_id })).rejects.toBe(internal);
   });
 });
