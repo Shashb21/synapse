@@ -1,3 +1,5 @@
+import { coverageProvenance } from "./support/coverage-provenance";
+import { coveragePairRevisions, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
 import { describe, expect, it } from "vitest";
 import {
   activityIdForTactic,
@@ -17,7 +19,6 @@ import {
   hashGanttSnapshot,
 } from "@/accuracy/modules/gantt-project/snapshot-hash";
 import { applyClaimValidation, insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
-import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
@@ -147,10 +148,12 @@ describe("gantt save-final guard", () => {
   it("persists a snapshot hash and audit bundle link for the frozen Gantt", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("hash-final");
+    const provenance = await coverageProvenance(workspace_id, "Need overall survival in 2L NSCLC");
     const gap = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Need overall survival in 2L NSCLC",
+      metadata: { provenance },
       validated: true,
       status: "validated",
     });
@@ -161,18 +164,21 @@ describe("gantt save-final guard", () => {
       validated: true,
       status: "validated",
       metadata: {
+        tactic_status: "planned",
         start: "2026-03-01",
         end: "2027-03-01",
         readout: "2027-06-01",
         source_badge: "pivotal",
       },
     });
-    await insertCoverageJoin({
+    await upsertCoverageDecision({
       workspace_id,
       gap_id: gap.id,
       tactic_id: tactic.id,
       overall: "covers",
-      validated: true,
+      actor: { name: "reviewer", function: "medical_affairs" },
+      rationale: "Addresses survival evidence",
+      ...await coveragePairRevisions({ workspace_id, gap_id: gap.id, tactic_id: tactic.id }),
     });
 
     const first = await saveFinalGanttPlan({

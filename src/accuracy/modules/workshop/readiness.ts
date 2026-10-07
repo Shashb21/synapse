@@ -2,6 +2,7 @@ import {
   asTacticLifecycle,
   deriveWorkspaceGapStatuses,
   type GapStatus,
+  type CoverageJoinLite,
 } from "@/accuracy/modules/status-derive/engine";
 
 export const UNASSIGNED_BOARD_ID = "unassigned";
@@ -126,13 +127,13 @@ export function isLiveWorkshopGap(status: string): boolean {
 
 export function coverageStatusFromJoins(args: {
   gap_ids: string[];
-  joins: Array<{ gap_id: string; tactic_id: string; overall: string; validated: boolean }>;
+  joins: CoverageJoinLite[];
   tactics: Array<{ id: string; tactic_status?: string | null; status?: string | null }>;
   overrides?: Record<string, GapStatus | null | undefined>;
 }): Record<string, WorkshopCoverageStatus> {
   const tacticLites = args.tactics.flatMap((tactic) => {
     const status =
-      asTacticLifecycle(tactic.tactic_status) ?? asTacticLifecycle(tactic.status) ?? "planned";
+      asTacticLifecycle(tactic.tactic_status) ?? asTacticLifecycle(tactic.status) ?? "unknown";
     return [{ id: tactic.id, status }];
   });
   const rows = deriveWorkspaceGapStatuses({

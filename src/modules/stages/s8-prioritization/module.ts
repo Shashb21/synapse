@@ -10,7 +10,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { loadState, lockPriority } from "@/lib/iegp/store";
@@ -279,7 +279,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     const openGaps = state.gaps.filter(
       (gap) =>
         isLiveGap(gap) &&
-        displayedGapStatus(gap) === "validated_open" &&
+        eligibilityGapStatus(gap, state) === "validated_open" &&
         (!input.gap_ids?.length || input.gap_ids.includes(gap.id)),
     );
     if (openGaps.length === 0) {
@@ -635,7 +635,7 @@ export async function validatedPlacementGapIds(): Promise<string[]> {
  */
 export async function prioritizationProgress(state: IegpState): Promise<{ validated: number; open: number }> {
   const validated = new Set((await listPlacements()).filter((row) => row.validated).map((row) => row.gap_id));
-  const open = state.gaps.filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
+  const open = state.gaps.filter((gap) => isLiveGap(gap) && eligibilityGapStatus(gap, state) === "validated_open");
   return { open: open.length, validated: open.filter((gap) => validated.has(gap.id)).length };
 }
 
@@ -649,7 +649,7 @@ async function requireOpenGap(gapId: string) {
   const state = await loadState();
   const gap = state.gaps.find((row) => row.id === gapId);
   if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${gapId}.`);
-  if (displayedGapStatus(gap) !== "validated_open") {
+  if (eligibilityGapStatus(gap, state) !== "validated_open") {
     throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
   }
 }
@@ -723,9 +723,9 @@ export async function validatePlacement(args: {
   // Rationale first: a band must not move before the reason for it is known good.
   const rationale = requireRationale(args.rationale);
   const current = await currentPlacement(args.gap_id);
+  await requireOpenGap(args.gap_id);
   let row: PlacementRow;
   if (!current) {
-    await requireOpenGap(args.gap_id);
     row = await insertManualPlacement({
       gap_id: args.gap_id,
       axis_scores: {},
@@ -804,7 +804,7 @@ export async function setPlacement(args: {
   }
 
   const current = await currentPlacement(args.gap_id);
-  if (!current) await requireOpenGap(args.gap_id);
+  await requireOpenGap(args.gap_id);
   const axis_scores = { ...((current?.axis_scores as Record<string, number> | undefined) ?? {}), ...typed };
   const quadrant =
     xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
@@ -890,7 +890,7 @@ export async function movePlacement(args: {
     throw new Error("A matrix position needs two numbers.");
   }
   const current = await currentPlacement(args.gap_id);
-  if (!current) await requireOpenGap(args.gap_id);
+  await requireOpenGap(args.gap_id);
   const axis_scores = {
     ...((current?.axis_scores as Record<string, number> | undefined) ?? {}),
     [xAxis.id]: scoreFromFavourability(xAxis, args.x),

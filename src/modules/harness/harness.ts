@@ -10,7 +10,7 @@ import { AiDisabledError, platformAiEnabled } from "@/modules/kernel/ai-switch";
 import { replaceContentsOf } from "@/modules/workspaces/contents";
 import { createWorkspace, getWorkspace, withWorkspace } from "@/modules/workspaces/store";
 import { createGap, loadState } from "@/lib/iegp/store";
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { SOURCE_TYPES, type EvidenceDomain } from "@/lib/iegp/enums";
 import { movePlacement, validatePlacement } from "@/modules/stages/s8-prioritization/module";
@@ -141,7 +141,7 @@ export async function harnessPartialGaps(): Promise<{ id: string; name: string }
     await replaceContentsOf(sandbox, "demo");
     const state = await loadState();
     return state.gaps
-      .filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_partial")
+      .filter((gap) => isLiveGap(gap) && eligibilityGapStatus(gap, state) === "validated_partial")
       .map((gap) => ({ id: gap.id, name: gap.name }));
   });
 }
@@ -260,7 +260,7 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
       }
       case "partial_split": {
         const state = await loadState();
-        const partial = state.gaps.filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_partial");
+        const partial = state.gaps.filter((gap) => isLiveGap(gap) && eligibilityGapStatus(gap, state) === "validated_partial");
         const gap = (mode === "custom" ? partial.find((row) => row.id === input.gap_id) : undefined) ?? partial[0];
         if (!gap) throw new Error("The sandbox has no partially addressed gap to split.");
         await run("S6", { gap_id: gap.id });

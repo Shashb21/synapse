@@ -51,6 +51,7 @@ function cov(overall: GapTacticCoverage["overall"], dims: Partial<GapTacticCover
     overall_lock: unlocked(),
     stale: false,
     needs_review: false,
+    validation_freshness: "current",
   };
 }
 
@@ -135,12 +136,12 @@ describe("IEGP engine", () => {
       overall_lock: humanLock,
     };
     expect(computeGapStatus([lockedFullThinDims], [planned])).toBe("validated_addressed");
-    // A model verdict of Full that no human has locked stays Partial.
-    expect(computeGapStatus([cov("full", {})], [planned])).toBe("validated_partial");
-    // Partial, limited or not-yet-assessed coverage is Partial.
-    expect(computeGapStatus([cov("partial", {})], [planned])).toBe("validated_partial");
-    expect(computeGapStatus([cov("limited", {})], [planned])).toBe("validated_partial");
-    expect(computeGapStatus([cov("unassessed", {})], [planned])).toBe("validated_partial");
+    // A model verdict cannot provide authoritative plan coverage.
+    expect(computeGapStatus([cov("full", {})], [planned])).toBe("validated_open");
+    // Unvalidated partial, limited or pending coverage remains Open.
+    expect(computeGapStatus([cov("partial", {})], [planned])).toBe("validated_open");
+    expect(computeGapStatus([cov("limited", {})], [planned])).toBe("validated_open");
+    expect(computeGapStatus([cov("unassessed", {})], [planned])).toBe("validated_open");
     // Not relevant is no coverage at all.
     expect(computeGapStatus([cov("not_relevant", {})], [planned])).toBe("validated_open");
     expect(computeGapStatus([], [planned])).toBe("validated_open");
@@ -194,6 +195,7 @@ describe("IEGP engine", () => {
       relevance: { value: "partial", rationale: "", lock: unlocked() },
       comparator: { value: "no", rationale: "", lock: unlocked() },
     });
+    partial.overall_lock = { ...unlocked(), locked: true };
     expect(computeGapStatus([partial], [planned])).toBe("validated_partial");
     expect(computeGapStatus([partial], [completed])).toBe("validated_partial");
     expect(computeGapStatus([partial], [publication])).toBe("validated_partial");
@@ -224,12 +226,12 @@ describe("IEGP engine", () => {
     expect(tacticCountsTowardAddressing(completedPub)).toBe(true);
     expect(isPublishedLiterature(completedPub)).toBe(true);
     expect(isPublishedLiterature(proposedPubWithEvidence)).toBe(true);
-    expect(tacticCountsTowardAddressing(proposedPubWithEvidence)).toBe(true);
+    expect(tacticCountsTowardAddressing(proposedPubWithEvidence)).toBe(false);
 
     const unlockedLimited = cov("limited", {});
     expect(countingCoverages([unlockedLimited], [proposed])).toHaveLength(0);
     expect(suggestGapStatus([unlockedLimited], [proposed])).toBe("validated_open");
-    expect(suggestGapStatus([unlockedLimited], [planned])).toBe("validated_partial");
+    expect(suggestGapStatus([unlockedLimited], [planned])).toBe("validated_open");
 
     const unlockedFull: GapTacticCoverage = {
       ...cov("full", {
@@ -245,7 +247,7 @@ describe("IEGP engine", () => {
         decision_utility: { value: "yes", rationale: "", lock: unlocked() },
       }),
     };
-    expect(suggestGapStatus([unlockedFull], [planned])).toBe("validated_partial");
+    expect(suggestGapStatus([unlockedFull], [planned])).toBe("validated_open");
     const lockedFull: GapTacticCoverage = {
       ...unlockedFull,
       overall_lock: {

@@ -1,7 +1,8 @@
+import { coverageProvenance } from "./support/coverage-provenance";
 import { describe, expect, it } from "vitest";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
-import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { coveragePairRevisions, upsertCoverageDecision, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
@@ -93,17 +94,18 @@ describe("merge-dedupe + status-derive persistence", () => {
       statement: "Open need with no joins",
       metadata: { reference_pack_id: BGB, external_id: "NSCLC_AD_01" },
     });
+    const provenance = await coverageProvenance(workspace_id, "CNS outcomes covered by pivotal follow-up");
     const addressedGap = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "CNS outcomes covered by pivotal follow-up",
-      metadata: { reference_pack_id: BGB, external_id: "NSCLC_CE_01" },
+      metadata: { reference_pack_id: BGB, external_id: "NSCLC_CE_01", provenance },
     });
     const partialGap = await insertClaim({
       workspace_id,
       claim_type: "gap",
-      statement: "Proposed-only coverage remains partial",
-      metadata: { reference_pack_id: BGB, external_id: "NSCLC_CE_04" },
+      statement: "Proposed-only coverage remains open",
+      metadata: { reference_pack_id: BGB, external_id: "NSCLC_CE_04", provenance },
     });
     const committed = await insertClaim({
       workspace_id,
@@ -120,19 +122,23 @@ describe("merge-dedupe + status-derive persistence", () => {
       metadata: { tactic_status: "proposed", reference_pack_id: BGB },
     });
 
-    await insertCoverageJoin({
+    await upsertCoverageDecision({
       workspace_id,
       gap_id: addressedGap.id,
       tactic_id: committed.id,
       overall: "full",
-      validated: true,
+      actor: { name: "test", function: "medical_affairs" },
+      rationale: "Coverage assessed by reviewer",
+      ...await coveragePairRevisions({ workspace_id, gap_id: addressedGap.id, tactic_id: committed.id }),
     });
-    await insertCoverageJoin({
+    await upsertCoverageDecision({
       workspace_id,
       gap_id: partialGap.id,
       tactic_id: proposed.id,
       overall: "covers",
-      validated: true,
+      actor: { name: "test", function: "medical_affairs" },
+      rationale: "Proposed publication covers comparison",
+      ...await coveragePairRevisions({ workspace_id, gap_id: partialGap.id, tactic_id: proposed.id }),
     });
 
     const derived = await runAccuracyModule<StatusDeriveOutput>({
@@ -144,14 +150,14 @@ describe("merge-dedupe + status-derive persistence", () => {
       workspace_id,
     });
 
-    expect(derived.output.open).toBe(1);
-    expect(derived.output.partial).toBe(1);
+    expect(derived.output.open).toBe(2);
+    expect(derived.output.partial).toBe(0);
     expect(derived.output.addressed).toBe(1);
 
     const byId = new Map(derived.output.statuses.map((s) => [s.gap_id, s.status]));
     expect(byId.get(openGap.id)).toBe("open");
     expect(byId.get(addressedGap.id)).toBe("addressed");
-    expect(byId.get(partialGap.id)).toBe("partial");
+    expect(byId.get(partialGap.id)).toBe("open");
 
     const reloaded = await listClaims(workspace_id, { claim_type: "gap" });
     expect(claimMetadata(reloaded.find((c) => c.id === addressedGap.id)!).computed_status).toBe(

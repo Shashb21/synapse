@@ -47,7 +47,7 @@ export default async function GapsPage() {
               className="border border-border bg-card p-4 no-underline rounded-lg"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <GapBadge status={displayedGapStatus(g)} />
+                <GapBadge status={displayedGapStatus(g, state)} />
                 {g.parked_at ? <ParkedFlag reason={g.parked_reason} /> : null}
                 <span className="text-[12px] text-muted-foreground">
                   {DOMAIN_LABELS[g.domain]}

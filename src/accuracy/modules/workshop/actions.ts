@@ -66,6 +66,7 @@ export function assertWorkshopAction(input: WorkshopActionInput): {
   return { kind: "park", gap_id, rationale };
 }
 
+/** Preview label only. Authoritative workflow status comes from all effective owner decisions. */
 export function coverageStatusAfterOverall(overall: CoverageOverallWrite): WorkshopCoverageStatus {
   if (overall === "covers") return "addressed";
   if (overall === "partial") return "partial";

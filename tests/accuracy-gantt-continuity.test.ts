@@ -299,6 +299,7 @@ describe("workspace gantt reads coverage joins", () => {
       validated: true,
       status: "validated",
       metadata: {
+        tactic_status: "planned",
         start: "2026-01-01",
         end: "2026-06-01",
         readout: "2026-09-01",
@@ -312,6 +313,7 @@ describe("workspace gantt reads coverage joins", () => {
       validated: true,
       status: "validated",
       metadata: {
+        tactic_status: "planned",
         start: "2026-03-01",
         end: "2026-05-01",
         tactic_type: "publication",

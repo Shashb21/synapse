@@ -7,7 +7,7 @@ import {
   type GapProposalGroup,
 } from "@/components/ideation/gap-proposal-group";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
-import { displayedGapStatus, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { can } from "@/modules/auth/roles";
@@ -35,7 +35,7 @@ export default async function IdeationPage() {
   const mayIdeate = can(session.role, "ideate");
 
   const openGaps = state.gaps.filter(
-    (gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open",
+    (gap) => isLiveGap(gap) && eligibilityGapStatus(gap, state) === "validated_open",
   );
 
   // Open gaps a human validated as High are eligible (KAN-8: the Figma design ideates High only).

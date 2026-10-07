@@ -28,6 +28,9 @@ export type Lock = {
   actor_function: ActorFunction | null;
   locked_at: string | null;
   note: string | null;
+  /** Factual inputs of a human coverage verdict; absent on legacy locks. */
+  gap_revision?: string;
+  tactic_revision?: string;
 };
 
 export type DimensionAssessment = {
@@ -277,7 +280,9 @@ export type GapTacticCoverage = {
   overall: OverallCoverage;
   overall_rationale: string;
   overall_lock: Lock;
-  /** Unused. Coverage is not marked outdated. Kept on the row for schema compatibility. */
+  /** Effective read-only freshness from the existing coverage lock and factual inputs. */
+  validation_freshness?: "current" | "stale" | "unknown" | "unassessed";
+  /** A factual edit invalidates the prior human coverage decision. */
   stale: boolean;
   /** Sibling coverage flagged after a dimension/overall change on another live gap for the same tactic. Values are not copied. */
   needs_review: boolean;

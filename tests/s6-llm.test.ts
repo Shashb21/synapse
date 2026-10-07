@@ -9,6 +9,7 @@ import {
   createProposedTactic,
   loadState,
   lockTactic,
+  lockCoverageOverall,
   resetDemoSetup,
   syncComputedGapStatuses,
 } from "@/lib/iegp/store";
@@ -88,6 +89,8 @@ async function makePartialGap() {
     actor_function: ACTOR.function,
   });
   await lockTactic({ tactic_id: tacticId, status: "planned", actor_name: ACTOR.name, actor_function: ACTOR.function });
+  const coverage = (await loadState()).coverages.find((c) => c.gap_id === gapId && c.tactic_id === tacticId)!;
+  await lockCoverageOverall({ coverage_id: coverage.id, overall: "partial", rationale: "Covers outcomes but no comparator", actor_name: ACTOR.name, actor_function: ACTOR.function });
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((row) => row.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");

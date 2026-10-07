@@ -7,7 +7,6 @@ import {
 } from "@/accuracy/modules/status-derive/engine";
 import {
   assertWorkshopAction,
-  coverageStatusAfterOverall,
   type WorkshopActionInput,
 } from "@/accuracy/modules/workshop/actions";
 import {
@@ -79,6 +78,7 @@ async function ensureWorkshopSchema() {
 function overrideFromMeta(meta: ReturnType<typeof claimMetadata>): GapStatus | null {
   const raw = meta.status_override;
   if (!raw || typeof raw !== "object") return null;
+  if ((raw as { stale?: boolean }).stale) return null;
   const status = (raw as { status?: unknown }).status;
   if (status === "open" || status === "partial" || status === "addressed") return status;
   return null;
@@ -122,7 +122,7 @@ function toTacticLite(claim: AccuracyClaimRow): WorkshopTacticLite {
 
 export async function buildWorkshopInventory(workspace_id: string): Promise<WorkshopInventory> {
   await ensureWorkshopSchema();
-  const claims = (await listClaims(workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
+  const claims = (await listClaims(workspace_id, { limit: 2147483647 })).filter(isActiveLedgerClaim);
   const gapRows = claims.filter((row) => row.claim_type === "gap");
   const tacticRows = claims.filter((row) => row.claim_type === "tactic");
   const joins = await listCoverageJoins(workspace_id, { effective: true });
@@ -132,6 +132,7 @@ export async function buildWorkshopInventory(workspace_id: string): Promise<Work
     tactic_id: join.tactic_id,
     overall: join.overall,
     validated: join.validated,
+    freshness: join.freshness,
     rationale: join.rationale,
   }));
   const overrides: Record<string, GapStatus | null> = {};
@@ -360,7 +361,7 @@ export async function applyWorkshopAction(args: {
         overall: "covers",
         rationale: parsed.rationale,
       });
-      overlay.coverage_status = "addressed";
+      overlay.coverage_status = (await buildWorkshopInventory(args.workspace_id)).gaps.find((gap) => gap.id === parsed.gap_id)?.coverage_status ?? "open";
       overlay.parked = false;
       detail.tactic_id = parsed.tactic_id;
       detail.overall = "covers";
@@ -377,7 +378,7 @@ export async function applyWorkshopAction(args: {
         overall: parsed.overall,
         rationale: parsed.rationale,
       });
-      overlay.coverage_status = coverageStatusAfterOverall(parsed.overall);
+      overlay.coverage_status = (await buildWorkshopInventory(args.workspace_id)).gaps.find((gap) => gap.id === parsed.gap_id)?.coverage_status ?? "open";
       detail.tactic_id = parsed.tactic_id;
       detail.overall = parsed.overall;
       detail.ledger = "coverage";

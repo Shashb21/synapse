@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { computeCoverageStatus, type StatusAssessment } from "@/lib/iegp/coverage-status";
+import { canonicalCoverageOverall } from "@/accuracy/domain/coverage-overall";
 
 export const gapStatusSchema = z.enum(["open", "partial", "addressed"]);
 
@@ -11,6 +13,7 @@ export type CoverageJoinLite = {
   tactic_id: string;
   overall: CoverageOverall | string;
   validated: boolean;
+  freshness?: StatusAssessment["freshness"];
 };
 
 export type TacticLite = {
@@ -35,69 +38,24 @@ export function asTacticLifecycle(value: unknown): TacticLite["status"] | null {
     : null;
 }
 
-const COMMITTED: ReadonlySet<string> = new Set(["completed", "ongoing", "planned"]);
-
-/** Map stored / UI overall values onto the status-engine enum. */
+/** Compatibility vocabulary adapter; pending/unknown never become supporting coverage. */
 export function normalizeCoverageOverall(value: string | null | undefined): CoverageOverall | null {
-  switch ((value ?? "").trim().toLowerCase()) {
-    case "full":
-    case "covers":
-      return "full";
-    case "partial":
-      return "partial";
-    case "limited":
-      return "limited";
-    case "not_relevant":
-    case "none":
-      return "not_relevant";
-    default:
-      return null;
-  }
+  const overall = canonicalCoverageOverall(value);
+  return overall === "pending" ? null : overall;
 }
 
-function isCommitted(status: TacticLite["status"] | undefined): boolean {
-  return Boolean(status && COMMITTED.has(status));
-}
-
-/**
- * Deterministic Open / Partial / Addressed from validated joins + tactic lifecycle.
- *
- * - Open: no qualifying (non-cancelled, relevant) joins
- * - Partial: limited/partial committed coverage, or proposed-only tactics
- * - Addressed: committed full coverage with no residual partial/limited on committed tactics
- */
 export function deriveGapStatus(args: {
   gap_id: string;
   coverages: CoverageJoinLite[];
   tactics: TacticLite[];
 }): GapStatus {
-  const rows = args.coverages.filter((c) => c.gap_id === args.gap_id && c.validated);
-  if (rows.length === 0) return "open";
-
-  const tacticById = new Map(args.tactics.map((t) => [t.id, t]));
-  const qualifying = rows.filter((c) => {
-    const overall = normalizeCoverageOverall(String(c.overall));
-    if (!overall || overall === "not_relevant") return false;
-    const tactic = tacticById.get(c.tactic_id);
-    if (!tactic) return false;
-    if (tactic.status === "cancelled") return false;
-    return true;
-  });
-  if (qualifying.length === 0) return "open";
-
-  const committed = qualifying.filter((c) => isCommitted(tacticById.get(c.tactic_id)?.status));
-  if (committed.length === 0) {
-    const proposedOnly = qualifying.some((c) => tacticById.get(c.tactic_id)?.status === "proposed");
-    return proposedOnly ? "partial" : "open";
-  }
-
-  const hasFull = committed.some((c) => normalizeCoverageOverall(String(c.overall)) === "full");
-  const hasResidual = committed.some((c) => {
-    const overall = normalizeCoverageOverall(String(c.overall));
-    return overall === "partial" || overall === "limited";
-  });
-  if (hasFull && !hasResidual) return "addressed";
-  return "partial";
+  const byId = new Map(args.tactics.map((t) => [t.id, t]));
+  return computeCoverageStatus(args.coverages.filter((c) => c.gap_id === args.gap_id).map((c) => ({
+    overall: canonicalCoverageOverall(c.overall),
+    lifecycle: byId.get(c.tactic_id)?.status,
+    validated: c.validated,
+    freshness: c.freshness,
+  })));
 }
 
 export type DerivedGapStatusRow = {

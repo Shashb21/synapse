@@ -1,3 +1,4 @@
+import { currentPlanCoverageLock } from "./plan-coverage-validation";
 import { unlocked, emptyDimensions } from "./engine";
 import type {
   ActorFunction,
@@ -1744,7 +1745,7 @@ export function buildSeed(): IegpState {
     gap_suggestions: [],
   };
 
-  return {
+  const seed: IegpState = {
     ...state,
     residual_gap_suggestions: [],
     // The demo gaps are numbered 001… in the order they are defined (KAN-56).
@@ -1772,6 +1773,13 @@ export function buildSeed(): IegpState {
       created_gap_id: null,
     })),
   } as IegpState;
+  for (const row of seed.coverages) {
+    if (!row.overall_lock.locked) continue;
+    row.overall_lock = currentPlanCoverageLock(row.overall_lock,
+      seed.gaps.find((gap) => gap.id === row.gap_id)!, seed.tactics.find((tactic) => tactic.id === row.tactic_id)!);
+    row.validation_freshness = "current";
+  }
+  return seed;
 }
 
 function need(

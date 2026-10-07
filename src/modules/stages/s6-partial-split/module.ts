@@ -6,7 +6,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { loadState, splitPartialGap } from "@/lib/iegp/store";
-import { displayedGapStatus, tacticCountsTowardAddressing } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, countingCoverages, computeGapStatus } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 
 const inputSchema = z.object({
@@ -182,13 +182,11 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
     const gap = state.gaps.find((row) => row.id === input.gap_id);
     if (!gap) throw new Error(`Unknown gap ${input.gap_id}`);
     const coverages = state.coverages.filter((row) => row.gap_id === gap.id);
+    if (eligibilityGapStatus(gap, state) !== "validated_partial" || computeGapStatus(coverages, state.tactics) !== "validated_partial") {
+      throw new Error("Only current human-validated partial plan coverage can supply a split.");
+    }
     const tacticById = new Map(state.tactics.map((tactic) => [tactic.id, tactic]));
-    const countingIds = new Set(
-      coverages
-        .map((coverage) => tacticById.get(coverage.tactic_id))
-        .filter((tactic) => tactic !== undefined && tacticCountsTowardAddressing(tactic))
-        .map((tactic) => tactic!.id),
-    );
+    const countingIds = new Set(countingCoverages(coverages, state.tactics).map((coverage) => coverage.tactic_id));
     if (countingIds.size === 0) {
       throw new Error(
         `${gap.id} has no completed, ongoing or planned tactic mapped, so no tactic can close an addressed slice. Map the tactic that closes part of it, or rewrite the gap instead of splitting it.`,
@@ -466,7 +464,7 @@ partialSplitModule.evals = {
     // read-only, so scoring never applies a split.
     const state = await loadState();
     return state.gaps
-      .filter((gap) => !gap.retired && displayedGapStatus(gap) === "validated_partial")
+      .filter((gap) => !gap.retired && eligibilityGapStatus(gap, state) === "validated_partial")
       .slice(0, 4)
       .map((gap) => ({ name: gap.id, input: { gap_id: gap.id } }));
   },

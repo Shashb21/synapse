@@ -30,7 +30,9 @@ export function GapStatusDisagreement({
   computedStatus: MappedGapStatus | null;
   override: GapStatusOverrideRecord | null;
 }) {
-  if (!override) return null;
+  if (!override) return computedStatus ? (
+    <p className="text-[12px] leading-5 text-muted-foreground">Plan coverage: {GAP_STATUS_LABELS[computedStatus]}</p>
+  ) : null;
   if (!override.stale) {
     return (
       <p className="text-[12px] leading-5 text-muted-foreground">
@@ -42,7 +44,7 @@ export function GapStatusDisagreement({
   }
   return (
     <p className="text-[12px] leading-5 text-amber-700 dark:text-amber-300" role="status">
-      This gap was set to {GAP_STATUS_LABELS[override.status]} by hand, but the status computed from its mapped tactics is now{" "}
+      This gap was set to {GAP_STATUS_LABELS[override.status]} by hand, but its current validated plan coverage is now{" "}
       {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "a different status"}. The hand-set status is kept. To use the
       computed status instead, open the status dialog.
     </p>
@@ -165,7 +167,7 @@ export function GapStatusOverride({
             <DialogTitle>Override gap status</DialogTitle>
             <DialogDescription>
               Engine computed{" "}
-              {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "status from joined tactics"}. A
+              {computedStatus ? GAP_STATUS_LABELS[computedStatus] : "plan coverage status from current validated tactics"}. A
               non-empty reason is required. Cancel does not change status.
             </DialogDescription>
           </DialogHeader>

@@ -1,3 +1,6 @@
+import { computeCoverageStatus } from "@/lib/iegp/coverage-status";
+import { asTacticLifecycle } from "@/accuracy/modules/status-derive/engine";
+import { claimMetadata } from "@/accuracy/store/claim-store";
 import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { gapsForGantt, isActiveLedgerClaim, listClaims, tacticsForGantt } from "@/accuracy/store/claim-store";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
@@ -71,15 +74,16 @@ export async function projectWorkspaceGantt(workspace_id: string): Promise<{
   catalog: GanttCatalogEntry[];
 }> {
   await assertAccuracyCanProgress(workspace_id, "gantt_project");
-  const claims = (await listClaims(workspace_id, { limit: 500 })).filter(isActiveLedgerClaim);
+  const claims = (await listClaims(workspace_id, { limit: 2147483647 })).filter(isActiveLedgerClaim);
   const tactics = tacticsForGantt(claims);
   const gaps = gapsForGantt(claims);
-  const coverages = (await listCoverageJoins(workspace_id)).map((row) => ({
-    gap_id: row.gap_id,
-    tactic_id: row.tactic_id,
-    overall: row.overall,
-    validated: row.validated,
-  }));
+  const byId = new Map(claims.map((claim) => [claim.id, claim]));
+  const coverages = (await listCoverageJoins(workspace_id, { effective: true })).map((row) => {
+    const tactic = byId.get(row.tactic_id);
+    const lifecycle = tactic ? asTacticLifecycle(claimMetadata(tactic).tactic_status) ?? asTacticLifecycle(tactic.status) : null;
+    return { gap_id: row.gap_id, tactic_id: row.tactic_id, overall: row.overall,
+      validated: computeCoverageStatus([{ overall: row.overall, validated: row.validated, freshness: row.freshness, lifecycle }]) !== "open" };
+  });
   const activities = projectGanttFromTactics({ tactics, gaps, coverages });
   return {
     workspace_id,

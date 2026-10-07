@@ -225,7 +225,7 @@ export function gapTimelineView(args: {
       deferred.push(groupFor(gap, null));
     } else if (placement?.validated && placement.band) {
       prioritized.push(groupFor(gap, placement.band as PriorityBand));
-    } else if (displayedGapStatus(gap) === "validated_open") {
+    } else if (displayedGapStatus(gap, state) === "validated_open") {
       notPrioritized.push(groupFor(gap, null));
     }
   }

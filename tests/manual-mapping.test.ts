@@ -66,26 +66,26 @@ async function post(body: Record<string, unknown>) {
 }
 
 describe("human validation survives a model re-run (syncComputedGapStatuses)", () => {
-  it("keeps a human-validated status and its validation, flagging the new computation stale", async () => {
+  it("keeps a human-validated Open and its validation when a model-only preview is added", async () => {
     const { gapId, tacticIds } = await workspace(1);
     await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked: nothing covers this yet." });
-    // A model run maps an ongoing tactic: the engine would now compute Partial.
+    // A model mapping remains a preview and cannot change current human-validated status.
     await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...MODEL, coverage: "partial" });
     const gap = await gapOf(gapId);
     expect(gap.human_validated).toBe(true);
     expect(gap.status_lock.locked).toBe(true);
     expect(gap.status).toBe("validated_open");
-    expect(gap.computed_status).toBe("validated_partial");
-    expect(gap.status_override).toMatchObject({ status: "validated_open", stale: true, actor_name: HUMAN.actor_name });
+    expect(gap.computed_status).toBe("validated_open");
+    expect(gap.status_override).toBeNull();
     expect(displayedGapStatus(gap)).toBe("validated_open");
     const audit = (await loadState()).audit.filter((a) => a.entity_id === gapId && a.action === "status_override_stale");
-    expect(audit.length).toBeGreaterThan(0);
+    expect(audit).toHaveLength(0);
   });
 
   it("a person's own mapping edit still recomputes the status", async () => {
     const { gapId, tacticIds } = await workspace(1);
     await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked." });
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...HUMAN, note: "Mine.", human: true });
+    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...HUMAN, note: "Mine.", human: true, coverage: "partial", lock_coverage: true });
     const gap = await gapOf(gapId);
     expect(gap.status).toBe("validated_partial");
     expect(gap.status_override).toBeNull();

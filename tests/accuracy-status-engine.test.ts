@@ -20,7 +20,7 @@ describe("accuracy status engine", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
-        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true }],
+        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true, freshness: "current" }],
         tactics: [{ id: "T1", status: "ongoing" }],
       }),
     ).toBe("addressed");
@@ -31,7 +31,7 @@ describe("accuracy status engine", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
-        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "covers", validated: true }],
+        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "covers", validated: true, freshness: "current" }],
         tactics: [{ id: "T1", status: "planned" }],
       }),
     ).toBe("addressed");
@@ -41,46 +41,46 @@ describe("accuracy status engine", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
-        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "limited", validated: true }],
+        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "limited", validated: true, freshness: "current" }],
         tactics: [{ id: "T1", status: "planned" }],
       }),
     ).toBe("partial");
   });
 
-  it("marks partial for proposed-only full coverage", () => {
+  it("marks open for proposed-only full coverage", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
-        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true }],
+        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true, freshness: "current" }],
         tactics: [{ id: "T1", status: "proposed" }],
       }),
-    ).toBe("partial");
+    ).toBe("open");
   });
 
   it("marks open when the only covering tactic is cancelled", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
-        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true }],
+        coverages: [{ gap_id: "G1", tactic_id: "T1", overall: "full", validated: true, freshness: "current" }],
         tactics: [{ id: "T1", status: "cancelled" }],
       }),
     ).toBe("open");
   });
 
-  it("marks partial when a committed full join sits beside a committed limited join", () => {
+  it("marks addressed when current committed Full sits beside Limited", () => {
     expect(
       deriveGapStatus({
         gap_id: "G1",
         coverages: [
-          { gap_id: "G1", tactic_id: "T1", overall: "full", validated: true },
-          { gap_id: "G1", tactic_id: "T2", overall: "limited", validated: true },
+          { gap_id: "G1", tactic_id: "T1", overall: "full", validated: true, freshness: "current" },
+          { gap_id: "G1", tactic_id: "T2", overall: "limited", validated: true, freshness: "current" },
         ],
         tactics: [
           { id: "T1", status: "completed" },
           { id: "T2", status: "ongoing" },
         ],
       }),
-    ).toBe("partial");
+    ).toBe("addressed");
   });
 
   it("treats not_relevant and unknown overall as non-qualifying", () => {
@@ -88,8 +88,8 @@ describe("accuracy status engine", () => {
       deriveGapStatus({
         gap_id: "G1",
         coverages: [
-          { gap_id: "G1", tactic_id: "T1", overall: "not_relevant", validated: true },
-          { gap_id: "G1", tactic_id: "T2", overall: "unknown", validated: true },
+          { gap_id: "G1", tactic_id: "T1", overall: "not_relevant", validated: true, freshness: "current" },
+          { gap_id: "G1", tactic_id: "T2", overall: "unknown", validated: true, freshness: "current" },
         ],
         tactics: [
           { id: "T1", status: "ongoing" },

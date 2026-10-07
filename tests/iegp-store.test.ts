@@ -419,8 +419,8 @@ describe("IEGP postgres store", () => {
     expect(row.dimensions.population.value).toBe("yes");
     expect(row.dimensions.comparator.value).toBe("no");
     expect(row.dimensions.outcomes.value).toBe("unknown");
-    // A model Full is Partial until a human locks it.
-    expect(state.gaps.find((g) => g.id === gapId)?.status).toBe("validated_partial");
+    // A model Full stays a preview until a human validates current coverage.
+    expect(state.gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
     await lockCoverageOverall({ coverage_id: row.id, overall: "partial", rationale: "Only a slice.", actor_name: "A. Rao", actor_function: "heor" });
     state = await loadState();
     expect(state.residual_gap_suggestions).toHaveLength(0);
@@ -550,6 +550,8 @@ describe("IEGP postgres store", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
+    const coverage = (await loadState()).coverages.find((c) => c.gap_id === gapId && c.tactic_id === tacticId)!;
+    await lockCoverageOverall({ coverage_id: coverage.id, overall: "partial", rationale: "Current coverage addresses a slice", actor_name: "A. Rao", actor_function: "heor" });
     const partial = (await loadState()).gaps.find((g) => g.id === gapId)!;
     expect(partial.status).toBe("validated_partial");
     expect(partial.computed_status).toBe("validated_partial");

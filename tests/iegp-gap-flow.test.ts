@@ -6,6 +6,7 @@ import {
   createGap,
   createProposedTactic,
   lockTactic,
+  lockCoverageOverall,
   splitPartialGap,
   rewritePartialGap,
   overrideGapStatus,
@@ -57,7 +58,9 @@ async function makePartialGap() {
     actor_name: "A. Rao",
     actor_function: "heor",
   });
-  // Belt-and-suspenders for CI: re-sync after planned lock so displayed status is Partial.
+  const coverage = (await loadState()).coverages.find((c) => c.gap_id === gapId && c.tactic_id === tacticId)!;
+  await lockCoverageOverall({ coverage_id: coverage.id, overall: "partial", rationale: "Covers outcomes without comparator", actor_name: "A. Rao", actor_function: "heor" });
+  // Sync after current human coverage validation.
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");
@@ -228,6 +231,8 @@ describe("partial split and rewrite", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
+    const secondCoverage = (await loadState()).coverages.find((c) => c.gap_id === gapId && c.tactic_id === secondTacticId)!;
+    await lockCoverageOverall({ coverage_id: secondCoverage.id, overall: "partial", rationale: "Covers a second outcomes slice", actor_name: "A. Rao", actor_function: "heor" });
     const before = await loadState();
     const objectiveId = before.objectives[0]!.id;
     await persistState({

@@ -1,3 +1,4 @@
+import { canonicalCoverageOverall } from "@/accuracy/domain/coverage-overall";
 import { AiDisabledError } from "@/modules/kernel/ai-switch";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { createHash } from "node:crypto";
@@ -33,15 +34,7 @@ export class CoverageError extends Error {
     super(message); this.name = "CoverageError";
   }
 }
-export function canonicalCoverageOverall(value: string | null | undefined): CoverageOverall {
-  switch ((value ?? "").trim().toLowerCase()) {
-    case "full": case "covers": return "full";
-    case "partial": return "partial";
-    case "limited": return "limited";
-    case "none": case "not_relevant": return "not_relevant";
-    default: return "pending";
-  }
-}
+export { canonicalCoverageOverall } from "@/accuracy/domain/coverage-overall";
 /** Inventory lifecycle does not limit assessment. Proposed/cancelled/unknown remain inspectable. */
 export function coverageExclusionReason(claim: AccuracyClaimRow): string | null {
   const meta = claimMetadata(claim);
@@ -362,7 +355,7 @@ export async function assessCoveragePage(args: CoveragePageInput & {
 }
 export async function rejectCoveragePair(args: Omit<CoverageWrite, "overall">): Promise<void> { await writeCoverage({ ...args, overall: "pending" }, "rejection"); }
 /** Default retains original history flags. Consumers can explicitly request current, provenance-checked decisions. */
-export async function listCoverageJoins(workspace_id: string, options?: { effective?: boolean }): Promise<CoverageJoinRow[]> {
+export async function listCoverageJoins(workspace_id: string, options?: { effective?: boolean }): Promise<Array<CoverageJoinRow & { freshness?: CoverageFreshness }>> {
   await ensureAccuracySchema();
   const joins = await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
   if (!options?.effective || !joins.length) return joins;
@@ -372,9 +365,9 @@ export async function listCoverageJoins(workspace_id: string, options?: { effect
   const provenance = await coverageProvenanceStates(eligible);
   return joins.map((join) => {
     const gap = byId.get(join.gap_id), tactic = byId.get(join.tactic_id);
-    if (gap?.claim_type !== "gap" || tactic?.claim_type !== "tactic") return { ...join, overall: "pending", validated: false };
+    if (gap?.claim_type !== "gap" || tactic?.claim_type !== "tactic") return { ...join, overall: "pending", validated: false, freshness: "unknown" };
     const pair = pairFrom(gap, tactic, join, pairHasProvenance(provenance.get(gap.id)!, provenance.get(tactic.id)!));
-    return { ...join, overall: pair.overall ?? "pending", validated: pair.validated };
+    return { ...join, overall: pair.overall ?? "pending", validated: pair.validated, freshness: pair.freshness };
   });
 }
 /** Trusted legacy/import boundary. Missing revision/actor remains unknown; it cannot create current validation. */

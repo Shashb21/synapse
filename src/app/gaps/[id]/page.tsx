@@ -69,12 +69,10 @@ export default async function GapDetailPage({
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
-  const computed = computeGapStatus(coverages, state.tactics, {
-    hasAcceptedChild: children.length > 0,
-  });
+  const computed = computeGapStatus(coverages, state.tactics);
   const shown = displayedGapStatus({
     ...gap,
-    computed_status: gap.computed_status ?? computed,
+    computed_status: computed,
   });
   // Only a leftover a person saved is shown; drafts come from S6 on demand.
   const leftover = persistedResidualGaps(state).find((row) => row.parent_gap_id === gap.id);

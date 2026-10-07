@@ -229,7 +229,7 @@ export function timelineCandidates(args: {
     for (const gapId of gapIds) {
       const gap = gapById.get(gapId);
       if (!gap) continue;
-      if (displayedGapStatus(gap) === "validated_addressed") continue;
+      if (displayedGapStatus(gap, args.state) === "validated_addressed") continue;
       sawOpen = true;
       const placement = placementByGap.get(gapId);
       // Only a band a human validated places the activity; a deferred gap is out of this cycle.
@@ -510,7 +510,7 @@ export function buildTimeline(args: {
   const unscheduled = liveGaps
     .filter(
       (gap) =>
-        displayedGapStatus(gap) === "validated_open" &&
+        displayedGapStatus(gap, args.state) === "validated_open" &&
         !candidates.some((candidate) => candidate.gap_ids.includes(gap.id)),
     )
     .map((gap) => ({

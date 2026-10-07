@@ -21,7 +21,7 @@ import {
 } from "@/lib/iegp/enums";
 import { appendAudit, createProposedTactic, loadState } from "@/lib/iegp/store";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
-import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
 
@@ -490,7 +490,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       .filter(
         (gap) =>
           isLiveGap(gap) &&
-          displayedGapStatus(gap) === "validated_open" &&
+          eligibilityGapStatus(gap, state) === "validated_open" &&
           (input.gap_ids?.length ? input.gap_ids.includes(gap.id) : order.has(gap.id)),
       )
       .sort((a, b) => (order.get(a.id) ?? BAND_RANK.low + 1) - (order.get(b.id) ?? BAND_RANK.low + 1))
@@ -1211,7 +1211,7 @@ export async function addIdeationProposal(args: {
   const state = await loadState();
   const gap = state.gaps.find((row) => row.id === args.gap_id);
   if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${args.gap_id}.`);
-  if (displayedGapStatus(gap) !== "validated_open") {
+  if (eligibilityGapStatus(gap, state) !== "validated_open") {
     throw new Error(`${args.gap_id} is not an Open gap; ideas are written for Open gaps.`);
   }
   const empty: StoredDesign = {

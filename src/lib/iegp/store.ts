@@ -1,3 +1,4 @@
+import { currentPlanCoverageLock, planCoverageFreshness } from "./plan-coverage-validation";
 import { and, eq } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
@@ -46,6 +47,8 @@ import {
 import {
   computeGapStatus,
   displayedGapStatus,
+  eligibilityGapStatus,
+  countingCoverages,
   emptyDimensions,
   gapEligibleForMapping,
   gapNameFromStatement,
@@ -55,6 +58,7 @@ import {
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
+  tacticCountsTowardAddressing,
   unlocked,
 } from "./engine";
 
@@ -82,6 +86,8 @@ function asLock(value: unknown): Lock {
     actor_function: v?.actor_function ?? null,
     locked_at: v?.locked_at ?? null,
     note: v?.note ?? null,
+    ...(v?.gap_revision ? { gap_revision: v.gap_revision } : {}),
+    ...(v?.tactic_revision ? { tactic_revision: v.tactic_revision } : {}),
   };
 }
 
@@ -126,6 +132,9 @@ export async function loadState(): Promise<IegpState> {
     await persistState(buildBlankWorkspace());
   }
   const state = await readState();
+  const gaps = new Map(state.gaps.map((gap) => [gap.id, gap]));
+  const tactics = new Map(state.tactics.map((tactic) => [tactic.id, tactic]));
+  for (const row of state.coverages) row.validation_freshness = planCoverageFreshness(row, gaps.get(row.gap_id), tactics.get(row.tactic_id));
   if (state.gaps.some((gap) => !gap.number)) return numberGaps(state);
   return state;
 }
@@ -963,11 +972,6 @@ export async function moveNeedToGap(args: {
   return targetId;
 }
 
-function childParents(state: IegpState): Set<string> {
-  return new Set(
-    state.gaps.map((g) => g.parent_gap_id).filter((id): id is string => Boolean(id)),
-  );
-}
 
 /**
  * An Addressed gap has no leftover, so a pending leftover row is closed. A
@@ -1015,7 +1019,6 @@ function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
  */
 export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }) {
   const state = await loadState();
-  const children = childParents(state);
   const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
   for (const gap of gaps) {
     if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
@@ -1025,9 +1028,7 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
       continue;
     }
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-    const computed = computeGapStatus(coverages, state.tactics, {
-      hasAcceptedChild: children.has(gap.id),
-    });
+    const computed = computeGapStatus(coverages, state.tactics);
     const override = gap.status_override;
     if (override) {
       const stale = override.status !== computed;
@@ -1132,9 +1133,7 @@ export async function lockGapStatus(args: {
   }
   if (args.status === "validated_addressed") {
     const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
-    const computed = computeGapStatus(cov, state.tactics, {
-      hasAcceptedChild: childParents(state).has(gap.id),
-    });
+    const computed = computeGapStatus(cov, state.tactics);
     if (computed !== "validated_addressed" && !args.note) {
       throw new Error(
         "A reason is required to override computed gap status. Cannot lock Addressed unless coverage is Full.",
@@ -1207,11 +1206,7 @@ export async function overrideGapStatus(args: {
   }
   const reason = requireOverrideReason(args.reason ?? args.note);
   const coverages = state.coverages.filter((c) => c.gap_id === args.gap_id);
-  const computed =
-    gap.computed_status ??
-    computeGapStatus(coverages, state.tactics, {
-      hasAcceptedChild: childParents(state).has(gap.id),
-    });
+  const computed = computeGapStatus(coverages, state.tactics);
   const from = gap.status;
   const override: GapStatusOverride = {
     status: args.status,
@@ -1449,7 +1444,8 @@ export async function lockCoverageOverall(args: {
     .set({
       overall: args.overall,
       overall_rationale: rationale,
-      overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
+      overall_lock: currentPlanCoverageLock(makeLock(args.actor_name, args.actor_function, rationale),
+        state.gaps.find((gap) => gap.id === row.gap_id)!, state.tactics.find((tactic) => tactic.id === row.tactic_id)!),
       stale: false,
       needs_review: false,
     })
@@ -1973,7 +1969,7 @@ export async function assignTacticToGap(args: {
     overall_rationale: rationale,
     overall_lock:
       lockVerdict && overall !== "unassessed"
-        ? makeLock(args.actor_name, args.actor_function, rationale)
+        ? currentPlanCoverageLock(makeLock(args.actor_name, args.actor_function, rationale), gap, tactic)
         : unlocked(),
     stale: false,
     needs_review: false,
@@ -2689,6 +2685,7 @@ export async function modifyGap(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  await syncComputedGapStatuses(args.gap_id);
   return changes;
 }
 
@@ -3556,11 +3553,8 @@ export async function modifyTactic(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
-  if (changes.some((c) => c.field === "type")) {
-    // Coverage status depends on tactic type; recompute the gaps this tactic maps to.
-    const gapIds = new Set(state.coverages.filter((c) => c.tactic_id === args.tactic_id).map((c) => c.gap_id));
-    for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
-  }
+  const gapIds = new Set(state.coverages.filter((c) => c.tactic_id === args.tactic_id).map((c) => c.gap_id));
+  for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
   return changes;
 }
 
@@ -3776,7 +3770,8 @@ async function insertClosingCoverage(args: {
       .set({
         overall: "full",
         overall_rationale: args.note,
-        overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+        overall_lock: currentPlanCoverageLock(makeLock(args.actor_name, args.actor_function, args.note),
+        state.gaps.find((gap) => gap.id === args.gap_id)!, state.tactics.find((tactic) => tactic.id === args.tactic_id)!),
         stale: false,
         needs_review: false,
       })
@@ -3794,7 +3789,8 @@ async function insertClosingCoverage(args: {
     dimensions: emptyDimensions(),
     overall: "full",
     overall_rationale: args.note,
-    overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+    overall_lock: currentPlanCoverageLock(makeLock(args.actor_name, args.actor_function, args.note),
+        state.gaps.find((gap) => gap.id === args.gap_id)!, state.tactics.find((tactic) => tactic.id === args.tactic_id)!),
     stale: false,
     needs_review: false,
   });
@@ -3890,10 +3886,12 @@ export async function splitPartialGap(args: {
   const state = await loadState();
   const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
   if (!parent || !isLiveGap(parent)) throw new Error("Gap not found");
-  if (displayedGapStatus(parent) !== "validated_partial") {
+  if (eligibilityGapStatus(parent, state) !== "validated_partial" || computeGapStatus(state.coverages.filter((c) => c.gap_id === parent.id), state.tactics) !== "validated_partial") {
     throw new Error("Only Partially Addressed gaps can split.");
   }
+  const eligibleTactics = new Set(countingCoverages(state.coverages.filter((c) => c.gap_id === parent.id), state.tactics).map((c) => c.tactic_id));
   for (const tacticId of addressedTacticIds) {
+    if (!eligibleTactics.has(tacticId)) throw new Error("Select a current human-validated committed tactic for the closed slice.");
     if (!state.tactics.find((x) => x.id === tacticId)) {
       throw new Error("Select the tactic that addresses the closed slice.");
     }
@@ -4012,8 +4010,12 @@ export async function rewritePartialGap(args: {
   const state = await loadState();
   const original = state.gaps.find((g) => g.id === args.gap_id);
   if (!original || !isLiveGap(original)) throw new Error("Gap not found");
-  if (displayedGapStatus(original) !== "validated_partial") {
+  if (eligibilityGapStatus(original, state) !== "validated_partial" || computeGapStatus(state.coverages.filter((c) => c.gap_id === original.id), state.tactics) !== "validated_partial") {
     throw new Error("Only Partially Addressed gaps can be rewritten this way.");
+  }
+  if (args.status === "validated_addressed") {
+    const eligible = new Set(countingCoverages(state.coverages.filter((c) => c.gap_id === original.id), state.tactics).map((c) => c.tactic_id));
+    if (tacticIds.some((id) => !eligible.has(id))) throw new Error("Select current human-validated committed coverage for the addressed rewrite.");
   }
   const liveId = await createGap({
     name,
@@ -4105,6 +4107,10 @@ export async function createAddressedGap(args: {
       actor_name: args.actor_name,
       actor_function: args.actor_function,
     });
+  }
+  const selected = (await loadState()).tactics.find((tactic) => tactic.id === tacticId);
+  if (!selected || selected.review_status !== "accepted" || !tacticCountsTowardAddressing(selected)) {
+    throw new Error("Addressed gaps require an accepted committed tactic (planned, ongoing or completed).");
   }
   const id = await createGap({
     name: args.name,

@@ -32,11 +32,12 @@ const coverageLiteSchema = z.object({
   tactic_id: z.string(),
   overall: z.string(),
   validated: z.boolean(),
+  freshness: z.enum(["current", "stale", "unknown", "unassessed"]).optional(),
 });
 
 const tacticLiteSchema = z.object({
   id: z.string(),
-  status: z.enum(["completed", "ongoing", "planned", "proposed", "cancelled"]),
+  status: z.enum(["completed", "ongoing", "planned", "proposed", "cancelled", "unknown"]),
 });
 
 const inputSchema = z.object({
@@ -56,6 +57,7 @@ const statusRowSchema = z.object({
 
 const outputSchema = z.object({
   statuses: z.array(statusRowSchema),
+  preview: z.boolean().optional(),
   open: z.number().int(),
   partial: z.number().int(),
   addressed: z.number().int(),
@@ -79,7 +81,10 @@ export const statusDeriveModule = mechanicalModule({
   inputSchema,
   outputSchema,
   run: async (input, ctx) => {
-    const claims = await listClaims(input.workspace_id, { limit: 1000 });
+    if ((input.coverages || input.tactics) && input.persist !== false) {
+      throw new Error("Supplied mapping inputs are previews only; use persist:false.");
+    }
+    const claims = await listClaims(input.workspace_id, { limit: 2147483647 });
     const active = claims.filter(isActiveLedgerClaim);
     const gapRows = active.filter((row) => row.claim_type === "gap");
     const tacticRows = active.filter((row) => row.claim_type === "tactic");
@@ -103,14 +108,17 @@ export const statusDeriveModule = mechanicalModule({
       coverages = input.coverages.map((row) => ({
         ...row,
         overall: normalizeCoverageOverall(row.overall) ?? "not_relevant",
+        validated: false,
+        freshness: "unknown",
       }));
     } else {
-      const joins = await listCoverageJoins(input.workspace_id);
+      const joins = await listCoverageJoins(input.workspace_id, { effective: true });
       coverages = joins.map((join) => ({
         gap_id: join.gap_id,
         tactic_id: join.tactic_id,
         overall: normalizeCoverageOverall(join.overall) ?? "not_relevant",
-        validated: join.validated,
+        validated: input.tactics ? false : join.validated,
+        freshness: input.tactics ? "unknown" : join.freshness,
       }));
     }
 
@@ -151,7 +159,7 @@ export const statusDeriveModule = mechanicalModule({
     const addressed = statuses.filter((s) => s.status === "addressed").length;
     ctx.run.note("status:derived", { open, partial, addressed, count: statuses.length });
     return {
-      output: { statuses, open, partial, addressed },
+      output: { statuses, open, partial, addressed, preview: Boolean(input.coverages || input.tactics) },
       summary: `Derived ${statuses.length} gap status(es) — ${open} open, ${partial} partial, ${addressed} addressed`,
     };
   },
