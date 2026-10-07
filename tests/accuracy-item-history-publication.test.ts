@@ -5,6 +5,7 @@ import { createOrganization, createWorkspace, deleteWorkspace, grantOrganization
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { publishGeneratedItemHistory, readItemHistory } from "@/accuracy/store/item-history-store";
 import { listAssemblies } from "@/accuracy/store/assembly-store";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { eq } from "drizzle-orm";
 import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
@@ -129,6 +130,10 @@ it("preserves distinct generated questions through persisted publication and dow
   const items = [gap(scope, "What is the long-term safety?"), gap(scope, "What is the comparative efficacy?")]
     .map(item => ({ ...item, external_id: "G:17" }));
   const output = { workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, gaps: items };
+  const { insertClaim, getClaimsByIds, updateClaimMetadata } = await import("@/accuracy/store/claim-store");
+  // This legacy row predates the managed extraction head.
+  const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
+    statement: items[0].statement, metadata: { external_id: "G:17", provenance: items[0].provenance } });
   const run_id = await run(scope, [], output);
   const batch = await createExtractionBatch(scope.workspace_id, scope.source_file_id, ["need_extract"]);
   const ids: string[] = [];
@@ -138,19 +143,17 @@ it("preserves distinct generated questions through persisted publication and dow
       statement: item.statement, metadata: { external_id: item.external_id, provenance: item.provenance },
     })) })).claim_ids);
   });
-  const { insertClaim, getClaimsByIds, updateClaimMetadata } = await import("@/accuracy/store/claim-store");
-  // A user metadata edit cannot remove the server-owned history boundary.
-  await updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: items[0].id,
-    metadata: { external_id: "G:17", provenance: items[0].provenance } });
-  const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
-    statement: items[0].statement, metadata: { external_id: "G:17", provenance: items[0].provenance } });
+  // Duplicate legacy identity hints make this proposal unapprovable under KAN38.
+  // Inspect its retained raw history through the trusted preparation path.
+  await withAssemblyPreparation(() => updateClaimMetadata({ workspace_id: scope.workspace_id, claim_id: items[0].id,
+    metadata: { external_id: "G:17", provenance: items[0].provenance } }));
   const execute = async () => (await runAccuracyModule<{ merged: number; survivors: number }>({
     ...scope, actor, call_kind: "merge_dedupe", agent_role: "none", input: { workspace_id: scope.workspace_id },
   })).output;
-  const resumed = await resumeExtractionBatch({ ...scope, batch_id: batch.id, execute });
+  const resumed = await withAssemblyPreparation(() => resumeExtractionBatch({ ...scope, batch_id: batch.id, execute }));
   expect(resumed).toMatchObject({ merged: 0, survivors: 3 });
-  expect(await resumeExtractionBatch({ ...scope, batch_id: batch.id, execute })).toEqual(resumed);
-  expect((await getClaimsByIds(scope.workspace_id, [...ids, legacy.id])).every(row => row.status !== "merged")).toBe(true);
+  expect(await withAssemblyPreparation(() => resumeExtractionBatch({ ...scope, batch_id: batch.id, execute }))).toEqual(resumed);
+  expect((await withAssemblyPreparation(() => getClaimsByIds(scope.workspace_id, [...ids, legacy.id]))).every(row => row.status !== "merged")).toBe(true);
   for (const item of items) {
     const history = await readItemHistory(scope.workspace_id, item.id);
     expect(history?.canonical_claim_id).toBe(item.id);

@@ -4,6 +4,8 @@ import { accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
+import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 import { isDownstreamClaim } from "@/accuracy/domain/item-history";
 export { isDownstreamClaim } from "@/accuracy/domain/item-history";
@@ -69,22 +71,91 @@ export async function insertClaim(args: {
   source_file_id?: string | null;
   metadata?: AccuracyClaimMetadata;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const now = nowIso();
-  const row = {
-    id: args.id ?? newId(args.claim_type === "gap" ? "gap" : "tac"),
-    workspace_id: args.workspace_id,
-    claim_type: args.claim_type,
-    statement: args.statement,
-    status: args.status ?? "draft",
-    validated: args.metadata?.history_only === true ? false : args.validated ?? false,
-    source_file_id: args.source_file_id ?? null,
-    metadata: (args.metadata ?? {}) as Record<string, unknown>,
-    created_at: now,
-    updated_at: now,
-  };
-  await accuracyDb().insert(t.accuracyClaims).values(row);
-  return row as AccuracyClaimRow;
+  return withAssemblyWorkspaceLock(args.workspace_id, async () => {
+    await ensureAccuracySchema();
+    await assertManagedClaimMutationAllowed(args.workspace_id, []);
+    const now = nowIso();
+    const row = {
+      id: args.id ?? newId(args.claim_type === "gap" ? "gap" : "tac"),
+      workspace_id: args.workspace_id,
+      claim_type: args.claim_type,
+      statement: args.statement,
+      status: args.status ?? "draft",
+      validated: args.metadata?.history_only === true ? false : args.validated ?? false,
+      source_file_id: args.source_file_id ?? null,
+      metadata: (args.metadata ?? {}) as Record<string, unknown>,
+      created_at: now,
+      updated_at: now,
+    };
+    await accuracyDb().insert(t.accuracyClaims).values(row);
+    return row as AccuracyClaimRow;
+  });
+}
+
+async function approvedClaimIdsForMutation(workspace_id: string): Promise<Set<string> | null> {
+  if (assemblyExecutionScope().kind !== "production") return null;
+  const { approvedLiveInventory } = await import("./assembly-review-store");
+  const live = await approvedLiveInventory(workspace_id);
+  return live ? new Set(live.claims.map((claim) => claim.id)) : null;
+}
+
+async function assertManagedClaimMutationAllowed(workspace_id: string, claim_ids: string[]): Promise<void> {
+  const approved = await approvedClaimIdsForMutation(workspace_id);
+  if (!approved) return;
+  if (claim_ids.length === 0) {
+    throw new AssemblyReviewError("approval_required", "Claim changes require a revised approved assembly.");
+  }
+  const unknown = claim_ids.filter((id) => !approved.has(id));
+  if (unknown.length > 0) {
+    throw new AssemblyReviewError("approval_required", "Claim changes require claims from the current approved assembly.");
+  }
+}
+
+const APPROVED_METADATA_OVERLAY_KEYS = new Set([
+  "start",
+  "end",
+  "readout",
+  "readout_date",
+  "evidence_available",
+  "validation",
+  "computed_status",
+  "derived_at",
+  "status_override",
+  "priority",
+  "priority_band",
+  "priority_rationale",
+  "priority_origin",
+]);
+
+const APPROVED_PATCH_STATUS_VALUES = new Set(["validated", "rejected"]);
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, field]) => [key, canonical(field)]));
+  }
+  return value;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+function approvedOverlayMetadata(existing: AccuracyClaimMetadata, requested: AccuracyClaimMetadata): AccuracyClaimMetadata {
+  const next: AccuracyClaimMetadata = { ...existing };
+  for (const [key, value] of Object.entries(requested)) {
+    if (!APPROVED_METADATA_OVERLAY_KEYS.has(key)) {
+      if (!sameJson(value, existing[key])) {
+        throw new AssemblyReviewError("conflict", "Approved claim metadata changes are limited to documented workflow overlays.");
+      }
+      continue;
+    }
+    next[key] = value;
+  }
+  if (existing.history_only === true) next.history_only = true;
+  return next;
 }
 
 export async function listClaims(
@@ -108,6 +179,24 @@ export async function listDownstreamClaims(
   workspace_id: string,
   opts?: { claim_type?: AccuracyClaimType; source_file_id?: string; limit?: number | null },
 ): Promise<AccuracyClaimRow[]> {
+  if (assemblyExecutionScope().kind === "production") {
+    const { approvedLiveInventory } = await import("./assembly-review-store");
+    const live = await approvedLiveInventory(workspace_id);
+    if (live) {
+      const rows = live.claims.filter((claim) =>
+        (!opts?.claim_type || claim.claim_type === opts.claim_type)
+        && (opts?.source_file_id === undefined || claim.source_file_id === opts.source_file_id));
+      const ordered = rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      return opts?.limit === null ? ordered : ordered.slice(0, opts?.limit ?? 200);
+    }
+  }
+  return listRawDownstreamClaims(workspace_id, opts);
+}
+
+async function listRawDownstreamClaims(
+  workspace_id: string,
+  opts?: { claim_type?: AccuracyClaimType; source_file_id?: string; limit?: number | null },
+): Promise<AccuracyClaimRow[]> {
   await ensureAccuracySchema();
   const query = accuracyDb().select().from(t.accuracyClaims).where(and(
     eq(t.accuracyClaims.workspace_id, workspace_id),
@@ -124,7 +213,7 @@ export async function listActiveSourceClaims(
   workspace_id: string,
   source_file_id: string,
 ): Promise<AccuracyClaimRow[]> {
-  return listDownstreamClaims(workspace_id, { source_file_id, limit: null });
+  return listRawDownstreamClaims(workspace_id, { source_file_id, limit: null });
 }
 
 export async function getClaimsByIds(
@@ -164,59 +253,62 @@ export async function applyClaimValidation(args: {
     throw new Error("At least one claim_id is required.");
   }
 
-  await ensureAccuracySchema();
-  const existing = await getClaimsByIds(args.workspace_id, args.claim_ids);
-  if (existing.length !== args.claim_ids.length) {
-    const found = new Set(existing.map((row) => row.id));
-    const missing = args.claim_ids.filter((id) => !found.has(id));
-    throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
-  }
+  return withAssemblyWorkspaceLock(args.workspace_id, async () => {
+    await ensureAccuracySchema();
+    await assertManagedClaimMutationAllowed(args.workspace_id, args.claim_ids);
+    const existing = await getClaimsByIds(args.workspace_id, args.claim_ids);
+    if (existing.length !== args.claim_ids.length) {
+      const found = new Set(existing.map((row) => row.id));
+      const missing = args.claim_ids.filter((id) => !found.has(id));
+      throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
+    }
 
-  if (args.action === "validate" && existing.some(claim => claimMetadata(claim).history_only === true)) {
-    throw new Error("History-only alternatives cannot be validated; approval requires a separate assembly decision.");
-  }
+    if (args.action === "validate" && existing.some(claim => claimMetadata(claim).history_only === true)) {
+      throw new Error("History-only alternatives cannot be validated; approval requires a separate assembly decision.");
+    }
 
-  const now = nowIso();
-  const validated = args.action === "validate";
-  const nextStatus = args.action === "validate" ? "validated" : "rejected";
-  const updated: AccuracyClaimRow[] = [];
+    const now = nowIso();
+    const validated = args.action === "validate";
+    const nextStatus = args.action === "validate" ? "validated" : "rejected";
+    const updated: AccuracyClaimRow[] = [];
 
-  for (const claim of existing) {
-    const prevMeta = (claim.metadata ?? {}) as AccuracyClaimMetadata;
-    const metadata: AccuracyClaimMetadata = {
-      ...prevMeta,
-      validation: {
-        action: args.action,
-        rationale,
-        at: now,
-        by: args.actor.name,
-        by_function: args.actor.function,
-      },
-    };
-    await accuracyDb()
-      .update(t.accuracyClaims)
-      .set({
+    for (const claim of existing) {
+      const prevMeta = (claim.metadata ?? {}) as AccuracyClaimMetadata;
+      const metadata: AccuracyClaimMetadata = {
+        ...prevMeta,
+        validation: {
+          action: args.action,
+          rationale,
+          at: now,
+          by: args.actor.name,
+          by_function: args.actor.function,
+        },
+      };
+      await accuracyDb()
+        .update(t.accuracyClaims)
+        .set({
+          validated,
+          status: nextStatus,
+          metadata,
+          updated_at: now,
+        })
+        .where(
+          and(
+            eq(t.accuracyClaims.id, claim.id),
+            eq(t.accuracyClaims.workspace_id, args.workspace_id),
+          ),
+        );
+      updated.push({
+        ...claim,
         validated,
         status: nextStatus,
         metadata,
         updated_at: now,
-      })
-      .where(
-        and(
-          eq(t.accuracyClaims.id, claim.id),
-          eq(t.accuracyClaims.workspace_id, args.workspace_id),
-        ),
-      );
-    updated.push({
-      ...claim,
-      validated,
-      status: nextStatus,
-      metadata,
-      updated_at: now,
-    });
-  }
+      });
+    }
 
-  return { updated: updated.length, claims: updated };
+    return { updated: updated.length, claims: updated };
+  });
 }
 
 export async function getClaim(
@@ -232,21 +324,30 @@ export async function updateClaimMetadata(args: {
   claim_id: string;
   metadata: AccuracyClaimMetadata;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const metadata = claimMetadata(existing).history_only === true ? { ...args.metadata, history_only: true } : args.metadata;
-  const now = nowIso();
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({ metadata: metadata as Record<string, unknown>, updated_at: now })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, metadata: metadata as Record<string, unknown>, updated_at: now };
+  return withAssemblyWorkspaceLock(args.workspace_id, async () => {
+    await ensureAccuracySchema();
+    const managed = await approvedClaimIdsForMutation(args.workspace_id);
+    if (managed && !managed.has(args.claim_id)) {
+      throw new AssemblyReviewError("approval_required", "Claim changes require claims from the current approved assembly.");
+    }
+    const existing = await getClaim(args.workspace_id, args.claim_id);
+    if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+    const existingMeta = claimMetadata(existing);
+    const metadata = managed
+      ? approvedOverlayMetadata(existingMeta, args.metadata)
+      : existingMeta.history_only === true ? { ...args.metadata, history_only: true } : args.metadata;
+    const now = nowIso();
+    await accuracyDb()
+      .update(t.accuracyClaims)
+      .set({ metadata: metadata as Record<string, unknown>, updated_at: now })
+      .where(
+        and(
+          eq(t.accuracyClaims.id, args.claim_id),
+          eq(t.accuracyClaims.workspace_id, args.workspace_id),
+        ),
+      );
+    return { ...existing, metadata: metadata as Record<string, unknown>, updated_at: now };
+  });
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
@@ -264,27 +365,39 @@ export async function persistClaimPatch(args: {
   status?: string;
   metadata?: AccuracyClaimMetadata;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const now = nowIso();
-  const metadata = { ...(args.metadata ?? claimMetadata(existing)),
-    ...(claimMetadata(existing).history_only === true ? { history_only: true } : {}) };
-  const status = args.status ?? existing.status;
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({
-      status,
-      metadata: metadata as Record<string, unknown>,
-      updated_at: now,
-    })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
+  return withAssemblyWorkspaceLock(args.workspace_id, async () => {
+    await ensureAccuracySchema();
+    const managed = await approvedClaimIdsForMutation(args.workspace_id);
+    if (managed && !managed.has(args.claim_id)) {
+      throw new AssemblyReviewError("approval_required", "Claim changes require claims from the current approved assembly.");
+    }
+    const existing = await getClaim(args.workspace_id, args.claim_id);
+    if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+    if (managed && args.status !== undefined && !APPROVED_PATCH_STATUS_VALUES.has(args.status)) {
+      throw new AssemblyReviewError("conflict", "Approved claim status changes are limited to documented workflow values.");
+    }
+    const now = nowIso();
+    const existingMeta = claimMetadata(existing);
+    const metadata = managed
+      ? approvedOverlayMetadata(existingMeta, args.metadata ?? existingMeta)
+      : { ...(args.metadata ?? existingMeta),
+        ...(existingMeta.history_only === true ? { history_only: true } : {}) };
+    const status = args.status ?? existing.status;
+    await accuracyDb()
+      .update(t.accuracyClaims)
+      .set({
+        status,
+        metadata: metadata as Record<string, unknown>,
+        updated_at: now,
+      })
+      .where(
+        and(
+          eq(t.accuracyClaims.id, args.claim_id),
+          eq(t.accuracyClaims.workspace_id, args.workspace_id),
+        ),
+      );
+    return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
+  });
 }
 
 function metaString(value: unknown): string | null {

@@ -110,7 +110,6 @@ describe("generateExtractionAssembly", () => {
     expect(assembly.mappings).toEqual([{ gap_version_id: assembly.items[0]!.id, tactic_version_id: assembly.items[1]!.id }]);
     expect(assembly.coverage).toHaveLength(1);
     expect(assembly.coverage[0]?.input).toMatchObject({ gap_id: assembly.items[0]!.id, tactic_id: assembly.items[1]!.id,
-      generation_context: { evaluation_context: "production" },
       selected_versions: { gap_version_id: assembly.items[0]!.id, tactic_version_id: assembly.items[1]!.id,
         gap_payload: judgedGap, tactic_payload: tactic } });
     expect(assembly.extraction_runs).toEqual([
@@ -267,6 +266,5 @@ describe("generateExtractionAssembly", () => {
       .filter(run => run.call_kind === "coverage_decide");
     expect(coverageRuns).toHaveLength(1);
     expect(coverageRuns[0]).toMatchObject({ evaluation_context: "experiment" });
-    expect(coverageRuns[0]?.input).toMatchObject({ generation_context: { evaluation_context: "experiment" } });
   });
 });

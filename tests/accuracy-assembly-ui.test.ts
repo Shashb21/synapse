@@ -162,7 +162,7 @@ it("loads list and detail on demand with exact lineage, findings and uncovered o
 
   await click("Complete proposals");
   expect(fetcher).toHaveBeenCalledWith("/api/accuracy/assemblies?workspace_id=ws", { cache: "no-store" });
-  for (const text of ["assembly-a", "assembly-b", "Unapproved proposal", "Deterministic checks blocked", "Deterministic checks passed"]) {
+  for (const text of ["assembly-a", "assembly-b", "Complete proposal", "Deterministic checks blocked", "Deterministic checks passed"]) {
     expect(host.textContent).toContain(text);
   }
 

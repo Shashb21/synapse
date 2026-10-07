@@ -197,6 +197,26 @@ export const accuracyAssemblyItems = pgTable("accuracy_assembly_items", {
   workspace: index("accuracy_assembly_items_workspace_idx").on(table.workspace_id, table.assembly_id),
 }));
 
+/** Append-only human approval/rejection decisions for exact assemblies. */
+export const accuracyAssemblyReviews = pgTable("accuracy_assembly_reviews", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  fingerprint: text("fingerprint").notNull(),
+  checks_fingerprint: text("checks_fingerprint").notNull(),
+  decision: text("decision").notNull(),
+  rationale: text("rationale").notNull(),
+  advisory_overrides: jsonb("advisory_overrides").$type<Array<{ code: string; item_version_ids: string[]; reason: string }>>().notNull(),
+  reviewer_subject: text("reviewer_subject").notNull(),
+  reviewer_provider: text("reviewer_provider").notNull(),
+  reviewer_actor_name: text("reviewer_actor_name").notNull(),
+  reviewer_actor_function: text("reviewer_actor_function").notNull(),
+  reviewer_role: text("reviewer_role").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  assembly: index("accuracy_assembly_reviews_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
+}));
+
 /** Uncertain identity or ancestry proposal; decisions are separate immutable records. */
 export const accuracyItemRelationshipProposals = pgTable("accuracy_item_relationship_proposals", {
   id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
@@ -485,6 +505,15 @@ export const ACCURACY_DDL = [
     CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_reviews (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    fingerprint text NOT NULL, checks_fingerprint text NOT NULL, decision text NOT NULL,
+    rationale text NOT NULL, advisory_overrides jsonb NOT NULL,
+    reviewer_subject text NOT NULL, reviewer_provider text NOT NULL,
+    reviewer_actor_name text NOT NULL, reviewer_actor_function text NOT NULL, reviewer_role text NOT NULL,
+    created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_proposals (
     id text PRIMARY KEY, workspace_id text NOT NULL, kind text NOT NULL, predecessor_ids jsonb NOT NULL,
     successor_ids jsonb NOT NULL, basis_version_ids jsonb NOT NULL, rationale text NOT NULL, actor_name text NOT NULL,
@@ -608,6 +637,15 @@ export const ACCURACY_MIGRATIONS = [
     CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_reviews (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    fingerprint text NOT NULL, checks_fingerprint text NOT NULL, decision text NOT NULL,
+    rationale text NOT NULL, advisory_overrides jsonb NOT NULL,
+    reviewer_subject text NOT NULL, reviewer_provider text NOT NULL,
+    reviewer_actor_name text NOT NULL, reviewer_actor_function text NOT NULL, reviewer_role text NOT NULL,
+    created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
   `DO $$ BEGIN
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint

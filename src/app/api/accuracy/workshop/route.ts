@@ -10,6 +10,7 @@ import {
   workshopReadiness,
 } from "@/accuracy/store/workshop-store";
 import type { ActorFunction } from "@/lib/iegp/enums";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,18 +34,23 @@ export async function GET(request: Request) {
   if (!workspace) {
     return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
   }
-  const { readiness, inventory } = await workshopReadiness(workspace_id);
-  const snapshot = await latestWorkshopSnapshot(workspace_id);
-  return NextResponse.json({
-    workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
-    readiness,
-    inventory_counts: {
-      gaps: inventory.gaps.length,
-      tactics: inventory.tactics.length,
-      joins: inventory.joins.length,
-    },
-    snapshot,
-  });
+  try {
+    const { readiness, inventory } = await workshopReadiness(workspace_id);
+    const snapshot = await latestWorkshopSnapshot(workspace_id);
+    return NextResponse.json({
+      workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
+      readiness,
+      inventory_counts: {
+        gaps: inventory.gaps.length,
+        tactics: inventory.tactics.length,
+        joins: inventory.joins.length,
+      },
+      snapshot,
+    });
+  } catch (error) {
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
+    throw error;
+  }
 }
 
 const createSchema = z.object({
@@ -74,6 +80,7 @@ export async function POST(request: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
     const message = error instanceof Error ? error.message : "Could not save workshop state";
     const status = /not ready|Partial|validated|No live gaps/i.test(message) ? 409 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
@@ -98,6 +105,7 @@ export async function PATCH(request: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
     const message = error instanceof Error ? error.message : "Could not update workshop scene";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
