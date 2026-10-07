@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterEach, describe, expect, it } from "vitest";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction, withAccuracyWorkspaceMutation } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import {
   createOrganization,
@@ -12,7 +12,7 @@ import {
 import { insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
-import { insertCoverageJoin, upsertCoverageDecision, coveragePairRevisions, listCoveragePairs, listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { insertCoverageJoin, upsertCoverageDecision, coveragePairRevisions, listCoveragePairs, listCoverageJoins, reassignCoverageClaimId, type CoverageJoinRow } from "@/accuracy/store/coverage-store";
 import { newId } from "@/modules/kernel/ids";
 import { copyExperimentWorkspace } from "@/accuracy/experiments/copy-workspace";
 
@@ -176,6 +176,83 @@ describe("copyExperimentWorkspace", () => {
     expect((await listCoveragePairs(copy.workspace_id))[0].evidence).toEqual([copy.block_id_map[source.block_id]]);
     expect(copied.dimensions).toMatchObject({ actor: { name: "Ada", function: "medical_affairs" } });
     expect(await listCoverageJoins(source.workspace_id)).toEqual(original);
+  });
+
+  it("copies stale merge and import histories with consistent deleted-join IDs without refreshing their decisions", async () => {
+    const source = await fixture();
+    const other = await insertClaim({ workspace_id: source.workspace_id, source_file_id: source.source_file_id,
+      claim_type: "tactic", statement: "Alternative evidence collection" });
+    const identity = { workspace_id: source.workspace_id, gap_id: source.claim.id, tactic_id: source.tactic.id };
+    const actor = { name: source.block_id, function: "medical_affairs" as const };
+    const rationale = `Literal ${source.workspace_id} and ${source.claim.id}`;
+    await persistClaimPatch({ workspace_id: source.workspace_id, claim_id: source.claim.id,
+      metadata: { provenance: [{ source_file_id: source.source_file_id, block_id: source.block_id, quote: "The source evidence supports the proposed need." }] } });
+    await upsertCoverageDecision({ ...identity, ...await coveragePairRevisions(identity), overall: "limited",
+      rationale, evidence: [source.block_id], actor });
+    const imported = await insertCoverageJoin({ workspace_id: source.workspace_id, gap_id: source.claim.id, tactic_id: other.id,
+      overall: "partial", rationale: "Retained imported decision" });
+    // Whole rows retained by the existing legacy reconciliation owner, including
+    // an ID no longer present in the live table. No revision token is trusted.
+    const historical = { ...imported, id: newId("legacy-cov"), dimensions: { evidence: [source.block_id],
+      gap_revision: "stale-gap-token", tactic_revision: "stale-tactic-token", actor,
+      provenance: [{ source_file_id: source.source_file_id, block_id: source.block_id, quote: "The source evidence supports the proposed need." }] } };
+    await withAccuracyWorkspaceMutation(source.workspace_id, async () => {
+      await accuracyDb().update(t.accuracyCoverageJoins).set({ dimensions: { legacy_duplicates: [historical], legacy_rejection: historical } })
+        .where(eq(t.accuracyCoverageJoins.id, imported.id));
+    });
+    await reassignCoverageClaimId({ workspace_id: source.workspace_id, from_id: other.id, to_id: source.tactic.id, role: "tactic" });
+    const before = await listCoverageJoins(source.workspace_id);
+    const copy = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(copy.workspace_id);
+    const [live] = await listCoverageJoins(copy.workspace_id);
+    const originalDimensions = before[0].dimensions as Record<string, unknown>;
+    const dimensions = live.dimensions as { merge_history: CoverageJoinRow[] };
+    expect(live).toMatchObject({ validated: false, rationale, dimensions: { validation_stale: true, actor,
+      gap_revision: originalDimensions.gap_revision, tactic_revision: originalDimensions.tactic_revision,
+      evidence: [copy.block_id_map[source.block_id]] } });
+    expect(live.dimensions).not.toHaveProperty("copied_from_revisions");
+    expect((await listCoveragePairs(copy.workspace_id))[0]).toMatchObject({ freshness: "stale", validated: false });
+    expect(dimensions.merge_history).toHaveLength(2);
+    const [previous, merged] = dimensions.merge_history;
+    expect(previous).toMatchObject({ id: live.id, workspace_id: copy.workspace_id,
+      gap_id: copy.claim_id_map[source.claim.id], tactic_id: copy.claim_id_map[source.tactic.id],
+      rationale, dimensions: { actor, evidence: [copy.block_id_map[source.block_id]] } });
+    expect(merged).toMatchObject({ workspace_id: copy.workspace_id, gap_id: copy.claim_id_map[source.claim.id], tactic_id: copy.claim_id_map[other.id] });
+    expect(merged.id).not.toBe(imported.id);
+    const legacy = merged.dimensions as { legacy_duplicates: CoverageJoinRow[]; legacy_rejection: CoverageJoinRow };
+    expect(legacy.legacy_duplicates).toHaveLength(1);
+    expect(legacy.legacy_duplicates[0]).toEqual(legacy.legacy_rejection);
+    expect(legacy.legacy_rejection.id).not.toBe(historical.id);
+    expect(legacy.legacy_rejection).toMatchObject({ workspace_id: copy.workspace_id,
+      gap_id: copy.claim_id_map[source.claim.id], tactic_id: copy.claim_id_map[other.id],
+      dimensions: { evidence: [copy.block_id_map[source.block_id]], actor, gap_revision: "stale-gap-token", tactic_revision: "stale-tactic-token",
+        provenance: [{ source_file_id: copy.source_id_map[source.source_file_id], block_id: copy.block_id_map[source.block_id], quote: "The source evidence supports the proposed need." }] } });
+    expect(await listCoverageJoins(source.workspace_id)).toEqual(before);
+    const second = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(second.workspace_id);
+    expect(second.baseline_fingerprint).toBe(copy.baseline_fingerprint);
+    expect((await listCoverageJoins(second.workspace_id))[0].id).not.toBe(live.id);
+  });
+
+  it.each(["workspace", "claim", "evidence", "operation"])("rejects an unresolved historical coverage %s reference atomically", async kind => {
+    const source = await fixture(), other = await fixture();
+    const history = { ...source.coverage,
+      workspace_id: kind === "workspace" ? other.workspace_id : source.workspace_id,
+      gap_id: kind === "claim" ? other.claim.id : source.claim.id,
+      dimensions: { evidence: [kind === "evidence" ? other.block_id : source.block_id],
+        ...(kind === "operation" ? { retired_by_rollback: "missing-split-operation" } : {}) } };
+    await withAccuracyWorkspaceMutation(source.workspace_id, async () => {
+      await accuracyDb().update(t.accuracyCoverageJoins).set({ dimensions: { validation_stale: true, decision_history: [history] } })
+        .where(eq(t.accuracyCoverageJoins.id, source.coverage.id));
+    });
+    const before = await listCoverageJoins(source.workspace_id);
+    const workspaces = await accuracyDb().select().from(t.accuracyWorkspaces);
+    const organizations = await accuracyDb().select().from(t.accuracyOrganizations);
+    await expect(copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] }))
+      .rejects.toMatchObject({ code: "unresolved_reference" });
+    expect(await listCoverageJoins(source.workspace_id)).toEqual(before);
+    expect(await accuracyDb().select().from(t.accuracyWorkspaces)).toEqual(workspaces);
+    expect(await accuracyDb().select().from(t.accuracyOrganizations)).toEqual(organizations);
   });
 
   it("remaps every supported metadata claim relationship inside the copy", async () => {

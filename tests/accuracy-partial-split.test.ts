@@ -4,7 +4,7 @@ import * as t from "@/accuracy/store/schema";
 import { readAccuracySplitInputs } from "@/accuracy/store/partial-split-store";
 import { copyExperimentWorkspace } from "@/accuracy/experiments/copy-workspace";
 import { updateClaim } from "@/accuracy/store/claim-edit";
-import { type SplitProposal } from "@/accuracy/store/partial-split-store";
+import { type SplitProposal, type SplitSnapshot } from "@/accuracy/store/partial-split-store";
 import { claimValidationFreshness, readStructuredFields } from "@/accuracy/domain/structured-fields";
 import postgres from "postgres";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +19,9 @@ afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorks
 async function fixture() { const f = await splitFixture(); workspaces.push(f.workspace_id); return f; }
 function apply(f: Awaited<ReturnType<typeof fixture>>, operation_key = "confirmed-split") {
   return applyAccuracySplit({ workspace_id: f.workspace_id, proposal: f.proposal, operation_key, actor: splitActor, rationale: "Confirmed outcomes slice and remaining comparison" });
+}
+async function splitState(workspace_id: string) {
+  return { claims: await listClaims(workspace_id), coverage: await listCoverageJoins(workspace_id), operations: await listAccuracySplitOperations(workspace_id) };
 }
 describe("confirmed Accuracy residual split", () => {
   it("persists two real children, explicit slice support, pending residual and exact reversible snapshot", async () => {
@@ -87,6 +90,90 @@ it("copies split lineage, evidence and reversible snapshots into an isolated exp
   const deleted = await deleteWorkspace(copy.workspace_id); workspaces.splice(workspaces.indexOf(copy.workspace_id), 1);
   expect(deleted.deleted.split_operations).toBe(1);
   expect(await listAccuracySplitOperations(f.workspace_id)).toHaveLength(1);
+});
+
+it("copies revised parent decision history consistently in live coverage and reversible split snapshots", async () => {
+  const f = await fixture();
+  const [originalDecision] = await listCoverageJoins(f.workspace_id);
+  const rationale = `Reviewed ${f.workspace_id} and ${f.evidence[0].block_id} as literal audit text`;
+  await upsertCoverageDecision({ workspace_id: f.workspace_id, gap_id: f.parent.id, tactic_id: f.tactic.id,
+    ...await coveragePairRevisions({ workspace_id: f.workspace_id, gap_id: f.parent.id, tactic_id: f.tactic.id }),
+    overall: "partial", evidence: [f.evidence[0].block_id], actor: splitActor, rationale });
+  f.proposal = { ...f.proposal, ...(await readAccuracySplitInputs({ workspace_id: f.workspace_id, gap_id: f.parent.id })).revisions };
+  await apply(f);
+  const before = await splitState(f.workspace_id);
+  const copy = await copyExperimentWorkspace({ source_workspace_id: f.workspace_id, source_file_ids: [f.evidence[0].source_file_id] });
+  workspaces.push(copy.workspace_id);
+  const [operation] = await listAccuracySplitOperations(copy.workspace_id);
+  const live = (await listCoverageJoins(copy.workspace_id)).find(c => c.gap_id === copy.claim_id_map[f.parent.id])!;
+  const saved = (operation.snapshot as SplitSnapshot).after_coverage.find(c => c.gap_id === live.gap_id)!;
+  const history = { ...originalDecision, id: live.id, workspace_id: copy.workspace_id,
+    gap_id: copy.claim_id_map[f.parent.id], tactic_id: copy.claim_id_map[f.tactic.id],
+    dimensions: { ...Object.fromEntries(Object.entries(originalDecision.dimensions as Record<string, unknown>).filter(([key]) => key !== "decision_history")),
+      evidence: [copy.block_id_map[f.evidence[0].block_id]] } };
+  for (const row of [live, saved]) {
+    expect(row.dimensions).toMatchObject({ decision_history: [history], actor: splitActor });
+    expect(row.rationale).toBe(rationale);
+  }
+  expect(saved).toEqual(live);
+  expect(await splitState(f.workspace_id)).toEqual(before);
+  await rollbackAccuracySplit({ workspace_id: copy.workspace_id, operation_id: operation.id, actor: splitActor, rationale: "Undo copied revised split" });
+  expect(await getClaim(copy.workspace_id, copy.claim_id_map[f.parent.id])).toEqual((operation.snapshot as SplitSnapshot).before_parent);
+  expect(await splitState(f.workspace_id)).toEqual(before);
+});
+
+it("copies rolled-back splits with scoped retirement references, preserved stale tokens and an inverse no-op", async () => {
+  const f = await fixture(); const split = await apply(f);
+  await rollbackAccuracySplit({ workspace_id: f.workspace_id, operation_id: split.operation_id, actor: splitActor, rationale: "Original rollback" });
+  const before = await splitState(f.workspace_id);
+  const copy = await copyExperimentWorkspace({ source_workspace_id: f.workspace_id, source_file_ids: [f.evidence[0].source_file_id] });
+  workspaces.push(copy.workspace_id);
+  const copied = await splitState(copy.workspace_id);
+  const [operation] = copied.operations;
+  expect(operation).toMatchObject({ state: "rolled_back", rolled_back_at: before.operations[0].rolled_back_at });
+  expect(operation.id).not.toBe(split.operation_id);
+  const snapshot = operation.snapshot as SplitSnapshot;
+  for (const original of before.coverage.filter(c => c.gap_id !== f.parent.id)) {
+    const live = copied.coverage.find(c => c.gap_id === copy.claim_id_map[original.gap_id])!;
+    const saved = snapshot.after_coverage.find(c => c.id === live.id)!;
+    expect(live).toMatchObject({ workspace_id: copy.workspace_id, tactic_id: copy.claim_id_map[f.tactic.id], overall: "pending", validated: false,
+      dimensions: { retired_by_rollback: operation.id, validation_stale: true,
+        gap_revision: (original.dimensions as Record<string, unknown>).gap_revision,
+        tactic_revision: (original.dimensions as Record<string, unknown>).tactic_revision,
+        evidence: (original.dimensions as { evidence: string[] }).evidence.map(id => copy.block_id_map[id]) } });
+    expect(saved).toMatchObject({ workspace_id: copy.workspace_id, gap_id: live.gap_id, tactic_id: live.tactic_id,
+      dimensions: { evidence: (original.dimensions as { evidence: string[] }).evidence.map(id => copy.block_id_map[id]) } });
+    expect(saved.dimensions).not.toHaveProperty("retired_by_rollback");
+    expect(live.dimensions).not.toHaveProperty("copied_from_revisions");
+  }
+  const effective = await listCoverageJoins(copy.workspace_id, { effective: true });
+  expect(effective.filter(c => c.gap_id !== operation.parent_gap_id).every(c => c.overall === "pending" && !c.validated && c.freshness !== "current")).toBe(true);
+  await rollbackAccuracySplit({ workspace_id: copy.workspace_id, operation_id: operation.id, actor: splitActor, rationale: "Replay copied inverse" });
+  expect(await splitState(copy.workspace_id)).toEqual(copied);
+  expect(await splitState(f.workspace_id)).toEqual(before);
+});
+
+it("retains later coverage decisions and their history when copying, so copied inverse stays blocked", async () => {
+  const f = await fixture(); const split = await apply(f);
+  const pending = (await listCoverageJoins(f.workspace_id)).find(c => c.gap_id === split.open_residual_gap_id)!;
+  await upsertCoverageDecision({ workspace_id: f.workspace_id, gap_id: split.open_residual_gap_id, tactic_id: f.tactic.id,
+    ...await coveragePairRevisions({ workspace_id: f.workspace_id, gap_id: split.open_residual_gap_id, tactic_id: f.tactic.id }),
+    overall: "limited", evidence: [f.evidence[0].block_id], actor: splitActor, rationale: "Later human decision must survive copy" });
+  const before = await splitState(f.workspace_id);
+  const copy = await copyExperimentWorkspace({ source_workspace_id: f.workspace_id, source_file_ids: [f.evidence[0].source_file_id] });
+  workspaces.push(copy.workspace_id);
+  const copied = await splitState(copy.workspace_id); const [operation] = copied.operations;
+  const live = copied.coverage.find(c => c.gap_id === operation.open_residual_gap_id)!;
+  const saved = (operation.snapshot as SplitSnapshot).after_coverage.find(c => c.id === live.id)!;
+  expect(live).toMatchObject({ overall: "limited", validated: true, rationale: "Later human decision must survive copy" });
+  expect(live.dimensions).toMatchObject({ decision_history: [expect.objectContaining({ id: live.id, workspace_id: copy.workspace_id,
+    gap_id: operation.open_residual_gap_id, tactic_id: copy.claim_id_map[f.tactic.id], overall: "pending", validated: false,
+    dimensions: Object.fromEntries(Object.entries(pending.dimensions as Record<string, unknown>).filter(([key]) => key !== "decision_history")) })] });
+  expect(saved).toMatchObject({ overall: "pending", validated: false });
+  expect(saved.dimensions).toMatchObject({ decision_history: [] });
+  await expect(rollbackAccuracySplit({ workspace_id: copy.workspace_id, operation_id: operation.id, actor: splitActor, rationale: "Must retain the later decision" })).rejects.toMatchObject({ code: "rollback_blocked" });
+  expect(await splitState(copy.workspace_id)).toEqual(copied);
+  expect(await splitState(f.workspace_id)).toEqual(before);
 });
 
 it.each([
