@@ -14,6 +14,7 @@ import { withHumanEdit } from "./claim-edit";
 import { listCoverageJoins, upsertCoverageDecision, type CoverageJoinRow } from "./coverage-store";
 import { getWorkspace } from "./tenant";
 import { provenanceSpanSchema, validateProvenance, type ProvenanceSpan, type ParseBlock } from "./quote-validator";
+import { accuracyPriorityHumanRevisions } from "./priority-records";
 import { readParseBlocksByIds } from "./parse-store";
 
 export class SplitError extends Error {
@@ -119,7 +120,7 @@ export function validateAccuracySplitProposal(p: SplitProposal, state: Awaited<R
   }
 }
 
-export type SplitSnapshot = { before_parent: AccuracyClaimRow; after_claims: AccuracyClaimRow[]; after_coverage: CoverageJoinRow[];
+export type SplitSnapshot = { priority_human_revisions?: { gap_id: string; human_revision: string }[]; before_parent: AccuracyClaimRow; after_claims: AccuracyClaimRow[]; after_coverage: CoverageJoinRow[];
   after_provenance: (typeof t.accuracyProvenance.$inferSelect)[];
   evidence_state: { blocks: Awaited<ReturnType<typeof readParseBlocksByIds>>; sources: (typeof t.accuracySourceFiles.$inferSelect)[] }; dependencies: { id: string; revision: string }[] };
 async function related(workspace_id: string, ids: string[]) {
@@ -175,7 +176,7 @@ export async function applyAccuracySplit(args: { workspace_id: string; proposal:
       metadata: withHumanEdit(claimMetadata(state.parent), { action: "split", fields: ["split"], before: { status: state.parent.status },
         after: { addressed_gap_id: addressed.id, open_residual_gap_id: residual.id, operation_id }, actor: args.actor, rationale, at }) }).where(and(eq(t.accuracyClaims.workspace_id, args.workspace_id), eq(t.accuracyClaims.id, state.parent.id)));
     const after = await related(args.workspace_id, [state.parent.id, addressed.id, residual.id]);
-    const snapshot: SplitSnapshot = { before_parent: state.parent, after_claims: after.claims, after_coverage: after.coverage,
+    const snapshot: SplitSnapshot = { priority_human_revisions: await accuracyPriorityHumanRevisions(args.workspace_id, [state.parent.id, addressed.id, residual.id]), before_parent: state.parent, after_claims: after.claims, after_coverage: after.coverage,
       after_provenance: after.provenance, evidence_state: { blocks: sorted(state.blocks), sources: sorted(state.sources.filter(s => state.evidence.some(e => e.source_file_id === s.id))) }, dependencies: state.tactics.map(t => ({ id: t.id, revision: claimFactualRevision(t) })) };
     const [operation] = await accuracyDb().insert(t.accuracySplitOperations).values({ id: operation_id, workspace_id: args.workspace_id,
       operation_key: args.operation_key, request_fingerprint, parent_gap_id: state.parent.id, addressed_gap_id: addressed.id,
@@ -194,6 +195,8 @@ export async function rollbackAccuracySplit(args: { workspace_id: string; operat
     const snapshot = op.snapshot as SplitSnapshot;
     const ids = [op.parent_gap_id, op.addressed_gap_id, op.open_residual_gap_id];
     const current = await related(args.workspace_id, ids);
+    if (splitFingerprint(await accuracyPriorityHumanRevisions(args.workspace_id, ids)) !== splitFingerprint(snapshot.priority_human_revisions ?? []))
+      throw new SplitError("rollback_blocked", "Later human priority placement or validation blocks rollback.");
     const allClaims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, args.workspace_id));
     const descendant = allClaims.some(c => !ids.includes(c.id) && ids.includes(String(claimMetadata(c).parent_gap_id)));
     if (descendant || splitFingerprint(current) !== splitFingerprint({ claims: snapshot.after_claims, coverage: snapshot.after_coverage, provenance: snapshot.after_provenance })

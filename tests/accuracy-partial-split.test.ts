@@ -302,3 +302,36 @@ it("uses original valid pair provenance when current Partial coverage has no sel
   const result = await apply(f);
   expect((await listCoverageJoins(f.workspace_id, { effective: true })).find(c => c.gap_id === result.addressed_gap_id)).toMatchObject({ overall: "full", validated: true, freshness: "current" });
 });
+
+import { setAccuracyPlacement, listAccuracyPlacements } from "@/accuracy/store/priority-store";
+it("refuses split rollback after a real human placement validation on the residual", async () => {
+  const f = await fixture(), result = await apply(f);
+  await setAccuracyPlacement({ workspace_id: f.workspace_id, gap_id: result.open_residual_gap_id,
+    band: "defer", validate: true, actor: splitActor, rationale: "Human defers this residual this cycle" });
+  const before = { claims: await listClaims(f.workspace_id), placements: await listAccuracyPlacements(f.workspace_id) };
+  await expect(rollbackAccuracySplit({ workspace_id: f.workspace_id, operation_id: result.operation_id, actor: splitActor, rationale: "Do not overwrite later decisions" })).rejects.toMatchObject({ code: "rollback_blocked" });
+  expect({ claims: await listClaims(f.workspace_id), placements: await listAccuracyPlacements(f.workspace_id) }).toEqual(before);
+});
+
+import { prioritizeModule } from "@/accuracy/modules/prioritize/module";
+import { scriptedPriorityContext } from "./support/accuracy-priority";
+it("permits exact split rollback after a harmless unvalidated model priority suggestion", async () => {
+  const f = await fixture(), result = await apply(f), before = process.env.SYNAPSE_TEST_STUB_LLM;
+  process.env.SYNAPSE_TEST_STUB_LLM = "";
+  try {
+    await prioritizeModule.run(prioritizeModule.inputSchema.parse({ workspace_id: f.workspace_id, gap_ids: [result.open_residual_gap_id], x_axis: "effort_cost", y_axis: "decision_impact" }), scriptedPriorityContext(f));
+    expect((await listAccuracyPlacements(f.workspace_id))[0]).toMatchObject({ validated: false, human_revision: null });
+    await rollbackAccuracySplit({ workspace_id: f.workspace_id, operation_id: result.operation_id, actor: splitActor, rationale: "Restore original; suggestion was not a human decision" });
+    expect(await getClaim(f.workspace_id, f.parent.id)).toEqual(f.parent);
+  } finally { if (before === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM; else process.env.SYNAPSE_TEST_STUB_LLM = before; }
+});
+it("copies later human priority placements and keeps split rollback blocked in both isolated workspaces", async () => {
+  const f = await fixture(), result = await apply(f);
+  await setAccuracyPlacement({ workspace_id: f.workspace_id, gap_id: result.open_residual_gap_id, band: "defer", validate: true, actor: splitActor, rationale: "Later human residual decision" });
+  const copied = await copyExperimentWorkspace({ source_workspace_id: f.workspace_id, source_file_ids: [f.evidence[0].source_file_id] }); workspaces.push(copied.workspace_id);
+  const operation = (await listAccuracySplitOperations(copied.workspace_id))[0];
+  expect((await listAccuracyPlacements(copied.workspace_id))[0]).toMatchObject({ gap_id: copied.claim_id_map[result.open_residual_gap_id], validated: true, band: "defer" });
+  await expect(rollbackAccuracySplit({ workspace_id: copied.workspace_id, operation_id: operation.id, actor: splitActor, rationale: "Blocked copied inverse" })).rejects.toMatchObject({ code: "rollback_blocked" });
+  expect((await listAccuracySplitOperations(f.workspace_id))[0].state).toBe("applied");
+  expect((await listAccuracyPlacements(f.workspace_id))[0].band).toBe("defer");
+});

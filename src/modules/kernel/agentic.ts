@@ -44,6 +44,8 @@ export type ProposerArgs<C> = {
 };
 
 export type AgenticCycle<C> = {
+  /** Explicit domain-owned corrections; omitted retains plan hillclimb behavior. */
+  reviewerHints?: string;
   /**
    * Stable identity. A revision keeps a candidate's subject so critiques, the
    * judge and the trace all line up across rounds.
@@ -108,9 +110,9 @@ export async function runAgenticCycle<C>(
   stage: StageId,
   cycle: AgenticCycle<C>,
 ): Promise<AgenticOutcome<C>> {
-  const digest = await hillclimbDigest(stage);
-  const hints = digestAsPrompt(digest);
-  ctx.run.note("hillclimb:hints", { open: digest.open, corrections: digest.corrections });
+  const digest = cycle.reviewerHints === undefined ? await hillclimbDigest(stage) : null;
+  const hints = cycle.reviewerHints ?? digestAsPrompt(digest!);
+  ctx.run.note("hillclimb:hints", digest ? { open: digest.open, corrections: digest.corrections } : { corrections: hints });
 
   const propose = async (args: ProposerArgs<C>): Promise<{ candidates: C[]; via: "llm" | "local" }> => {
     if (isTestStub()) {

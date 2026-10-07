@@ -1,5 +1,6 @@
 /** Clone a selected accuracy workspace state for an isolated experiment. */
 
+import { priorityInputs, readEffectiveAccuracyPlacement, type AccuracyPlacement } from "@/accuracy/store/priority-store";
 import { splitFingerprint, type SplitSnapshot } from "@/accuracy/store/partial-split-store";
 import { rebaseCopiedCoverage, type CoverageJoinRow } from "@/accuracy/store/coverage-store";
 import { createHash } from "node:crypto";
@@ -294,6 +295,14 @@ export async function copyExperimentWorkspace(
         throw new ExperimentCopyError("unresolved_reference", `Split ${op.id} points to omitted claims or supporting tactics.`);
       }
     }
+    const priorityRows = await db.select().from(t.accuracyPriorityPlacements).where(eq(t.accuracyPriorityPlacements.workspace_id, args.source_workspace_id));
+    const selectedPriorities = priorityRows.filter(row => copiedClaimIds.has(row.gap_id));
+    const priorityConfigs = await db.select().from(t.accuracyPriorityConfigs).where(eq(t.accuracyPriorityConfigs.workspace_id, args.source_workspace_id));
+    const originalPriorityInputs = new Map<string, Awaited<ReturnType<typeof readEffectiveAccuracyPlacement>>>();
+    for (const row of selectedPriorities) {
+      const data = row.data as AccuracyPlacement;
+      originalPriorityInputs.set(row.gap_id, await readEffectiveAccuracyPlacement(data));
+    }
     const org_id = newId("org");
     const workspace_id = newId("ws");
     const referenceMaps = { source: source_id_map, block: block_id_map, claim: claim_id_map,
@@ -358,7 +367,7 @@ export async function copyExperimentWorkspace(
         const original = claimsById.get(d.id)!;
         return { id: claim_id_map[d.id], revision: d.revision === claimFactualRevision(original) ? claimFactualRevision(copiedClaim(original)) : d.revision };
       });
-      const copied_snapshot: SplitSnapshot = { before_parent: snapshotClaim(snapshot.before_parent), after_claims, after_coverage, after_provenance, dependencies,
+      const copied_snapshot: SplitSnapshot = { priority_human_revisions: snapshot.priority_human_revisions?.map(row => ({ ...row, gap_id: claim_id_map[row.gap_id] })), before_parent: snapshotClaim(snapshot.before_parent), after_claims, after_coverage, after_provenance, dependencies,
         evidence_state: { blocks: sortedById(snapshot.evidence_state.blocks.map(row => ({ ...row, id: block_id_map[row.id], workspace_id, source_file_id: source_id_map[row.source_file_id] }))),
           sources: sortedById(snapshot.evidence_state.sources.map(row => ({ ...row, id: source_id_map[row.id], workspace_id, org_id }))) } };
       return { ...op, id: operation_id_map[op.id], workspace_id, parent_gap_id: claim_id_map[op.parent_gap_id],
@@ -374,7 +383,7 @@ export async function copyExperimentWorkspace(
       org_id,
       name: `${sourceWorkspace.name} (experiment)`,
       slug: `${sourceWorkspace.slug}-experiment-${workspace_id.slice(-8)}`,
-      planning_context: sourceWorkspace.planning_context,
+      planning_context: remapMetadata(sourceWorkspace.planning_context, referenceMaps),
       created_at,
       archived_at: null,
     });
@@ -408,7 +417,26 @@ export async function copyExperimentWorkspace(
 
     if (copiedSplits.length) await db.insert(t.accuracySplitOperations).values(copiedSplits);
 
+    if (priorityConfigs.length) await db.insert(t.accuracyPriorityConfigs).values(priorityConfigs.map(row => ({ workspace_id, data: remapMetadata(row.data, referenceMaps) })));
+    const copiedPriorities: (typeof t.accuracyPriorityPlacements.$inferSelect)[] = [];
+    for (const row of selectedPriorities) {
+      const original = row.data as AccuracyPlacement, before = originalPriorityInputs.get(row.gap_id)!;
+      const data = remapMetadata(original, referenceMaps) as AccuracyPlacement;
+      const after = before.inputs ? await priorityInputs(workspace_id, data.gap_id, data.selection) : null;
+      // Only originally current outer tokens may be translated. History stays historical.
+      if (before.inputs && after && original.input_revision === before.inputs.input_revision && original.config_revision === before.inputs.config_revision) {
+        data.input_revision = after.input_revision; data.config_revision = after.config_revision;
+      }
+      if (before.placement.validated && after && data.validation) {
+        data.validation = { ...data.validation, input_revision: after.input_revision, config_revision: after.config_revision };
+      }
+      copiedPriorities.push({ workspace_id, gap_id: data.gap_id, data });
+    }
+    if (copiedPriorities.length) await db.insert(t.accuracyPriorityPlacements).values(copiedPriorities);
+
     const baseline_snapshot = {
+      priority_placements: copiedPriorities,
+      priority_configs: priorityConfigs.map(row => ({ workspace_id, data: remapMetadata(row.data, referenceMaps) })),
       split_operations: copiedSplits,
       source_files: sourceRows.map((row) => ({ original_id: row.id, copied_id: source_id_map[row.id], ...row, id: source_id_map[row.id], workspace_id, org_id })),
       parse_blocks: blockRows.map((row) => ({ original_id: row.id, copied_id: block_id_map[row.id], ...row, id: block_id_map[row.id], workspace_id, source_file_id: source_id_map[row.source_file_id] })),
@@ -425,6 +453,7 @@ export async function copyExperimentWorkspace(
       // Fingerprint the source facts, not the randomly allocated copied references.
       coverage_joins: copiedCoverageRows,
       split_operations: copiedSplitRows,
+      priority_placements: selectedPriorities, priority_configs: priorityConfigs,
     });
     return { workspace_id, org_id, source_id_map, block_id_map, claim_id_map, source_fingerprint, baseline_fingerprint, baseline_snapshot };
   }, { isolationLevel: "repeatable read" });

@@ -1,5 +1,5 @@
 import type { SourceProgress } from "../domain/source-pages";
-import { boolean, index, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, unique } from "drizzle-orm/pg-core";
 
 /** Multi-tenant accuracy stack — one workspace = one IEGP. */
 
@@ -115,6 +115,15 @@ export const accuracyCoverageJoins = pgTable("accuracy_coverage_joins", {
   validated: boolean("validated").notNull().default(false),
   rationale: text("rationale"),
 }, (table) => ({ pair: unique("accuracy_coverage_pair_key").on(table.workspace_id, table.gap_id, table.tactic_id) }));
+
+/** Workspace-owned S8 decisions and saved Accuracy matrix configuration. */
+export const accuracyPriorityPlacements = pgTable("accuracy_priority_placements", {
+  workspace_id: text("workspace_id").notNull(), gap_id: text("gap_id").notNull(),
+  data: jsonb("data").notNull(),
+}, table => ({ key: primaryKey({ columns: [table.workspace_id, table.gap_id] }) }));
+export const accuracyPriorityConfigs = pgTable("accuracy_priority_configs", {
+  workspace_id: text("workspace_id").primaryKey(), data: jsonb("data").notNull(),
+});
 
 /** One split-specific reversible snapshot and its append-only human audit. */
 export const accuracySplitOperations = pgTable("accuracy_split_operations", {
@@ -304,6 +313,8 @@ export const accuracyExperimentEvaluations = pgTable("accuracy_experiment_evalua
 }, (table) => ({ version: unique("accuracy_experiment_evaluations_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
 
 export const ACCURACY_DDL = [
+  `CREATE TABLE IF NOT EXISTS accuracy_priority_placements (workspace_id text NOT NULL, gap_id text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(workspace_id,gap_id))`,
+  `CREATE TABLE IF NOT EXISTS accuracy_priority_configs (workspace_id text PRIMARY KEY, data jsonb NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS accuracy_split_operations (
     id text PRIMARY KEY, workspace_id text NOT NULL, operation_key text NOT NULL,
     request_fingerprint text NOT NULL, parent_gap_id text NOT NULL,

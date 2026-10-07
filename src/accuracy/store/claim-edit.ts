@@ -30,7 +30,7 @@ import { listSourceFiles } from "./source-store";
 export const GAP_STATUS_OVERRIDES = ["open", "partial", "addressed"] as const;
 export type GapStatusOverride = (typeof GAP_STATUS_OVERRIDES)[number];
 
-export const CLAIM_PRIORITIES = ["high", "medium", "low", "critical", "gated", "addressed"] as const;
+export const CLAIM_PRIORITIES = ["high", "medium", "low", "defer", "critical", "gated", "addressed"] as const;
 export type ClaimPriority = (typeof CLAIM_PRIORITIES)[number];
 
 /** Editable claim fields. Tactic-only and gap-only fields are rejected on the wrong type. */

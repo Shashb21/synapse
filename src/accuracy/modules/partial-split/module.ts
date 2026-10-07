@@ -51,16 +51,4 @@ export const partialSplitModule = agenticModule({
 });
 partialSplitModule.manifest.version = "0.2.0";
 
-export const prioritizeModule = agenticModule({
-  id: "prioritize.agent-v1",
-  call_kind: "prioritize",
-  title: "Prioritize",
-  summary: "H/M/L on validated open gaps.",
-  inputSchema: z.object({ workspace_id: z.string(), gap_ids: z.array(z.string()) }),
-  outputSchema: z.object({
-    placements: z.array(
-      z.object({ gap_id: z.string(), band: z.enum(["high", "medium", "low"]) }),
-    ),
-  }),
-  run: async () => ({ output: { placements: [] }, summary: "Prioritize stub" }),
-});
+export { prioritizeModule } from "../prioritize/module";

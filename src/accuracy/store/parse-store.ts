@@ -1,3 +1,4 @@
+import { invalidateAccuracyPriorityForSource } from "./priority-records";
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
@@ -501,6 +502,8 @@ async function audit(args: {
     actor_function: args.actor.function,
     at: nowIso(),
   });
+  if (["text", "block", "doc_role", "kind", "heading"].includes(args.field))
+    await invalidateAccuracyPriorityForSource(args.workspace_id, args.source_file_id, nowIso());
 }
 
 /** Upserts the human meta row; the first touch records the model's original. */

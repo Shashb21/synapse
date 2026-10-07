@@ -5,6 +5,7 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import { claimFactualRevision, readStructuredFields, structuredProvenance, validateFieldEvidence,
   gapStructuredFieldsSchema, tacticStructuredFieldsSchema, type GapStructuredFields, type TacticStructuredFields } from "@/accuracy/domain/structured-fields";
+import { invalidateAccuracyPriorityValidation } from "./priority-records";
 import { provenanceSpanSchema } from "./quote-validator";
 
 export type AccuracyClaimType = "gap" | "tactic";
@@ -93,6 +94,7 @@ export async function invalidateDependentClaimValidation(workspace_id: string, c
   const joins = await database.select().from(t.accuracyCoverageJoins).where(and(
     eq(t.accuracyCoverageJoins.workspace_id, workspace_id),
     or(eq(t.accuracyCoverageJoins.gap_id, claim_id), eq(t.accuracyCoverageJoins.tactic_id, claim_id))));
+  await invalidateAccuracyPriorityValidation(workspace_id, [...new Set([claim_id, ...joins.map(join => join.gap_id)])], at, "claim_facts_changed", database);
   for (const join of joins) {
     await database.update(t.accuracyCoverageJoins).set({ validated: false,
       dimensions: { ...(join.dimensions as Record<string, unknown>), validation_stale: true,
@@ -324,6 +326,10 @@ export async function applyClaimValidation(args: {
             eq(t.accuracyClaims.workspace_id, args.workspace_id),
           ),
         );
+      if (!validated) {
+        const joins = await accuracyDb().select().from(t.accuracyCoverageJoins).where(and(eq(t.accuracyCoverageJoins.workspace_id, args.workspace_id), eq(t.accuracyCoverageJoins.tactic_id, claim.id)));
+        await invalidateAccuracyPriorityValidation(args.workspace_id, [claim.id, ...joins.map(join => join.gap_id)], now, "claim_validation_rejected");
+      }
       updated.push({
         ...claim,
         validated,

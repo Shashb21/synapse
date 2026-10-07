@@ -174,7 +174,7 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
   prioritize: {
     id: "prioritize",
     title: "Prioritization",
-    purpose: "H/M/L on validated open gaps + planning context.",
+    purpose: "S8 High/Medium/Low/Defer on current human-validated Open gaps and saved planning context.",
     kind: "agentic",
     llm_roles: ["proposer", "critic", "reviser", "judge"],
     upstream: ["status_derive"],
