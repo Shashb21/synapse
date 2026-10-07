@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { PriorityReviewControls } from "./priority-review-controls";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -207,14 +208,16 @@ export function PlanPriorityCard({
   }
 
   return (
-    <article className="border border-border bg-card p-3 rounded-lg">
+    <article className="border border-border bg-card p-3 rounded-lg" data-testid={`plan-gap-${claimId}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-[13px] text-foreground">{statement}</p>
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-          {validated ? "validated" : "unvalidated"}
+          {validated ? "validated" : "unvalidated"} · {resolveGapStatus(status)}
         </span>
       </div>
       <p className="mt-1 font-mono text-[10px] text-muted-foreground">{claimId}</p>
+      <PriorityReviewControls workspaceId={workspaceId} gapId={claimId} />
+      <p className="mt-2 text-[11px] text-muted-foreground">Draft metadata priority (use S8 review above for authoritative working validation)</p>
       <input
         value={priorityRationale}
         onChange={(e) => setPriorityRationale(e.target.value)}
@@ -223,7 +226,7 @@ export function PlanPriorityCard({
         className="mt-2 w-full border border-border bg-background px-2 py-1.5 text-[12px]"
       />
       <div className="mt-2 flex flex-wrap gap-2">
-        {(["high", "medium", "low"] as const).map((bandOption) => (
+        {(["high", "medium", "low", "defer"] as const).map((bandOption) => (
           <button
             key={bandOption}
             type="button"

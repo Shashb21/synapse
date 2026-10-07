@@ -21,6 +21,7 @@ import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { getWorkspace } from "@/accuracy/store/tenant";
 import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
+import { sourceExtractionCheckpoint } from "@/components/accuracy/source-progress";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,10 +31,10 @@ registerAccuracyStack();
 export default async function AccuracySourcesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace_id?: string }>;
+  searchParams: Promise<{ workspace_id?: string; block_id?: string; source_file_id?: string }>;
 }) {
   await requireOwnerPage();
-  const { workspace_id: workspaceId = "" } = await searchParams;
+  const { workspace_id: workspaceId = "", block_id: openBlockId, source_file_id: openSourceId } = await searchParams;
   let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let sources: Array<
     Awaited<ReturnType<typeof listSourceFiles>>[number] & {
@@ -43,6 +44,7 @@ export default async function AccuracySourcesPage({
       })[];
       stakeholder: Awaited<ReturnType<typeof readSourceStakeholder>>;
       dropped: Awaited<ReturnType<typeof listDroppedUnits>>;
+      checkpoint: Awaited<ReturnType<typeof sourceExtractionCheckpoint>>;
     }
   > = [];
   let loadError: string | null = null;
@@ -64,6 +66,7 @@ export default async function AccuracySourcesPage({
             parse_blocks,
             stakeholder: await readSourceStakeholder(workspaceId, row.id),
             dropped: await listDroppedUnits(workspaceId, row.id),
+            checkpoint: await sourceExtractionCheckpoint(workspaceId, row.id),
           };
         }),
       );
@@ -193,7 +196,7 @@ export default async function AccuracySourcesPage({
           ) : (
             <ul className="grid gap-2">
               {sources.map((source) => (
-                <li key={source.id} className="border border-border bg-card p-3 rounded-lg">
+                <li key={source.id} id={`source-${source.id}`} className="border border-border bg-card p-3 rounded-lg">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="text-[12px] font-semibold text-foreground">{source.filename}</p>
                     <span className="text-[11px] text-muted-foreground">{source.doc_role}</span>
@@ -213,6 +216,8 @@ export default async function AccuracySourcesPage({
                   ) : null}
                   <ParseBlockPreview
                     blocks={source.parse_blocks}
+                    openBlockId={openBlockId}
+                    openSource={source.id === openSourceId}
                     edit={
                       aiOn
                         ? { workspaceId, sourceFileId: source.id, identity, kinds: PARSE_BLOCK_KINDS }
@@ -225,6 +230,7 @@ export default async function AccuracySourcesPage({
                       sourceFileId={source.id}
                       blockCount={source.block_count}
                       gate={extractGate}
+                      checkpoint={source.checkpoint}
                     />
                   ) : null}
                 </li>

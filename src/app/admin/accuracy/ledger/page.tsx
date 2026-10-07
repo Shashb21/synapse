@@ -19,11 +19,16 @@ import {
   siThemeLabel,
 } from "@/accuracy/domain/ledger-filters";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
-import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
+import { claimMetadata, isActiveLedgerClaim, listClaims } from "@/accuracy/store/claim-store";
 import { getWorkspace, listWorkspaces } from "@/accuracy/store/tenant";
 import { UnknownWorkspaceNotice } from "@/components/accuracy/unknown-workspace";
 import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { latestWorkshopSnapshot, workshopReadiness } from "@/accuracy/store/workshop-store";
+import { readStructuredFields, claimValidationFreshness } from "@/accuracy/domain/structured-fields";
+import { listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { asTacticLifecycle, deriveGapStatus, effectiveGapStatus } from "@/accuracy/modules/status-derive/engine";
+import { listAccuracySplitOperations } from "@/accuracy/store/partial-split-store";
+import { SplitOperationHistory, type SplitHistoryRow } from "@/components/accuracy/claim-split-controls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,6 +52,9 @@ function toCard(claim: ClaimRow, statementById: Map<string, string>): LedgerClai
     statement: claim.statement,
     status: claim.status,
     validated: claim.validated,
+    structured: readStructuredFields(claim),
+    validation_freshness: claimValidationFreshness(claim),
+    override_stale: Boolean(meta.status_override?.stale),
     source_badge: String(meta.source_badge ?? claim.source_file_id ?? "unspecified source"),
     validation_rationale: meta.validation?.rationale ?? null,
     computed_status: typeof meta.computed_status === "string" ? meta.computed_status : null,
@@ -100,14 +108,23 @@ export default async function AccuracyLedgerPage({
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
+  let operations: SplitHistoryRow[] = [];
 
   try {
     workspaces = await listWorkspaces();
     // Looked up directly, so a workspace past the picker's cap still shows its name.
     if (workspaceId) activeWorkspace = await getWorkspace(workspaceId);
     if (activeWorkspace) {
-      const claims = await listClaims(workspaceId);
-      const live = claims.filter((c) => c.status !== "merged");
+      operations = (await listAccuracySplitOperations(workspaceId)).map(operation => ({
+        id: operation.id, parent_gap_id: operation.parent_gap_id, addressed_gap_id: operation.addressed_gap_id,
+        open_residual_gap_id: operation.open_residual_gap_id, state: operation.state, actor: { name: String((operation.audit as { last_human_edit?: { by?: string } })?.last_human_edit?.by ?? "") },
+        rationale: String((operation.audit as { last_human_edit?: { rationale?: string } })?.last_human_edit?.rationale ?? ""), created_at: operation.created_at, rolled_back_at: operation.rolled_back_at,
+      }));
+      const claims = await listClaims(workspaceId, { limit: 2147483647 });
+      const joins = await listCoverageJoins(workspaceId, { effective: true });
+      const statusTactics = claims.filter(c => c.claim_type === "tactic" && isActiveLedgerClaim(c)).map(c => ({ id: c.id,
+        status: asTacticLifecycle(claimMetadata(c).tactic_status) ?? asTacticLifecycle(c.status) ?? "unknown" as const }));
+      const live = claims.filter((c) => c.status !== "merged" && c.status !== "retired");
       const statementById = new Map(claims.map((c) => [c.id, c.statement]));
       const active = live.filter((c) => c.status !== "rejected");
       tacticOptions = active
@@ -137,7 +154,13 @@ export default async function AccuracyLedgerPage({
       );
       gaps = visible
         .filter((c) => c.claim_type === "gap")
-        .map((c) => toCard(c, statementById));
+        .map((c) => {
+          const card = toCard(c, statementById);
+          const computed = deriveGapStatus({ gap_id: c.id, coverages: joins, tactics: statusTactics });
+          const rawOverride = claimMetadata(c).status_override?.status;
+          const override = rawOverride === "open" || rawOverride === "partial" || rawOverride === "addressed" ? rawOverride : null;
+          return { ...card, computed_status: computed, effective_status: effectiveGapStatus({ computed, override }).status };
+        });
       tactics = visible
         .filter((c) => c.claim_type === "tactic")
         .map((c) => toCard(c, statementById));
@@ -307,6 +330,7 @@ export default async function AccuracyLedgerPage({
           <LedgerMergedList workspaceId={workspaceId} rows={merged} />
         </>
       )}
+      {activeWorkspace ? <SplitOperationHistory workspaceId={workspaceId} operations={operations} /> : null}
     </AccuracyAppShell>
   );
 }

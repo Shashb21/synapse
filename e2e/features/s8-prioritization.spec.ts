@@ -24,7 +24,7 @@ type PrioritizationOutput = {
     gap_name: string;
     axis_scores: Record<string, number>;
     score: number;
-    suggested_band: "high" | "medium" | "low";
+    suggested_band: "high" | "medium" | "low" | "defer";
     rationale: string;
   }[];
   skipped: number;
@@ -58,7 +58,7 @@ test.describe("S8 prioritization matrix", () => {
         );
       }
       expect(placement.rationale.length).toBeGreaterThan(0);
-      expect(["high", "medium", "low"]).toContain(placement.suggested_band);
+      expect(["high", "medium", "low", "defer"]).toContain(placement.suggested_band);
     }
     const { run } = await expectThreeExchanges(request, result.run_id);
     expectRouteIsHonest(run);
@@ -77,7 +77,7 @@ test.describe("S8 prioritization matrix", () => {
     await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? validated`))).toBeVisible();
     await expect(page.getByText(/A dashed edge means the band is not validated yet/)).toBeVisible();
     // Each gap is a card on the plot, with its suggested band and not yet validated.
-    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), not validated\. Arrow keys move it\.$/ });
+    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low|Defer), not validated\. Arrow keys move it\.$/ });
     await expect(cards).toHaveCount(open.length);
   });
 
@@ -184,5 +184,13 @@ test.describe("S8 prioritization matrix", () => {
     expect(names).toContain("axis_scores_complete");
     expect(names).toContain("suggestions_explained");
     expect(body.metrics.find((metric) => metric.name === "axis_scores_complete")!.value).toBe(1);
+  });
+  test("supports a human Defer decision on the saved matrix", async ({ page, request }) => {
+    const gap = await firstOpenGap(request);
+    await planAction(request, { action: "validate_band", gap_id: gap.gap_id, band: "defer", rationale: "Human reviewer defers this question until the later study" });
+    const placement = (await planState(request)).placements.find(row => row.gap_id === gap.gap_id)!;
+    expect(placement).toMatchObject({ band: "defer", validated: true });
+    await page.goto("/?place=plan&setting=all");
+    await expect(page.getByRole("group", { name: /^Prioritization matrix: / }).getByRole("button", { name: /: Defer, validated\. Arrow keys move it\.$/ })).toHaveCount(1);
   });
 });

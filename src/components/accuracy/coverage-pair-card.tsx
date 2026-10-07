@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import Link from "next/link";
+import { sendJson } from "./claim-api";
 
 export type CoveragePairCardModel = {
   id: string;
@@ -32,10 +34,7 @@ export function CoveragePairCard({
   function submit(next: "full" | "partial" | "limited" | "not_relevant" | "pending", reject = false) {
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/coverage", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const result = await sendJson("/api/accuracy/coverage", "POST", {
           workspace_id: workspaceId,
           gap_id: pair.gap_id,
           tactic_id: pair.tactic_id,
@@ -43,11 +42,9 @@ export function CoveragePairCard({
           rationale, action: reject ? "reject" : "decide",
           expected_gap_revision: pair.gap_revision, expected_tactic_revision: pair.tactic_revision,
           evidence: reject ? [] : pair.evidence ?? [],
-        }),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string | { message: string } };
-      if (!res.ok || !body.ok) {
-        setError(typeof body.error === "string" ? body.error : body.error?.message ?? "Save failed");
+      if (!result.ok) {
+        setError(result.error);
         return;
       }
       setOverall(next);
@@ -74,7 +71,7 @@ export function CoveragePairCard({
       </p>
       {pair.failure_reason ? <p className="text-[12px] text-destructive">{pair.failure_reason}</p> : null}
       {pair.pending_reason === "missing_provenance" ? <p className="text-[12px] text-destructive">Missing factual source provenance. Supporting coverage remains pending.</p> : null}
-      <p className="text-[11px] text-muted-foreground">{pair.evidence?.length ? `Cited evidence: ${pair.evidence.join(", ")}` : "No cited evidence attached to this decision."}</p>
+      <p className="text-[11px] text-muted-foreground">{pair.evidence?.length ? <>Cited evidence: {pair.evidence.map((id, index) => <span key={id}>{index ? ", " : ""}<Link className="underline" href={`/admin/accuracy/sources?workspace_id=${encodeURIComponent(workspaceId)}&block_id=${encodeURIComponent(id)}#${encodeURIComponent(id)}`}>{id}</Link></span>)}</> : "No cited evidence attached to this decision."}</p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Rationale (required)</span>
         <textarea
@@ -84,7 +81,7 @@ export function CoveragePairCard({
           placeholder="Why this coverage overall?"
         />
       </label>
-      {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-[12px] text-destructive">{error} Retry this decision; your rationale is retained.</p> : null}
       <div className="flex flex-wrap gap-2">
         {(["full", "partial", "limited", "not_relevant", "pending"] as const).map((value) => (
           <button

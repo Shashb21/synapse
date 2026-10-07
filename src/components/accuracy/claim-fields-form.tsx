@@ -187,7 +187,7 @@ export function ClaimFieldsForm({
                 className={selectClass}
               >
                 <option value="">—</option>
-                {TACTIC_STATUSES.map((status) => (
+                {[...TACTIC_STATUSES, "unknown"].map((status) => (
                   <option key={status} value={status}>
                     {status}
                   </option>

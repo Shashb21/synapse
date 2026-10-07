@@ -122,3 +122,5 @@ Scaffold JSON under each pack’s `gold/` — populate statements from parse blo
 - Workshop v1: `/accuracy/workshop` (facilitator-tag boards + rationale-gated actions)
 
 *Analysis generated after reference upload — Sep 23, 2026.*
+
+The existing Accuracy review flow, including structured evidence, completeness, confirmed split/rollback and S8 working decisions, is documented in [Accuracy stage completion workflow](accuracy-stage-completion-workflow.md).

@@ -12,6 +12,9 @@ import {
   type TacticOption,
 } from "@/components/accuracy/claim-fields-form";
 import { rationaleError, sendJson } from "@/components/accuracy/claim-api";
+import { StructuredClaimFacts } from "./claim-evidence";
+import type { GapStructuredFields, TacticStructuredFields } from "@/accuracy/domain/structured-fields";
+import { ClaimSplitControls } from "./claim-split-controls";
 
 export type LedgerClaimCardModel = {
   id: string;
@@ -22,6 +25,10 @@ export type LedgerClaimCardModel = {
   source_badge: string;
   validation_rationale: string | null;
   computed_status?: string | null;
+  effective_status?: string;
+  override_stale?: boolean;
+  validation_freshness?: string;
+  structured?: GapStructuredFields | TacticStructuredFields;
   external_id?: string | null;
   chapter_label?: string | null;
   si_label?: string | null;
@@ -40,13 +47,15 @@ export type LedgerClaimCardModel = {
 };
 
 function validationLabel(claim: LedgerClaimCardModel): string {
+  if (claim.validation_freshness === "stale") return "Stale validation";
+  if (claim.validated && claim.validation_freshness === "unknown") return "Validation unknown";
   if (claim.validated) return "Validated";
   if (claim.status === "rejected") return "Rejected";
   return "Draft";
 }
 
 function validationTone(claim: LedgerClaimCardModel): string {
-  if (claim.validated) return "text-[var(--known-foreground)]";
+  if (claim.validated && (!claim.validation_freshness || claim.validation_freshness === "current")) return "text-[var(--known-foreground)]";
   if (claim.status === "rejected") return "text-destructive";
   return "text-[var(--unknown-foreground)]";
 }
@@ -221,6 +230,10 @@ export function LedgerClaimCard({
         ) : null}
         <span className="text-[11px] text-muted-foreground">{claim.id}</span>
       </div>
+      {claim.validation_freshness ? <p className="mt-2 text-[11px] text-muted-foreground">Validation: {claim.validation_freshness}</p> : null}
+      {claim.effective_status ? <p className="text-[11px] text-muted-foreground">Computed: {claim.computed_status} · Effective: {claim.effective_status}{claim.override_stale ? " · stale override — review before downstream work" : ""}</p> : null}
+      {claim.structured ? <StructuredClaimFacts workspaceId={workspaceId} fields={claim.structured} /> : null}
+      {claim.claim_type === "gap" && claim.computed_status === "partial" && claim.validation_freshness === "current" ? <ClaimSplitControls workspaceId={workspaceId} gapId={claim.id} /> : null}
       {claim.validation_rationale ? (
         <p className="mt-2 text-[11px] text-muted-foreground">
           Last rationale: {claim.validation_rationale}
@@ -400,7 +413,7 @@ export function LedgerClaimCard({
         </div>
       ) : null}
 
-      {!claim.validated || claim.status === "rejected" ? (
+      {!claim.validated || (claim.validation_freshness && claim.validation_freshness !== "current") || claim.status === "rejected" ? (
         <div className="mt-3 grid gap-2">
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Rationale (required)

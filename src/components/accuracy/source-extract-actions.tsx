@@ -41,11 +41,13 @@ export function SourceExtractActions({
   sourceFileId,
   blockCount,
   gate,
+  checkpoint,
 }: {
   workspaceId: string;
   sourceFileId: string;
   blockCount: number;
   gate: LiveExtractGate;
+  checkpoint?: { progress: SourceProgress; kinds: Array<"need" | "inventory">; stale: boolean } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -55,6 +57,9 @@ export function SourceExtractActions({
   const [reviewRuns, setReviewRuns] = useState<Array<{ run_id: string; call_kind: string }>>([]);
   const [retry, setRetry] = useState<{ cursor: string; kinds: Array<"need" | "inventory"> } | null>(null);
   const extractReady = gate.ready;
+  const savedRetry = checkpoint && !checkpoint.stale && checkpoint.progress.next_cursor && checkpoint.kinds.length
+    ? { cursor: checkpoint.progress.next_cursor, kinds: checkpoint.kinds } : null;
+  const activeRetry = retry ?? savedRetry;
 
   function runExtract(kinds: Array<"need" | "inventory">, cursor?: string) {
     setRetry(null);
@@ -63,6 +68,7 @@ export function SourceExtractActions({
     setSummary(null);
     setReviewRuns([]);
     startTransition(async () => {
+      try {
       const res = await fetch("/api/accuracy/extract", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -115,6 +121,7 @@ export function SourceExtractActions({
         : via;
       setSummary(`Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
+      } catch { setError("Extract request failed; retry extraction or continue manual work on the Ledger."); }
     });
   }
 
@@ -128,6 +135,13 @@ export function SourceExtractActions({
 
   return (
     <div className="mt-2 grid gap-1">
+      {checkpoint ? <div className="text-[11px] text-muted-foreground" role="status">
+        <p>Source progress: {checkpoint.progress.processed_units}/{checkpoint.progress.expected_units} units · {checkpoint.progress.failed_units} failed · Full source: {checkpoint.progress.full_source_complete ? "complete" : "incomplete"}{checkpoint.stale ? " · stale source — start a new extraction" : ""}</p>
+        <details><summary>Extraction page attempts and cursor</summary>
+          <p>Cursor: {checkpoint.progress.next_cursor ?? "none"} · Scope: {checkpoint.progress.selection_scope}</p>
+          <ul>{checkpoint.progress.pages.map(page => <li key={page.id}>Page {page.index + 1}: {Object.entries(page.attempts).map(([kind, attempt]) => `${kind}: ${attempt.state}${attempt.error ? ` (${attempt.error})` : ""}`).join(" · ")}</li>)}</ul>
+        </details>
+      </div> : null}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -160,7 +174,7 @@ export function SourceExtractActions({
           Ledger →
         </Link>
       </div>
-      {retry ? <button type="button" disabled={pending || !extractReady} onClick={() => runExtract(retry.kinds, retry.cursor)}
+      {activeRetry ? <button type="button" disabled={pending || !extractReady} onClick={() => runExtract(activeRetry.kinds, activeRetry.cursor)}
         className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40">
         Retry remaining pages
       </button> : null}

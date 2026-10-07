@@ -28,9 +28,13 @@ function originLabel(p: BlockProvenanceMeta | undefined): string {
 export function ParseBlockPreview({
   blocks,
   edit,
+  openBlockId,
+  openSource = false,
 }: {
   blocks: PreviewBlock[];
   edit?: ParseBlockEditContext;
+  openBlockId?: string;
+  openSource?: boolean;
 }) {
   const kindOptions = (edit?.kinds ?? []).map((k) => ({ value: k, label: k }));
   const addFirst = edit ? (
@@ -61,7 +65,7 @@ export function ParseBlockPreview({
 
   const humanCount = blocks.filter((b) => b.provenance?.human).length;
   return (
-    <details className="mt-2 border border-border/70 bg-background/40 p-2" data-testid="parse-block-preview">
+    <details open={openSource || Boolean(openBlockId && blocks.some(block => block.id === openBlockId))} className="mt-2 border border-border/70 bg-background/40 p-2" data-testid="parse-block-preview">
       <summary className="cursor-pointer text-[12px] text-foreground">
         Preview {blocks.length} parse block{blocks.length === 1 ? "" : "s"} (verbatim)
         {humanCount ? ` · ${humanCount} human` : ""}
@@ -75,6 +79,7 @@ export function ParseBlockPreview({
         {blocks.map((block, index) => (
           <li
             key={block.id}
+            id={block.id}
             className="border border-border/60 bg-card p-2 rounded-lg"
             data-testid="parse-block-item"
             data-block-id={block.id}

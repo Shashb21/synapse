@@ -29,7 +29,7 @@ function day(value: unknown): string {
   return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : "";
 }
 
-const LIFECYCLES = new Set(["completed", "ongoing", "planned", "proposed", "cancelled"]);
+const LIFECYCLES = new Set(["completed", "ongoing", "planned", "proposed", "cancelled", "unknown"]);
 
 export function claimFieldSnapshot(claim: {
   statement: string;

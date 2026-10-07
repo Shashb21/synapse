@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fillNameIfAsked } from "../support/session";
+import { fillNameIfAsked, freshWorkspace } from "../support/session";
 import {
   consolidate,
   expectRouteIsHonest,
@@ -8,6 +8,7 @@ import {
   runRecord,
   runStage,
   seedMapped,
+  iegpAction,
 } from "../support/synapse";
 import { openInventoryRow } from "../support/inventory";
 
@@ -31,9 +32,7 @@ type SplitOutput = {
 test.describe.configure({ mode: "serial" });
 
 test.describe("S6 partial gap split", () => {
-  test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
-  });
+  freshWorkspace({ name: "S6 current human coverage", seed: seedConfirmedPartial });
 
   test("a partially addressed gap exists and must be resolved before Prioritize", async ({ page, request }) => {
     const partial = await firstPartialGap(request);
@@ -110,7 +109,7 @@ test.describe("S6 partial gap split", () => {
     const partial = await firstPartialGap(request);
     if (!partial) {
       // Every partial has been resolved by the split above; re-seed one to score.
-      await seedMapped(request);
+      await seedConfirmedPartial(request);
     }
     const response = await request.post("/api/modules/evals", {
       headers: { "content-type": "application/json" },
@@ -157,3 +156,18 @@ test.describe("S6 partial gap split", () => {
     expect(run.summary).toMatch(/Split .* into an addressed slice and an open leftover/);
   });
 });
+
+/** Model mapping is a draft; only an explicit human decision supplies current Partial. */
+async function seedConfirmedPartial(request: import("@playwright/test").APIRequestContext) {
+  const seeded = await seedMapped(request);
+  expect((await consolidate(request)).unresolved_partials).toHaveLength(0);
+  const committed = (seeded.mapping.output as { committed: { gap_id: string; tactic_ids: string[] }[] }).committed.find(row => row.tactic_ids.length);
+  expect(committed, "fixture must have a mapped source tactic").toBeTruthy();
+  await iegpAction(request, { action: "lock_tactic", tactic_id: committed!.tactic_ids[0], status: "planned", rationale: "Fixture reviewer confirms the committed activity is planned" });
+  await iegpAction(request, { action: "validate_gap", gap_id: committed!.gap_id, note: "Verified fixture source and current supporting coverage" });
+  // Replace this model-only assignment through the normal human mapping API;
+  // accepting an existing mapping alone does not supply a human coverage verdict.
+  await iegpAction(request, { action: "unassign_tactic", gap_id: committed!.gap_id, tactic_id: committed!.tactic_ids[0], rationale: "Review this draft mapping with an explicit coverage verdict" });
+  await iegpAction(request, { action: "assign_tactic", gap_id: committed!.gap_id, tactic_id: committed!.tactic_ids[0], overall: "partial", rationale: "Fixture reviewer confirms outcomes support and a remaining comparator question" });
+  expect((await consolidate(request)).unresolved_partials.some(row => row.gap_id === committed!.gap_id)).toBe(true);
+}

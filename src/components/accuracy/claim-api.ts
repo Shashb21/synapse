@@ -23,7 +23,8 @@ export async function sendJson(
     const failed = !res.ok || json.ok === false;
     return {
       ok: !failed,
-      error: failed ? String(json.error ?? `Request failed (${res.status})`) : null,
+      error: failed ? (json.error && typeof json.error === "object" && "message" in json.error
+        ? String(json.error.message) : String(json.error ?? `Request failed (${res.status})`)) : null,
       json,
     };
   } catch (error) {

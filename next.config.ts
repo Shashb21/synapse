@@ -22,6 +22,8 @@ export const ADMIN_REDIRECTS: { source: string; destination: string }[] = [
 ];
 
 const nextConfig: NextConfig = {
+  // The provider-fixture browser journey runs a second dev server with its own build lock.
+  distDir: process.env.E2E_NEXT_DIST_DIR || ".next",
   serverExternalPackages: ["mammoth", "xlsx", "jszip", "docx"],
   experimental: {
     // forbidden() renders the Owner only page (403) for /admin.

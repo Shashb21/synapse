@@ -1,6 +1,6 @@
 # KAN-83: complete existing extraction, assessment, split, and prioritization stages
 
-Status: written design for user review; no implementation approved or performed.
+Status: spec and implementation plan approved by the user on 2026-10-07. Tasks 1–7 have independent task reports/reviews; Task 8 workflow integration and scoped verification are complete in the isolated worker. Controller review, merged-SHA verification, publication and Jira completion remain pending. See the SDD Task 8 report and [workflow guide](../../accuracy-stage-completion-workflow.md).
 
 Source baseline: freshly fetched `github/main`, commit `3eb28c1`, inspected in `/private/tmp/synapse-stage-review-20261007`. The controller confirmed this matches main. Jira dependency KAN-17 is still To Do and owns retiring the legacy priority path.
 
@@ -8,7 +8,7 @@ Source baseline: freshly fetched `github/main`, commit `3eb28c1`, inspected in `
 
 Complete the existing workflow so a reviewer can see source-backed structured gaps and inventory tactics, inspect every eligible gap–tactic assessment, derive consistent status, apply a validated partial split, and prioritize validated open gaps with the existing configurable S8 model. “Source-backed” means each claimed fact has a traceable quotation or reference to the material that supports it. Unknown information remains explicitly unknown.
 
-This changes stage contracts and persistence boundaries, so it is architectural work. This document is a design, not an implementation plan. Written-spec approval permits preparing the implementation plan; implementation requires its review and an execution-method selection under the brainstorming workflow.
+This changes stage contracts and persistence boundaries, so it is architectural work. This approved design is executed through the reviewed implementation plan and isolated task workers. Task reports record the implemented interfaces and verification; whole-branch integration remains a controller responsibility.
 
 KAN-83 reuses existing UI, source matching, validation, and history owners. It does not redesign their screens, replace source matching, implement a new history product, or retire legacy priorities. KAN-17 remains a dependency for retirement, not a reason to postpone reuse of S8 scoring.
 

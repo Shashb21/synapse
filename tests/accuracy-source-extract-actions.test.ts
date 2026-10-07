@@ -45,3 +45,17 @@ it("shows saved incomplete pages and retries with their source cursor", async ()
   expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ workspace_id: "ws", source_file_id: "source", cursor: "page-cursor", kinds: ["need", "inventory"] });
   expect(host.textContent).toContain("Extracted 2 gap(s)");
 });
+it("reports request failure and leaves extraction available for a retry", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("Network failed"); }));
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1, gate: { ready: true, stub: true, connect_path: "/admin/control" } })));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.textContent).toContain("Extract request failed");
+  expect(host.querySelector("button")!.disabled).toBe(false);
+});
+it("restores a saved incomplete cursor on reload and distinguishes full-source completeness", async () => {
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1,
+    gate: { ready: true, stub: true, connect_path: "/admin/control" }, checkpoint: { progress: { complete: false, full_source_complete: false, next_cursor: "saved", processed_units: 1, expected_units: 2, failed_units: 1, pages: [] } as never, kinds: ["need", "inventory"], stale: false } })));
+  expect(host.textContent).toContain("Source progress: 1/2");
+  expect(host.textContent).toContain("Full source: incomplete");
+  expect([...host.querySelectorAll("button")].some(button => button.textContent === "Retry remaining pages")).toBe(true);
+});

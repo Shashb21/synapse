@@ -6,10 +6,12 @@ import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
 import {
   gapsEligibleForIdeation,
-  resolveGapStatus,
   resolvePriorityBand,
 } from "@/accuracy/domain/iegp-semantics";
-import { claimMetadata, listClaims } from "@/accuracy/store/claim-store";
+import { claimMetadata, isActiveLedgerClaim, listClaims } from "@/accuracy/store/claim-store";
+import { claimValidationFreshness } from "@/accuracy/domain/structured-fields";
+import { listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { asTacticLifecycle, deriveWorkspaceGapStatuses, gapStatusSchema, type GapStatus } from "@/accuracy/modules/status-derive/engine";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { getWorkspace } from "@/accuracy/store/tenant";
 import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
@@ -30,6 +32,7 @@ export default async function AccuracyPlanPage({
   const { workspace_id: workspaceId = "" } = await searchParams;
   let active: Awaited<ReturnType<typeof getWorkspace>> = null;
   let gaps: Awaited<ReturnType<typeof listClaims>> = [];
+  let statuses = new Map<string, GapStatus>();
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
@@ -38,7 +41,15 @@ export default async function AccuracyPlanPage({
   try {
     if (workspaceId) active = await getWorkspace(workspaceId);
     if (active) {
-      gaps = await listClaims(workspaceId, { claim_type: "gap", limit: 200 });
+      const claims = await listClaims(workspaceId, { limit: 2147483647 });
+      gaps = claims.filter(claim => claim.claim_type === "gap" && isActiveLedgerClaim(claim));
+      const coverages = await listCoverageJoins(workspaceId, { effective: true });
+      statuses = new Map(deriveWorkspaceGapStatuses({
+        gap_ids: gaps.map(gap => gap.id), coverages,
+        tactics: claims.filter(claim => claim.claim_type === "tactic" && isActiveLedgerClaim(claim)).map(claim => ({ id: claim.id,
+          status: asTacticLifecycle(claimMetadata(claim).tactic_status) ?? asTacticLifecycle(claim.status) ?? "unknown" })),
+        overrides: Object.fromEntries(gaps.map(gap => [gap.id, gapStatusSchema.safeParse(claimMetadata(gap).status_override?.status).data ?? null])),
+      }).map(row => [row.gap_id, row.status]));
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
@@ -54,15 +65,15 @@ export default async function AccuracyPlanPage({
       return {
         id: gap.id,
         priority_band: resolvePriorityBand(meta.priority ?? meta.priority_band),
-        status: resolveGapStatus(gap.status),
-        validated: gap.validated,
+        status: statuses.get(gap.id) ?? "open",
+        validated: claimValidationFreshness(gap) === "current",
       };
     }),
   ).length;
 
   return (
     <AccuracyAppShell active="plan" planLabel={workspacePlanLabel(active)}>
-      <PageIntro kicker="Prioritize · H / M / L bands" title="Plan">
+      <PageIntro kicker="Prioritize · High / Medium / Low / Defer" title="Plan">
         {aiOn
           ? "Set priority bands on evidence gaps. Validated high-priority open gaps can run live LLM ideation — origin ideated, status proposed until you validate. Inventory tactics stay on extract."
           : "Set priority bands on evidence gaps. AI is off: for validated high-priority open gaps, write proposed tactics by hand — status proposed until you validate."}
@@ -125,8 +136,8 @@ export default async function AccuracyPlanPage({
                     claimId={gap.id}
                     statement={gap.statement}
                     priority={priority}
-                    validated={gap.validated}
-                    status={gap.status}
+                    validated={claimValidationFreshness(gap) === "current"}
+                    status={statuses.get(gap.id) ?? "open"}
                   />
                 );
               })}

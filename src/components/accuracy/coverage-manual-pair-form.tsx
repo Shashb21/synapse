@@ -90,7 +90,7 @@ export function CoverageManualPairForm({
         <form onSubmit={submit} className="grid gap-2" data-testid="coverage-manual-pair">
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Gap
-            <select value={gapId} onChange={(e) => setGapId(e.target.value)} className={selectClass}>
+            <select aria-label="Gap" value={gapId} onChange={(e) => setGapId(e.target.value)} className={selectClass}>
               <option value="">Choose a gap…</option>
               {gaps.map((row) => (
                 <option key={row.id} value={row.id}>
@@ -102,6 +102,7 @@ export function CoverageManualPairForm({
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Tactic
             <select
+              aria-label="Tactic"
               value={tacticId}
               onChange={(e) => setTacticId(e.target.value)}
               className={selectClass}
@@ -129,6 +130,7 @@ export function CoverageManualPairForm({
             ))}
           </fieldset>
           <Textarea
+            aria-label="Coverage decision rationale (required)"
             value={rationale}
             onChange={(e) => setRationale(e.target.value)}
             rows={2}
