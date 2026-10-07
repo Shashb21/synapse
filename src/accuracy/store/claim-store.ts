@@ -1,8 +1,11 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
+import { claimFactualRevision, readStructuredFields, structuredProvenance, validateFieldEvidence,
+  gapStructuredFieldsSchema, tacticStructuredFieldsSchema, type GapStructuredFields, type TacticStructuredFields } from "@/accuracy/domain/structured-fields";
+import { provenanceSpanSchema } from "./quote-validator";
 
 export type AccuracyClaimType = "gap" | "tactic";
 
@@ -14,9 +17,15 @@ export type ClaimValidationMeta = {
   at: string;
   by: string;
   by_function: string;
+  factual_revision?: string;
+  copied_from_factual_revision?: string;
+  stale?: boolean;
+  stale_at?: string;
 };
 
 export type AccuracyClaimMetadata = {
+  structured?: GapStructuredFields | TacticStructuredFields;
+  factual_revision?: string;
   source_badge?: string | null;
   origin?: string | null;
   start?: string | null;
@@ -45,6 +54,8 @@ export type AccuracyClaimMetadata = {
     at?: string;
     by?: string;
     by_function?: string;
+    stale?: boolean;
+    stale_at?: string;
   } | null;
   /** Fields a human set by hand. AI re-runs never overwrite these. */
   human_locked?: string[];
@@ -58,6 +69,53 @@ export type AccuracyClaimMetadata = {
   pre_merge_status?: string | null;
   [key: string]: unknown;
 };
+
+export function requireClaimActor(actor: Actor): void {
+  if (!actor.name?.trim() || !actor.function?.trim()) throw new Error("An authenticated actor is required.");
+}
+
+/** Called only on a factual write; reads never revalidate legacy decisions. */
+export function invalidateClaimFacts(previous: AccuracyClaimRow, next: AccuracyClaimRow, at: string): AccuracyClaimRow {
+  const revision = claimFactualRevision(next);
+  if (claimFactualRevision(previous) === revision) return next;
+  const meta = claimMetadata(next);
+  const priorValidation = claimMetadata(previous).validation;
+  return { ...next, validated: false, status: next.status === "validated" ? "draft" : next.status,
+    metadata: { ...meta, factual_revision: revision, factual_validation_stale: true,
+      previously_validated: previous.validated || claimMetadata(previous).previously_validated === true,
+      ...(priorValidation ? { validation: { ...priorValidation, stale: true, stale_at: at } } : {}),
+      ...(meta.status_override ? { status_override: { ...meta.status_override, stale: true, stale_at: at } } : {}),
+    } };
+}
+
+/** Invalidate only decisions involving this edited claim, retaining rationale and prior metadata. */
+export async function invalidateDependentClaimValidation(workspace_id: string, claim_id: string, at: string, database = accuracyDb()): Promise<void> {
+  const joins = await database.select().from(t.accuracyCoverageJoins).where(and(
+    eq(t.accuracyCoverageJoins.workspace_id, workspace_id),
+    or(eq(t.accuracyCoverageJoins.gap_id, claim_id), eq(t.accuracyCoverageJoins.tactic_id, claim_id))));
+  for (const join of joins) {
+    await database.update(t.accuracyCoverageJoins).set({ validated: false,
+      dimensions: { ...(join.dimensions as Record<string, unknown>), validation_stale: true,
+        stale_at: at, stale_claim_id: claim_id,
+        prior_validated: (join.dimensions as Record<string, unknown>)?.prior_validated ?? join.validated } }).where(and(
+      eq(t.accuracyCoverageJoins.workspace_id, workspace_id), eq(t.accuracyCoverageJoins.id, join.id)));
+  }
+}
+
+/** Index new structured claims in the existing provenance table so parse edits keep their evidence intact. */
+export async function syncClaimProvenance(claim: AccuracyClaimRow, database = accuracyDb()): Promise<void> {
+  if (!claimMetadata(claim).structured) return;
+  const meta = claimMetadata(claim);
+  const spans = [...(Array.isArray(meta.provenance) ? meta.provenance.flatMap(raw => {
+    const span = provenanceSpanSchema.safeParse(raw);
+    return span.success ? [span.data] : [];
+  }) : []), ...structuredProvenance(readStructuredFields(claim))];
+  const unique = new Map(spans.map(span => [JSON.stringify([span.source_file_id, span.block_id, span.quote]), span]));
+  await database.delete(t.accuracyProvenance).where(and(eq(t.accuracyProvenance.workspace_id, claim.workspace_id),
+    eq(t.accuracyProvenance.claim_id, claim.id)));
+  for (const span of unique.values()) await database.insert(t.accuracyProvenance).values({ id: newId("prov"),
+    workspace_id: claim.workspace_id, claim_id: claim.id, source_file_id: span.source_file_id, block_id: span.block_id, quote: span.quote });
+}
 
 export type AccuracyClaimRow = typeof t.accuracyClaims.$inferSelect;
 
@@ -123,8 +181,11 @@ export async function insertClaim(args: {
     created_at: now,
     updated_at: now,
   };
-  await accuracyDb().insert(t.accuracyClaims).values(row);
-  return row as AccuracyClaimRow;
+  return withAccuracyTransaction(async () => {
+      await accuracyDb().insert(t.accuracyClaims).values(row);
+      await syncClaimProvenance(row as AccuracyClaimRow);
+      return row as AccuracyClaimRow;
+  });
 }
 
 export async function listClaims(
@@ -193,59 +254,82 @@ export async function applyClaimValidation(args: {
   actor: Actor;
 }): Promise<{ updated: number; claims: AccuracyClaimRow[] }> {
   const rationale = requireValidationRationale(args.rationale);
+  requireClaimActor(args.actor);
   if (args.claim_ids.length === 0) {
     throw new Error("At least one claim_id is required.");
   }
 
   await ensureAccuracySchema();
-  const existing = await getClaimsByIds(args.workspace_id, args.claim_ids);
-  if (existing.length !== args.claim_ids.length) {
-    const found = new Set(existing.map((row) => row.id));
-    const missing = args.claim_ids.filter((id) => !found.has(id));
-    throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
-  }
+  return withAccuracyTransaction(async () => {
+    const existing = await accuracyDb().select().from(t.accuracyClaims).where(and(
+      eq(t.accuracyClaims.workspace_id, args.workspace_id), inArray(t.accuracyClaims.id, args.claim_ids))).for("update");
+    if (existing.length !== args.claim_ids.length) {
+      const found = new Set(existing.map((row) => row.id));
+      const missing = args.claim_ids.filter((id) => !found.has(id));
+      throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
+    }
 
-  const now = nowIso();
-  const validated = args.action === "validate";
-  const nextStatus = args.action === "validate" ? "validated" : "rejected";
-  const updated: AccuracyClaimRow[] = [];
+    const now = nowIso();
+    const validated = args.action === "validate";
+    const nextStatus = args.action === "validate" ? "validated" : "rejected";
+    const updated: AccuracyClaimRow[] = [];
 
-  for (const claim of existing) {
-    const prevMeta = (claim.metadata ?? {}) as AccuracyClaimMetadata;
-    const metadata: AccuracyClaimMetadata = {
-      ...prevMeta,
-      validation: {
-        action: args.action,
-        rationale,
-        at: now,
-        by: args.actor.name,
-        by_function: args.actor.function,
-      },
-    };
-    await accuracyDb()
-      .update(t.accuracyClaims)
-      .set({
+    for (const claim of existing) {
+      const prevMeta = (claim.metadata ?? {}) as AccuracyClaimMetadata;
+      if (validated && prevMeta.structured) {
+        const structured = (claim.claim_type === "tactic" ? tacticStructuredFieldsSchema : gapStructuredFieldsSchema).parse(prevMeta.structured);
+        const { readParseBlocksByIds } = await import("./parse-store");
+        const { listSourceFiles } = await import("./source-store");
+        const spans = structuredProvenance(structured);
+        const blocks = await readParseBlocksByIds(args.workspace_id, [...new Set(spans.map(span => span.block_id))]);
+        const sources = await listSourceFiles(args.workspace_id);
+        const error = validateFieldEvidence({ structured, provenance: [], source_file_id: claim.source_file_id ?? "manual", blocks,
+          source_file_ids: new Set(sources.map(source => source.id)), resolved_source_ids: new Set(sources.map(source => source.id)) });
+        if (error) throw new Error(`${error.field}: ${error.reason}`);
+      }
+      const lifecycle = ["completed", "ongoing", "planned", "proposed", "cancelled", "unknown"].includes(claim.status) ? claim.status : "unknown";
+      const normalized = claim.claim_type === "tactic" && !prevMeta.tactic_status ? { ...prevMeta, tactic_status: lifecycle } : prevMeta;
+      const factual_revision = claimFactualRevision({ ...claim, metadata: normalized });
+      const metadata: AccuracyClaimMetadata = {
+        ...normalized,
+        factual_revision,
+        validation_history: [...(Array.isArray(prevMeta.validation_history) ? prevMeta.validation_history : []), ...(prevMeta.validation ? [prevMeta.validation] : [])],
+        validation: {
+          factual_revision,
+          stale: false,
+          action: args.action,
+          rationale,
+          at: now,
+          by: args.actor.name,
+          by_function: args.actor.function,
+        },
+        factual_validation_stale: false,
+      };
+      await accuracyDb()
+        .update(t.accuracyClaims)
+        .set({
+          validated,
+          status: nextStatus,
+          metadata,
+          updated_at: now,
+        })
+        .where(
+          and(
+            eq(t.accuracyClaims.id, claim.id),
+            eq(t.accuracyClaims.workspace_id, args.workspace_id),
+          ),
+        );
+      updated.push({
+        ...claim,
         validated,
         status: nextStatus,
         metadata,
         updated_at: now,
-      })
-      .where(
-        and(
-          eq(t.accuracyClaims.id, claim.id),
-          eq(t.accuracyClaims.workspace_id, args.workspace_id),
-        ),
-      );
-    updated.push({
-      ...claim,
-      validated,
-      status: nextStatus,
-      metadata,
-      updated_at: now,
-    });
-  }
+      });
+    }
 
-  return { updated: updated.length, claims: updated };
+    return { updated: updated.length, claims: updated };
+  });
 }
 
 export async function getClaim(
@@ -261,20 +345,7 @@ export async function updateClaimMetadata(args: {
   claim_id: string;
   metadata: AccuracyClaimMetadata;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const now = nowIso();
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({ metadata: args.metadata as Record<string, unknown>, updated_at: now })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, metadata: args.metadata as Record<string, unknown>, updated_at: now };
+  return persistClaimPatch({ workspace_id: args.workspace_id, claim_id: args.claim_id, metadata: args.metadata });
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
@@ -290,28 +361,30 @@ export async function persistClaimPatch(args: {
   workspace_id: string;
   claim_id: string;
   status?: string;
+  statement?: string;
   metadata?: AccuracyClaimMetadata;
+  at?: string;
+  expected_factual_revision?: string;
 }): Promise<AccuracyClaimRow> {
-  await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  const now = nowIso();
-  const metadata = args.metadata ?? ((existing.metadata ?? {}) as AccuracyClaimMetadata);
-  const status = args.status ?? existing.status;
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({
-      status,
-      metadata: metadata as Record<string, unknown>,
-      updated_at: now,
-    })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim_id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return { ...existing, status, metadata: metadata as Record<string, unknown>, updated_at: now };
+  return withAccuracyTransaction(async () => {
+      const [existing] = await accuracyDb().select().from(t.accuracyClaims).where(and(
+        eq(t.accuracyClaims.id, args.claim_id), eq(t.accuracyClaims.workspace_id, args.workspace_id))).for("update");
+      if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+      if (args.expected_factual_revision !== undefined && claimFactualRevision(existing) !== args.expected_factual_revision) {
+        throw new Error("Claim factual inputs changed; reload before saving.");
+      }
+      const at = args.at ?? nowIso();
+      const next = invalidateClaimFacts(existing, { ...existing, statement: args.statement ?? existing.statement,
+        metadata: args.metadata ?? existing.metadata, status: args.status ?? existing.status, updated_at: at }, at);
+      await accuracyDb().update(t.accuracyClaims).set({ statement: next.statement, status: next.status,
+        validated: next.validated, metadata: next.metadata, updated_at: at }).where(and(
+        eq(t.accuracyClaims.id, args.claim_id), eq(t.accuracyClaims.workspace_id, args.workspace_id)));
+      if (claimFactualRevision(existing) !== claimFactualRevision(next)) {
+        await invalidateDependentClaimValidation(args.workspace_id, args.claim_id, at);
+        await syncClaimProvenance(next);
+      }
+      return next;
+  });
 }
 
 function metaString(value: unknown): string | null {
@@ -333,6 +406,9 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
       return {
         id: row.id,
         validated: row.validated,
+        /** Keep a previously reviewed human schedule visible while its facts await revalidation. */
+        schedule_visible: !row.validated && meta.previously_validated === true
+          && meta.factual_validation_stale === true && (locked.includes("start") || locked.includes("end")),
         /** Human-entered dates are pinned: gantt continuity never shifts them. */
         dates_locked: locked.includes("start") || locked.includes("end"),
         start: metaString(meta.start),

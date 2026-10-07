@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { getClaimsByIds, persistClaimPatch } from "./claim-store";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { ParseBlock } from "./quote-validator";
@@ -447,6 +448,28 @@ async function dependentsFor(
   return rows.map((row) => ({ id: row.claim_id, quote: row.quote, block_id: row.block_id, provenance_id: row.id }));
 }
 
+/** The provenance index and current structured/record spans must share the same block identity. */
+async function remapClaimEvidence(workspace_id: string, claim_ids: string[], from: string, to: string, quotes?: Set<string>) {
+  for (const claim of await getClaimsByIds(workspace_id, [...new Set(claim_ids)])) {
+    const meta = (claim.metadata ?? {}) as Record<string, unknown>;
+    if (!meta.structured) continue; // Legacy index-only claims keep their existing policy.
+    const remap = (value: unknown): unknown => {
+      if (!value || typeof value !== "object") return value;
+      if (Array.isArray(value)) return value.map(remap);
+      const record = value as Record<string, unknown>;
+      if (record.block_id === from && typeof record.quote === "string" && (!quotes || quotes.has(record.quote))) {
+        const span = { ...record };
+        delete span.char_start;
+        delete span.char_end;
+        return { ...span, block_id: to };
+      }
+      return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, remap(entry)]));
+    };
+    await persistClaimPatch({ workspace_id, claim_id: claim.id,
+      metadata: { ...meta, provenance: remap(meta.provenance), structured: remap(meta.structured) } as Parameters<typeof persistClaimPatch>[0]["metadata"] });
+  }
+}
+
 /* ------------------------------------------------------------------------- */
 /* Human edits                                                                */
 /* ------------------------------------------------------------------------- */
@@ -603,43 +626,47 @@ export async function splitParseBlock(args: {
   rationale: string;
   actor: ParseEditActor;
 }) {
-  const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
-  const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
-  const deps = await dependentsFor(args.workspace_id, [block.id]);
-  const orphans = orphanedQuotes(deps, [first, second]);
-  if (orphans.length) throw new ProvenanceConflictError(orphans);
+  await ensureParseSchema();
+  return withAccuracyTransaction(async () => {
+    const rationale = requireEditRationale(args.rationale);
+    const block = await requireBlock(args.workspace_id, args.block_id);
+    const [first, second] = splitAtOffset(block.text, resolveSplitOffset(block.text, args));
+    const deps = await dependentsFor(args.workspace_id, [block.id]);
+    const orphans = orphanedQuotes(deps, [first, second]);
+    if (orphans.length) throw new ProvenanceConflictError(orphans);
 
-  const db = accuracyDb();
-  const secondId = `${block.source_file_id}-${newId("H")}`;
-  // Shift later blocks to make room right after the split block.
-  await db
-    .update(t.accuracyParseBlocks)
-    .set({ index: sql`${t.accuracyParseBlocks.index} + 1` })
-    .where(
-      and(
-        eq(t.accuracyParseBlocks.workspace_id, args.workspace_id),
-        eq(t.accuracyParseBlocks.source_file_id, block.source_file_id),
-        sql`${t.accuracyParseBlocks.index} > ${block.index}`,
-      ),
-    );
-  await db.update(t.accuracyParseBlocks).set({ text: first }).where(eq(t.accuracyParseBlocks.id, block.id));
-  await db.insert(t.accuracyParseBlocks).values({
-    id: secondId,
-    workspace_id: args.workspace_id,
-    source_file_id: block.source_file_id,
-    index: block.index + 1,
-    kind: block.kind,
-    heading: block.heading,
-    text: second,
-    parser: "human",
-    created_at: nowIso(),
+    const db = accuracyDb();
+    const secondId = `${block.source_file_id}-${newId("H")}`;
+    // Shift later blocks to make room right after the split block.
+    await db
+      .update(t.accuracyParseBlocks)
+      .set({ index: sql`${t.accuracyParseBlocks.index} + 1` })
+      .where(
+        and(
+          eq(t.accuracyParseBlocks.workspace_id, args.workspace_id),
+          eq(t.accuracyParseBlocks.source_file_id, block.source_file_id),
+          sql`${t.accuracyParseBlocks.index} > ${block.index}`,
+        ),
+      );
+    await db.update(t.accuracyParseBlocks).set({ text: first }).where(eq(t.accuracyParseBlocks.id, block.id));
+    await db.insert(t.accuracyParseBlocks).values({
+      id: secondId,
+      workspace_id: args.workspace_id,
+      source_file_id: block.source_file_id,
+      index: block.index + 1,
+      kind: block.kind,
+      heading: block.heading,
+      text: second,
+      parser: "human",
+      created_at: nowIso(),
   });
+  const moved = deps.filter(dep => !squashText(first).includes(squashText(dep.quote)));
   for (const dep of deps) {
     if (!squashText(first).includes(squashText(dep.quote))) {
       await db.update(t.accuracyProvenance).set({ block_id: secondId }).where(eq(t.accuracyProvenance.id, dep.provenance_id));
     }
   }
+  await remapClaimEvidence(args.workspace_id, moved.map(dep => dep.id), block.id, secondId, new Set(moved.map(dep => dep.quote)));
   await markHuman({ block, current_text: first, actor: args.actor });
   await markHuman({
     block: { ...block, id: secondId, text: second },
@@ -659,6 +686,7 @@ export async function splitParseBlock(args: {
     actor: args.actor,
   });
   return { first_id: block.id, second_id: secondId };
+  });
 }
 
 /**
@@ -673,42 +701,47 @@ export async function mergeParseBlocks(args: {
   rationale: string;
   actor: ParseEditActor;
 }) {
-  const rationale = requireEditRationale(args.rationale);
-  const block = await requireBlock(args.workspace_id, args.block_id);
-  let next: BlockRow | undefined;
-  if (args.next_block_id) {
-    next = await requireBlock(args.workspace_id, args.next_block_id);
-    if (next.source_file_id !== block.source_file_id) throw new Error("Only blocks of the same source can be merged.");
-  } else {
-    const rows = await readParseBlocks(args.workspace_id, block.source_file_id);
-    next = rows.find((row) => row.index > block.index);
-    if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
-  }
-  if (next.id === block.id) throw new Error("A block cannot be merged with itself.");
-  const merged = `${block.text}\n\n${next.text}`;
-  const db = accuracyDb();
-  await db.update(t.accuracyParseBlocks).set({ text: merged }).where(eq(t.accuracyParseBlocks.id, block.id));
-  await db
-    .update(t.accuracyProvenance)
-    .set({ block_id: block.id })
-    .where(and(eq(t.accuracyProvenance.workspace_id, args.workspace_id), eq(t.accuracyProvenance.block_id, next.id)));
-  await db.delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, next.id));
-  await markHuman({ block, current_text: merged, actor: args.actor });
-  // Tombstone the absorbed block so a re-parse does not bring it back as a duplicate.
-  await markHuman({ block: next, current_text: next.text, deleted: true, actor: args.actor });
-  await renumber(args.workspace_id, block.source_file_id);
-  await audit({
-    workspace_id: args.workspace_id,
-    source_file_id: block.source_file_id,
-    block_id: block.id,
-    action: "merge",
-    field: "text",
-    before: JSON.stringify({ [block.id]: block.text, [next.id]: next.text }),
-    after: merged,
-    rationale,
-    actor: args.actor,
+  await ensureParseSchema();
+  return withAccuracyTransaction(async () => {
+    const rationale = requireEditRationale(args.rationale);
+    const block = await requireBlock(args.workspace_id, args.block_id);
+    let next: BlockRow | undefined;
+    if (args.next_block_id) {
+      next = await requireBlock(args.workspace_id, args.next_block_id);
+      if (next.source_file_id !== block.source_file_id) throw new Error("Only blocks of the same source can be merged.");
+    } else {
+      const rows = await readParseBlocks(args.workspace_id, block.source_file_id);
+      next = rows.find((row) => row.index > block.index);
+      if (!next) throw new Error("This is the last block: there is nothing after it to merge.");
+    }
+    if (next.id === block.id) throw new Error("A block cannot be merged with itself.");
+    const deps = await dependentsFor(args.workspace_id, [next.id]);
+    const merged = `${block.text}\n\n${next.text}`;
+    const db = accuracyDb();
+    await db.update(t.accuracyParseBlocks).set({ text: merged }).where(eq(t.accuracyParseBlocks.id, block.id));
+    await db
+      .update(t.accuracyProvenance)
+      .set({ block_id: block.id })
+      .where(and(eq(t.accuracyProvenance.workspace_id, args.workspace_id), eq(t.accuracyProvenance.block_id, next.id)));
+    await remapClaimEvidence(args.workspace_id, deps.map(dep => dep.id), next.id, block.id);
+    await db.delete(t.accuracyParseBlocks).where(eq(t.accuracyParseBlocks.id, next.id));
+    await markHuman({ block, current_text: merged, actor: args.actor });
+    // Tombstone the absorbed block so a re-parse does not bring it back as a duplicate.
+    await markHuman({ block: next, current_text: next.text, deleted: true, actor: args.actor });
+    await renumber(args.workspace_id, block.source_file_id);
+    await audit({
+      workspace_id: args.workspace_id,
+      source_file_id: block.source_file_id,
+      block_id: block.id,
+      action: "merge",
+      field: "text",
+      before: JSON.stringify({ [block.id]: block.text, [next.id]: next.text }),
+      after: merged,
+      rationale,
+      actor: args.actor,
   });
   return { block_id: block.id, absorbed_id: next.id, text: merged };
+  });
 }
 
 /** Delete a block. Refused while any claim quotes it (the quote would be orphaned). */

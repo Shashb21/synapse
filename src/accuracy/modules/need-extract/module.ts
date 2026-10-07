@@ -11,12 +11,14 @@ import { NEED_PROPOSER_SYSTEM, needProposerUser } from "./prompts";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
 import { claimMetadata, listActiveSourceClaims } from "../../store/claim-store";
 import { inspectSnapshotCompleteness, type SnapshotItem } from "../completeness-audit/snapshot-inspector";
+import { emptyGapStructuredFields, gapStructuredFieldsSchema, rejectedCandidateSchema, validateFieldEvidence, structuredProvenance, type RejectedCandidate } from "../../domain/structured-fields";
 
 export const needGapSchema = z.object({
   id: z.string(),
   statement: z.string().min(1),
   external_id: z.string().nullable(),
   provenance: z.array(provenanceSpanSchema).min(1),
+  structured: gapStructuredFieldsSchema.default(() => emptyGapStructuredFields()),
 });
 
 export type NeedGap = z.infer<typeof needGapSchema>;
@@ -25,6 +27,7 @@ export const needExtractOutputSchema = z.object({
   workspace_id: z.string(),
   source_file_id: z.string(),
   gaps: z.array(needGapSchema),
+  rejected_candidates: z.array(rejectedCandidateSchema).optional(),
 });
 
 export type NeedExtractOutput = z.infer<typeof needExtractOutputSchema>;
@@ -33,10 +36,12 @@ const proposerGapSchema = z.object({
   statement: z.string(),
   external_id: z.string().nullable().optional(),
   provenance: z.array(provenanceSpanSchema).optional(),
+  structured: z.unknown().optional(),
 });
 
 type NeedDraft = {
-  gaps: z.infer<typeof proposerGapSchema>[];
+  gaps: (z.infer<typeof proposerGapSchema> & { candidate_index: number })[];
+  rejected_candidates?: RejectedCandidate[];
 };
 
 function critiqueDraft(draft: NeedDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[]; observationIssues: CriticIssue[] } {
@@ -66,7 +71,7 @@ function critiqueDraft(draft: NeedDraft, source_file_id: string, blocks: { id: s
       seen.add(key);
     }
   }
-  const checked = inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => gap.provenance ?? []), blocks });
+  const checked = inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => [...(gap.provenance ?? []), ...structuredProvenance(gap.structured)]), blocks });
   for (const finding of checked.findings) {
     observationIssues.push({ issue_id: `need:observed:${observationIssues.length}`,
       category: "quote_validity", code: finding.code, severity: "medium",
@@ -78,33 +83,34 @@ function critiqueDraft(draft: NeedDraft, source_file_id: string, blocks: { id: s
   return { score, issues, observationIssues };
 }
 
-function normalizeDraft(raw: unknown, source_file_id: string): NeedDraft {
-  const parsed = z.object({ gaps: z.array(proposerGapSchema).default([]) }).safeParse(raw);
-  if (!parsed.success) return { gaps: [] };
-  return {
-    gaps: parsed.data.gaps.map((g) => ({
-      ...g,
-      external_id: g.external_id ?? null,
-      provenance: (g.provenance ?? []).map((p) => ({
-        ...p,
-        source_file_id: p.source_file_id || source_file_id,
-      })),
-    })),
-  };
+function normalizeDraft(raw: unknown): NeedDraft {
+  const envelope = z.object({ gaps: z.array(z.unknown()) }).safeParse(raw);
+  if (!envelope.success) return { gaps: [], rejected_candidates: [{ index: 0, field: "response", reason: "malformed_response" }] };
+  const draft: NeedDraft = { gaps: [], rejected_candidates: [] };
+  for (const [index, candidate] of envelope.data.gaps.entries()) {
+    const parsed = proposerGapSchema.safeParse(candidate);
+    if (!parsed.success) draft.rejected_candidates!.push({ index, field: "candidate", reason: "invalid_candidate_shape" });
+    else draft.gaps.push({ ...parsed.data, candidate_index: index });
+  }
+  return draft;
 }
 
-function judgeDraft(draft: NeedDraft): NeedGap[] {
-  const out: NeedGap[] = [];
+function judgeDraft(draft: NeedDraft, source_file_id: string, blocks: Parameters<typeof validateFieldEvidence>[0]["blocks"]) {
+  const gaps: NeedGap[] = [];
+  const rejected_candidates = [...(draft.rejected_candidates ?? [])];
   for (const gap of draft.gaps) {
-    const parsed = needGapSchema.safeParse({
-      id: newId("gap"),
-      statement: gap.statement.trim(),
-      external_id: gap.external_id?.trim() || null,
-      provenance: gap.provenance ?? [],
-    });
-    if (parsed.success) out.push(parsed.data);
+    const structured = gap.structured === undefined ? emptyGapStructuredFields("not_stated")
+      : gap.structured && typeof gap.structured === "object"
+        ? { ...emptyGapStructuredFields("not_stated"), ...gap.structured } : gap.structured;
+    const parsed = needGapSchema.safeParse({ id: newId("gap"), statement: gap.statement.trim(),
+      external_id: gap.external_id?.trim() || null, provenance: gap.provenance ?? [], structured });
+    const error = parsed.success ? validateFieldEvidence({ structured: parsed.data.structured,
+      provenance: parsed.data.provenance, source_file_id, blocks })
+      : { field: gap.structured === undefined ? "candidate" : "structured", reason: "invalid_candidate_shape" };
+    if (error) rejected_candidates.push({ index: gap.candidate_index, ...error });
+    else if (parsed.success) gaps.push(parsed.data);
   }
-  return out;
+  return { gaps, rejected_candidates };
 }
 
 async function proposeNeeds(
@@ -133,7 +139,7 @@ async function proposeNeeds(
   if (round > 0 && prior && (!raw || (raw as { gaps?: unknown[] }).gaps?.length === 0)) {
     return prior;
   }
-  return normalizeDraft(raw, input.source_file_id);
+  return normalizeDraft(raw);
 }
 
 export const needExtractModule = agenticModule({
@@ -175,7 +181,7 @@ export const needExtractModule = agenticModule({
     const cycle = await runShallowAgenticCycle<NeedDraft>({
       run: ctx.run,
       onSnapshot: async (draft): Promise<ProductionSignals> => ({
-        quote_validity: inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => gap.provenance ?? []), blocks }).signals,
+        quote_validity: inspectQuoteSpans({ spans: draft.gaps.flatMap((gap) => [...(gap.provenance ?? []), ...structuredProvenance(gap.structured)]), blocks }).signals,
         invariant_failures: critiqueDraft(draft, input.source_file_id, blocks).issues.map((issue) => issue.claim),
         completeness: "not_checked",
       }),
@@ -204,16 +210,20 @@ export const needExtractModule = agenticModule({
     });
 
     ctx.run.note("agentic:trace", cycle.trace);
-    const gaps = stub ? [] : judgeDraft(cycle.final);
+    const { gaps, rejected_candidates } = stub ? { gaps: [], rejected_candidates: [] } : judgeDraft(cycle.final, input.source_file_id, blocks);
+    if (rejected_candidates.length) ctx.run.note("extract:rejected_candidates", rejected_candidates);
     return {
       output: {
         workspace_id: input.workspace_id,
         source_file_id: input.source_file_id,
         gaps,
+        ...(rejected_candidates.length ? { rejected_candidates } : {}),
       },
       summary: stub
         ? "Need extract (SYNAPSE_TEST_STUB_LLM — empty gaps)"
-        : `Need extract — ${gaps.length} gap(s)`,
+        : `Need extract — ${gaps.length} gap(s)${rejected_candidates.length ? ` · ${rejected_candidates.length} rejected candidate(s)` : ""}`,
     };
   },
 });
+
+needExtractModule.manifest.version = "0.2.0";

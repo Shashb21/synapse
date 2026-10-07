@@ -16,7 +16,7 @@ import {
   canonicalizeGanttSnapshot,
   hashGanttSnapshot,
 } from "@/accuracy/modules/gantt-project/snapshot-hash";
-import { insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
+import { applyClaimValidation, insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
@@ -244,6 +244,11 @@ describe("gantt save-final guard", () => {
       claim_id: tactic.id,
       metadata: { start: "2026-02-01", end: "2026-08-01" },
     });
+
+    await expect(saveFinalGanttPlan({ workspace_id, note: "Unreviewed changed dates",
+      actor: { name: "reviewer", function: "medical_affairs" } })).rejects.toThrow(/no activities|not validated/i);
+    await applyClaimValidation({ workspace_id, claim_ids: [tactic.id], action: "validate",
+      rationale: "Confirmed revised dates after readout review", actor: { name: "reviewer", function: "medical_affairs" } });
 
     const second = await saveFinalGanttPlan({
       workspace_id,

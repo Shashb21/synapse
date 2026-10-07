@@ -1,6 +1,7 @@
 /**
  * LLM prompt for the merge / dedupe equivalence judge (`merge_dedupe`).
  */
+import type { GapStructuredFields, TacticStructuredFields } from "@/accuracy/domain/structured-fields";
 
 export const MERGE_EQUIVALENCE_SYSTEM = `You are the dedupe judge for an Integrated Evidence Generation Plan (IEGP) evidence ledger.
 
@@ -17,6 +18,7 @@ export type EquivalencePromptSide = {
   statement: string;
   external_id: string | null;
   quotes: string[];
+  structured?: GapStructuredFields | TacticStructuredFields;
 };
 
 export function mergeEquivalenceUser(args: {
@@ -32,6 +34,7 @@ export function mergeEquivalenceUser(args: {
       `${label}: ${s.statement}`,
       s.external_id ? `${label} id: ${s.external_id}` : "",
       s.quotes.length ? `${label} quotes: ${s.quotes.map((q) => `"${q}"`).join(" · ")}` : "",
+      s.structured ? `${label} structured source facts: ${JSON.stringify(s.structured)}` : "",
     ]
       .filter(Boolean)
       .join("\n");

@@ -4,9 +4,10 @@ import { z } from "zod";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
 import { newId } from "@/modules/kernel/ids";
-import { isActiveLedgerClaim } from "./claim-store";
+import { isActiveLedgerClaim, invalidateClaimFacts, invalidateDependentClaimValidation, syncClaimProvenance } from "./claim-store";
 import { withHumanEdit } from "./claim-edit";
 import { claimToMergeCandidate } from "@/accuracy/modules/merge-dedupe/module";
+import { emptyGapStructuredFields, emptyTacticStructuredFields } from "@/accuracy/domain/structured-fields";
 import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
@@ -264,14 +265,16 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
           if (!input.confirmed_distinct) throw new OmissionActionError(409, `Ambiguous claim ${row.id}; confirm this is a distinct item before adding.`);
         }
         claim_id = newId(issue.item_kind === "gap" ? "gap" : "tac");
-        await tx.insert(t.accuracyClaims).values({ id: claim_id, workspace_id: input.workspace_id, claim_type: issue.item_kind,
-          statement: proposed.statement, status: "draft", validated: false, source_file_id: run.source_file_id,
-          metadata: withHumanEdit({ provenance: [span], reference_pack_id: sources[0].reference_pack_id, origin: "contributor",
+        const [created] = await tx.insert(t.accuracyClaims).values({ id: claim_id, workspace_id: input.workspace_id, claim_type: issue.item_kind,
+          statement: proposed.statement, status: issue.item_kind === "tactic" ? "unknown" : "draft", validated: false, source_file_id: run.source_file_id,
+          metadata: withHumanEdit({ structured: issue.item_kind === "tactic" ? emptyTacticStructuredFields("not_stated") : emptyGapStructuredFields("not_stated"),
+            ...(issue.item_kind === "tactic" ? { tactic_status: "unknown" } : {}), provenance: [span], reference_pack_id: sources[0].reference_pack_id, origin: "contributor",
             omission_action_id: actionId, contributor: { name: input.actor.name, function: input.actor.function, reason: input.reason } }, {
             action: "create", fields: ["statement", "provenance"], before: {},
             after: { statement: proposed.statement, provenance: [span] }, rationale: input.reason, actor: input.actor, at: now,
           }),
-          created_at: now, updated_at: now });
+          created_at: now, updated_at: now }).returning();
+        await syncClaimProvenance(created, tx);
       } else {
         const target = rows.find((row) => row.id === input.claim_id);
         if (!target) throw new OmissionActionError(404, "Unknown claim in workspace.");
@@ -286,8 +289,11 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
             action: "edit", fields: ["provenance"], before: { provenance: existing.provenance }, after: { provenance },
             rationale: input.reason, actor: input.actor, at: now,
           });
-          await tx.update(t.accuracyClaims).set({ metadata, updated_at: now }).where(and(
+          const changed = invalidateClaimFacts(target, { ...target, metadata, updated_at: now }, now);
+          await tx.update(t.accuracyClaims).set({ metadata: changed.metadata, status: changed.status, validated: changed.validated, updated_at: now }).where(and(
             eq(t.accuracyClaims.workspace_id, input.workspace_id), eq(t.accuracyClaims.id, target.id)));
+          await invalidateDependentClaimValidation(input.workspace_id, target.id, now, tx);
+          await syncClaimProvenance(changed, tx);
         }
       }
     }

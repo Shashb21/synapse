@@ -29,6 +29,7 @@ import {
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
 import { nowIso } from "@/modules/kernel/ids";
 import { listSourceFiles } from "@/accuracy/store/source-store";
+import { mergeStructuredFields, readStructuredFields } from "@/accuracy/domain/structured-fields";
 
 export {
   mergeDedupeCandidates,
@@ -100,6 +101,7 @@ export function claimToMergeCandidate(
     external_id: externalIdFromMeta(meta),
     tactic_status: asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status),
     provenance: provenanceFromMeta(meta),
+    structured: readStructuredFields(claim),
     created_at: claim.created_at,
     protected: isHumanProtectedClaim(claim),
   };
@@ -230,6 +232,10 @@ export async function applyMergeJudgment(inputs: MergeInputs, judgment: MergeJud
         external_id: survivor.external_id ?? meta.external_id ?? null,
         reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
         tactic_status: survivor.tactic_status ?? meta.tactic_status ?? null,
+        structured: mergeStructuredFields(readStructuredFields(row), absorbedIds.flatMap(id => {
+          const duplicate = byId.get(id);
+          return duplicate ? [readStructuredFields(duplicate)] : [];
+        })),
         provenance: survivor.provenance,
         merged_from: mergedFrom,
         merged_into: null,
@@ -337,3 +343,5 @@ export const pairGenerateModule = mechanicalModule({
   outputSchema: z.object({ pairs: z.array(z.object({ gap_id: z.string(), tactic_id: z.string() })) }),
   run: async () => ({ output: { pairs: [] }, summary: "Pair generator stub" }),
 });
+
+mergeDedupeModule.manifest.version = "0.2.0";

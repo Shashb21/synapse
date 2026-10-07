@@ -56,6 +56,21 @@ export const EVIDENCE_DOMAINS = [
 ] as const;
 export type EvidenceDomain = (typeof EVIDENCE_DOMAINS)[number];
 
+/** Jira KAN-83 source areas mapped onto the existing plan vocabulary. */
+export const SOURCE_EVIDENCE_CATEGORY_DOMAINS = {
+  "clinical efficacy": "efficacy",
+  safety: "safety",
+  PRO: "qol_pro",
+  HRQoL: "qol_pro",
+  HEOR: "economics",
+  epidemiology: "epidemiology",
+  biomarkers: "biomarkers",
+  guidelines: "implementation",
+  access: "health_system_impact",
+} as const satisfies Record<string, EvidenceDomain>;
+
+export type SourceEvidenceCategory = keyof typeof SOURCE_EVIDENCE_CATEGORY_DOMAINS;
+
 export const DOMAIN_LABELS: Record<EvidenceDomain, string> = {
   efficacy: "Efficacy",
   safety: "Safety",

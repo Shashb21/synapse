@@ -1,17 +1,19 @@
 import { z } from "zod";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { CLAIM_PRIORITIES, GAP_STATUS_OVERRIDES } from "./claim-edit";
+import { structuredPatchSchema } from "@/accuracy/domain/structured-fields";
 
 /** Wire schema for a human claim patch (PATCH /api/accuracy/claims). */
 export const claimPatchSchema = z
   .object({
+    structured: structuredPatchSchema.optional(),
     statement: z.string().min(1).optional(),
     external_id: z.string().nullable().optional(),
     provenance_quote: z.string().nullable().optional(),
     priority: z.enum(CLAIM_PRIORITIES).optional(),
     status_override: z.enum(GAP_STATUS_OVERRIDES).nullable().optional(),
     type: z.enum(TACTIC_TYPES).nullable().optional(),
-    tactic_status: z.enum(TACTIC_STATUSES).optional(),
+    tactic_status: z.enum([...TACTIC_STATUSES, "unknown"]).optional(),
     evidence_question: z.string().nullable().optional(),
     design_summary: z.string().nullable().optional(),
     start: z.string().nullable().optional(),

@@ -117,10 +117,10 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
   const drafts: Array<Parameters<typeof insertClaim>[0]> = [
     ...inventory.output.tactics.map(tactic => ({ id: tactic.id, workspace_id: context.workspace_id, claim_type: "tactic" as const, statement: tactic.name,
       status: tactic.status, validated: false, source_file_id, metadata: { origin: "inventory", source_badge: "extract", type: tactic.type,
-        evidence_question: tactic.evidence_question, provenance: tactic.provenance, tactic_status: tactic.status, reference_pack_id: source.reference_pack_id ?? null } })),
+        evidence_question: tactic.evidence_question, provenance: tactic.provenance, structured: tactic.structured, tactic_status: tactic.status, reference_pack_id: source.reference_pack_id ?? null } })),
     ...needs.output.gaps.map(gap => ({ id: gap.id, workspace_id: context.workspace_id, claim_type: "gap" as const, statement: gap.statement,
       status: "draft", validated: false, source_file_id, metadata: { origin: "need_extract", source_badge: "extract", external_id: gap.external_id,
-        si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null, provenance: gap.provenance, reference_pack_id: source.reference_pack_id ?? null } })),
+        si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null, provenance: gap.provenance, structured: gap.structured, reference_pack_id: source.reference_pack_id ?? null } })),
   ];
   await applyExtractionBatch(batch, [inventory.run_id, needs.run_id], drafts.map(draft => draft.id!), async () => {
     for (const draft of drafts) await insertClaim(draft);

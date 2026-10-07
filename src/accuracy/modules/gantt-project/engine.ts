@@ -1,6 +1,8 @@
 export type GanttTacticInput = {
   id: string;
   validated: boolean;
+  /** Preview a previously validated, human-edited schedule pending factual revalidation. */
+  schedule_visible?: boolean;
   start?: string | null;
   end?: string | null;
   /** Evidence-available / readout date from parse or user entry — never synthesized. */
@@ -44,6 +46,7 @@ export type GanttActivity = {
   readout: string | null;
   depends_on: string[];
   gap_ids: string[];
+  validation_stale?: boolean;
 };
 
 /** Dissemination waits on generating work that covers the same gap. */
@@ -264,7 +267,7 @@ export function dependenciesRespectReadouts(activities: GanttActivity[]): boolea
 }
 
 /**
- * Deterministic Gantt projection from validated tactics only.
+ * Deterministic Gantt preview; stale human schedules stay visible but cannot be saved final.
  * Does not synthesize bars or dates — tactics without start+end are omitted.
  * Coverage joins and explicit depends_on keep successor bars/readouts continuous
  * by shifting (never inventing) sourced timing.
@@ -287,7 +290,7 @@ export function projectGanttFromTactics(args: {
   const sortedTactics = [...args.tactics].sort((a, b) => a.id.localeCompare(b.id));
 
   for (const tactic of sortedTactics) {
-    if (!tactic.validated) continue;
+    if (!tactic.validated && !tactic.schedule_visible) continue;
 
     const override = overrideByTactic.get(tactic.id);
     const start = override?.start ?? tactic.start ?? null;
@@ -307,6 +310,7 @@ export function projectGanttFromTactics(args: {
       depends_on: normalizeDependsOn(override?.depends_on ?? tactic.depends_on, tacticIds),
       gap_ids: gapIdsForTactic(tactic, args.coverages),
       tactic_type: tacticTypeById.get(tactic.id) ?? null,
+      ...(!tactic.validated ? { validation_stale: true } : {}),
     });
   }
 
@@ -333,7 +337,7 @@ export function projectGanttFromTactics(args: {
   applyDateContinuity(working, pinned);
 
   const projected: GanttActivity[] = working.map(
-    ({ tactic_type: _tacticType, ...activity }) => activity,
+    ({ tactic_type, ...activity }) => { void tactic_type; return activity; },
   );
 
   return projected.sort(

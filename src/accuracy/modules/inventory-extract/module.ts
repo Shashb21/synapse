@@ -12,8 +12,9 @@ import { INVENTORY_PROPOSER_SYSTEM, inventoryProposerUser } from "./prompts";
 import { readParseBlocks, readParseBlocksByIds } from "../../store/parse-store";
 import { claimMetadata, listActiveSourceClaims } from "../../store/claim-store";
 import { inspectSnapshotCompleteness, type SnapshotItem } from "../completeness-audit/snapshot-inspector";
+import { emptyTacticStructuredFields, tacticStructuredFieldsSchema, rejectedCandidateSchema, validateFieldEvidence, structuredProvenance, type RejectedCandidate } from "../../domain/structured-fields";
 
-const tacticStatusSchema = z.enum(TACTIC_STATUSES);
+const tacticStatusSchema = z.enum([...TACTIC_STATUSES, "unknown"]);
 const tacticTypeSchema = z.enum(TACTIC_TYPES);
 
 /** One inventory tactic after judge (stable id + validated shape). */
@@ -25,6 +26,7 @@ export const inventoryTacticSchema = z.object({
   evidence_question: z.string().min(1),
   origin: z.literal("inventory"),
   provenance: z.array(provenanceSpanSchema).min(1),
+  structured: tacticStructuredFieldsSchema.default(() => emptyTacticStructuredFields()),
 });
 
 export type InventoryTactic = z.infer<typeof inventoryTacticSchema>;
@@ -33,6 +35,7 @@ export const inventoryExtractOutputSchema = z.object({
   workspace_id: z.string(),
   source_file_id: z.string(),
   tactics: z.array(inventoryTacticSchema),
+  rejected_candidates: z.array(rejectedCandidateSchema).optional(),
 });
 
 export type InventoryExtractOutput = z.infer<typeof inventoryExtractOutputSchema>;
@@ -40,14 +43,16 @@ export type InventoryExtractOutput = z.infer<typeof inventoryExtractOutputSchema
 const proposerTacticSchema = z.object({
   name: z.string(),
   type: z.string(),
-  status: z.string(),
+  status: z.string().default("unknown"),
   evidence_question: z.string(),
-  origin: z.literal("inventory").optional(),
+  origin: z.string().optional(),
   provenance: z.array(provenanceSpanSchema).optional(),
+  structured: z.unknown().optional(),
 });
 
 type InventoryDraft = {
-  tactics: z.infer<typeof proposerTacticSchema>[];
+  tactics: (z.infer<typeof proposerTacticSchema> & { candidate_index: number })[];
+  rejected_candidates?: RejectedCandidate[];
 };
 
 function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { id: string; source_file_id: string; text: string }[]): { score: number; issues: CriticIssue[]; observationIssues: CriticIssue[] } {
@@ -82,7 +87,7 @@ function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { 
       names.add(key);
     }
   }
-  const checked = inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks });
+  const checked = inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => [...(tactic.provenance ?? []), ...structuredProvenance(tactic.structured)]), blocks });
   for (const finding of checked.findings) {
     observationIssues.push({ issue_id: `inventory:observed:${observationIssues.length}`,
       category: "quote_validity", code: finding.code, severity: "medium",
@@ -94,38 +99,50 @@ function critiqueDraft(draft: InventoryDraft, source_file_id: string, blocks: { 
   return { score, issues, observationIssues };
 }
 
-function normalizeDraft(raw: unknown, source_file_id: string): InventoryDraft {
-  const parsed = z
-    .object({ tactics: z.array(proposerTacticSchema).default([]) })
-    .safeParse(raw);
-  if (!parsed.success) return { tactics: [] };
-  return {
-    tactics: parsed.data.tactics.map((t) => ({
-      ...t,
-      origin: "inventory" as const,
-      provenance: (t.provenance ?? []).map((p) => ({
-        ...p,
-        source_file_id: p.source_file_id || source_file_id,
-      })),
-    })),
-  };
+function normalizeDraft(raw: unknown): InventoryDraft {
+  const envelope = z.object({ tactics: z.array(z.unknown()) }).safeParse(raw);
+  if (!envelope.success) return { tactics: [], rejected_candidates: [{ index: 0, field: "response", reason: "malformed_response" }] };
+  const draft: InventoryDraft = { tactics: [], rejected_candidates: [] };
+  for (const [index, candidate] of envelope.data.tactics.entries()) {
+    const parsed = proposerTacticSchema.safeParse(candidate);
+    if (!parsed.success) draft.rejected_candidates!.push({ index, field: "candidate", reason: "invalid_candidate_shape" });
+    else draft.tactics.push({ ...parsed.data, candidate_index: index });
+  }
+  return draft;
 }
 
-function judgeDraft(draft: InventoryDraft): InventoryExtractOutput["tactics"] {
-  const out: InventoryTactic[] = [];
+function judgeDraft(draft: InventoryDraft, source_file_id: string, blocks: Parameters<typeof validateFieldEvidence>[0]["blocks"]) {
+  const tactics: InventoryTactic[] = [];
+  const rejected_candidates = [...(draft.rejected_candidates ?? [])];
   for (const tactic of draft.tactics) {
-    const parsed = inventoryTacticSchema.safeParse({
-      id: newId("tac"),
-      name: tactic.name.trim(),
-      type: tactic.type,
-      status: tactic.status,
-      evidence_question: tactic.evidence_question.trim(),
-      origin: "inventory",
-      provenance: tactic.provenance ?? [],
-    });
-    if (parsed.success) out.push(parsed.data);
+    if (tactic.origin !== undefined && tactic.origin !== "inventory") {
+      rejected_candidates.push({ index: tactic.candidate_index, field: "origin", reason: "wrong_origin" });
+      continue;
+    }
+    const raw = tactic.structured;
+    const structured = raw === undefined ? emptyTacticStructuredFields("not_stated")
+      : raw && typeof raw === "object" ? { ...emptyTacticStructuredFields("not_stated"), ...raw } : raw;
+    // Older proposer contracts already supply a sourced lifecycle; retain that fact with its evidence.
+    if (structured && typeof structured === "object" && (!raw || typeof raw !== "object" || !("lifecycle" in raw))
+      && tactic.status !== "unknown" && (TACTIC_STATUSES as readonly string[]).includes(tactic.status)) {
+      Object.assign(structured, { lifecycle: { state: "known", value: tactic.status, provenance: tactic.provenance ?? [] } });
+    }
+    const parsed = inventoryTacticSchema.safeParse({ id: newId("tac"), name: tactic.name.trim(), type: tactic.type,
+      status: tactic.status, evidence_question: tactic.evidence_question.trim(), origin: "inventory",
+      provenance: tactic.provenance ?? [], structured });
+    let error = parsed.success ? validateFieldEvidence({ structured: parsed.data.structured,
+      provenance: parsed.data.provenance, source_file_id, blocks })
+      : { field: raw === undefined ? "candidate" : "structured", reason: "invalid_candidate_shape" };
+    if (!error && parsed.success) {
+      const lifecycle = parsed.data.structured.lifecycle;
+      if ((lifecycle.state === "known" ? lifecycle.value : "unknown") !== parsed.data.status) {
+        error = { field: "structured.lifecycle", reason: "lifecycle_mismatch" };
+      }
+    }
+    if (error) rejected_candidates.push({ index: tactic.candidate_index, ...error });
+    else if (parsed.success) tactics.push(parsed.data);
   }
-  return out;
+  return { tactics, rejected_candidates };
 }
 
 async function proposeInventory(
@@ -155,7 +172,7 @@ async function proposeInventory(
   if (round > 0 && prior && (!raw || (raw as { tactics?: unknown[] }).tactics?.length === 0)) {
     return prior;
   }
-  return normalizeDraft(raw, input.source_file_id);
+  return normalizeDraft(raw);
 }
 
 export const inventoryExtractModule = agenticModule({
@@ -197,7 +214,7 @@ export const inventoryExtractModule = agenticModule({
     const cycle = await runShallowAgenticCycle<InventoryDraft>({
       run: ctx.run,
       onSnapshot: async (draft): Promise<ProductionSignals> => ({
-        quote_validity: inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => tactic.provenance ?? []), blocks }).signals,
+        quote_validity: inspectQuoteSpans({ spans: draft.tactics.flatMap((tactic) => [...(tactic.provenance ?? []), ...structuredProvenance(tactic.structured)]), blocks }).signals,
         invariant_failures: critiqueDraft(draft, input.source_file_id, blocks).issues.map((issue) => issue.claim),
         completeness: "not_checked",
       }),
@@ -228,11 +245,13 @@ export const inventoryExtractModule = agenticModule({
 
     ctx.run.note("agentic:trace", cycle.trace);
 
-    const tactics = stub ? [] : judgeDraft(cycle.final);
+    const { tactics, rejected_candidates } = stub ? { tactics: [], rejected_candidates: [] } : judgeDraft(cycle.final, input.source_file_id, blocks);
+    if (rejected_candidates.length) ctx.run.note("extract:rejected_candidates", rejected_candidates);
     const output = {
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
       tactics,
+      ...(rejected_candidates.length ? { rejected_candidates } : {}),
     };
 
     return {
@@ -243,3 +262,5 @@ export const inventoryExtractModule = agenticModule({
     };
   },
 });
+
+inventoryExtractModule.manifest.version = "0.2.0";

@@ -9,6 +9,7 @@ import {
 } from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
+import type { RejectedCandidate } from "@/accuracy/domain/structured-fields";
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
@@ -78,8 +79,9 @@ export async function POST(req: Request) {
             eq(tables.accuracyModuleRuns.workspace_id, request.workspace_id), inArray(tables.accuracyModuleRuns.id, batch.run_ids)));
           const runs = batch.run_ids.map(id => {
             const run = extractionRuns.find(row => row.id === id)!;
-            const output = run.output as { gaps?: unknown[]; tactics?: unknown[] };
-            return { call_kind: run.call_kind, run_id: id, summary: run.summary, count: output.gaps?.length ?? output.tactics?.length ?? 0 };
+            const output = run.output as { gaps?: unknown[]; tactics?: unknown[]; rejected_candidates?: RejectedCandidate[] };
+            return { call_kind: run.call_kind, run_id: id, summary: run.summary, count: output.gaps?.length ?? output.tactics?.length ?? 0,
+              ...(output.rejected_candidates?.length ? { rejected_candidates: output.rejected_candidates } : {}) };
           });
           const downstream = await runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
             merge_id: journal.merge_operation_id, status_id: journal.status_operation_id, prepared_merge: prepared });
@@ -132,6 +134,7 @@ export async function POST(req: Request) {
       run_id: string;
       summary: string;
       count: number;
+      rejected_candidates?: RejectedCandidate[];
     }> = [];
 
     if (kinds.includes("need")) {
@@ -161,7 +164,7 @@ export async function POST(req: Request) {
             source_badge: "extract",
             external_id: gap.external_id,
             si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null,
-            provenance: gap.provenance,
+            provenance: gap.provenance, structured: gap.structured,
             reference_pack_id: source.reference_pack_id ?? null,
           },
         });
@@ -173,6 +176,7 @@ export async function POST(req: Request) {
         run_id: result.run_id,
         summary: result.summary,
         count: result.output.gaps.length,
+        ...(result.output.rejected_candidates?.length ? { rejected_candidates: result.output.rejected_candidates } : {}),
       });
     }
 
@@ -203,7 +207,7 @@ export async function POST(req: Request) {
             source_badge: "extract",
             type: tactic.type,
             evidence_question: tactic.evidence_question,
-            provenance: tactic.provenance,
+            provenance: tactic.provenance, structured: tactic.structured,
             tactic_status: tactic.status,
             reference_pack_id: source.reference_pack_id ?? null,
           },
@@ -216,6 +220,7 @@ export async function POST(req: Request) {
         run_id: result.run_id,
         summary: result.summary,
         count: result.output.tactics.length,
+        ...(result.output.rejected_candidates?.length ? { rejected_candidates: result.output.rejected_candidates } : {}),
       });
     }
 

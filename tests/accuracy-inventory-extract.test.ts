@@ -166,7 +166,8 @@ describe("inventory extract module", () => {
       withCompleteness(ctx);
       const result = await inventoryExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
         block_ids: ["blk-1"] }, ctx);
-      expect(result.output.tactics[0]?.provenance[0]?.quote).toBe("Invented study");
+      expect(result.output.tactics).toEqual([]);
+      expect(result.output.rejected_candidates).toEqual([{ index: 0, field: "provenance", reason: "quote_not_substring" }]);
       expect(vi.mocked(ctx.complete).mock.calls.map(([request]) => request.purpose))
         .toEqual([expect.stringContaining("proposer"), "snapshot_completeness"]);
       expect(events.find((event) => event.event_type === "judgment")).toMatchObject({ selected_iteration: 0 });
@@ -233,6 +234,8 @@ describe("inventory extract module", () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {
+      vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([{ id: "blk-1", source_file_id: "src-1",
+        workspace_id: "ws-test", index: 0, kind: "prose", heading: null, text: "Phase 3 study ongoing in NSCLC.", parser: "test", created_at: "now" }]);
       const ctx = stubCtx();
       ctx.complete = async () => ({
         raw: JSON.stringify({

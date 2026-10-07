@@ -43,6 +43,7 @@ export async function judgeEquivalence(args: {
       statement: candidate.statement,
       external_id: candidate.external_id,
       quotes: candidate.provenance.map((span) => span.quote).filter(Boolean),
+      structured: candidate.structured,
     };
   };
 

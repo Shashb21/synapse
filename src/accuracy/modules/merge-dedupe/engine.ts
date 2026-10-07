@@ -10,6 +10,8 @@
  * Conflicting tactic lifecycles are surfaced, not auto-picked.
  */
 
+import type { GapStructuredFields, TacticStructuredFields } from "@/accuracy/domain/structured-fields";
+
 export type MergeClaimType = "gap" | "tactic";
 
 export type MergeProvenance = {
@@ -18,7 +20,7 @@ export type MergeProvenance = {
   quote: string;
 };
 
-export type TacticLifecycle = "completed" | "ongoing" | "planned" | "proposed" | "cancelled";
+export type TacticLifecycle = "completed" | "ongoing" | "planned" | "proposed" | "cancelled" | "unknown";
 
 export type MergeCandidate = {
   id: string;
@@ -32,6 +34,7 @@ export type MergeCandidate = {
   external_id: string | null;
   tactic_status?: TacticLifecycle | null;
   provenance: MergeProvenance[];
+  structured?: GapStructuredFields | TacticStructuredFields;
   created_at?: string | null;
   /**
    * Validated or human-edited. A protected claim may survive a merge (absorb
@@ -89,6 +92,7 @@ const TACTIC_LIFECYCLES = new Set<TacticLifecycle>([
   "planned",
   "proposed",
   "cancelled",
+  "unknown",
 ]);
 
 const ID_PATTERNS: RegExp[] = [
@@ -187,7 +191,7 @@ export function tacticStatusesConflict(a: MergeCandidate, b: MergeCandidate): bo
   if (a.claim_type !== "tactic" || b.claim_type !== "tactic") return false;
   const sa = tacticLifecycleOf(a);
   const sb = tacticLifecycleOf(b);
-  if (!sa || !sb) return false;
+  if (!sa || !sb || sa === "unknown" || sb === "unknown") return false;
   return sa !== sb;
 }
 
@@ -220,7 +224,9 @@ function unionProvenance(a: MergeProvenance[], b: MergeProvenance[]): MergeProve
 function mergeInto(survivor: MergeCandidate, duplicate: MergeCandidate): MergeCandidate {
   const ext = survivor.external_id?.trim() || duplicate.external_id;
   const pack = survivor.reference_pack_id || duplicate.reference_pack_id;
-  const tactic_status = tacticLifecycleOf(survivor) ?? tacticLifecycleOf(duplicate);
+  const survivorStatus = tacticLifecycleOf(survivor);
+  const duplicateStatus = tacticLifecycleOf(duplicate);
+  const tactic_status = survivorStatus && survivorStatus !== "unknown" ? survivorStatus : duplicateStatus ?? survivorStatus;
   return {
     ...survivor,
     external_id: ext ?? null,

@@ -15,7 +15,7 @@ export type CoverageJoinLite = {
 
 export type TacticLite = {
   id: string;
-  status: "completed" | "ongoing" | "planned" | "proposed" | "cancelled";
+  status: "completed" | "ongoing" | "planned" | "proposed" | "cancelled" | "unknown";
 };
 
 const TACTIC_LIFECYCLES = new Set<TacticLite["status"]>([
@@ -24,6 +24,7 @@ const TACTIC_LIFECYCLES = new Set<TacticLite["status"]>([
   "planned",
   "proposed",
   "cancelled",
+  "unknown",
 ]);
 
 export function asTacticLifecycle(value: unknown): TacticLite["status"] | null {

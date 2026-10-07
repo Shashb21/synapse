@@ -7,7 +7,8 @@ import * as t from "@/accuracy/store/schema";
 import * as store from "@/accuracy/store/omission-review-store";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { isHumanProtectedClaim, preserveHumanLocks } from "@/accuracy/store/claim-edit";
-import { claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
+import { applyClaimValidation, claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
+import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { RequestIdentity } from "@/modules/auth/request";
@@ -67,6 +68,26 @@ async function post(body: unknown) {
 }
 
 describe("atomic omission decisions", () => {
+  it("invalidates prior claim and coverage validation when recovery adds factual provenance", async () => {
+    const f = await fixture();
+    const gap = await candidate(f, { metadata: { provenance: [] } });
+    const tactic = await candidate(f, { kind: "tactic", statement: "Registry R" });
+    await applyClaimValidation({ workspace_id: f.workspace_id, claim_ids: [gap.id], action: "validate", rationale: "Board confirmed this need", actor });
+    await insertCoverageJoin({ workspace_id: f.workspace_id, gap_id: gap.id, tactic_id: tactic.id,
+      overall: "full", validated: true, rationale: "Board reviewed the study" });
+    await store.applyOmissionAction({ ...request(f), action: "link_existing", claim_id: gap.id });
+    expect((await claims(f)).find(row => row.id === gap.id)).toMatchObject({ validated: false,
+      metadata: { validation: { by: actor.name, rationale: "Board confirmed this need", stale: true } } });
+    expect((await listCoverageJoins(f.workspace_id))[0]).toMatchObject({ validated: false, rationale: "Board reviewed the study" });
+  });
+  it("recovers a tactic with explicit unknown structured facts and lifecycle", async () => {
+    const f = await fixture({ kind: "tactic", summary: "Registry inventory" });
+    const result = await store.applyOmissionAction(request(f));
+    const [claim] = await claims(f);
+    expect(claim).toMatchObject({ id: result.claim_id, validated: false, status: "unknown", metadata: {
+      tactic_status: "unknown", structured: { version: 1, owner: { state: "unknown", value: null,
+        reason: "not_stated", provenance: [] }, lifecycle: { state: "unknown", value: null, reason: "not_stated", provenance: [] } } } });
+  });
   it("adds one draft with canonical provenance and contributor-authored statement, then replays without duplication", async () => {
     const f = await fixture(); const args = { ...request(f), statement: "Contributor clarified regional evidence" };
     const result = await store.applyOmissionAction(args);

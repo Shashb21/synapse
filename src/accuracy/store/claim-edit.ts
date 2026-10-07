@@ -5,22 +5,27 @@
  * never clobbers what a human set by hand.
  */
 import { and, eq } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import {
   claimMetadata,
-  getClaim,
   insertClaim,
   requireValidationRationale,
+  requireClaimActor,
+  persistClaimPatch,
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
   type AccuracyClaimType,
   type ClaimEditAction,
   type ClaimEditEntry,
 } from "./claim-store";
+import { emptyGapStructuredFields, emptyTacticStructuredFields, gapStructuredFieldsSchema, tacticStructuredFieldsSchema,
+  gapStructuredPatchSchema, tacticStructuredPatchSchema, validateFieldEvidence, type StructuredPatch } from "@/accuracy/domain/structured-fields";
+import { readParseBlocksByIds } from "./parse-store";
+import { listSourceFiles } from "./source-store";
 
 export const GAP_STATUS_OVERRIDES = ["open", "partial", "addressed"] as const;
 export type GapStatusOverride = (typeof GAP_STATUS_OVERRIDES)[number];
@@ -30,6 +35,7 @@ export type ClaimPriority = (typeof CLAIM_PRIORITIES)[number];
 
 /** Editable claim fields. Tactic-only and gap-only fields are rejected on the wrong type. */
 export type ClaimPatch = {
+  structured?: StructuredPatch;
   statement?: string;
   external_id?: string | null;
   /** Replaces the quote of the first provenance span (creates a manual span when none). */
@@ -39,7 +45,7 @@ export type ClaimPatch = {
   status_override?: GapStatusOverride | null;
   /** Tactic only. */
   type?: (typeof TACTIC_TYPES)[number] | null;
-  tactic_status?: (typeof TACTIC_STATUSES)[number];
+  tactic_status?: (typeof TACTIC_STATUSES)[number] | "unknown";
   evidence_question?: string | null;
   design_summary?: string | null;
   start?: string | null;
@@ -48,9 +54,10 @@ export type ClaimPatch = {
   depends_on?: string[];
 };
 
-export type ClaimPatchField = keyof ClaimPatch;
+export type ClaimPatchField = keyof ClaimPatch | `structured.${string}`;
 
 export const CLAIM_PATCH_FIELDS: ClaimPatchField[] = [
+  "structured",
   "statement",
   "external_id",
   "provenance_quote",
@@ -104,6 +111,9 @@ const HUMAN_BOOKKEEPING_KEYS = [
   "last_human_edit",
   "merge_rejected_with",
   "validation",
+  "validation_history",
+  "factual_validation_stale",
+  "previously_validated",
 ];
 
 export function humanLockedFields(meta: AccuracyClaimMetadata): string[] {
@@ -136,9 +146,23 @@ export function preserveHumanLocks(
 ): AccuracyClaimMetadata {
   const out: AccuracyClaimMetadata = { ...next };
   for (const lock of humanLockedFields(prev)) {
+    if (lock.startsWith("structured.")) {
+      const field = lock.slice("structured.".length);
+      const previous = prev.structured as unknown as Record<string, unknown> | undefined;
+      const structured = { ...(out.structured ?? {}), version: 1 } as Record<string, unknown>;
+      if (previous && field in previous) structured[field] = previous[field];
+      else delete structured[field];
+      out.structured = structured as AccuracyClaimMetadata["structured"];
+      if (field === "lifecycle") out.tactic_status = prev.tactic_status;
+      continue;
+    }
     for (const key of LOCK_META_KEYS[lock] ?? [lock]) {
       if (key in prev) out[key] = prev[key];
       else delete out[key];
+    }
+    if (lock === "tactic_status" && out.structured && "lifecycle" in out.structured) {
+      out.structured = { ...out.structured, lifecycle: prev.structured && "lifecycle" in prev.structured
+        ? prev.structured.lifecycle : { state: "unknown", value: null, reason: "legacy_missing", provenance: [] } };
     }
   }
   for (const key of HUMAN_BOOKKEEPING_KEYS) {
@@ -195,6 +219,7 @@ function currentFieldValue(
   field: ClaimPatchField,
 ): unknown {
   const meta = current.metadata;
+  if (field.startsWith("structured.")) return (meta.structured as unknown as Record<string, unknown> | undefined)?.[field.slice("structured.".length)] ?? null;
   switch (field) {
     case "statement":
       return current.statement;
@@ -241,7 +266,7 @@ export function applyClaimPatch(
   before: Record<string, unknown>;
   after: Record<string, unknown>;
 } {
-  const fields = (Object.keys(patch) as ClaimPatchField[]).filter(
+  const fields = (Object.keys(patch) as (keyof ClaimPatch)[]).filter(
     (key) => patch[key] !== undefined,
   );
   for (const field of fields) {
@@ -263,12 +288,32 @@ export function applyClaimPatch(
 
   const record = (field: ClaimPatchField, next: unknown) => {
     const prev = currentFieldValue(snapshot, field);
-    if (valuesEqual(prev, next)) return false;
+    if (valuesEqual(prev, next) || changed.includes(field)) return false;
     changed.push(field);
     before[field] = prev ?? null;
     after[field] = next ?? null;
     return true;
   };
+
+  if (patch.structured !== undefined) {
+    const patchSchema = ctx.claim_type === "tactic" ? tacticStructuredPatchSchema : gapStructuredPatchSchema;
+    const fieldsSchema = ctx.claim_type === "tactic" ? tacticStructuredFieldsSchema : gapStructuredFieldsSchema;
+    const parsedPatch = patchSchema.parse(patch.structured);
+    const normalized = fieldsSchema.parse({ ...(ctx.claim_type === "tactic" ? emptyTacticStructuredFields() : emptyGapStructuredFields()),
+      ...meta.structured, ...parsedPatch });
+    for (const key of Object.keys(parsedPatch)) {
+      const field = `structured.${key}` as const;
+      const value = (normalized as unknown as Record<string, unknown>)[key];
+      record(field, value);
+    }
+    meta.structured = normalized;
+    if (ctx.claim_type === "tactic" && "lifecycle" in parsedPatch && "lifecycle" in normalized) {
+      const lifecycle = normalized.lifecycle;
+      const next = lifecycle.state === "known" ? lifecycle.value : "unknown";
+      if (patch.tactic_status !== undefined && patch.tactic_status !== next) throw new Error("Lifecycle conflicts with tactic_status.");
+      if (record("tactic_status", next)) meta.tactic_status = next;
+    }
+  }
 
   if (patch.statement !== undefined) {
     const next = patch.statement.trim();
@@ -339,10 +384,17 @@ export function applyClaimPatch(
     }
   }
   if (patch.tactic_status !== undefined) {
-    if (!(TACTIC_STATUSES as readonly string[]).includes(patch.tactic_status)) {
+    if (patch.tactic_status !== "unknown" && !(TACTIC_STATUSES as readonly string[]).includes(patch.tactic_status)) {
       throw new Error(`Unknown tactic status: ${patch.tactic_status}`);
     }
     if (record("tactic_status", patch.tactic_status)) meta.tactic_status = patch.tactic_status;
+    if (meta.structured && "lifecycle" in meta.structured && !(patch.structured && "lifecycle" in patch.structured)) {
+      // Human lifecycle editing uses the same evidenced field contract; known updates supply structured.lifecycle.
+      if (patch.tactic_status === "unknown" || meta.structured.lifecycle.state !== "known" || meta.structured.lifecycle.value !== patch.tactic_status) {
+        const lifecycle = { state: "unknown" as const, value: null, reason: patch.tactic_status === "unknown" ? "human_unknown" : "human_edit_without_field_evidence", provenance: [] as [] };
+        if (record("structured.lifecycle", lifecycle)) meta.structured = { ...meta.structured, lifecycle };
+      }
+    }
   }
   if (patch.evidence_question !== undefined) {
     const next = optionalText(patch.evidence_question);
@@ -430,6 +482,31 @@ async function workspaceTacticIds(workspace_id: string): Promise<Set<string>> {
   return new Set(rows.filter((row) => row.claim_type === "tactic").map((row) => row.id));
 }
 
+async function validateStructuredPatchEvidence(workspace_id: string, claim_type: AccuracyClaimType,
+  source_file_id: string | null, patch: ClaimPatch): Promise<void> {
+  if (patch.structured === undefined) return;
+  const schema = claim_type === "tactic" ? tacticStructuredPatchSchema : gapStructuredPatchSchema;
+  const partial = schema.parse(patch.structured);
+  const structured = claim_type === "tactic"
+    ? tacticStructuredFieldsSchema.parse({ ...emptyTacticStructuredFields("not_edited"), ...partial })
+    : gapStructuredFieldsSchema.parse({ ...emptyGapStructuredFields("not_edited"), ...partial });
+  const spans: Array<{ block_id: string }> = [];
+  const collect = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) { value.forEach(collect); return; }
+    const record = value as Record<string, unknown>;
+    if (typeof record.block_id === "string") spans.push({ block_id: record.block_id });
+    Object.values(record).forEach(collect);
+  };
+  collect(structured);
+  const blocks = await readParseBlocksByIds(workspace_id, [...new Set(spans.map(span => span.block_id))]);
+  const sources = await listSourceFiles(workspace_id);
+  const error = validateFieldEvidence({ structured, provenance: [], source_file_id: source_file_id ?? "manual", blocks,
+    source_file_ids: new Set(sources.map(source => source.id)),
+    resolved_source_ids: new Set(sources.map(source => source.id)) });
+  if (error) throw new Error(`${error.field}: ${error.reason}`);
+}
+
 /** Write statement/status/metadata for one claim (no lock logic — callers decide). */
 export async function writeClaimRow(args: {
   workspace_id: string;
@@ -439,25 +516,9 @@ export async function writeClaimRow(args: {
   metadata: AccuracyClaimMetadata;
   at?: string;
 }): Promise<AccuracyClaimRow> {
-  const at = args.at ?? nowIso();
-  const statement = args.statement ?? args.claim.statement;
-  const status = args.status ?? args.claim.status;
-  await accuracyDb()
-    .update(t.accuracyClaims)
-    .set({ statement, status, metadata: args.metadata as Record<string, unknown>, updated_at: at })
-    .where(
-      and(
-        eq(t.accuracyClaims.id, args.claim.id),
-        eq(t.accuracyClaims.workspace_id, args.workspace_id),
-      ),
-    );
-  return {
-    ...args.claim,
-    statement,
-    status,
-    metadata: args.metadata as Record<string, unknown>,
-    updated_at: at,
-  };
+  return persistClaimPatch({ workspace_id: args.workspace_id, claim_id: args.claim.id,
+    statement: args.statement ?? args.claim.statement, status: args.status ?? args.claim.status,
+    metadata: args.metadata, at: args.at });
 }
 
 /**
@@ -473,44 +534,48 @@ export async function updateClaim(args: {
   actor: Actor;
 }): Promise<{ claim: AccuracyClaimRow; changed: ClaimPatchField[] }> {
   const rationale = requireValidationRationale(args.rationale);
+  requireClaimActor(args.actor);
   await ensureAccuracySchema();
-  const existing = await getClaim(args.workspace_id, args.claim_id);
-  if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
-  if (existing.claim_type !== "gap" && existing.claim_type !== "tactic") {
-    throw new Error(`Unsupported claim type: ${existing.claim_type}`);
-  }
-  const at = nowIso();
-  const applied = applyClaimPatch(
-    { statement: existing.statement, metadata: claimMetadata(existing) },
-    args.patch,
-    {
-      claim_id: existing.id,
-      claim_type: existing.claim_type,
-      source_file_id: existing.source_file_id,
+  return withAccuracyTransaction(async () => {
+    const [existing] = await accuracyDb().select().from(t.accuracyClaims).where(and(
+      eq(t.accuracyClaims.workspace_id, args.workspace_id), eq(t.accuracyClaims.id, args.claim_id))).for("update");
+    if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);
+    if (existing.claim_type !== "gap" && existing.claim_type !== "tactic") {
+      throw new Error(`Unsupported claim type: ${existing.claim_type}`);
+    }
+    const at = nowIso();
+    await validateStructuredPatchEvidence(args.workspace_id, existing.claim_type, existing.source_file_id, args.patch);
+    const applied = applyClaimPatch(
+      { statement: existing.statement, metadata: claimMetadata(existing) },
+      args.patch,
+      {
+        claim_id: existing.id,
+        claim_type: existing.claim_type,
+        source_file_id: existing.source_file_id,
+        rationale,
+        actor: args.actor,
+        at,
+        tactic_ids: args.patch.depends_on?.length
+          ? await workspaceTacticIds(args.workspace_id)
+          : new Set(),
+      },
+    );
+    if (applied.changed.length === 0) {
+      throw new Error("No changes to save.");
+    }
+    const metadata = withHumanEdit(applied.metadata, {
+      action: "edit",
+      fields: applied.changed,
+      before: applied.before,
+      after: applied.after,
       rationale,
       actor: args.actor,
       at,
-      tactic_ids: args.patch.depends_on?.length
-        ? await workspaceTacticIds(args.workspace_id)
-        : new Set(),
-    },
-  );
-  if (applied.changed.length === 0) {
-    throw new Error("No changes to save.");
-  }
-  const metadata = withHumanEdit(applied.metadata, {
-    action: "edit",
-    fields: applied.changed,
-    before: applied.before,
-    after: applied.after,
-    rationale,
-    actor: args.actor,
-    at,
   });
   let status = existing.status;
   if (
-    applied.changed.includes("tactic_status") &&
-    (TACTIC_STATUSES as readonly string[]).includes(existing.status)
+    (applied.changed.includes("tactic_status") || applied.changed.includes("structured.lifecycle")) &&
+    [...TACTIC_STATUSES, "unknown"].includes(existing.status as never)
   ) {
     status = String(metadata.tactic_status);
   }
@@ -523,6 +588,7 @@ export async function updateClaim(args: {
     at,
   });
   return { claim, changed: applied.changed };
+  });
 }
 
 /**
@@ -544,6 +610,7 @@ export async function createManualClaim(args: {
   status?: string;
 }): Promise<AccuracyClaimRow> {
   const rationale = requireValidationRationale(args.rationale);
+  requireClaimActor(args.actor);
   const statement = args.statement.trim();
   if (!statement) throw new Error("Statement is required.");
   if (args.claim_type !== "gap" && args.claim_type !== "tactic") {
@@ -553,11 +620,13 @@ export async function createManualClaim(args: {
   const id = newId(args.claim_type === "gap" ? "gap" : "tac");
   const at = nowIso();
   const base: AccuracyClaimMetadata = {
+    structured: args.claim_type === "tactic" ? emptyTacticStructuredFields("not_stated") : emptyGapStructuredFields("not_stated"),
     ...(args.metadata ?? {}),
     origin: args.origin ?? "manual",
     source_badge: args.source_badge ?? "manual",
   };
   const fields = args.fields ?? {};
+  await validateStructuredPatchEvidence(args.workspace_id, args.claim_type, args.source_file_id ?? null, fields);
   const applied = applyClaimPatch({ statement, metadata: base }, fields, {
     claim_id: id,
     claim_type: args.claim_type,

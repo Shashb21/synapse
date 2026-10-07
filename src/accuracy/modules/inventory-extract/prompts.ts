@@ -15,9 +15,14 @@ A tactic is a study, analysis, publication, registry entry, or dissemination act
 Rules:
 - Every tactic must have origin "inventory" (found in the source — not created for a gap).
 - type must be one of: ${TACTIC_TYPES.join(", ")}.
-- status must be one of: ${TACTIC_STATUSES.join(", ")} and must reflect what the document says.
+- status must be one of: ${[...TACTIC_STATUSES, "unknown"].join(", ")} and must reflect what the document says.
 - evidence_question is the decision-relevant question the tactic answers, in one sentence.
 - provenance is one or more verbatim quote spans: source_file_id, block_id, quote (substring of that block's text).
+- Every tactic includes structured.version=1 and description, objective, owner, timing, outputs, lifecycle.
+- Each field is {state:"known",value:...,provenance:[...]} with its OWN supporting original block spans, or {state:"unknown",value:null,reason:"not_stated",provenance:[]}. Never invent an owner, date, deliverable or evidence. Missing fields remain unknown; these are suggestions, never human validation.
+- description, objective and owner are text. timing is the stated milestone or range, verbatim or faithfully summarized; never manufacture ISO dates. outputs.value is an array of stated deliverables, not an imagined study outcome.
+- lifecycle.value is a known status enum backed by a source quotation, or unknown. Top-level status must match the known lifecycle value or be "unknown" when lifecycle is unknown. Do not default missing status to planned.
+- Include existing IIS, clinical studies, RWE, publications, congresses, registries, HEOR studies, surveys and chart reviews using the existing tactic types. Exclude new ideation, including any origin "ideated"; a proposed activity explicitly in the source is inventory with proposed lifecycle.
 - Return JSON only:
 {"tactics":[{"name":"","type":"","status":"","evidence_question":"","origin":"inventory","provenance":[{"source_file_id":"","block_id":"","quote":""}]}]}`;
 

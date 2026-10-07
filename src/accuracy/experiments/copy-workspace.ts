@@ -1,6 +1,7 @@
 /** Clone a selected accuracy workspace state for an isolated experiment. */
 
 import { createHash } from "node:crypto";
+import { claimFactualRevision, claimValidationFreshness } from "@/accuracy/domain/structured-fields";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
@@ -252,6 +253,17 @@ export async function copyExperimentWorkspace(
 
     const org_id = newId("org");
     const workspace_id = newId("ws");
+    // A trusted, isomorphic baseline copy changes IDs rather than facts. Translate
+    // current human decision tokens only; never freshen legacy or stale decisions.
+    for (const claim of copiedClaimRows) {
+      if (claimValidationFreshness(claim) !== "current") continue;
+      const metadata = copiedMetadata.get(claim.id)!;
+      const revision = claimFactualRevision({ ...claim, id: claim_id_map[claim.id], workspace_id,
+        source_file_id: claim.source_file_id ? source_id_map[claim.source_file_id] : null, metadata });
+      const validation = metadata.validation as Record<string, unknown>;
+      metadata.factual_revision = revision;
+      metadata.validation = { ...validation, copied_from_factual_revision: validation.factual_revision, factual_revision: revision };
+    }
     const created_at = nowIso();
     await db.insert(t.accuracyOrganizations).values({ id: org_id, name: `${sourceOrg.name} (experiment)`, created_at });
     await db.insert(t.accuracyWorkspaces).values({
