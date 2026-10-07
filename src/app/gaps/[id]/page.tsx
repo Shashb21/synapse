@@ -71,6 +71,7 @@ export default async function GapDetailPage({
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
   const computed = computeGapStatus(coverages, state.tactics, {
     hasAcceptedChild: children.length > 0,
+    expansions: state.expansions,
   });
   const shown = displayedGapStatus({
     ...gap,

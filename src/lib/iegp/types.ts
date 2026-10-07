@@ -292,7 +292,10 @@ export type ExpansionScope = {
 };
 
 export type ExpansionHistoryEntry = {
-  action: "accept" | "status";
+  action: "accept" | "status" | "inherit";
+  source_gap_id?: string;
+  target_gap_id?: string;
+  source_coverage_id?: string;
   at: string;
   actor: Actor;
   rationale: string;

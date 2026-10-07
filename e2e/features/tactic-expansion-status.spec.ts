@@ -88,3 +88,60 @@ test("shows separate expansion scope, validates rationale and records human stat
     expect(childCoverage).toMatchObject({overall: "full", overall_lock: {locked: true}});
   } finally { await pg.end(); }
 });
+
+test("split selects a counting child independently and gap details agree before and after cancellation", async ({page, request}) => {
+  test.setTimeout(90_000);
+  page.setDefaultTimeout(10_000);
+  await resetWorkspace(request);
+  await iegpAction(request, {action: "create_gap", domain: "safety", name: "Scoped partial gap", statement: "Community and comparator evidence missing", rationale: "Browser split fixture"});
+  await iegpAction(request, {action: "record_missed_tactic", name: "Scoped parent", type: "rwe_study", evidence_question: "Parent question", status: "ongoing", rationale: "Browser split fixture"});
+  const pg = postgres(process.env.DATABASE_URL!);
+  try {
+    const [ws] = await pg`select schema_name from workspaces where id=${workspace.id}`;
+    const schema = ws!.schema_name as string;
+    const [gap] = await pg`select id from ${pg(`${schema}.gaps`)} limit 1`;
+    const [parent] = await pg`select id from ${pg(`${schema}.tactics`)} where name='Scoped parent'`;
+    const unlocked = {locked: false, actor_name: null, actor_function: null, locked_at: null, note: null};
+    const actor = {name: "Feature E2E", function: "medical_affairs"};
+    const at = new Date().toISOString();
+    const scope = {name: "Counting community child", evidence_question: "Community question", population: "Community", outcomes: "ILD", geography: "US", data_cut: "2026", analysis: "Post-hoc", instrument: "", study_design: "Retrospective", gap_coverage: "Community", cost_effort: "Two weeks", timing: "Q4", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+    await pg`delete from ${pg(`${schema}.coverages`)}`;
+    for (const [id, status, name] of [["EXP-SPLIT-COUNTING", "planned", scope.name], ["EXP-SPLIT-PROPOSED", "proposed", "Proposed sibling"]]) {
+      await pg`insert into ${pg(`${schema}.tactic_expansions`)} ${pg({id, tactic_id: parent!.id, proposal_id: `browser:${id}`, gap_ids: pg.json([gap!.id]), scope: pg.json({...scope, name}), status, version: id, created_at: at, updated_at: at, actor: pg.json(actor), history: pg.json([{action: "accept", at, actor, rationale: "Browser split fixture", status: "proposed", version: id}])})}`;
+      await pg`insert into ${pg(`${schema}.coverages`)} ${pg({id: `COV-${id}`, gap_id: gap!.id, tactic_id: parent!.id, expansion_id: id, dimensions: pg.json(Object.fromEntries(COVERAGE_DIMENSIONS.map(key => [key, {value: "unknown", rationale: "", lock: unlocked}]))), overall: "limited", overall_rationale: "Scoped fixture", overall_lock: pg.json(unlocked), stale: false, needs_review: false})}`;
+    }
+    await pg`update ${pg(`${schema}.gaps`)} set status='validated_partial', computed_status='validated_partial', human_validated=false where id=${gap!.id}`;
+    await page.goto(`/gaps/${gap!.id}`);
+    await expect(page.getByText("Engine computed Partially Addressed", {exact: true})).toBeVisible();
+    await page.getByRole("button", {name: /resolve this partially addressed gap/i}).click();
+    const dialog = page.getByRole("dialog");
+    const addressed = dialog.locator("section").filter({has: page.getByRole("heading", {name: "Addressed", exact: true})});
+    await expect(addressed.getByRole("checkbox", {name: /Counting community child/})).toBeChecked();
+    await expect(addressed.getByRole("checkbox", {name: /Proposed sibling|Scoped parent/})).toHaveCount(0);
+    await addressed.getByRole("textbox", {name: "Title", exact: true}).fill("Community child addressed slice");
+    const open = dialog.locator("section").filter({has: page.getByRole("heading", {name: "Open", exact: true})});
+    await open.getByRole("textbox", {name: "Title", exact: true}).fill("Comparator still open");
+    await dialog.getByPlaceholder(/why this split or rewrite/i).fill("Community child closes only its added scope");
+    await page.screenshot({path: ".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-4-fix1-split-dialog.png", fullPage: true});
+    const saved = page.waitForResponse(r => r.url().includes("/api/iegp") && r.request().method() === "POST", {timeout: 15_000});
+    await dialog.getByRole("button", {name: "Split gap", exact: true}).click();
+    expect((await saved).status()).toBe(200);
+    await expect(dialog).toBeHidden();
+    const [closed] = await pg`select id from ${pg(`${schema}.gaps`)} where name='Community child addressed slice'`;
+    const inherited = await pg`select expansion_id, tactic_id, overall from ${pg(`${schema}.coverages`)} where gap_id=${closed!.id}`;
+    expect(inherited).toEqual([{expansion_id: "EXP-SPLIT-COUNTING", tactic_id: parent!.id, overall: "full"}]);
+    await page.goto(`/gaps/${closed!.id}`);
+    await expect(page.getByText("Engine computed Addressed", {exact: true})).toBeVisible();
+    const [child] = await pg`select version from ${pg(`${schema}.tactic_expansions`)} where id='EXP-SPLIT-COUNTING'`;
+    const cancel = await request.post("/api/plan", {data: {action: "set_expansion_status", expansion_id: "EXP-SPLIT-COUNTING", status: "cancelled", expected_version: child!.version, rationale: "Added analysis cancelled"}});
+    expect(cancel.ok(), await cancel.text()).toBe(true);
+    await page.reload();
+    await expect(page.getByRole("status").filter({hasText: /computed from its mapped tactics is now Open/})).toBeVisible();
+    const [cancelledGap] = await pg`select computed_status, status_override from ${pg(`${schema}.gaps`)} where id=${closed!.id}`;
+    expect(cancelledGap).toMatchObject({computed_status: "validated_open", status_override: {status: "validated_addressed", stale: true}});
+    const [base] = await pg`select status from ${pg(`${schema}.tactics`)} where id=${parent!.id}`;
+    expect(base!.status).toBe("ongoing");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({path: ".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-4-fix1-gap-details.png", fullPage: true});
+  } finally { await pg.end(); }
+});

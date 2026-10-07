@@ -74,7 +74,7 @@ is scored on every run: `exchanges`, `dialogue_retention`, `critic_score_gain`, 
 | S3 Tactic extraction | `s3-tactic-extract.pcj` (2.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `tactic_candidates`, domain `tactics` |
 | S4 Mapping | `s4-kg-mapping.scored-pcj` (3.1.0) | LLM mapping table: one row per gap with a coverage verdict, confidence and rationale per tactic; critic ×3 → judge | domain gaps + tactics | `mapping_candidates`, domain `coverages` |
 | S5 Validation gate | `s5-validation.human-gate` (1.0.0) | human gate, no model | domain state | domain state, `edit_records`, `hillclimb_signals` |
-| S6 Partial split | `s6-partial-split.pcj` (2.0.0) | model proposes the split, critic ×3 → judge; applies only what the user validates | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
+| S6 Partial split | `s6-partial-split.pcj` (2.1.0) | model proposes the split, critic ×3 → judge; applies only what the user validates | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
 | S7 Consolidation | `s7-consolidation.derived` (1.0.0) | derived, no model | validated state | nothing |
 | S8 Prioritization | `s8-prioritization.axes` (2.0.0) | model scores every axis, critic ×3; the band is the quadrant, the user validates it | open gaps, axis config | `priority_placements` |
 | S9 Ideation | `s9-ideation.pcj` (2.0.0) | model designs tactics for gaps validated High, critic ×3 → judge, per-gap cap | High open gaps | `ideation_proposals`, domain `tactics` (status `proposed`) on accept |

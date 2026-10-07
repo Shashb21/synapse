@@ -45,8 +45,8 @@ function TacticChecklist({
             <input
               type="checkbox"
               className="mt-0.5"
-              checked={selected.includes(tactic.id)}
-              onChange={() => onToggle(tactic.id)}
+              checked={selected.includes(tactic.expansion_id ?? tactic.id)}
+              onChange={() => onToggle(tactic.expansion_id ?? tactic.id)}
             />
             <span className="min-w-0 whitespace-normal">
               {tactic.name}{" "}
@@ -134,8 +134,8 @@ export function SplitGapDialog({
   const [rewriteStatus, setRewriteStatus] = useState<"validated_open" | "validated_addressed">(
     "validated_open",
   );
-  const countingIds = tactics.filter((t) => t.counts_toward_addressing).map((t) => t.id);
-  const defaultAddressed = countingIds.length > 0 ? countingIds : tactics.slice(0, 1).map((t) => t.id);
+  const countingIds = tactics.filter((t) => t.counts_toward_addressing).map((t) => t.expansion_id ?? t.id);
+  const defaultAddressed = countingIds;
   const [addressedTacticIds, setAddressedTacticIds] = useState<string[]>(defaultAddressed);
   const [openTacticIds, setOpenTacticIds] = useState<string[]>([]);
   const [rationale, setRationale] = useState("");
@@ -152,7 +152,7 @@ export function SplitGapDialog({
    */
   const [touched, setTouched] = useState(false);
   const leftoverTactics = useMemo(
-    () => tactics.filter((t) => !addressedTacticIds.includes(t.id)),
+    () => tactics.filter((t) => !addressedTacticIds.includes(t.expansion_id ?? t.id)),
     [tactics, addressedTacticIds],
   );
   const rationaleRequired = mode === "rewrite" || touched;
@@ -298,7 +298,7 @@ export function SplitGapDialog({
               openName,
               openStatement,
               addressedTacticIds,
-              openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)),
+              openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => (t.expansion_id ?? t.id) === id)),
             }),
             note: rationale.trim(),
           }
@@ -427,7 +427,7 @@ export function SplitGapDialog({
               </label>
               <p className="mt-3 text-[12px] text-muted-foreground">Mapped tactics</p>
               <TacticChecklist
-                tactics={tactics}
+                tactics={tactics.filter(t => t.counts_toward_addressing)}
                 selected={addressedTacticIds}
                 onToggle={(id) => {
                   setAddressedTacticIds((prev) => toggleId(prev, id));
@@ -517,7 +517,7 @@ export function SplitGapDialog({
                   Accompanying tactics (at least one)
                 </p>
                 <TacticChecklist
-                  tactics={tactics}
+                  tactics={tactics.filter(t => t.counts_toward_addressing)}
                   selected={addressedTacticIds}
                   onToggle={(id) => setAddressedTacticIds((prev) => toggleId(prev, id))}
                   empty="Map an existing tactic or record a missed one on Gaps first."

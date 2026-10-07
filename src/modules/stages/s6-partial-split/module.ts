@@ -10,7 +10,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { loadState, splitPartialGap } from "@/lib/iegp/store";
-import { displayedGapStatus, tacticCountsTowardAddressing } from "@/lib/iegp/engine";
+import { displayedGapStatus, countingCoverages } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
 
 const inputSchema = z.object({
@@ -23,6 +23,7 @@ const inputSchema = z.object({
       addressed_statement: z.string().optional(),
       open_name: z.string().min(3),
       open_statement: z.string().optional(),
+      /** Exact scope IDs from mapped_tactics, including child IDs. */
       addressed_tactic_ids: z.array(z.string()).default([]),
       open_tactic_ids: z.array(z.string()).default([]),
       rationale: z.string().min(3),
@@ -60,7 +61,7 @@ const REMEDY = "run the split proposal again or switch the S6 route in /admin/co
 
 const SPLIT_PROPOSER_SYSTEM = `You split a partially addressed evidence gap from a pharma Integrated Evidence Generation Plan into two child gaps.
 
-You are given the parent gap, the evidence needs behind it, and every tactic mapped to it with its pressure-test coverage verdict (overall and per dimension, with rationales; human_locked marks a verdict a person confirmed). Only tactics with counts_toward_addressing true can close part of a gap.
+You are given the parent gap, the evidence needs behind it, and every tactic mapped to it with its pressure-test coverage verdict (overall and per dimension, with rationales; human_locked marks a verdict a person confirmed). Each mapped id identifies either parent tactic scope or an expansion scope; preserve that exact id in addressed_tactic_ids. parent_tactic_id is navigation/provenance only. Expansion status and added question are independent of the parent. Only scopes with counts_toward_addressing true can close part of a gap.
 
 - The addressed child is the slice the mapped tactics genuinely close. addressed_tactic_ids lists the tactics that close it, chosen only from tactics with counts_toward_addressing true; name at least one.
 - The open child is the leftover question that no mapped tactic answers. uncovered_dimensions lists the coverage dimensions (from coverage_dimensions) the leftover is about; name at least one.
@@ -169,7 +170,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
   manifest: {
     id: "s6-partial-split.pcj",
     stage: "S6",
-    version: "2.0.0",
+    version: "2.1.0",
     title: "Partial split proposal",
     summary:
       "A model proposes the addressed slice and the open leftover for a partially addressed gap, a model critic challenges it over three exchanges and a model judge decides whether it is shown; applies only what the user validates. Proposing needs a connected LLM.",
@@ -190,12 +191,9 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
     if (!gap) throw new Error(`Unknown gap ${input.gap_id}`);
     const coverages = state.coverages.filter((row) => row.gap_id === gap.id);
     const tacticById = new Map(state.tactics.map((tactic) => [tactic.id, tactic]));
-    const countingIds = new Set(
-      coverages
-        .map((coverage) => tacticById.get(coverage.tactic_id))
-        .filter((tactic) => tactic !== undefined && tacticCountsTowardAddressing(tactic))
-        .map((tactic) => tactic!.id),
-    );
+    const expansions = state.expansions ?? [];
+    const countingIds = new Set(countingCoverages(coverages, state.tactics, expansions)
+      .map(coverage => coverage.expansion_id ?? coverage.tactic_id));
     if (countingIds.size === 0) {
       throw new Error(
         `${gap.id} has no completed, ongoing or planned tactic mapped, so no tactic can close an addressed slice. Map the tactic that closes part of it, or rewrite the gap instead of splitting it.`,
@@ -223,20 +221,25 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
         })),
       mapped_tactics: coverages.flatMap((coverage) => {
         const tactic = tacticById.get(coverage.tactic_id);
-        if (!tactic) return [];
+        const child = coverage.expansion_id ? expansions.find(e => e.id === coverage.expansion_id && e.tactic_id === tactic?.id && e.gap_ids.includes(gap.id)) : null;
+        if (!tactic || (coverage.expansion_id && !child)) return [];
+        const scopeId = child?.id ?? tactic.id;
         return [
           {
-            id: tactic.id,
-            name: tactic.name,
+            id: scopeId,
+            parent_tactic_id: tactic.id,
+            expansion_id: child?.id ?? null,
+            name: child?.scope.name ?? tactic.name,
             type: tactic.type,
-            status: tactic.status,
-            counts_toward_addressing: countingIds.has(tactic.id),
-            evidence_question: tactic.evidence_question,
-            population: tactic.population,
-            intervention: tactic.intervention,
-            comparator: tactic.comparator,
-            outcomes: tactic.outcomes,
-            geography: tactic.geography,
+            status: child?.status ?? tactic.status,
+            counts_toward_addressing: countingIds.has(scopeId),
+            evidence_question: child?.scope.evidence_question ?? tactic.evidence_question,
+            population: child?.scope.population ?? tactic.population,
+            intervention: child ? "" : tactic.intervention,
+            comparator: child ? "" : tactic.comparator,
+            outcomes: child?.scope.outcomes ?? tactic.outcomes,
+            geography: child?.scope.geography ?? tactic.geography,
+            expansion_scope: child?.scope ?? null,
             coverage: {
               overall: coverage.overall,
               rationale: coverage.overall_rationale,
@@ -461,7 +464,7 @@ export async function decidePartialSplit(args: {
     const run = await getRun(args.originating_run_id);
     const output = outputSchema.safeParse(run?.output);
     const input = inputSchema.safeParse(run?.input);
-    if (!run || run.workspace_id !== workspace_id || run.stage !== "S6" || run.status !== "ok" || run.module_id !== partialSplitModule.manifest.id || !output.success || output.data.mode !== "llm" || output.data.applied || !output.data.proposal || output.data.proposal.parent_gap_id !== args.gap_id || !input.success || input.data.gap_id !== args.gap_id || input.data.apply) {
+    if (!run || run.workspace_id !== workspace_id || run.stage !== "S6" || run.status !== "ok" || run.module_id !== partialSplitModule.manifest.id || run.module_version !== partialSplitModule.manifest.version || !output.success || output.data.mode !== "llm" || output.data.applied || !output.data.proposal || output.data.proposal.parent_gap_id !== args.gap_id || !input.success || input.data.gap_id !== args.gap_id || input.data.apply) {
       throw new Error("The originating S6 proposal is unavailable or does not belong to this gap and workspace. Request a new proposal.");
     }
     original = output.data.proposal;
