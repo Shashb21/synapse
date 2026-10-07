@@ -71,6 +71,7 @@ export function ProposalCard({
         ) : null}
       </div>
 
+      <p className="text-[12px] font-medium">{proposal.proposal_kind === "expansion" ? `Expand: ${proposal.reviewed_parent?.name ?? proposal.target_tactic_id}` : "New tactic"}</p>
       <h4 className="text-[13px] leading-5 text-foreground">{proposal.name}</h4>
 
       <div className="grid gap-0.5">
@@ -78,6 +79,15 @@ export function ProposalCard({
         <p className="text-[12px] leading-4 text-foreground">{proposal.evidence_question}</p>
       </div>
 
+      {proposal.proposal_kind === "expansion" && proposal.expansion_scope ? (
+        <div className="grid gap-2 border-t border-border pt-2">
+          <p className="text-[12px]">Reviewed current scope ({proposal.reviewed_parent?.status}): {proposal.reviewed_parent?.population}; {proposal.reviewed_parent?.outcomes}; {proposal.reviewed_parent?.study_design}</p>
+          <dl className="grid gap-2 sm:grid-cols-2">
+            {Object.entries(proposal.expansion_scope).filter(([,value]) => value !== null && value !== "").map(([key,value]) => <DesignField key={key} label={`Added scope: ${key.replaceAll("_", " ")}`} value={typeof value === "boolean" ? value ? "Yes" : "No" : value ?? ""} />)}
+          </dl>
+          <p className="text-[12px]">Comparison: {proposal.comparative_rationale}</p>
+        </div>
+      ) : null}
       <dl className="grid gap-2 border-t border-border pt-2 sm:grid-cols-2">
         <DesignField label="Population" value={proposal.design.population} />
         <DesignField label="Comparator" value={proposal.design.comparator} />
@@ -121,7 +131,7 @@ export function ProposalCard({
               href={`/tactics/${proposal.tactic_id}`}
               className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
             >
-              Tactic {proposal.tactic_id}
+              {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
             </Link>
           ) : null}
           {proposal.status === "rejected" && mayIdeate ? (
@@ -164,7 +174,7 @@ export function ProposalCard({
                 payload={{ action: "decide_proposal", id: proposal.id, decision: "accept" }}
                 label="Accept"
                 title={`Accept ${proposal.name}`}
-                description="Accepting creates a proposed tactic mapped to this gap. The rationale is stored on the edit record."
+                description={proposal.proposal_kind === "expansion" ? "Accepting creates a proposed expansion on the existing tactic. Its coverage starts unassessed and does not count until its own lifecycle and coverage are validated." : "Accepting creates a proposed tactic mapped to this gap. The rationale is stored on the edit record."}
                 confirmLabel="Accept proposal"
                 requireRationale
                 identity={identity}

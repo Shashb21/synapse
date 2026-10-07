@@ -1,7 +1,11 @@
+import type { ExpansionScope } from "@/lib/iegp/types";
 import type { ActionField } from "@/components/platform/action-dialog";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
 
 export type ProposalFieldDefaults = {
+  proposal_kind?: "new" | "expansion";
+  expansion_scope?: ExpansionScope | null;
+  comparative_rationale?: string;
   name?: string;
   type?: string;
   evidence_question?: string;
@@ -26,7 +30,7 @@ const months = (value: number | null | undefined) => (typeof value === "number" 
  */
 export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionField[] {
   const design = defaults.design ?? {};
-  return [
+  const fields: ActionField[] = [
     { name: "name", label: "Name", defaultValue: defaults.name ?? "", required: true },
     {
       name: "type",
@@ -77,4 +81,12 @@ export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionFiel
       defaultValue: design.timing_rationale ?? "",
     },
   ];
+  if (defaults.proposal_kind === "expansion" && defaults.expansion_scope) {
+    fields.push({name:"comparative_rationale",label:"Why expand rather than create a new tactic?",type:"textarea",defaultValue:defaults.comparative_rationale ?? "",required:true});
+    for (const [key,value] of Object.entries(defaults.expansion_scope)) {
+      const label = `Added scope: ${key.replaceAll("_", " ")}`;
+      fields.push(typeof value === "boolean" ? {name:`expansion_${key}`,label,type:"select",defaultValue:String(value),options:[{value:"true",label:"Yes"},{value:"false",label:"No"}]} : {name:`expansion_${key}`,label,defaultValue:value ?? "",type:"textarea"});
+    }
+  }
+  return fields;
 }

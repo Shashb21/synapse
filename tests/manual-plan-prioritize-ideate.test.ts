@@ -248,6 +248,7 @@ describe("S9 manual ideas and edits", () => {
   });
 
   it("adds an idea by hand for an Open gap, audited, with timing left for S10", async () => {
+    await validatePlacement({gap_id:ids[3]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
     const proposal = await addIdeationProposal({
       gap_id: ids[3]!,
       fields: {
@@ -374,6 +375,7 @@ describe("S9 manual ideas and edits", () => {
   });
 
   it("adds an idea through the plan API", async () => {
+    await validatePlacement({gap_id:ids[4]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
     const { status, json } = await post({
       action: "add_proposal",
       gap_id: ids[4]!,

@@ -5,6 +5,7 @@ import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { createGap, createProposedTactic, loadState, resetDemoSetup } from "@/lib/iegp/store";
+import { validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { ideationModule } from "@/modules/stages/s9-ideation/module";
 
 /**
@@ -66,6 +67,7 @@ function tactic(gap_id: string, name: string, overrides: Record<string, unknown>
     type: "rwe_study",
     evidence_question: `Question for ${name}`,
     rationale: `Why ${name}`,
+    comparative_rationale: "New study adds data unavailable from existing scope; more time/cost but credible quality and feasibility",
     population: "Adults on therapy",
     comparator: "Standard of care",
     outcomes: "OS",
@@ -132,6 +134,7 @@ describe("S9 on the model path", () => {
       .map((gap) => gap.id)
       .slice(0, 2);
     expect(ids).toHaveLength(2);
+    for (const gap_id of ids) await validatePlacement({gap_id,band:"high",rationale:"Blocks dossier",actor:ACTOR});
     libraryId = state.tactics[0]!.id;
   }, 60_000);
 
@@ -146,6 +149,13 @@ describe("S9 on the model path", () => {
 
   const input = (per_gap = 1) => ideationModule.inputSchema.parse({ gap_ids: ids, per_gap, dry_run: true });
 
+  it("explicit IDs cannot bypass human-validated High priority", async () => {
+    await validatePlacement({gap_id:ids[0]!,band:"medium",rationale:"Later cycle",actor:ACTOR});
+    const {ctx} = context(call => call.purpose === "ideation-proposer" ? {tactics:gapsOf(call).map(g=>tactic(g.id,"Eligible"))} : call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call,1));
+    const {output} = await ideationModule.run(input(),ctx);
+    expect(output.gaps_considered).toBe(1); expect(output.proposals.map(p=>p.gap_id)).toEqual([ids[1]]);
+    await validatePlacement({gap_id:ids[0]!,band:"high",rationale:"Blocks dossier",actor:ACTOR});
+  });
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
     await expect(ideationModule.run(input(), ctx)).rejects.toBeInstanceOf(NoRouteError);
@@ -225,6 +235,55 @@ describe("S9 on the model path", () => {
     expect(output.rejected[0]).toMatchObject({ judge_note: "judge on B1", rank: null, score: 30 });
   });
 
+  it("compares expansions and new options with the full library design/status for proposer, critic and judge", async () => {
+    const target = await createProposedTactic({name:"Completed safety trial",type:"phase3_trial",description:"Locked trial dataset",evidence_question:"Overall safety",population:"Adults",intervention:"Asset",comparator:"SOC",outcomes:"AE",study_design:"Randomized trial",data_source:"Trial dataset",owner:ACTOR.name,function:ACTOR.function,residual_ids:[],status:"completed",actor_name:ACTOR.name,actor_function:ACTOR.function});
+    const scope = {name:"Elderly analysis",evidence_question:"Safety in 75+?",population:"Age 75+",outcomes:"AESI",geography:"",data_cut:"Locked trial data",analysis:"Post-hoc subgroup",instrument:"",study_design:"Retrospective subgroup analysis",gap_coverage:"Elderly safety",cost_effort:"Two analyst months",timing:"3 months",feasibility_risks:"Small subgroup",post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
+    const {ctx,calls}=context(call => {
+      if (call.purpose === "ideation-proposer") return {tactics:gapsOf(call).flatMap(gap=>[tactic(gap.id,"Expand safety",{proposal_kind:"expansion",target_tactic_id:target,expansion_scope:scope,comparative_rationale:"Existing data is faster and cheaper; small sample reduces quality"}),tactic(gap.id,"New safety cohort")])};
+      if (call.purpose === "ideation-critic") return keepAll(call);
+      return judgeFirst(call,2);
+    });
+    const {output}=await ideationModule.run(input(2),ctx);
+    expect(output.proposals.filter(p=>p.proposal_kind === "expansion")).toHaveLength(2);
+    for (const purpose of ["ideation-proposer","ideation-critic","ideation-judge"]) {
+      const lib=calls.find(c=>c.purpose === purpose)!.body.library as Record<string,unknown>[];
+      expect(lib.find(t=>t.id===target)).toMatchObject({status:"completed",study_design:"Randomized trial",data_source:"Trial dataset",description:"Locked trial dataset"});
+    }
+  });
+  it("preserves expansion AI baseline, rejection memory across reruns and explicit restore", async () => {
+    const {RunRecorder,openRun,closeRun}=await import("@/modules/kernel/observability");
+    const {listIdeationProposals,decideIdeationProposal,restoreIdeationProposal,editIdeationProposal}=await import("@/modules/stages/s9-ideation/module");
+    const {sharedDb}=await import("@/modules/kernel/db"); const {sql}=await import("drizzle-orm");
+    const target=await createProposedTactic({name:"Completed baseline trial",type:"phase3_trial",description:"Existing data",evidence_question:"Overall safety",population:"Adults",intervention:"Asset",comparator:"SOC",outcomes:"AE",owner:ACTOR.name,function:ACTOR.function,residual_ids:[],status:"completed",actor_name:ACTOR.name,actor_function:ACTOR.function});
+    const scope={name:"Elderly analysis",evidence_question:"Safety in 75+?",population:"Age 75+",outcomes:"AESI",geography:"",data_cut:"Locked data",analysis:"Post-hoc subgroup",instrument:"",study_design:"Retrospective analysis",gap_coverage:"Elderly safety",cost_effort:"Two analyst months",timing:"3 months",feasibility_risks:"Small sample",post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
+    const script:Script=call=>call.purpose === "ideation-proposer" ? {tactics:gapsOf(call).map(g=>tactic(g.id,"Baseline expansion",{proposal_kind:"expansion",target_tactic_id:target,expansion_scope:scope}))} : call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call,1);
+    const recorder=new RunRecorder({workspace_id:"default",stage:"S9",module_id:ideationModule.manifest.id,module_version:ideationModule.manifest.version,actor:ACTOR,input:{gap_ids:ids}});
+    await openRun(recorder); const {ctx}=context(script); ctx.run=recorder;
+    const generated=await ideationModule.run({...input(),dry_run:false},ctx); await closeRun({recorder,status:"ok",output:generated.output,route:ctx.route});
+    const p=(await listIdeationProposals()).find(p=>p.target_tactic_id===target && p.gap_id===ids[0])!;
+    await decideIdeationProposal({id:p.id,decision:"reject",rationale:"Feasibility pending",actor:ACTOR});
+    const rerun=await ideationModule.run(input(),context(script).ctx); expect(rerun.output.proposals.some(p=>p.gap_id===ids[0])).toBe(false);
+    await restoreIdeationProposal({id:p.id,rationale:"New feasibility information",actor:ACTOR});
+    const restored=await ideationModule.run(input(),context(script).ctx); expect(restored.output.proposals.some(p=>p.gap_id===ids[0])).toBe(true);
+    const editedScope={...scope,cost_effort:"One analyst month"};
+    await editIdeationProposal({id:p.id,fields:{expansion_scope:editedScope},rationale:"Human budget refinement",actor:ACTOR});
+    await ideationModule.run({...input(),dry_run:false},context(script).ctx);
+    expect((await listIdeationProposals()).find(r=>r.id===p.id)?.expansion_scope).toEqual(editedScope);
+    await decideIdeationProposal({id:p.id,decision:"accept",rationale:"Credible existing data",actor:ACTOR});
+    const observations=await sharedDb().execute(sql`select ai_output, final, outcome from decision_examples where run_id=${recorder.id} and subject_id=${p.id}`);
+    expect(observations).toHaveLength(2);
+    const accepted=observations.find(row=>row.outcome==='edited')!;
+    expect(accepted.ai_output).toMatchObject({proposal_kind:"expansion",target_tactic_id:target,expansion_scope:scope});
+    expect(accepted.final).toMatchObject({proposal_kind:"expansion",target_tactic_id:target,expansion_scope:editedScope});
+    await expect(decideIdeationProposal({id:p.id,decision:"accept",rationale:"Duplicate decision",actor:ACTOR})).rejects.toThrow(/already accepted/);
+    expect(await sharedDb().execute(sql`select id from decision_examples where run_id=${recorder.id} and subject_id=${p.id}`)).toHaveLength(2);
+  });
+  it.each(["unknown-target", "incomplete-scope", "completed-prospective", "unmarked-posthoc"])("fails closed on invalid model expansion: %s", async defect => {
+    const target=await createProposedTactic({name:"Completed validation trial",type:"phase3_trial",description:"Existing data",evidence_question:"Overall safety",population:"Adults",intervention:"Asset",comparator:"SOC",outcomes:"AE",owner:ACTOR.name,function:ACTOR.function,residual_ids:[],status:"completed",actor_name:ACTOR.name,actor_function:ACTOR.function});
+    const scope={name:"Elderly analysis",evidence_question:"Safety in 75+?",population:"Age 75+",outcomes:"AESI",geography:"",data_cut:"Locked data",analysis:"Post-hoc subgroup",instrument:"",study_design:"Retrospective analysis",gap_coverage:"Elderly safety",cost_effort:defect === "incomplete-scope" ? "" : "Two analyst months",timing:"3 months",feasibility_risks:"Small sample",post_hoc:defect !== "unmarked-posthoc",prospective_enrolment:defect === "completed-prospective",protocol_amendment:false,start_date:null,evidence_available:null};
+    const {ctx}=context(call=>({tactics:gapsOf(call).map(g=>tactic(g.id,"Invalid expansion",{proposal_kind:"expansion",target_tactic_id:defect === "unknown-target" ? "TAC-unknown" : target,expansion_scope:scope}))}));
+    await expect(ideationModule.run(input(),ctx)).rejects.toThrow(/did not return a complete set of tactic designs/);
+  });
   it("asks again for a gap whose tactic has an invalid type or no duration", async () => {
     const [a, b] = ids as [string, string];
     let firstProposal = true;

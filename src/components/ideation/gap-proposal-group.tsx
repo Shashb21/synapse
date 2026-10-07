@@ -34,7 +34,7 @@ export function AddIdeaDialog({
       fields={proposalFields()}
       label="Add idea by hand"
       title={`Add an idea for ${gapName}`}
-      description="Write the tactic yourself. It joins the ideas awaiting a decision and is accepted or rejected the same way."
+      description="Write a new tactic for this human-validated High-priority gap. It joins the ideas awaiting a decision and is accepted or rejected the same way."
       confirmLabel="Add idea"
       requireRationale
       identity={identity}

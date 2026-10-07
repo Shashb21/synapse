@@ -1,3 +1,4 @@
+import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 /** Frozen originating facts and typed human-target agreement; no historical facts are reconstructed. */
 import { sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
@@ -104,6 +105,19 @@ export function scoreDecisionReplay(example: DecisionExample, output: unknown): 
         const actualDesign = record(actual.design);
         if (fields.some(k => target[k] == null) || designFields.some(k => design[k] == null))
             return excluded('Proposal target lacks required final design fields.');
+        if (example.kind === 's9_proposal') {
+            const kind = target.proposal_kind ?? 'new';
+            if (!['new', 'expansion'].includes(String(kind))) return excluded('Unknown proposal kind.');
+            metric('proposal_kind_agreement', kind === (actual.proposal_kind ?? 'new'));
+            if (kind === 'expansion') {
+                const scope = expansionScopeSchema.safeParse(target.expansion_scope);
+                if (!scope.success || typeof target.target_tactic_id !== 'string' || !target.target_tactic_id || typeof target.comparative_rationale !== 'string' || !target.comparative_rationale.trim()) return excluded('Expansion target lacks complete target, scope or comparison.');
+                metric('target_tactic_id_agreement', target.target_tactic_id === actual.target_tactic_id);
+                metric('comparative_rationale_literal_agreement', evidenceHash(target.comparative_rationale) === evidenceHash(actual.comparative_rationale ?? null));
+                const actualScope = record(actual.expansion_scope);
+                for (const [key,value] of Object.entries(scope.data)) metric(`expansion_${key}_literal_agreement`, evidenceHash(value) === evidenceHash(actualScope[key] ?? null));
+            }
+        }
         for (const k of fields)
             metric(`${k}_literal_agreement`, evidenceHash(target[k]) === evidenceHash(actual[k] ?? null));
         for (const k of designFields)

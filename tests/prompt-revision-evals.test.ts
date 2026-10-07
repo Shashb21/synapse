@@ -202,7 +202,7 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
             return { tactics: body.gaps.flatMap((g: {
                     id: string;
                     proposal_slots: string[];
-                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, name: args.system.includes('Edited design') ? 'Human-approved study' : 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', rationale: 'Answer the evidence gap', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
+                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, name: args.system.includes('Edited design') ? 'Human-approved study' : 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', rationale: 'Answer the evidence gap', comparative_rationale:'New registry answers unavailable scope; credible feasibility but slower and costlier than secondary analysis', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
         });
         const live = await runStage({ stage: 'S9', workspace_id: f.ws.id, input: { gap_ids: [f.gap.id], per_gap: 1 }, actor, role: 'medical_affairs' });
         const [proposal] = await listIdeationProposals();
@@ -236,7 +236,7 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
         const output = await executeFrozenStage({ module: ideationModule as SynapseModule<unknown, unknown>, snapshot: frozen, route: { ...route, stage: 'S9' }, revision: { id: 'candidate', instruction: 'Edited design' }, actor, excluded_ids: [decision.id] });
         const score = scoreDecisionReplay(decision, projectReplayDecision(decision, output));
         expect(score.reason).toBeNull();
-        expect(score.metrics).toHaveLength(12);
+        expect(score.metrics).toHaveLength(13);
         expect(score.metrics.every(m => m.value === 1)).toBe(true);
         expect(await liveContents()).toEqual(before);
         const o = output as {

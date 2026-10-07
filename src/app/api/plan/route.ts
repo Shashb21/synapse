@@ -1,3 +1,4 @@
+import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import "@/modules";
@@ -93,8 +94,20 @@ const PROPOSAL_TEXT_FIELDS = [
 /** The idea fields present on the request; absent ones are left as they are. */
 function proposalFieldsOf(body: Record<string, unknown>): ProposalFields {
   const fields: ProposalFields = {};
+  if (body.proposal_kind !== undefined) fields.proposal_kind = field(z.enum(["new", "expansion"]), body.proposal_kind, "proposal_kind");
+  if (body.target_tactic_id !== undefined) fields.target_tactic_id = field(z.string().trim().min(1).nullable(), body.target_tactic_id, "target_tactic_id");
+  if (body.expansion_scope !== undefined) fields.expansion_scope = field(expansionScopeSchema, body.expansion_scope, "expansion_scope");
+  if (body.comparative_rationale !== undefined) fields.comparative_rationale = field(z.string(), body.comparative_rationale, "comparative_rationale");
   for (const key of PROPOSAL_TEXT_FIELDS) {
     if (body[key] !== undefined && body[key] !== null) fields[key] = String(body[key]);
+  }
+  if (Object.keys(body).some(key => key.startsWith("expansion_")) && body.expansion_scope === undefined) {
+    const raw = Object.fromEntries(["name","evidence_question","population","outcomes","geography","data_cut","analysis","instrument","study_design","gap_coverage","cost_effort","timing","feasibility_risks","post_hoc","prospective_enrolment","protocol_amendment","start_date","evidence_available"].map(key => {
+      const value = body[`expansion_${key}`];
+      if (["post_hoc","prospective_enrolment","protocol_amendment"].includes(key)) return [key,field(z.enum(["true","false"]),value,`expansion_${key}`) === "true"];
+      return [key,["start_date","evidence_available"].includes(key) && value === "" ? null : value];
+    }));
+    fields.expansion_scope = field(expansionScopeSchema,raw,"expansion_scope");
   }
   const duration = optionalMonths(body.duration_months, "duration_months");
   if (duration !== undefined) fields.duration_months = duration;

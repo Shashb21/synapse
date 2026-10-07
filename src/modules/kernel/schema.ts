@@ -163,6 +163,12 @@ export const ideationProposals = pgTable("ideation_proposals", {
   decided_at: text("decided_at"),
   decision_rationale: text("decision_rationale"),
   tactic_id: text("tactic_id"),
+  proposal_kind: text("proposal_kind").notNull().default("new"),
+  target_tactic_id: text("target_tactic_id"),
+  expansion_id: text("expansion_id"),
+  expansion_scope: jsonb("expansion_scope"),
+  reviewed_parent: jsonb("reviewed_parent"),
+  comparative_rationale: text("comparative_rationale").notNull().default(""),
 });
 
 export const timelineActivities = pgTable("timeline_activities", {
