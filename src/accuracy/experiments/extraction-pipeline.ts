@@ -68,7 +68,7 @@ async function retainResult(args: PipelineExperimentContext & { call_kind: CallK
   }
 }
 
-/** Retain an error result when a stage opens a run but cannot complete. */
+/** Retain an error under the reserved stage identity, even if preparation has not opened a run. */
 async function retainFailure(args: PipelineExperimentContext & { call_kind: CallKind; input: Record<string, unknown>; call_id: string; error: unknown }) {
   const implementation = await activeAccuracyModule(args.call_kind);
   const output_error = args.error instanceof Error ? args.error.message : String(args.error);
@@ -127,7 +127,10 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
   });
   const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null; merge: AccuracyRunResult<MergeDedupeOutput> | null; status: AccuracyRunResult<StatusDeriveOutput> | null } = { current: null, merge: null, status: null };
   try {
-    await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, merge_context: { org_id: context.org_id, actor: context.actor, evaluation_context: "experiment" }, execute: async (_batch, journal, prepared) => {
+    await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, merge_context: { org_id: context.org_id, actor: context.actor, evaluation_context: "experiment" },
+      onMergePreparation: journal => {
+        downstream.current = { call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, call_id: journal.merge_operation_id };
+      }, execute: async (_batch, journal, prepared) => {
       await assertAccuracyCanProgress(context.workspace_id, "merge_dedupe");
       downstream.current = { call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, call_id: journal.merge_operation_id };
       downstream.merge = await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false, prepared);

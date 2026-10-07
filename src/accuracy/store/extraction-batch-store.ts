@@ -92,6 +92,8 @@ async function currentBatch(workspace_id: string, source_file_id: string, batch_
 /** Reserve/capture briefly, judge without locks, then atomically apply the unchanged inputs. */
 export async function resumeExtractionBatch<T>(args: { workspace_id: string; source_file_id: string; batch_id: string;
   merge_context: { org_id: string; actor: Actor; evaluation_context?: "production" | "experiment" };
+  /** Notify orchestration of the reserved merge ID outside the transaction, before preparation can fail. */
+  onMergePreparation?: (journal: ResumeJournal) => void;
   execute: (batch: ExtractionBatch, journal: ResumeJournal, prepared?: PreparedAccuracyMerge) => Promise<T> }): Promise<T> {
   // Never let the preparation phase join a caller's outer transaction.
   if (accuracyTransactionActive()) throw new Error("Extraction resume must start outside every Accuracy transaction.");
@@ -128,6 +130,7 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
   let prepared = reservation.prepared;
   try {
     if (reservation.inputs && !prepared) {
+      args.onMergePreparation?.(reservation.journal);
       prepared = await prepareAccuracyMerge({ ...args.merge_context, workspace_id: args.workspace_id,
         run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs, prior: reservation.prior });
       // Successful paid judgment survives an apply rollback. CAS fences lease takeover.

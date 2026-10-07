@@ -13,7 +13,16 @@ import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
-import { accuracyDb } from "@/accuracy/store/db";
+import { accuracyDb, accuracyTransactionActive } from "@/accuracy/store/db";
+import { listClaims, claimMetadata } from "@/accuracy/store/claim-store";
+import { listAccuracyRuns } from "@/accuracy/kernel/observability";
+import { ExtractionBatchError, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
+import { IncompleteAnswerError } from "@/modules/kernel/stage-errors";
+import { accuracyRouteConfig, setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
+import { openAi, ProviderError, type LlmRequest } from "@/modules/llm/provider";
+import { INVENTORY_PROPOSER_SYSTEM } from "@/accuracy/modules/inventory-extract/prompts";
+import { NEED_PROPOSER_SYSTEM } from "@/accuracy/modules/need-extract/prompts";
+import { MERGE_EQUIVALENCE_SYSTEM } from "@/accuracy/modules/merge-dedupe/prompts";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy/store/tenant";
 import { newId } from "@/modules/kernel/ids";
@@ -68,7 +77,146 @@ function controlled(call_kind: "inventory_extract" | "need_extract" | "merge_ded
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "pipeline test" });
 }
 
+/** Script the provider only; extraction, completeness, merge and stores stay real. */
+async function scriptedPipelineProvider<T>(judge: (request: LlmRequest) => Promise<string>, operation: () => Promise<T>) {
+  const routes = await Promise.all((["inventory_extract", "need_extract", "merge_dedupe"] as const)
+    .map(call_kind => accuracyRouteConfig(call_kind, call_kind === "merge_dedupe" ? "judge" : "proposer")));
+  vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "0");
+  vi.stubEnv("OPENAI_API_KEY", "scripted-pipeline-provider");
+  try {
+    for (const route of routes) await setAccuracyRouteConfig({ ...route, provider_id: "openai", model: "gpt-5.1", fallbacks: [], actor_name: "test" });
+    vi.spyOn(openAi, "complete").mockImplementation(async request => {
+      expect(accuracyTransactionActive()).toBe(false);
+      if (request.system === MERGE_EQUIVALENCE_SYSTEM) return judge(request);
+      if (request.system.startsWith("Compare every source block")) {
+        const { blocks } = JSON.parse(request.user) as { blocks: { id: string }[] };
+        return JSON.stringify({ checked_block_ids: blocks.map(block => block.id), suspected_omissions: [], prior_issue_resolutions: [] });
+      }
+      const source_file_id = request.user.match(/source_file_id=(\S+)/)?.[1];
+      const block_id = request.user.match(/### block_id=(\S+)/)?.[1];
+      const provenance = [{ source_file_id, block_id, quote: "Source evidence." }];
+      if (request.system === INVENTORY_PROPOSER_SYSTEM) return JSON.stringify({ tactics: [{ name: "Clinical comparator study",
+        type: "phase3_trial", status: "planned", evidence_question: "Does it improve survival?", provenance }] });
+      if (request.system === NEED_PROPOSER_SYSTEM) return JSON.stringify({ gaps: ["Need survival evidence", "Survival evidence is missing"]
+        .map(statement => ({ statement, external_id: null, provenance })) });
+      throw new Error("Unexpected provider request in scripted pipeline");
+    });
+    return await operation();
+  } finally {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    for (const route of routes) await setAccuracyRouteConfig({ ...route, actor_name: route.updated_by,
+      temperature: route.params.temperature, max_tokens: route.params.max_tokens });
+  }
+}
+
 describe("isolated extraction-pipeline experiments", () => {
+  it("retains exhausted invalid merge judgments as an error version and evaluation without applying downstream effects", async () => {
+    const source = await sourceFixture();
+    let judgeCalls = 0;
+    await scriptedPipelineProvider(async () => {
+      judgeCalls++;
+      return JSON.stringify({ decisions: [{ pair_id: "p1", same: "invalid boolean", rationale: "Invalid scripted judgment" }] });
+    }, async () => {
+      const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id,
+        source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {},
+        actor: { name: "test", function: "medical_affairs" } });
+      workspaces.push(experiment.workspace_id);
+      expect(experiment.status).toBe("failed");
+      expect(judgeCalls).toBe(3);
+      const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
+      const errors = experiment.calls.filter(call => call.call_kind === "merge_dedupe");
+      expect(errors).toEqual([expect.objectContaining({ call_id: journal.merge_operation_id, version_index: 0, output: null,
+        output_error: expect.stringContaining("after 3 attempts"), input: { workspace_id: experiment.workspace_id } })]);
+      expect(errors[0].output_error).toContain("complete dedupe decision");
+      expect(experiment.evaluations.filter(row => row.call_id === journal.merge_operation_id)).toEqual([
+        expect.objectContaining({ version_index: 0, evaluation: expect.objectContaining({ status: "model_error",
+          output_shape: { valid: false }, errors: [errors[0].output_error] }) }),
+      ]);
+      expect(journal).toMatchObject({ merge_state: "reserved", status_state: "reserved", final_response: null,
+        prepared_merge: null, preparation_token: null });
+      expect((await listAccuracyRuns(experiment.workspace_id)).map(run => run.call_kind).sort()).toEqual(["inventory_extract", "need_extract"]);
+      expect(experiment.calls.filter(call => call.call_kind === "status_derive")).toEqual([]);
+      expect(experiment.calls.filter(call => call.call_kind !== "merge_dedupe").map(call => call.call_kind).sort())
+        .toEqual(["inventory_extract", "need_extract"]);
+      const claims = await listClaims(experiment.workspace_id);
+      expect(claims).toHaveLength(3);
+      expect(claims.filter(row => row.claim_type === "gap").map(row => row.status)).toEqual(["draft", "draft"]);
+      for (const claim of claims) {
+        expect(claimMetadata(claim)).not.toHaveProperty("merged_into");
+        expect(claimMetadata(claim)).not.toHaveProperty("computed_status");
+      }
+      expect(await listClaims(source.workspace_id)).toEqual([]);
+      const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.id, journal.batch_id));
+      await expect(resumeExtractionBatch({ workspace_id: experiment.workspace_id, source_file_id: batch.source_file_id, batch_id: batch.id,
+        merge_context: { org_id: experiment.org_id, actor: { name: "test", function: "medical_affairs" } },
+        execute: async () => { throw new Error("Preparation failure must not reach apply"); } })).rejects.toBeInstanceOf(IncompleteAnswerError);
+      expect(judgeCalls).toBe(6);
+      expect(await listClaims(experiment.workspace_id)).toEqual(claims);
+    });
+  });
+
+  it("does not notify a merge phase or invent an operation identity when reservation fails", async () => {
+    const source = await sourceFixture();
+    let phase: string | null = null;
+    let applied = false;
+    await expect(resumeExtractionBatch({ workspace_id: source.workspace_id, source_file_id: source.source_file_id, batch_id: "missing-batch",
+      merge_context: { org_id: source.org_id, actor: { name: "test", function: "medical_affairs" } },
+      onMergePreparation: journal => { phase = journal.merge_operation_id; },
+      execute: async () => { applied = true; return {}; } })).rejects.toBeInstanceOf(ExtractionBatchError);
+    expect(phase).toBeNull();
+    expect(applied).toBe(false);
+    expect(await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, source.workspace_id))).toEqual([]);
+  });
+
+  it("retains a merge preparation provider failure and evaluation under its reserved journal identity", async () => {
+    const source = await sourceFixture();
+    const failure = new ProviderError({ provider_id: "openai", provider_name: "OpenAI", key_env: "OPENAI_API_KEY",
+      status: 402, error_type: "insufficient_quota", provider_message: "Scripted merge provider failure" });
+    let judgeCalls = 0;
+    await scriptedPipelineProvider(async () => { judgeCalls++; throw failure; }, async () => {
+      const experiment = await runAccuracyExperiment({ mode: "pipeline", source_workspace_id: source.workspace_id,
+        source_file_ids: [source.source_file_id], pack_id: "beone-bgb-58067-prmt5i", condition: {},
+        actor: { name: "test", function: "medical_affairs" } });
+      workspaces.push(experiment.workspace_id);
+      expect(experiment.status).toBe("failed");
+      expect(judgeCalls).toBe(1);
+      const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
+      expect(journal).toMatchObject({ merge_state: "reserved", status_state: "reserved", final_response: null,
+        prepared_merge: null, preparation_token: null });
+      expect(experiment.calls.filter(call => call.call_kind === "merge_dedupe")).toEqual([
+        expect.objectContaining({ call_id: journal.merge_operation_id, version_index: 0, output: null, output_error: failure.message,
+          input: { workspace_id: experiment.workspace_id } }),
+      ]);
+      expect(experiment.evaluations.filter(row => row.call_id === journal.merge_operation_id)).toEqual([
+        expect.objectContaining({ version_index: 0, evaluation: expect.objectContaining({ status: "model_error",
+          output_shape: { valid: false }, errors: [failure.message] }) }),
+      ]);
+      expect(experiment.calls.filter(call => call.call_kind === "status_derive")).toEqual([]);
+      const runs = await listAccuracyRuns(experiment.workspace_id);
+      expect(runs.map(run => run.call_kind).sort()).toEqual(["inventory_extract", "need_extract"]);
+      expect(runs.every(run => run.status === "ok")).toBe(true);
+      const claims = await listClaims(experiment.workspace_id);
+      expect(claims).toHaveLength(3);
+      expect(claims.filter(row => row.claim_type === "gap").map(row => row.status)).toEqual(["draft", "draft"]);
+      for (const claim of claims) {
+        expect(claimMetadata(claim)).not.toHaveProperty("merged_into");
+        expect(claimMetadata(claim)).not.toHaveProperty("computed_status");
+      }
+      expect(await listClaims(source.workspace_id)).toEqual([]);
+      expect(experiment.calls.filter(call => call.call_kind !== "merge_dedupe").map(call => call.call_kind).sort())
+        .toEqual(["inventory_extract", "need_extract"]);
+      // Production resume keeps the same typed failure and reserved identity;
+      // the experiment observer is optional and does not alter its error surface.
+      const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.id, journal.batch_id));
+      let applied = false;
+      await expect(resumeExtractionBatch({ workspace_id: experiment.workspace_id, source_file_id: batch.source_file_id, batch_id: batch.id,
+        merge_context: { org_id: experiment.org_id, actor: { name: "test", function: "medical_affairs" } },
+        execute: async () => { applied = true; return {}; } })).rejects.toBe(failure);
+      expect(applied).toBe(false);
+      expect(judgeCalls).toBe(2);
+    });
+  });
   it.each(["single_call", "pipeline"] as const)("propagates three fixed passes through the actual %s path and retains terminal assessments", async mode => {
     const source = await sourceFixture();
     const sourceRows = await accuracyDb().select().from(t.accuracySourceFiles).where(eq(t.accuracySourceFiles.workspace_id, source.workspace_id));
