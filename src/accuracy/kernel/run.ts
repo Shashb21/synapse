@@ -1,7 +1,8 @@
 /** Execute accuracy modules after input, tenant ownership, and omission pause checks. */
 import { isDeepStrictEqual } from "node:util";
 import { activeAccuracyModule } from "./registry";
-import { ensureAccuracySchema } from "../store/db";
+import { AiDisabledError, aiEnabled } from "@/modules/kernel/ai-switch";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema } from "../store/db";
 import { AccuracyRunRecorder, closeAccuracyRun, openAccuracyRun, reservedAccuracyRun } from "./observability";
 import {
   accuracyCompletionFor,
@@ -21,6 +22,7 @@ import { validateExperimentCycleControl } from "./contracts";
 import { estimateCostUsd } from "./cost";
 import { getWorkspaceOrgId } from "../store/tenant";
 import { assertAccuracyCanProgress } from "./omission-pause";
+import { isTestStub } from "@/modules/kernel/llm";
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -59,6 +61,10 @@ export async function runAccuracyModule<O = unknown>(args: {
   const experiment_cycle_control = validateExperimentCycleControl(args.experiment_cycle_control, evaluation_context, args.call_kind);
   const implementation = await activeAccuracyModule(args.call_kind);
   await ensureAccuracySchema(implementation.migrations ?? []);
+  // The admin AI switch: with AI off, no agentic module runs at all.
+  if (implementation.manifest.agentic && !(await aiEnabled(accuracyTransactionActive() ? accuracyDb() : undefined))) {
+    throw new AiDisabledError(implementation.manifest.title);
+  }
 
   const parsedInput = implementation.inputSchema.safeParse(args.input);
   if (!parsedInput.success) {
@@ -107,7 +113,7 @@ export async function runAccuracyModule<O = unknown>(args: {
 
   let route = null;
   try {
-    if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+    if (isTestStub()) {
       // Vitest / Playwright: allow agentic modules without a live provider.
       const stub = await resolveAccuracyRoute({
         call_kind: args.call_kind,
@@ -143,8 +149,8 @@ export async function runAccuracyModule<O = unknown>(args: {
   const llmReady =
     route &&
     route.connected &&
-    (route.auth === "oauth" || route.auth === "api_key") &&
-    process.env.SYNAPSE_TEST_STUB_LLM !== "1";
+    route.auth === "api_key" &&
+    !isTestStub();
   const ctx: AccuracyModuleContext = {
     org_id: args.org_id,
     workspace_id: args.workspace_id,
@@ -187,9 +193,9 @@ export async function runAccuracyModule<O = unknown>(args: {
         })
       : async () => {
           throw new Error(
-            process.env.SYNAPSE_TEST_STUB_LLM === "1"
+            isTestStub()
               ? "LLM stub: complete should not run under SYNAPSE_TEST_STUB_LLM"
-              : "LLM not available — connect Grok or Claude in /control",
+              : "LLM not available — set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment",
           );
         },
     noteCost: (cost) => {

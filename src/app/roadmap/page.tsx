@@ -33,10 +33,10 @@ export default async function RoadmapPage() {
       ) : (
       <ol className="grid gap-3">
         {items.map(({ tactic, item }) => (
-          <li key={tactic.id} className="border border-border bg-card p-4">
+          <li key={tactic.id} className="border border-border bg-card p-4 rounded-lg">
             <div className="flex flex-wrap items-center gap-2">
               <TacticBadge status={tactic.status} />
-              <Link href={`/tactics/${tactic.id}`} className="text-[14px] text-foreground">
+              <Link href={`/tactics/${tactic.id}`} className="text-[13px] text-foreground">
                 {tactic.name}
               </Link>
             </div>
@@ -52,7 +52,7 @@ export default async function RoadmapPage() {
               </p>
             ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              {item ? <LockMeta lock={item.lock} /> : <span className="text-[11px] text-amber-300">Not yet on locked roadmap</span>}
+              {item ? <LockMeta lock={item.lock} /> : <span className="text-[11px] text-amber-700 dark:text-amber-300">Not yet on locked roadmap</span>}
               <LockForm
                 label={item ? "Re-lock roadmap row" : "Accept onto roadmap"}
                 action="lock_roadmap"

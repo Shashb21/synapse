@@ -1,95 +1,19 @@
-import type { IegpState } from "./types";
+import { buildSeed } from "./seed";
+import type { Asset, IegpState } from "./types";
 
 const AT = "2026-09-17T00:00:00.000Z";
 
-/** Empty IEGP: Velmara asset + objectives only. No sources, gaps, or tactics. */
-export function buildBlankWorkspace(): IegpState {
+/**
+ * The asset row id of a blank workspace. The schema needs an id; it is never
+ * shown. Names, INN, indication and geography stay empty until the setup
+ * wizard (saveProductSetup) fills them in.
+ */
+export const BLANK_ASSET_ID = "ASSET";
+
+function emptyState(asset: Asset, detail: string): IegpState {
   return {
-    asset: {
-      id: "ASSET-VELMARA",
-      name: "Velmara",
-      inn: "velmaratinib",
-      indication: "2L EGFR-mutant NSCLC",
-      geography: "US + EU5",
-      wizard_complete: false,
-      tactics_unlocked: false,
-      setup_complete: false,
-      planning_context: {},
-    },
-    objectives: [
-      {
-        id: "OBJ-REIMB",
-        name: "Support reimbursement and HTA",
-        description: "Generate decision-grade evidence for US payers and EU5 HTA.",
-        lifecycle_stage: "peri-launch",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US + EU5",
-        strategic_importance: 5,
-        key_decision: "US national payer P&T and EU5 HTA filings",
-        decision_date: "2027-03-31",
-        owner: "T. Okonkwo",
-      },
-      {
-        id: "OBJ-DIFF",
-        name: "Demonstrate differentiated clinical value",
-        description: "Position Velmara versus osimertinib and NX-441.",
-        lifecycle_stage: "peri-launch",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US + EU5",
-        strategic_importance: 5,
-        key_decision: "Brand strategy lock",
-        decision_date: "2026-12-15",
-        owner: "M. Hale",
-      },
-      {
-        id: "OBJ-ELDERLY",
-        name: "Establish value in elderly and frail patients",
-        description: "Answer the elderly SoC question that HTA and KOLs keep raising.",
-        lifecycle_stage: "peri-launch",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US + EU5",
-        strategic_importance: 5,
-        key_decision: "HTA elderly subgroup package",
-        decision_date: "2027-01-15",
-        owner: "A. Rao",
-      },
-      {
-        id: "OBJ-BURDEN",
-        name: "Characterise burden of CNS disease and recurrence",
-        description: "Clinical, HCRU and economic burden to feed models and medical.",
-        lifecycle_stage: "peri-launch",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US + EU5",
-        strategic_importance: 4,
-        key_decision: "CEA/BIM input freeze",
-        decision_date: "2026-11-30",
-        owner: "A. Rao",
-      },
-      {
-        id: "OBJ-SEQ",
-        name: "Support treatment sequencing",
-        description: "Where Velmara sits after osimertinib and versus NX-441.",
-        lifecycle_stage: "lifecycle",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US + EU5",
-        strategic_importance: 4,
-        key_decision: "Medical sequencing narrative",
-        decision_date: "2027-06-01",
-        owner: "M. Hale",
-      },
-      {
-        id: "OBJ-ACCESS",
-        name: "Improve patient access",
-        description: "Formulary, IRA net price, persistence RWE.",
-        lifecycle_stage: "peri-launch",
-        indication: "2L EGFR-mutant NSCLC",
-        geography: "US",
-        strategic_importance: 5,
-        key_decision: "Aetna / UHC formulary",
-        decision_date: "2026-12-01",
-        owner: "T. Okonkwo",
-      },
-    ],
+    asset,
+    objectives: [],
     sources: [],
     blocks: [],
     needs: [],
@@ -109,10 +33,9 @@ export function buildBlankWorkspace(): IegpState {
         actor_name: "System",
         actor_function: "evidence_lead",
         entity_type: "plan",
-        entity_id: "ASSET-VELMARA",
+        entity_id: asset.id,
         action: "blank",
-        detail:
-          "Blank IEGP workspace. Sidebar places: upload → review → mappings → library → plan. Demo files wait on Upload until a human ingest them.",
+        detail,
       },
     ],
     gold_needs: [],
@@ -120,5 +43,49 @@ export function buildBlankWorkspace(): IegpState {
     gap_versions: [],
     breakout_groups: [],
     breakout_group_gaps: [],
+    gap_suggestions: [],
   };
+}
+
+/**
+ * A truly blank IEGP: an empty asset and nothing else. No objectives, key
+ * decisions, sources, gaps or tactics. Everything comes from the person, via
+ * the setup wizard and the stages.
+ */
+export function buildBlankWorkspace(): IegpState {
+  return emptyState(
+    {
+      id: BLANK_ASSET_ID,
+      name: "",
+      inn: "",
+      indication: "",
+      geography: "",
+      wizard_complete: false,
+      tactics_unlocked: false,
+      setup_complete: false,
+      planning_context: {},
+    },
+    "Blank IEGP workspace. Nothing is filled in until someone enters it.",
+  );
+}
+
+/**
+ * Demo fixture for tests: the Velmara demo's asset and objectives (from the
+ * seed) with setup not yet done, and no sources, gaps or tactics. It is demo
+ * data, so it is only loaded on request (the "load_demo" action with
+ * scope "setup"), never as a default.
+ */
+export function buildDemoSetupWorkspace(): IegpState {
+  const seed = buildSeed();
+  const state = emptyState(
+    {
+      ...seed.asset,
+      wizard_complete: false,
+      tactics_unlocked: false,
+      setup_complete: false,
+      planning_context: {},
+    },
+    "Demo setup (Velmara): the demo asset and objectives, with no sources, gaps or tactics.",
+  );
+  return { ...state, objectives: seed.objectives.map((objective) => ({ ...objective })) };
 }

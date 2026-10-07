@@ -1,57 +1,41 @@
-# SDLC process — Origin, Cloud Agent, Grokbot
+# SDLC process
 
 ## Loop
 
-1. **Requirements** (`01-requirements.md`) get IDs. No silent scope.
-2. **Architecture / design** cite those IDs.
-3. **TDD** (`04-tdd.md`) accepts tests before code. PR description lists REQ IDs touched.
-4. **Implement** on the working branch. Keep CIR and `theme_links` the contract.
-5. **Eval sweep** — automatic on seed load and every ingest (`runEvalSweep`). EVAL and SPEC are view-only tapes. Champion may move only through the safety gate.
-6. **Regression** `npm test && npm run test:e2e`.
-7. **Review** — Grokbot / Bugbot on the PR; humans accept gold expansions (new insights).
-8. **Ship**.
+1. **Requirements** ([01-requirements.md](./01-requirements.md)) carry stable `REQ-*` IDs. No silent scope: an owner decision that changes the product is written into the requirements.
+2. **Jira.** Every task is an issue in project **KAN** (`synapse21.atlassian.net`). Branches, commits and PRs carry the issue key (`KAN-21-…`, `KAN-21: …`). Statuses: **To Do**, **In Progress**, **In Review** (implementation done and QA underway, or waiting on someone, with a comment saying what), **Done**.
+3. **Tests first** for new behaviour: Vitest for logic, stores and route handlers (`tests/`), Playwright for user flows (`e2e/`). Test files for a Jira issue are named after it (`tests/kan-28-seats-sso.test.ts`, `e2e/features/kan-25-manual-timeline.spec.ts`).
+4. **Implement** on the issue branch, in small commits.
+5. **Checks** before merge: `npm test`, `npm run typecheck` (`next typegen` + `tsc`), `npm run lint` with no errors, and the e2e specs for the flows touched.
+6. **QA is the definition of done.** An issue moves to Done only after QA of the running app from a real user's point of view, in a browser, with Playwright MCP and Claude in Chrome: the happy path, edge cases and invalid input, error states, regressions in related flows, and each role that matters. The QA comment on the issue lists each scenario, the tool, pass or fail, and evidence. A failed scenario keeps the issue In Progress. If a required QA tool is not connected, the issue stays In Review with a comment saying so.
+7. **Compliance.** When a feature changes whether a requirement is met, update [requirements-compliance.md](./requirements-compliance.md) with the evidence. Nothing is marked Met without a check.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request, against Postgres 16: `npm ci`, `npm test`, `npx next typegen`, `npx tsc --noEmit`. Lint and the e2e suite are not in CI yet (REQ-OPS-002); run them locally.
+
+Local e2e: `npm run test:e2e` starts a dev server on port 43217 with `SYNAPSE_TEST_STUB_LLM=1`, so agentic stages use local proposers and no live model is needed. `E2E_PORT` runs the suite against its own server, for example from a second worktree. The stub is never set in production.
 
 ## Origin and GitHub
 
-Use **both**. Origin is the Cursor forge (agents, Origin PRs). It cannot host a public repo in the current beta (Internal / Private only). GitHub is the public share URL.
+Every published commit lands on both remotes:
 
-- Preferred dual setup: public GitHub repo `Shashb21/synapse`, then `origin repo create-mirrored Shashb21/synapse` so Origin tracks GitHub as source of truth.
-- Push both remotes with `scripts/push-both.sh`.
-- Open PRs against `main` with REQ IDs in the title or body (`REQ-CLU-002`, …).
-- CI (`.github/workflows/ci.yml`) runs unit tests on every GitHub push; e2e when browsers are available.
-- On Origin-native repos, `origin pr checks` is the merge gate. An empty check list locally still means: run `npm test` before you merge.
+- `origin` — Cursor Origin
+- `github` — [github.com/Shashb21/synapse](https://github.com/Shashb21/synapse) (public; CI runs here)
 
-Use Origin when: agent work, Origin review threads. Use GitHub when: public link, Actions, forks.
+Push both with `./scripts/push-both.sh` (or `git push origin` and `git push github` for the same branch). GitHub needs `GH_TOKEN` or `gh auth` with `repo` scope; never commit the token.
 
-## Cloud Agent
+## Review checklist
 
-Cloud Agent is the right worker for **ingest/parser work and gold/prompt patches**, not for rewriting the theme catalog by vibe. Hill-climb runs in-process; do not add a Run button back to EVAL.
-
-Suggested Cloud Agent jobs:
-
-- After a prompt patch, ingest or reset so `runEvalSweep` lands on the tape; commit only if champion composite rises and REQ-EVA-010 holds.
-- Add a gold insight when critique `kind=new` is human-accepted. Hygiene and inventory: [12-gold-set.md](./12-gold-set.md). Protocol: [06-eval-protocol.md](./06-eval-protocol.md).
-- Extend local parsers (a new OOXML quirk), with `tests/req-ing-parse.test.ts` updated first.
-
-Do not let an agent invent theme names. Residuals **propose**; humans **name** on `/catalog`. Splits append a child; they do not delete the parent.
+- Every AI judgement goes through a routed LLM; no keyword, threshold or similarity rule decides anything (REQ-AI-001), and a missing model fails clearly (REQ-AI-002).
+- Every AI output has a manual create and edit path, and a later run never overwrites a person's edit (REQ-MAN-001, REQ-MAN-002).
+- With AI off (the master switch or that section's switch in `/admin/control`) the change still works by hand and calls no model (REQ-AI-004).
+- Server-side role and workspace checks on every mutating API; the actor comes from the session, never the request body (REQ-AUTH-005, REQ-AUTH-006).
+- Customer copy has no internal jargon: no stage codes, "hillclimb" or owner-console links (REQ-UX-008, REQ-ADM-002).
+- Docs that the change makes stale (README, deploy checklist, `.env.example`, these specs) are updated in the same branch (REQ-OPS-005).
 
 ## Application flow
 
-This file is the **engineering** loop. The product loop (ingest → CIR → catalog → graph → brief) is drawn in:
-
-- [09-flow-high-level.md](./09-flow-high-level.md) — what a brand team sees
-- [10-flow-technical.md](./10-flow-technical.md) — modules, APIs, and `EngineState`
-- [11-regression.md](./11-regression.md) — REQ → test → user-flow matrix
-
-## Grokbot (Bugbot-style review)
-
-On every PR that touches `src/lib/extract`, `src/lib/eval`, `src/lib/cluster`, or gold:
-
-- Fail review if a new extractor path has no REQ-ID test.
-- Fail review if `theme_links` is bypassed (copying `statement` onto a theme, or assigning a single `theme_id` again).
-- Flag gold edits that drop `must_find` without a judge rationale.
-- Flag LlamaParse-only logic with no local fallback (REQ-ING-004).
-
-## Local vs hosted LLM
-
-v1 ships a deterministic proposer/critique/judge so the product works without keys. When `OPENAI_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY` is later wired, the **same JSON contracts and gold set** score the LLM path. Do not fork the CIR schema per vendor.
+- [02-architecture.md](./02-architecture.md) — runtime, code layout, data, identity, AI
+- [09-flow-high-level.md](./09-flow-high-level.md) — what a plan team does
+- [10-flow-technical.md](./10-flow-technical.md) — stages, APIs and tables

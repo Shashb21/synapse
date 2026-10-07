@@ -36,12 +36,12 @@ export default async function ResidualsPage() {
       ) : (
       <div className="grid gap-4">
         {rows.map(({ r, gap, pri }) => (
-          <article key={r.id} className="border border-border bg-card p-4">
+          <article key={r.id} className="border border-border bg-card p-4 rounded-lg">
             <div className="flex flex-wrap items-center gap-2">
               {pri?.lock.locked ? (
                 <PriorityBadge band={pri.band} />
               ) : (
-                <span className="text-[11px] text-amber-300">Priority unlocked — human gate</span>
+                <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked — human gate</span>
               )}
               <Link href={`/gaps/${gap.id}`} className="text-[12px] text-muted-foreground">
                 Parent: {gap.name}
@@ -60,7 +60,12 @@ export default async function ResidualsPage() {
                   <textarea name="statement" defaultValue={r.statement} className="min-h-20 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm" />
                 </label>
               </LockForm>
-              <LockForm label="Lock priority band" action="lock_priority" extra={{ residual_id: r.id }}>
+              <LockForm
+                label="Lock priority band"
+                action="lock_priority"
+                extra={{ residual_id: r.id }}
+                note={{ label: "Reason for this band (optional)" }}
+              >
                 <label className="grid gap-1 text-[12px] text-muted-foreground">
                   Band (you choose)
                   <select name="band" defaultValue={pri?.band ?? ""} required className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">

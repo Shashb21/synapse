@@ -1,9 +1,15 @@
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { addFacilitatorTag, assignFacilitatorTag } from "@/accuracy/store/workshop-store";
+import {
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,10 +26,11 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
+    const body = await parseLabBody(request, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
     await assertAccuracyCanProgress(body.workspace_id, "prioritize");
     if (body.action === "add_tag") {
       const snapshot = await addFacilitatorTag({
@@ -44,7 +51,9 @@ export async function POST(request: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Could not update facilitator tags";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Could not update facilitator tags");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

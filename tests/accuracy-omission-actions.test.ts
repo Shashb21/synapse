@@ -6,7 +6,8 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import * as store from "@/accuracy/store/omission-review-store";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { isHumanProtectedClaim, preserveHumanLocks } from "@/accuracy/store/claim-edit";
+import { claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { RequestIdentity } from "@/modules/auth/request";
@@ -74,6 +75,12 @@ describe("atomic omission decisions", () => {
     expect(rows[0]).toMatchObject({ id: result.claim_id, statement: args.statement, status: "draft", validated: false,
       metadata: { provenance: [{ ...f.issue.source_ref, quote: f.issue.evidence_quote }], origin: "contributor" } });
     expect(result.contributor_statement).toBe(args.statement);
+    const claim = (await claims(f))[0];
+    expect(isHumanProtectedClaim(claim)).toBe(true);
+    expect(claim.metadata).toMatchObject({ human_locked: ["provenance", "statement"],
+      edit_history: [expect.objectContaining({ action: "create", by: actor.name, rationale: args.reason })] });
+    expect(preserveHumanLocks(claimMetadata(claim), { provenance: [] }).provenance)
+      .toEqual([{ ...f.issue.source_ref, quote: f.issue.evidence_quote }]);
     expect(JSON.parse(result.request_fingerprint)).toMatchObject({ statement: args.statement });
     expect(await store.listBlockingOmissions(f.workspace_id)).toEqual([]);
     await expect(store.applyOmissionAction({ ...args, statement: "changed" })).rejects.toMatchObject({ status: 409 });

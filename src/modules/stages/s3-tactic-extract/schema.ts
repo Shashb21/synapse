@@ -14,6 +14,8 @@ export const tacticCandidates = pgTable("tactic_candidates", {
   score: integer("score").notNull(),
   verdict: text("verdict").notNull(),
   critic_note: text("critic_note").notNull(),
+  /** Library tactic id the model judge matched this candidate to; null when new. */
+  duplicate_of: text("duplicate_of"),
   proposer: text("proposer").notNull(),
   created_at: text("created_at").notNull(),
 });
@@ -26,4 +28,8 @@ CREATE TABLE IF NOT EXISTS tactic_candidates (
   verdict text NOT NULL, critic_note text NOT NULL, proposer text NOT NULL,
   created_at text NOT NULL
 )
+`;
+
+export const TACTIC_CANDIDATES_DUPLICATE_DDL = `
+ALTER TABLE tactic_candidates ADD COLUMN IF NOT EXISTS duplicate_of text
 `;

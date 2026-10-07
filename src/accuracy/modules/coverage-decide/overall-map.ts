@@ -23,10 +23,10 @@ export function mapCoverageOverallToUi(
   }
 }
 
-/** True when the accuracy route can call a live completion (OAuth or API key). */
+/** True when the accuracy route can call a live completion (its API key is set). */
 export function coverageRouteAllowsLlm(route: {
   connected: boolean;
-  auth: "oauth" | "api_key" | "none";
+  auth: "api_key" | "none";
 }): boolean {
-  return route.connected && (route.auth === "oauth" || route.auth === "api_key");
+  return route.connected && route.auth === "api_key";
 }

@@ -3,12 +3,20 @@ import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { LockForm } from "@/components/lock-form";
-import { GapStatusGuide } from "@/components/gap-status-guide";
 import { GapsWorkbench } from "@/components/gaps-workbench";
-import { GapPlanCard, PrioritizeQueue } from "@/components/plan-cards";
+import { pendingSuggestionCards } from "@/lib/iegp/gap-suggestion-cards";
+import { PrioritizePlace } from "@/components/prioritize/prioritize-place";
 import { TacticsPlace } from "@/components/tactics-place";
-import Link from "next/link";
+import { loadTacticIdeation } from "@/components/tactic-ideation/data";
+import { ManualStart, ManualStartAlongsideUpload } from "@/components/plan-cards";
+import { AiOnly } from "@/components/platform/ai-status";
+import { StepWaiting } from "@/components/step-waiting";
+import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
+import { aiSections } from "@/modules/kernel/ai-switch";
+import { noAiSections, type AiSections } from "@/modules/kernel/ai-sections";
+import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
   defaultPlanPlace,
@@ -17,87 +25,93 @@ import {
   planGates,
   reviewGapFilterCounts,
   REVIEW_GAP_FILTERS,
-  type PlanColumn,
+  settingOptions,
   type PlanPlace,
   type ReviewGapFilter,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
 
-const COLUMNS: { id: PlanColumn; title: string; hint: string }[] = [
-  { id: "high", title: "High", hint: "Critical and high — staff these first" },
-  { id: "medium", title: "Medium", hint: "Decision-relevant, not this cycle's blocker" },
-  { id: "low", title: "Low", hint: "Keep on the inventory; do not staff first" },
-];
-
 function PlaceIntro({
   place,
   wizardComplete,
+  sections,
 }: {
   place: PlanPlace;
   wizardComplete: boolean;
+  sections: AiSections;
 }) {
+  if (place === "upload" && !sections.ingestion) {
+    return (
+      <PageIntro kicker="Manual plan" title="Start">
+        Add your gaps and the tactics you already have, then map, prioritize and date them.
+      </PageIntro>
+    );
+  }
   if (place === "upload") {
     return (
       <PageIntro
         kicker={wizardComplete ? "Living plan · ingest" : "First visit · ingest"}
         title="Upload sources"
       >
-        Demo files and notes extract gaps and tactics already mapped, with engine-computed status.
-        After you enter Prioritize, ingest stays here.
+        Upload source files or paste notes. Synapse pulls out the evidence gaps and tactics, maps
+        them and computes each gap&apos;s status for you to confirm on Gaps. Or start by hand: add
+        gaps and tactics yourself, with or without a source. You can come back here to add sources
+        at any time.
       </PageIntro>
     );
   }
   if (place === "gaps") {
     return (
-      <PageIntro kicker="Status engine · human validation" title="Gaps">
-        Every extracted gap is shown with its mapped tactics and computed status. There is no
-        accept/reject inbox. Map existing library tactics, or record a missed real study. Do not
-        invent proposed tactics here. Add Open or Addressed gaps (Addressed needs a tactic). Partial
-        must be split or rewritten before Prioritize.
+      <PageIntro kicker="Gaps & metadata" title="Evidence Inventory">
+        Every evidence gap with its mapped tactics and computed status. Confirm each one, map
+        library tactics or record a missed study, and add gaps by hand. Partial gaps must be split or
+        rewritten before prioritization.
       </PageIntro>
     );
   }
   if (place === "tactics") {
     return (
-      <PageIntro kicker="Open gaps only" title="Tactics">
-        Create and assign proposed tactics for Open gaps after they are prioritized. Proposed tactics
-        do not change gap status until they are planned, ongoing, or completed. Recording missed
-        real studies happens on Gaps.
+      <PageIntro kicker="Gap tactics" title="Tactic Ideation">
+        {sections.ideation
+          ? "The High-priority Open gaps, each with its linked tactics and AI-assisted suggestions. Accept or reject each suggestion with a reason, or write a custom tactic. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."
+          : "The High-priority Open gaps, each with its linked tactics. Assign a tactic from the library or write a custom one. Proposed tactics do not change a gap's status until they are planned, ongoing or completed."}
       </PageIntro>
     );
   }
   return (
-    <PageIntro kicker={wizardComplete ? "Living plan" : "Open gaps"} title="Prioritize">
-      High / Medium / Low are priority bands on Open gaps. Addressed gaps sit in their own bucket.
-      Continue to Tactics when bands are set.
+    <PageIntro kicker="Priority canvas" title="Prioritization Matrix">
+      {sections.prioritization
+        ? "Pick a setting and two axes. Open gaps land on the matrix as a first draft; drag them to set their priority, then validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."
+        : "Pick a setting and two axes, then place each Open gap by hand (type its scores or band, or drop it on the matrix) and validate each one. The quadrant suggests Prioritize, Plan, Monitor or Defer."}
     </PageIntro>
-  );
-}
-
-function LockedPlace({ title, body }: { title: string; body: string }) {
-  return (
-    <section className="border border-border bg-card/40 p-4">
-      <h2 className="text-[15px] font-medium text-foreground">{title}</h2>
-      <p className="mt-1 text-[12px] text-muted-foreground">{body}</p>
-    </section>
   );
 }
 
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ place?: string; gap_filter?: string }>;
+  searchParams: Promise<{ place?: string; gap_filter?: string; setting?: string }>;
 }) {
   await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
+  // Each place follows its own AI section (KAN-53): Upload ingestion, Matrix prioritization, Ideation.
+  const sections = await aiSections().catch(() => noAiSections());
+  const ai = sections.ingestion;
+  // Demo source files are offered only in a workspace that holds the Velmara demo.
+  const demo = await currentWorkspaceIsDemo();
+  // With AI off nothing is ingested, so Gaps never waits for a source.
+  const gapsUnlocked = gates.gapsUnlocked || !ai;
   const params = await searchParams;
   if (params.place === "mappings") redirect("/mappings");
   const requested =
     params.place === "review" || params.place === "library" ? "gaps" : params.place;
-  const fallback = defaultPlanPlace(state, workspace);
+  const suggested = defaultPlanPlace(state, workspace);
+  // With AI off there is no Upload place: the flow starts on Evidence Inventory.
+  const fallback: PlanPlace = !ai && suggested === "upload" ? "gaps" : suggested;
+  if (!ai && requested === "upload") redirect("/?place=gaps");
   const place: PlanPlace = isPlanPlace(requested) ? requested : fallback;
   const ready = gapsReadyForPrioritize(state);
   const gapFilter = (REVIEW_GAP_FILTERS as readonly string[]).includes(params.gap_filter ?? "")
@@ -109,14 +123,29 @@ export default async function HomePage({
     const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
-        <IngestPanel sources={state.sources} />
+        {/* Upload follows the admin's ingestion switch (KAN-53); with it off the plan starts by hand. */}
+        <AiOnly
+          section="ingestion"
+          fallback={
+            <ManualStart
+              gapCount={workspace.review.length}
+              tacticCount={workspace.availableTactics.length}
+            />
+          }
+        >
+          <ManualStartAlongsideUpload
+            gapCount={workspace.review.length}
+            tacticCount={workspace.availableTactics.length}
+          />
+          <IngestPanel sources={state.sources} demoFiles={demo} />
+        </AiOnly>
         {workspace.review.length > 0 ? (
-          <section className="mt-8 border border-border bg-card/40 p-4" aria-labelledby="upload-readiness">
-            <h2 id="upload-readiness" className="text-[13px] font-medium text-foreground">
+          <section className="mt-8 border border-border bg-card p-4 rounded-lg" aria-labelledby="upload-readiness">
+            <h2 id="upload-readiness" className="text-[12px] font-semibold text-foreground">
               Prep readiness
             </h2>
             <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
-              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} mapped</li>
+              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} so far</li>
               <li>{readiness.partial} partial — must resolve before Prioritize</li>
               <li>{readiness.needs_validation} unconfirmed</li>
             </ul>
@@ -128,138 +157,67 @@ export default async function HomePage({
       </>
     );
   } else if (place === "gaps") {
-    pane = gates.gapsUnlocked ? (
-      <GapsWorkbench
-        cards={workspace.review}
-        availableTactics={workspace.availableTactics}
-        readyForPrioritize={ready}
-        initialFilter={gapFilter}
-      />
-    ) : (
-      <LockedPlace title="Gaps is locked" body="Ingest at least one source on Upload." />
+    // Each gap's priority on the matrix: the band, and whether a person validated it.
+    const priorities = Object.fromEntries(
+      (await listPlacements())
+        .filter((row) => row.band)
+        .map((row) => [row.gap_id, { band: row.band!, validated: row.validated }]),
+    );
+    pane = (
+      <>
+        {!gapsUnlocked ? (
+          <StepWaiting
+            title="Waiting on Upload"
+            body="Nothing has been ingested yet, so there are no extracted gaps to review. Upload a source first, or add a gap by hand below."
+            href="/?place=upload"
+            cta="Go to Upload"
+          />
+        ) : null}
+        <GapsWorkbench
+          cards={workspace.review}
+          availableTactics={workspace.availableTactics}
+          readyForPrioritize={ready}
+          initialFilter={gapFilter}
+          settingOptions={settingOptions(state)}
+          priorities={priorities}
+          suggestions={pendingSuggestionCards(state)}
+        />
+        <SetAsideGaps gaps={state.gaps} />
+      </>
     );
   } else if (place === "tactics") {
+    // Only gaps validated as High on the matrix are ideated (KAN-8); Defer is out of this cycle.
+    const ideation = await loadTacticIdeation(workspace.openGaps);
     pane = (
-      <TacticsPlace
-        unlocked={gates.tacticsUnlocked}
-        openGaps={workspace.openGaps}
-        availableTactics={workspace.availableTactics}
-      />
-    );
-  } else if (!gates.planUnlocked) {
-    pane = (
-      <LockedPlace
-        title="Prioritize is locked"
-        body="Validate every live gap on Gaps. Partially Addressed gaps must be split or rewritten."
-      />
+      <>
+        <TacticsPlace ready={gates.tacticsUnlocked} availableTactics={workspace.availableTactics} {...ideation} />
+        <RejectedTactics tactics={state.tactics} />
+      </>
     );
   } else {
     pane = (
       <>
-        <GapStatusGuide />
-        <section className="mb-10" aria-labelledby="prioritize-gaps">
-          <h2 id="prioritize-gaps" className="text-[15px] font-medium text-foreground">
-            Prioritize open gaps
-          </h2>
-          <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-            You lock High, Medium, or Low — the engine does not assign a band.
-          </p>
-          <PrioritizeQueue
-            cards={workspace.unprioritized}
-            availableTactics={workspace.availableTactics}
+        {!gates.planUnlocked ? (
+          <StepWaiting
+            title="Waiting on Gaps"
+            body="Prioritize needs every live gap validated, with Partially Addressed gaps split or rewritten. Until then the matrix shows only the gaps already validated as Open, so priorities will be incomplete."
+            href="/?place=gaps"
+            cta="Go to Gaps"
           />
-        </section>
-
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[15px] font-medium text-foreground">Prioritized plan</h2>
-          <Link href="/matrix" className="text-[12px] text-muted-foreground no-underline hover:underline">
-            Open matrix →
-          </Link>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr_1fr]">
-          {COLUMNS.map((col) => (
-            <section
-              key={col.id}
-              className={
-                col.id === "high"
-                  ? "border-2 border-foreground/25 bg-card/40 p-3"
-                  : "border border-border bg-card/40 p-3"
-              }
-              aria-labelledby={`plan-${col.id}`}
-            >
-              <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2
-                  id={`plan-${col.id}`}
-                  className={col.id === "high" ? "text-[16px] font-semibold text-foreground" : "text-[15px] font-medium text-foreground"}
-                >
-                  {col.title}
-                </h2>
-                <span className="text-[11px] text-muted-foreground">
-                  {workspace.board[col.id].length}
-                </span>
-              </div>
-              <p className="mb-3 text-[11px] text-muted-foreground">{col.hint}</p>
-              <div className="grid gap-3">
-                {workspace.board[col.id].length === 0 ? (
-                  <p className="text-[12px] text-muted-foreground">No gaps in this band.</p>
-                ) : (
-                  workspace.board[col.id].map((card) => (
-                    <GapPlanCard
-                      key={card.gap_id}
-                      card={card}
-                      availableTactics={workspace.availableTactics}
-                    />
-                  ))
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <details className="mt-10 group" aria-labelledby="addressed-gaps">
-          <summary
-            id="addressed-gaps"
-            className="cursor-pointer list-none text-[15px] font-medium text-foreground marker:content-none"
-          >
-            <span className="inline-flex items-center gap-1.5">
-              Addressed
-              <span className="text-[11px] font-normal text-muted-foreground">
-                ({workspace.addressed.length}) · click to expand
-              </span>
-            </span>
-          </summary>
-          {workspace.addressed.length === 0 ? (
-            <p className="mt-2 text-[12px] text-muted-foreground">No addressed gaps yet.</p>
-          ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {workspace.addressed.map((card) => (
-                <GapPlanCard
-                  key={card.gap_id}
-                  card={card}
-                  availableTactics={workspace.availableTactics}
-                />
-              ))}
-            </div>
-          )}
-        </details>
-
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          {!state.asset.tactics_unlocked ? (
-            <LockForm
-              label="Continue to tactics"
-              action="unlock_tactics"
-              confirmLabel="Go to tactics"
-            />
-          ) : null}
-          <LockForm label="Reset to blank slate" action="reset" confirmLabel="Reset" />
-        </div>
+        ) : null}
+        <PrioritizePlace
+          state={state}
+          setting={params.setting}
+          addressed={workspace.addressed}
+          availableTactics={workspace.availableTactics}
+        />
       </>
     );
   }
 
   return (
     <AppShell active={place}>
-      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} />
+      <PlaceIntro place={place} wizardComplete={state.asset.wizard_complete} sections={sections} />
       {pane}
       {place === "upload" ? (
         <div className="mt-8">

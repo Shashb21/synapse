@@ -1,5 +1,7 @@
 # Knowledge graph — how the base is supposed to grow
 
+> **Retired — v1 insights engine.** This page describes the retired Velmara Insights Engine (flat insight records, theme catalog, knowledge graph, local hill-climb). It is kept for lineage only and does not describe the current product. Its code (`src/lib/pipeline.ts`, `src/lib/store.ts`, the LlamaParse ingest) was removed in KAN-21, and most of the tests and customer routes it cites (for example `/insights`, `/graph`, `/ingest`) no longer exist. The owner tool's current eval gold is `src/modules/eval-gold/`. Current specs: [01-requirements.md](./01-requirements.md), [02-architecture.md](./02-architecture.md), [09-flow-high-level.md](./09-flow-high-level.md), [10-flow-technical.md](./10-flow-technical.md).
+
 The catalog is the **ontology** (named decision objects). The graph is the **associative memory**. Together they are the knowledge base. Insights keep arriving; the base is not a folder of decks.
 
 This is not a new invention. Synapse follows a small set of existing frameworks, then refuses the ones that would mash the record.

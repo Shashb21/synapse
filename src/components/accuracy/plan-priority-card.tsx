@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
+import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -54,8 +56,17 @@ export function PlanIdeateAllButton({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const aiOn = useAiEnabled();
 
   if (eligibleCount < 1) return null;
+  if (!aiOn) {
+    return (
+      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="plan-ideate-ai-off">
+        AI is off — no LLM ideation. Write proposed tactics by hand with &ldquo;Save manual
+        proposal&rdquo; on each high open gap below.
+      </p>
+    );
+  }
 
   function run() {
     setError(null);
@@ -104,11 +115,16 @@ export function PlanPriorityCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const aiOn = useAiEnabled();
   const [value, setValue] = useState(priority ?? "medium");
   const [error, setError] = useState<string | null>(null);
   const [ideateTitle, setIdeateTitle] = useState("");
   const [ideateRationale, setIdeateRationale] = useState("");
   const [ideateMsg, setIdeateMsg] = useState<string | null>(null);
+  const [priorityRationale, setPriorityRationale] = useState("");
+  const [ideateStart, setIdeateStart] = useState("");
+  const [ideateEnd, setIdeateEnd] = useState("");
+  const [ideateType, setIdeateType] = useState("");
 
   const band = resolvePriorityBand(value) ?? resolvePriorityBand(priority);
   const canIdeate = validated && band === "high" && resolveGapStatus(status) === "open";
@@ -116,6 +132,10 @@ export function PlanPriorityCard({
   function save(next: string) {
     setError(null);
     setIdeateMsg(null);
+    if (priorityRationale.trim().length < 3) {
+      setError("Type a short rationale (min 3 characters) before changing the priority band.");
+      return;
+    }
     startTransition(async () => {
       const res = await fetch("/api/accuracy/claims/priority", {
         method: "POST",
@@ -124,7 +144,7 @@ export function PlanPriorityCard({
           workspace_id: workspaceId,
           claim_id: claimId,
           priority: next,
-          rationale: `Set priority band to ${next}`,
+          rationale: priorityRationale.trim(),
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
@@ -133,6 +153,7 @@ export function PlanPriorityCard({
         return;
       }
       setValue(next);
+      setPriorityRationale("");
       router.refresh();
     });
   }
@@ -167,6 +188,9 @@ export function PlanPriorityCard({
         gap_id: claimId,
         title: ideateTitle.trim(),
         rationale: ideateRationale.trim(),
+        ...(ideateStart ? { start: ideateStart } : {}),
+        ...(ideateEnd ? { end: ideateEnd } : {}),
+        ...(ideateType ? { type: ideateType } : {}),
       });
       if (!ok) {
         setError(json.error ?? "Ideate failed");
@@ -175,12 +199,15 @@ export function PlanPriorityCard({
       setIdeateMsg(outcomeMessage(json));
       setIdeateTitle("");
       setIdeateRationale("");
+      setIdeateStart("");
+      setIdeateEnd("");
+      setIdeateType("");
       router.refresh();
     });
   }
 
   return (
-    <article className="border border-border bg-card/40 p-3">
+    <article className="border border-border bg-card p-3 rounded-lg">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-[13px] text-foreground">{statement}</p>
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -188,6 +215,13 @@ export function PlanPriorityCard({
         </span>
       </div>
       <p className="mt-1 font-mono text-[10px] text-muted-foreground">{claimId}</p>
+      <input
+        value={priorityRationale}
+        onChange={(e) => setPriorityRationale(e.target.value)}
+        placeholder="Why this priority band (required, then pick a band)"
+        aria-label="Priority rationale"
+        className="mt-2 w-full border border-border bg-background px-2 py-1.5 text-[12px]"
+      />
       <div className="mt-2 flex flex-wrap gap-2">
         {(["high", "medium", "low"] as const).map((bandOption) => (
           <button
@@ -208,32 +242,78 @@ export function PlanPriorityCard({
 
       {canIdeate ? (
         <form onSubmit={ideateManual} className="mt-3 grid gap-2 border-t border-border pt-3">
-          <p className="text-[11px] text-muted-foreground">
-            High + validated + open — run live LLM ideation (origin: ideated, status: proposed until
-            you validate). Inventory tactics stay on extract.
-          </p>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={runLlm}
-            className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
-          >
-            {pending ? "Working…" : "Run LLM ideate"}
-          </button>
+          {aiOn ? (
+            <>
+              <p className="text-[11px] text-muted-foreground">
+                High + validated + open — run live LLM ideation (origin: ideated, status: proposed
+                until you validate). Inventory tactics stay on extract.
+              </p>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={runLlm}
+                className="w-fit border border-foreground bg-foreground px-3 py-1.5 text-[11px] text-background disabled:opacity-50"
+              >
+                {pending ? "Working…" : "Run LLM ideate"}
+              </button>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              High + validated + open — AI is off, so propose a tactic by hand: title (8+
+              characters) and rationale, then save (status: proposed until you validate).
+            </p>
+          )}
           <input
             value={ideateTitle}
             onChange={(e) => setIdeateTitle(e.target.value)}
-            placeholder="Optional title hint, or submit as a manual proposal"
+            placeholder={aiOn ? "Optional title hint, or submit as a manual proposal" : "Proposed tactic title"}
             minLength={8}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
           <input
             value={ideateRationale}
             onChange={(e) => setIdeateRationale(e.target.value)}
-            placeholder="Optional rationale (required to save a manual proposal)"
+            placeholder={
+              aiOn ? "Optional rationale (required to save a manual proposal)" : "Rationale (required)"
+            }
             minLength={3}
             className="border border-border bg-background px-2 py-1.5 text-[12px]"
           />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Type (optional)
+              <select
+                value={ideateType}
+                onChange={(e) => setIdeateType(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px] text-foreground"
+              >
+                <option value="">—</option>
+                {TACTIC_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {TACTIC_TYPE_LABELS[type] ?? type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              Start (optional)
+              <input
+                type="date"
+                value={ideateStart}
+                onChange={(e) => setIdeateStart(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-muted-foreground">
+              End (optional)
+              <input
+                type="date"
+                value={ideateEnd}
+                onChange={(e) => setIdeateEnd(e.target.value)}
+                className="border border-border bg-background px-2 py-1.5 text-[12px]"
+              />
+            </label>
+          </div>
           <button
             type="submit"
             disabled={pending || ideateTitle.trim().length < 8 || ideateRationale.trim().length < 3}

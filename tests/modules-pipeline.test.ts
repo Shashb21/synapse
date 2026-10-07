@@ -9,7 +9,7 @@ import { listEvalRuns } from "@/modules/kernel/evals";
 import { routeConfig, resolveRoute, setDefaultProvider, setRouteConfig } from "@/modules/kernel/routing";
 import { activateModule, stageWiring } from "@/modules/kernel/registry";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
-import { loadState, resetSeed } from "@/lib/iegp/store";
+import { loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { listSourceFiles } from "@/modules/stages/s0-upload/module";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
 import { listGapCandidates } from "@/modules/stages/s2-gap-extract/module";
@@ -35,7 +35,7 @@ async function run<O>(stage: Parameters<typeof runStage>[0]["stage"], input: unk
 
 describe("modular pipeline, S0 to S10", () => {
   beforeAll(async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await wipePlatform([
       "source_files",
       "parsed_documents",
@@ -85,7 +85,9 @@ describe("modular pipeline, S0 to S10", () => {
     expect(result.output.committed_gap_ids.length).toBeGreaterThan(0);
     for (const candidate of result.output.accepted) {
       expect(candidate.source_quote.trim().length).toBeGreaterThan(0);
-      expect(candidate.score).toBeGreaterThanOrEqual(45);
+      // Under the test stub no model judges; the note says so and nothing is marked a duplicate.
+      expect(candidate.critic_note).toMatch(/test stub/i);
+      expect(candidate.duplicate_of).toBeNull();
     }
     const candidates = await listGapCandidates();
     expect(candidates.length).toBe(result.output.accepted.length + result.output.rejected.length);
@@ -333,13 +335,13 @@ describe("modular pipeline, S0 to S10", () => {
     ).rejects.toThrow(/may not run stage/i);
   }, 60_000);
 
-  it("switches every stage to one provider in a single action and degrades when it is not connected", async () => {
+  it("switches every stage to one provider in a single action and degrades when it has no key", async () => {
     await setDefaultProvider({ provider_id: "anthropic-claude", actor_name: ACTOR.name });
     const claude = await routeConfig("S2");
     expect(claude.provider_id).toBe("anthropic-claude");
     expect(claude.fallbacks).toContain("xai-grok");
 
-    await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+    await expect(resolveRoute("S2")).rejects.toThrow(/ANTHROPIC_API_KEY/);
 
     await setRouteConfig({
       stage: "S2",
@@ -354,10 +356,10 @@ describe("modular pipeline, S0 to S10", () => {
   }, 60_000);
 
   it("activates a named module per stage, which is how a stage is upgraded", async () => {
-    await activateModule({ stage: "S1", module_id: "s1-parse.local", actor_name: ACTOR.name });
+    await activateModule({ stage: "S1", module_id: "s1-parse.llm", actor_name: ACTOR.name });
     const wiring = await stageWiring();
     const parse = wiring.find((row) => row.stage === "S1")!;
-    expect(parse.active?.id).toBe("s1-parse.local");
+    expect(parse.active?.id).toBe("s1-parse.llm");
     expect(parse.activated_by).toBe(ACTOR.name);
     await expect(
       activateModule({ stage: "S1", module_id: "s2-gap-extract.pcj", actor_name: ACTOR.name }),

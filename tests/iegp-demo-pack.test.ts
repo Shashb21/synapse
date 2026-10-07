@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import { extractCandidateGaps, extractCandidateTactics } from "@/lib/iegp/engine";
-import { buildBlankWorkspace } from "@/lib/iegp/blank";
+import { buildDemoSetupWorkspace } from "@/lib/iegp/blank";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-describe("blank demo workspace", () => {
+describe("demo setup workspace", () => {
   it("has the Velmara asset and objectives but no IEGP objects", () => {
-    const state = buildBlankWorkspace();
+    const state = buildDemoSetupWorkspace();
     expect(state.asset.name).toBe("Velmara");
     expect(state.objectives.length).toBeGreaterThanOrEqual(4);
     expect(state.sources).toHaveLength(0);

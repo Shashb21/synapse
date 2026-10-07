@@ -15,17 +15,19 @@ vi.mock("@/modules/auth/session", () => ({ sessionContext }));
 const createdWorkspaces: string[] = [];
 const creator = {
   signed_in: true,
-  session: { subject: "creator-subject" },
+  session: { subject: "creator-subject", provider_id: "sso", email: "creator@example.test" },
   actor: { name: "Experiment creator", function: "medical_affairs" as const },
   role: "contributor" as const,
 };
 
 beforeEach(() => {
+  vi.stubEnv("OWNER_EMAILS", "creator@example.test");
   registerAccuracyStack();
   sessionContext.mockResolvedValue(creator);
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const workspace_id of createdWorkspaces.splice(0)) {
     await deleteWorkspace(workspace_id);
   }
@@ -83,4 +85,23 @@ describe("experiment API integration", () => {
     expect(legacyExperiment.workspace_id).not.toBe(experiment.workspace_id);
     expect(legacyExperiment.calls[0]?.input.workspace_id).toBe(legacyExperiment.workspace_id);
   });
+});
+
+
+it("refuses experiment and comparison starts with AI off before creating a workspace copy", async () => {
+  const { POST: compare } = await import("@/app/api/accuracy/experiments/pass-comparisons/route");
+  const { listWorkspaces } = await import("@/accuracy/store/tenant");
+  const { setAiEnabled } = await import("@/modules/kernel/ai-switch");
+  const before = (await listWorkspaces(undefined, { includeArchived: true })).map(row => row.id);
+  await setAiEnabled({ enabled: false, actor_name: "test" });
+  try {
+    for (const start of [startExperiment, compare]) {
+      const response = await start(new Request("http://localhost/api/accuracy/experiments", { method: "POST", body: "{}" }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "ai_off" });
+    }
+    expect((await listWorkspaces(undefined, { includeArchived: true })).map(row => row.id)).toEqual(before);
+  } finally {
+    await setAiEnabled({ enabled: true, actor_name: "test" });
+  }
 });

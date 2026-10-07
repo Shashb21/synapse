@@ -1,14 +1,28 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { db, ensurePlatformSchema } from "@/modules/kernel/db";
+import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
-import { ROLE_LABELS, isRole, roleForFunction, type Role } from "./roles";
-import { configuredIdentityProviders, demoMode, identityProvider } from "./idp";
+import { ROLE_LABELS, isRole, ownerEmails, roleForFunction, testOwnerBypass, type Role } from "./roles";
+import { findAccountByEmail, getAccount, isAdminEmail, passwordSessionValid, PASSWORD_PROVIDER, type Account } from "./accounts";
+import { hasActiveSeat } from "./customers";
+import {
+  configuredIdentityProviders,
+  demoMode,
+  demoSignInAllowed,
+  emailDomainAllowed,
+  GITHUB_EMAILS_URL,
+  identityProvider,
+  idpRefusal,
+  idTokenClaims,
+  resolveIdentity,
+  type GithubEmail,
+  type IdentityProvider,
+} from "./idp";
 
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
@@ -56,7 +70,7 @@ export async function createSession(args: {
   const id = base64Url(randomBytes(24));
   const created_at = nowIso();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-  await db().insert(t.authSessions).values({
+  await sharedDb().insert(t.authSessions).values({
     id,
     provider_id: args.provider_id,
     subject: args.subject,
@@ -92,11 +106,11 @@ export async function currentSession(): Promise<Session | null> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
+  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
-  if (Date.parse(row.expires_at) < Date.now()) {
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+  if (Date.parse(row.expires_at) < Date.now() || !(await sessionStillAllowed(row))) {
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
     return null;
   }
   return {
@@ -111,12 +125,71 @@ export async function currentSession(): Promise<Session | null> {
   };
 }
 
+/** The `?error=` code /login shows the no-seat message for (see LOGIN_ERROR_MESSAGES). */
+export const NO_SEAT_ERROR = "no_seat";
+export const NO_SEAT_MESSAGE = "Your organisation hasn't assigned you a Synapse seat. Ask your administrator.";
+
+/** Messages /login shows for an `?error=` code; anything else is shown as sent. */
+export const LOGIN_ERROR_MESSAGES: Record<string, string> = { [NO_SEAT_ERROR]: NO_SEAT_MESSAGE };
+
+/** SSO refused: the verified email holds no seat on an active customer. Carries no detail on purpose. */
+export class NoSeatError extends Error {
+  readonly code = NO_SEAT_ERROR;
+  constructor() {
+    super(NO_SEAT_MESSAGE);
+    this.name = "NoSeatError";
+  }
+}
+
+/**
+ * Whether an SSO identity may have a session (KAN-28): its verified email holds
+ * a seat on an active customer, or it is a platform admin (OWNER_EMAILS, or an
+ * enabled admin account with that email). No verified email, no seat.
+ */
+export async function seatAllowsSignIn(email: string | null | undefined): Promise<boolean> {
+  const address = email?.trim().toLowerCase();
+  if (!address) return false;
+  if (ownerEmails().includes(address)) return true;
+  if (await hasActiveSeat(address)) return true;
+  return isAdminEmail(address);
+}
+
+/**
+ * A test customer account (KAN-59): not staff, but allowed to sign in with a
+ * password because its verified email is on a test-only domain (so no real
+ * person can hold it) and holds a seat on an active customer. Real customers
+ * stay SSO-only.
+ */
+export async function testSeatPasswordAllowed(
+  account: Pick<Account, "email" | "email_verified" | "disabled">,
+): Promise<boolean> {
+  if (account.disabled || !account.email_verified || !testOnlyAddress(account.email)) return false;
+  return hasActiveSeat(account.email);
+}
+
+/**
+ * Re-checked on every session lookup, so an unassigned seat, a deactivated
+ * customer or a demoted staff account stops working even if a session row
+ * survived. Demo sessions (development only) need nothing; password sessions
+ * need a staff account or a test seat (KAN-59); SSO sessions need a seat (one
+ * indexed query).
+ */
+async function sessionStillAllowed(row: { provider_id: string; subject: string; email: string | null }): Promise<boolean> {
+  if (row.provider_id === "demo") return true;
+  if (row.provider_id === PASSWORD_PROVIDER) {
+    if (await passwordSessionValid(row.subject)) return true;
+    const account = await getAccount(row.subject);
+    return account ? testSeatPasswordAllowed(account) : false;
+  }
+  return seatAllowsSignIn(row.email);
+}
+
 export async function signOut() {
   const jar = await cookies();
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
     await ensurePlatformSchema();
-    await db().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
   }
   jar.delete(SESSION_COOKIE);
 }
@@ -153,6 +226,8 @@ export async function beginLogin(args: {
   if (!provider) throw new Error(`Unknown identity provider ${args.provider_id}`);
   const clientId = process.env[provider.descriptor.client_id_env]?.trim();
   if (!clientId) throw new Error(`${provider.label} sign-in is not configured in this deployment.`);
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
   const verifier = base64Url(randomBytes(48));
   const state = base64Url(randomBytes(16));
   const jar = await cookies();
@@ -192,7 +267,10 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   if (pending.state !== args.state) throw new Error("Sign-in state mismatch.");
   const provider = identityProvider(pending.provider_id);
   if (!provider) throw new Error("Unknown identity provider.");
-  const clientId = process.env[provider.descriptor.client_id_env]!.trim();
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
+  const clientId = process.env[provider.descriptor.client_id_env]?.trim();
+  if (!clientId) throw new Error(`${provider.label} sign-in is not configured in this deployment.`);
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: args.code,
@@ -211,56 +289,185 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   });
   const tokenText = await tokenRes.text();
   if (!tokenRes.ok) throw new Error(`Token exchange failed (HTTP ${tokenRes.status}).`);
-  const token = JSON.parse(tokenText) as { access_token?: string };
+  const token = JSON.parse(tokenText) as { access_token?: string; id_token?: unknown };
   if (!token.access_token) throw new Error("Token exchange returned no access token.");
   const profileRes = await fetch(provider.userinfo_url, {
     headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
   });
   if (!profileRes.ok) throw new Error(`Profile lookup failed (HTTP ${profileRes.status}).`);
   const profile = (await profileRes.json()) as Record<string, unknown>;
-  const pick = (claims: string[]) =>
-    claims.map((claim) => profile[claim]).find((value) => typeof value === "string") as
-      | string
-      | undefined;
-  const name = pick(provider.name_claims) ?? "Unnamed user";
-  const email = pick(provider.email_claims) ?? null;
+  let github_emails: GithubEmail[] | null = null;
+  if (provider.id === "github") {
+    const emailsRes = await fetch(GITHUB_EMAILS_URL, {
+      headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
+    });
+    const list = emailsRes.ok ? ((await emailsRes.json().catch(() => null)) as unknown) : null;
+    github_emails = Array.isArray(list) ? (list as GithubEmail[]) : null;
+  }
+  const sessionArgs = loginIdentity({
+    provider,
+    profile,
+    id_token_claims: idTokenClaims(token.id_token),
+    github_emails,
+  });
+  jar.delete(PENDING_COOKIE);
+  // Customers sign in only with a seat their organisation was assigned (KAN-28).
+  if (!(await seatAllowsSignIn(sessionArgs.email))) throw new NoSeatError();
+  return createSession(await withoutClaimedOperator(sessionArgs));
+}
+
+/**
+ * A customer's own directory can set the `synapse_role` claim, so an IdP may
+ * never grant "operator" (which is platform owner) to a seat holder: only
+ * OWNER_EMAILS and admin accounts keep it. Anyone else gets their function's role.
+ */
+export async function withoutClaimedOperator(
+  args: Parameters<typeof createSession>[0],
+): Promise<Parameters<typeof createSession>[0]> {
+  if (args.role !== "operator") return args;
+  const email = args.email?.trim().toLowerCase();
+  const platformAdmin = Boolean(email) && (ownerEmails().includes(email!) || (await isAdminEmail(email!)));
+  return platformAdmin ? args : { ...args, role: roleForFunction(args.actor_function) };
+}
+
+/**
+ * The session a completed OAuth sign-in gets. Only a verified email is kept
+ * (else the subject `provider:id` is the principal), and ALLOWED_EMAIL_DOMAINS
+ * is enforced here. Throws when the sign-in must be refused.
+ */
+export function loginIdentity(args: {
+  provider: IdentityProvider;
+  profile: Record<string, unknown>;
+  id_token_claims?: Record<string, unknown>;
+  github_emails?: GithubEmail[] | null;
+}): Parameters<typeof createSession>[0] {
+  const { provider, profile } = args;
+  const refusal = idpRefusal(provider);
+  if (refusal) throw new Error(refusal);
+  const identity = resolveIdentity(args);
+  if (!emailDomainAllowed(identity.email)) {
+    throw new Error(
+      identity.email
+        ? "Your account's email domain is not allowed to sign in to this deployment."
+        : "Sign-in needs a verified email address on an allowed domain.",
+    );
+  }
   const claimedRole = provider.role_claim ? profile[provider.role_claim] : undefined;
   const fn = asFunction(typeof profile.synapse_function === "string" ? profile.synapse_function : null);
-  jar.delete(PENDING_COOKIE);
-  return createSession({
+  return {
     provider_id: provider.id,
-    subject: String(profile.sub ?? profile.id ?? email ?? name),
-    email,
-    actor_name: name,
+    subject: identity.subject,
+    email: identity.email,
+    actor_name: identity.name,
     actor_function: fn,
     role: isRole(typeof claimedRole === "string" ? claimedRole : undefined)
       ? (claimedRole as Role)
       : roleForFunction(fn),
-  });
+  };
 }
 
-/** Demo sign-in: no identity provider configured, so the typed name is the identity. */
+/** The address a demo user is known by, so workspace invites work in local preview. */
+export function demoEmail(actorName: string): string {
+  const slug = actorName.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+  return `${slug || "demo"}@demo.synapse.local`;
+}
+
+/**
+ * Demo sign-in for local preview and tests: the typed name is the identity.
+ * Never available in a production build, identity provider or not.
+ *
+ * The caller cannot choose its privileges. Outside the test stub
+ * (SYNAPSE_TEST_STUB_LLM=1, never production) a supplied `role` is ignored: a
+ * demo user is a "contributor". Under the test stub the role (never
+ * "operator") is honoured, and without a role it follows the function, so the
+ * Playwright/Vitest suites keep their Medical Affairs demo user.
+ *
+ * A typed email becomes the session's email (and so its workspace principal)
+ * only when it is safe to: see demoEmailFor. Otherwise sign-in is refused with
+ * the reason; nothing is silently swapped for a generated address.
+ */
 export async function signInDemo(args: {
   actor_name: string;
   actor_function: ActorFunction;
   role?: Role;
+  email?: string | null;
 }): Promise<Session> {
-  if (!demoMode()) {
-    throw new Error("This deployment has an identity provider configured; use OAuth sign-in.");
+  if (!demoSignInAllowed()) {
+    throw new Error("Demo sign-in is not available in production. Sign in with your organisation's account.");
   }
+  const name = args.actor_name.trim();
+  if (!name) throw new Error("Enter a name to continue as a demo user.");
+  const fn = asFunction(args.actor_function);
   return createSession({
     provider_id: "demo",
-    subject: `demo:${args.actor_name}`,
-    email: null,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    role: args.role ?? roleForFunction(args.actor_function),
+    subject: `demo:${name}`,
+    email: await demoEmailFor(name, args.email),
+    actor_name: name,
+    actor_function: fn,
+    role: demoRole(fn, args.role),
   });
+}
+
+/** The role a demo sign-in gets (see signInDemo). Never "operator". */
+export function demoRole(fn: ActorFunction, requested?: string | null): Role {
+  if (!testOwnerBypass()) return "contributor";
+  if (requested && isRole(requested) && requested !== "operator") return requested;
+  return roleForFunction(fn);
+}
+
+/** Top-level domains no real mailbox can have (RFC 2606, RFC 6761; .local is mDNS). */
+const TEST_ONLY_TLDS = ["test", "example", "invalid", "localhost", "local"];
+/** Second-level domains reserved for documentation (RFC 2606). */
+const TEST_ONLY_DOMAINS = ["example.com", "example.net", "example.org"];
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Whether an address is on a domain reserved for testing, so no real person can hold it. */
+export function testOnlyAddress(email: string): boolean {
+  const address = email.trim().toLowerCase();
+  if (!EMAIL_SHAPE.test(address)) return false;
+  const domain = address.slice(address.lastIndexOf("@") + 1);
+  const tld = domain.slice(domain.lastIndexOf(".") + 1);
+  return (
+    TEST_ONLY_TLDS.includes(tld) ||
+    TEST_ONLY_DOMAINS.some((reserved) => domain === reserved || domain.endsWith(`.${reserved}`))
+  );
+}
+
+export const DEMO_EMAIL_DOMAIN_MESSAGE =
+  "A demo email must be on a test-only domain, such as name@team.test or name@example.com, so it can never be a real person's address. Leave it empty to use a generated one.";
+export const DEMO_EMAIL_TAKEN_MESSAGE =
+  "That address belongs to a Synapse account or a customer seat, so a demo user can't use it. Pick another test address, or leave it empty.";
+
+/**
+ * The email a demo sign-in is known by. Empty: `<name>@demo.synapse.local`.
+ * Typed: used as-is (so invites sent to it reach this demo user), but only when
+ *
+ * - it is on a test-only domain (testOnlyAddress), so it cannot be a real
+ *   customer's address and so cannot take over their workspaces or invites
+ *   (workspace membership is keyed by email, see principalOf); and
+ * - it is not an OWNER_EMAILS address, an email + password account's email
+ *   (staff or admin) or a seat holder's email (KAN-28), even a test-only one.
+ *
+ * Either failure refuses the sign-in. Owner status never comes from it:
+ * ownerDecision ignores the email of every demo session.
+ */
+export async function demoEmailFor(name: string, requested?: string | null): Promise<string> {
+  const supplied = requested?.trim().toLowerCase();
+  if (!supplied) return demoEmail(name);
+  if (!testOnlyAddress(supplied)) throw new Error(DEMO_EMAIL_DOMAIN_MESSAGE);
+  if (
+    ownerEmails().includes(supplied) ||
+    (await findAccountByEmail(supplied).then(Boolean, () => true)) ||
+    (await hasActiveSeat(supplied).catch(() => true))
+  ) {
+    throw new Error(DEMO_EMAIL_TAKEN_MESSAGE);
+  }
+  return supplied;
 }
 
 export async function activeSessions(): Promise<Session[]> {
   await ensurePlatformSchema();
-  const rows = await db().select().from(t.authSessions);
+  const rows = await sharedDb().select().from(t.authSessions);
   return rows
     .filter((row) => Date.parse(row.expires_at) > Date.now())
     .map((row) => ({
@@ -277,7 +484,8 @@ export async function activeSessions(): Promise<Session[]> {
 
 export function loginOptions() {
   return {
-    demo: demoMode(),
+    /** Offer "continue as a demo user": development and tests only, never production. */
+    demo: demoSignInAllowed(),
     providers: configuredIdentityProviders().map((provider) => ({
       id: provider.id,
       label: provider.label,
@@ -287,7 +495,7 @@ export function loginOptions() {
 
 export async function sessionsForSubject(subject: string) {
   await ensurePlatformSchema();
-  return db()
+  return sharedDb()
     .select()
     .from(t.authSessions)
     .where(and(eq(t.authSessions.subject, subject)));

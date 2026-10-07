@@ -1,4 +1,5 @@
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -15,7 +16,18 @@ import {
   listClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { normalizeClaimDate, withHumanEdit } from "@/accuracy/store/claim-edit";
+import { TACTIC_TYPES } from "@/lib/iegp/enums";
+import type { Actor } from "@/accuracy/kernel/contracts";
+import { isTestStub } from "@/modules/kernel/llm";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,16 +35,18 @@ export const dynamic = "force-dynamic";
 registerAccuracyStack();
 
 const bodySchema = z.object({
-  workspace_id: z.string(),
+  workspace_id: z.string().min(1),
   gap_id: z.string().optional(),
   title: z.string().min(8).max(280).optional(),
   rationale: z.string().min(3).optional(),
   hints: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
+  type: z.enum(TACTIC_TYPES).optional(),
   per_gap: z.number().int().min(1).max(3).optional(),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: proposals are credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 function gapRecordFromClaim(gap: AccuracyClaimRow) {
@@ -69,9 +83,40 @@ async function persistProposal(args: {
   start?: string | null;
   end?: string | null;
   source_file_id?: string | null;
+  /** Manual (human-authored) proposal: fields are human-locked + audited. */
+  human?: { rationale: string; actor: Actor };
 }) {
   const meta = claimMetadata(args.gap);
   const external = typeof meta.external_id === "string" ? meta.external_id : args.gap.id;
+  const start = normalizeClaimDate("start", args.start);
+  const end = normalizeClaimDate("end", args.end);
+  if (start && end && end < start) {
+    throw new Error("End date must be on or after the start date.");
+  }
+  const base = {
+    origin: "ideated",
+    source_badge: "ideate",
+    gap_ids: [external],
+    type: args.type ?? null,
+    tactic_type: args.type ?? null,
+    design_summary: args.design_summary.trim(),
+    ideation_rationale: args.design_summary.trim(),
+    not_from_reference: true,
+    start,
+    end,
+  };
+  const fields = ["statement", "design_summary", ...(args.type ? ["type"] : []),
+    ...(start ? ["start"] : []), ...(end ? ["end"] : [])];
+  const metadata = args.human
+    ? withHumanEdit(base, {
+        action: "create",
+        fields,
+        before: {},
+        after: { statement: args.name.trim(), design_summary: base.design_summary, type: base.type, start, end },
+        rationale: args.human.rationale,
+        actor: args.human.actor,
+      })
+    : base;
   return insertClaim({
     workspace_id: args.workspace_id,
     claim_type: "tactic",
@@ -79,34 +124,24 @@ async function persistProposal(args: {
     status: "proposed",
     validated: false,
     source_file_id: args.source_file_id ?? null,
-    metadata: {
-      origin: "ideated",
-      source_badge: "ideate",
-      gap_ids: [external],
-      type: args.type ?? null,
-      design_summary: args.design_summary.trim(),
-      ideation_rationale: args.design_summary.trim(),
-      not_from_reference: true,
-      start: args.start ?? null,
-      end: args.end ?? null,
-    },
+    metadata,
   });
 }
 
 /**
  * Ideate proposed tactics for validated high-priority open gaps.
  * - Manual: title + rationale inserts one human-authored proposed tactic (no LLM).
- * - Live: runs the ideate module (OAuth / API key). Stub LLM returns empty proposals.
+ * - Live: runs the ideate module (server API key). Stub LLM returns empty proposals.
+ *   With the admin AI switch off the live path answers 409 { code: "ai_off" }.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
-
+    const body = await parseLabBody(req, bodySchema);
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
     await assertAccuracyCanProgress(body.workspace_id, "ideate");
+    const actor = await labActor();
     const gaps = await listClaims(body.workspace_id, { claim_type: "gap", limit: 300 });
     const tactics = await listClaims(body.workspace_id, { claim_type: "tactic", limit: 500 });
     const isManual = Boolean(body.title?.trim() && body.rationale?.trim());
@@ -133,17 +168,26 @@ export async function POST(req: Request) {
         design_summary: body.rationale!.trim(),
         start: body.start ?? null,
         end: body.end ?? null,
+        type: body.type,
         source_file_id: gap.source_file_id,
+        human: {
+          rationale: body.rationale!.trim(),
+          actor,
+        },
       });
       return NextResponse.json({
         ok: true,
         mode: "manual",
-        stub: process.env.SYNAPSE_TEST_STUB_LLM === "1",
+        stub: isTestStub(),
         tactic_id: tactic.id,
         tactic_ids: [tactic.id],
         tactics_inserted: 1,
       });
     }
+
+    // LLM ideation from here on: nothing runs or is written with AI off.
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
 
     let targetGaps = gaps;
     if (body.gap_id) {
@@ -171,11 +215,6 @@ export async function POST(req: Request) {
         summary: "No high-priority open gaps to ideate for",
       });
     }
-
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy ideate",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
 
     const result = await runAccuracyModule<IdeateOutput>({
       call_kind: "ideate",
@@ -213,7 +252,7 @@ export async function POST(req: Request) {
       tactic_ids.push(inserted.id);
     }
 
-    const stub = result.output.mode === "stub" || process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const stub = result.output.mode === "stub" || isTestStub();
     return NextResponse.json({
       ok: true,
       mode: result.output.mode,
@@ -225,10 +264,14 @@ export async function POST(req: Request) {
       summary: result.summary,
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Ideate failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Ideate failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

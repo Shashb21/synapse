@@ -1,7 +1,7 @@
 /** Accuracy database access and request-local atomic transaction context. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/iegp/db";
+import { sharedDb as db } from "@/lib/iegp/db";
 import { ACCURACY_DDL, ACCURACY_MIGRATIONS } from "./schema";
 
 type AccuracyDatabase = ReturnType<typeof db>;
@@ -50,25 +50,26 @@ const globalAccuracy = globalThis as unknown as {
   accuracyMigrated?: Promise<void>;
 };
 
+/** Runs `statements` once per process; a failure is forgotten so the next call retries. */
+function once(key: "accuracySchema" | "accuracyMigrated", statements: string[]): Promise<void> {
+  if (!globalAccuracy[key]) {
+    const attempt = (async () => {
+      const d = db();
+      for (const stmt of statements) {
+        await d.execute(sql.raw(stmt));
+      }
+    })();
+    globalAccuracy[key] = attempt;
+    attempt.catch(() => {
+      if (globalAccuracy[key] === attempt) globalAccuracy[key] = undefined;
+    });
+  }
+  return globalAccuracy[key]!;
+}
+
 export async function ensureAccuracySchema(extra: string[] = []) {
-  if (!globalAccuracy.accuracySchema) {
-    globalAccuracy.accuracySchema = (async () => {
-      const d = db();
-      for (const stmt of [...ACCURACY_DDL, ...extra]) {
-        await d.execute(sql.raw(stmt));
-      }
-    })();
-  }
-  await globalAccuracy.accuracySchema;
-  if (!globalAccuracy.accuracyMigrated) {
-    globalAccuracy.accuracyMigrated = (async () => {
-      const d = db();
-      for (const stmt of ACCURACY_MIGRATIONS) {
-        await d.execute(sql.raw(stmt));
-      }
-    })();
-  }
-  await globalAccuracy.accuracyMigrated;
+  await once("accuracySchema", [...ACCURACY_DDL, ...extra]);
+  await once("accuracyMigrated", ACCURACY_MIGRATIONS);
   if (extra.length) {
     const d = accuracyDb();
     for (const stmt of extra) {

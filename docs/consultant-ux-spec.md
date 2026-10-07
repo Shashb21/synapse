@@ -1,6 +1,6 @@
 # Synapse IEGP — Consultant UX specification
 
-**Status:** Proposed · ready to implement
+**Status:** Proposed design (largely superseded by the KAN-8 redesign). The app today: the sidebar places are Plan context, Upload, Evidence Inventory, Prioritization Matrix, Tactic Ideation and Gantt Timeline; Room (the presenter view) is switched off (`ROOM_ENABLED = false`, KAN-52). Read the current behaviour in [`iegp-model.md`](iegp-model.md) and [`modules.md`](modules.md).
 **Audience:** Consultants preparing an Integrated Evidence Generation Plan before a workshop, and facilitating during the workshop
 **Out of scope for this phase:** Full workshop presentation / deck mode (stub only)
 **Related:** [`iegp-model.md`](iegp-model.md), [`problem-and-solution.md`](problem-and-solution.md), [`accuracy-reference-ux.md`](accuracy-reference-ux.md), existing workshop stage at `/accuracy/workshop`
@@ -377,7 +377,6 @@ Room behaviour now
 
 **Phase C — Presentation view (later)**
 - Read-only chaptered walkthrough: context → gaps → tactics → Gantt.
-- Export pack for leave-behind.
 - No parallel data store; projection of validated plan only.
 
 > **Status:** Phase C, plus a new Breakout Groups capability the user asked for alongside it, are specified in [`presentation-and-breakouts.md`](presentation-and-breakouts.md).

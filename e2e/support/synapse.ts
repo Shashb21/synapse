@@ -50,7 +50,7 @@ export type RunRecord = {
     provider_id: string;
     provider_label: string;
     model: string;
-    auth: "oauth" | "none";
+    auth: "api_key" | "none";
     connected: boolean;
     degraded: boolean;
     reason: string | null;
@@ -67,8 +67,12 @@ async function postJson(request: APIRequestContext, url: string, body: Record<st
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+/**
+ * Starts a spec from the Velmara demo's asset and objectives, with no sources,
+ * gaps or tactics (load_demo, scope "setup"). A plain "reset" is truly blank.
+ */
 export async function resetWorkspace(request: APIRequestContext) {
-  await postJson(request, "/api/iegp", { action: "reset" });
+  await postJson(request, "/api/iegp", { action: "load_demo", scope: "setup" });
 }
 
 export async function runStage<O = unknown>(
@@ -143,7 +147,7 @@ export async function planState(request: APIRequestContext) {
       rationale: string | null;
     }[];
     axes: {
-      axes: { id: string; label: string; weight: number; cues: string[]; low_label: string; high_label: string; description: string }[];
+      axes: { id: string; label: string; weight: number; low_label: string; high_label: string; description: string }[];
       x_axis: string;
       y_axis: string;
       bands: { high: number; medium: number };
@@ -192,14 +196,15 @@ export async function controlState(request: APIRequestContext) {
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
     routes: { stage: string; provider_id: string; model: string; fallbacks: string[] }[];
-    connections: {
+    provider_keys: {
       provider_id: string;
       label: string;
       tier: string | null;
       auth: string;
-      configured: boolean;
-      status: string;
+      status: "configured" | "missing";
+      key_env: string | null;
       models: string[];
+      default_model: string;
     }[];
     providers: { id: string; label: string; tier: string | null; auth: string; models: string[] }[];
     defaults: { primary: string; alternate: string };
@@ -313,12 +318,12 @@ export async function expectThreeExchanges(request: APIRequestContext, runId: st
   return { run, rounds };
 }
 
-/** Agentic runs must use a connected LLM route; mechanical runs may note degradation. */
+/** Agentic runs must use a live LLM route; mechanical runs may note degradation. */
 export function expectRouteIsHonest(run: RunRecord) {
   expect(run.route, `${run.stage} should record its route`).toBeTruthy();
   const agentic = ["S2", "S3", "S4", "S6", "S8", "S9"].includes(run.stage);
   if (agentic) {
-    expect(run.route!.auth).toBe("oauth");
+    expect(run.route!.auth).toBe("api_key");
     expect(run.route!.connected).toBeTruthy();
   }
 }

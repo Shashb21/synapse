@@ -1,9 +1,10 @@
 /** Extract source drafts, pause applied batches for review, and safely resume downstream work. */
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import {
-  extractOauthGateJson,
+  extractKeyGateJson,
   inspectLiveExtractGate,
 } from "@/accuracy/kernel/extract-gate";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
@@ -11,7 +12,6 @@ import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extrac
 import { insertClaim } from "@/accuracy/store/claim-store";
 import { readParseBlocks } from "@/accuracy/store/parse-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { and, eq, inArray } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
@@ -22,6 +22,14 @@ import { requestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { NoRouteError } from "@/modules/llm/provider";
 import { runExtractionDownstream } from "@/accuracy/experiments/extraction-pipeline";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  readLabJson,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +43,9 @@ const bodySchema = z.object({
     .array(z.enum(["need", "inventory"]))
     .min(1)
     .default(["need", "inventory"]),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the run is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 const resumeSchema = z.object({ action: z.literal("resume"), workspace_id: z.string().min(1), source_file_id: z.string().min(1),
@@ -49,19 +58,22 @@ const MAX_EXTRACT_BLOCKS = 80;
  * persist resulting claims, then merge/dedupe and derive Open/Partial/Addressed.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const raw = await req.json();
+    const raw = await readLabJson(req) as Record<string, unknown> | null;
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     if (raw && raw.action === "resume") {
       const identity = await requestIdentity(raw);
       if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
       assertCan(identity.role, "validate");
       const request = resumeSchema.parse(raw);
+      const { org_id } = await requireLabWorkspace(request.workspace_id);
+      const actor = await labActor();
       const response = await resumeExtractionBatch({ workspace_id: request.workspace_id, source_file_id: request.source_file_id,
         batch_id: request.extraction_batch_id, execute: async (batch, journal) => {
           await assertAccuracyCanProgress(request.workspace_id, "merge_dedupe");
-          const org_id = await getWorkspaceOrgId(request.workspace_id);
-          if (!org_id) throw new Error("Unknown workspace");
-          const actor = identity.actor;
           const extractionRuns = await accuracyDb().select().from(tables.accuracyModuleRuns).where(and(
             eq(tables.accuracyModuleRuns.workspace_id, request.workspace_id), inArray(tables.accuracyModuleRuns.id, batch.run_ids)));
           const runs = batch.run_ids.map(id => {
@@ -79,10 +91,7 @@ export async function POST(req: Request) {
       return NextResponse.json(response);
     }
     const body = bodySchema.parse(raw);
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
 
     const sources = await listSourceFiles(body.workspace_id);
     const source = sources.find((row) => row.id === body.source_file_id);
@@ -107,13 +116,10 @@ export async function POST(req: Request) {
 
     const gate = await inspectLiveExtractGate();
     if (!gate.ready) {
-      return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+      return NextResponse.json(extractKeyGateJson(gate), { status: 409 });
     }
 
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy extractor",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
+    const actor = await labActor();
 
     const kinds = body.kinds;
     const batch = await createExtractionBatch(body.workspace_id, body.source_file_id, kinds.map(kind => `${kind}_extract`));
@@ -238,13 +244,17 @@ export async function POST(req: Request) {
     if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
     if (error instanceof ExtractionBatchError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 409 });
     if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers }, { status: 409 });
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     if (error instanceof NoRouteError) {
       const gate = await inspectLiveExtractGate();
       if (!gate.ready) {
-        return NextResponse.json(extractOauthGateJson(gate), { status: 409 });
+        return NextResponse.json(extractKeyGateJson(gate), { status: 409 });
       }
     }
-    const message = error instanceof Error ? error.message : "Extract failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Extract failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

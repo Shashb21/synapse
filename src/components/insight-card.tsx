@@ -23,7 +23,7 @@ export function AppShell({
     <div className="flex min-h-full flex-col bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background">
         <div className="mx-auto flex w-full max-w-[1100px] items-center gap-6 px-4 py-2.5 sm:px-6">
-          <Link href="/" className="text-[13px] font-medium text-foreground no-underline">
+          <Link href="/" className="text-[12px] font-semibold text-foreground no-underline">
             Synapse
           </Link>
           <nav className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
@@ -50,29 +50,6 @@ export function AppShell({
   );
 }
 
-export function PageIntro({
-  kicker,
-  title,
-  children,
-}: {
-  kicker?: string;
-  title: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-6">
-      {kicker ? (
-        <p className="mb-1 text-[11px] text-muted-foreground">{kicker}</p>
-      ) : null}
-      <h1 className="text-lg font-medium text-foreground">{title}</h1>
-      {children ? (
-        <div className="mt-2 max-w-3xl text-[13px] leading-5 text-muted-foreground">
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function InsightCard({
   insight,
@@ -91,7 +68,7 @@ export function InsightCard({
     .filter((t): t is Pick<Theme, "id" | "name"> => Boolean(t));
 
   return (
-    <article className="border border-border bg-card p-4">
+    <article className="border border-border bg-card p-4 rounded-lg">
       <div className="flex flex-wrap items-center gap-1.5">
         <ClassChip value={insight.classification} />
         {linked.map((t) => (
@@ -129,3 +106,5 @@ export function InsightCard({
     </article>
   );
 }
+
+export { PageIntro } from "@/components/page-intro";

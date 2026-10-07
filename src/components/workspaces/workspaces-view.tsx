@@ -1,0 +1,227 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { FolderKanban, Inbox, Loader2, Plus, Settings } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import type { WorkspaceRole } from "@/modules/workspaces/store";
+import { DemoBadge } from "./demo-badge";
+import { formatCreated, sendJson, WORKSPACE_ROLE_LABELS } from "./model";
+
+export type WorkspaceRow = { id: string; name: string; role: WorkspaceRole; created_at: string; demo: boolean };
+
+type Start = "blank" | "demo";
+
+const START_OPTIONS: { value: Start; label: string; hint: string }[] = [
+  { value: "blank", label: "Start blank", hint: "An empty plan. The setup wizard asks for the asset, objectives and decisions." },
+  {
+    value: "demo",
+    label: "Start with demo data (Velmara)",
+    hint: "The full Velmara worked example: sources, gaps, tactics and plan. Marked Demo; reset it to blank any time.",
+  },
+];
+
+/** Name a new workspace; it opens straight into setup. */
+export function CreateWorkspaceForm({ autoFocus, onCancel }: { autoFocus?: boolean; onCancel?: () => void }) {
+  const [name, setName] = useState("");
+  const [start, setStart] = useState<Start>("blank");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <form
+      className="grid gap-2"
+      aria-label="Create a workspace"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setPending(true);
+        setError(null);
+        try {
+          const json = await sendJson<{ redirect: string }>("/api/workspaces", { name, start });
+          window.location.assign(json.redirect);
+        } catch (err) {
+          setPending(false);
+          setError(err instanceof Error ? err.message : "Could not create the workspace.");
+        }
+      }}
+    >
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Workspace name
+        <Input
+          name="workspace-name"
+          value={name}
+          maxLength={80}
+          autoFocus={autoFocus}
+          placeholder="e.g. Brand X · EU launch"
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <p className="text-[11px] text-muted-foreground">
+        One workspace per client, product or plan. Its gaps, tactics and sources are kept apart from every other workspace.
+      </p>
+      <fieldset className="grid gap-1.5" aria-label="Start with">
+        <legend className="mb-1 text-[12px] text-muted-foreground">Start with</legend>
+        {START_OPTIONS.map((option) => (
+          <label
+            key={option.value}
+            className="flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2 text-[13px] text-foreground has-[:checked]:border-primary"
+          >
+            <input
+              type="radio"
+              name="workspace-start"
+              value={option.value}
+              checked={start === option.value}
+              onChange={() => setStart(option.value)}
+              className="mt-0.5"
+            />
+            <span className="grid gap-0.5">
+              <span>{option.label}</span>
+              <span className="text-[11px] text-muted-foreground">{option.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={pending || name.trim().length < 2}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" aria-hidden />}
+          Create workspace
+        </Button>
+        {onCancel ? (
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <p role="alert" className="text-[12px] text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+export function WorkspacesView({
+  workspaces,
+  currentId,
+  startCreating,
+  next,
+}: {
+  workspaces: WorkspaceRow[];
+  currentId: string | null;
+  startCreating: boolean;
+  next: string;
+}) {
+  const [creating, setCreating] = useState(startCreating || workspaces.length === 0);
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function open(id: string) {
+    setPending(id);
+    setError(null);
+    try {
+      const json = await sendJson<{ redirect: string }>("/api/workspaces/select", { workspace_id: id, next });
+      window.location.assign(json.redirect);
+    } catch (err) {
+      setPending(null);
+      setError(err instanceof Error ? err.message : "Could not open the workspace.");
+    }
+  }
+
+  if (workspaces.length === 0) {
+    return (
+      <div className="grid gap-4">
+        <section
+          className="flex gap-3 border border-border bg-card p-5 rounded-lg"
+          aria-labelledby="no-workspaces"
+          data-testid="no-workspaces"
+        >
+          <Inbox className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+          <div>
+            <h2 id="no-workspaces" className="text-[13px] font-semibold text-foreground">
+              You&apos;re not in a workspace yet
+            </h2>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Ask your workspace owner to invite you with this email address. Their workspace appears here as soon as
+              they do.
+            </p>
+          </div>
+        </section>
+        <section className="border border-border bg-card p-5 rounded-lg" aria-labelledby="first-workspace">
+          <h2 id="first-workspace" className="text-[13px] font-semibold text-foreground">
+            Or create your first workspace
+          </h2>
+          <p className="mb-4 mt-1 text-[13px] text-muted-foreground">Start a new plan of your own and invite your team.</p>
+          <CreateWorkspaceForm />
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      <section aria-labelledby="your-workspaces" className="grid gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="your-workspaces" className="text-[13px] font-semibold text-foreground">
+            Your workspaces
+          </h2>
+          {!creating ? (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="size-3.5" aria-hidden />
+              New workspace
+            </Button>
+          ) : null}
+        </div>
+        <ul className="grid gap-2" aria-label="Workspaces">
+          {workspaces.map((ws) => (
+            <li
+              key={ws.id}
+              data-testid="workspace-row"
+              className="flex flex-wrap items-center gap-3 border border-border bg-card px-3 py-2.5 rounded-lg"
+            >
+              <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-foreground">
+                  <span className="truncate">{ws.name}</span>
+                  {ws.demo ? <DemoBadge /> : null}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {WORKSPACE_ROLE_LABELS[ws.role]} · created {formatCreated(ws.created_at)}
+                </p>
+              </div>
+              {ws.id === currentId ? <Badge variant="secondary">Current</Badge> : null}
+              <Link
+                href={`/workspaces/${ws.id}`}
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
+                aria-label={`Settings for ${ws.name}`}
+              >
+                <Settings className="size-3.5" aria-hidden />
+                Settings
+              </Link>
+              <Button size="sm" onClick={() => void open(ws.id)} disabled={pending !== null} aria-label={`Open ${ws.name}`}>
+                {pending === ws.id ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                Open
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {error ? (
+          <p role="alert" className="text-[12px] text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </section>
+
+      {creating ? (
+        <section className="border border-border bg-card p-4 rounded-lg" aria-labelledby="new-workspace">
+          <h2 id="new-workspace" className="mb-3 text-[13px] font-semibold text-foreground">
+            New workspace
+          </h2>
+          <CreateWorkspaceForm autoFocus onCancel={() => setCreating(false)} />
+        </section>
+      ) : null}
+    </div>
+  );
+}

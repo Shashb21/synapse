@@ -23,7 +23,7 @@ import { GET, POST } from "@/app/api/accuracy/experiments/pass-comparisons/route
 import { POST as postExperiment } from "@/app/api/accuracy/experiments/route";
 
 const session = {
-  signed_in: true, session: { subject: "pass-api-subject" },
+  signed_in: true, session: { subject: "pass-api-subject", provider_id: "sso", email: "owner@example.test" },
   actor: { name: "Session actor", function: "medical_affairs" as const }, role: "contributor" as const,
 };
 const sources: string[] = [];
@@ -31,9 +31,10 @@ const fixtureCopies: string[] = [];
 let originalModule: string | undefined;
 
 beforeAll(() => registerAccuracyStack());
-beforeEach(() => { sessionContext.mockResolvedValue(session); });
+beforeEach(() => { vi.stubEnv("OWNER_EMAILS", "owner@example.test"); sessionContext.mockResolvedValue(session); });
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   if (originalModule) activateAccuracyModule({ call_kind: "need_extract", module_id: originalModule, activated_by: "API test restore" });
   originalModule = undefined;
   for (const workspace_id of fixtureCopies.splice(0)) await deleteWorkspace(workspace_id);
@@ -166,7 +167,7 @@ describe("authenticated controlled pass comparison API", () => {
 
   it("uses real organization grants for source scope before run or read", async () => {
     const body = await fixture();
-    sessionContext.mockResolvedValue({ ...session, session: { subject: "ungranted" } });
+    sessionContext.mockResolvedValue({ ...session, session: { ...session.session, subject: "ungranted" } });
     for (const response of [await post(body), await get(body.source_workspace_id, ["missing"])]) {
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({ error: "Source workspace not found" });

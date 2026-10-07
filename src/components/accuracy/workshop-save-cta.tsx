@@ -49,10 +49,10 @@ export function WorkshopSaveCta({
 
   return (
     <section
-      className="mb-6 border border-border bg-card/40 p-3"
+      className="mb-6 border border-border bg-card p-3 rounded-lg"
       aria-labelledby="workshop-save-heading"
     >
-      <h2 id="workshop-save-heading" className="text-[15px] font-medium text-foreground">
+      <h2 id="workshop-save-heading" className="text-[13px] font-semibold text-foreground">
         Workshop
       </h2>
       <p className="mt-1 text-[12px] text-muted-foreground">
@@ -66,7 +66,7 @@ export function WorkshopSaveCta({
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-[12px] text-[var(--known)]">Ready to save workshop state.</p>
+        <p className="mt-2 text-[12px] text-[var(--known-foreground)]">Ready to save workshop state.</p>
       )}
       {error ? <p className="mt-2 text-[12px] text-destructive">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">

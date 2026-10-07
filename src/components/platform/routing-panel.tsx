@@ -6,13 +6,14 @@ import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 export type ProviderOption = {
   id: string;
   label: string;
   models: string[];
   default_model: string;
-  auth: "oauth" | "none";
+  auth: "api_key" | "none";
 };
 
 export type StageRouteView = {
@@ -45,16 +46,24 @@ export function RoutingPanel({
   canRoute: boolean;
   canActivate: boolean;
 }) {
+  const ai = useAiEnabled();
   return (
     <section className="grid gap-3" aria-labelledby="routing">
       <div>
-        <h2 id="routing" className="text-[15px] font-medium text-foreground">
+        <h2 id="routing" className="text-[13px] font-semibold text-foreground">
           Per-stage routing
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          Each stage resolves its own provider, model and parameters. Agentic stages require a
-          connected LLM — log in on this page first, or the run blocks with a link back here.
+          Each stage resolves its own provider, model and parameters. Agentic stages need a
+          provider whose API key is set in the server environment, or the run blocks with a link
+          back here.
         </p>
+        {ai ? null : (
+          <p className="mt-1 text-[12px] text-[var(--unknown-foreground)]" data-testid="routing-ai-off">
+            AI is off, so these routes are not used. You can still edit them; they take effect when
+            an admin turns AI back on.
+          </p>
+        )}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {routes.map((route) => (
@@ -107,16 +116,27 @@ function StageRouteCard({
         stage: route.stage,
         provider_id: providerId,
         model,
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
+        // Sent as typed: the server checks the bounds, keeps a blank number's
+        // current value and reads blank fallbacks as none (KAN-63).
+        temperature,
+        max_tokens: maxTokens,
         fallbacks,
       }),
     });
-    const json = (await res.json()) as { error?: string };
+    const json = (await res.json()) as {
+      error?: string;
+      config?: { params: { temperature: number; max_tokens: number }; fallbacks: string[] };
+    };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not save this route");
       return;
+    }
+    // Show what was stored: a blank number comes back as the value it kept.
+    if (json.config) {
+      setTemperature(String(json.config.params.temperature));
+      setMaxTokens(String(json.config.params.max_tokens));
+      setFallbacks(json.config.fallbacks.join(", "));
     }
     setSaved(true);
     router.refresh();
@@ -138,10 +158,10 @@ function StageRouteCard({
   }
 
   return (
-    <article className="grid gap-2 border border-border bg-card/40 p-3">
+    <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[13px] font-medium text-foreground">{route.stage_title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground">{route.stage_title}</h3>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {route.module_id ?? "no module registered"}
             {route.module_version ? ` · v${route.module_version}` : ""}
@@ -195,17 +215,21 @@ function StageRouteCard({
             </select>
           </label>
           <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Temperature
+            Temperature (0 to 2)
             <Input
               value={temperature}
+              inputMode="decimal"
+              placeholder="Blank keeps the current value"
               disabled={!canRoute}
               onChange={(event) => setTemperature(event.target.value)}
             />
           </label>
           <label className="grid gap-1 text-[11px] text-muted-foreground">
-            Max tokens
+            Max tokens (1 to 200,000)
             <Input
               value={maxTokens}
+              inputMode="numeric"
+              placeholder="Blank keeps the current value"
               disabled={!canRoute}
               onChange={(event) => setMaxTokens(event.target.value)}
             />
@@ -215,8 +239,13 @@ function StageRouteCard({
             <Input
               value={fallbacks}
               disabled={!canRoute}
+              placeholder="No fallbacks"
               onChange={(event) => setFallbacks(event.target.value)}
             />
+            <span>
+              Provider ids, comma-separated ({providers.map((option) => option.id).join(", ")}). Leave
+              blank for no fallbacks: the stage then fails rather than switch providers.
+            </span>
           </label>
         </div>
       ) : (

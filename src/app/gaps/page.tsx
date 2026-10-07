@@ -4,12 +4,14 @@ import { GapBadge, ParkedFlag } from "@/components/iegp-badges";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { displayedGapStatus } from "@/lib/iegp/engine";
 import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function GapsPage() {
   await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
+  const ai = await aiSectionEnabled("ingestion").catch(() => false);
   return (
     <AppShell active="gaps">
       <PageIntro kicker="Decision objects" title="Evidence gaps">
@@ -21,7 +23,17 @@ export default async function GapsPage() {
       </PageIntro>
       {state.gaps.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
-          No gaps yet. Ingest a source on Upload — extracted gaps land here already mapped.
+          {ai ? (
+            "No gaps yet. Ingest a source on Upload — extracted gaps land here already mapped."
+          ) : (
+            <>
+              No gaps yet. Add them on{" "}
+              <Link href="/?place=upload" className="text-foreground">
+                Start
+              </Link>
+              .
+            </>
+          )}
         </p>
       ) : (
       <div className="grid gap-3">
@@ -32,7 +44,7 @@ export default async function GapsPage() {
             <Link
               key={g.id}
               href={`/gaps/${g.id}`}
-              className="border border-border bg-card p-4 no-underline"
+              className="border border-border bg-card p-4 no-underline rounded-lg"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <GapBadge status={displayedGapStatus(g)} />

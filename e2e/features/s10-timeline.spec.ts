@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fillNameIfAsked } from "../support/session";
 import {
   firstOpenGap,
   planAction,
@@ -47,7 +48,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
       expect(activity.end_date >= activity.start_date).toBe(true);
       expect(activity.meta.evidence_question.length).toBeGreaterThan(0);
     }
-    expect(built.output.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "addressed"]);
+    expect(built.output.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "unprioritized", "addressed"]);
   });
 
   test("gates an activity on the readouts it depends on", async ({ request }) => {
@@ -66,14 +67,16 @@ test.describe("S10 interactive Gantt IEGP", () => {
 
   test("renders the Gantt with lanes and a readout legend", async ({ page }) => {
     await page.goto("/timeline");
-    await expect(page.getByRole("heading", { name: /^iegp timeline$/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
     const chart = page.locator("svg[role='img']");
     await expect(chart).toBeVisible();
-    await expect(chart).toHaveAttribute("aria-label", /Gantt timeline with \d+ activities/);
+    await expect(chart).toHaveAttribute("aria-label", /Gantt timeline with \d+ activit(?:y|ies)/);
     await expect(page.getByText("HIGH PRIORITY", { exact: true })).toBeVisible();
     await expect(page.getByText("Readout", { exact: true })).toBeVisible();
     await expect(page.getByText("Depends on", { exact: true })).toBeVisible();
-    await expect(page.getByText("Dashed bar outline = proposed tactic")).toBeVisible();
+    // KAN-8: bars are coloured by tactic type and patterned by status, as the legend says.
+    await expect(page.getByText("Real-world data", { exact: true })).toBeVisible();
+    await expect(page.getByText("Proposed", { exact: true })).toBeVisible();
   });
 
   test("opens an activity's full record on click", async ({ page, request }) => {
@@ -88,7 +91,49 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await expect(panel.getByRole("heading", { name: "Timing" })).toBeVisible();
     await expect(panel.getByRole("heading", { name: "Design" })).toBeVisible();
     await expect(panel.getByText(activity.start_date)).toBeVisible();
-    await expect(panel.getByRole("button", { name: /reschedule/i })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /^edit$/i })).toBeVisible();
+  });
+
+  // Owner feedback (KAN-56): editing stays in the side panel, and the budget can be set there.
+  test("edits the activity and its budget inside the same side panel", async ({ page, request }) => {
+    const state = await planState(request);
+    const activity = state.timeline.activities[0]!;
+    await page.goto("/timeline");
+    await page.waitForLoadState("networkidle");
+    await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
+
+    const panel = page.getByRole("dialog");
+    await panel.getByRole("button", { name: /^edit$/i }).click();
+    const form = panel.getByTestId("activity-editor");
+    await expect(form).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+
+    // Nothing typed: nothing is sent.
+    await form.getByLabel("Rationale for the change").fill("Budget agreed with finance");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText("Nothing changed.");
+
+    // No rationale: refused before anything is sent.
+    await form.getByLabel("Budget", { exact: true }).fill("$120k");
+    await form.getByLabel("Rationale for the change").fill("");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText(/rationale is required/i);
+
+    // End before start is caught in the panel.
+    await form.getByLabel("End", { exact: true }).fill("2020-01-01");
+    await form.getByLabel("Rationale for the change").fill("Budget agreed with finance");
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form.getByRole("alert")).toHaveText("The end date is before the start date.");
+    await form.getByLabel("End", { exact: true }).fill(activity.end_date);
+
+    await form.getByRole("button", { name: /^save changes$/i }).click();
+    await expect(form).toBeHidden({ timeout: 20_000 });
+    await expect(panel.getByRole("heading", { name: "Design" })).toBeVisible();
+    await expect(panel.getByText("$120k")).toBeVisible();
+    // Saved: it is still there after a reload.
+    await page.reload();
+    await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
+    await expect(page.getByRole("dialog").getByText("$120k")).toBeVisible();
   });
 
   test("exports the chart as a PNG image", async ({ page }) => {
@@ -119,7 +164,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
       start_date: "next spring",
       rationale: "Vague date",
     });
-    expect(badDate.error).toMatch(/start_date: expected YYYY-MM-DD/i);
+    expect(badDate.error).toBe("Start date must be a date (YYYY-MM-DD).");
 
     await planAction(request, {
       action: "move_activity",
@@ -139,7 +184,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await page.getByRole("button", { name: /save as final/i }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByPlaceholder(/why this decision/i).fill("Signed off for the feature spec");
-    await dialog.getByRole("textbox", { name: /^name$/i }).fill("A. Rao");
+    await fillNameIfAsked(dialog, "A. Rao");
     await dialog.getByRole("button", { name: /^save$/i }).click();
     await expect(dialog).toBeHidden();
 

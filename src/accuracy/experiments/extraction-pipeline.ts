@@ -30,9 +30,9 @@ export type PipelineExperimentContext = {
   experiment_cycle_control?: ExperimentCycleControl;
 };
 
-/** Shared mechanical tail used after an applied extraction batch has reserved its journal IDs. */
+/** Shared merge/status tail used after an applied extraction batch has reserved its journal IDs. */
 export async function runExtractionDownstream(args: { workspace_id: string; org_id: string; actor: Actor; merge_id: string; status_id: string }) {
-  const merge = await runAccuracyModule<MergeDedupeOutput>({ call_kind: "merge_dedupe", agent_role: "none", input: { workspace_id: args.workspace_id },
+  const merge = await runAccuracyModule<MergeDedupeOutput>({ call_kind: "merge_dedupe", agent_role: "judge", input: { workspace_id: args.workspace_id },
     actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.merge_id });
   const status = await runAccuracyModule<StatusDeriveOutput>({ call_kind: "status_derive", agent_role: "none", input: { workspace_id: args.workspace_id },
     actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.status_id });
@@ -94,7 +94,7 @@ async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: Ca
   const call_id = reserved_run_id ?? newId("arun");
   try {
     const result = await runAccuracyModule<O>({ call_kind, input, actor: context.actor, org_id: context.org_id, workspace_id: context.workspace_id,
-      reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" || call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment",
+      reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" ? "judge" : call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment",
       ...((call_kind === "inventory_extract" || call_kind === "need_extract") ? { experiment_cycle_control: context.experiment_cycle_control } : {}) });
     if (retain) await retainResult({ ...context, call_kind, input, result });
     return result;

@@ -1,5 +1,10 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { PRESENT_HEADER } from "@/modules/auth/gate";
 import { PlanChrome, type PlanNavModel, type ShellId } from "@/components/plan-chrome";
+import { loadWorkspaceTag } from "@/components/workspaces/workspace-tag-data";
 import { loadState } from "@/lib/iegp/store";
+import { prioritizationProgress } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
   gapsReadyForPrioritize,
@@ -28,6 +33,12 @@ export async function AppShell({
   children: React.ReactNode;
   active: ShellId;
 }) {
+  // The proxy only checks that the cookies exist; this is the real check.
+  const workspace = await loadWorkspaceTag();
+  if (workspace.state === "signed_out") redirect("/login");
+  // Fail closed: if the session or membership cannot be verified, nothing renders.
+  if (workspace.state !== "ready") redirect("/workspaces");
+  const present = (await headers()).get(PRESENT_HEADER) === "1";
   let nav = EMPTY_NAV;
   try {
     const state = await loadState();
@@ -44,37 +55,16 @@ export async function AppShell({
       tacticsUnlocked: gates.tacticsUnlocked,
       setupComplete: state.asset.setup_complete,
       readyForPrioritize: gapsReadyForPrioritize(state),
+      prioritized: await prioritizationProgress(state),
     };
   } catch {
     // Setup and other shells must render before Postgres is configured.
   }
   return (
-    <PlanChrome active={active} nav={nav}>
+    <PlanChrome active={active} nav={nav} workspace={workspace.tag} present={present}>
       {children}
     </PlanChrome>
   );
 }
 
-export function PageIntro({
-  kicker,
-  title,
-  children,
-}: {
-  kicker?: string;
-  title: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-6">
-      {kicker ? (
-        <p className="mb-1 text-[11px] text-muted-foreground">{kicker}</p>
-      ) : null}
-      <h1 className="text-lg font-medium text-foreground">{title}</h1>
-      {children ? (
-        <div className="mt-2 max-w-3xl text-[13px] leading-5 text-muted-foreground">
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+export { PageIntro } from "@/components/page-intro";

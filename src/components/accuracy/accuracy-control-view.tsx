@@ -7,11 +7,17 @@ import { CALL_KINDS_META } from "@/accuracy/kernel/contracts";
 import { PROVIDERS } from "@/modules/llm/provider";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
+import { aiSwitch } from "@/modules/kernel/ai-switch";
+import Link from "next/link";
 
 registerAccuracyStack();
 
 export async function AccuracyControlView() {
-  const [configs, identity] = await Promise.all([accuracyRouteConfigs(), sessionContext()]);
+  const [configs, identity, ai] = await Promise.all([
+    accuracyRouteConfigs(),
+    sessionContext(),
+    aiSwitch(),
+  ]);
 
   const routes: AccuracyRouteView[] = await Promise.all(
     configs.map(async (config) => {
@@ -36,6 +42,29 @@ export async function AccuracyControlView() {
 
   return (
     <div className="grid gap-8">
+      <section
+        className="grid gap-1 border border-border bg-card p-3 rounded-lg"
+        aria-labelledby="ai-switch-state"
+        data-testid="accuracy-ai-switch-state"
+      >
+        <h2 id="ai-switch-state" className="text-[13px] font-semibold text-foreground">
+          AI switch · {ai.enabled ? "on" : "off"}
+        </h2>
+        <p className="text-[12px] text-muted-foreground">
+          {ai.enabled
+            ? "Models run on the routes below (parse, extract, audit, coverage assist, ideate)."
+            : "AI is off: no route below is called. Every accuracy step is done by hand — add gaps and tactics on the Ledger, decide coverage, set priority and dates yourself."}
+          {ai.updated_by ? ` Last changed by ${ai.updated_by}` : ""}
+          {ai.updated_at ? ` at ${ai.updated_at}` : ""}
+          {ai.rationale ? ` — “${ai.rationale}”` : ""}
+          {ai.updated_by || ai.updated_at ? "." : ""}
+        </p>
+        <p className="text-[12px]">
+          <Link href="/admin/control" className="text-foreground underline-offset-2 hover:underline">
+            Change the AI switch in the control panel →
+          </Link>
+        </p>
+      </section>
       <AccuracyRoutingPanel
         routes={routes}
         providers={PROVIDERS.map((provider) => ({
@@ -48,16 +77,16 @@ export async function AccuracyControlView() {
         canRoute={can(identity.role, "configure_routing")}
       />
       <section className="grid gap-2" aria-labelledby="live-prices">
-        <h2 id="live-prices" className="text-[15px] font-medium text-foreground">
+        <h2 id="live-prices" className="text-[13px] font-semibold text-foreground">
           Live price table
         </h2>
         <p className="text-[12px] text-muted-foreground">
-          USD per 1M tokens used for run estimates. OAuth providers do not return billing; Audit shows
+          USD per 1M tokens used for run estimates. Provider calls do not return billing; Audit shows
           the rollup of these estimates.
         </p>
         <div className="overflow-x-auto border border-border">
           <table className="w-full text-left text-[12px]">
-            <thead className="bg-card/60 text-muted-foreground">
+            <thead className="bg-card text-muted-foreground">
               <tr>
                 <th className="px-2 py-1.5 font-medium">Provider</th>
                 <th className="px-2 py-1.5 font-medium">Model</th>

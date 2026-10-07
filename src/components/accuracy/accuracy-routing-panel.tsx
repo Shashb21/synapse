@@ -35,7 +35,7 @@ export function AccuracyRoutingPanel({
   return (
     <section className="grid gap-3" aria-labelledby="accuracy-routing">
       <div>
-        <h2 id="accuracy-routing" className="text-[15px] font-medium text-foreground">
+        <h2 id="accuracy-routing" className="text-[13px] font-semibold text-foreground">
           Per call kind · per agent role
         </h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
@@ -92,8 +92,9 @@ function AccuracyRouteCard({
         agent_role: route.agent_role,
         provider_id: providerId,
         model,
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
+        // Sent as typed: the server checks the range, and a blank keeps the current value.
+        temperature,
+        max_tokens: maxTokens,
         fallbacks,
       }),
     });
@@ -113,10 +114,10 @@ function AccuracyRouteCard({
       : `${route.call_kind_title} · ${route.agent_role}`;
 
   return (
-    <article className="grid gap-2 border border-border bg-card/40 p-3">
+    <article className="grid gap-2 border border-border bg-card p-3 rounded-lg">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
+          <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{route.call_kind}</p>
         </div>
         <Badge variant="outline" className="text-[10px]">

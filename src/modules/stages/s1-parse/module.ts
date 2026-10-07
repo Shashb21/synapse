@@ -7,11 +7,19 @@ import { registerModule } from "@/modules/kernel/registry";
 import type { SynapseModule } from "@/modules/kernel/contracts";
 import { persistSourceAndBlocks } from "@/lib/iegp/store";
 import {
+  persistDroppedSourceUnits,
+  recordLlmSourceStakeholder,
+  reparseSourceBlocks,
+} from "@/lib/iegp/source-blocks";
+import * as iegp from "@/lib/iegp/schema";
+import {
   extractCandidateGaps,
   extractCandidateTactics,
   splitSourceIntoBlocks,
 } from "@/lib/iegp/engine";
 import { parseLocalDocument } from "@/lib/ingest/local-parse";
+import { parseWithLlm } from "@/lib/ingest/llm-structure";
+import { isTestStub, requireLlm } from "@/modules/kernel/llm";
 import type { ActorFunction, SourceType } from "@/lib/iegp/enums";
 import {
   listSourceFiles,
@@ -20,12 +28,14 @@ import {
   sourceFileContent,
   unparsedFileIds,
 } from "@/modules/stages/s0-upload/module";
+import { ProviderError } from "@/modules/llm/provider-error";
 import {
   PARSED_DOCUMENTS_DDL,
   parsedDocuments,
   type ParseQuality,
   type ParsedDocumentBlock,
 } from "./schema";
+import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
   /** Defaults to every uploaded file that has not been parsed yet. */
@@ -59,7 +69,7 @@ const outputSchema = z.object({
 export type ParseInput = z.infer<typeof inputSchema>;
 export type ParseOutput = z.infer<typeof outputSchema>;
 
-const PARSER_VERSION = "1.0.0";
+const PARSER_VERSION = "2.0.0";
 
 function qualityOf(blocks: ParsedDocumentBlock[]): ParseQuality {
   const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
@@ -82,20 +92,21 @@ function qualityOf(blocks: ParsedDocumentBlock[]): ParseQuality {
 
 export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
   manifest: {
-    id: "s1-parse.local",
+    id: "s1-parse.llm",
     stage: "S1",
-    version: "1.0.0",
-    title: "Local document parser",
+    version: "2.0.0",
+    title: "LLM document parser",
     summary:
-      "Parses text, DOCX, PPTX and XLSX into headed blocks, writes the domain source, and scores parse quality.",
+      "Extracts the text of PDF, PPTX, DOCX, XLSX and text files, then the chosen LLM decides the blocks, their kinds and headings. LlamaParse is disabled.",
     contract: 1,
-    agentic: false,
-    capabilities: ["text", "docx", "pptx", "xlsx"],
+    agentic: true,
+    capabilities: ["pdf", "text", "docx", "pptx", "xlsx", "llm-structure"],
   },
   inputSchema,
   outputSchema,
   migrations: [PARSED_DOCUMENTS_DDL],
   async run(input, ctx) {
+    requireLlm(ctx, "Parsing");
     const ids = input.file_ids?.length
       ? input.file_ids
       : input.dry_run
@@ -113,58 +124,109 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
       const began = Date.now();
       try {
         const { record, buffer } = loaded;
-        const text = await ctx.run.step(
-          `extract-text:${file_id}`,
+        // The model decides the structure; only the test stub splits text by rule.
+        const parsed = await ctx.run.step(
+          `parse:${file_id}`,
           async () => {
-            if (record.mime.startsWith("text/") || record.filename.endsWith(".txt")) {
-              return buffer.toString("utf8");
+            if (isTestStub()) {
+              const text =
+                record.mime.startsWith("text/") || record.filename.endsWith(".txt")
+                  ? buffer.toString("utf8")
+                  : (await parseLocalDocument({ filename: record.filename, buffer, mime: record.mime })).blocks
+                      .map((block) => block.text)
+                      .join("\n\n");
+              return {
+                text,
+                sections: undefined,
+                parser: "local" as const,
+                dropped_units: [],
+                stakeholder: null,
+              };
             }
-            const parsed = await parseLocalDocument({
+            const { document, dropped, dropped_units, stakeholder_rationale } = await parseWithLlm({
               filename: record.filename,
               buffer,
               mime: record.mime,
+              ask: ctx.complete,
             });
-            return parsed.blocks.map((block) => block.text).join("\n\n");
+            if (dropped.length > 0) ctx.run.note(`parse:dropped:${file_id}`, dropped);
+            return {
+              text: document.blocks.map((block) => block.text).join("\n\n"),
+              sections: document.blocks.map((block) => ({
+                heading: block.heading ?? block.location.ref,
+                text: block.text,
+                location: block.location.ref,
+              })),
+              parser: "llm" as const,
+              dropped_units,
+              stakeholder: { stakeholder_function: document.stakeholder_function as string, rationale: stakeholder_rationale },
+            };
           },
           record.mime,
         );
+        const sectionsFor = () =>
+          parsed.sections ??
+          splitSourceIntoBlocks(parsed.text, record.title).map((section) => ({ ...section, location: section.heading }));
         if (input.dry_run) {
           // Score the parse without touching the domain store.
-          const sections = splitSourceIntoBlocks(text, record.title);
+          const sections = sectionsFor();
           const quality = qualityOf(
             sections.map((section, index) => ({
               id: `dry-${index}`,
               source_id: "dry-run",
               heading: section.heading,
               text: section.text,
-              location: section.heading,
+              location: section.location,
             })),
           );
           documents.push({
             id: `dry-${file_id}`,
             file_id,
             source_id: "dry-run",
-            parser: "local",
+            parser: parsed.parser,
             blocks: sections.length,
             quality,
           });
           ctx.run.note(`dry-parsed:${file_id}`, quality, `${sections.length} block(s), not persisted`);
           continue;
         }
-        const { source_id, blocks } = await persistSourceAndBlocks({
-          title: record.title,
-          source_type: record.source_type as SourceType,
-          stakeholder_function: record.stakeholder_function as ActorFunction,
-          text,
-          filename: record.filename,
-        });
+        // Re-parsing a file that already has a source updates that source in
+        // place: human-made and human-edited blocks survive, only model blocks
+        // are replaced. A first parse creates the source.
+        const existingSource = record.source_id
+          ? (await db().select({ id: iegp.sources.id }).from(iegp.sources).where(eq(iegp.sources.id, record.source_id)))[0]
+          : undefined;
+        const { source_id, blocks } = existingSource
+          ? await reparseSourceBlocks({ source_id: existingSource.id, sections: sectionsFor() }).then((result) => {
+              if (result.kept_human > 0 || result.kept_cited > 0) {
+                ctx.run.note(`parse:kept:${file_id}`, {
+                  kept_human: result.kept_human,
+                  kept_cited: result.kept_cited,
+                  skipped_duplicates: result.skipped_duplicates,
+                });
+              }
+              return result;
+            })
+          : await persistSourceAndBlocks({
+              title: record.title,
+              source_type: record.source_type as SourceType,
+              stakeholder_function: record.stakeholder_function as ActorFunction,
+              text: parsed.text,
+              filename: record.filename,
+              sections: parsed.sections,
+            });
+        await persistDroppedSourceUnits(source_id, parsed.dropped_units);
+        if (parsed.stakeholder) {
+          // Kept beside the source's function (chosen at upload or by a human override), never over it.
+          await recordLlmSourceStakeholder({ source_id, ...parsed.stakeholder });
+        }
         const quality = qualityOf(blocks);
         const id = newId("DOC");
         await db().insert(parsedDocuments).values({
           id,
           file_id,
           source_id,
-          parser: "local",
+          parser: parsed.parser,
           parser_version: PARSER_VERSION,
           blocks,
           quality,
@@ -172,9 +234,12 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
           duration_ms: Date.now() - began,
         });
         await markFileParsed({ id: file_id, source_id, note: `${blocks.length} block(s)` });
-        documents.push({ id, file_id, source_id, parser: "local", blocks: blocks.length, quality });
+        documents.push({ id, file_id, source_id, parser: parsed.parser, blocks: blocks.length, quality });
         ctx.run.note(`parsed:${file_id}`, quality, `${blocks.length} block(s) → ${source_id}`);
       } catch (error) {
+        // A provider error (billing, key, rate limit, outage) fails every file the same
+        // way: stop the stage so the run fails and the cause reaches the person (KAN-68).
+        if (error instanceof ProviderError) throw error;
         const reason = error instanceof Error ? error.message : String(error);
         await markFileFailed({ id: file_id, note: reason });
         failures.push({ file_id, reason });
@@ -189,7 +254,7 @@ export const parseModule: SynapseModule<ParseInput, ParseOutput> = {
 
     return {
       output: { documents, failures },
-      summary: `${documents.length} document(s) parsed, ${failures.length} failed`,
+      summary: `${plural(documents.length, "document")} parsed, ${failures.length} failed`,
       evals: [
         { name: "documents_parsed", value: documents.length, unit: "count" },
         { name: "with_need_language", value: Number(cueRatio.toFixed(3)), unit: "ratio", target: 0.5 },

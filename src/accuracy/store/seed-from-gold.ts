@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { createOrganization, createWorkspace, getWorkspace } from "./tenant";
 import { insertClaim } from "./claim-store";
 import { insertSourceFile } from "./source-store";
-import { persistParseBlocks, blocksFromParsedDocument } from "./parse-store";
 import { loadReferenceGold, getReferencePack, referencePackDir } from "../eval/reference-gold";
-import { parseLocalDocument, mimeForFilename } from "@/lib/ingest/local-parse";
+import { mimeForFilename } from "@/lib/ingest/local-parse";
+import { aiEnabled } from "@/modules/kernel/ai-switch";
 import { planLabelFromPack } from "@/accuracy/domain/plan-label";
 import {
   normalizeChapterSlug,
@@ -20,6 +20,13 @@ export type SeedFromGoldResult = {
   gaps: number;
   tactics: number;
   parse_blocks: number;
+  /** Why the reference source was not parsed (e.g. no LLM connected), or null. */
+  parse_error: string | null;
+  /**
+   * Why the parse was deliberately not attempted (AI switched off), or null.
+   * A skipped parse is not an error: the gold gaps/tactics are still seeded.
+   */
+  parse_skipped: string | null;
   pack_id: string;
 };
 
@@ -31,7 +38,14 @@ function slugify(value: string): string {
     .slice(0, 48);
 }
 
-/** Create a workspace and load gold gap/tactic statements (+ optional local PPTX parse). */
+export const SEED_PARSE_SKIPPED_AI_OFF =
+  "AI is off, so the reference source was not parsed. The gold gaps and tactics are loaded as drafts to review by hand.";
+
+/**
+ * Create a workspace and load gold gap/tactic statements (+ optional LLM parse
+ * of the reference source). With the admin AI switch off the parse is skipped
+ * (parse_skipped), never attempted and never reported as a parse_error.
+ */
 export async function seedWorkspaceFromGold(args: {
   packId: string;
   workspaceName?: string;
@@ -54,6 +68,11 @@ export async function seedWorkspaceFromGold(args: {
   const sourcePath = join(referencePackDir(args.packId), pack.source_file);
   let source_file_id = "";
   let parse_blocks = 0;
+  let parse_error: string | null = null;
+  let parse_skipped: string | null = null;
+  const wantParse = args.parseSource !== false;
+  const parseAllowed = wantParse && (await aiEnabled());
+  if (wantParse && !parseAllowed) parse_skipped = SEED_PARSE_SKIPPED_AI_OFF;
 
   try {
     const buffer = readFileSync(sourcePath);
@@ -70,27 +89,32 @@ export async function seedWorkspaceFromGold(args: {
     });
     source_file_id = source.id;
 
-    if (args.parseSource !== false) {
-      const document = await parseLocalDocument({
-        filename: sourceRel || pack.source_file,
-        buffer,
-        mime,
-      });
-      const blocks = blocksFromParsedDocument({
-        workspace_id,
-        source_file_id,
-        blocks: document.blocks.map((b, index) => ({
-          ...b,
-          id: `${source_file_id}-B${String(index + 1).padStart(3, "0")}`,
-        })),
-      });
-      await persistParseBlocks({
-        workspace_id,
-        source_file_id,
-        parser: "local_structured",
-        blocks,
-      });
-      parse_blocks = blocks.length;
+    if (parseAllowed) {
+      // Same path as an upload: the parse route's LLM structures the source.
+      const [{ runAccuracyModule }, { registerAccuracyStack }] = await Promise.all([
+        import("@/accuracy/kernel/run"),
+        import("@/accuracy"),
+      ]);
+      registerAccuracyStack();
+      try {
+        const parsed = await runAccuracyModule<{ block_count: number }>({
+          call_kind: "parse",
+          agent_role: "proposer",
+          input: {
+            workspace_id,
+            source_file_id,
+            filename: sourceRel || pack.source_file,
+            mime,
+            content_base64: buffer.toString("base64"),
+          },
+          actor: { name: "Gold seed", function: "medical_affairs" },
+          org_id,
+          workspace_id,
+        });
+        parse_blocks = parsed.output.block_count;
+      } catch (error) {
+        parse_error = error instanceof Error ? error.message : String(error);
+      }
     }
   } catch (error) {
     if (!source_file_id) {
@@ -199,6 +223,8 @@ export async function seedWorkspaceFromGold(args: {
     gaps,
     tactics,
     parse_blocks,
+    parse_error,
+    parse_skipped,
     pack_id: args.packId,
   };
 }

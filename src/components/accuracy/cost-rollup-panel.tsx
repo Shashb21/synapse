@@ -10,14 +10,14 @@ export function CostRollupPanel({
 }) {
   return (
     <section className="mb-6 grid gap-2" aria-labelledby="cost-rollup">
-      <h2 id="cost-rollup" className="text-[15px] font-medium text-foreground">
+      <h2 id="cost-rollup" className="text-[13px] font-semibold text-foreground">
         Estimated spend
         {workspaceName ? (
           <span className="ml-2 text-[12px] font-normal text-muted-foreground">· {workspaceName}</span>
         ) : null}
       </h2>
       <p className="text-[12px] text-muted-foreground">
-        Rollup of recorded module-run estimates (OAuth providers do not expose a billing API). Uses the
+        Rollup of recorded module-run estimates (provider calls do not return billing). Uses the
         live price table in the accuracy kernel.
       </p>
       <div className="grid gap-2 sm:grid-cols-4">
@@ -32,7 +32,7 @@ export function CostRollupPanel({
       {rollup.by_call_kind.length > 0 ? (
         <div className="overflow-x-auto border border-border">
           <table className="w-full text-left text-[12px]">
-            <thead className="bg-card/60 text-muted-foreground">
+            <thead className="bg-card text-muted-foreground">
               <tr>
                 <th className="px-2 py-1.5 font-medium">Call kind</th>
                 <th className="px-2 py-1.5 font-medium">Runs</th>
@@ -64,7 +64,7 @@ export function CostRollupPanel({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-border bg-card/40 p-3">
+    <div className="border border-border bg-card p-3 rounded-lg">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-1 text-[13px] text-foreground">{value}</p>
     </div>

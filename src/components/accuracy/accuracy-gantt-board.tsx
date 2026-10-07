@@ -16,6 +16,10 @@ import {
 } from "@/accuracy/modules/gantt-project/export-svg";
 import type { GanttCatalogEntry } from "@/accuracy/modules/gantt-project/snapshot-hash";
 import { svgMarkupToPngBlob, triggerBlobDownload } from "@/components/accuracy/svg-to-png";
+import {
+  GanttScheduleEditor,
+  type GanttTacticSchedule,
+} from "@/components/accuracy/gantt-schedule-editor";
 
 function toDay(iso: string): number {
   return Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
@@ -41,6 +45,7 @@ export function AccuracyGanttBoard({
   planId,
   snapshotHash,
   auditBundleHref,
+  tactics = [],
 }: {
   workspaceId: string;
   activities: GanttActivity[];
@@ -50,6 +55,8 @@ export function AccuracyGanttBoard({
   planId: string | null;
   snapshotHash: string | null;
   auditBundleHref: string | null;
+  /** Active tactics with their stored schedule (for manual date / dependency entry). */
+  tactics?: GanttTacticSchedule[];
 }) {
   const router = useRouter();
   const barRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -65,6 +72,12 @@ export function AccuracyGanttBoard({
   const hash = savedHash ?? snapshotHash;
   const auditHref = savedAuditHref ?? auditBundleHref;
   const selected = activities.find((row) => row.id === selectedId) ?? null;
+  const tacticOptions = tactics.map((row) => ({ id: row.id, statement: row.statement }));
+  const scheduledIds = new Set(activities.map((row) => row.tactic_id));
+  const unscheduled = tactics.filter((row) => row.validated && !scheduledIds.has(row.id));
+  const selectedTactic = selected
+    ? (tactics.find((row) => row.id === selected.tactic_id) ?? null)
+    : null;
   const detail = selected
     ? resolveActivityDetail({ activity: selected, activities, catalog })
     : null;
@@ -255,7 +268,7 @@ export function AccuracyGanttBoard({
         />
       </label>
       {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
-      {message ? <p className="text-[11px] text-[var(--known)]">{message}</p> : null}
+      {message ? <p className="text-[11px] text-[var(--known-foreground)]">{message}</p> : null}
 
       {activities.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">
@@ -339,13 +352,13 @@ export function AccuracyGanttBoard({
 
       {detail ? (
         <section
-          className="border border-foreground/40 bg-card p-4"
+          className="border border-foreground/40 bg-card p-4 rounded-lg"
           aria-labelledby="activity-detail-title"
           data-testid="gantt-activity-detail"
         >
           <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 id="activity-detail-title" className="text-[15px] font-medium text-foreground">
+              <h2 id="activity-detail-title" className="text-[13px] font-semibold text-foreground">
                 {detail.tactic?.statement ?? detail.activity.tactic_id}
               </h2>
               <p className="text-[12px] text-muted-foreground">
@@ -408,6 +421,43 @@ export function AccuracyGanttBoard({
               ) : null}
             </div>
           </div>
+          {selectedTactic ? (
+            <div className="mt-4 border-t border-border pt-3">
+              <h3 className="mb-2 text-[12px] font-medium text-foreground">Edit schedule</h3>
+              <GanttScheduleEditor
+                key={`${selectedTactic.id}-${selectedTactic.start}-${selectedTactic.end}-${selectedTactic.readout}-${selectedTactic.depends_on.join(",")}`}
+                workspaceId={workspaceId}
+                tactic={selectedTactic}
+                tacticOptions={tacticOptions}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      {unscheduled.length > 0 ? (
+        <section className="grid gap-2" aria-labelledby="gantt-unscheduled" data-testid="gantt-unscheduled">
+          <h2 id="gantt-unscheduled" className="text-[12px] font-semibold text-foreground">
+            Validated tactics without a bar ({unscheduled.length})
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            Enter start and end dates (and optional readout / dependencies) to place them on the
+            timeline.
+          </p>
+          <ul className="grid gap-2">
+            {unscheduled.map((row) => (
+              <li key={row.id} className="border border-border bg-card p-3 rounded-lg">
+                <p className="mb-2 text-[12px] text-foreground">
+                  {row.statement} <span className="text-muted-foreground">{row.id}</span>
+                </p>
+                <GanttScheduleEditor
+                  key={`${row.id}-${row.start}-${row.end}`}
+                  workspaceId={workspaceId}
+                  tactic={row}
+                  tacticOptions={tacticOptions}
+                />
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
     </div>

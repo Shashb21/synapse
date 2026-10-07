@@ -5,32 +5,31 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { LiveExtractGate } from "@/accuracy/kernel/extract-gate";
 
-export function ExtractOauthGateBanner({ gate }: { gate: LiveExtractGate }) {
+export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
   if (gate.ready && gate.stub) return null;
   if (gate.ready) {
     return (
-      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="extract-oauth-gate">
-        Live extract will use {gate.provider_label} ({gate.auth === "oauth" ? "OAuth" : "connected"}
-        ).
+      <p className="mb-3 text-[12px] text-muted-foreground" data-testid="extract-key-gate">
+        Live extract will use {gate.provider_label} (server API key).
       </p>
     );
   }
   return (
     <div
-      className="mb-3 border border-border bg-card/40 p-3"
-      data-testid="extract-oauth-gate"
+      className="mb-3 border border-border bg-card p-3 rounded-lg"
+      data-testid="extract-key-gate"
       role="status"
     >
       <p className="text-[13px] text-foreground">{gate.message}</p>
       <p className="mt-1 text-[12px] text-muted-foreground">
-        Grok is the default route; Claude is the one-click alternate. LlamaParse keys are a separate
-        parse worker — not this gate.
+        Grok is the default route; Claude is the one-click alternate. Parsing uses the parse route
+        in the control panel.
       </p>
       <Link
         href={gate.connect_path}
         className="mt-2 inline-block text-[12px] text-foreground underline-offset-2 hover:underline"
       >
-        Connect a provider in /control →
+        Check provider key status in /admin/control →
       </Link>
     </div>
   );
@@ -99,7 +98,7 @@ export function SourceExtractActions({
       ];
       const via = json.provider_label ? ` via ${json.provider_label}` : "";
       const note = json.stub
-        ? " (stub LLM — connect a provider in /control for live extract)"
+        ? " (stub LLM — set a provider's API key in the server environment for live extract)"
         : via;
       setSummary(`Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
@@ -142,7 +141,7 @@ export function SourceExtractActions({
           Inventory only
         </button>
         <Link
-          href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+          href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
           className="px-1 text-[11px] text-foreground underline-offset-2 hover:underline"
         >
           Ledger →
@@ -155,14 +154,14 @@ export function SourceExtractActions({
             <>
               {" "}
               <Link href={connectPath} className="underline-offset-2 hover:underline">
-                Connect in /control →
+                Key status in /admin/control →
               </Link>
             </>
           ) : null}
         </p>
       ) : null}
       {reviewRuns.map(run => (
-        <Link key={run.run_id} href={`/accuracy/runs/${encodeURIComponent(run.run_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}
+        <Link key={run.run_id} href={`/admin/accuracy/runs/${encodeURIComponent(run.run_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}
           className="text-[11px] text-foreground underline-offset-2 hover:underline">
           Review {run.call_kind === "need_extract" ? "needs" : "inventory"} omissions →
         </Link>

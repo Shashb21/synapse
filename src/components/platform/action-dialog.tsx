@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
+import { tacticDatesError } from "@/lib/iegp/tactic-dates";
 
 export type ActionField = {
   name: string;
@@ -25,6 +26,8 @@ export type ActionField = {
   placeholder?: string;
   hint?: string;
   required?: boolean;
+  /** Checks the typed value before anything is sent; returns the message to show, or null. */
+  validate?: (value: string) => string | null;
 };
 
 export type ActionIdentity = {
@@ -38,6 +41,16 @@ export type ActionIdentity = {
  * always collects the rationale when the action records an edit, and posts to the
  * module API.
  */
+/**
+ * Many rows share a button label ("Set dates"); a title that starts with it
+ * ("Set dates for an activity under …") tells them apart for a screen reader,
+ * and still contains the visible words.
+ */
+export function triggerName(label: string, title?: string): string | undefined {
+  if (!title || title === label) return undefined;
+  return title.toLowerCase().startsWith(label.toLowerCase()) ? title : undefined;
+}
+
 export function ActionDialog({
   endpoint,
   payload,
@@ -53,6 +66,7 @@ export function ActionDialog({
   size = "sm",
   className,
   trigger,
+  validateForm,
 }: {
   endpoint: string;
   payload: Record<string, unknown>;
@@ -68,8 +82,10 @@ export function ActionDialog({
   size?: "sm" | "default" | "icon-sm";
   className?: string;
   trigger?: React.ReactElement;
+  /** A check across fields (by name, as typed) once each field passes its own; message or null. */
+  validateForm?: (values: Record<string, string>) => string | null;
 }) {
-  const router = useRouter();
+  const { refreshing, refresh } = usePageRefresh();
   const formId = useId();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -82,7 +98,7 @@ export function ActionDialog({
     const rationale = String(data.get("rationale") ?? "").trim();
     setError(null);
     if (requireRationale && rationale.length < 3) {
-      setError("A short rationale is required. It is stored with the edit and feeds hillclimb.");
+      setError("A short rationale is required. It is stored with the edit.");
       return;
     }
     if (!identity.signed_in && !actorName.trim()) {
@@ -90,13 +106,28 @@ export function ActionDialog({
       return;
     }
     const extra: Record<string, unknown> = {};
+    const typed: Record<string, string> = {};
     for (const field of fields) {
       const value = data.get(field.name);
       if (value !== null) extra[field.name] = field.type === "number" ? Number(value) : String(value);
+      typed[field.name] = String(value ?? "");
       if (field.required && !String(value ?? "").trim()) {
         setError(`${field.label} is required.`);
         return;
       }
+      const invalid = field.validate?.(String(value ?? ""));
+      if (invalid) {
+        setError(invalid);
+        return;
+      }
+    }
+    // A tactic's dates, checked as the server will (KAN-68); a server page can't pass validateForm.
+    const invalid =
+      ("evidence_available" in typed ? tacticDatesError(typed.start_date, typed.evidence_available) : null) ??
+      validateForm?.(typed);
+    if (invalid) {
+      setError(invalid);
+      return;
     }
     setPending(true);
     const res = await fetch(endpoint, {
@@ -110,19 +141,32 @@ export function ActionDialog({
         actor_function: actorFunction,
       }),
     });
-    const json = (await res.json()) as { error?: string };
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Action failed");
       return;
     }
-    setOpen(false);
-    router.refresh();
+    setError(null);
+    // The dialog closes as the refreshed data arrives, so the page never shows the old value.
+    refresh(() => setOpen(false));
+  }
+
+  function onOpenChange(next: boolean) {
+    // Each opening starts clean: an error from an earlier attempt does not linger.
+    if (next) {
+      setError(null);
+      setPending(false);
+    }
+    setOpen(next);
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={trigger ?? <Button size={size} variant={variant} className={className} />}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger
+        render={trigger ?? <Button size={size} variant={variant} className={className} />}
+        aria-label={triggerName(label, title)}
+      >
         {label}
       </DialogTrigger>
       <DialogContent className="z-[60] sm:max-w-md">
@@ -140,16 +184,24 @@ export function ActionDialog({
           </DialogHeader>
           <div className="grid gap-3 py-3">
             {fields.map((field) => (
-              <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+              // A new default (the page refreshed after a save) remounts the control: Base UI
+              // refuses to change an uncontrolled field's default in place (KAN-68).
+              <label key={`${field.name}:${field.defaultValue ?? ""}`} className="grid gap-1 text-[12px] text-muted-foreground">
                 {field.label}
                 {field.type === "textarea" ? (
                   <Textarea name={field.name} rows={3} defaultValue={field.defaultValue} placeholder={field.placeholder} />
                 ) : field.type === "select" ? (
                   <select
                     name={field.name}
-                    defaultValue={field.defaultValue}
+                    defaultValue={field.defaultValue ?? (field.placeholder ? "" : undefined)}
                     className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
                   >
+                    {/* A placeholder means nothing is picked until the person picks it. */}
+                    {field.placeholder ? (
+                      <option value="" disabled>
+                        {field.placeholder}
+                      </option>
+                    ) : null}
                     {(field.options ?? []).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
@@ -172,7 +224,7 @@ export function ActionDialog({
                 {rationaleLabel ?? "Rationale (required)"}
                 <Textarea name="rationale" rows={3} placeholder="Why this decision, in one line" />
                 <span className="text-[11px] text-muted-foreground/80">
-                  Stored on the edit record and replayed as a hillclimb signal for this stage.
+                  Stored on the edit record.
                 </span>
               </label>
             ) : (
@@ -204,11 +256,15 @@ export function ActionDialog({
                 </label>
               </div>
             ) : null}
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Saving…" : (confirmLabel ?? "Save")}
+            <Button type="submit" size="sm" disabled={pending || refreshing}>
+              {pending || refreshing ? "Saving…" : (confirmLabel ?? "Save")}
             </Button>
           </DialogFooter>
         </form>

@@ -1,3 +1,5 @@
+import { refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import { ownerGate } from "@/modules/auth/owner";
 /** Authenticated experiment start and source-workspace-scoped record export API. */
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
@@ -20,6 +22,8 @@ function unauthorized() {
 export async function GET(request: Request) {
   const session = await sessionContext();
   if (!session.signed_in) return unauthorized();
+  const denied = await ownerGate();
+  if (denied) return denied;
   const url = new URL(request.url);
   const source_workspace_id = url.searchParams.get("source_workspace_id")?.trim() ?? "";
   const format = url.searchParams.get("format") ?? "json";
@@ -40,10 +44,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await sessionContext();
   if (!session.signed_in) return unauthorized();
+  const denied = await ownerGate();
+  if (denied) return denied;
   if (!can(session.role, "validate")) {
     return NextResponse.json({ error: "You do not have validation capability" }, { status: 403 });
   }
   try {
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     const body = await parseExperimentRequest(request);
     if (!await authorizedSourceWorkspace(body.source_workspace_id, session)) {
       return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });

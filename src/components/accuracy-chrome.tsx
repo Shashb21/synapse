@@ -54,21 +54,21 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { id: "workspaces", href: "/accuracy", label: "Workspaces", icon: Building2 },
-  { id: "sources", href: "/accuracy/sources", label: "Sources", icon: FileStack },
-  { id: "review", href: "/accuracy/review", label: "Review", icon: Flag },
-  { id: "ledger", href: "/accuracy/ledger", label: "Ledger", icon: BookMarked },
-  { id: "coverage", href: "/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
-  { id: "workshop", href: "/accuracy/workshop", label: "Workshop", icon: Presentation },
-  { id: "plan", href: "/accuracy/plan", label: "Plan", icon: Target },
-  { id: "timeline", href: "/accuracy/timeline", label: "Timeline", icon: ChartGantt },
-  { id: "audit", href: "/accuracy/audit", label: "Audit", icon: ScrollText },
-  { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
-  { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
+  { id: "workspaces", href: "/admin/accuracy", label: "Workspaces", icon: Building2 },
+  { id: "sources", href: "/admin/accuracy/sources", label: "Sources", icon: FileStack },
+  { id: "review", href: "/admin/accuracy/review", label: "Review", icon: Flag },
+  { id: "ledger", href: "/admin/accuracy/ledger", label: "Ledger", icon: BookMarked },
+  { id: "coverage", href: "/admin/accuracy/coverage", label: "Coverage", icon: GitCompareArrows },
+  { id: "workshop", href: "/admin/accuracy/workshop", label: "Workshop", icon: Presentation },
+  { id: "plan", href: "/admin/accuracy/plan", label: "Plan", icon: Target },
+  { id: "timeline", href: "/admin/accuracy/timeline", label: "Timeline", icon: ChartGantt },
+  { id: "audit", href: "/admin/accuracy/audit", label: "Audit", icon: ScrollText },
+  { id: "control", href: "/admin/accuracy/routing", label: "Routing", icon: SlidersHorizontal },
+  { id: "runs", href: "/admin/accuracy/runs", label: "Runs", icon: Activity },
 ];
 
 function withWorkspace(href: string, workspaceId: string | null): string {
-  if (!workspaceId || href === "/accuracy") return href;
+  if (!workspaceId || href === "/admin/accuracy") return href;
   const sep = href.includes("?") ? "&" : "?";
   return `${href}${sep}workspace_id=${encodeURIComponent(workspaceId)}`;
 }
@@ -119,24 +119,23 @@ function AccuracyChromeInner({
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
   const current = NAV.find((item) => item.id === active)?.label ?? "Accuracy";
-  const [fetchedLabel, setFetchedLabel] = useState<PlanLabel | null>(null);
+  // The fetched label remembers which workspace it belongs to, so a stale one is never shown.
+  const [fetched, setFetched] = useState<{ workspace_id: string; label: PlanLabel | null } | null>(null);
+  const fetchedLabel = fetched && fetched.workspace_id === workspaceId ? fetched.label : null;
   const planLabel = planLabelProp ?? fetchedLabel;
   const planStatus = chromePlanLabelStatus(planLabel);
 
   useEffect(() => {
-    if (planLabelProp || !workspaceId) {
-      setFetchedLabel(null);
-      return;
-    }
+    if (planLabelProp || !workspaceId) return;
     let cancelled = false;
     fetch(`/api/accuracy/workspaces?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { workspace?: { plan_label?: unknown } } | null) => {
         if (cancelled) return;
-        setFetchedLabel(normalizePlanLabel(body?.workspace?.plan_label));
+        setFetched({ workspace_id: workspaceId, label: normalizePlanLabel(body?.workspace?.plan_label) });
       })
       .catch(() => {
-        if (!cancelled) setFetchedLabel(null);
+        if (!cancelled) setFetched({ workspace_id: workspaceId, label: null });
       });
     return () => {
       cancelled = true;
@@ -147,10 +146,10 @@ function AccuracyChromeInner({
     <div className="flex min-h-full bg-background">
       <aside className="sticky top-0 z-20 flex h-dvh w-12 shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 md:w-60 md:px-2">
         <Link
-          href="/accuracy"
-          className="mb-1 hidden px-2 text-[13px] font-medium text-sidebar-foreground no-underline md:block"
+          href="/admin/accuracy"
+          className="mb-1 hidden px-2 text-[12px] font-semibold text-sidebar-foreground no-underline md:block"
         >
-          Synapse · Accuracy
+          Accuracy lab
         </Link>
         {planStatus ? (
           <p
@@ -166,7 +165,7 @@ function AccuracyChromeInner({
           {chromeStackCaption(planLabel)}
         </p>
         <Link
-          href="/accuracy"
+          href="/admin/accuracy"
           className="mb-3 flex items-center justify-center text-[11px] font-medium text-sidebar-foreground no-underline md:hidden"
           aria-label="Accuracy"
         >
@@ -184,11 +183,11 @@ function AccuracyChromeInner({
           ))}
           <div className="mt-auto border-t border-sidebar-border pt-3">
             <Link
-              href="/control"
+              href="/admin/control"
               className="flex h-8 items-center gap-2 rounded-md px-2 text-[12px] text-sidebar-foreground/70 no-underline hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
             >
-              <span className="hidden md:inline">Legacy control panel</span>
-              <span className="md:hidden">Legacy</span>
+              <span className="hidden md:inline">Admin control panel</span>
+              <span className="md:hidden">Admin</span>
             </Link>
           </div>
         </nav>
@@ -203,7 +202,7 @@ function AccuracyChromeInner({
             </SheetTrigger>
             <SheetContent side="left" className="w-64 bg-sidebar p-3">
               <SheetHeader className="px-1 pb-2">
-                <SheetTitle className="text-[13px]">Synapse · Accuracy</SheetTitle>
+                <SheetTitle className="text-[13px]">Accuracy lab</SheetTitle>
               </SheetHeader>
               <div className="grid gap-0.5" onClick={() => setOpen(false)}>
                 {NAV.map((item) => (
@@ -218,7 +217,7 @@ function AccuracyChromeInner({
               </div>
             </SheetContent>
           </Sheet>
-          <p className="text-[13px] font-medium text-foreground">{current}</p>
+          <p className="text-[12px] font-semibold text-foreground">{current}</p>
           {planStatus ? (
             <span
               className="ml-auto text-[11px] text-muted-foreground"

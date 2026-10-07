@@ -1,72 +1,54 @@
 # Architecture
 
-## Why not nested JSON, and why not “just embed everything”
+This describes the product as it runs today: the customer IEGP app, the owner console at `/admin`, and the modules behind them. Requirements are [01-requirements.md](./01-requirements.md) (v2.1). Module contracts in detail: [../modules.md](../modules.md). Flows: [09-flow-high-level.md](./09-flow-high-level.md), [10-flow-technical.md](./10-flow-technical.md).
 
-The analyst’s object is an **atomic insight**, not a document tree. Clustering, eval matching, and the briefing all iterate insights. A **flat Canonical Insight Record (CIR)** plus two join collections is the store:
-
-```
-documents[]          1 —n  insights[]          1 —n  theme_links[]  n— 1  themes[]
-                         1 —n  knowledge_state.corroborated_by (peer insights)
-```
-
-- **CIR JSON** (one object per insight) is the system of record. Export as JSON array or JSONL for evals.
-- **theme_links** is the 1-to-many (insight → themes) join. Themes never copy `statement`.
-- Nested “document → slides → bullets → insights” JSON looks tidy and is hostile to clustering, gold matching, and multi-theme membership.
-
-LlamaCloud Parse v2 (agentic + specialized chart parsing) is the primary ingest path for PPTX/PDF graphics. Local OOXML is the fallback. Both emit the same `ParsedDocument` / `ParsedBlock` shape, including `chart` blocks (REQ-ING-004). Live extraction uses Claude Sonnet (`v1.4-claude`) when `ANTHROPIC_API_KEY` is set; the eval ladder stays on local v1.0–v1.3 so hill-climb scores remain deterministic.
-
-## Why not vanilla semantic clustering
-
-Embedding + k-means / HDBSCAN is a poor primary theming strategy for this workflow:
-
-1. **Themes are decision objects**, not latent blobs. “IRA net price” and “Horizon outcomes contract” are semantically far and both belong under Access / Policy.
-2. **One claim, two decisions** is the common case. “Aetna delayed formulary pending 6-month discontinuation RWE” is Access **and** Evidence. Unsupervised clustering forces a single assignment or duplicates the row.
-3. **Cluster IDs drift** every ingest. A brand VP cannot brief against Theme-7-this-week.
-4. Embeddings **are** the right tool for a different job: **near-duplicate detection** across decks (REQ-CLU-006), which we keep on `knowledge_state.corroborated_by`.
-
-## What we use instead: catalog + scored multi-label links
-
-```
-                    ┌─────────────┐
-   Parsed blocks ─▶│  Proposer    │─▶ CIR (once)
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ Ontology     │  keywords + patterns + stakeholder prior
-                    │ scorer       │
-                    └──────┬──────┘
-                           │ scores ≥ threshold
-                    ┌──────▼──────┐
-                    │ theme_links  │  primary + 0..n secondary
-                    └──────┬──────┘
-                           │
-              weak max ─▶ THEME-RESIDUAL (propose new catalog entry)
-```
-
-Optional embeddings (when an API key exists in a later slice) are a **score booster against catalog centroids**, never the clusterer. Residuals may be grouped to *propose* a new named theme ([07-catalog-evolution.md](./07-catalog-evolution.md)); they are not auto-merged into an unstable blob.
-
-The catalog is the ontology. The **knowledge graph** ([08-knowledge-graph.md](./08-knowledge-graph.md)) is associative memory: blends (one CIR, many themes), corroboration, entity bridges, and gap-closures. That is the Zettelkasten / Obsidian layer — not a neural net of opaque weights.
+The v1 architecture (flat insight records, a theme catalog, a keyword/ontology scorer and a local hill-climb ladder) is retired. Its code (`src/lib/pipeline.ts`, `src/lib/store.ts`, LlamaParse ingest) was removed in KAN-21.
 
 ## Runtime
 
-- Next.js App Router, Node runtime for ingest (zip/xml, mammoth, xlsx).
-- File store `data/runtime/engine-state.json` locally; in-memory fallback on read-only hosts (Vercel).
-- Seed corpus: seven Velmara readouts (commercial, access, medical, clin ops, marketing, HEOR, regulatory) plus gold CIRs ([12-gold-set.md](./12-gold-set.md)). Off-catalog claims (e.g. REMS) residual and may **emerge**; a named theme that is briefing two decisions may **split**. Humans accept on `/catalog` ([07-catalog-evolution.md](./07-catalog-evolution.md)).
-- Eval protocol (pairing, composite, safety gate, prompt vs local ladder): [06-eval-protocol.md](./06-eval-protocol.md).
+- Next.js 16 App Router on the Node runtime (file text extraction uses zip/xml, mammoth and xlsx), deployed on Vercel.
+- Postgres is the only store (`DATABASE_URL`). There is no file store.
+- `src/proxy.ts` is the first gate: customer pages and APIs need a session cookie and a signed, unexpired workspace cookie; `/login` and `/api/auth` are public; `/admin`, `/api/admin`, `/api/accuracy` and `/api/control` gate themselves by owner role. Sessions, membership and roles are then verified server-side on every request (`src/modules/auth/api-guard.ts`).
 
-## Three-model eval loop
+## Code layout
 
-```
-prompt versions ─▶ proposer extract ─▶ critique (partial/wrong/missed/new)
-                                      ─▶ judge (composite + safety gate)
-                                      ─▶ improver patch / next version
-                                      ─▶ promote champion (REQ-EVA-009/010)
-```
+| Area | Path | What it owns |
+| --- | --- | --- |
+| Customer pages | `src/app/*` (not `admin`) | Plan context → Upload → Evidence Inventory (Gaps) → Prioritization Matrix → Tactic Ideation → Gantt Timeline, plus Ideation, Mappings, Needs, Residuals, Roadmap, Setup, Sources, Workspaces, Login, Account. Room, Breakouts and Presentation stay in the code but are switched off (`ROOM_ENABLED`, `BREAKOUTS_ENABLED` are `false`) and redirect to the plan |
+| Owner console | `src/app/admin/*` | AI master and section switches, provider key status and routing, AI harness, customers and seats, staff users, accuracy lab, pipeline, runs, evals, catalog, module versions, specs |
+| IEGP domain | `src/lib/iegp/` | Gaps, needs, tactics, coverages, residuals, priorities, audit; engine status rules; blank and demo contents |
+| Kernel | `src/modules/kernel/` | Stage contracts, registry, `runStage`, routing, observability, edit records, evals, the AI switches |
+| Stages | `src/modules/stages/s0…s10/` | One module per stage, S0 upload to S10 timeline |
+| Identity | `src/modules/auth/` | SSO providers, verified identity, sessions, staff password accounts, customers and seats, roles, owner gate |
+| Workspaces | `src/modules/workspaces/` | Workspaces, members, per-workspace schema scope, blank/demo contents |
+| LLM access | `src/modules/llm/` | Provider catalog (xAI, Anthropic, OpenAI, Gemini, OpenRouter), server-side API keys from the environment (`api-keys.ts`) |
+| Parsing | `src/lib/ingest/` | Mechanical text extraction (`local-parse.ts`) and LLM block structuring (`llm-structure.ts`), manual blocks |
+| Accuracy lab | `src/accuracy/` | The owner-only accuracy tool, separate tables and routes |
 
-Local strategies (`bullet-only` → `claim-split` → `gap-scan` → `full`) implement the same version ladder the LLM prompts describe, so the hill-climb is real without credentials.
+## Data
 
-## Origin / Cloud Agent / Grokbot
+- **One schema per workspace.** Every workspace's IEGP rows and module tables live in their own Postgres schema; queries are scoped with a per-query `search_path` resolved from the signed workspace cookie or a `runInWorkspace` scope. Nothing reads across workspaces.
+- **Shared tables** in the public schema: workspaces and members (with a `demo` flag; the old `ai_enabled` column remains but no longer counts since KAN-53), staff accounts, customers and seat assignments, and platform settings (the AI master switch and the per-section switches).
+- **Blank or demo.** A new workspace is created blank. Choosing demo data at creation, or the owner's "Load demo data", replaces the workspace's contents with the Velmara example; "Reset to blank" empties it. Both act on one workspace only (`src/modules/workspaces/contents.ts`).
 
-See [05-process.md](./05-process.md). CI is the regression spine; Cloud Agent runs evals; Grokbot reviews REQ coverage on the PR.
+## Identity
 
-Application flow diagrams: [09-flow-high-level.md](./09-flow-high-level.md) (process), [10-flow-technical.md](./10-flow-technical.md) (modules and APIs).
+- Customers sign in only with SSO (Google, Microsoft Entra ID, GitHub). The callback creates a session only for a verified email that holds a seat on an active customer (`src/modules/auth/customers.ts`). There is no self sign-up.
+- Staff sign in with email and password. The first admin comes from `npm run create-admin`; others are managed at `/admin/users`. Passwords are scrypt hashes with lockout after five failures.
+- The owner is `OWNER_EMAILS`, an enabled admin account, or the operator role; only they reach `/admin`.
+- Roles govern what a person may do to the plan: Medical Affairs, contributing function, platform operator, viewer (`src/modules/auth/roles.ts`). Separately, a workspace member is its owner or a member; only the owner renames it, manages members, or loads demo / resets it. Every mutating API checks these server-side, and the actor on every edit is the signed-in person.
+
+## AI
+
+- **Whether AI runs** is decided by the Synapse admin for every customer (KAN-53), in `/admin/control`: the platform master switch and one switch per AI section (ingestion, gap extraction, tactic extraction, mapping, partial split, prioritization, ideation; `src/modules/kernel/ai-sections.ts`), all stored in `platform_settings`. A section runs only when the master switch and its own switch are on; every section starts off. Customers have no AI switch. With a section off its entry points throw `AiDisabledError` and the UI shows only the manual paths.
+- **Which model** is per-stage routing (`src/modules/kernel/routing.ts`): xAI Grok by default, with Anthropic Claude as the one-click alternate and OpenAI, Google Gemini and OpenRouter also available, each reached with its server-side API key from the environment (there is no provider login). With no provider key a stage fails with `no_llm`; nothing falls back to rules.
+- **Parsing** (S1) is an LLM stage like the others: text is extracted mechanically, then the routed model decides blocks, kinds and headings for every file type. There is no separate parser service.
+- **Agentic stages** (S2, S3, S4, S6, S8, S9) run a proposer, three critic exchanges and a judge (`src/modules/kernel/agentic.ts`). Human edits are recorded with a rationale and are never overwritten by a later run.
+
+## Timeline
+
+S10 lays activities out per prioritized gap. The timeline can be built entirely by hand: activities are created, dated, dragged and sequenced with no stage run and no model. With AI on, an S10 rebuild has the model infer dependencies and estimate any start, duration or readout lag nobody supplied; it keeps every hand edit. The chart exports as a PNG image. Medical Affairs saves a version as final. There is no PowerPoint export.
+
+## Process
+
+Engineering process (Jira, QA definition of done, CI, both remotes): [05-process.md](./05-process.md).

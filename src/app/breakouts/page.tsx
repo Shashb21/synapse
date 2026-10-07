@@ -1,92 +1,70 @@
-import Link from "next/link";
+import { BREAKOUTS_ENABLED } from "@/lib/breakouts-enabled";
+import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { LockForm } from "@/components/lock-form";
-import { loadState } from "@/lib/iegp/store";
+import {
+  BreakoutsOverview,
+  type BreakoutGapRow,
+  type BreakoutGroupRow,
+  type ThemePreview,
+} from "@/components/breakouts/breakouts-overview";
+import { BREAKOUT_THEMES, BREAKOUT_THEME_LABELS, themeBuckets } from "@/lib/iegp/breakout-themes";
 import { isLiveGap } from "@/lib/iegp/engine";
+import { DOMAIN_LABELS } from "@/lib/iegp/enums";
+import { loadState } from "@/lib/iegp/store";
+import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
 export const dynamic = "force-dynamic";
 
+const PRIORITY_LABELS: Record<string, string> = {
+  high: "High priority",
+  medium: "Medium priority",
+  low: "Low priority",
+  defer: "Deferred",
+};
+
 export default async function BreakoutsPage() {
-  const state = await loadState();
-  const liveGapCount = state.gaps.filter(isLiveGap).length;
+  if (!BREAKOUTS_ENABLED) redirect("/");
+  const [state, placements] = await Promise.all([loadState(), listPlacements().catch(() => [])]);
+  const bands = new Map(placements.filter((row) => row.validated && row.band).map((row) => [row.gap_id, row.band!]));
+  const groupsOf = (gapId: string) =>
+    state.breakout_group_gaps.filter((row) => row.gap_id === gapId).map((row) => row.group_id);
+
+  const gaps: BreakoutGapRow[] = state.gaps.filter(isLiveGap).map((gap) => ({
+    id: gap.id,
+    name: gap.name,
+    domain: DOMAIN_LABELS[gap.domain],
+    settings: gap.settings,
+    priority: PRIORITY_LABELS[bands.get(gap.id) ?? ""] ?? "Not prioritized",
+    group_ids: groupsOf(gap.id),
+  }));
+  const live = new Set(gaps.map((gap) => gap.id));
+  const groups: BreakoutGroupRow[] = state.breakout_groups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    note: group.note,
+    gap_ids: state.breakout_group_gaps.filter((row) => row.group_id === group.id && live.has(row.gap_id)).map((row) => row.gap_id),
+  }));
+  const grouped = new Set(gaps.filter((gap) => gap.group_ids.length > 0).map((gap) => gap.id));
+  const themes: ThemePreview[] = await Promise.all(
+    BREAKOUT_THEMES.map(async (theme) => ({
+      theme,
+      label: BREAKOUT_THEME_LABELS[theme],
+      buckets: (await themeBuckets(theme, state)).map((bucket) => ({
+        label: bucket.label,
+        count: bucket.gap_ids.length,
+        unassigned: bucket.gap_ids.filter((id) => !grouped.has(id)).length,
+      })),
+    })),
+  );
 
   return (
     <AppShell active="breakouts">
       <PageIntro kicker="Workshop day" title="Breakout groups">
-        Group gaps by theme, then open each group&apos;s room in its own browser window — one per
-        screen. A different consultant can open the same room on their own device and sign in there
-        to facilitate it.
+        Split the gaps into groups for the workshop: create a group by hand, or group the gaps by domain, treatment
+        setting or priority in one step. Open a group to work its gaps; open it in a new window so another consultant
+        can facilitate it on their own screen.
       </PageIntro>
-
-      <div className="mb-8 border border-border bg-card p-4">
-        <h2 className="mb-3 text-[13px] font-medium text-foreground">New breakout group</h2>
-        <LockForm label="Create group" action="create_breakout_group" confirmLabel="Create group">
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
-            Name
-            <input
-              name="name"
-              required
-              placeholder="e.g. Comparative effectiveness"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            />
-          </label>
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
-            Note (optional)
-            <input
-              name="note"
-              placeholder="What this breakout covers"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            />
-          </label>
-        </LockForm>
-      </div>
-
-      {state.breakout_groups.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          No breakout groups yet. {liveGapCount} live gap{liveGapCount === 1 ? "" : "s"} available
-          to assign once you create one.
-        </p>
-      ) : (
-        <div className="grid gap-3">
-          {state.breakout_groups.map((group) => {
-            const gapCount = state.breakout_group_gaps.filter(
-              (row) => row.group_id === group.id,
-            ).length;
-            return (
-              <article key={group.id} className="border border-border bg-card p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-[13px] font-medium text-foreground">{group.name}</p>
-                    {group.note ? (
-                      <p className="mt-0.5 text-[12px] text-muted-foreground">{group.note}</p>
-                    ) : null}
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {gapCount} gap{gapCount === 1 ? "" : "s"} assigned
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/breakouts/${group.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-[13px] text-foreground no-underline"
-                    >
-                      Open room ↗
-                    </Link>
-                    <LockForm
-                      label="Delete"
-                      action="delete_breakout_group"
-                      extra={{ group_id: group.id }}
-                      confirmLabel="Delete group"
-                      description={`This ungroups ${gapCount} gap${gapCount === 1 ? "" : "s"} from "${group.name}". Gaps themselves are unaffected.`}
-                    />
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
+      <BreakoutsOverview groups={groups} gaps={gaps} themes={themes} />
     </AppShell>
   );
 }

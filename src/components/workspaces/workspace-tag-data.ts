@@ -1,0 +1,41 @@
+import { ownerAccess } from "@/modules/auth/owner";
+import { platformAiEnabled } from "@/modules/kernel/ai-switch";
+import { currentSession } from "@/modules/auth/session";
+import { currentWorkspace, principalOf } from "@/modules/workspaces/session";
+import { listWorkspacesFor } from "@/modules/workspaces/store";
+import type { WorkspaceTagModel } from "./model";
+
+export type WorkspaceTagState =
+  | { state: "ready"; tag: WorkspaceTagModel }
+  /** No valid session (expired or signed out): send them to /login. */
+  | { state: "signed_out" }
+  /** Signed in, but no workspace is selected or the selection no longer verifies. */
+  | { state: "no_workspace" }
+  /** The store could not be read (e.g. Postgres not configured yet): render without a tag. */
+  | { state: "unavailable" };
+
+/** Server-side: the data behind the workspace tag, and whether this request may use the customer app. */
+export async function loadWorkspaceTag(): Promise<WorkspaceTagState> {
+  try {
+    const session = await currentSession();
+    if (!session) return { state: "signed_out" };
+    const current = await currentWorkspace();
+    if (!current) return { state: "no_workspace" };
+    const [workspaces, access, platform] = await Promise.all([
+      listWorkspacesFor(principalOf(session)),
+      ownerAccess().catch(() => ({ owner: false })),
+      platformAiEnabled().catch(() => true),
+    ]);
+    return {
+      state: "ready",
+      tag: {
+        current: { id: current.id, name: current.name, role: current.role, demo: current.demo },
+        ai: { workspace: current.ai_enabled, platform },
+        workspaces: workspaces.map(({ id, name, role, demo }) => ({ id, name, role, demo })),
+        person: { name: session.actor.name, email: session.email, owner: access.owner },
+      },
+    };
+  } catch {
+    return { state: "unavailable" };
+  }
+}

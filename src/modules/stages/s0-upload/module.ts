@@ -9,6 +9,7 @@ import { ACTOR_FUNCTIONS, SOURCE_TYPES } from "@/lib/iegp/enums";
 import { DEMO_PACK, demoSourceById } from "@/lib/iegp/demo-pack";
 import { mimeForFilename } from "@/lib/ingest/local-parse";
 import { SOURCE_FILES_DDL, sourceFiles } from "./schema";
+import { plural } from "@/lib/plural";
 
 const fileInput = z.object({
   filename: z.string().min(1),
@@ -98,6 +99,8 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
     summary: "Records uploaded files with checksum and mime. No parsing, no extraction.",
     contract: 1,
     agentic: false,
+    // Uploads only feed the AI parser; with AI off, gaps and tactics are added by hand.
+    needs_ai: true,
     capabilities: ["text", "docx", "pptx", "xlsx", "demo-pack"],
   },
   inputSchema,
@@ -177,7 +180,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
 
     return {
       output: { files: accepted, skipped },
-      summary: `${accepted.length} file(s) uploaded, ${skipped.length} skipped`,
+      summary: `${plural(accepted.length, "file")} uploaded, ${skipped.length} skipped`,
       evals: [
         { name: "files_accepted", value: accepted.length, unit: "count" },
         {

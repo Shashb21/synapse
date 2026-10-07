@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, type RefObject } from "react";
+import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
+import { useMemo, useSyncExternalStore, type RefObject } from "react";
+import { useIsDark } from "@/components/theme-toggle";
 import type { TimelineActivity, TimelineBand, TimelineModel } from "@/modules/stages/s10-timeline/build";
-import { TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 
 const LABEL_W = 184;
 const HEADER_H = 46;
@@ -13,33 +14,45 @@ const PAD_R = 28;
 const PAD_B = 10;
 const LEGEND_H = 30;
 
-const BANDS: TimelineBand[] = ["high", "medium", "low", "addressed"];
+const BANDS: TimelineBand[] = ["high", "medium", "low", "unprioritized", "addressed"];
+
+const LEGEND_LABELS: Record<TimelineBand, string> = {
+  high: "High priority",
+  medium: "Medium priority",
+  low: "Low priority",
+  unprioritized: "Not yet prioritized",
+  addressed: "Addressed",
+};
 
 /**
  * Colours are read from the app's CSS tokens at mount so the chart matches the
  * rest of the UI, but they are written onto the SVG as literal attributes: the
  * PNG export serialises this node on its own, with no stylesheet attached.
  */
-const FALLBACK = {
-  high: "#fb7185",
-  medium: "#fbbf24",
-  low: "#38bdf8",
-  addressed: "#4ade80",
-  readout: "#60a5fa",
-  today: "#c084fc",
-  grid: "#2e2e2e",
-  card: "#1e1e1e",
-  background: "#181818",
-  foreground: "#e4e4e4",
-  muted: "#8c8c8c",
+export const FALLBACK = {
+  high: "#e11d48",
+  medium: "#d97706",
+  low: "#2563eb",
+  unprioritized: "#6b7280",
+  addressed: "#059669",
+  readout: "#2563eb",
+  today: "#7e22ce",
+  grid: "#e5e7eb",
+  card: "#ffffff",
+  background: "#f4f5f7",
+  foreground: "#111827",
+  muted: "#6b7280",
+  conflict: "#e11d48",
+  primary: "#4f46e5",
 };
 
-type Palette = typeof FALLBACK;
+export type Palette = typeof FALLBACK;
 
-const TOKENS: Record<keyof Palette, string> = {
+export const PALETTE_TOKENS: Record<keyof Palette, string> = {
   high: "--chart-5",
   medium: "--chart-4",
-  low: "--chart-3",
+  low: "--opportunity", // as on the prioritize matrix
+  unprioritized: "--muted-foreground",
   addressed: "--known",
   readout: "--opportunity",
   today: "--chart-2",
@@ -48,54 +61,71 @@ const TOKENS: Record<keyof Palette, string> = {
   background: "--background",
   foreground: "--foreground",
   muted: "--muted-foreground",
+  conflict: "--destructive",
+  primary: "--primary",
 };
 
 /**
  * Read once at render. The fallbacks mirror the token values in `globals.css`, so
  * the server and client agree; a retheme only changes what the browser paints.
  */
-function readPalette(): Palette {
+export function readPalette(): Palette {
   if (typeof document === "undefined") return FALLBACK;
   const computed = getComputedStyle(document.documentElement);
   const next = { ...FALLBACK };
-  for (const key of Object.keys(TOKENS) as (keyof Palette)[]) {
-    const value = computed.getPropertyValue(TOKENS[key]).trim();
+  for (const key of Object.keys(PALETTE_TOKENS) as (keyof Palette)[]) {
+    const value = computed.getPropertyValue(PALETTE_TOKENS[key]).trim();
     if (value) next[key] = value;
   }
   return next;
 }
 
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const noSubscription = () => () => {};
 
-function parts(iso: string) {
+/**
+ * The palette, re-read whenever the light/dark theme on <html> changes. The first
+ * client render uses FALLBACK, exactly as the server did, so hydration matches
+ * (KAN-68); the stylesheet's tokens are read on the render after it.
+ */
+export function usePalette(): Palette {
+  const dark = useIsDark();
+  const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
+  // `dark` is the trigger: the tokens behind the palette change with the theme.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => (hydrated ? readPalette() : FALLBACK), [dark, hydrated]);
+}
+
+export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function parts(iso: string) {
   const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
   return { year: year ?? 2026, month: month ?? 1, day: day ?? 1 };
 }
 
-function daysInMonth(year: number, month: number) {
+export function daysInMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 /** Position of a date in months (fractional) from the first day of the window month. */
-function monthPos(originIso: string, iso: string) {
+export function monthPos(originIso: string, iso: string) {
   const origin = parts(originIso);
   const target = parts(iso);
   const whole = (target.year - origin.year) * 12 + (target.month - origin.month);
   return whole + (target.day - 1) / daysInMonth(target.year, target.month);
 }
 
-function monthAt(originIso: string, index: number) {
+export function monthAt(originIso: string, index: number) {
   const origin = parts(originIso);
   const zero = origin.month - 1 + index;
   return { year: origin.year + Math.floor(zero / 12), month: (((zero % 12) + 12) % 12) + 1 };
 }
 
-function truncate(value: string, max: number) {
+export function truncate(value: string, max: number) {
   if (value.length <= max) return value;
   return `${value.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
 }
 
-function monthWidthFor(months: number) {
+export function monthWidthFor(months: number) {
   if (months <= 8) return 94;
   if (months <= 14) return 72;
   if (months <= 24) return 52;
@@ -156,7 +186,7 @@ export function GanttChart({
   onSelect: (activity: TimelineActivity) => void;
   svgRef: RefObject<SVGSVGElement | null>;
 }) {
-  const palette = useMemo(() => readPalette(), []);
+  const palette = usePalette();
   const origin = model.window.start;
   const months = Math.max(1, model.window.months);
   const monthWidth = monthWidthFor(months);
@@ -299,7 +329,7 @@ export function GanttChart({
         const barWidth = Math.max(6, geo.x2 - geo.x1);
         const readoutX = activity.readout_date ? x(activity.readout_date) : null;
         const insideChars = Math.floor((barWidth - 12) / 5.6);
-        const barLabel = insideChars >= 6 ? truncate(TACTIC_TYPE_LABELS[activity.tactic_type], insideChars) : "";
+        const barLabel = insideChars >= 6 ? truncate(tacticTypeLabel({ type: activity.tactic_type, custom_type: activity.tactic_custom_type }), insideChars) : "";
         return (
           <g
             key={activity.id}
@@ -421,23 +451,23 @@ export function GanttChart({
           <g key={`legend-${band}`} transform={`translate(${12 + index * 116}, ${legendY})`}>
             <rect x={0} y={-7} width={14} height={9} rx={2} fill={bandColour(band)} fillOpacity={0.28} stroke={bandColour(band)} />
             <text x={20} y={1} fill={palette.muted} fontSize={9.5}>
-              {band === "addressed" ? "Addressed" : `${band[0]!.toUpperCase()}${band.slice(1)} priority`}
+              {LEGEND_LABELS[band]}
             </text>
           </g>
         ))}
-        <g transform={`translate(${12 + 4 * 116}, ${legendY})`}>
+        <g transform={`translate(${12 + BANDS.length * 116}, ${legendY})`}>
           <polygon points="5,-8 10,-3 5,2 0,-3" fill={palette.readout} />
           <text x={16} y={1} fill={palette.muted} fontSize={9.5}>
             Readout
           </text>
         </g>
-        <g transform={`translate(${12 + 4 * 116 + 80}, ${legendY})`}>
+        <g transform={`translate(${12 + BANDS.length * 116 + 80}, ${legendY})`}>
           <path d="M 0 -3 H 16" stroke={palette.muted} strokeWidth={1} strokeDasharray="4 3" markerEnd="url(#synapse-dep-arrow)" />
           <text x={26} y={1} fill={palette.muted} fontSize={9.5}>
             Depends on
           </text>
         </g>
-        <text x={12 + 4 * 116 + 190} y={legendY + 1} fill={palette.muted} fontSize={9.5}>
+        <text x={12 + BANDS.length * 116 + 190} y={legendY + 1} fill={palette.muted} fontSize={9.5}>
           Dashed bar outline = proposed tactic
         </text>
       </g>

@@ -2,8 +2,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { JsonCompletion } from "@/accuracy/kernel/contracts";
-import { AUDITABLE_BLOCK_KINDS, type AuditBlockLite } from "./engine";
-import { completenessSkipReason } from "./skip-rules";
+import type { AuditBlockLite } from "./engine";
 
 /** A current snapshot gap or tactic and its source provenance. */
 export type SnapshotItem = {
@@ -87,7 +86,9 @@ export async function inspectSnapshotCompleteness(args: {
   prior_open_issues: SuspectedOmission[];
   complete: JsonCompletion;
 }): Promise<SnapshotCompletenessAssessment> {
-  const scope = args.blocks.filter((block) => AUDITABLE_BLOCK_KINDS.has(block.kind) && !completenessSkipReason(block));
+  // As in the current audit owner, only empty text is excluded mechanically.
+  // Titles and short fragments can still contain evidence; the model judges them.
+  const scope = args.blocks.filter((block) => block.text.trim().length > 0);
   const allIds = scope.map((block) => block.id);
   const priorUnresolved = args.prior_open_issues.map((issue) => unresolved(issue.issue_id));
   const failed = (): SnapshotCompletenessAssessment => ({

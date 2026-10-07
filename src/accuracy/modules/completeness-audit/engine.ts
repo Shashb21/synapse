@@ -1,23 +1,12 @@
 import { z } from "zod";
-import {
-  collapseAuditText,
-  completenessSkipReason,
-  emptySkipCounts,
-  HEADING_BLOCK_KINDS,
-  type CompletenessSkipReason,
-} from "./skip-rules";
 
-export {
-  completenessSkipReason,
-  collapseAuditText,
-  isHeadingOnlyNoise,
-  isChapterLabelNoise,
-  isSiLabelNoise,
-} from "./skip-rules";
-export type { CompletenessSkipReason, SkipRuleBlock } from "./skip-rules";
-
-/** Text + table kinds only — skip headings, slide masters, icons, empty captions (reference UX). */
-export const AUDITABLE_BLOCK_KINDS = new Set(["prose", "table_row", "list_item"]);
+/**
+ * Completeness audit bookkeeping: index (parse blocks) vs ledger (claims).
+ *
+ * Only facts are settled here — a block the ledger cites by provenance is
+ * covered, a resolved or empty block has nothing to judge. Whether any other
+ * block is a missed gap or tactic is the completeness critic's call (critic.ts).
+ */
 
 export const missFlagSuggestedSchema = z.enum(["gap", "tactic"]);
 export type MissFlagSuggested = z.infer<typeof missFlagSuggestedSchema>;
@@ -26,6 +15,7 @@ export const missFlagSchema = z.object({
   block_id: z.string(),
   source_file_id: z.string(),
   suggested: missFlagSuggestedSchema,
+  /** The critic's rationale (or the test-stub label). */
   reason: z.string(),
   excerpt: z.string(),
   kind: z.string(),
@@ -33,6 +23,20 @@ export const missFlagSchema = z.object({
 });
 
 export type MissFlag = z.infer<typeof missFlagSchema>;
+
+/** One critic verdict. A miss must say whether it is a gap or a tactic. */
+export const completenessVerdictSchema = z
+  .object({
+    block_id: z.string().min(1),
+    missed: z.boolean(),
+    claim_type: missFlagSuggestedSchema.nullable(),
+    rationale: z.string().trim().min(1),
+  })
+  .refine((verdict) => !verdict.missed || verdict.claim_type !== null, {
+    message: "a missed block needs claim_type gap or tactic",
+  });
+
+export type CompletenessVerdict = z.infer<typeof completenessVerdictSchema>;
 
 export type AuditBlockLite = {
   id: string;
@@ -47,56 +51,23 @@ export type AuditClaimLite = {
   id: string;
   claim_type: "gap" | "tactic" | string;
   statement: string;
+  source_file_id?: string | null;
   provenance?: Array<{ block_id?: string | null }> | null;
 };
 
-const MIN_BLOCK_CHARS = 24;
 const EXCERPT_MAX = 220;
-const OVERLAP_MIN_TOKEN_LEN = 4;
-const OVERLAP_HIT_RATIO = 0.45;
 
-const TACTIC_HINT =
-  /\b(tactic|study|trial|registry|chart review|publication|rwe|iis|survey|advisory|heor|phase\s*[123]|ongoing|planned|completed)\b/i;
-const GAP_HINT =
-  /\b(gap|need|evidence gap|unknown|unclear|lack of|insufficient|missing|unmet|open question)\b/i;
-
-function normalizeTokens(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= OVERLAP_MIN_TOKEN_LEN);
-}
-
-/** True when block text substantially overlaps a claim statement (gold seed without provenance). */
-export function blockOverlapsStatement(blockText: string, statement: string): boolean {
-  const blockTokens = new Set(normalizeTokens(blockText));
-  const claimTokens = normalizeTokens(statement);
-  if (claimTokens.length === 0 || blockTokens.size === 0) return false;
-  let hits = 0;
-  for (const token of claimTokens) {
-    if (blockTokens.has(token)) hits += 1;
-  }
-  return hits / claimTokens.length >= OVERLAP_HIT_RATIO;
+export function collapseAuditText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export function excerptFromBlock(text: string, max = EXCERPT_MAX): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
+  const collapsed = collapseAuditText(text);
   if (collapsed.length <= max) return collapsed;
   return `${collapsed.slice(0, max - 1)}…`;
 }
 
-export function suggestClaimType(block: AuditBlockLite): MissFlagSuggested {
-  const hay = `${block.heading ?? ""} ${block.text}`;
-  const tacticScore = TACTIC_HINT.test(hay) ? 1 : 0;
-  const gapScore = GAP_HINT.test(hay) ? 1 : 0;
-  if (tacticScore > gapScore) return "tactic";
-  if (gapScore > tacticScore) return "gap";
-  if (block.kind === "table_row") return "tactic";
-  return "gap";
-}
-
-function citedBlockIds(claims: AuditClaimLite[]): Set<string> {
+export function citedBlockIds(claims: AuditClaimLite[]): Set<string> {
   const ids = new Set<string>();
   for (const claim of claims) {
     const spans = Array.isArray(claim.provenance) ? claim.provenance : [];
@@ -107,81 +78,69 @@ function citedBlockIds(claims: AuditClaimLite[]): Set<string> {
   return ids;
 }
 
-function isCoveredByClaims(block: AuditBlockLite, claims: AuditClaimLite[], cited: Set<string>): boolean {
-  if (cited.has(block.id)) return true;
-  return claims.some((claim) => blockOverlapsStatement(block.text, claim.statement));
-}
-
-export type CompletenessAuditResult = {
-  flags: MissFlag[];
-  skipped_noise: number;
-  skipped_by_reason: Record<CompletenessSkipReason, number>;
+export type AuditSelection = {
+  /** Blocks the critic must judge, in document order. */
+  to_judge: AuditBlockLite[];
+  /** Blocks a ledger claim cites by provenance. */
+  cited: number;
+  /** Blocks already promoted or dismissed by a reviewer. */
+  resolved: number;
+  /** Blocks with no text at all. */
+  empty: number;
 };
 
-/**
- * Deterministic completeness audit: index (parse blocks) vs inventory/needs (claims).
- * Flags auditable blocks that are neither provenance-cited nor lexically covered.
- * Heading-only / chapter / SI chrome is skipped mechanically (no LLM).
- */
-export function auditCompletenessDetailed(args: {
+/** Splits blocks into settled facts and the ones that need a verdict. */
+export function selectBlocksToJudge(args: {
   blocks: AuditBlockLite[];
   claims: AuditClaimLite[];
   resolved_block_ids?: Iterable<string>;
-}): CompletenessAuditResult {
-  const resolved = new Set(args.resolved_block_ids ?? []);
-  const cited = citedBlockIds(args.claims);
-  const flags: MissFlag[] = [];
-  const skipped_by_reason = emptySkipCounts();
-  let skipped_noise = 0;
-
+}): AuditSelection {
+  const resolvedIds = new Set(args.resolved_block_ids ?? []);
+  const citedIds = citedBlockIds(args.claims);
   const sorted = [...args.blocks].sort((a, b) => {
     if (a.source_file_id !== b.source_file_id) {
       return a.source_file_id.localeCompare(b.source_file_id);
     }
     return a.index - b.index;
   });
-
+  const selection: AuditSelection = { to_judge: [], cited: 0, resolved: 0, empty: 0 };
   for (const block of sorted) {
-    if (resolved.has(block.id)) continue;
-    if (!AUDITABLE_BLOCK_KINDS.has(block.kind)) {
-      if (HEADING_BLOCK_KINDS.has(block.kind)) {
-        skipped_noise += 1;
-        skipped_by_reason.heading_only += 1;
-      }
-      continue;
+    if (resolvedIds.has(block.id)) {
+      selection.resolved += 1;
+    } else if (citedIds.has(block.id)) {
+      selection.cited += 1;
+    } else if (!collapseAuditText(block.text)) {
+      selection.empty += 1;
+    } else {
+      selection.to_judge.push(block);
     }
-    const text = collapseAuditText(block.text);
-    if (text.length < MIN_BLOCK_CHARS) continue;
-    const skip = completenessSkipReason({ ...block, text });
-    if (skip) {
-      skipped_noise += 1;
-      skipped_by_reason[skip] += 1;
-      continue;
-    }
-    if (isCoveredByClaims(block, args.claims, cited)) continue;
+  }
+  return selection;
+}
 
-    const suggested = suggestClaimType(block);
+/** Ledger claims the critic sees for one source (plus claims with no source). */
+export function claimsForSource(claims: AuditClaimLite[], source_file_id: string): AuditClaimLite[] {
+  return claims.filter((claim) => !claim.source_file_id || claim.source_file_id === source_file_id);
+}
+
+/** Open miss flags: every judged block the critic called a miss, in document order. */
+export function flagsFromVerdicts(
+  blocks: AuditBlockLite[],
+  verdicts: Map<string, CompletenessVerdict>,
+): MissFlag[] {
+  const flags: MissFlag[] = [];
+  for (const block of blocks) {
+    const verdict = verdicts.get(block.id);
+    if (!verdict?.missed || !verdict.claim_type) continue;
     flags.push({
       block_id: block.id,
       source_file_id: block.source_file_id,
-      suggested,
-      reason:
-        suggested === "tactic"
-          ? "Parse block not cited by inventory and not overlapping a tactic statement"
-          : "Parse block not cited by needs and not overlapping a gap statement",
-      excerpt: excerptFromBlock(text),
+      suggested: verdict.claim_type,
+      reason: verdict.rationale,
+      excerpt: excerptFromBlock(block.text),
       kind: block.kind,
       index: block.index,
     });
   }
-
-  return { flags, skipped_noise, skipped_by_reason };
-}
-
-export function auditCompleteness(args: {
-  blocks: AuditBlockLite[];
-  claims: AuditClaimLite[];
-  resolved_block_ids?: Iterable<string>;
-}): MissFlag[] {
-  return auditCompletenessDetailed(args).flags;
+  return flags;
 }

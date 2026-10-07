@@ -42,7 +42,7 @@ function stubCtx(): AccuracyModuleContext {
       provider_id: "xai",
       provider_label: "Grok",
       model: "stub",
-      auth: "oauth",
+      auth: "api_key",
       connected: true,
       params: { temperature: 0, max_tokens: 8192 },
       fallbacks: [],
@@ -54,6 +54,18 @@ function stubCtx(): AccuracyModuleContext {
     },
     noteCost: () => {},
   };
+}
+
+/** Quote tests script the completeness judge independently from extraction. */
+function withCompleteness(ctx: AccuracyModuleContext) {
+  const propose = ctx.complete;
+  ctx.complete = vi.fn(async (request) => {
+    if (request.purpose === "snapshot_completeness") {
+      return { raw: JSON.stringify({ checked_block_ids: ["blk-1"], suspected_omissions: [],
+        prior_issue_resolutions: [] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+    }
+    return propose(request);
+  });
 }
 
 describe("need extract module", () => {
@@ -147,10 +159,12 @@ describe("need extract module", () => {
         external_id: "G1", provenance: [{ source_file_id: "src-1", block_id: "blk-1",
           quote: "Invented quote" }] }] }),
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+      withCompleteness(ctx);
       const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
         block_ids: ["blk-1"] }, ctx);
       expect(result.output.gaps[0]?.provenance[0]?.quote).toBe("Invented quote");
-      expect(ctx.complete).toHaveBeenCalledOnce();
+      expect(vi.mocked(ctx.complete).mock.calls.map(([request]) => request.purpose))
+        .toEqual([expect.stringContaining("proposer"), "snapshot_completeness"]);
       expect(events.find((event) => event.event_type === "judgment")).toMatchObject({ selected_iteration: 0 });
       expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
         signals: { quote_validity: { invalid_count: 1 } },
@@ -173,10 +187,13 @@ describe("need extract module", () => {
           { source_file_id: "src-1", block_id: "blk-1", quote: "Invented quote" }] },
         { statement: "Need PFS evidence", external_id: "G2", provenance: [] },
       ] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+      withCompleteness(ctx);
       await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
         block_ids: ["blk-1"] }, ctx);
-      expect(ctx.complete).toHaveBeenCalledTimes(2);
-      const revisionPrompt = vi.mocked(ctx.complete).mock.calls[1]?.[0].user ?? "";
+      expect(ctx.complete).toHaveBeenCalledTimes(4);
+      const proposals = vi.mocked(ctx.complete).mock.calls.filter(([request]) => request.purpose?.includes("proposer"));
+      expect(proposals).toHaveLength(2);
+      const revisionPrompt = proposals[1]?.[0].user ?? "";
       expect(revisionPrompt).toContain("G2:no_quote");
       expect(revisionPrompt).not.toContain("quote_not_substring");
       expect(events.filter((event) => event.event_type === "snapshot").map((event) => event.signals.invariant_failures)).toEqual([
@@ -206,7 +223,7 @@ describe("need extract module", () => {
     expect(result.summary).toContain("SYNAPSE_TEST_STUB_LLM");
   });
 
-  it("calls the connected OAuth LLM when stub is off", async () => {
+  it("calls the live LLM when stub is off", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {

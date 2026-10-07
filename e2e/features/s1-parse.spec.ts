@@ -37,7 +37,7 @@ test.describe("S1 file parse", () => {
   test("parses from the pipeline page into blocks with quality signals", async ({ page, request }) => {
     await page.goto("/pipeline");
     await page.getByRole("button", { name: /^run s1$/i }).click();
-    await expect(page.getByText(/document\(s\) parsed, 0 failed/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/documents? parsed, 0 failed/)).toBeVisible({ timeout: 30_000 });
 
     const state = await runStage<ParseOutput>(request, "S1", { dry_run: true });
     expect(state.output.documents.length).toBeGreaterThan(0);

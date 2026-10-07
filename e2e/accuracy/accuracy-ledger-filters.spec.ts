@@ -17,7 +17,7 @@ test.describe("accuracy ledger filters + plan_label chrome", () => {
       parse_source: false,
     });
 
-    await page.goto(workspaceUrl("/accuracy/ledger", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/ledger", seed.workspace_id));
     await expect(page.getByRole("heading", { name: /^ledger$/i })).toBeVisible();
     await expect(page.getByRole("status", { name: /plan type iep/i })).toBeVisible();
     await expect(page.getByText(/multi-tenant iep stack/i)).toBeVisible();
@@ -47,7 +47,7 @@ test.describe("accuracy ledger filters + plan_label chrome", () => {
       parse_source: false,
     });
 
-    await page.goto(workspaceUrl("/accuracy/ledger", seed.workspace_id));
+    await page.goto(workspaceUrl("/admin/accuracy/ledger", seed.workspace_id));
     await expect(page.getByRole("status", { name: /plan type iegp/i })).toBeVisible();
     await expect(page.getByText(/multi-tenant iegp stack/i)).toBeVisible();
 

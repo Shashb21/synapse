@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 export function CreateWorkspaceForm() {
   const router = useRouter();
+  const aiOn = useAiEnabled();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -30,14 +32,17 @@ export function CreateWorkspaceForm() {
         setError(body.error ?? "Create failed");
         return;
       }
-      router.push(`/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}`);
+      // AI off: land on hand entry of gaps (there is nothing to upload or extract).
+      router.push(
+        `/admin/accuracy/ledger?workspace_id=${encodeURIComponent(body.workspace_id)}${aiOn ? "" : "&add=gap"}`,
+      );
       router.refresh();
     });
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card/40 p-3">
-      <h3 className="text-[13px] font-medium text-foreground">Create workspace</h3>
+    <form onSubmit={onSubmit} className="grid gap-3 border border-border bg-card p-3 rounded-lg">
+      <h3 className="text-[12px] font-semibold text-foreground">Create workspace</h3>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Name</span>
         <input

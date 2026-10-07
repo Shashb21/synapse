@@ -14,7 +14,8 @@ import {
   PROPOSER_CRITIC_EXCHANGES,
   hasIssue,
   runAgenticCycle,
-  thresholdJudge,
+  type Critique,
+  type JudgedCandidate,
 } from "@/modules/kernel/agentic";
 import { RunRecorder } from "@/modules/kernel/observability";
 import { canPrompt, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID, resolveRoute } from "@/modules/kernel/routing";
@@ -28,19 +29,31 @@ import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
   PROVIDERS,
-  findProvider,
-  providerConfigured,
 } from "@/modules/llm/provider";
+import { providerConfigured } from "@/modules/llm/api-keys";
 import { can, capabilitiesOf, roleForFunction } from "@/modules/auth/roles";
-import {
-  DEFAULT_AXES,
-  bandFor,
-  parseAxesConfig,
-  validateAxes,
-  weightedScore,
-} from "@/modules/stages/s8-prioritization/axes";
-import { addMonths, buildTimeline, monthsBetween } from "@/modules/stages/s10-timeline/build";
+import { DEFAULT_AXES, parseAxesConfig, validateAxes } from "@/modules/stages/s8-prioritization/axes";
+import { addMonths, buildTimeline, monthsBetween, timelineCandidates } from "@/modules/stages/s10-timeline/build";
 import { buildSeed } from "@/lib/iegp/seed";
+import { displayedGapStatus } from "@/lib/iegp/engine";
+
+
+/** Test-only judge for exercising the kernel loop: accepts what the critic kept above a floor. */
+function testJudge<C>(subjectOf: (candidate: C) => string, floor = 40) {
+  return ({ candidates, critiques }: { candidates: C[]; critiques: Critique[] }): JudgedCandidate<C>[] =>
+    candidates.map((candidate) => {
+      const subject = subjectOf(candidate);
+      const critique = critiques.find((item) => item.subject === subject);
+      const score = critique?.score ?? 50;
+      return {
+        candidate,
+        subject,
+        verdict: critique?.verdict !== "drop" && score >= floor ? ("accept" as const) : ("reject" as const),
+        score,
+        note: critique?.note ?? "no critique",
+      };
+    });
+}
 
 describe("module contracts", () => {
   it("registers exactly one implementation per stage, all on the kernel contract", () => {
@@ -89,6 +102,7 @@ describe("the locked agentic loop", () => {
 
   function fakeContext(run: RunRecorder, stage: StageId = "S2"): ModuleContext {
     return {
+      ai: true,
       workspace_id: "test",
       actor: { name: "Loop Test", function: "medical_affairs" as const },
       role: "medical_affairs",
@@ -98,7 +112,7 @@ describe("the locked agentic loop", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: false,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,
@@ -169,7 +183,7 @@ describe("the locked agentic loop", () => {
           return { subject: candidate.id, verdict: "keep" as const, note: "fine", score: 80 };
         });
       },
-      judge: thresholdJudge<Candidate>((candidate) => candidate.id, 50),
+      judge: testJudge<Candidate>((candidate) => candidate.id, 50),
     });
 
     expect(criticRounds).toEqual([1, 2, 3]);
@@ -234,7 +248,7 @@ describe("the locked agentic loop", () => {
           note: "no",
           score: 5,
         })),
-      judge: thresholdJudge<Candidate>((candidate) => candidate.id),
+      judge: testJudge<Candidate>((candidate) => candidate.id),
     });
     expect(outcome.rounds).toHaveLength(PROPOSER_CRITIC_EXCHANGES);
     expect(outcome.judged).toHaveLength(0);
@@ -251,7 +265,7 @@ describe("routing defaults", () => {
     expect(DEFAULT_FALLBACKS).toEqual(["anthropic-claude", "openai"]);
   });
 
-  it("ships the five locked OAuth providers", () => {
+  it("ships the five locked API-key providers", () => {
     const ids = PROVIDERS.map((provider) => provider.id);
     expect(ids).toEqual([
       "xai-grok",
@@ -261,27 +275,33 @@ describe("routing defaults", () => {
       "openrouter",
     ]);
     for (const provider of PROVIDERS) {
-      expect(provider.auth).toBe("oauth");
-      expect(provider.oauth?.authorize_url).toMatch(/^https:\/\//);
-      expect(provider.oauth?.token_url).toMatch(/^https:\/\//);
+      expect(provider.auth).toBe("api_key");
+      expect("oauth" in provider).toBe(false);
     }
   });
 
-  it("treats every MVP provider as OAuth-ready without operator client env vars", () => {
-    for (const provider of PROVIDERS) {
-      expect(providerConfigured(provider)).toBe(true);
+  it("treats a provider as configured only when its API key is set", () => {
+    const saved = process.env.OPENROUTER_API_KEY;
+    try {
+      delete process.env.OPENROUTER_API_KEY;
+      expect(providerConfigured(PROVIDERS.find((provider) => provider.id === "openrouter")!)).toBe(false);
+      process.env.OPENROUTER_API_KEY = "sk-or-test";
+      expect(providerConfigured(PROVIDERS.find((provider) => provider.id === "openrouter")!)).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = saved;
     }
   });
 
-  it("blocks agentic routing when no provider is connected", async () => {
-    const keyEnvs = ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"] as const;
+  it("blocks agentic routing when no provider has a key", async () => {
+    const keyEnvs = ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"] as const;
     const saved: Record<string, string | undefined> = {};
     for (const name of keyEnvs) {
       saved[name] = process.env[name];
       delete process.env[name];
     }
     try {
-      await expect(resolveRoute("S2")).rejects.toThrow(/control panel/i);
+      await expect(resolveRoute("S2")).rejects.toThrow(/server environment/i);
     } finally {
       for (const name of keyEnvs) {
         if (saved[name] === undefined) delete process.env[name];
@@ -294,12 +314,12 @@ describe("routing defaults", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: false,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,
         degraded: true,
-        reason: "disconnected",
+        reason: "no API key",
       }),
     ).toBe(false);
     expect(
@@ -308,7 +328,7 @@ describe("routing defaults", () => {
         provider_id: "xai-grok",
         provider_label: "xAI · Grok",
         model: "grok-4",
-        auth: "oauth",
+        auth: "api_key",
         connected: true,
         params: { temperature: 0, max_tokens: 8192 },
         fallbacks: DEFAULT_FALLBACKS,
@@ -386,15 +406,6 @@ describe("roles", () => {
 });
 
 describe("prioritization axes", () => {
-  it("weights axes and bands the weighted score", () => {
-    const scores = { decision_impact: 80, time_pressure: 70, external_scrutiny: 40, feasibility: 20 };
-    const score = weightedScore(scores, DEFAULT_AXES.axes);
-    expect(score).toBeGreaterThan(50);
-    expect(bandFor(score, DEFAULT_AXES.bands)).toBe("medium");
-    expect(bandFor(90, DEFAULT_AXES.bands)).toBe("high");
-    expect(bandFor(10, DEFAULT_AXES.bands)).toBe("low");
-  });
-
   it("rejects a malformed axis configuration before it is stored", () => {
     expect(() => parseAxesConfig({ axes: [], x_axis: "a", y_axis: "b", bands: { high: 60, medium: 40 } })).toThrow(
       /malformed/i,
@@ -430,42 +441,101 @@ describe("timeline build", () => {
     expect(monthsBetween("2026-01-10", "2026-03-10")).toBe(3);
   });
 
-  it("dates every mapped tactic, lanes it by band and gates dissemination on readouts", () => {
+  const validated = (gapId: string, band: "high" | "medium" | "low", isValidated = true) => ({
+    gap_id: gapId,
+    axis_scores: { decision_impact: 80 },
+    suggested_band: band,
+    suggested_rationale: "seeded",
+    band,
+    validated: isValidated,
+    rationale: isValidated ? "seeded" : null,
+    actor_name: "Test",
+    at: "2026-01-01T00:00:00.000Z",
+  });
+
+  /** Every candidate estimated in full, so the layout is exercised on supplied values only. */
+  const estimateAll = (state: ReturnType<typeof buildSeed>, placements: ReturnType<typeof validated>[]) =>
+    new Map(
+      timelineCandidates({ state, placements }).map((candidate) => [
+        candidate.id,
+        { start_offset_months: 2, duration_months: 6, readout_lag_months: 1, rationale: "estimated" },
+      ]),
+    );
+
+  it("lays out only the values it is given and never dates a tactic on its own", () => {
     const state = buildSeed();
+    const bare = buildTimeline({ state, placements: [], anchor: "2026-01-01" });
+    // Seed tactics carry a start date but no designed duration: nothing is invented.
+    expect(bare.activities).toHaveLength(0);
+    expect(bare.pending.length).toBeGreaterThan(0);
+    for (const row of bare.pending) expect(row.missing).toContain("duration");
+
     const model = buildTimeline({
       state,
-      placements: state.gaps.slice(0, 2).map((gap) => ({
-        gap_id: gap.id,
-        axis_scores: { decision_impact: 80 },
-        suggested_band: "high" as const,
-        suggested_rationale: "seeded",
-        band: "high" as const,
-        validated: true,
-        rationale: "seeded",
-        actor_name: "Test",
-        at: "2026-01-01T00:00:00.000Z",
-      })),
+      placements: [],
+      estimates: estimateAll(state, []),
       anchor: "2026-01-01",
     });
-    expect(model.activities.length).toBeGreaterThan(0);
+    expect(model.pending).toHaveLength(0);
+    expect(model.activities.length).toBe(bare.pending.length);
     for (const activity of model.activities) {
-      expect(activity.gap_ids.length).toBeGreaterThan(0);
-      expect(activity.end_date >= activity.start_date).toBe(true);
+      const tactic = state.tactics.find((row) => row.id === activity.tactic_id)!;
+      expect(activity.start_date).toBe(tactic.start_date ?? "2026-03-01");
+      expect(activity.end_date).toBe(addMonths(activity.start_date, 6));
+      expect(activity.readout_date).toBe(tactic.evidence_available ?? addMonths(activity.end_date, 1));
+      expect(activity.meta.schedule_basis.end).toBe("model");
+      expect(activity.depends_on).toEqual([]);
     }
-    expect(model.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "addressed"]);
+    expect(model.lanes.map((lane) => lane.id)).toEqual(["high", "medium", "low", "unprioritized", "addressed"]);
     expect(model.window.months).toBeGreaterThan(0);
-    const dependent = model.activities.filter((activity) => activity.depends_on.length > 0);
-    for (const activity of dependent) {
-      for (const upstreamId of activity.depends_on) {
-        const upstream = model.activities.find((candidate) => candidate.id === upstreamId)!;
-        expect(activity.start_date >= (upstream.readout_date ?? upstream.end_date)).toBe(true);
-      }
-    }
+  });
+
+  it("lanes an activity only by a validated band", () => {
+    const state = buildSeed();
+    const probe = timelineCandidates({ state, placements: [] }).find((candidate) => candidate.band !== "addressed")!;
+    const gapId = probe.gap_ids.find((id) => {
+      const gap = state.gaps.find((row) => row.id === id);
+      return gap && displayedGapStatus(gap) !== "validated_addressed";
+    })!;
+    const others = probe.gap_ids.filter((id) => id !== gapId);
+    const suggestedOnly = [validated(gapId, "high", false), ...others.map((id) => validated(id, "high", false))];
+    const unvalidated = timelineCandidates({ state, placements: suggestedOnly }).find((row) => row.id === probe.id)!;
+    expect(unvalidated.band).toBe("unprioritized");
+
+    const placed = [validated(gapId, "medium"), ...others.map((id) => validated(id, "low", false))];
+    const model = buildTimeline({ state, placements: placed, estimates: estimateAll(state, placed), anchor: "2026-01-01" });
+    const activity = model.activities.find((row) => row.id === probe.id)!;
+    expect(activity.band).toBe("medium");
+    expect(activity.lane).toBe("medium");
+  });
+
+  it("gates a model-dated start on the readouts the model said it depends on", () => {
+    const state = buildSeed();
+    const [upstream, downstream] = timelineCandidates({ state, placements: [] });
+    // The downstream tactic has no start of its own, so its start is the model's to set.
+    const tactic = state.tactics.find((row) => row.id === downstream!.tactic.id)!;
+    tactic.start_date = null;
+    tactic.evidence_available = null;
+    const model = buildTimeline({
+      state,
+      placements: [],
+      estimates: estimateAll(state, []),
+      dependencies: new Map([
+        [downstream!.id, { upstream: [{ id: upstream!.id, reason: "reports its results" }] }],
+      ]),
+      anchor: "2020-01-01",
+    });
+    const before = model.activities.find((row) => row.id === upstream!.id)!;
+    const after = model.activities.find((row) => row.id === downstream!.id)!;
+    expect(after.depends_on).toEqual([upstream!.id]);
+    expect(after.start_date).toBe(before.readout_date);
+    expect(after.end_date).toBe(addMonths(after.start_date, 6));
+    expect(after.meta.dependency_note).toMatch(/reports its results/);
   });
 
   it("keeps a user's saved dates when it rebuilds", () => {
     const state = buildSeed();
-    const first = buildTimeline({ state, placements: [], anchor: "2026-01-01" });
+    const first = buildTimeline({ state, placements: [], estimates: estimateAll(state, []), anchor: "2026-01-01" });
     const target = first.activities[0]!;
     const second = buildTimeline({
       state,
@@ -486,5 +556,6 @@ describe("timeline build", () => {
     expect(moved.start_date).toBe("2027-05-01");
     expect(moved.end_date).toBe("2027-11-01");
     expect(moved.readout_date).toBe("2027-12-01");
+    expect(moved.meta.schedule_basis.start).toBe("saved");
   });
 });

@@ -2,32 +2,65 @@ import { NextResponse } from "next/server";
 import "@/modules";
 import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activateModule, stageWiring } from "@/modules/kernel/registry";
-import { routeConfigs, setDefaultProvider, setRouteConfig } from "@/modules/kernel/routing";
+import {
+  parseFallbacks,
+  parseRouteParam,
+  routeConfigs,
+  setDefaultProvider,
+  setRouteConfig,
+} from "@/modules/kernel/routing";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
   PROVIDERS,
 } from "@/modules/llm/provider";
-import { beginOauth, disconnect, listConnections } from "@/modules/llm/oauth";
-import { assertCan } from "@/modules/auth/roles";
+import { listProviderKeys } from "@/modules/llm/api-keys";
+import { apiErrorResponse, readJsonBody, requireCustomerContext } from "@/modules/auth/api-guard";
 import { requestIdentity } from "@/modules/auth/request";
+import { ownerAccess, ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
 import { beginLogin, loginOptions, signInDemo, signOut } from "@/modules/auth/session";
 import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
+import { aiSwitch, setAiEnabled, setAiSection, storedAiSections } from "@/modules/kernel/ai-switch";
+import { AI_SECTION_IDS, isAiSectionId } from "@/modules/kernel/ai-sections";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Platform actions only the owner may take (the admin console at /admin/control).
+ * Sign-in and sign-out stay open; the prioritization axes (save_axes) go
+ * through the customer guard like every other customer write.
+ */
+const OWNER_ACTIONS = new Set([
+  "set_ai_enabled",
+  "set_ai_section",
+  "set_ai_sections",
+  "set_route",
+  "set_default_provider",
+  "activate_module",
+]);
+
+/**
+ * Platform configuration (routes, provider key status, module wiring): owner only.
+ * A provider's key status says only whether it is set and which env var it comes
+ * from, never its value.
+ */
 export async function GET() {
-  const [wiring, routes, connections, axes] = await Promise.all([
+  const denied = await ownerGate();
+  if (denied) return denied;
+  const [wiring, routes, axes, ai, sections] = await Promise.all([
     stageWiring(),
     routeConfigs(),
-    listConnections(),
     loadAxes(),
+    aiSwitch(),
+    storedAiSections(),
   ]);
   return NextResponse.json({
+    ai,
+    ai_sections: sections.sections,
     wiring,
     routes,
-    connections,
+    provider_keys: listProviderKeys(),
     axes,
     providers: PROVIDERS.map((provider) => ({
       id: provider.id,
@@ -44,35 +77,62 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const action = String(body.action ?? "");
-  const identity = await requestIdentity(body);
+  // The owner holds every platform capability; nobody else reaches these actions.
+  if (OWNER_ACTIONS.has(action) && !(await ownerAccess()).owner) return ownerOnlyJson();
   const origin = new URL(request.url).origin;
 
   try {
+    const identity = await requestIdentity(body);
     switch (action) {
+      case "set_ai_enabled": {
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const ai = await setAiEnabled({
+          enabled: body.enabled,
+          actor_name: identity.actor.name,
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
+        });
+        return NextResponse.json({ ok: true, ai });
+      }
+      // One AI section on or off for every customer (KAN-53).
+      case "set_ai_section": {
+        if (!isAiSectionId(body.section)) throw new Error("Unknown AI section.");
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const sections = await setAiSection({ section: body.section, enabled: body.enabled, actor_name: identity.actor.name });
+        return NextResponse.json({ ok: true, ai_sections: sections });
+      }
+      // Every section at once (a fresh platform, or the e2e suite).
+      case "set_ai_sections": {
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        let sections = (await storedAiSections()).sections;
+        for (const section of AI_SECTION_IDS) {
+          sections = await setAiSection({ section, enabled: body.enabled, actor_name: identity.actor.name });
+        }
+        return NextResponse.json({ ok: true, ai_sections: sections });
+      }
       case "set_route": {
-        assertCan(identity.role, "configure_routing");
         const stage = String(body.stage ?? "") as StageId;
         if (!STAGE_IDS.includes(stage)) throw new Error(`Unknown stage ${body.stage}`);
+        const provider_id = String(body.provider_id ?? "");
+        // Blank numbers keep the current value; blank fallbacks mean none (KAN-63).
         const config = await setRouteConfig({
           stage,
-          provider_id: String(body.provider_id ?? ""),
+          provider_id,
           model: String(body.model ?? ""),
-          temperature: body.temperature === undefined ? undefined : Number(body.temperature),
-          max_tokens: body.max_tokens === undefined ? undefined : Number(body.max_tokens),
-          fallbacks:
-            typeof body.fallbacks === "string"
-              ? body.fallbacks.split(",").map((id) => id.trim()).filter(Boolean)
-              : Array.isArray(body.fallbacks)
-                ? (body.fallbacks as string[])
-                : undefined,
+          temperature: parseRouteParam(body.temperature, "temperature"),
+          max_tokens: parseRouteParam(body.max_tokens, "max_tokens"),
+          fallbacks: parseFallbacks(body.fallbacks, provider_id),
           actor_name: identity.actor.name,
         });
         return NextResponse.json({ ok: true, config });
       }
       case "set_default_provider": {
-        assertCan(identity.role, "configure_routing");
         const configs = await setDefaultProvider({
           provider_id: String(body.provider_id ?? ""),
           model: body.model ? String(body.model) : undefined,
@@ -81,7 +141,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, stages: configs.length });
       }
       case "activate_module": {
-        assertCan(identity.role, "activate_module");
         const stage = String(body.stage ?? "") as StageId;
         await activateModule({
           stage,
@@ -90,26 +149,13 @@ export async function POST(request: Request) {
         });
         return NextResponse.json({ ok: true });
       }
-      case "connect_provider": {
-        assertCan(identity.role, "connect_provider");
-        const provider_id = String(body.provider_id ?? "");
-        const { authorize_url } = await beginOauth({
-          provider_id,
-          redirect_uri: `${origin}/api/oauth/llm/callback?provider=${encodeURIComponent(provider_id)}`,
-          actor_name: identity.actor.name,
-        });
-        return NextResponse.json({ ok: true, authorize_url });
-      }
-      case "disconnect_provider": {
-        assertCan(identity.role, "connect_provider");
-        await disconnect(String(body.provider_id ?? ""));
-        return NextResponse.json({ ok: true });
-      }
       case "save_axes": {
-        assertCan(identity.role, "prioritize");
+        // Customer data: a verified session, a selected workspace the person is a
+        // member of, and the prioritize capability. Never the Default workspace by fallback.
+        const customer = await requireCustomerContext({ body, capability: "prioritize" });
         const axes = await saveAxes({
           config: body.config,
-          actor_name: identity.actor.name,
+          actor_name: customer.actor.name,
         });
         return NextResponse.json({ ok: true, axes });
       }
@@ -137,7 +183,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unknown action ${action}` }, { status: 400 });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Control-panel action failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return apiErrorResponse(error, "Control-panel action failed");
   }
 }

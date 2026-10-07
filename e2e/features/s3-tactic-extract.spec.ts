@@ -8,10 +8,11 @@ import {
   runStage,
   seedParsed,
 } from "../support/synapse";
+import { openInventoryRow } from "../support/inventory";
 
 type TacticExtractOutput = {
   proposed: number;
-  accepted: { id: string; name: string; type: string; status: string; source_quote: string }[];
+  accepted: { id: string; name: string; type: string; status: string; source_quote: string; duplicate_of: string | null }[];
   rejected: { id: string; critic_note: string }[];
   committed_tactic_ids: string[];
 };
@@ -26,7 +27,7 @@ test.describe("S3 tactic extraction", () => {
 
   test("extracts the tactics the sources already describe", async ({ page, request }) => {
     const run = await clickRunStage(page, request, "S3");
-    expect(run.summary).toMatch(/tactic candidate\(s\) accepted/);
+    expect(run.summary).toMatch(/tactic candidates? accepted/);
     expectRouteIsHonest(run);
   });
 
@@ -44,27 +45,28 @@ test.describe("S3 tactic extraction", () => {
     expect(dry.output.proposed).toBeGreaterThan(0);
 
     await page.goto("/?place=gaps");
-    await page.getByRole("button", { name: /map existing tactic/i }).first().click();
+    await openInventoryRow(page);
     const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    // Retry until the page has hydrated; a click before that does nothing.
+    await expect(async () => {
+      await page.getByRole("button", { name: /map existing tactic/i }).first().click({ timeout: 5_000 });
+      await expect(dialog).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
     await expect(dialog.getByRole("combobox").first()).toBeVisible();
     const options = await dialog.getByRole("combobox").first().locator("option").allTextContents();
     expect(options.join(" ").length, "the library should offer extracted tactics").toBeGreaterThan(0);
   });
 
-  test("withdraws a tactic that is already in the library during the dialogue", async ({ request }) => {
+  test("does not add a tactic the judge marks as already in the library", async ({ request }) => {
     const again = await runStage<TacticExtractOutput>(request, "S3");
     expect(again.output.committed_tactic_ids).toHaveLength(0);
 
-    // The candidates never reach the judge: the proposer concedes them mid-dialogue,
-    // and the trace records which ones and why.
+    // The judge names the library tactic each repeat is the same as; commit skips
+    // those. The judge step is in the trace.
+    expect(again.output.accepted.length).toBeGreaterThan(0);
+    expect(again.output.accepted.some((row) => Boolean(row.duplicate_of))).toBeTruthy();
     const run = await runRecord(request, again.run_id);
-    const withdrawn = run.steps.find((step) => step.name === "withdrawn-in-dialogue");
-    expect(withdrawn, "the trace should name the withdrawn candidates").toBeTruthy();
-    const rows = withdrawn!.data as { note: string }[];
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.some((row) => /already in the tactic library/i.test(row.note))).toBeTruthy();
-    expect(evalValue(run, "withdrawn_in_dialogue")).toBe(rows.length);
+    expect(run.steps.some((step) => step.name === "judge:model")).toBeTruthy();
   });
 
   test("scores itself against its gold cases", async ({ request }) => {

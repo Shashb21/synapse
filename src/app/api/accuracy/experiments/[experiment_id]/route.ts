@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 /** Authenticated source-workspace-scoped API for one isolated experiment record. */
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
@@ -14,6 +15,8 @@ registerAccuracyStack();
 export async function GET(request: Request, { params }: { params: Promise<{ experiment_id: string }> }) {
   const session = await sessionContext();
   if (!session.signed_in) return NextResponse.json({ error: "Sign in to access experiments" }, { status: 401 });
+  const denied = await ownerGate();
+  if (denied) return denied;
   const source_workspace_id = new URL(request.url).searchParams.get("source_workspace_id")?.trim() ?? "";
   const { experiment_id } = await params;
   if (!source_workspace_id || !experiment_id.trim()) {

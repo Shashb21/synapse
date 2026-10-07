@@ -1,37 +1,45 @@
 import { LockForm } from "@/components/lock-form";
-import { IngestFileField } from "@/components/ingest-file-field";
+import { AddSourceForm } from "@/components/add-source-form";
 import {
-  SOURCE_TYPES,
   SOURCE_TYPE_LABELS,
-  ACTOR_FUNCTIONS,
   FUNCTION_LABELS,
 } from "@/lib/iegp/enums";
 import { DEMO_PACK } from "@/lib/iegp/demo-pack";
 import type { SourceDocument } from "@/lib/iegp/types";
 
+/**
+ * Upload: add a source of your own, plus the Velmara demo source files in a demo
+ * workspace only. A team's own workspace never offers demo content unasked.
+ */
 export function IngestPanel({
   sources,
   compact,
+  demoFiles = false,
 }: {
   sources: SourceDocument[];
   compact?: boolean;
+  /** The workspace holds the Velmara demo: offer its demo source files. */
+  demoFiles?: boolean;
 }) {
   const ingestedTitles = new Set(sources.map((s) => s.title));
 
   return (
     <div>
+      {demoFiles ? (
       <section aria-labelledby="demo-pack">
-        <h2 id="demo-pack" className="text-[15px] font-medium text-foreground">
+        <h2 id="demo-pack" className="text-[13px] font-semibold text-foreground">
           Demo source files
         </h2>
         <p className="mb-4 mt-1 text-[12px] text-muted-foreground">
-          Nothing is ingested until you do it. Each file extracts candidate gaps and tactics.
+          Nothing is ingested until you do it. Ingesting a file reads it, pulls out its evidence gaps
+          and tactics and maps them, using the connected AI model. If no model is connected it stops
+          and says so.
         </p>
         <div className="grid gap-3">
           {DEMO_PACK.map((file) => {
             const ingested = ingestedTitles.has(file.title);
             return (
-              <article key={file.id} className="border border-border bg-card p-4">
+              <article key={file.id} className="border border-border bg-card p-4 rounded-lg">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-[13px] text-foreground">{file.title}</p>
                   <span className="text-[11px] text-muted-foreground">
@@ -67,44 +75,10 @@ export function IngestPanel({
           })}
         </div>
       </section>
+      ) : null}
 
-      <div className="mt-6 border border-border bg-card p-4">
-        <h2 className="mb-3 text-[13px] text-foreground">Upload your own note</h2>
-        <LockForm label="Ingest gaps and tactics" action="ingest" confirmLabel="Ingest">
-          <IngestFileField />
-          <input
-            name="title"
-            required
-            placeholder="Title"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          />
-          <select
-            name="source_type"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          >
-            {SOURCE_TYPES.map((s) => (
-              <option key={s} value={s}>
-                {SOURCE_TYPE_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <select
-            name="stakeholder_function"
-            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-          >
-            {ACTOR_FUNCTIONS.map((fn) => (
-              <option key={fn} value={fn}>
-                {FUNCTION_LABELS[fn]}
-              </option>
-            ))}
-          </select>
-          <textarea
-            name="text"
-            required
-            placeholder="Paste interview notes or drop a downloaded demo file above. Gap cues such as 'need to understand' become candidate gaps. Mentions of trials, registries, chart reviews, or publications become extracted tactics."
-            className="min-h-28 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
-          />
-        </LockForm>
+      <div className={demoFiles ? "mt-6" : undefined}>
+        <AddSourceForm demoFiles={demoFiles} />
       </div>
 
       {compact ? null : (
@@ -115,7 +89,7 @@ export function IngestPanel({
           ) : (
             <div className="grid gap-3">
               {sources.map((s) => (
-                <article key={s.id} className="border border-border bg-card p-4">
+                <article key={s.id} className="border border-border bg-card p-4 rounded-lg">
                   <p className="text-[13px] text-foreground">{s.title}</p>
                   <p className="mt-1 text-[12px] text-muted-foreground">
                     {SOURCE_TYPE_LABELS[s.source_type]} · {FUNCTION_LABELS[s.stakeholder_function]}

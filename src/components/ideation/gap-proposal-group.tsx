@@ -1,17 +1,48 @@
 import Link from "next/link";
-import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
+import { plural } from "@/lib/plural";
 
 export type GapProposalGroup = {
   gap_id: string;
   gap_name: string;
   statement: string;
   domain_label: string;
-  band: "high" | "medium" | "low" | null;
+  band: "high" | "medium" | "low" | "defer" | null;
   band_validated: boolean;
   mapped_tactic_count: number;
   proposals: ProposalCardModel[];
 };
+
+/** A person writes an idea for the gap with no model run; it is decided like any other. */
+export function AddIdeaDialog({
+  gapId,
+  gapName,
+  identity,
+  variant = "outline",
+}: {
+  gapId: string;
+  gapName: string;
+  identity: ActionIdentity;
+  variant?: "default" | "outline";
+}) {
+  return (
+    <ActionDialog
+      endpoint="/api/plan"
+      payload={{ action: "add_proposal", gap_id: gapId }}
+      fields={proposalFields()}
+      label="Add idea by hand"
+      title={`Add an idea for ${gapName}`}
+      description="Write the tactic yourself. It joins the ideas awaiting a decision and is accepted or rejected the same way."
+      confirmLabel="Add idea"
+      requireRationale
+      identity={identity}
+      variant={variant}
+      size="sm"
+    />
+  );
+}
 
 export function GapProposalGroupCard({
   group,
@@ -25,7 +56,7 @@ export function GapProposalGroupCard({
   const accepted = group.proposals.filter((p) => p.status === "accepted").length;
   const open = group.proposals.filter((p) => p.status === "proposed").length;
   return (
-    <section className="grid gap-3 rounded-md border border-border bg-card/40 p-3">
+    <section className="grid gap-3 rounded-md border border-border bg-card p-3">
       <header className="grid gap-1">
         <div className="flex flex-wrap items-center gap-1.5">
           {group.band ? (
@@ -37,7 +68,7 @@ export function GapProposalGroupCard({
                 borderStyle: group.band_validated ? "solid" : "dashed",
               }}
             >
-              {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : "Low"}
+              {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : group.band === "low" ? "Low" : "Defer"}
               {group.band_validated ? " · validated" : " · suggested"}
             </span>
           ) : null}
@@ -45,7 +76,7 @@ export function GapProposalGroupCard({
             {group.domain_label}
           </span>
           <span className="text-[10px] text-muted-foreground">
-            {group.mapped_tactic_count} mapped tactic(s)
+            {plural(group.mapped_tactic_count, "mapped tactic")}
           </span>
         </div>
         <Link
@@ -56,8 +87,13 @@ export function GapProposalGroupCard({
         </Link>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
-          {group.proposals.length} proposal(s) · {open} awaiting a decision · {accepted} accepted
+          {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
         </p>
+        {mayIdeate ? (
+          <div>
+            <AddIdeaDialog gapId={group.gap_id} gapName={group.gap_name} identity={identity} />
+          </div>
+        ) : null}
       </header>
       <div className="grid gap-3 lg:grid-cols-2">
         {group.proposals.map((proposal) => (

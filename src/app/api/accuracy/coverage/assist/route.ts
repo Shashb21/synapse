@@ -1,4 +1,5 @@
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
@@ -6,7 +7,15 @@ import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema
 import { mapCoverageOverallToUi } from "@/accuracy/modules/coverage-decide/overall-map";
 import { getClaimsByIds } from "@/accuracy/store/claim-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import { isTestStub } from "@/modules/kernel/llm";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +26,9 @@ const bodySchema = z.object({
   workspace_id: z.string().min(1),
   gap_id: z.string().min(1),
   tactic_id: z.string().min(1),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the run is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
   /** Optional override; default = provenance block ids from both claims. */
   block_bundle_ids: z.array(z.string()).optional(),
 });
@@ -28,12 +38,13 @@ const bodySchema = z.object({
  * does not persist; the human still confirms via POST /api/accuracy/coverage.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = bodySchema.parse(await req.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
+    const body = await parseLabBody(req, bodySchema);
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
 
     await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
     const claims = await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id]);
@@ -51,10 +62,7 @@ export async function POST(req: Request) {
         ? body.block_bundle_ids
         : blockBundleIdsForPair(gap, tactic);
 
-    const actor = {
-      name: body.actor_name?.trim() || "Coverage assist",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
+    const actor = await labActor();
 
     const result = await runAccuracyModule<CoverageDecision>({
       call_kind: "coverage_decide",
@@ -71,11 +79,8 @@ export async function POST(req: Request) {
     });
 
     const ui_overall = mapCoverageOverallToUi(result.output.overall);
-    const mode: "llm" | "stub" =
-      process.env.SYNAPSE_TEST_STUB_LLM === "1" ||
-      result.output.rationale.includes("deterministic not_relevant stub")
-        ? "stub"
-        : "llm";
+    // Only the test stub skips the model; a production run either used it or threw.
+    const mode: "llm" | "stub" = isTestStub() ? "stub" : "llm";
 
     return NextResponse.json({
       ok: true,
@@ -92,10 +97,14 @@ export async function POST(req: Request) {
       stub: mode === "stub",
     });
   } catch (error) {
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Coverage assist failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Coverage assist failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

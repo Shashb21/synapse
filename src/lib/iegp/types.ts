@@ -1,3 +1,4 @@
+import type { CustomTacticType } from "./custom-tactic-type";
 import type {
   ActorFunction,
   CoverageDimension,
@@ -94,7 +95,8 @@ export type EvidenceNeed = {
   timing: string;
   source_id: string;
   source_quote: string;
-  confidence: number;
+  /** Null until a model or a human scores it. */
+  confidence: number | null;
   status: NeedStatus;
   status_lock: Lock;
 };
@@ -130,6 +132,71 @@ export type EvidenceGap = {
   /** Set aside by a human as not a real gap. Excludes from Prioritize and Tactics until unparked. */
   parked_at: string | null;
   parked_reason: string | null;
+  /**
+   * Treatment settings the gap belongs to (e.g. "1L", "Perioperative"). Free
+   * tags a human adds; a gap can carry several. Prioritize scopes on them.
+   */
+  settings: string[];
+  /** The design's gap metadata (KAN-49): who it affects, where, and notes. Written by a person. */
+  metadata: GapMetadata;
+  /** The gap's number as people read it (001, 002…); the id stays the key (KAN-56). */
+  number: number;
+  /**
+   * Set when a new source joined the gap after a person had validated it or its
+   * priority (KAN-74); cleared when a person marks it reviewed.
+   */
+  new_source_at?: string | null;
+  /** The need that joined, for the "New source added" note. */
+  new_source_need_id?: string | null;
+  /** Gaps split from a shared question (KAN-75): each side lists the other. */
+  related_gap_ids?: string[];
+};
+
+export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
+
+/** A source sentence waiting on a suggestion: it follows the suggestion's outcome. */
+export type GapSuggestionSource = { source_id: string; statement: string; source_quote: string };
+
+/**
+ * A candidate gap the S2 judge found to overlap an existing gap (KAN-74): part of
+ * its question is the gap's, part is new. Nothing changes until a person accepts
+ * the merged wording, accepts the split, or rejects it (KAN-75).
+ */
+export type GapSuggestion = {
+  id: string;
+  gap_id: string;
+  run_id: string;
+  /** The S2 candidate row (gap_candidates), so a rejected one can be promoted later. */
+  candidate_row_id: string | null;
+  source_id: string;
+  name: string;
+  statement: string;
+  domain: EvidenceDomain;
+  source_quote: string;
+  shared_part: string;
+  new_part: string;
+  merged_name: string;
+  merged_statement: string;
+  split_name: string;
+  split_statement: string;
+  /** Repeats of the same candidate from other sources in the same run. */
+  extra_sources: GapSuggestionSource[];
+  status: GapSuggestionStatus;
+  /** The gap a split created. */
+  result_gap_id: string | null;
+  decided_by: string | null;
+  rationale: string | null;
+  created_at: string;
+  decided_at: string | null;
+};
+
+export type GapMetadata = {
+  /** Impacted stakeholders as tags: payers, HTA bodies, KOLs, patients… */
+  stakeholders: string[];
+  geography: string;
+  /** How the gap differs by country or region. */
+  regional_nuances: string;
+  notes: string;
 };
 
 export type GapVersionEvent = "split" | "rewrite";
@@ -196,6 +263,10 @@ export type Tactic = {
   budget: string | null;
   intended_use: string;
   lock: Lock;
+  /** The source sentence S3 extracted this tactic from. Empty for hand-created tactics. */
+  source_quote?: string;
+  /** A person's own type name and colour, shown over the standard type (KAN-51). */
+  custom_type?: CustomTacticType | null;
 };
 
 export type GapTacticCoverage = {
@@ -306,4 +377,5 @@ export type IegpState = {
   gap_versions: GapVersion[];
   breakout_groups: BreakoutGroup[];
   breakout_group_gaps: BreakoutGroupGap[];
+  gap_suggestions: GapSuggestion[];
 };

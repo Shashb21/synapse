@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 /** Authenticated, workspace-scoped API for one agent run's recorded progression. */
 import { NextResponse } from "next/server";
 import { readAgentProgression, registerAccuracyStack } from "@/accuracy";
@@ -18,6 +19,8 @@ export async function GET(
     return NextResponse.json({ error: "Sign in to inspect run progression" }, { status: 401 });
   }
 
+  const denied = await ownerGate();
+  if (denied) return denied;
   const { run_id } = await params;
   const workspace_id = new URL(request.url).searchParams.get("workspace_id")?.trim() ?? "";
   if (!workspace_id || !run_id?.trim()) {

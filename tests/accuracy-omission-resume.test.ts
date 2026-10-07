@@ -1,5 +1,5 @@
 /** Behavioral extraction and durable resume checks against the real database. */
-import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -25,7 +25,8 @@ const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contri
 vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
 
 // Concurrent HTTP requests need separate connections, as in the normal server pool.
-beforeAll(() => vi.stubEnv("VITEST", ""));
+// The main setup opens the pool in beforeAll; set its size before those hooks run.
+vi.stubEnv("VITEST", "");
 afterAll(() => vi.unstubAllEnvs());
 const originals = new Map<CallKind, string>();
 afterEach(() => {
@@ -111,7 +112,10 @@ describe("extraction omission resume", () => {
     expect(await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id))).toEqual(journals);
     Object.assign(identity, { signed_in: true, role: "contributor" });
     expect((await post(request)).status).toBe(200);
-    expect((await runs(scope.workspace_id)).filter(run => run.call_kind !== "need_extract").every(run => run.actor_name === "Test" && run.actor_function === "heor")).toBe(true);
+    const trustedActor = (await import("@/modules/auth/owner")).ownerAccess;
+    const owner = await trustedActor();
+    expect((await runs(scope.workspace_id)).filter(run => run.call_kind !== "need_extract")
+      .every(run => run.actor_name === owner.actor.name && run.actor_function === owner.actor.function)).toBe(true);
     Object.assign(identity, { signed_in, role });
     expect((await post(request)).status).toBe(status);
   });

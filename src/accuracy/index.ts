@@ -55,7 +55,7 @@ export {
 export {
   inspectLiveExtractGate,
   EXTRACT_CONNECT_PATH,
-  EXTRACT_OAUTH_GATE_MESSAGE,
+  EXTRACT_KEY_GATE_MESSAGE,
 } from "./kernel/extract-gate";
 export {
   listAccuracyRuns,

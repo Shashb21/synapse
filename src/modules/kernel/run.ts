@@ -1,19 +1,26 @@
 import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
-import { completionFor, resolveRoute, routeConfig } from "./routing";
+import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
+import { AI_OFF_MESSAGE, AiDisabledError, aiEnabled, aiSectionEnabled, platformAiEnabled } from "./ai-switch";
+import { sectionOfStage } from "./ai-sections";
 import { DEFAULT_ROUTE_PROVIDER, findProvider } from "@/modules/llm/provider";
 import { STAGES } from "./contracts";
 import { recordSignal } from "./hillclimb";
 import { recordEvalRun } from "./evals";
-import type { Actor, EvalScore, ModuleContext, StageId } from "./contracts";
+import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId } from "./contracts";
 import { assertCan, type Capability, type Role } from "@/modules/auth/roles";
+import { isTestStub } from "./llm";
+import { tagStageError } from "./stage-errors";
+import type { RunStep } from "./contracts";
 
 export const DEFAULT_WORKSPACE = "default";
 
 /** Agentic stages require a connected LLM; mechanical stages may run without one. */
 async function resolveRouteForRun(stage: StageId) {
-  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+  // Test stub only: modules swap the model for labelled local output, so the
+  // route is marked connected without a real provider behind it.
+  if (isTestStub()) {
     const preferred = await routeConfig(stage);
     const provider =
       findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
@@ -22,7 +29,7 @@ async function resolveRouteForRun(stage: StageId) {
       provider_id: provider.id,
       provider_label: provider.label,
       model: preferred.model || provider.default_model,
-      auth: "oauth" as const,
+      auth: "api_key" as const,
       connected: true,
       params: preferred.params,
       fallbacks: preferred.fallbacks,
@@ -43,7 +50,7 @@ async function resolveRouteForRun(stage: StageId) {
       provider_id: provider.id,
       provider_label: provider.label,
       model: preferred.model || provider.default_model,
-      auth: "oauth" as const,
+      auth: "api_key" as const,
       connected: false,
       params: preferred.params,
       fallbacks: preferred.fallbacks,
@@ -51,6 +58,36 @@ async function resolveRouteForRun(stage: StageId) {
       reason: message,
     };
   }
+}
+
+/** The route a run sees while AI is off: nothing to prompt, and it says why. */
+async function aiOffRoute(stage: StageId): Promise<ResolvedRoute> {
+  const preferred = await routeConfig(stage);
+  const provider = findProvider(preferred.provider_id) ?? findProvider(DEFAULT_ROUTE_PROVIDER)!;
+  return {
+    stage,
+    provider_id: provider.id,
+    provider_label: provider.label,
+    model: preferred.model || provider.default_model,
+    auth: "none",
+    connected: false,
+    params: preferred.params,
+    fallbacks: preferred.fallbacks,
+    degraded: false,
+    reason: AI_OFF_MESSAGE,
+  };
+}
+
+/**
+ * Whether a run's decisions came from a model. A stage that reports its own
+ * `mode` is believed; otherwise any recorded `llm:*` completion step counts.
+ */
+export function runMode(output: unknown, steps: Pick<RunStep, "name">[]): "llm" | "deterministic" {
+  if (output && typeof output === "object" && "mode" in output) {
+    const mode = (output as { mode?: unknown }).mode;
+    if (mode === "llm" || mode === "deterministic") return mode;
+  }
+  return steps.some((step) => step.name.startsWith("llm:")) ? "llm" : "deterministic";
 }
 
 export type StageRunResult<O> = {
@@ -75,7 +112,8 @@ const CAPABILITY_BY_STAGE: Record<StageId, Capability> = {
   S7: "run_stage",
   S8: "prioritize",
   S9: "ideate",
-  S10: "export",
+  // Building the timeline writes the plan's activities: an edit, not an export (viewers only read and export).
+  S10: "run_stage",
 };
 
 /**
@@ -89,10 +127,29 @@ export async function runStage<O = unknown>(args: {
   actor: Actor;
   role: Role;
   workspace_id?: string;
+  /**
+   * Admin AI harness only (KAN-54): run the stage's AI whatever the customer-facing
+   * switches say, so a section can be tried before it is turned on. Needs a routed model.
+   * It never overrides the platform master switch: with AI off for the platform, no model runs.
+   */
+  force_ai?: boolean;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
   const implementation = await activeModule(args.stage);
   await ensurePlatformSchema(implementation.migrations ?? []);
+  // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
+  // Each stage follows its section's admin switch (KAN-53); S7 and S10 have no section.
+  const section = sectionOfStage(args.stage);
+  const ai =
+    args.force_ai === true
+      ? await platformAiEnabled()
+      : section
+        ? await aiSectionEnabled(section)
+        : await aiEnabled();
+  const manifest = implementation.manifest;
+  if (!ai && ((manifest.agentic && !manifest.ai_optional) || manifest.needs_ai)) {
+    throw new AiDisabledError(stageLabel(args.stage));
+  }
 
   const workspace_id = args.workspace_id ?? DEFAULT_WORKSPACE;
   const recorder = new RunRecorder({
@@ -116,7 +173,7 @@ export async function runStage<O = unknown>(args: {
   }
   recorder.note("input:accepted", parsedInput.data);
 
-  const route = await resolveRouteForRun(args.stage);
+  const route = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);
 
   const ctx: ModuleContext = {
@@ -125,7 +182,12 @@ export async function runStage<O = unknown>(args: {
     role: args.role,
     run: recorder,
     route,
-    complete: completionFor(route, recorder),
+    complete: ai
+      ? completionFor(route, recorder)
+      : async () => {
+          throw new AiDisabledError(stageLabel(args.stage));
+        },
+    ai,
   };
 
   try {
@@ -160,13 +222,12 @@ export async function runStage<O = unknown>(args: {
     for (const signal of result.signals ?? []) {
       await recordSignal(signal);
     }
-    const modeStep = recorder.steps().find((step) => step.name === "proposer:llm");
     return {
       run_id: recorder.id,
       stage: args.stage,
       module_id: implementation.manifest.id,
       module_version: implementation.manifest.version,
-      mode: modeStep ? "llm" : "deterministic",
+      mode: runMode(parsedOutput.data, recorder.steps()),
       summary: result.summary,
       output: parsedOutput.data as O,
       evals,
@@ -174,6 +235,8 @@ export async function runStage<O = unknown>(args: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await closeRun({ recorder, status: "error", error: message, route });
+    // So the response can say which step failed (and offer to re-run mapping, KAN-68).
+    tagStageError(error, args.stage);
     throw error;
   }
 }

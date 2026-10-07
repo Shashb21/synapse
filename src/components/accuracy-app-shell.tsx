@@ -2,7 +2,7 @@ import { AccuracyChrome, type AccuracyShellId } from "@/components/accuracy-chro
 import type { PlanLabel } from "@/accuracy/domain/plan-label";
 
 /**
- * Shell for accuracy-first routes (/accuracy/*). Mirrors platform shell layout without
+ * Shell for the accuracy lab (/admin/accuracy/*), inside the owner console. Mirrors platform shell layout without
  * legacy IEGP place nav.
  */
 export function AccuracyAppShell({
@@ -21,4 +21,4 @@ export function AccuracyAppShell({
   );
 }
 
-export { PageIntro } from "@/components/app-shell";
+export { PageIntro } from "@/components/admin/admin-page";

@@ -99,7 +99,7 @@ export const STAGES: Record<StageId, StageDescriptor> = {
   S9: {
     id: "S9",
     title: "Tactics ideation",
-    purpose: "Propose tactics for high-priority open gaps (proposer → critic → judge).",
+    purpose: "Propose tactics for open gaps with a validated priority band (proposer → critic → judge).",
     kind: "agentic",
     upstream: ["S8"],
   },
@@ -127,6 +127,16 @@ export type ModuleManifest = {
   contract: 1;
   /** True when the module routes LLM calls through the control panel. */
   agentic: boolean;
+  /**
+   * An agentic module that still does useful work with AI switched off (e.g.
+   * the timeline laying out human dates). Others are refused while AI is off.
+   */
+  ai_optional?: boolean;
+  /**
+   * A mechanical module that only exists to feed an AI step (upload feeds the
+   * AI parser). Refused while AI is off, like an agentic module.
+   */
+  needs_ai?: boolean;
   capabilities?: string[];
 };
 
@@ -189,7 +199,7 @@ export type ResolvedRoute = {
   provider_id: string;
   provider_label: string;
   model: string;
-  auth: "oauth" | "api_key" | "none";
+  auth: "api_key" | "none";
   connected: boolean;
   params: { temperature: number; max_tokens: number };
   fallbacks: string[];
@@ -213,6 +223,8 @@ export type ModuleContext = {
   run: RunHandle;
   route: ResolvedRoute;
   complete: JsonCompletion;
+  /** False while an admin has AI switched off; no model may be called. */
+  ai: boolean;
 };
 
 export type ModuleResult<O> = {

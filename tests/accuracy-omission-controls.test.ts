@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import OmissionActions from "@/app/accuracy/runs/[run_id]/omission-actions";
+import OmissionActions from "@/app/admin/accuracy/runs/[run_id]/omission-actions";
 
 const issue = { issue_id: "issue-1", item_kind: "gap", summary: "Regional evidence need",
   source_ref: { source_file_id: "source-1", block_id: "block-1" }, evidence_quote: "Evidence",

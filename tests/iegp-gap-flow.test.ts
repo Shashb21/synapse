@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  resetSeed,
+  resetDemoSetup,
   loadState,
   persistState,
   createGap,
@@ -20,12 +20,13 @@ import {
 } from "@/lib/iegp/store";
 import {
   buildPlanWorkspace,
+  buildTacticLibrary,
   displayedGapStatus,
   gapsReadyForPrioritize,
 } from "@/lib/iegp/engine";
 
 async function makePartialGap() {
-  await resetSeed();
+  await resetDemoSetup();
   const gapId = await createGap({
     name: "Comparative effectiveness versus regional SoC in elderly patients",
     statement: "Need comparative effectiveness of Velmara versus regional standard of care in elderly patients.",
@@ -89,6 +90,20 @@ describe("partial split and rewrite", () => {
     expect(gapsReadyForPrioritize(after)).toBe(true);
   });
 
+  it("KAN-68: a tactic's gap list leaves out the retired parent of a split", async () => {
+    const { gapId, tacticId } = await makePartialGap();
+    const result = await splitPartialGap({
+      parent_gap_id: gapId,
+      addressed_name: "Elderly outcomes covered by the chart review",
+      open_name: "Comparator evidence versus regional SoC in frail elderly",
+      tactic_id: tacticId,
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const item = buildTacticLibrary(await loadState()).find((t) => t.id === tacticId)!;
+    expect(item.gaps.map((g) => g.id)).toEqual([result.addressedId]);
+  });
+
   it("rewrites a partial as Open and keeps the original in version history", async () => {
     const { gapId } = await makePartialGap();
     const liveId = await rewritePartialGap({
@@ -140,7 +155,7 @@ describe("partial split and rewrite", () => {
   });
 
   it("lets the user add an Addressed gap with a tactic, and requires validation before Prioritize", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const tacticId = await createProposedTactic({
       name: "Completed publication",
       type: "publication",
@@ -276,7 +291,7 @@ describe("partial split and rewrite", () => {
   });
 
   it("flags sibling coverage needs_review without copying dimension values", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapA = await createGap({
       name: "Sequencing after osimertinib",
       statement: "Where Velmara sits after osimertinib failure.",
@@ -368,7 +383,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
   }
 
   it("maps an existing library tactic onto a gap from the Gaps path", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "Need comparative effectiveness versus regional SoC in elderly patients.",
       actor_name: "A. Rao",
@@ -389,7 +404,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
   });
 
   it("records missed ongoing, completed, and planned tactics and auto-maps them onto the gap", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "Need ILD characterisation in community oncology clinics.",
       actor_name: "A. Rao",
@@ -415,7 +430,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
   });
 
   it("rejects proposed from the Gaps create-tactic path", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     const gapId = await createGap({
       statement: "White-space leftover after mapping",
       actor_name: "A. Rao",
@@ -450,7 +465,7 @@ describe("Gaps map existing vs record missed vs proposed", () => {
   });
 
   it("still requires a tactic when adding an Addressed gap", async () => {
-    await resetSeed();
+    await resetDemoSetup();
     await expect(
       createAddressedGap({
         statement: "PFS versus osimertinib in the pivotal trial",

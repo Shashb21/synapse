@@ -1,3 +1,5 @@
+import { refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import { ownerGate } from "@/modules/auth/owner";
 /** Authenticated controlled 1/2/3-pass cohorts and scoped retained-evidence comparisons. */
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
@@ -14,8 +16,12 @@ registerAccuracyStack();
 export async function POST(request: Request) {
   const session = await sessionContext();
   if (!session.signed_in) return NextResponse.json({ error: "Sign in to access experiments" }, { status: 401 });
+  const denied = await ownerGate();
+  if (denied) return denied;
   if (!can(session.role, "validate")) return NextResponse.json({ error: "You do not have validation capability" }, { status: 403 });
   try {
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
     const body = await parseExperimentRequest(request, true);
     if (!await authorizedSourceWorkspace(body.source_workspace_id, session)) {
       return NextResponse.json({ error: "Source workspace not found" }, { status: 404 });
@@ -36,6 +42,8 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const session = await sessionContext();
   if (!session.signed_in) return NextResponse.json({ error: "Sign in to access experiments" }, { status: 401 });
+  const denied = await ownerGate();
+  if (denied) return denied;
   const query = new URL(request.url).searchParams;
   const source_workspace_id = query.get("source_workspace_id")?.trim() ?? "";
   const experiment_ids = query.getAll("experiment_id").map(id => id.trim());

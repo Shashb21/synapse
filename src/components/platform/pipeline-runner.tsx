@@ -9,13 +9,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SOURCE_TYPES, SOURCE_TYPE_LABELS, type SourceType } from "@/lib/iegp/enums";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import { useAiEnabled } from "@/components/platform/ai-status";
+import { CUSTOMER_STAGE_TARGET, type StageTarget } from "@/components/platform/run-stage-button";
 
 type StageStep = { stage: string; label: string; input?: Record<string, unknown> };
 
 type StepState = { status: "idle" | "running" | "ok" | "error"; detail?: string };
 
-async function runOne(step: StageStep, identity: ActionIdentity) {
-  const res = await fetch("/api/modules", {
+async function runOne(step: StageStep, identity: ActionIdentity, target: StageTarget) {
+  const res = await fetch(target.endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -23,22 +25,29 @@ async function runOne(step: StageStep, identity: ActionIdentity) {
       input: step.input ?? {},
       actor_name: identity.actor_name,
       actor_function: identity.actor_function,
+      ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
     }),
   });
-  const json = (await res.json()) as { error?: string; summary?: string; mode?: string };
-  if (!res.ok) throw new Error(json.error ?? `${step.stage} failed`);
+  const json = (await res.json().catch(() => ({}))) as { error?: string; summary?: string; mode?: string };
+  if (!res.ok) throw new Error(json.error ?? `${step.stage} failed (HTTP ${res.status})`);
   return json;
 }
 
-/** Runs a fixed chain of stages in order and reports each one as it lands. */
-export function ChainRunner({
+/** Runs a fixed chain of stages in order and reports each one as it lands. Hidden while AI is off. */
+export function ChainRunner(props: { steps: StageStep[]; label: string; identity: ActionIdentity; target?: StageTarget }) {
+  return useAiEnabled() ? <Chain {...props} /> : null;
+}
+
+function Chain({
   steps,
   label,
   identity,
+  target = CUSTOMER_STAGE_TARGET,
 }: {
   steps: StageStep[];
   label: string;
   identity: ActionIdentity;
+  target?: StageTarget;
 }) {
   const router = useRouter();
   const [state, setState] = useState<Record<string, StepState>>({});
@@ -50,7 +59,7 @@ export function ChainRunner({
     for (const step of steps) {
       setState((prev) => ({ ...prev, [step.stage]: { status: "running" } }));
       try {
-        const result = await runOne(step, identity);
+        const result = await runOne(step, identity, target);
         setState((prev) => ({
           ...prev,
           [step.stage]: { status: "ok", detail: result.summary },
@@ -85,7 +94,7 @@ export function ChainRunner({
                 {status === "running" ? (
                   <Loader2 className="mt-0.5 size-3 animate-spin text-muted-foreground" aria-hidden />
                 ) : status === "ok" ? (
-                  <CircleCheck className="mt-0.5 size-3 text-[var(--known)]" aria-hidden />
+                  <CircleCheck className="mt-0.5 size-3 text-[var(--known-foreground)]" aria-hidden />
                 ) : status === "error" ? (
                   <TriangleAlert className="mt-0.5 size-3 text-destructive" aria-hidden />
                 ) : (
@@ -109,14 +118,21 @@ export function ChainRunner({
   );
 }
 
-/** S0 upload: demo pack files or a pasted note. S1 parses whatever lands. */
-export function ModularUploadForm({
-  demoOptions,
-  identity,
-}: {
+type UploadFormProps = {
   demoOptions: { id: string; title: string; filename: string }[];
   identity: ActionIdentity;
-}) {
+  target?: StageTarget;
+};
+
+/**
+ * S0 upload: demo pack files or a pasted note. S1 parses whatever lands.
+ * With AI off there is no upload or parsing at all; the form is not rendered.
+ */
+export function ModularUploadForm(props: UploadFormProps) {
+  return useAiEnabled() ? <UploadForm {...props} /> : null;
+}
+
+function UploadForm({ demoOptions, identity, target = CUSTOMER_STAGE_TARGET }: UploadFormProps) {
   const router = useRouter();
   const [picked, setPicked] = useState<string[]>([]);
   const [title, setTitle] = useState("");
@@ -149,10 +165,11 @@ export function ModularUploadForm({
       const upload = await runOne(
         { stage: "S0", label: "Upload", input: { files, demo_ids: picked } },
         identity,
+        target,
       );
       let detail = upload.summary ?? "uploaded";
       if (parseToo) {
-        const parsed = await runOne({ stage: "S1", label: "Parse", input: {} }, identity);
+        const parsed = await runOne({ stage: "S1", label: "Parse", input: {} }, identity, target);
         detail = `${detail}; ${parsed.summary ?? "parsed"}`;
       }
       setMessage(detail);

@@ -3,6 +3,7 @@ import { agenticModule } from "../_factory";
 import { inspectQuoteSpans, runShallowAgenticCycle } from "../../kernel/agentic";
 import type { CriticIssue, ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
+import { isTestStub } from "@/modules/kernel/llm";
 import { provenanceSpanSchema } from "../../store/quote-validator";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { newId } from "@/modules/kernel/ids";
@@ -136,7 +137,7 @@ async function proposeInventory(
   blocks: Awaited<ReturnType<typeof readParseBlocks>>,
   block_ids: string[],
 ): Promise<InventoryDraft> {
-  if (process.env.SYNAPSE_TEST_STUB_LLM === "1") {
+  if (isTestStub()) {
     return { tactics: [] };
   }
   const raw = await completeJson(ctx.complete, {
@@ -169,7 +170,7 @@ export const inventoryExtractModule = agenticModule({
   }),
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
-    const stub = process.env.SYNAPSE_TEST_STUB_LLM === "1";
+    const stub = isTestStub();
     const blocks = stub ? [] : (input.block_ids.length
       ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
       : await readParseBlocks(input.workspace_id, input.source_file_id))

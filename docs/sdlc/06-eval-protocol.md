@@ -1,5 +1,7 @@
 # Eval protocol
 
+> **Retired — v1 insights engine.** This page describes the retired Velmara Insights Engine (flat insight records, theme catalog, knowledge graph, local hill-climb). It is kept for lineage only and does not describe the current product. Its code (`src/lib/pipeline.ts`, `src/lib/store.ts`, the LlamaParse ingest) was removed in KAN-21, and most of the tests and customer routes it cites (for example `/insights`, `/graph`, `/ingest`) no longer exist. The owner tool's current eval gold is `src/modules/eval-gold/`. Current specs: [01-requirements.md](./01-requirements.md), [02-architecture.md](./02-architecture.md), [09-flow-high-level.md](./09-flow-high-level.md), [10-flow-technical.md](./10-flow-technical.md). **How the code is tested today, and the current gold: [13-testing.md](./13-testing.md).**
+
 This is the full write-up of how extraction is scored, how misses / partials / wrongs are caught, how the champion moves, and how good the prompt actually is. The gold **inventory** (every `GOLD-xxx` row) is [12-gold-set.md](./12-gold-set.md). Live numbers are the `/evals` tape after seed or ingest. This file is the contract; the tape is the latest run.
 
 Hill-climb (`runEvalSweep` in `src/lib/pipeline.ts`) runs automatically when the engine seeds and after every document ingest. `/evals` and `/sdlc` are view-only. There is no Run button (REQ-UX-008, REQ-OPS-001).

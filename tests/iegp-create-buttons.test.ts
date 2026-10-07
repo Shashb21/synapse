@@ -55,9 +55,11 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(cards).not.toContain("Accept tactic");
     const chrome = readFileSync(path.join(process.cwd(), "src/components/plan-chrome.tsx"), "utf8");
     expect(chrome).toContain('label: "Upload"');
-    expect(chrome).toContain('label: "Gaps"');
-    expect(chrome).toContain('label: "Prioritize"');
-    expect(chrome).toContain('label: "Tactics"');
+    // KAN-8: the Figma design's place names.
+    expect(chrome).toContain('label: "Evidence Inventory"');
+    expect(chrome).toContain('label: "Prioritization Matrix"');
+    expect(chrome).toContain('label: "Tactic Ideation"');
+    expect(chrome).toContain('label: "Gantt Timeline"');
     expect(chrome).toContain('href: "/?place=upload"');
     expect(chrome).toContain('href: "/?place=gaps"');
     expect(chrome).toContain('href: "/?place=plan"');
@@ -72,7 +74,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(page).toContain("TacticsPlace");
     const tacticsRoute = readFileSync(path.join(process.cwd(), "src/app/tactics/page.tsx"), "utf8");
     expect(tacticsRoute).toContain("TacticsPlace");
-    expect(tacticsRoute).toContain("tacticsUnlocked");
+    expect(tacticsRoute).toContain("ready={gates.tacticsUnlocked}");
     expect(tacticsRoute).not.toContain("Propose a tactic");
     const tacticsPlace = readFileSync(path.join(process.cwd(), "src/components/tactics-place.tsx"), "utf8");
     expect(tacticsPlace).toContain("Ideate proposed tactics here after Prioritize");
@@ -101,7 +103,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(dialog).toContain("Resolve — split or rewrite");
     expect(dialog).toContain("tactic_ids");
     expect(dialog).toContain("addressed_name");
-    expect(dialog).not.toContain("addressed_statement");
+    expect(dialog).toContain("addressed_statement");
+    expect(dialog).toContain("open_statement");
     expect(dialog).toContain("At least one tactic");
     expect(dialog).not.toContain("create_tactic");
     expect(dialog).not.toContain("record_missed_tactic");
@@ -125,7 +128,7 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     const badges = readFileSync(path.join(process.cwd(), "src/components/iegp-badges.tsx"), "utf8");
     expect(badges).not.toContain("Outdated coverage");
     expect(badges).not.toContain("StaleFlag");
-    expect(badges).toContain("Review coverage — also mapped elsewhere");
+    expect(badges).toContain("Review coverage");
     expect(badges).toContain("Tooltip");
     expect(badges).toContain("delay={0}");
     expect(badges).not.toContain("nativeButton");

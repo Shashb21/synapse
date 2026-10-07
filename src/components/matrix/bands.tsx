@@ -1,18 +1,29 @@
-export type Band = "high" | "medium" | "low";
+/** The four matrix priorities (KAN-8, the owner's Figma design). */
+export type Band = "high" | "medium" | "low" | "defer";
 
-export const BANDS: Band[] = ["high", "medium", "low"];
+export const BANDS: Band[] = ["high", "medium", "low", "defer"];
 
 export const BAND_LABELS: Record<Band, string> = {
   high: "High",
   medium: "Medium",
   low: "Low",
+  defer: "Defer",
 };
 
-/** Band colour comes from the chart tokens so the plot, chips and legend agree. */
+/** The quadrant each band is on the canvas, as the design names them. */
+export const QUADRANT_NAMES: Record<Band, string> = {
+  high: "Prioritize",
+  medium: "Plan",
+  low: "Monitor",
+  defer: "Defer",
+};
+
+/** Band colour comes from the tokens so the plot, chips and legend agree. */
 export const BAND_TOKENS: Record<Band, string> = {
   high: "var(--chart-5)",
   medium: "var(--chart-4)",
-  low: "var(--chart-3)",
+  low: "var(--opportunity)",
+  defer: "var(--muted-foreground)",
 };
 
 export function BandChip({ band, validated }: { band: Band; validated: boolean }) {
@@ -43,7 +54,7 @@ export function BandLegend({ counts }: { counts: Record<Band, number> }) {
       ))}
       <li className="flex items-center gap-1.5">
         <span className="size-2.5 rounded-full border border-dashed border-muted-foreground" aria-hidden />
-        A dashed edge means the band is still only an S8 suggestion
+        A dashed edge means the band is still only an AI suggestion
       </li>
     </ul>
   );

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { sessionContext } = vi.hoisted(() => ({ sessionContext: vi.fn() }));
 vi.mock("@/modules/auth/session", () => ({ sessionContext }));
 import {
@@ -139,7 +139,7 @@ describe("ledger SI / chapter filters", () => {
     expect(tisleFacets.chapters.some((f) => f.slug === UNASSIGNED_FILTER)).toBe(true);
 
     expect(ledgerHref("ws_1", { si: "differentiation" })).toBe(
-      "/accuracy/ledger?workspace_id=ws_1&si=differentiation",
+      "/admin/accuracy/ledger?workspace_id=ws_1&si=differentiation",
     );
     expect(parseLedgerFilters({ chapter: "ESCC", si: "CE" })).toEqual({
       chapter: "advanced_metastatic_escc",
@@ -149,10 +149,12 @@ describe("ledger SI / chapter filters", () => {
 });
 
 describe("workspace plan_label (IEP vs IEGP)", () => {
+  beforeEach(() => vi.stubEnv("OWNER_EMAILS", "owner@example.test,viewer@example.test"));
+  afterEach(() => vi.unstubAllEnvs());
   it("forbids read-only viewers from creating a workspace", async () => {
     sessionContext.mockResolvedValue({
       signed_in: true,
-      session: { subject: "viewer-subject" },
+      session: { subject: "viewer-subject", email: "viewer@example.test", provider_id: "sso" },
       actor: { name: "Viewer", function: "medical_affairs" },
       role: "viewer",
     });
@@ -182,7 +184,7 @@ describe("workspace plan_label (IEP vs IEGP)", () => {
   it("persists plan_label on create and returns it from the workspaces API", async () => {
     sessionContext.mockResolvedValue({
       signed_in: true,
-      session: { subject: "plan-label-creator" },
+      session: { subject: "plan-label-creator", email: "owner@example.test", provider_id: "sso" },
       actor: { name: "Plan label creator", function: "medical_affairs" },
       role: "contributor",
     });

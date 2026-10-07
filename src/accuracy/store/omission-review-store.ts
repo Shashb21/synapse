@@ -5,8 +5,9 @@ import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
 import { newId } from "@/modules/kernel/ids";
 import { isActiveLedgerClaim } from "./claim-store";
+import { withHumanEdit } from "./claim-edit";
 import { claimToMergeCandidate } from "@/accuracy/modules/merge-dedupe/module";
-import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, statementJaccard, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
+import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { accuracyDb, ensureAccuracySchema } from "./db";
@@ -155,7 +156,21 @@ function isClosed(action: OmissionAction | undefined): boolean {
   return !!action && (action.action !== "reclassify" || action.new_importance === "advisory");
 }
 
-/** Compare using the merge engine's pack, identity, and lexical rules. */
+/** Legacy lexical guard for omission adds; it never decides an automatic merge. */
+function tokenSet(value: string): Set<string> {
+  return new Set(normalizeStatement(value).split(" ").filter((t) => t.length > 1));
+}
+
+function statementJaccard(a: string, b: string): number {
+  const A = tokenSet(a);
+  const B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter += 1;
+  return inter / (A.size + B.size - inter);
+}
+
+/** Compare pack and identity through the merge owner, then guard ambiguous omission adds. */
 function matchCandidate(finding: MergeCandidate, existing: MergeCandidate): "equivalent" | "ambiguous" | null {
   if (finding.claim_type !== existing.claim_type || !packsMayMerge(finding, existing)) return null;
   const ids = new Set(identityKeys(existing));
@@ -251,8 +266,11 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
         claim_id = newId(issue.item_kind === "gap" ? "gap" : "tac");
         await tx.insert(t.accuracyClaims).values({ id: claim_id, workspace_id: input.workspace_id, claim_type: issue.item_kind,
           statement: proposed.statement, status: "draft", validated: false, source_file_id: run.source_file_id,
-          metadata: { provenance: [span], reference_pack_id: sources[0].reference_pack_id, origin: "contributor",
-            omission_action_id: actionId, contributor: { name: input.actor.name, function: input.actor.function, reason: input.reason } },
+          metadata: withHumanEdit({ provenance: [span], reference_pack_id: sources[0].reference_pack_id, origin: "contributor",
+            omission_action_id: actionId, contributor: { name: input.actor.name, function: input.actor.function, reason: input.reason } }, {
+            action: "create", fields: ["statement", "provenance"], before: {},
+            after: { statement: proposed.statement, provenance: [span] }, rationale: input.reason, actor: input.actor, at: now,
+          }),
           created_at: now, updated_at: now });
       } else {
         const target = rows.find((row) => row.id === input.claim_id);
@@ -263,8 +281,12 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
         if (tacticStatusesConflict(candidate, existing)) throw new OmissionActionError(409, "Linked tactic has conflicting lifecycle.");
         claim_id = target.id;
         if (!existing.provenance.some((entry) => entry.source_file_id === span.source_file_id && entry.block_id === span.block_id && entry.quote === span.quote)) {
-          await tx.update(t.accuracyClaims).set({ metadata: { ...(target.metadata as Record<string, unknown>),
-            provenance: [...existing.provenance, span] }, updated_at: now }).where(and(
+          const provenance = [...existing.provenance, span];
+          const metadata = withHumanEdit({ ...(target.metadata as Record<string, unknown>), provenance }, {
+            action: "edit", fields: ["provenance"], before: { provenance: existing.provenance }, after: { provenance },
+            rationale: input.reason, actor: input.actor, at: now,
+          });
+          await tx.update(t.accuracyClaims).set({ metadata, updated_at: now }).where(and(
             eq(t.accuracyClaims.workspace_id, input.workspace_id), eq(t.accuracyClaims.id, target.id)));
         }
       }

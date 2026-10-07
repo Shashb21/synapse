@@ -12,30 +12,29 @@ import {
   type RunHandle,
 } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
-import { accessToken, authKindFor, connectionStatus } from "@/modules/llm/oauth";
-import { hasProviderApiKey } from "@/modules/llm/api-keys";
+import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
   DEFAULT_ROUTE_PROVIDER,
   NoRouteError,
   findProvider,
-  providerConfigured,
+  servedModel,
 } from "@/modules/llm/provider";
 import { estimateCostUsd, usageFromMessages } from "./cost";
+import { DEFAULT_MAX_TOKENS } from "@/modules/kernel/routing";
+import { isTestStub } from "@/modules/kernel/llm";
 
-/** Live LLM may use OAuth always, or an env API key except Claude without a workspace id. */
+/**
+ * Whether an Anthropic workspace id is set. Optional: only an org-scoped key
+ * needs one, and the Claude provider sends it when it is set (KAN-65).
+ */
 export function anthropicWorkspaceConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_WORKSPACE_ID?.trim());
 }
 
-export function accuracyAuthAllowsLive(
-  provider_id: string,
-  auth: "oauth" | "api_key" | "none",
-): boolean {
-  if (auth === "oauth") return true;
-  if (auth !== "api_key") return false;
-  if (provider_id === "anthropic-claude") return anthropicWorkspaceConfigured();
-  return true;
+/** Live LLM needs the provider's env API key; every provider's key is enough on its own. */
+export function accuracyAuthAllowsLive(_provider_id: string, auth: "api_key" | "none"): boolean {
+  return auth === "api_key";
 }
 
 export type AccuracyRouteConfig = {
@@ -56,7 +55,7 @@ function defaultConfig(call_kind: CallKind, agent_role: AgentRole | "none"): Acc
     agent_role,
     provider_id: DEFAULT_ROUTE_PROVIDER,
     model: provider.default_model,
-    params: { temperature: 0, max_tokens: 8192 },
+    params: { temperature: 0, max_tokens: DEFAULT_MAX_TOKENS },
     fallbacks: [...DEFAULT_ROUTE_FALLBACKS],
     updated_by: "default (Grok → Claude → OpenAI)",
     updated_at: "—",
@@ -73,7 +72,14 @@ export async function accuracyRouteConfigs(): Promise<AccuracyRouteConfig[]> {
       meta.llm_roles.length === 0 ? ["none"] : [...meta.llm_roles];
     for (const role of roles) {
       const row = rows.find((r) => r.call_kind === kind && r.agent_role === role);
-      out.push(row ? (row as unknown as AccuracyRouteConfig) : defaultConfig(kind, role));
+      if (!row) {
+        out.push(defaultConfig(kind, role));
+        continue;
+      }
+      const stored = row as unknown as AccuracyRouteConfig;
+      const provider = findProvider(stored.provider_id);
+      // A model the provider no longer lists reads as its default (KAN-65).
+      out.push(provider ? { ...stored, model: servedModel(provider, stored.model) } : stored);
     }
   }
   return out;
@@ -110,7 +116,7 @@ export async function setAccuracyRouteConfig(args: {
     model: args.model || provider.default_model,
     params: {
       temperature: args.temperature ?? 0,
-      max_tokens: args.max_tokens ?? 8192,
+      max_tokens: args.max_tokens ?? DEFAULT_MAX_TOKENS,
     },
     fallbacks: args.fallbacks?.length ? args.fallbacks : [...DEFAULT_ROUTE_FALLBACKS],
     updated_by: args.actor_name,
@@ -152,24 +158,12 @@ export async function resolveAccuracyRoute(args: {
   for (const [index, id] of candidates.entries()) {
     const provider = findProvider(id);
     if (!provider || provider.auth === "none") continue;
-    const oauthReady = providerConfigured(provider);
-    const keyReady = hasProviderApiKey(provider.id);
-    if (!oauthReady && !keyReady) {
-      reasons.push(`${provider.label}: OAuth client not available`);
+    if (!providerConfigured(provider)) {
+      reasons.push(missingKeyReason(provider));
       continue;
     }
-    const status = await connectionStatus(provider.id);
-    if (status !== "connected") {
-      reasons.push(`${provider.label}: ${status}`);
-      continue;
-    }
-    const authKind = (await authKindFor(provider.id)) ?? (keyReady ? "api_key" : "oauth");
-    if (!accuracyAuthAllowsLive(provider.id, authKind)) {
-      reasons.push(
-        provider.id === "anthropic-claude"
-          ? `${provider.label}: org API key needs ANTHROPIC_WORKSPACE_ID — connect Grok OAuth in /control`
-          : `${provider.label}: not usable for live LLM`,
-      );
+    if (!accuracyAuthAllowsLive(provider.id, "api_key")) {
+      reasons.push(`${provider.label}: not usable for live LLM`);
       continue;
     }
     return {
@@ -178,19 +172,17 @@ export async function resolveAccuracyRoute(args: {
       provider_id: provider.id,
       provider_label: provider.label,
       model: index === 0 ? config.model : provider.default_model,
-      auth: authKind,
+      auth: "api_key",
       connected: true,
       params: config.params,
       fallbacks: config.fallbacks,
       degraded: index > 0,
-      reason: reasons.length
-        ? reasons.join("; ")
-        : authKind === "api_key"
-          ? "server API key"
-          : null,
+      reason: reasons.length ? reasons.join("; ") : null,
     };
   }
-  throw new NoRouteError(reasons.join("; ") || "Connect a provider in /control");
+  throw new NoRouteError(
+    `${reasons.length ? `${reasons.join("; ")}. ` : ""}Set the provider's API key in the server environment, then retry.`,
+  );
 }
 
 export function accuracyCompletionFor(args: {
@@ -199,12 +191,13 @@ export function accuracyCompletionFor(args: {
   onUsage: (usage: ReturnType<typeof usageFromMessages>, cost_usd: number) => void;
 }): JsonCompletion {
   return async ({ system, user, purpose, maxTokens }) => {
-    if ((args.route.auth !== "oauth" && args.route.auth !== "api_key") || !args.route.connected) {
+    if (args.route.auth !== "api_key" || !args.route.connected) {
       throw new NoRouteError(`No LLM route for ${purpose}`);
     }
     const provider = findProvider(args.route.provider_id)!;
-    const token = await accessToken(args.route.provider_id);
-    if (!token) throw new NoRouteError(`${args.route.provider_label} not connected`);
+    // Read at call time and handed straight to the provider; never logged or traced.
+    const api_key = providerApiKey(args.route.provider_id);
+    if (!api_key) throw new NoRouteError(missingKeyReason(provider));
     const raw = await args.run.step(
       `llm:${args.route.role}:${purpose}`,
       () =>
@@ -216,7 +209,7 @@ export function accuracyCompletionFor(args: {
             temperature: args.route.params.temperature,
             max_tokens: maxTokens ?? args.route.params.max_tokens,
           },
-          { access_token: token, kind: args.route.auth === "api_key" ? "api_key" : "oauth" },
+          { api_key },
         ),
       `${args.route.provider_label} · ${args.route.model}`,
     );
@@ -229,6 +222,21 @@ export function accuracyCompletionFor(args: {
     args.onUsage(usage, cost_usd);
     return { raw, usage };
   };
+}
+
+/**
+ * Throws unless this route can prompt a model (or the test stub is on). Accuracy
+ * modules call it before any judgement; there is no rule-based fallback.
+ */
+export function requireAccuracyLlm(
+  route: Pick<ResolvedAccuracyRoute, "connected" | "auth">,
+  what: string,
+): void {
+  if (isTestStub()) return;
+  if (route.connected && route.auth === "api_key") return;
+  throw new NoRouteError(
+    `${what} needs a live LLM. Set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment and run it again.`,
+  );
 }
 
 /** Parse JSON from completion when module expects structured output. */

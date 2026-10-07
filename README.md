@@ -4,9 +4,9 @@ Digital **Integrated Evidence Generation Plan** for a pharmaceutical asset. Syna
 
 This is not a study tracker or a gap spreadsheet. It connects:
 
-objectives → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps.
+objectives → extracted gaps + tactics already mapped → **Gaps** (engine status, human validation, split/rewrite) → **Prioritize** → **Tactics** for open gaps → **Timeline**.
 
-Demo asset is fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC). The app starts as a **blank workspace**. First visit is the **Upload** pane on `/`. After you enter Prioritize, new ingest stays on Upload and lands on **Gaps**. Demo files live in `public/demo-sources/`.
+Every new workspace starts **blank**: no asset, sources, gaps or tactics, and the setup wizard asks for the plan's context. Choose **Start with demo data (Velmara)** when creating a workspace to get the fictional **Velmara / velmaratinib** (2L EGFR-mutant NSCLC) worked example instead: sources, gaps, tactics, validated bands and a dated timeline, marked with a **Demo** badge. A workspace owner can later **Load demo data** or **Reset to blank** from the workspace settings page (both replace everything in that workspace). Demo files live in `public/demo-sources/`.
 
 **Read first:** [`docs/problem-and-solution.md`](docs/problem-and-solution.md) and [`docs/iegp-model.md`](docs/iegp-model.md).
 
@@ -33,9 +33,45 @@ npm run dev
 
 App: [http://127.0.0.1:43217](http://127.0.0.1:43217) (local dev port; Vercel uses the platform default).
 
-**Deploy to Vercel:** [`docs/deploy-checklist.md`](docs/deploy-checklist.md) (operator list) and [`docs/deployment-vercel.md`](docs/deployment-vercel.md) — Postgres via Vercel Postgres / `DATABASE_URL`, OAuth redirects on `/control`.
+Developer shortcut: `npx tsx scripts/seed.ts` replaces the Default workspace's plan with the Velmara demo, and `npx tsx scripts/seed.ts --blank` empties it.
 
-The first visit is **Upload** on `/`. Ingest a demo file. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
+### Sign-in and the admin account
+
+There is no self sign-up. Customers sign in on `/login` with their organisation's **single sign-on** (Google, Microsoft or GitHub, when configured), and only when their verified email holds a **seat** the owner assigned in **Admin → Customers** (`/admin/customers`); everyone else is refused. Email and password sign-in is for the owner's own staff, plus one test customer account (below). The login page offers no demo sign-in; a demo sign-in API remains for automated tests in development builds only. `/account` shows who you are and, for staff, changes your password. Setting up a provider: [`docs/deploy-checklist.md`](docs/deploy-checklist.md) §3a.
+
+The admin account that opens the owner control panel (`/admin`) is created from the command line — nothing secret goes in config:
+
+```bash
+npm run create-admin
+# prompts for email, name, and the password twice (hidden); the same command resets an admin's password
+# non-interactive: printf '%s\n' "$ADMIN_PASSWORD" | npm run create-admin -- --email you@example.com --name "Your Name"
+```
+
+A test customer account for trying the customer side without SSO (KAN-59): a password account on a test-only email (default `tester@synapse.test`) holding the one seat of the **Synapse Test** customer. It signs in on `/login` like a customer and lands on the workspace picker; unassigning its seat in **Admin → Customers** signs it out at once. Only emails on test-only domains (`.test`, `.example`, `example.com`, …) can sign in this way; real customers stay SSO-only.
+
+```bash
+npm run create-test-customer
+# prompts for the email (Enter for tester@synapse.test) and the password; run again to reset the password
+```
+
+It uses `DATABASE_URL` from the environment or `.env*` files. Sign in at `/login` with that email and password. Sell and assign customer seats at **Admin → Customers** (`/admin/customers`); manage your own staff's password accounts (admins and Platform operators only) at **Admin → Users** (`/admin/users`): create (a temporary password is shown once), reset passwords, change roles, verify, disable/enable and unlock.
+
+Passwords: at least 12 characters, not your email, not a common password; stored only as scrypt hashes. Five wrong passwords in a row lock the account for 15 minutes (an admin can unlock it sooner).
+
+**Deploy to Vercel:** [`docs/deploy-checklist.md`](docs/deploy-checklist.md) (operator list) and [`docs/deployment-vercel.md`](docs/deployment-vercel.md) — Postgres via Vercel Postgres / `DATABASE_URL`; LLM provider API keys in the host environment; key status and routing in the owner console at `/admin/control`.
+
+### AI on and off
+
+The Synapse admin decides whether AI runs, in the owner console (`/admin/control`), for every customer at once (KAN-53):
+
+- the **master switch** ("AI for all workspaces") turns all AI on or off;
+- each **AI section** (ingestion, gap extraction, tactic extraction, mapping, partial split, prioritization, ideation) has its own switch, so one step can run by hand while the rest use AI.
+
+Customers have no AI switch of their own and are not told when a section is off: the screens simply offer the manual path.
+
+With AI off no model is called and nothing is uploaded or parsed: the first place is **Start**, where gaps and tactics are added by hand, and every later step works by hand. With AI on, every manual path is still there.
+
+With AI on, the first visit is **Upload** on `/`. Upload a source (PDF, DOCX, PPTX, XLSX, .txt or .md, up to 3 MB) or paste its text; the LLM chosen for the parse stage parses every file type into blocks. Old .doc, .ppt and .xls files must be saved as the newer formats first. There is no separate parser service. **Gaps** shows every mapped gap with computed Open / Partially Addressed / Addressed. Every gap lists the source(s) it was identified from under **View constituent needs** — if several documents raised the same gap, each source is listed. There is no accept/reject inbox. Partial must be split or rewritten. Then **Prioritize**, then **Tactics** for open gaps.
 
 Gap status after mapping (not the Plan High / Medium / Low bands):
 
@@ -43,34 +79,62 @@ Gap status after mapping (not the Plan High / Medium / Low bands):
 - **Partially Addressed** — some evidence (completed / ongoing / planned tactics and/or published literature) that supports but does not fully close the gap. Click Partial to split (LEFT = Addressed + tactic, RIGHT = Open leftover) or rewrite the original as Open or Addressed. Partial cannot stay.
 - **Addressed** — published literature and/or completed, ongoing, or planned tactics fully close the gap. The engine computes this when evidence is sufficient. A human override of Open or Addressed requires a reason and wins until cleared or marked stale on ingest/coverage refresh.
 
+Customer app:
+
 | Route | What |
 | --- | --- |
-| `/` | Sidebar places: Upload → Gaps → Prioritize → Tactics. Query `?place=` |
-| `/matrix` | Prioritization matrix on configurable axes (S8) |
-| `/ideation` | Tactic proposals for high-priority open gaps (S9) |
-| `/timeline` | The final IEGP as an interactive Gantt: detail on click, image export, save as final (S10) |
-| `/breakouts` | Create workshop breakout groups, assign gaps, open each group's room in its own window |
-| `/presentation` | Read-only chaptered walkthrough (context → gaps → tactics → timeline) with a .pptx leave-behind export |
-| `/pipeline` | Run any stage or the chain; module, route and last run per stage |
-| `/runs` | Observability: run traces, edit rationales, hillclimb signals, eval runs |
-| `/control` | Control panel: session and role, per-provider OAuth login, per-stage routing |
-| `/evals` | View-only gold tape (needs + coverage; engine computes Addressed when evidence closes) |
-| `/sdlc` | Spec tape |
+| `/` | Sidebar places: Upload (or Start with AI off) → Gaps → Prioritize → Tactics. Query `?place=` |
+| `/timeline` | The IEGP Gantt timeline (S10): every prioritized gap with its activities beneath it. Create, date, drag and sequence activities by hand with no model; with AI on, **Rebuild** has the model infer dependencies and estimate any start, duration or readout lag nobody set (human values always survive). Warnings for broken dependencies, detail on click, image (PNG) export, save as final (Medical Affairs) |
+| `/ideation` | Tactic ideas for High-priority open gaps, AI-proposed or added by hand (Medium and Low gaps get tactics from the library or by hand on the gap) |
+| `/needs`, `/residuals`, `/roadmap`, `/mappings` | Secondary lists: constituent needs, residual gaps, forward roadmap, gap × tactic mapping table |
+| `/room`, `/room/audience`, `/presentation` | **Hidden for now** (KAN-52): redirect to the plan. The presenter console and audience window come back by setting `ROOM_ENABLED` in `src/lib/room/enabled.ts`. The timeline exports as a PNG image |
+| `/breakouts` | **Hidden for now** (KAN-57): redirects to the plan. Comes back by setting `BREAKOUTS_ENABLED` in `src/lib/breakouts-enabled.ts` |
+| `/setup` | Setup wizard for the plan's context |
+| `/sources` | Upload and review sources and their parsed blocks (read only with AI off) |
+| `/workspaces`, `/workspaces/[id]` | Your workspaces; settings (rename, members, load demo / reset to blank) |
+| `/login`, `/account` | SSO sign-in for seat holders (plus staff email and password); your account and, for staff, your password |
+
+`/matrix` is kept only as a redirect to Prioritize (`/?place=plan`) so old bookmarks work.
+
+Owner console (owner only: `OWNER_EMAILS` or an admin/operator account). The old top-level URLs (`/control`, `/pipeline`, `/runs`, `/evals`, `/catalog`, `/sdlc`, `/docs`, `/accuracy/*`) redirect here:
+
+| Route | What |
+| --- | --- |
+| `/admin/control` | AI master switch and per-section switches, provider API key status (keys are env-only), per-stage model routing |
+| `/admin/customers` | Customers, seats sold and assigned |
+| `/admin/users` | Staff email and password accounts |
+| `/admin/accuracy` | The accuracy lab (owner testing tool) |
+| `/admin/pipeline`, `/admin/runs` | Run any stage or the chain; run traces and signals |
+| `/admin/evals`, `/admin/catalog`, `/admin/modules` | Gold evals, registered modules and prompt variants, module versions |
+| `/admin/sdlc`, `/admin/docs` | Specs in `docs/sdlc` |
 
 ## Modular stack
 
-Every pipeline stage (S0 upload → S10 Gantt) is an independent module behind a
-versioned contract, with its own observability, evals and hillclimb loop. See
+Every stage (S0 upload → S10 timeline) is an independent module behind a
+versioned contract, with its own observability and evals. See
 [`docs/modules.md`](docs/modules.md) for the boundaries and the upgrade steps.
 
-LLM access is **OAuth only** — no API-key path for an end user. Providers: xAI
-Grok (default route), Anthropic Claude (one-click alternate), OpenAI, Google
-Gemini, OpenRouter, each logged in from the control panel. With nothing connected
-the stages run their deterministic proposer/critic/judge, so the pipeline still
-works end to end. Copy `.env.example` to `.env.local` and fill in the OAuth client
-ids you want available; never commit a credential.
+LLM access is set up by the owner, never by an end user. Every provider uses one
+server-side API key from the environment: `XAI_API_KEY` (xAI Grok, the default
+route), `ANTHROPIC_API_KEY` (Anthropic Claude, the one-click alternate),
+`OPENAI_API_KEY`, `GEMINI_API_KEY` and `OPENROUTER_API_KEY`. There is no provider
+login. **AI & routing** (`/admin/control`) shows each provider as "Key set" or
+"No key" with the env var it reads, never the value, and sets per-stage routing.
+A provider with no key is not configured: routing to it fails with a message
+naming the env var, and the manual path stays available; nothing falls back to
+rules. Copy `.env.example` to `.env.local` and fill in what you need; never commit
+a credential.
 
-No login. Locks record a typed name and function.
+To test the AI steps without paid credit, use the free Gemini tier: put a free
+Google AI Studio key in `GEMINI_API_KEY`, set `GEMINI_MODELS=gemini-3.8-flash`, restart,
+and choose **Route every stage to → Google · Gemini** in AI & routing. A free-tier
+rate limit (HTTP 429) or "high demand" (HTTP 503) is waited out and retried a few times. A per-day quota is
+reported to the owner and not retried. Google's free tier can be as low as 20
+requests a day per model, so for a full run use OpenRouter's free models instead:
+`OPENROUTER_API_KEY` plus `OPENROUTER_MODELS` naming a `:free` model that supports
+JSON (see `.env.example`), routed the same way.
+
+Every edit, lock and audit row records the signed-in person.
 
 ## Sharing (Origin + GitHub)
 
@@ -86,8 +150,10 @@ No login. Locks record a typed name and function.
 ## Tests
 
 ```bash
-npm test          # engine, seed invariants, postgres store
-npm run test:e2e  # Playwright against port 43217
+npm test            # Vitest unit and integration suite (needs Postgres; DATABASE_URL)
+npm run typecheck   # next typegen + tsc
+npm run lint        # eslint
+npm run test:e2e    # Playwright against port 43217
 ```
 
 ## Documentation
@@ -97,5 +163,9 @@ npm run test:e2e  # Playwright against port 43217
 | [problem-and-solution.md](docs/problem-and-solution.md) | Problem statement and proposed IEGP |
 | [iegp-model.md](docs/iegp-model.md) | Locked objects, gates, priority, refresh |
 | [consultant-ux-spec.md](docs/consultant-ux-spec.md) | Consultant UX: nav IA, readiness strip, Gaps workbench, Prep \| Room |
-| [presentation-and-breakouts.md](docs/presentation-and-breakouts.md) | Presentation view + multi-window breakout groups |
-| [docs/sdlc/](docs/sdlc/) | Historical CIR/theme SDLC (lineage, not live SoR) |
+| [presentation-and-breakouts.md](docs/presentation-and-breakouts.md) | Presentation view + multi-window breakout groups (both hidden for now: `ROOM_ENABLED` / `BREAKOUTS_ENABLED` are `false`) |
+| [deploy-checklist.md](docs/deploy-checklist.md) | Operator checklist: env, admin account, SSO and seats, smoke tests |
+| [modules.md](docs/modules.md) | Kernel, stages S0–S10 and module contracts |
+| [sdlc/13-testing.md](docs/sdlc/13-testing.md) | How the code is tested today: Vitest, Playwright, LLM stub, CI, gold |
+| [sdlc/01-requirements.md](docs/sdlc/01-requirements.md) | Requirements (v2) and the [compliance check](docs/sdlc/requirements-compliance.md) |
+| [docs/sdlc/](docs/sdlc/) | Architecture, process and flows. Files marked *Retired* describe the v1 insights engine and are kept for lineage |

@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   CoveragePairCard,
   type CoveragePairCardModel,
 } from "@/components/accuracy/coverage-pair-card";
+import { useAiEnabled } from "@/components/platform/ai-status";
 
 type AssistSuggestion = {
   overall: "covers" | "partial" | "none" | "unknown";
@@ -30,18 +31,24 @@ export function CoverageQueue({
   const undecided = useMemo(() => pairs.filter((p) => !p.validated), [pairs]);
   const decided = useMemo(() => pairs.filter((p) => p.validated), [pairs]);
   const [index, setIndex] = useState(0);
+  const aiOn = useAiEnabled();
   const [assistPending, startAssist] = useTransition();
   const [assistError, setAssistError] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<AssistSuggestion | null>(null);
   const [assistMode, setAssistMode] = useState<string | null>(null);
   const [showDecided, setShowDecided] = useState(false);
 
-  useEffect(() => {
+  // Reset the cursor and any suggestion when the queue changes (adjust during
+  // render rather than in an effect, so there is no cascading re-render).
+  const queueKey = `${workspaceId}:${undecided.length}`;
+  const [seenQueueKey, setSeenQueueKey] = useState(queueKey);
+  if (seenQueueKey !== queueKey) {
+    setSeenQueueKey(queueKey);
     setIndex((i) => (undecided.length === 0 ? 0 : Math.min(i, undecided.length - 1)));
     setSuggestion(null);
     setAssistError(null);
     setAssistMode(null);
-  }, [undecided.length, workspaceId]);
+  }
 
   const current = undecided[index] ?? null;
   const progressLabel =
@@ -117,16 +124,23 @@ export function CoverageQueue({
           >
             Skip / next
           </button>
-          <button
-            type="button"
-            disabled={!current || assistPending}
-            onClick={requestAssist}
-            className="border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/50"
-          >
-            {assistPending ? "Suggesting…" : "Suggest with LLM"}
-          </button>
+          {aiOn ? (
+            <button
+              type="button"
+              disabled={!current || assistPending}
+              onClick={requestAssist}
+              className="border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/50"
+            >
+              {assistPending ? "Suggesting…" : "Suggest with LLM"}
+            </button>
+          ) : null}
         </div>
       </div>
+      {!aiOn ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="coverage-ai-off">
+          AI is off — no suggestions. Pick an overall and write the rationale yourself below.
+        </p>
+      ) : null}
 
       {assistError ? <p className="text-[12px] text-destructive">{assistError}</p> : null}
       {suggestion && current ? (
@@ -152,7 +166,9 @@ export function CoverageQueue({
         />
       ) : (
         <p className="text-[12px] text-muted-foreground">
-          Queue clear. Revisit decided pairs below, or extract more claims on Sources / Ledger.
+          {aiOn
+            ? "Queue clear. Revisit decided pairs below, or extract more claims on Sources / Ledger."
+            : "Queue clear. Revisit decided pairs below, or add more gaps and tactics on the Ledger."}
         </p>
       )}
 

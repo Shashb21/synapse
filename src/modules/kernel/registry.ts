@@ -1,4 +1,5 @@
-import { db, ensurePlatformSchema } from "./db";
+import { ensurePlatformSchema, sharedDb } from "./db";
+import { onWorkspaceBootstrap } from "@/lib/iegp/db";
 import * as t from "./schema";
 import { nowIso } from "./ids";
 import {
@@ -12,6 +13,15 @@ import {
 type Registered = SynapseModule<unknown, unknown>;
 
 const registry = new Map<string, Registered>();
+
+// A new workspace schema gets every registered module's tables up front.
+onWorkspaceBootstrap(async (run) => {
+  for (const implementation of registry.values()) {
+    for (const stmt of implementation.migrations ?? []) {
+      for (const part of stmt.split(";").map((s) => s.trim()).filter(Boolean)) await run(part);
+    }
+  }
+});
 
 export function registerModule<I, O>(implementation: SynapseModule<I, O>): SynapseModule<I, O> {
   const { manifest } = implementation;
@@ -49,7 +59,7 @@ export function manifests(): ModuleManifest[] {
 
 async function activationRows() {
   await ensurePlatformSchema();
-  return db().select().from(t.stageModules);
+  return sharedDb().select().from(t.stageModules);
 }
 
 /**
@@ -89,7 +99,7 @@ export async function activateModule(args: {
     activated_by: args.actor_name,
     activated_at: nowIso(),
   };
-  await db()
+  await sharedDb()
     .insert(t.stageModules)
     .values(values)
     .onConflictDoUpdate({ target: t.stageModules.stage, set: values });

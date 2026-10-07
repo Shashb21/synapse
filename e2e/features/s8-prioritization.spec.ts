@@ -1,11 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { freshWorkspace } from "../support/session";
 import {
+  consolidate,
   controlAction,
   controlActionExpectingError,
   evalValue,
   expectRouteIsHonest,
   expectThreeExchanges,
   firstOpenGap,
+  iegpAction,
+  planAction,
   planActionExpectingError,
   planState,
   runStage,
@@ -29,8 +33,18 @@ type PrioritizationOutput = {
 test.describe.configure({ mode: "serial" });
 
 test.describe("S8 prioritization matrix", () => {
-  test.beforeAll(async ({ request }) => {
-    await seedMapped(request);
+  // Its own workspace: mapped demo gaps, every Open gap confirmed (Prioritize
+  // shows only confirmed Open gaps), and two axes chosen for "All settings".
+  freshWorkspace({
+    name: "S8",
+    seed: async (request) => {
+      await seedMapped(request);
+      for (const gap of (await consolidate(request)).open) {
+        await iegpAction(request, { action: "validate_gap", gap_id: gap.gap_id });
+      }
+      const { axes } = (await planState(request)).axes;
+      await planAction(request, { action: "save_scope_axes", scope: "all", x_axis: axes[0]!.id, y_axis: axes[1]!.id });
+    },
   });
 
   test("suggests a band per open gap on the configured axes, through three exchanges", async ({ request }) => {
@@ -51,16 +65,20 @@ test.describe("S8 prioritization matrix", () => {
     expect(evalValue(result, "exchanges")).toBe(3);
   });
 
-  test("plots the gaps as cards on the matrix, not as a list", async ({ page }) => {
+  test("plots the gaps as cards on the matrix, not as a list", async ({ page, request }) => {
+    const open = (await consolidate(request)).open;
+    // The retired /matrix page now opens Prioritize.
     await page.goto("/matrix");
+    await expect(page).toHaveURL(/\/\?place=plan$/);
+    await page.goto("/?place=plan&setting=all");
     await expect(page.getByRole("heading", { name: /^prioritization matrix$/i })).toBeVisible();
-    await expect(page.locator("svg").first()).toBeVisible();
-    await expect(page.getByText(/band\(s\) validated/)).toBeVisible();
-    await expect(page.getByText(/dashed edge means the band is still only an S8 suggestion/)).toBeVisible();
-    // Gaps are placed as cards; where several share a slot they collapse into one
-    // cluster card that opens into the individual ones.
-    await expect(page.getByText(/Suggested (High|Medium|Low)|Validated (High|Medium|Low)/).first()).toBeAttached();
-    await expect(page.getByText(/gaps here|Suggested (High|Medium|Low)|Validated (High|Medium|Low)/).first()).toBeVisible();
+    const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
+    await expect(matrix).toBeVisible();
+    await expect(page.getByText(new RegExp(`\\b0 of ${open.length} Open gaps? validated`))).toBeVisible();
+    await expect(page.getByText(/A dashed edge means the band is not validated yet/)).toBeVisible();
+    // Each gap is a card on the plot, with its suggested band and not yet validated.
+    const cards = matrix.getByRole("button", { name: /: (High|Medium|Low), not validated\. Arrow keys move it\.$/ });
+    await expect(cards).toHaveCount(open.length);
   });
 
   test("takes a new axis configuration and refuses one the matrix cannot draw", async ({ request }) => {
@@ -128,7 +146,7 @@ test.describe("S8 prioritization matrix", () => {
       band: "urgent",
       rationale: "Not a band",
     });
-    expect(badBand.error).toMatch(/band: Invalid option/i);
+    expect(badBand.error).toBe("Band must be one of: high, medium, low, defer.");
 
     await validateBandHigh(request, gap.gap_id, "Blocks the EU5 reimbursement dossier");
     const after = await planState(request);
@@ -137,10 +155,10 @@ test.describe("S8 prioritization matrix", () => {
     expect(placement.band).toBe("high");
     expect(placement.rationale).toMatch(/reimbursement dossier/);
 
-    await page.goto("/matrix");
-    // Co-located gaps share a cluster card, so the validated card may start collapsed.
-    await expect(page.getByText(/Validated High/i).first()).toBeAttached();
-    await expect(page.getByText(/[1-9]\d* of \d+ band\(s\) validated/)).toBeVisible();
+    await page.goto("/?place=plan&setting=all");
+    const matrix = page.getByRole("group", { name: /^Prioritization matrix: / });
+    await expect(matrix.getByRole("button", { name: /: High, validated\. Arrow keys move it\.$/ })).toHaveCount(1);
+    await expect(page.getByText(/\b1 of \d+ Open gaps? validated/).first()).toBeVisible();
   });
 
   test("a re-run keeps the validated band and the suggestion the human judged", async ({ request }) => {

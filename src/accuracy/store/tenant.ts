@@ -38,7 +38,15 @@ export async function createOrganization(name: string) {
   return id;
 }
 
-/** One workspace = one IEGP (or IEP) within an org. */
+/** A lab workspace slug is taken (archived workspaces keep theirs). */
+export class DuplicateWorkspaceSlugError extends Error {
+  constructor(readonly slug: string) {
+    super(`The slug "${slug}" is already used by another workspace. Choose a different slug.`);
+    this.name = "DuplicateWorkspaceSlugError";
+  }
+}
+
+/** One workspace = one IEGP (or IEP) within an org. Slugs are unique, so /w/<slug> is unambiguous. */
 export async function createWorkspace(args: {
   org_id: string;
   name: string;
@@ -47,6 +55,7 @@ export async function createWorkspace(args: {
   planning_context?: Record<string, unknown> | null;
 }) {
   await ensureAccuracySchema();
+  if (await getWorkspaceBySlug(args.slug)) throw new DuplicateWorkspaceSlugError(args.slug);
   const id = newId("ws");
   await accuracyDb()
     .insert(t.accuracyWorkspaces)
@@ -79,7 +88,13 @@ export async function updateWorkspacePlanLabel(
   return { ...workspace, planning_context };
 }
 
-export async function listWorkspaces(limit = 50, opts?: { includeArchived?: boolean }) {
+/** Upper bound for workspace lists and pickers: high enough that every lab workspace shows. */
+export const WORKSPACE_LIST_LIMIT = 1000;
+
+export async function listWorkspaces(
+  limit = WORKSPACE_LIST_LIMIT,
+  opts?: { includeArchived?: boolean },
+) {
   await ensureAccuracySchema();
   const query = accuracyDb().select().from(t.accuracyWorkspaces);
   const filtered = opts?.includeArchived
@@ -88,7 +103,9 @@ export async function listWorkspaces(limit = 50, opts?: { includeArchived?: bool
   return filtered.orderBy(desc(t.accuracyWorkspaces.created_at)).limit(limit);
 }
 
-export async function getWorkspace(workspace_id: string) {
+export type AccuracyWorkspaceRow = typeof t.accuracyWorkspaces.$inferSelect;
+
+export async function getWorkspace(workspace_id: string): Promise<AccuracyWorkspaceRow | null> {
   await ensureAccuracySchema();
   const rows = await accuracyDb()
     .select()
@@ -147,7 +164,7 @@ export async function getWorkspaceOrgId(workspace_id: string): Promise<string | 
   return workspace?.org_id ?? null;
 }
 
-export async function getWorkspaceBySlug(slug: string) {
+export async function getWorkspaceBySlug(slug: string): Promise<AccuracyWorkspaceRow | null> {
   await ensureAccuracySchema();
   const rows = await accuracyDb()
     .select()

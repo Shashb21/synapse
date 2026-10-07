@@ -2,9 +2,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement, ReactNode } from "react";
-import AccuracyCoveragePage from "@/app/accuracy/coverage/page";
-import AccuracyAuditPage from "@/app/accuracy/audit/page";
-import AccuracyTimelinePage from "@/app/accuracy/timeline/page";
+import AccuracyCoveragePage from "@/app/admin/accuracy/coverage/page";
+import AccuracyAuditPage from "@/app/admin/accuracy/audit/page";
+import AccuracyTimelinePage from "@/app/admin/accuracy/timeline/page";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";

@@ -1,6 +1,6 @@
 # Deploy Synapse on Vercel
 
-Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is **OAuth-only** from `/control` — no API keys in the UI. Server env keys still unlock providers when no OAuth session is connected.
+Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM access is one server-side API key per provider, set in the Vercel environment (`XAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`). There is no provider login; the owner console (`/admin/control`) shows only whether each key is set.
 
 **Operator checklist:** [`deploy-checklist.md`](./deploy-checklist.md) (env, smoke, post-deploy hygiene).
 
@@ -8,7 +8,7 @@ Production stack: **Next.js 16** on Vercel + **Postgres** (`DATABASE_URL`). LLM 
 
 - GitHub repo: [Shashb21/synapse](https://github.com/Shashb21/synapse)
 - Branch for production: `main`
-- xAI (and other) **OAuth apps** registered with production redirect URIs (client ids/secrets in Vercel env — never in git)
+- An API key for at least one LLM provider (xAI for the default route), kept in Vercel env — never in git
 
 ## 1. Postgres (required)
 
@@ -50,9 +50,9 @@ cd /path/to/synapse
 git checkout main
 vercel link                  # pick team + create/link project
 vercel env add DATABASE_URL  # paste pooled Postgres URL (Production)
-# Optional OAuth client vars (see .env.example) — one at a time:
-# vercel env add XAI_OAUTH_CLIENT_ID
-# vercel env add XAI_OAUTH_CLIENT_SECRET
+# LLM provider keys (see .env.example) — one at a time:
+# vercel env add XAI_API_KEY
+# vercel env add ANTHROPIC_API_KEY
 vercel --prod
 ```
 
@@ -65,46 +65,37 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | **Yes** | Hosted Postgres (see §1) |
-| `LLAMA_CLOUD_API_KEY` | PDF/PPTX parse | LlamaParse service credential (not an end-user field). Missing key gates PDF/PPTX on `/accuracy/sources`. |
-| `LLAMA_PARSE_TIER` | Optional | Default `agentic` |
+| `SESSION_SECRET` | **Yes** | ≥ 32 random characters (`openssl rand -base64 48`). Signs the workspace-selection cookie (bound to the session, expires with it). The production server refuses to start without it — there is no fallback in production |
+| `OWNER_EMAILS` | Owner console | Comma-separated platform-owner emails. Only an identity provider's **verified** email matches |
+| `ALLOWED_EMAIL_DOMAINS` | Optional | Comma-separated domains (exact match). When set, only verified emails on these domains may sign in |
+| `AZURE_TENANT_ID` | Microsoft sign-in | Your Entra ID directory id. `common` / `organizations` / `consumers` are refused unless `MICROSOFT_ALLOW_MULTI_TENANT=1` |
+| `MICROSOFT_ALLOW_MULTI_TENANT` | Optional | `1` deliberately allows the multi-tenant endpoint. Not recommended |
 | `ANTHROPIC_WORKSPACE_ID` | Org-scoped Claude keys | Required when the Anthropic key is org-scoped |
-| `XAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Live extract without OAuth | Server-only; never shown in the UI |
-| `XAI_OAUTH_CLIENT_ID` | Grok login | OAuth **client** id (operator); public client ships if unset |
-| `XAI_OAUTH_CLIENT_SECRET` | Grok login | If xAI issues one |
-| `ANTHROPIC_OAUTH_CLIENT_ID` | Claude login | One-click alternate |
-| `OPENAI_OAUTH_CLIENT_ID` | OpenAI login | |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Gemini | |
-| `OPENROUTER_OAUTH_CLIENT_ID` | OpenRouter | Optional (PKCE can be client-less) |
-| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | App sign-in | Omit for demo mode (typed-name gate) |
+| `XAI_API_KEY` | Grok (default route) | Server-only; the console shows only "Key set" / "No key" |
+| `ANTHROPIC_API_KEY` | Claude (one-click alternate) | Server-only |
+| `OPENAI_API_KEY` | OpenAI | Server-only |
+| `GEMINI_API_KEY` | Gemini | Server-only |
+| `OPENROUTER_API_KEY` | OpenRouter | Server-only |
+| `GOOGLE_IDP_*` / `MICROSOFT_IDP_*` / `GITHUB_IDP_*` | Customer sign-in | SSO for seat holders only (seats in `/admin/customers`). With none set, customers cannot sign in; staff use password accounts (`npm run create-admin`, `/admin/users`) |
 
-Optional overrides: `XAI_OAUTH_*_URL`, `XAI_BASE_URL`, `XAI_MODELS` — defaults in `.env.example`.
-
-## 4. OAuth redirect URIs (production)
-
-Register these in each provider’s console using your **live Vercel host** (`https://<project>.vercel.app` or custom domain).
-
-**Grok (xAI) — required for default route:**
-
-```text
-https://<vercel-host>/api/oauth/llm/callback?provider=xai-grok
+```bash
+vercel env add SESSION_SECRET   # paste the output of: openssl rand -base64 48
+vercel env add OWNER_EMAILS
 ```
 
-**Other LLM providers (same pattern):**
+**Sign-in identity.** Only a verified email reaches a session: Google needs `email_verified=true`; Microsoft uses `email` only when the ID token carries `xms_edov` (add it under *Token configuration → optional claims*) or `email_verified`, never `preferred_username`; GitHub uses the primary verified address from `/user/emails`. Without a verified email the person is known as `provider:subject`, which never matches a workspace invite or `OWNER_EMAILS`. Demo sign-in is off in production.
 
-```text
-https://<vercel-host>/api/oauth/llm/callback?provider=anthropic-claude
-https://<vercel-host>/api/oauth/llm/callback?provider=openai
-https://<vercel-host>/api/oauth/llm/callback?provider=google-gemini
-https://<vercel-host>/api/oauth/llm/callback?provider=openrouter
-```
+Optional overrides: `*_BASE_URL`, `*_MODELS` (e.g. `XAI_BASE_URL`, `ANTHROPIC_MODELS`) — defaults in `.env.example`. A provider without its key is not configured, and routing to it fails with a message naming the env var.
 
-**App identity (if configured):**
+## 4. SSO redirect URI (production)
+
+Register the sign-in callback with each SSO provider using your **live Vercel host** (`https://<project>.vercel.app` or custom domain):
 
 ```text
 https://<vercel-host>/api/auth/callback
 ```
 
-The control panel builds `redirect_uri` from the incoming request origin, so preview deployments need matching redirect URIs per preview host **or** use a stable production domain only.
+Sign-in builds `redirect_uri` from the incoming request origin, so preview deployments need a matching redirect URI per preview host **or** use a stable production domain only. LLM providers need no redirect URI: they use API keys only.
 
 ## 5. Smoke test after deploy
 
@@ -112,15 +103,16 @@ Open:
 
 | URL | Expect |
 | --- | --- |
-| `/` | Upload / IEGP home |
-| `/control` | Control panel — five OAuth providers, Grok default, no API-key fields |
-| `/accuracy` | Workspaces (create, seed, archive, delete) |
-| `/accuracy/control` | Per call-kind routing + live price table |
-| `/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
-| `/timeline` | Gantt surface |
-| `/matrix` | Prioritization matrix |
+| `/login` | SSO buttons, then the staff email + password form; no sign-up link |
+| `/` | Upload (AI on) or Start (AI off) in the open workspace |
+| `/admin/control` | AI master switch; five providers, each "Key set" or "No key" with its env var, Grok default, no API-key fields |
+| `/admin/customers`, `/admin/users` | Customers and seats; staff password accounts |
+| `/admin/accuracy` | Accuracy lab workspaces (create, seed, archive, delete) |
+| `/admin/accuracy/routing` | Per call-kind routing + live price table |
+| `/admin/accuracy/audit?workspace_id=…` | Event trail + estimated-spend rollup |
+| `/timeline` | Hand-built IEGP timeline |
 
-Connect Grok on `/control` after `XAI_OAUTH_CLIENT_ID` is set and xAI redirect URI matches.
+The full list is in [`deploy-checklist.md`](./deploy-checklist.md) §6. After setting `XAI_API_KEY` and redeploying, **xAI · Grok** on `/admin/control` reads "Key set".
 
 ## 6. Build notes
 

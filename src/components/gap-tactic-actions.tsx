@@ -1,10 +1,15 @@
 "use client";
 
 import { LockForm } from "@/components/lock-form";
+import { useAiEnabled } from "@/components/platform/ai-status";
 import {
+  ACTOR_FUNCTIONS,
+  FUNCTION_LABELS,
   CATCH_UP_REASON_LABELS,
   CATCH_UP_REASONS,
   CATCH_UP_TACTIC_STATUSES,
+  CREATE_TACTIC_STATUS_LABELS,
+  ASSESSED_COVERAGE,
   TACTIC_TYPE_LABELS,
   TACTIC_TYPES,
 } from "@/lib/iegp/enums";
@@ -40,8 +45,12 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
         <select
           name={type}
           required={!prefix}
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         >
+          <option value="" disabled={!prefix}>
+            Choose a type
+          </option>
           {TACTIC_TYPES.map((row) => (
             <option key={row} value={row}>
               {TACTIC_TYPE_LABELS[row]}
@@ -54,12 +63,15 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
         <select
           name={status}
           required={!prefix}
-          defaultValue="ongoing"
+          defaultValue=""
           className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
         >
+          <option value="" disabled={!prefix}>
+            Choose a status
+          </option>
           {CATCH_UP_TACTIC_STATUSES.map((row) => (
             <option key={row} value={row}>
-              {row}
+              {CREATE_TACTIC_STATUS_LABELS[row]}
             </option>
           ))}
         </select>
@@ -92,6 +104,66 @@ export function RecordMissedFields({ prefix = false }: { prefix?: boolean }) {
   );
 }
 
+const DETAIL_FIELDS: { name: string; label: string; placeholder: string }[] = [
+  { name: "population", label: "Population", placeholder: "e.g. adults with EGFR+ NSCLC after 1L" },
+  { name: "intervention", label: "Intervention", placeholder: "e.g. the asset, dose or regimen" },
+  { name: "comparator", label: "Comparator", placeholder: "e.g. standard of care" },
+  { name: "outcomes", label: "Outcomes", placeholder: "e.g. OS, PFS, HCRU" },
+  { name: "study_design", label: "Study design", placeholder: "e.g. retrospective cohort" },
+  { name: "data_source", label: "Data source", placeholder: "e.g. Flatiron EHR, sponsor registry" },
+  { name: "geography", label: "Geography", placeholder: "e.g. US, EU5" },
+  { name: "owner", label: "Owner", placeholder: "Blank: you" },
+];
+
+/**
+ * The tactic's descriptive fields, all optional and empty until a person fills
+ * them. Nothing is prefilled: a blank field is stored blank.
+ */
+export function TacticDetailFields() {
+  return (
+    <details className="grid gap-2">
+      <summary className="cursor-pointer text-[12px] text-muted-foreground">
+        Details (optional — population, design, data source, geography, owner)
+      </summary>
+      <div className="mt-2 grid gap-2">
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Description
+          <textarea
+            name="description"
+            placeholder="Blank: the name is used"
+            className="min-h-14 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+          />
+        </label>
+        {DETAIL_FIELDS.map((field) => (
+          <label key={field.name} className="grid gap-1 text-[12px] text-muted-foreground">
+            {field.label}
+            <input
+              name={field.name}
+              placeholder={field.placeholder}
+              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+            />
+          </label>
+        ))}
+        <label className="grid gap-1 text-[12px] text-muted-foreground">
+          Owner function
+          <select
+            name="function"
+            defaultValue=""
+            className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          >
+            <option value="">Blank: your function</option>
+            {ACTOR_FUNCTIONS.map((fn) => (
+              <option key={fn} value={fn}>
+                {FUNCTION_LABELS[fn]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </details>
+  );
+}
+
 export function MapExistingTactic({
   gapId,
   availableTactics,
@@ -101,6 +173,7 @@ export function MapExistingTactic({
   availableTactics: TacticLibraryItem[];
   mappedTacticIds: string[];
 }) {
+  const ai = useAiEnabled("mapping");
   const unmapped = availableTactics.filter((tactic) => !mappedTacticIds.includes(tactic.id));
   if (unmapped.length === 0) return null;
   return (
@@ -110,6 +183,7 @@ export function MapExistingTactic({
       extra={{ gap_id: gapId }}
       confirmLabel="Map tactic"
       description="Attach a library tactic onto this gap. The tactic is not copied."
+      note={{ label: "Rationale (needed when you set coverage)" }}
     >
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         From tactic library
@@ -125,6 +199,25 @@ export function MapExistingTactic({
           ))}
         </select>
       </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        How well it covers this gap
+        <select
+          name="overall"
+          defaultValue=""
+          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
+        >
+          <option value="">Not assessed yet</option>
+          {ASSESSED_COVERAGE.map((value) => (
+            <option key={value} value={value}>
+              {value === "not_relevant" ? "Not relevant" : value[0]!.toUpperCase() + value.slice(1)}
+            </option>
+          ))}
+        </select>
+        <span className="text-[11px] text-muted-foreground/80">
+          A planned, ongoing or completed tactic that is not assessed leaves the gap Partially Addressed.
+          {ai ? "Re-run mapping can assess it, or set it here or later on the gap page." : "Set it here or later on the gap page."}
+        </span>
+      </label>
     </LockForm>
   );
 }
@@ -139,14 +232,7 @@ export function RecordMissedTactic({ gapId }: { gapId: string }) {
       description="Catch-up only. Record a real study ingest missed, a source not yet uploaded, or one you remember. Do not invent new studies here."
     >
       <RecordMissedFields />
-      <input type="hidden" name="description" value="Recorded as catch-up from Gaps. Not ideation." />
-      <input type="hidden" name="population" value="To be specified" />
-      <input type="hidden" name="intervention" value="Velmara" />
-      <input type="hidden" name="comparator" value="To be specified" />
-      <input type="hidden" name="outcomes" value="To be specified" />
-      <input type="hidden" name="geography" value="US + EU5" />
-      <input type="hidden" name="owner" value="" />
-      <input type="hidden" name="function" value="evidence_lead" />
+      <TacticDetailFields />
     </LockForm>
   );
 }

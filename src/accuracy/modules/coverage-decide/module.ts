@@ -6,8 +6,8 @@ import { coverageDecisionSchema, coverageCriticOutputSchema } from "./schema";
 
 export { coverageDecisionSchema, coverageCriticOutputSchema } from "./schema";
 export { buildStateFromBlocks } from "./build-state-from-blocks";
-export { deterministicCoverageDecision, runCoverageDecide } from "./decide";
-export { deterministicCriticAccept, runCoverageCritic } from "./critic";
+export { testStubCoverageDecision, runCoverageDecide } from "./decide";
+export { testStubCriticAccept, runCoverageCritic } from "./critic";
 export {
   coverageRouteAllowsLlm,
   mapCoverageOverallToUi,

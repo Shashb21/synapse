@@ -195,7 +195,7 @@ describe("gantt save-final guard", () => {
         snapshot_hash: first.snapshot_hash,
       }),
     );
-    expect(first.audit_bundle.href).toContain(`/accuracy/audit?`);
+    expect(first.audit_bundle.href).toContain(`/admin/accuracy/audit?`);
     expect(first.audit_bundle.href).toContain(`plan_id=${first.plan.id}`);
     expect(first.audit_bundle.href).toContain(`snapshot_hash=${first.snapshot_hash}`);
     expect(auditBundleFromPlan(first.plan)).toEqual(first.audit_bundle);

@@ -89,7 +89,7 @@ test.describe("Hillclimb from edit rationales", () => {
     await runStage(request, "S8");
     await validateBandHigh(request, gap.gap_id, "Blocks the payer submission this cycle");
 
-    await page.goto("/runs");
+    await page.goto("/admin/runs");
     await expect(page.getByRole("heading", { name: /^edit rationales$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^hillclimb signals$/i })).toBeVisible();
     await expect(page.getByText(/Blocks the payer submission this cycle/).first()).toBeVisible();
@@ -98,7 +98,7 @@ test.describe("Hillclimb from edit rationales", () => {
 
   test("files an eval run for the stage that produced it", async ({ page, request }) => {
     await runStage(request, "S2", { dry_run: true });
-    await page.goto("/runs");
+    await page.goto("/admin/runs");
     await expect(page.getByRole("heading", { name: /^eval runs$/i })).toBeVisible();
     await expect(page.getByText(/S2 · s2-gap-extract\.pcj/).first()).toBeVisible();
     await expect(page.getByText(/exchanges 3/).first()).toBeVisible();

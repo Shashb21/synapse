@@ -1,3 +1,4 @@
+import { ownerGate } from "@/modules/auth/owner";
 /** Read current/historical extraction findings and record authorized contributor decisions. */
 import { and, eq } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
@@ -23,6 +24,8 @@ function errorResponse(error: unknown) {
 
 /** Read current review items, or one historical run and its immutable action history. */
 export async function GET(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const identity = await requestIdentity();
     if (!identity.signed_in && !identity.demo) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
@@ -47,6 +50,8 @@ export async function GET(request: Request) {
 
 /** Apply one action using the session actor and validate capability. */
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Expected a JSON object." }, { status: 400 });

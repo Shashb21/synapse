@@ -3,6 +3,8 @@ import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
 import type { ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
+import { isTestStub } from "@/modules/kernel/llm";
+import { NoRouteError } from "@/modules/llm/provider";
 import type { AccuracyModuleContext } from "../../kernel/contracts";
 import {
   gapsEligibleForIdeation,
@@ -69,20 +71,17 @@ const proposerRowSchema = z.object({
 
 type IdeationDraft = { proposals: z.infer<typeof proposerRowSchema>[] };
 
-function isStubLlm(): boolean {
-  return process.env.SYNAPSE_TEST_STUB_LLM === "1";
-}
-
 function routeAllowsLlm(route: AccuracyModuleContext["route"]): boolean {
-  return route.connected && (route.auth === "oauth" || route.auth === "api_key");
+  return route.connected && route.auth === "api_key";
 }
 
 function nameKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function coerceType(raw: string | undefined): TacticType {
-  return TACTIC_TYPES.includes(raw as TacticType) ? (raw as TacticType) : "rwe_study";
+/** The model must name a real tactic type; nothing is defaulted on its behalf. */
+function tacticTypeOf(raw: string | undefined): TacticType | null {
+  return TACTIC_TYPES.includes(raw as TacticType) ? (raw as TacticType) : null;
 }
 
 function normalizeDraft(raw: unknown): IdeationDraft {
@@ -116,6 +115,7 @@ export function critiqueIdeationDraft(
     if (row.origin && row.origin !== "ideated") issues.push(`${subject}:wrong_origin`);
     if (row.status && row.status !== "proposed") issues.push(`${subject}:wrong_status`);
     if (!row.name?.trim() || row.name.trim().length < 8) issues.push(`${subject}:missing_name`);
+    if (!tacticTypeOf(row.type)) issues.push(`${subject}:invalid_type`);
     const summary = (row.design_summary || row.rationale || "").trim();
     if (summary.length < 3) issues.push(`${subject}:missing_design`);
     if (looksLikeInventoryIdentifier(row.name ?? "") || looksLikeInventoryIdentifier(row.gap_id)) {
@@ -151,13 +151,15 @@ export function lockIdeationProposals(
     if (key && args.existingNames.has(key)) continue;
     const used = perGap.get(row.gap_id) ?? 0;
     if (used >= args.perGap) continue;
+    const type = tacticTypeOf(row.type);
+    if (!type) continue;
     const parsed = ideationProposalSchema.safeParse({
       gap_id: row.gap_id,
       name,
-      type: coerceType(row.type),
+      type,
       origin: "ideated",
       status: "proposed",
-      design_summary: (row.design_summary || row.rationale || row.evidence_question || name).trim(),
+      design_summary: (row.design_summary || row.rationale || row.evidence_question || "").trim(),
       not_from_reference: true,
     });
     if (!parsed.success) continue;
@@ -177,7 +179,7 @@ async function proposeIdeation(
   prior: IdeationDraft | null,
   critiques: string[],
 ): Promise<IdeationDraft> {
-  if (isStubLlm() || !routeAllowsLlm(ctx.route) || eligible.length === 0) {
+  if (isTestStub() || eligible.length === 0) {
     return { proposals: [] };
   }
   const statements = new Map(input.gaps.map((g) => [g.id, g.statement]));
@@ -215,17 +217,25 @@ export const ideateModule = agenticModule({
     const existingNames = new Set(input.existing_tactic_names.map(nameKey).filter(Boolean));
     ctx.run.note("ideate:eligible_high_open", [...eligibleIds]);
 
-    const stub = isStubLlm() || !routeAllowsLlm(ctx.route);
-    if (stub || eligible.length === 0) {
+    if (eligible.length === 0) {
+      return {
+        output: { mode: "stub", eligible_gap_ids: [], proposals: [] },
+        summary: "Ideation skipped — no high-priority open gaps",
+      };
+    }
+    if (isTestStub()) {
       return {
         output: { mode: "stub", eligible_gap_ids: [...eligibleIds], proposals: [] },
-        summary:
-          eligible.length === 0
-            ? "Ideation skipped — no high-priority open gaps"
-            : isStubLlm()
-              ? "Ideation stub (SYNAPSE_TEST_STUB_LLM — empty proposals)"
-              : "Ideation skipped — connect OAuth or a provider API key",
+        summary: "Ideation stub (SYNAPSE_TEST_STUB_LLM — empty proposals)",
       };
+    }
+    // Ideation is judgement: without a model there is nothing to fall back to.
+    if (!routeAllowsLlm(ctx.route)) {
+      throw new NoRouteError(
+        ctx.route.reason && ctx.route.reason !== "mechanical"
+          ? ctx.route.reason
+          : "Ideation needs a live LLM. Set XAI_API_KEY or ANTHROPIC_API_KEY in the server environment and run it again.",
+      );
     }
 
     const cycle = await runShallowAgenticCycle<IdeationDraft>({

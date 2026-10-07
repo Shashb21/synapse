@@ -1,10 +1,14 @@
 import { ProviderPanel } from "@/components/platform/provider-panel";
 import { RoutingPanel, type StageRouteView } from "@/components/platform/routing-panel";
 import { SessionPanel } from "@/components/platform/session-panel";
+import { AiSwitchPanel } from "@/components/platform/ai-switch-panel";
+import { AiStatusProvider } from "@/components/platform/ai-status";
+import { aiSwitch, storedAiSections, type AiSwitch } from "@/modules/kernel/ai-switch";
+import { noAiSections } from "@/modules/kernel/ai-sections";
 import { STAGES, STAGE_IDS } from "@/modules/kernel/contracts";
 import { stageWiring, type StageWiring } from "@/modules/kernel/registry";
 import { previewRoute, routeConfigs, type RouteConfig } from "@/modules/kernel/routing";
-import { listConnections } from "@/modules/llm/oauth";
+import { listProviderKeys } from "@/modules/llm/api-keys";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
@@ -12,15 +16,14 @@ import {
 } from "@/modules/llm/provider";
 import { capabilitiesOf, can } from "@/modules/auth/roles";
 import { loginOptions, sessionContext } from "@/modules/auth/session";
+import { ownerAccess } from "@/modules/auth/owner";
 
 export type ControlPanelSearchParams = {
-  connected?: string;
-  connect_error?: string;
   signed_in?: string;
   sign_in_error?: string;
 };
 
-/** OAuth control panel: five LLM providers, Grok default, Claude one-click, no API-key fields. */
+/** Owner control panel (/admin/control): the AI switch, provider key status and per-stage routing. Five LLM providers, Grok default, Claude one-click; keys come from the server environment and are never shown or entered here. */
 export async function ControlPanelView({ params }: { params: ControlPanelSearchParams }) {
   let wiring: StageWiring[] = STAGE_IDS.map((stage) => ({
     stage,
@@ -39,7 +42,6 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
     updated_by: "default (locked: Grok)",
     updated_at: "—",
   }));
-  let connections: Awaited<ReturnType<typeof listConnections>> = [];
   let identity = await sessionContext().catch(() => ({
     session: null,
     actor: { name: "Unsigned (demo)", function: "medical_affairs" as const },
@@ -49,17 +51,27 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
   }));
 
   try {
-    [wiring, configs, connections, identity] = await Promise.all([
-      stageWiring(),
-      routeConfigs(),
-      listConnections(),
-      sessionContext(),
-    ]);
+    [wiring, configs, identity] = await Promise.all([stageWiring(), routeConfigs(), sessionContext()]);
   } catch {
-    // Control panel must render before Postgres or OAuth connections exist.
+    // Control panel must render before Postgres is ready.
   }
+  // Key presence only, read from the environment; never a key's value.
+  const keys = listProviderKeys();
 
-  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage)));
+  const ai: AiSwitch = await aiSwitch().catch(() => ({
+    enabled: true,
+    updated_by: null,
+    updated_at: null,
+    rationale: null,
+  }));
+  const sections = await storedAiSections()
+    .then((row) => row.sections)
+    .catch(() => noAiSections());
+  // Platform configuration follows the master switch, not the owner's open workspace.
+  const resolved = await Promise.all(STAGE_IDS.map((stage) => previewRoute(stage, ai.enabled)));
+  // The owner holds every platform capability, whatever their plan role.
+  const owner = (await ownerAccess()).owner;
+  const may = (capability: Parameters<typeof can>[1]) => owner || can(identity.role, capability);
 
   const routes: StageRouteView[] = STAGE_IDS.map((stage, index) => {
     const config = configs.find((row) => row.stage === stage)!;
@@ -84,34 +96,39 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
       updated_by: config.updated_by,
       updated_at: config.updated_at,
       resolved_label: `${route.provider_label} · ${route.model}`,
-      degraded_reason: route.degraded ? (route.reason ?? "degraded to a fallback") : null,
+      // The owner gets owner copy, not the customer's "ask your administrator" text.
+      degraded_reason: !ai.enabled
+        ? AI_OFF_OWNER_MESSAGE
+        : route.degraded
+          ? (route.reason ?? "degraded to a fallback")
+          : null,
     };
   });
 
   return (
     <>
-      {params.connected ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card/40 p-2 text-[12px] text-foreground">
-          {params.connected} is connected.
-        </p>
-      ) : null}
-      {params.connect_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
-          Connection failed: {params.connect_error}
-        </p>
-      ) : null}
       {params.signed_in ? (
-        <p className="mb-4 border border-[var(--known)]/40 bg-card/40 p-2 text-[12px] text-foreground">
+        <p className="mb-4 border border-[var(--known)]/40 bg-card p-2 text-[12px] text-foreground rounded-lg">
           Signed in as {params.signed_in}.
         </p>
       ) : null}
       {params.sign_in_error ? (
-        <p className="mb-4 border border-destructive/40 bg-card/40 p-2 text-[12px] text-destructive">
+        <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
           Sign-in failed: {params.sign_in_error}
         </p>
       ) : null}
 
       <div className="grid gap-8">
+        <AiSwitchPanel
+          ai={ai}
+          sections={sections}
+          mayToggle={may("toggle_ai")}
+          identity={{
+            signed_in: identity.signed_in,
+            actor_name: identity.actor.name,
+            actor_function: identity.actor.function,
+          }}
+        />
         <SessionPanel
           actorName={identity.actor.name}
           role={identity.role}
@@ -121,25 +138,13 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
           capabilities={capabilitiesOf(identity.role)}
         />
 
+        {/* Providers and routes follow the master switch, not the owner's open workspace. */}
+        <AiStatusProvider enabled={ai.enabled} offBy={ai.enabled ? null : "platform"}>
         <ProviderPanel
-          connections={connections.map((connection) => ({
-              provider_id: connection.provider_id,
-              label: connection.label,
-              summary: connection.summary,
-              tier: connection.tier ?? null,
-              auth: connection.auth,
-              configured: connection.configured,
-              status: connection.status,
-              account_label: connection.account_label,
-              connected_by: connection.connected_by,
-              connected_at: connection.connected_at,
-              detail: connection.detail,
-              models: connection.models,
-              default_model: connection.default_model,
-            }))}
+          connections={keys.map((key) => ({ ...key, tier: key.tier ?? null }))}
           defaults={{ primary: DEFAULT_ROUTE_PROVIDER, alternate: ALTERNATE_ROUTE_PROVIDER }}
-          canConnect={can(identity.role, "connect_provider")}
-          canRoute={can(identity.role, "configure_routing")}
+          canRoute={may("configure_routing")}
+          routedTo={routedToEveryStage(configs)}
         />
 
         <RoutingPanel
@@ -152,10 +157,20 @@ export async function ControlPanelView({ params }: { params: ControlPanelSearchP
               auth: provider.auth,
             }),
           )}
-          canRoute={can(identity.role, "configure_routing")}
-          canActivate={can(identity.role, "activate_module")}
+          canRoute={may("configure_routing")}
+          canActivate={may("activate_module")}
         />
+        </AiStatusProvider>
       </div>
     </>
   );
+}
+
+/** Why a route is idle while the master switch is off, worded for the owner. */
+export const AI_OFF_OWNER_MESSAGE = "AI is off platform-wide. Turn it on above.";
+
+/** The provider every stage routes to, or null when they differ (KAN-60). */
+export function routedToEveryStage(configs: Pick<RouteConfig, "provider_id">[]): string | null {
+  const first = configs[0]?.provider_id;
+  return first && configs.every((config) => config.provider_id === first) ? first : null;
 }

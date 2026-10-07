@@ -86,9 +86,9 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
   parse: {
     id: "parse",
     title: "Parse store",
-    purpose: "PDF/PPTX via LlamaParse; DOCX/text via local structured parse.",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Text is extracted from every file type, then the chosen LLM structures it into blocks.",
+    kind: "agentic",
+    llm_roles: ["proposer"],
     upstream: ["upload"],
   },
   inventory_extract: {
@@ -110,17 +110,17 @@ export const CALL_KINDS_META: Record<CallKind, CallKindDescriptor> = {
   merge_dedupe: {
     id: "merge_dedupe",
     title: "Merge & dedupe",
-    purpose: "Unify candidates on study IDs and provenance overlap.",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Unify candidates on shared study IDs / identical statements; an LLM judge decides same-block candidates.",
+    kind: "agentic",
+    llm_roles: ["judge"],
     upstream: ["inventory_extract", "need_extract"],
   },
   completeness_audit: {
     id: "completeness_audit",
     title: "Completeness audit",
-    purpose: "Index vs inventory miss flags (recall gate).",
-    kind: "mechanical",
-    llm_roles: [],
+    purpose: "Index vs ledger miss flags (recall gate); an LLM critic judges uncited blocks.",
+    kind: "agentic",
+    llm_roles: ["critic"],
     upstream: ["merge_dedupe"],
   },
   pair_generate: {
@@ -232,7 +232,7 @@ export type ResolvedAccuracyRoute = {
   provider_id: string;
   provider_label: string;
   model: string;
-  auth: "oauth" | "api_key" | "none";
+  auth: "api_key" | "none";
   connected: boolean;
   params: { temperature: number; max_tokens: number };
   fallbacks: string[];

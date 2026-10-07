@@ -1,77 +1,69 @@
 import Link from "next/link";
-import { OpenGapsQueue, TacticLibrary } from "@/components/plan-cards";
-import { planColumn, type OpenGapCard, type PlanColumn, type TacticLibraryItem } from "@/lib/iegp/engine";
+import { StepWaiting } from "@/components/step-waiting";
+import type { ActionIdentity } from "@/components/platform/action-dialog";
+import type { ProposalCardModel } from "@/components/ideation/proposal-card";
+import { IdeationBoard } from "@/components/tactic-ideation/ideation-board";
+import type { TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
+import type { OpenGapCard, TacticLibraryItem } from "@/lib/iegp/engine";
 
-const GROUPS: { id: PlanColumn; title: string }[] = [
-  { id: "high", title: "High" },
-  { id: "medium", title: "Medium" },
-  { id: "low", title: "Low" },
-];
+const NO_IDENTITY: ActionIdentity = { signed_in: false, actor_name: "", actor_function: "medical_affairs" };
 
+/**
+ * Tactic Ideation (KAN-8, from the Figma design). Ideate proposed tactics here after Prioritize:
+ * only the Open gaps validated as High are listed. Medium and Low gaps get their tactics mapped
+ * on Evidence Inventory.
+ */
 export function TacticsPlace({
-  unlocked,
-  openGaps,
+  ready,
+  highGaps,
+  otherCount = 0,
   availableTactics,
+  proposals = [],
+  identity = NO_IDENTITY,
+  mayIdeate = false,
+  tactics = {},
 }: {
-  unlocked: boolean;
-  openGaps: OpenGapCard[];
+  /** False until Prioritize is finished. The place still shows; the banner says what it waits on. */
+  ready: boolean;
+  highGaps: OpenGapCard[];
+  otherCount?: number;
   availableTactics: TacticLibraryItem[];
+  proposals?: ProposalCardModel[];
+  identity?: ActionIdentity;
+  mayIdeate?: boolean;
+  tactics?: Record<string, TacticEditModel>;
 }) {
-  if (!unlocked) {
-    return (
-      <section className="border border-border bg-card/40 p-4">
-        <h2 className="text-[15px] font-medium text-foreground">Tactics is locked</h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
-          Validate gaps, then prioritize Open gaps. Tactics is the next stage.
-        </p>
-      </section>
-    );
-  }
-  const open = openGaps.filter((c) => c.gap_status === "validated_open");
-  const unbanded = open.filter((c) => !c.band);
   return (
-    <div className="grid gap-10">
-      <section>
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[15px] font-medium">Open gaps</h2>
-          <Link href="/ideation" className="text-[12px] text-muted-foreground no-underline hover:underline">
-            Open ideation →
-          </Link>
-        </div>
-        <p className="mb-4 text-[12px] text-muted-foreground">
-          Ideate proposed tactics here after Prioritize. Assign a library tactic onto an Open gap,
-          or create a new proposed one. Mapping existing inventory and recording missed studies
-          happens on Gaps. Grouped by priority — High first.
-        </p>
-        <div className="grid gap-6">
-          {GROUPS.map((group) => {
-            const cards = open.filter((c) => c.band && planColumn(c.band) === group.id);
-            if (cards.length === 0) return null;
-            return (
-              <div key={group.id}>
-                <h3 className="mb-2 text-[13px] font-medium text-foreground">
-                  {group.title} <span className="font-normal text-muted-foreground">({cards.length})</span>
-                </h3>
-                <OpenGapsQueue cards={cards} availableTactics={availableTactics} />
-              </div>
-            );
-          })}
-          {unbanded.length > 0 ? (
-            <div>
-              <h3 className="mb-2 text-[13px] font-medium text-foreground">
-                Not yet banded <span className="font-normal text-muted-foreground">({unbanded.length})</span>
-              </h3>
-              <OpenGapsQueue cards={unbanded} availableTactics={availableTactics} />
-            </div>
-          ) : null}
-          {open.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
-              Prioritize Open gaps first, then assign tactics here.
-            </p>
-          ) : null}
-        </div>
-      </section>
-      <TacticLibrary items={availableTactics} />
+    <div className="grid gap-4">
+      {!ready ? (
+        <StepWaiting
+          title="Waiting on Prioritize"
+          body="Tactic Ideation lists the Open gaps validated as High on the Prioritization Matrix. Finish Prioritize and choose Continue to tactics; until then there is little to ideate here, but you can look through the tactic library below."
+          href="/?place=plan"
+          cta="Go to Prioritize"
+        />
+      ) : null}
+      <IdeationBoard
+        gaps={highGaps}
+        proposals={proposals}
+        library={availableTactics}
+        identity={identity}
+        mayIdeate={mayIdeate}
+        tactics={tactics}
+      />
+      <p className="text-[11px] text-muted-foreground">
+        {otherCount > 0
+          ? `${otherCount} other Open gap${otherCount === 1 ? " is" : "s are"} Medium, Low or not validated yet; map tactics to them on `
+          : "Medium and Low gaps get their tactics mapped on "}
+        <Link href="/?place=gaps" className="text-foreground">
+          Evidence Inventory
+        </Link>
+        . Every idea decision is on{" "}
+        <Link href="/ideation" className="text-foreground">
+          the ideation review
+        </Link>
+        .
+      </p>
     </div>
   );
 }

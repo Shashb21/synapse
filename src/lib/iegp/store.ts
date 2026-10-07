@@ -1,44 +1,59 @@
 import { and, eq } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
-import { buildBlankWorkspace } from "./blank";
+import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
-import type { PlanningContext } from "./planning-context";
-import { parsePlanningContext } from "./planning-context";
-import type { IegpState, Lock, GapStatusOverride } from "./types";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
+import type { PlanningContext, SetupObjective } from "./planning-context";
+import { parsePlanningContext, setupIssues } from "./planning-context";
+import { newId, nowIso } from "@/modules/kernel/ids";
+import type {
+  GapMetadata,
+  GapStatusOverride,
+  GapSuggestion,
+  GapSuggestionSource,
+  GapSuggestionStatus,
+  IegpState,
+  Lock,
+} from "./types";
+import { normalizeCustomType, readCustomType, type CustomTacticType } from "./custom-tactic-type";
+import { tacticDateError, tacticDateOrderError, type TacticDateField } from "./tactic-dates";
 import type { ExtractedGap, ExtractedTactic } from "./engine";
 import type {
   ActorFunction,
   CatchUpReason,
   CatchUpTacticStatus,
+  CoverageDimension,
+  DimensionValue,
   EvidenceDomain,
   MappedGapStatus,
+  OverallCoverage,
 } from "./enums";
 import {
+  ASSESSED_COVERAGE,
   CATCH_UP_REASON_LABELS,
   CATCH_UP_REASONS,
   CATCH_UP_TACTIC_STATUSES,
+  CREATE_TACTIC_STATUSES,
+  type CreateTacticStatus,
+  COVERAGE_DIMENSIONS,
+  DIMENSION_VALUES,
   EVIDENCE_DOMAINS,
+  OVERALL_COVERAGE,
   TACTIC_TYPES,
+  ACTOR_FUNCTIONS,
 } from "./enums";
 import {
   computeGapStatus,
   displayedGapStatus,
-  draftResidualGapSuggestion,
   emptyDimensions,
-  extractCandidateGaps,
-  extractCandidateNeeds,
-  extractCandidateTactics,
   gapEligibleForMapping,
   gapNameFromStatement,
   gapsReadyForPrioritize,
   isLiveGap,
+  persistedResidualGaps,
   requireOverrideReason,
-  residualGapEligible,
   splitSourceIntoBlocks,
-  similarRecord,
-  suggestMappings as rankMappingSuggestions,
-  suggestResidualGaps as rankResidualGapSuggestions,
   tacticEligibleForMapping,
   unlocked,
 } from "./engine";
@@ -70,6 +85,39 @@ function asLock(value: unknown): Lock {
   };
 }
 
+/**
+ * Settings are free tags, so the same setting typed twice ("1L", " 1l ") must
+ * collapse to one. The first spelling wins; order is kept.
+ */
+export function normalizeSettings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") continue;
+    const tag = raw.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    out.push(tag);
+  }
+  return out;
+}
+
+const METADATA_TEXT_MAX = 2000;
+
+/** A gap's metadata as stored, cleaned: tags like settings, texts trimmed and capped. */
+export function normalizeGapMetadata(value: unknown): GapMetadata {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const text = (key: string, max = METADATA_TEXT_MAX) =>
+    typeof raw[key] === "string" ? (raw[key] as string).trim().slice(0, max) : "";
+  return {
+    stakeholders: normalizeSettings(raw.stakeholders),
+    geography: text("geography", 200),
+    regional_nuances: text("regional_nuances"),
+    notes: text("notes"),
+  };
+}
+
 export async function loadState(): Promise<IegpState> {
   await ensureSchema();
   const d = db();
@@ -77,8 +125,32 @@ export async function loadState(): Promise<IegpState> {
   if (assetRows.length === 0) {
     await persistState(buildBlankWorkspace());
   }
-  return readState();
+  const state = await readState();
+  if (state.gaps.some((gap) => !gap.number)) return numberGaps(state);
+  return state;
 }
+
+/**
+ * Gives every gap without one a number (KAN-56): GAP-007 style ids keep their own digits
+ * where free, the rest follow in the order they were created. Numbers are never reused.
+ */
+async function numberGaps(state: IegpState): Promise<IegpState> {
+  const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
+  let next = Math.max(0, ...taken) + 1;
+  for (const gap of state.gaps) {
+    if (gap.number) continue;
+    const own = /^GAP-(\d+)$/.exec(gap.id);
+    const wanted = own ? Number(own[1]) : null;
+    const number = wanted && !taken.has(wanted) ? wanted : next;
+    taken.add(number);
+    next = Math.max(next, number + 1);
+    await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
+    gap.number = number;
+  }
+  return state;
+}
+
+export { gapNumberLabel } from "./gap-number";
 
 async function readState(): Promise<IegpState> {
   const d = db();
@@ -103,6 +175,7 @@ async function readState(): Promise<IegpState> {
     gap_versions,
     breakout_groups,
     breakout_group_gaps,
+    gap_suggestions,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -124,6 +197,7 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.gapVersions),
     d.select().from(t.breakoutGroups),
     d.select().from(t.breakoutGroupGaps),
+    d.select().from(t.gapSuggestions),
   ]);
   const asset = assetRows[0]!;
   return {
@@ -161,6 +235,12 @@ async function readState(): Promise<IegpState> {
       human_validated: Boolean(g.human_validated),
       parked_at: g.parked_at ?? null,
       parked_reason: g.parked_reason ?? null,
+      settings: normalizeSettings(g.settings),
+      metadata: normalizeGapMetadata(g.metadata),
+      number: g.number ?? 0,
+      new_source_at: g.new_source_at ?? null,
+      new_source_need_id: g.new_source_need_id ?? null,
+      related_gap_ids: Array.isArray(g.related_gap_ids) ? g.related_gap_ids.map(String) : [],
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -173,6 +253,7 @@ async function readState(): Promise<IegpState> {
       review_status: (x.review_status as IegpState["tactics"][0]["review_status"]) || "accepted",
       function: x.function as ActorFunction,
       lock: asLock(x.lock),
+      custom_type: readCustomType(x.custom_type),
     })),
     coverages: coverages.map((c) => ({
       ...c,
@@ -235,6 +316,14 @@ async function readState(): Promise<IegpState> {
       actor_function: row.actor_function as ActorFunction,
     })),
     breakout_group_gaps: breakout_group_gaps,
+    gap_suggestions: gap_suggestions.map((row) => ({
+      ...row,
+      domain: row.domain as IegpState["gaps"][0]["domain"],
+      status: row.status as IegpState["gap_suggestions"][0]["status"],
+      extra_sources: Array.isArray(row.extra_sources)
+        ? (row.extra_sources as IegpState["gap_suggestions"][0]["extra_sources"])
+        : [],
+    })),
   };
 }
 
@@ -293,16 +382,43 @@ export async function persistState(state: IegpState) {
   if (state.breakout_group_gaps.length) {
     await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
   }
+  if (state.gap_suggestions?.length) await d.insert(t.gapSuggestions).values(state.gap_suggestions);
 }
 
-export async function resetSeed() {
-  await persistState(buildBlankWorkspace());
+/**
+ * What a workspace's contents can be replaced with:
+ * - `blank`: an empty asset and nothing else (a new workspace's default);
+ * - `demo`: the full Velmara demo from seed.ts (sources, gaps, tactics, plan);
+ * - `demo_setup`: the Velmara demo's asset and objectives only, setup not done
+ *   (what the stage tests start from).
+ */
+export type WorkspaceContents = "blank" | "demo" | "demo_setup";
+
+export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
+  if (contents === "demo") return buildSeed();
+  if (contents === "demo_setup") return buildDemoSetupWorkspace();
+  return buildBlankWorkspace();
+}
+
+/** Replaces every IEGP row in the current workspace with `contents`. */
+export async function replaceWorkspaceContents(contents: WorkspaceContents) {
+  await persistState(buildWorkspaceContents(contents));
   return loadState();
 }
 
-export async function resetWorkedExample() {
-  await persistState(buildSeed());
-  return loadState();
+/** Empties the workspace: no asset details, objectives, sources, gaps or tactics. */
+export function resetBlank() {
+  return replaceWorkspaceContents("blank");
+}
+
+/** Loads the full Velmara demo (seed.ts). */
+export function resetDemo() {
+  return replaceWorkspaceContents("demo");
+}
+
+/** Loads the Velmara demo's asset and objectives only (test fixture). */
+export function resetDemoSetup() {
+  return replaceWorkspaceContents("demo_setup");
 }
 
 function now() {
@@ -318,32 +434,6 @@ function nextId(prefix: string, existing: string[]) {
 }
 
 const PLAN_ENTRY_SOURCE_ID = "SRC-PLAN-ENTRY";
-
-function findMatchingLiveGap(
-  state: IegpState,
-  text: string,
-): IegpState["gaps"][0] | undefined {
-  const hay = text.trim();
-  if (!hay) return undefined;
-  return state.gaps.find(
-    (g) =>
-      isLiveGap(g) &&
-      (similarRecord(g.statement, hay) || similarRecord(g.name, hay)),
-  );
-}
-
-function gapHasNeedFromSource(state: IegpState, gapId: string, sourceId: string): boolean {
-  const needIds = new Set(
-    state.need_gap_links.filter((l) => l.gap_id === gapId).map((l) => l.need_id),
-  );
-  return state.needs.some((n) => needIds.has(n.id) && n.source_id === sourceId);
-}
-
-function primaryRoleForGap(state: IegpState, gapId: string): "primary" | "supporting" {
-  return state.need_gap_links.some((l) => l.gap_id === gapId && l.role === "primary")
-    ? "supporting"
-    : "primary";
-}
 
 async function ensurePlanEntrySource(): Promise<string> {
   const state = await loadState();
@@ -414,23 +504,6 @@ async function insertLiveOpenGap(args: {
   return gapId;
 }
 
-async function attachExistingSimilarNeed(gapId: string): Promise<boolean> {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === gapId);
-  if (!gap) return false;
-  const linkedNeedIds = new Set(
-    state.need_gap_links.filter((l) => l.gap_id === gapId).map((l) => l.need_id),
-  );
-  const similarNeed = state.needs.find(
-    (n) =>
-      !linkedNeedIds.has(n.id) &&
-      (similarRecord(n.statement, gap.statement, 0.62) || similarRecord(n.statement, gap.name, 0.62)),
-  );
-  if (!similarNeed) return false;
-  await linkNeedOntoGap(similarNeed.id, gapId, primaryRoleForGap(state, gapId));
-  return true;
-}
-
 async function insertNeedForGap(args: {
   gapId: string;
   sourceId: string;
@@ -441,37 +514,62 @@ async function insertNeedForGap(args: {
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gapId);
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!obj) throw new Error("No strategic objective to attach this need to.");
+  if (!gap) throw new Error("Gap not found");
   const statement = args.statement.trim();
   if (!statement) return;
   const needId = nextId(
     "NEED",
     state.needs.map((n) => n.id),
   );
-  await db().insert(t.needs).values({
+  await insertNeedRow({
     id: needId,
     statement,
-    domain: gap?.domain ?? "unmet_need",
+    source_quote: args.sourceQuote,
+    domain: gap.domain,
     stakeholder: args.actor_function,
-    objective_id: obj.id,
-    decision_supported: obj.key_decision,
-    geography: state.asset.geography,
-    population: "To be specified",
-    intervention: "Velmara",
-    comparator: "To be specified",
-    outcome: "To be specified",
-    timing: "To be specified",
     source_id: args.sourceId,
-    source_quote: args.sourceQuote.trim().slice(0, 280) || statement.slice(0, 280),
-    confidence: 0.5,
+    objective: obj,
+    geography: state.asset.geography,
+  });
+  await linkNeedOntoGap(needId, args.gapId, args.role);
+}
+
+/**
+ * A need row records a sourced statement. PICO fields and confidence stay empty
+ * until a model or a human fills them: nothing is invented here.
+ */
+async function insertNeedRow(args: {
+  id: string;
+  statement: string;
+  source_quote: string;
+  domain: EvidenceDomain;
+  stakeholder: ActorFunction;
+  source_id: string;
+  /** Undefined in a plan with no objectives yet: the need is stored unlinked. */
+  objective: IegpState["objectives"][0] | undefined;
+  geography: string;
+}) {
+  await db().insert(t.needs).values({
+    id: args.id,
+    statement: args.statement,
+    domain: args.domain,
+    stakeholder: args.stakeholder,
+    objective_id: args.objective?.id ?? "",
+    decision_supported: args.objective?.key_decision ?? "",
+    geography: args.geography,
+    population: "",
+    intervention: "",
+    comparator: "",
+    outcome: "",
+    timing: "",
+    source_id: args.source_id,
+    source_quote: args.source_quote.trim().slice(0, 280) || args.statement.slice(0, 280),
+    confidence: null,
     status: "candidate",
     lock: unlocked(),
   });
-  await db()
-    .insert(t.needGapLinks)
-    .values({ need_id: needId, gap_id: args.gapId, role: args.role })
-    .onConflictDoNothing();
 }
 
 export async function ensureGapHasConstituentNeed(gapId: string) {
@@ -485,7 +583,8 @@ export async function ensureGapHasConstituentNeed(gapId: string) {
     state = await loadState();
     if (state.need_gap_links.some((l) => l.gap_id === gapId)) return;
   }
-  if (await attachExistingSimilarNeed(gapId)) return;
+  // No similarity lookup: an existing need joins a gap only through an explicit
+  // link (lockNeed with gap_id). Otherwise the gap's own statement is its need.
   const sourceId = await ensurePlanEntrySource();
   const actor = (gap.status_lock.actor_function as ActorFunction | null) || "evidence_lead";
   await insertNeedForGap({
@@ -500,7 +599,11 @@ export async function ensureGapHasConstituentNeed(gapId: string) {
 
 export async function ensureAllLiveGapsHaveNeeds() {
   const state = await loadState();
+  // Pages run this on every render, refreshes included (KAN-68): a gap that already
+  // has a need is skipped here, not after a fresh loadState of its own.
+  const linked = new Set(state.need_gap_links.map((link) => link.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
+    if (linked.has(gap.id)) continue;
     await ensureGapHasConstituentNeed(gap.id);
   }
 }
@@ -569,6 +672,295 @@ export async function lockNeed(args: {
     "lock_status",
     `${need.status} → ${args.status}`,
   );
+  const rationale = args.note?.trim() ?? "";
+  if (rationale.length >= 3) {
+    await recordEdit({
+      stage: "S2",
+      entity_type: "need",
+      entity_id: args.need_id,
+      field: "status",
+      action: args.status === "accepted" ? "accept" : "reject",
+      before: need.status,
+      after: args.gap_id ? `${args.status} → ${args.gap_id}` : args.status,
+      rationale,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+  }
+}
+
+type FieldChange = { field: string; before: string | null; after: string | null };
+
+/** Files one edit record per changed field, each with its before and after value. */
+async function recordFieldEdits(args: {
+  stage: "S2" | "S3" | "S6";
+  entity_type: string;
+  entity_id: string;
+  changes: FieldChange[];
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  for (const change of args.changes) {
+    await recordEdit({
+      stage: args.stage,
+      entity_type: args.entity_type,
+      entity_id: args.entity_id,
+      field: change.field,
+      action: "edit",
+      before: change.before,
+      after: change.after,
+      rationale: args.rationale,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+  }
+}
+
+/** Compares a draft with the stored row; only fields the draft names and changes are returned. */
+function diffFields(
+  row: object,
+  draft: Record<string, string | null | undefined>,
+): FieldChange[] {
+  const stored = row as Record<string, unknown>;
+  const out: FieldChange[] = [];
+  for (const [field, value] of Object.entries(draft)) {
+    if (value === undefined) continue;
+    const before = (stored[field] ?? null) as string | null;
+    if (before === value) continue;
+    out.push({ field, before, after: value });
+  }
+  return out;
+}
+
+/**
+ * Human edit of a need's wording or its source quote. The need is locked to the
+ * editor; no stage rewrites an existing need, so the edit survives every re-run.
+ */
+export async function editNeed(args: {
+  need_id: string;
+  statement?: string;
+  source_quote?: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const need = state.needs.find((n) => n.id === args.need_id);
+  if (!need) throw new Error("Need not found");
+  const statement = args.statement === undefined ? undefined : args.statement.trim();
+  if (statement !== undefined && !statement) throw new Error("Need statement is required.");
+  const quote = args.source_quote === undefined ? undefined : args.source_quote.trim();
+  const changes = diffFields(need, { statement, source_quote: quote });
+  if (changes.length === 0) throw new Error("Nothing changed.");
+  await db()
+    .update(t.needs)
+    .set({
+      ...(statement !== undefined ? { statement } : {}),
+      ...(quote !== undefined ? { source_quote: quote } : {}),
+      lock: makeLock(args.actor_name, args.actor_function, rationale),
+    })
+    .where(eq(t.needs.id, args.need_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "need",
+    args.need_id,
+    "edit",
+    `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
+  );
+  await recordFieldEdits({
+    stage: "S2",
+    entity_type: "need",
+    entity_id: args.need_id,
+    changes,
+    rationale,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+}
+
+/**
+ * A need a person records by hand onto a gap (e.g. from a meeting no source file
+ * covers). It is accepted and locked to them, with the plan-entry source unless
+ * they name an ingested one.
+ */
+export async function createNeed(args: {
+  gap_id: string;
+  statement: string;
+  source_quote?: string;
+  source_id?: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string> {
+  const rationale = requireRationale(args.rationale);
+  const statement = args.statement.trim();
+  if (!statement) throw new Error("Need statement is required.");
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap || gap.retired) throw new Error("Gap not found");
+  const sourceId =
+    args.source_id && state.sources.some((s) => s.id === args.source_id)
+      ? args.source_id
+      : await ensurePlanEntrySource();
+  const hasPrimary = state.need_gap_links.some((l) => l.gap_id === gap.id && l.role === "primary");
+  const before = new Set(state.needs.map((n) => n.id));
+  await insertNeedForGap({
+    gapId: gap.id,
+    sourceId,
+    statement,
+    sourceQuote: args.source_quote?.trim() || statement,
+    role: hasPrimary ? "supporting" : "primary",
+    actor_function: args.actor_function,
+  });
+  const created = (await loadState()).needs.find((n) => !before.has(n.id));
+  if (!created) throw new Error("The need was not saved.");
+  await db()
+    .update(t.needs)
+    .set({ status: "accepted", lock: makeLock(args.actor_name, args.actor_function, rationale) })
+    .where(eq(t.needs.id, created.id));
+  await appendAudit(args.actor_name, args.actor_function, "need", created.id, "create", `${gap.id}: ${rationale}`);
+  await recordEdit({
+    stage: "S2",
+    entity_type: "need",
+    entity_id: created.id,
+    field: "created",
+    action: "add",
+    before: null,
+    after: `${gap.id}: ${statement}`,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
+  return created.id;
+}
+
+/** Removes one need → gap link; the old gap's primary passes to its next need. */
+async function dropNeedLink(state: IegpState, need_id: string, gap_id: string) {
+  const link = state.need_gap_links.find((l) => l.need_id === need_id && l.gap_id === gap_id);
+  if (!link) throw new Error(`${need_id} is not linked to ${gap_id}.`);
+  const gap = state.gaps.find((g) => g.id === gap_id);
+  const others = state.need_gap_links.filter((l) => l.gap_id === gap_id && l.need_id !== need_id);
+  if (gap && isLiveGap(gap) && others.length === 0) {
+    throw new Error(
+      "This is the gap's only need. Link or move another need onto it first, or park or exclude the gap.",
+    );
+  }
+  await db()
+    .delete(t.needGapLinks)
+    .where(and(eq(t.needGapLinks.need_id, need_id), eq(t.needGapLinks.gap_id, gap_id)));
+  if (link.role === "primary" && others.length > 0 && !others.some((l) => l.role === "primary")) {
+    await db()
+      .update(t.needGapLinks)
+      .set({ role: "primary" })
+      .where(and(eq(t.needGapLinks.need_id, others[0]!.need_id), eq(t.needGapLinks.gap_id, gap_id)));
+  }
+}
+
+export async function unlinkNeedFromGap(args: {
+  need_id: string;
+  gap_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const need = state.needs.find((n) => n.id === args.need_id);
+  if (!need) throw new Error("Need not found");
+  await dropNeedLink(state, args.need_id, args.gap_id);
+  await db()
+    .update(t.needs)
+    .set({ lock: makeLock(args.actor_name, args.actor_function, rationale) })
+    .where(eq(t.needs.id, args.need_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "need",
+    args.need_id,
+    "unlink",
+    `${args.need_id} ✕ ${args.gap_id}: ${rationale}`,
+  );
+  await recordEdit({
+    stage: "S2",
+    entity_type: "need",
+    entity_id: args.need_id,
+    field: "gap_link",
+    action: "edit",
+    before: args.gap_id,
+    after: null,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
+}
+
+/**
+ * Moves a need from one gap onto another, or onto a new gap made from the need.
+ * This is how a person corrects an S2 merge: the judge joined a need onto the
+ * wrong gap, or merged two different questions. Later S2 runs only add needs;
+ * they never re-link an existing one, so the move survives every re-run.
+ */
+export async function moveNeedToGap(args: {
+  need_id: string;
+  from_gap_id: string;
+  /** Leave empty and set `new_gap` to split the need out as its own gap. */
+  to_gap_id?: string;
+  new_gap?: boolean;
+  new_gap_name?: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string> {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const need = state.needs.find((n) => n.id === args.need_id);
+  if (!need) throw new Error("Need not found");
+  const toId = args.to_gap_id?.trim() || "";
+  if (!toId && !args.new_gap) throw new Error("Choose the gap to move this need onto.");
+  if (toId === args.from_gap_id) throw new Error("The need is already on that gap.");
+  if (toId) {
+    const target = state.gaps.find((g) => g.id === toId);
+    if (!target || target.retired) throw new Error("Target gap not found");
+  }
+  await dropNeedLink(state, args.need_id, args.from_gap_id);
+  let targetId = toId;
+  if (!targetId) {
+    targetId = await createGap({
+      name: args.new_gap_name?.trim() || undefined,
+      statement: need.statement,
+      domain: need.domain,
+      need_id: need.id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: rationale,
+    });
+  } else {
+    const hasPrimary = state.need_gap_links.some((l) => l.gap_id === targetId && l.role === "primary");
+    await linkNeedOntoGap(args.need_id, targetId, hasPrimary ? "supporting" : "primary");
+  }
+  await db()
+    .update(t.needs)
+    .set({ lock: makeLock(args.actor_name, args.actor_function, rationale) })
+    .where(eq(t.needs.id, args.need_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "need",
+    args.need_id,
+    "move",
+    `${args.from_gap_id} → ${targetId}: ${rationale}`,
+  );
+  await recordEdit({
+    stage: "S2",
+    entity_type: "need",
+    entity_id: args.need_id,
+    field: "gap_link",
+    action: "edit",
+    before: args.from_gap_id,
+    after: targetId,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
+  return targetId;
 }
 
 function childParents(state: IegpState): Set<string> {
@@ -577,34 +969,17 @@ function childParents(state: IegpState): Set<string> {
   );
 }
 
+/**
+ * An Addressed gap has no leftover, so a pending leftover row is closed. A
+ * Partial gap gets no drafted leftover here: leftovers come from S6 (the model,
+ * on demand) or a human.
+ */
 async function applyMappedStatusSideEffects(args: {
   gap_id: string;
   status: MappedGapStatus;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
-  if (args.status === "validated_partial") {
-    const after = await loadState();
-    const g = after.gaps.find((row) => row.id === args.gap_id);
-    if (g) {
-      const hasChild = after.gaps.some((row) => row.parent_gap_id === g.id);
-      const existing = after.residual_gap_suggestions.find((row) => row.parent_gap_id === g.id);
-      if (!hasChild && existing?.status !== "accepted" && existing?.status !== "rejected") {
-        const mapped = after.coverages.filter((c) => c.gap_id === g.id);
-        const draft = draftResidualGapSuggestion({ gap: g, coverages: mapped });
-        await upsertResidualGapSuggestion({
-          parent_gap_id: g.id,
-          statement: existing?.status === "candidate" ? existing.statement : draft.statement,
-          reasons: draft.reasons,
-          status: "candidate",
-          actor_name: args.actor_name,
-          actor_function: args.actor_function,
-          note: "Partially Addressed. Residual leftover drafted for split.",
-        });
-      }
-    }
-    await persistEligibleResidualDrafts();
-  }
   if (args.status === "validated_addressed") {
     const after = await loadState();
     const existing = after.residual_gap_suggestions.find((row) => row.parent_gap_id === args.gap_id);
@@ -622,7 +997,23 @@ async function applyMappedStatusSideEffects(args: {
   }
 }
 
-export async function syncComputedGapStatuses(gapId?: string) {
+/**
+ * A gap a person validated and whose lock still stands. The engine may not take
+ * its status or its validation away; a disagreeing computation is flagged stale
+ * for that person to review.
+ */
+function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
+  if (!gap.human_validated || !gap.status_lock.locked) return null;
+  return gap.status === "validated_open" || gap.status === "validated_addressed" ? gap.status : null;
+}
+
+/**
+ * Recomputes Open / Partial / Addressed from coverage. `human` marks a change a
+ * person just made (their coverage or mapping edit): the new computation then
+ * applies. Otherwise (a model run, an ingest) a human override or a
+ * human-validated status is kept and only flagged stale when it disagrees.
+ */
+export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }) {
   const state = await loadState();
   const children = childParents(state);
   const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
@@ -660,7 +1051,39 @@ export async function syncComputedGapStatuses(gapId?: string) {
       }
       continue;
     }
-    if (gap.status !== computed || gap.computed_status !== computed) {
+    const held = opts?.human ? null : humanHeldStatus(gap);
+    if (held && held !== computed) {
+      const lock = gap.status_lock;
+      const kept: GapStatusOverride = {
+        status: held,
+        from: held,
+        to: held,
+        reason: lock.note?.trim() || `Validated ${held} by a person; kept after a coverage change.`,
+        actor_name: lock.actor_name ?? "Human",
+        actor_function: lock.actor_function ?? "evidence_lead",
+        at: lock.locked_at ?? now(),
+        stale: true,
+      };
+      await db()
+        .update(t.gaps)
+        .set({ computed_status: computed, status_override: kept })
+        .where(eq(t.gaps.id, gap.id));
+      await appendAudit(
+        "Engine",
+        "evidence_lead",
+        "gap",
+        gap.id,
+        "status_override_stale",
+        `Human-validated ${held} kept; engine now computes ${computed}`,
+      );
+      continue;
+    }
+    if (gap.status === computed && gap.computed_status !== computed) {
+      // Same status, newly recorded computation: nothing a person decided changes.
+      await db().update(t.gaps).set({ computed_status: computed }).where(eq(t.gaps.id, gap.id));
+      continue;
+    }
+    if (gap.status !== computed) {
       await db()
         .update(t.gaps)
         .set({
@@ -671,22 +1094,20 @@ export async function syncComputedGapStatuses(gapId?: string) {
           human_validated: false,
         })
         .where(eq(t.gaps.id, gap.id));
-      if (gap.status !== computed) {
-        await appendAudit(
-          "Engine",
-          "evidence_lead",
-          "gap",
-          gap.id,
-          "compute_status",
-          `${gap.status} → ${computed}`,
-        );
-        await applyMappedStatusSideEffects({
-          gap_id: gap.id,
-          status: computed,
-          actor_name: "Engine",
-          actor_function: "evidence_lead",
-        });
-      }
+      await appendAudit(
+        "Engine",
+        "evidence_lead",
+        "gap",
+        gap.id,
+        "compute_status",
+        `${gap.status} → ${computed}`,
+      );
+      await applyMappedStatusSideEffects({
+        gap_id: gap.id,
+        status: computed,
+        actor_name: "Engine",
+        actor_function: "evidence_lead",
+      });
     }
   }
 }
@@ -872,6 +1293,59 @@ export async function parkGap(args: {
   await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "park", reason);
 }
 
+export async function setGapSettings(args: {
+  gap_id: string;
+  settings: string[];
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string[]> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
+  const settings = normalizeSettings(args.settings);
+  await db().update(t.gaps).set({ settings }).where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "set_settings",
+    settings.length ? settings.join(", ") : "No setting",
+  );
+  return settings;
+}
+
+/** The design's gap metadata (KAN-49), edited by a person and kept on the audit trail. */
+export async function setGapMetadata(args: {
+  gap_id: string;
+  metadata: unknown;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<GapMetadata> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be edited.");
+  const metadata = normalizeGapMetadata(args.metadata);
+  await db().update(t.gaps).set({ metadata }).where(eq(t.gaps.id, args.gap_id));
+  const summary = [
+    metadata.stakeholders.length ? `Stakeholders: ${metadata.stakeholders.join(", ")}` : null,
+    metadata.geography ? `Geography: ${metadata.geography}` : null,
+    metadata.regional_nuances ? "Regional nuances set" : null,
+    metadata.notes ? "Notes set" : null,
+  ].filter(Boolean);
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "gap",
+    args.gap_id,
+    "set_metadata",
+    summary.length ? summary.join(" · ") : "Metadata cleared",
+  );
+  return metadata;
+}
+
 export async function unparkGap(args: {
   gap_id: string;
   actor_name: string;
@@ -921,15 +1395,23 @@ export async function lockCoverageDimension(args: {
   actor_name: string;
   actor_function: ActorFunction;
 }) {
+  if (!(COVERAGE_DIMENSIONS as readonly string[]).includes(args.dimension)) {
+    throw new Error(`Unknown coverage dimension "${String(args.dimension)}".`);
+  }
+  if (!(DIMENSION_VALUES as readonly string[]).includes(args.value)) {
+    throw new Error(`Choose a dimension value (${DIMENSION_VALUES.join(", ")}).`);
+  }
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const row = state.coverages.find((c) => c.id === args.coverage_id);
   if (!row) throw new Error("Coverage not found");
+  const before = row.dimensions[args.dimension]?.value;
   const dimensions = {
     ...row.dimensions,
     [args.dimension]: {
       value: args.value,
-      rationale: args.rationale,
-      lock: makeLock(args.actor_name, args.actor_function, args.rationale),
+      rationale,
+      lock: makeLock(args.actor_name, args.actor_function, rationale),
     },
   };
   await db()
@@ -943,9 +1425,9 @@ export async function lockCoverageDimension(args: {
     "coverage",
     args.coverage_id,
     "lock_dimension",
-    `${args.dimension}=${args.value}`,
+    `${args.dimension}: ${before ?? "unknown"} → ${args.value}: ${rationale}`,
   );
-  await syncComputedGapStatuses(row.gap_id);
+  await syncComputedGapStatuses(row.gap_id, { human: true });
 }
 
 export async function lockCoverageOverall(args: {
@@ -955,6 +1437,10 @@ export async function lockCoverageOverall(args: {
   actor_name: string;
   actor_function: ActorFunction;
 }) {
+  if (!(ASSESSED_COVERAGE as readonly string[]).includes(args.overall)) {
+    throw new Error(`Choose a coverage verdict (${ASSESSED_COVERAGE.join(", ")}).`);
+  }
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const row = state.coverages.find((c) => c.id === args.coverage_id);
   if (!row) throw new Error("Coverage not found");
@@ -962,8 +1448,8 @@ export async function lockCoverageOverall(args: {
     .update(t.coverages)
     .set({
       overall: args.overall,
-      overall_rationale: args.rationale,
-      overall_lock: makeLock(args.actor_name, args.actor_function, args.rationale),
+      overall_rationale: rationale,
+      overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
       stale: false,
       needs_review: false,
     })
@@ -975,15 +1461,9 @@ export async function lockCoverageOverall(args: {
     "coverage",
     args.coverage_id,
     "lock_overall",
-    args.overall,
+    `${row.overall} → ${args.overall}: ${rationale}`,
   );
-  await enqueueResidualGapSuggestion({
-    gap_id: row.gap_id,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-  });
-  await persistEligibleResidualDrafts();
-  await syncComputedGapStatuses(row.gap_id);
+  await syncComputedGapStatuses(row.gap_id, { human: true });
 }
 
 async function flagSiblingCoveragesForReview(tactic_id: string, except_gap_id: string) {
@@ -1026,40 +1506,6 @@ export async function confirmCoverageReview(args: {
 }
 
 
-
-async function enqueueResidualGapSuggestion(args: {
-  gap_id: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) return;
-  const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  const hasChild = state.gaps.some((g) => g.parent_gap_id === gap.id);
-  const existing = state.residual_gap_suggestions.find((row) => row.parent_gap_id === gap.id);
-  if (existing?.status === "accepted" || existing?.status === "rejected") return;
-  if (
-    !residualGapEligible({
-      gap,
-      coverages,
-      hasChild,
-      suppressed: Boolean(existing && existing.status !== "candidate"),
-    })
-  ) {
-    return;
-  }
-  const draft = draftResidualGapSuggestion({ gap, coverages });
-  await upsertResidualGapSuggestion({
-    parent_gap_id: gap.id,
-    statement: existing?.status === "candidate" ? existing.statement : draft.statement,
-    reasons: draft.reasons,
-    status: "candidate",
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    note: "Pressure-test leftover suggested as a new gap.",
-  });
-}
 
 export async function lockResidual(args: {
   residual_id: string;
@@ -1162,17 +1608,70 @@ type LibraryTacticDraft = {
   lifecycle_stage: string;
   intended_use?: string;
   data_source?: string;
+  study_design?: string;
+  source_quote?: string;
+  /** YYYY-MM or YYYY-MM-DD, or blank. They feed the timeline. */
+  start_date?: string | null;
+  evidence_available?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
   audit_action: string;
   note?: string;
+  /** A person's own type name and colour (KAN-51); the standard type still decides mapping. */
+  custom_type?: CustomTacticType | null;
 };
+
+/** A tactic date as stored: a real YYYY-MM or YYYY-MM-DD, or null when blank. */
+export function optionalTacticDate(field: TacticDateField, value: string | null | undefined): string | null {
+  const error = tacticDateError(field, value);
+  if (error) throw new Error(error);
+  return (value ?? "").trim() || null;
+}
+
+/** Refuses evidence that arrives before the tactic starts (KAN-68). */
+function assertTacticDateOrder(start: string | null | undefined, evidence: string | null | undefined) {
+  const error = tacticDateOrderError(start, evidence);
+  if (error) throw new Error(error);
+}
+
+/** A blank status keeps the default, proposed. Anything else must be a known creatable status. */
+export function createTacticStatus(value: string | null | undefined): CreateTacticStatus {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "proposed";
+  if (!(CREATE_TACTIC_STATUSES as readonly string[]).includes(trimmed)) {
+    throw new Error("Status must be Proposed, Planned, Ongoing or Completed.");
+  }
+  return trimmed as CreateTacticStatus;
+}
+
+/**
+ * One label keeps one colour across the workspace (KAN-51): saving a custom type recolours
+ * every other tactic already carrying that label, so the legend never shows it twice.
+ */
+async function applyCustomTypeColour(custom: CustomTacticType | null, state: IegpState, exceptId?: string) {
+  if (!custom) return;
+  for (const tactic of state.tactics) {
+    if (tactic.id === exceptId || !tactic.custom_type) continue;
+    if (tactic.custom_type.label.toLowerCase() !== custom.label.toLowerCase()) continue;
+    if (tactic.custom_type.color === custom.color && tactic.custom_type.label === custom.label) continue;
+    await db().update(t.tactics).set({ custom_type: custom }).where(eq(t.tactics.id, tactic.id));
+  }
+}
+
+/** A custom type from a form's flat fields; a blank name means none. */
+export function customTypeFromFields(label: unknown, color: unknown): CustomTacticType | null {
+  return normalizeCustomType({ label, color });
+}
 
 async function insertLibraryTactic(args: LibraryTacticDraft) {
   const state = await loadState();
+  const custom_type = args.custom_type ?? null;
   if (!args.name.trim()) throw new Error("Tactic name is required.");
   if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
   if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
+  const start_date = optionalTacticDate("start_date", args.start_date);
+  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
+  assertTacticDateOrder(start_date, evidence_available);
   const id = nextId("TAC", state.tactics.map((x) => x.id));
   const reasonNote = args.note?.trim() || null;
   await db().insert(t.tactics).values({
@@ -1181,24 +1680,29 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
     type: args.type,
     description: args.description || args.name.trim(),
     evidence_question: args.evidence_question.trim(),
-    population: args.population || "To be specified",
-    intervention: args.intervention || "Velmara",
-    comparator: args.comparator || "To be specified",
-    outcomes: args.outcomes || "To be specified",
-    geography: args.geography || state.asset.geography,
-    data_source: args.data_source || "To be designed",
-    study_design: "To be designed",
+    population: args.population ?? "",
+    intervention: args.intervention ?? "",
+    comparator: args.comparator ?? "",
+    outcomes: args.outcomes ?? "",
+    // A field the form sent blank stays blank; only an omitted geography takes the asset's.
+    geography: args.geography === undefined ? state.asset.geography : args.geography.trim(),
+    data_source: args.data_source?.trim() ?? "",
+    study_design: args.study_design?.trim() ?? "",
+    source_quote: args.source_quote?.trim() ?? "",
     lifecycle_stage: args.lifecycle_stage,
     status: args.status,
     review_status: "accepted",
-    start_date: null,
-    evidence_available: null,
+    start_date,
+    evidence_available,
     owner: args.owner || args.actor_name,
-    function: args.function || "evidence_lead",
+    // Blank owner and function mean the person recording it, as the form says.
+    function: args.function || args.actor_function,
     budget: null,
     intended_use: args.intended_use || (args.residual_ids || []).join(", "),
     lock: reasonNote ? makeLock(args.actor_name, args.actor_function, reasonNote) : unlocked(),
+    custom_type,
   });
+  await applyCustomTypeColour(custom_type, state, id);
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1219,14 +1723,25 @@ export async function createProposedTactic(args: {
   intervention: string;
   comparator: string;
   outcomes: string;
-  geography: string;
+  geography?: string;
+  study_design?: string;
+  data_source?: string;
   owner: string;
   function: ActorFunction;
   residual_ids: string[];
   gap_id?: string;
+  /**
+   * Proposed (the default) is an idea and does not count toward addressing.
+   * Planned, ongoing and completed enter an existing real study as it stands.
+   */
+  status?: string;
+  start_date?: string | null;
+  evidence_available?: string | null;
+  custom_type?: CustomTacticType | null;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
+  const status = createTacticStatus(args.status);
   const id = await insertLibraryTactic({
     name: args.name,
     type: args.type,
@@ -1237,14 +1752,19 @@ export async function createProposedTactic(args: {
     comparator: args.comparator,
     outcomes: args.outcomes,
     geography: args.geography,
+    study_design: args.study_design,
+    data_source: args.data_source,
     owner: args.owner,
     function: args.function,
     residual_ids: args.residual_ids,
-    status: "proposed",
-    lifecycle_stage: "proposed",
+    status,
+    lifecycle_stage: status === "proposed" ? "proposed" : "recorded",
+    start_date: args.start_date,
+    evidence_available: args.evidence_available,
+    custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
-    audit_action: "create_proposed",
+    audit_action: status === "proposed" ? "create_proposed" : "create",
   });
   if (args.gap_id) {
     await assignTacticToGap({
@@ -1275,6 +1795,11 @@ export async function recordMissedTactic(args: {
   gap_id?: string;
   status: string;
   catch_up_reason?: string;
+  study_design?: string;
+  data_source?: string;
+  /** The source sentence, when the tactic is promoted from a rejected S3 candidate. */
+  source_quote?: string;
+  custom_type?: CustomTacticType | null;
   actor_name: string;
   actor_function: ActorFunction;
 }) {
@@ -1299,7 +1824,11 @@ export async function recordMissedTactic(args: {
     status,
     lifecycle_stage: "recorded",
     intended_use: reasonLabel || (args.residual_ids || []).join(", "),
-    data_source: reasonLabel || "Recorded while reviewing gaps",
+    // A blank data source stays blank; the catch-up reason is kept in intended_use and the lock note.
+    data_source: args.data_source?.trim() ?? "",
+    study_design: args.study_design,
+    source_quote: args.source_quote,
+    custom_type: args.custom_type,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     audit_action: "record_missed",
@@ -1326,13 +1855,81 @@ export async function createTacticFromGaps(
   return recordMissedTactic(args);
 }
 
+function coverageVerdict(value: unknown): OverallCoverage | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string" && (OVERALL_COVERAGE as readonly string[]).includes(value)) {
+    return value as OverallCoverage;
+  }
+  throw new Error(
+    `Unknown coverage "${String(value)}". Use one of: ${OVERALL_COVERAGE.filter((v) => v !== "unassessed").join(", ")}.`,
+  );
+}
+
+function coverageDimensions(
+  value: Partial<Record<CoverageDimension, DimensionValue>> | null | undefined,
+  rationale: string,
+): IegpState["coverages"][0]["dimensions"] {
+  const dimensions = emptyDimensions();
+  if (!value) return dimensions;
+  for (const [dim, raw] of Object.entries(value)) {
+    if (!(COVERAGE_DIMENSIONS as readonly string[]).includes(dim)) {
+      throw new Error(`Unknown coverage dimension "${dim}".`);
+    }
+    if (!(DIMENSION_VALUES as readonly string[]).includes(raw as string)) {
+      throw new Error(`Unknown value "${String(raw)}" for coverage dimension ${dim}.`);
+    }
+    dimensions[dim as CoverageDimension] = {
+      value: raw as DimensionValue,
+      rationale,
+      lock: unlocked(),
+    };
+  }
+  return dimensions;
+}
+
+/**
+ * A pair a person rejected or removed. A model run may never map it again;
+ * only a person can (assignTacticToGap with `human`).
+ */
+function humanRejection(state: IegpState, gap_id: string, tactic_id: string) {
+  return state.mapping_suggestions.find(
+    (m) => m.gap_id === gap_id && m.tactic_id === tactic_id && m.status === "rejected" && m.lock.locked,
+  );
+}
+
+/** `gap_id::tactic_id` of every pair a person rejected or removed. */
+export function humanRejectedPairs(state: IegpState): Set<string> {
+  return new Set(
+    state.mapping_suggestions
+      .filter((m) => m.status === "rejected" && m.lock.locked && !isMappingRowKey(m.tactic_id))
+      .map((m) => `${m.gap_id}::${m.tactic_id}`),
+  );
+}
+
+/**
+ * Writes one gap ↔ tactic coverage row. `coverage` and `dimensions` carry the
+ * verdict of whoever decided the mapping (the S4 model, or a human). Without a
+ * verdict the row is "unassessed" with every dimension "unknown" — nothing is
+ * invented. A model's verdict is stored unlocked; a human lock (lockCoverage*,
+ * or `lock_coverage` here) is what can make a gap Addressed.
+ *
+ * `human` marks a person's mapping: it records the pair as human-accepted and
+ * may re-map a pair that person (or another) rejected or removed. Without it
+ * (a model run) a human-rejected pair is refused.
+ */
 export async function assignTacticToGap(args: {
   gap_id: string;
   tactic_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
-}) {
+  coverage?: OverallCoverage | null;
+  dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
+  human?: boolean;
+  /** Human only: the given verdict and dimensions are the person's and are locked. */
+  lock_coverage?: boolean;
+}): Promise<string> {
+  const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
@@ -1341,23 +1938,43 @@ export async function assignTacticToGap(args: {
   if (tactic.review_status !== "accepted") {
     throw new Error("Only accepted tactics can be assigned to a gap.");
   }
+  const rejection = humanRejection(state, args.gap_id, args.tactic_id);
+  if (rejection && !args.human) {
+    throw new Error(
+      `${rejection.lock.actor_name ?? "A reviewer"} rejected or removed "${tactic.name}" for this gap; only a person can map it again.`,
+    );
+  }
   const existing = state.coverages.find(
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
   if (existing) {
     throw new Error("That tactic is already assigned to this gap.");
   }
+  const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
+  const lockVerdict =
+    Boolean(args.human && args.lock_coverage) && (overall !== "unassessed" || givenDimensions.length > 0);
+  const rationale = lockVerdict
+    ? requireRationale(args.note)
+    : args.note ||
+      "Assigned from the plan. Coverage is not assessed until a model or a human records it.";
+  const dimensions = coverageDimensions(args.dimensions, args.note ?? "");
+  if (lockVerdict) {
+    for (const dim of givenDimensions) {
+      dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
+    }
+  }
   const coverageId = nextId("COV", state.coverages.map((c) => c.id));
   await db().insert(t.coverages).values({
     id: coverageId,
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
-    dimensions: emptyDimensions(),
-    overall: "limited",
-    overall_rationale:
-      args.note ||
-      "Assigned from the plan. Coverage dimensions are unlocked until a human assesses them.",
-    overall_lock: unlocked(),
+    dimensions,
+    overall,
+    overall_rationale: rationale,
+    overall_lock:
+      lockVerdict && overall !== "unassessed"
+        ? makeLock(args.actor_name, args.actor_function, rationale)
+        : unlocked(),
     stale: false,
     needs_review: false,
   });
@@ -1367,9 +1984,57 @@ export async function assignTacticToGap(args: {
     "coverage",
     coverageId,
     "assign_tactic",
-    `${args.tactic_id} → ${args.gap_id}`,
+    `${args.tactic_id} → ${args.gap_id}${lockVerdict ? ` (${overall}, set by a person)` : ""}`,
   );
-  await syncComputedGapStatuses(args.gap_id);
+  if (args.human) {
+    await upsertMappingSuggestion({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      status: "accepted",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note: rationale,
+    });
+  }
+  await syncComputedGapStatuses(args.gap_id, { human: args.human });
+  return coverageId;
+}
+
+/**
+ * Removes a gap ↔ tactic mapping a person no longer wants. The pair is recorded
+ * as rejected by that person, so no later model run maps it again.
+ */
+export async function unassignTacticFromGap(args: {
+  gap_id: string;
+  tactic_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  const row = state.coverages.find((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  if (!row) throw new Error("That tactic is not mapped to this gap.");
+  await db().delete(t.coverages).where(eq(t.coverages.id, row.id));
+  await upsertMappingSuggestion({
+    gap_id: args.gap_id,
+    tactic_id: args.tactic_id,
+    status: "rejected",
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: rationale,
+  });
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "coverage",
+    row.id,
+    "unassign_tactic",
+    `${args.tactic_id} ↛ ${args.gap_id} (was ${row.overall}): ${rationale}`,
+  );
+  await syncComputedGapStatuses(args.gap_id, { human: true });
 }
 
 async function upsertMappingSuggestion(args: {
@@ -1402,16 +2067,19 @@ async function upsertMappingSuggestion(args: {
   await db().insert(t.mappingSuggestions).values(row);
 }
 
-export async function suggestMappings() {
-  return rankMappingSuggestions(await loadState());
-}
-
+/**
+ * A person accepts a gap ↔ tactic mapping (an S4 proposal, or their own pick).
+ * A pair S4 already committed keeps its coverage and is marked human-accepted;
+ * otherwise it is assigned, with the proposal's verdict when one is given.
+ */
 export async function acceptMapping(args: {
   gap_id: string;
   tactic_id: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
+  coverage?: OverallCoverage | null;
+  dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
 }) {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -1424,15 +2092,22 @@ export async function acceptMapping(args: {
   if (!tacticEligibleForMapping(tactic)) {
     throw new Error("Only accepted, non-cancelled tactics can be mapped.");
   }
-  await upsertMappingSuggestion({
-    ...args,
-    status: "accepted",
-    note: args.note || "Accepted mapping suggestion.",
-  });
-  await assignTacticToGap({
-    ...args,
-    note: args.note || "Accepted mapping suggestion.",
-  });
+  const note = args.note?.trim() || "Accepted mapping suggestion.";
+  const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  if (covered) {
+    await upsertMappingSuggestion({ ...args, status: "accepted", note });
+  } else {
+    await assignTacticToGap({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+      note,
+      coverage: args.coverage,
+      dimensions: args.dimensions,
+      human: true,
+    });
+  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1443,54 +2118,121 @@ export async function acceptMapping(args: {
   );
 }
 
+export const MAPPING_ROW_STATUSES = ["open", "addressed", "partially_addressed"] as const;
+export type MappingRowStatus = (typeof MAPPING_ROW_STATUSES)[number];
+
+/**
+ * A /mappings row a person saved is stored as one mapping_suggestions record
+ * per gap under this reserved tactic key (`__row__:<status>`); the row's tactic
+ * set is the gap's coverages, each marked human-accepted.
+ */
+export const HUMAN_MAPPING_ROW_PREFIX = "__row__:";
+
+export function isMappingRowKey(tactic_id: string): boolean {
+  return tactic_id.startsWith(HUMAN_MAPPING_ROW_PREFIX);
+}
+
+export type HumanMappingRow = {
+  gap_id: string;
+  mapping_status: MappingRowStatus;
+  rationale: string;
+  lock: Lock;
+};
+
+/** The row a person saved for this gap on /mappings, if any. */
+export function humanMappingRow(state: IegpState, gap_id: string): HumanMappingRow | null {
+  const row = state.mapping_suggestions.find((m) => m.gap_id === gap_id && isMappingRowKey(m.tactic_id));
+  if (!row) return null;
+  const status = row.tactic_id.slice(HUMAN_MAPPING_ROW_PREFIX.length);
+  if (!(MAPPING_ROW_STATUSES as readonly string[]).includes(status)) return null;
+  return {
+    gap_id,
+    mapping_status: status as MappingRowStatus,
+    rationale: row.lock.note ?? "",
+    lock: row.lock,
+  };
+}
+
+/** Rejects an empty or unknown mapping status instead of casting it. */
+export function requireMappingRowStatus(value: unknown): MappingRowStatus {
+  if (typeof value === "string" && (MAPPING_ROW_STATUSES as readonly string[]).includes(value)) {
+    return value as MappingRowStatus;
+  }
+  throw new Error(
+    value === undefined || value === null || value === ""
+      ? "Choose a mapping status (open, addressed or partially addressed) before saving this row."
+      : `Unknown mapping status "${String(value)}". Use open, addressed or partially_addressed.`,
+  );
+}
+
+/**
+ * Saves a /mappings row as the person's decision: the gap's tactic set becomes
+ * exactly `tactic_ids` (removed tactics are unassigned and recorded as rejected,
+ * new ones assigned), and the row status is stored so it wins over any S4 run.
+ */
 export async function saveMappingTableRow(args: {
   gap_id: string;
   tactic_ids: string[];
-  mapping_status: "open" | "addressed" | "partially_addressed";
+  mapping_status: MappingRowStatus;
   actor_name: string;
   actor_function: ActorFunction;
   rationale: string;
 }) {
+  const mapping_status = requireMappingRowStatus(args.mapping_status);
+  const rationale = requireRationale(args.rationale);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
   if (!gapEligibleForMapping(gap.status)) {
     throw new Error("Only live gaps eligible for mapping can be edited here.");
   }
-  const uniqueIds = [...new Set(args.tactic_ids.filter(Boolean))];
-  if (args.mapping_status !== "open" && uniqueIds.length === 0) {
+  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
+  if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new Error("Addressed or partially addressed rows need at least one tactic.");
   }
   for (const tactic_id of uniqueIds) {
-    const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === tactic_id);
-    if (!covered) {
-      await assignTacticToGap({
-        gap_id: args.gap_id,
-        tactic_id,
-        actor_name: args.actor_name,
-        actor_function: args.actor_function,
-        note: args.rationale,
-      });
-    }
-    await upsertMappingSuggestion({
-      gap_id: args.gap_id,
-      tactic_id,
-      status: "accepted",
-      actor_name: args.actor_name,
-      actor_function: args.actor_function,
-      note: args.rationale,
-    });
+    const tactic = state.tactics.find((x) => x.id === tactic_id);
+    if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
   }
+  const current = state.coverages.filter((c) => c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const removed = current.filter((id) => !uniqueIds.includes(id));
+  const actor = { actor_name: args.actor_name, actor_function: args.actor_function };
+  for (const tactic_id of removed) {
+    await unassignTacticFromGap({ gap_id: args.gap_id, tactic_id, rationale, ...actor });
+  }
+  for (const tactic_id of uniqueIds) {
+    if (current.includes(tactic_id)) {
+      await upsertMappingSuggestion({ gap_id: args.gap_id, tactic_id, status: "accepted", ...actor, note: rationale });
+    } else {
+      await assignTacticToGap({ gap_id: args.gap_id, tactic_id, ...actor, note: rationale, human: true });
+    }
+  }
+  for (const old of state.mapping_suggestions.filter((m) => m.gap_id === args.gap_id && isMappingRowKey(m.tactic_id))) {
+    await db()
+      .delete(t.mappingSuggestions)
+      .where(and(eq(t.mappingSuggestions.gap_id, args.gap_id), eq(t.mappingSuggestions.tactic_id, old.tactic_id)));
+  }
+  await db().insert(t.mappingSuggestions).values({
+    gap_id: args.gap_id,
+    tactic_id: `${HUMAN_MAPPING_ROW_PREFIX}${mapping_status}`,
+    status: "accepted",
+    lock: makeLock(args.actor_name, args.actor_function, rationale),
+  });
   await appendAudit(
     args.actor_name,
     args.actor_function,
     "mapping",
     args.gap_id,
     "save_mapping_row",
-    `${args.mapping_status} · ${uniqueIds.join(", ") || "none"}`,
+    `${mapping_status} · ${uniqueIds.join(", ") || "none"}${removed.length ? ` · removed ${removed.join(", ")}` : ""}: ${rationale}`,
   );
 }
 
+/**
+ * A person rejects a gap ↔ tactic mapping. A pair already committed (by S4 or
+ * anyone) is removed like unassignTacticFromGap, which needs a rationale. Either
+ * way the pair is recorded as rejected, so no later model run maps it again.
+ */
 export async function rejectMapping(args: {
   gap_id: string;
   tactic_id: string;
@@ -1507,13 +2249,20 @@ export async function rejectMapping(args: {
     (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
   if (covered) {
-    throw new Error("That tactic already covers this gap. Reject does not remove an assignment.");
+    await unassignTacticFromGap({
+      gap_id: args.gap_id,
+      tactic_id: args.tactic_id,
+      rationale: args.note ?? "",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+  } else {
+    await upsertMappingSuggestion({
+      ...args,
+      status: "rejected",
+      note: args.note || "Rejected mapping suggestion.",
+    });
   }
-  await upsertMappingSuggestion({
-    ...args,
-    status: "rejected",
-    note: args.note || "Rejected mapping suggestion.",
-  });
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1579,7 +2328,7 @@ async function consumeResidualRecord(args: {
   const row = {
     statement: args.statement,
     domain: args.domain,
-    draft_rationale: args.rationale || existing?.draft_rationale || "Pressure-test leftover.",
+    draft_rationale: args.rationale || existing?.draft_rationale || "",
     review_status: args.review_status,
     created_gap_id: args.created_gap_id,
     lock,
@@ -1604,29 +2353,15 @@ async function consumeResidualRecord(args: {
   });
 }
 
-async function persistEligibleResidualDrafts() {
-  const state = await loadState();
-  for (const draft of rankResidualGapSuggestions(state)) {
-    await consumeResidualRecord({
-      gap_id: draft.parent_gap_id,
-      statement: draft.statement,
-      domain: draft.domain,
-      rationale: draft.reasons.join(" "),
-      review_status: "candidate",
-      created_gap_id: null,
-      actor_name: "Engine",
-      actor_function: "evidence_lead",
-      note: "Pressure-test draft. Human must accept, reject, or modify in Review.",
-    });
-  }
+/** Leftover rows a human has saved and not yet accepted or rejected. */
+export async function listResidualGapDrafts() {
+  return persistedResidualGaps(await loadState());
 }
 
-export async function suggestResidualGaps() {
-  return rankResidualGapSuggestions(await loadState());
-}
-
-function liveResidualDraft(state: IegpState, parent_gap_id: string) {
-  return rankResidualGapSuggestions(state).find((row) => row.parent_gap_id === parent_gap_id);
+function savedResidualDraft(state: IegpState, parent_gap_id: string) {
+  return state.residual_gap_suggestions.find(
+    (row) => row.parent_gap_id === parent_gap_id && row.status === "candidate",
+  );
 }
 
 export async function acceptResidualGap(args: {
@@ -1648,18 +2383,15 @@ export async function acceptResidualGap(args: {
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
     throw new Error("A child gap already exists for this leftover.");
   }
-  const draft = liveResidualDraft(state, args.parent_gap_id);
-  const saved = state.residual_gap_suggestions.find(
-    (row) => row.parent_gap_id === args.parent_gap_id && row.status === "candidate",
-  );
-  if (!draft && !saved && !args.statement?.trim()) {
+  const saved = savedResidualDraft(state, args.parent_gap_id);
+  if (!saved && !args.statement?.trim()) {
     throw new Error("No leftover residual to accept.");
   }
-  const statement = (args.statement || saved?.statement || draft?.statement || "").trim();
+  const statement = (args.statement || saved?.statement || "").trim();
   if (!statement) throw new Error("Statement is required.");
   const childId = await createGap({
     statement,
-    domain: draft?.domain ?? parent.domain,
+    domain: parent.domain,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note || "Accepted leftover as a new Open gap. Parent statement preserved.",
@@ -1679,7 +2411,7 @@ export async function acceptResidualGap(args: {
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
     statement,
-    reasons: draft?.reasons ?? saved?.reasons ?? ["Human accepted residual as a new gap."],
+    reasons: saved?.reasons ?? ["Human accepted residual as a new gap."],
     status: "accepted",
     actor_name: args.actor_name,
     actor_function: args.actor_function,
@@ -1688,8 +2420,8 @@ export async function acceptResidualGap(args: {
   await consumeResidualRecord({
     gap_id: args.parent_gap_id,
     statement,
-    domain: draft?.domain ?? parent.domain,
-    rationale: (draft?.reasons ?? []).join(" "),
+    domain: parent.domain,
+    rationale: (saved?.reasons ?? []).join(" "),
     review_status: "accepted",
     created_gap_id: childId,
     actor_name: args.actor_name,
@@ -1704,7 +2436,30 @@ export async function acceptResidualGap(args: {
     "accept_residual_gap",
     `${args.parent_gap_id} → ${childId}`,
   );
+  await recordResidualEdit(args, "accept", saved?.statement ?? null, `${childId}: ${statement}`);
   return childId;
+}
+
+/** Leftover decisions carry the reviewer's note as the edit rationale when there is one. */
+async function recordResidualEdit(
+  args: { parent_gap_id: string; actor_name: string; actor_function: ActorFunction; note?: string },
+  action: "accept" | "edit" | "reject",
+  before: string | null,
+  after: string | null,
+) {
+  const rationale = args.note?.trim() ?? "";
+  if (rationale.length < 3) return;
+  await recordEdit({
+    stage: "S6",
+    entity_type: "residual_gap",
+    entity_id: args.parent_gap_id,
+    field: "leftover",
+    action,
+    before,
+    after,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
 }
 
 export async function modifyResidualGap(args: {
@@ -1723,11 +2478,10 @@ export async function modifyResidualGap(args: {
   if (existing?.status === "accepted" || existing?.status === "rejected") {
     throw new Error("That leftover is already locked.");
   }
-  const draft = liveResidualDraft(state, args.parent_gap_id);
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
     statement,
-    reasons: draft?.reasons ?? ["Human modified the leftover statement."],
+    reasons: existing?.reasons ?? ["Human modified the leftover statement."],
     status: "candidate",
     actor_name: args.actor_name,
     actor_function: args.actor_function,
@@ -1736,8 +2490,8 @@ export async function modifyResidualGap(args: {
   await consumeResidualRecord({
     gap_id: args.parent_gap_id,
     statement,
-    domain: draft?.domain ?? parent.domain,
-    rationale: (draft?.reasons ?? ["Human modified the leftover statement."]).join(" "),
+    domain: parent.domain,
+    rationale: (existing?.reasons ?? ["Human modified the leftover statement."]).join(" "),
     review_status: "candidate",
     created_gap_id: null,
     actor_name: args.actor_name,
@@ -1752,6 +2506,7 @@ export async function modifyResidualGap(args: {
     "modify_residual_gap",
     statement.slice(0, 180),
   );
+  await recordResidualEdit(args, "edit", existing?.statement ?? null, statement);
 }
 
 export async function rejectResidualGap(args: {
@@ -1766,11 +2521,11 @@ export async function rejectResidualGap(args: {
   if (state.gaps.some((g) => g.parent_gap_id === args.parent_gap_id)) {
     throw new Error("A child gap already exists for this leftover.");
   }
-  const draft = liveResidualDraft(state, args.parent_gap_id);
+  const saved = savedResidualDraft(state, args.parent_gap_id);
   await upsertResidualGapSuggestion({
     parent_gap_id: args.parent_gap_id,
-    statement: draft?.statement ?? parent.statement,
-    reasons: draft?.reasons ?? ["Human rejected this leftover."],
+    statement: saved?.statement ?? parent.statement,
+    reasons: saved?.reasons ?? ["Human rejected this leftover."],
     status: "rejected",
     actor_name: args.actor_name,
     actor_function: args.actor_function,
@@ -1778,9 +2533,9 @@ export async function rejectResidualGap(args: {
   });
   await consumeResidualRecord({
     gap_id: args.parent_gap_id,
-    statement: draft?.statement ?? parent.statement,
-    domain: draft?.domain ?? parent.domain,
-    rationale: (draft?.reasons ?? ["Human rejected this leftover."]).join(" "),
+    statement: saved?.statement ?? parent.statement,
+    domain: parent.domain,
+    rationale: (saved?.reasons ?? ["Human rejected this leftover."]).join(" "),
     review_status: "rejected",
     created_gap_id: null,
     actor_name: args.actor_name,
@@ -1795,26 +2550,42 @@ export async function rejectResidualGap(args: {
     "reject_residual_gap",
     `${args.parent_gap_id} leftover suppressed`,
   );
+  await recordResidualEdit(args, "reject", saved?.statement ?? null, null);
 }
 
 export async function createGap(args: {
   name?: string;
-  statement: string;
+  statement?: string;
   domain?: EvidenceDomain;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
   parent_gap_id?: string | null;
+  settings?: string[];
+  /** Who it affects and where (KAN-49), entered with the gap (KAN-52). A split child inherits its parent's. */
+  metadata?: unknown;
+  /** An existing need to become this gap's primary need (a need moved out of another gap). */
+  need_id?: string;
+  /** Provenance for a gap promoted from a rejected S2 candidate: its source and quote. */
+  source_id?: string;
+  source_quote?: string;
 }) {
-  const statement = args.statement.trim();
-  if (!statement) throw new Error("Statement is required.");
+  // The description is what evidence is missing; a person may give only the title (KAN-52).
+  const statement = (args.statement ?? "").trim() || (args.name ?? "").trim();
+  if (!statement) throw new Error("Give the gap a title or a description.");
   const domain = args.domain && EVIDENCE_DOMAINS.includes(args.domain) ? args.domain : "unmet_need";
   const state = await loadState();
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
-  if (!obj) throw new Error("No strategic objective to attach this gap to.");
+  // Split and rewrite children carry the parent's settings through.
+  let settings = normalizeSettings(args.settings ?? []);
+  let metadata = normalizeGapMetadata(args.metadata ?? {});
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
     if (!parent) throw new Error("Parent gap not found");
+    if (!args.settings) settings = parent.settings;
+    // …and its metadata (KAN-49): who it affects and where do not change on a split.
+    if (args.metadata === undefined) metadata = parent.metadata;
   }
   const name = args.name?.trim() || gapNameFromStatement(statement);
   const id = nextId(
@@ -1826,7 +2597,7 @@ export async function createGap(args: {
     name,
     statement,
     domain,
-    objective_id: obj.id,
+    objective_id: obj?.id ?? "",
     status: "validated_open",
     exclusion_reason: null,
     exclusion_note: null,
@@ -1838,28 +2609,68 @@ export async function createGap(args: {
     human_validated: false,
     parked_at: null,
     parked_reason: null,
+    settings,
+    metadata,
+    number: Math.max(0, ...state.gaps.map((gap) => gap.number)) + 1,
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name);
+  if (args.need_id) {
+    await linkNeedOntoGap(args.need_id, id, "primary");
+  } else if (args.source_id && state.sources.some((s) => s.id === args.source_id)) {
+    await insertNeedForGap({
+      gapId: id,
+      sourceId: args.source_id,
+      statement,
+      sourceQuote: args.source_quote?.trim() || statement,
+      role: "primary",
+      actor_function: args.actor_function,
+    });
+  }
   await syncComputedGapStatuses(id);
   if (args.parent_gap_id) await syncComputedGapStatuses(args.parent_gap_id);
   await ensureGapHasConstituentNeed(id);
   return id;
 }
 
+/**
+ * Human edit of a gap's name, statement and domain. Rationale is required; each
+ * changed field is filed as an edit record with its before and after value, and
+ * the gap is locked to the editor. No stage rewrites an existing gap's text: S2
+ * re-runs only add needs onto a gap they judge a duplicate.
+ */
 export async function modifyGap(args: {
   gap_id: string;
-  name: string;
-  statement: string;
+  name?: string;
+  statement?: string;
+  domain?: EvidenceDomain | string;
+  rationale?: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
 }) {
+  const rationale = requireRationale(args.rationale ?? args.note);
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("This gap was retired by a split or rewrite. Edit the live gap.");
+  const name = args.name === undefined ? undefined : args.name.trim();
+  const statement = args.statement === undefined ? undefined : args.statement.trim();
+  if (name !== undefined && !name) throw new Error("Gap name is required.");
+  if (statement !== undefined && !statement) throw new Error("Statement is required.");
+  const domain = args.domain === undefined || args.domain === "" ? undefined : args.domain;
+  if (domain !== undefined && !EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
+    throw new Error("Unknown evidence domain.");
+  }
+  const changes = diffFields(gap, { name, statement, domain });
+  if (changes.length === 0) throw new Error("Nothing changed.");
   await db()
     .update(t.gaps)
-    .set({ name: args.name, statement: args.statement })
+    .set({
+      ...(name !== undefined ? { name } : {}),
+      ...(statement !== undefined ? { statement } : {}),
+      ...(domain !== undefined ? { domain: domain as EvidenceDomain } : {}),
+      lock: makeLock(args.actor_name, args.actor_function, rationale),
+    })
     .where(eq(t.gaps.id, args.gap_id));
   await appendAudit(
     args.actor_name,
@@ -1867,8 +2678,18 @@ export async function modifyGap(args: {
     "gap",
     args.gap_id,
     "modify",
-    args.note || `${gap.name} → ${args.name}`,
+    `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
   );
+  await recordFieldEdits({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: args.gap_id,
+    changes,
+    rationale,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  return changes;
 }
 
 export async function lockTactic(args: {
@@ -1932,12 +2753,15 @@ export async function lockRoadmapItem(args: {
   if (tactic.status === "completed") {
     throw new Error("Completed tactics stay on the dossier, not the forward roadmap.");
   }
+  const start_date = optionalTacticDate("start_date", args.start_date);
+  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
+  assertTacticDateOrder(start_date, evidence_available);
   const existing = state.roadmap.find((r) => r.tactic_id === args.tactic_id);
   const row = {
     tactic_id: args.tactic_id,
     residual_ids: args.residual_ids,
-    start_date: args.start_date,
-    evidence_available: args.evidence_available,
+    start_date,
+    evidence_available,
     owner: args.owner,
     note: args.note ?? null,
     lock: makeLock(args.actor_name, args.actor_function, args.note),
@@ -1970,6 +2794,11 @@ export async function persistSourceAndBlocks(args: {
   stakeholder_function: ActorFunction;
   text: string;
   filename?: string;
+  /**
+   * Blocks the parse LLM already decided. When omitted (test stub, typed
+   * notes) the text is split mechanically.
+   */
+  sections?: { heading: string; text: string; location: string }[];
 }): Promise<{ source_id: string; blocks: IegpState["blocks"] }> {
   const state = await loadState();
   const sourceId = nextId("SRC", state.sources.map((s) => s.id));
@@ -1982,13 +2811,18 @@ export async function persistSourceAndBlocks(args: {
     ingested_at: now(),
     full_text: args.text,
   });
-  const sections = splitSourceIntoBlocks(args.text, args.title);
+  const sections =
+    args.sections ??
+    splitSourceIntoBlocks(args.text, args.title).map((section) => ({
+      ...section,
+      location: section.heading === "Note" ? "Uploaded note" : section.heading,
+    }));
   const blocks = sections.map((section, i) => ({
     id: `${sourceId}-B${String(i + 1).padStart(2, "0")}`,
     source_id: sourceId,
     heading: section.heading,
     text: section.text,
-    location: section.heading === "Note" ? "Uploaded note" : section.heading,
+    location: section.location,
   }));
   if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
   return { source_id: sourceId, blocks };
@@ -1998,12 +2832,50 @@ export type CandidateNeedRow = {
   id: string;
   statement: string;
   source_quote: string;
+  /**
+   * Explicit link to an existing live gap. Without it, the need belongs to the
+   * gap row in the same commit that carries the same candidate `id`.
+   */
+  gap_id?: string | null;
 };
 
 /**
- * Commits an accepted candidate set against an existing source. Callers decide
- * what the candidate set is: the ingest monolith uses the local extractors, the
- * S2/S3 modules use their judged output.
+ * A candidate the S2 judge found to overlap an existing gap (KAN-74): it becomes a
+ * suggestion for a person, never a gap, until someone accepts a merge or a split.
+ */
+export type OverlapRow = {
+  /** The candidate's id in this run. */
+  id: string;
+  gap_id: string;
+  run_id: string;
+  candidate_row_id?: string | null;
+  name: string;
+  statement: string;
+  domain: EvidenceDomain;
+  source_quote: string;
+  shared_part: string;
+  new_part: string;
+  merged_name: string;
+  merged_statement: string;
+  split_name: string;
+  split_statement: string;
+};
+
+/**
+ * Commits a judged candidate set against an existing source. The S2/S3 LLM
+ * stages decide what the set is and which rows repeat an existing record; this
+ * function only persists those decisions:
+ * - a gap with `duplicate_of` joins that live gap (its need is linked there);
+ *   otherwise it is inserted as a new gap. An unknown id throws.
+ * - an overlap row becomes a pending suggestion on its gap; no gap is created.
+ * - a need links to the gap named by `gap_id`, or to the gap row with its
+ *   candidate id. A need with neither throws: nothing is linked by similarity.
+ * - a need joining a gap a person already validated (its status, or its priority
+ *   in `validated_gap_ids`) flags the gap "new source added" (KAN-74).
+ * - a tactic with `duplicate_of` is skipped (the id must exist); otherwise it is
+ *   inserted. Only rows the S3 judge accepted are passed here, so they are
+ *   stored accepted as that judge's decision unless a row says `candidate`.
+ * Mapping is S4's job and leftovers are S6's: neither happens here.
  */
 export async function commitExtractedRecords(args: {
   source_id: string;
@@ -2014,125 +2886,213 @@ export async function commitExtractedRecords(args: {
   needs: CandidateNeedRow[];
   gaps: ExtractedGap[];
   tactics: ExtractedTactic[];
-  /** Skip to run mapping as its own stage. */
+  overlaps?: OverlapRow[];
+  /** Gaps whose priority a person validated (S8 keeps those), so a new source on them is flagged. */
+  validated_gap_ids?: string[];
+  /** @deprecated Ignored. Mapping runs only as S4. */
   apply_mappings?: boolean;
-}): Promise<{ need_ids: string[]; gap_ids: string[]; tactic_ids: string[] }> {
+}): Promise<{
+  need_ids: string[];
+  gap_ids: string[];
+  tactic_ids: string[];
+  merged_gap_ids: string[];
+  skipped_tactic_ids: string[];
+  /** The gap each gap row (or need with a gap_id) joined or became, by candidate id. */
+  gap_id_by_row: Record<string, string>;
+  /** The suggestion each overlap row became, by candidate id. */
+  suggestion_id_by_row: Record<string, string>;
+  /** Validated gaps a new source joined; they now show "New source added". */
+  flagged_gap_ids: string[];
+}> {
   const state = await loadState();
   const sourceId = args.source_id;
-  const needRows = args.needs;
-  const extractedGaps = args.gaps;
-  const extractedTactics = args.tactics;
-  const obj = state.objectives[0]!;
-  const needIds = [...state.needs.map((n) => n.id)];
-  const tacticIds = [...state.tactics.map((x) => x.id)];
-  const createdGapIds: string[] = [];
+  // Linked to the first objective once setup has named one; a blank plan has none yet.
+  const obj = state.objectives[0];
+  if (!state.sources.some((s) => s.id === sourceId)) {
+    throw new Error(`Source ${sourceId} not found. Nothing was saved.`);
+  }
+
+  // Validate every judged reference before writing anything.
+  const liveGaps = new Map(state.gaps.filter(isLiveGap).map((g) => [g.id, g]));
+  // A repeat of a gap a person excluded or parked joins that gap as provenance
+  // and leaves it excluded or parked: a re-run never re-opens a human decision.
+  const setAsideGaps = new Map(
+    state.gaps
+      .filter((g) => !g.retired && (g.status === "excluded" || Boolean(g.parked_at)))
+      .map((g) => [g.id, g]),
+  );
+  const tacticIdsKnown = new Set(state.tactics.map((x) => x.id));
+  const gapRows = new Map(args.gaps.map((g) => [g.id, g]));
+  for (const gap of args.gaps) {
+    if (gap.duplicate_of && !liveGaps.has(gap.duplicate_of) && !setAsideGaps.has(gap.duplicate_of)) {
+      throw new Error(
+        `Gap candidate ${gap.id} is marked a duplicate of ${gap.duplicate_of}, which is not a live gap (nor an excluded or parked one). Nothing was saved.`,
+      );
+    }
+  }
+  for (const overlap of args.overlaps ?? []) {
+    if (!liveGaps.has(overlap.gap_id) && !setAsideGaps.has(overlap.gap_id)) {
+      throw new Error(
+        `Gap candidate ${overlap.id} is marked as overlapping ${overlap.gap_id}, which is not a gap in the plan. Nothing was saved.`,
+      );
+    }
+  }
+  for (const tac of args.tactics) {
+    if (tac.duplicate_of && !tacticIdsKnown.has(tac.duplicate_of)) {
+      throw new Error(
+        `Tactic candidate ${tac.id} is marked a duplicate of ${tac.duplicate_of}, which is not a known tactic. Nothing was saved.`,
+      );
+    }
+  }
+  const needByGapRow = new Map<string, CandidateNeedRow>();
+  const needsOnExistingGaps: CandidateNeedRow[] = [];
+  for (const need of args.needs) {
+    if (need.gap_id) {
+      // A repeat of a gap a person set aside joins it too, and leaves it set aside.
+      if (!liveGaps.has(need.gap_id) && !setAsideGaps.has(need.gap_id)) {
+        throw new Error(`Need candidate ${need.id} links to ${need.gap_id}, which is not a live gap. Nothing was saved.`);
+      }
+      needsOnExistingGaps.push(need);
+    } else if (gapRows.has(need.id)) {
+      needByGapRow.set(need.id, need);
+    } else {
+      throw new Error(
+        `Need candidate ${need.id} has no gap: give it gap_id or commit it with the gap row of the same id. Nothing was saved.`,
+      );
+    }
+  }
+
+  const needIds = state.needs.map((n) => n.id);
+  const hasPrimary = new Set(
+    state.need_gap_links.filter((l) => l.role === "primary").map((l) => l.gap_id),
+  );
   const createdNeedIds: string[] = [];
+  const createdGapIds: string[] = [];
+  const mergedGapIds: string[] = [];
+  const gapIdByRow: Record<string, string> = {};
+  const suggestionIdByRow: Record<string, string> = {};
+  const flaggedGapIds: string[] = [];
+  // A person has already judged these: a new source on them is worth a second look.
+  const validatedPriority = new Set(args.validated_gap_ids ?? []);
+  const reviewed = new Set(
+    state.gaps.filter((g) => g.human_validated || validatedPriority.has(g.id)).map((g) => g.id),
+  );
 
-  const gapPool = extractedGaps.length
-    ? extractedGaps
-    : needRows.map((row) => ({
-        id: row.id,
-        name: gapNameFromStatement(row.statement),
-        statement: row.statement,
-        domain: "unmet_need" as const,
-        source_id: sourceId,
-        source_quote: row.source_quote,
-      }));
+  // A gap holds each source sentence once: re-running extraction on a document, or two
+  // candidates quoting the same sentence, must not attach it again (KAN-74).
+  const quoteKey = (gapId: string, quote: string) =>
+    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim()}`;
+  const attached = new Set(
+    state.need_gap_links.flatMap((link) => {
+      const need = state.needs.find((row) => row.id === link.need_id);
+      return need && need.source_id === sourceId ? [quoteKey(link.gap_id, need.source_quote ?? need.statement)] : [];
+    }),
+  );
 
-  for (const row of needRows) {
+  const addNeed = async (args2: {
+    gapId: string;
+    statement: string;
+    quote: string;
+    domain: EvidenceDomain;
+  }) => {
+    const key = quoteKey(args2.gapId, args2.quote || args2.statement);
+    if (attached.has(key)) return;
+    attached.add(key);
     const needId = nextId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
-    await db().insert(t.needs).values({
+    await insertNeedRow({
       id: needId,
-      statement: row.statement,
-      domain: "unmet_need",
+      statement: args2.statement,
+      source_quote: args2.quote,
+      domain: args2.domain,
       stakeholder: args.stakeholder_function,
-      objective_id: obj.id,
-      decision_supported: obj.key_decision,
-      geography: state.asset.geography,
-      population: "To be specified",
-      intervention: "Velmara",
-      comparator: "To be specified",
-      outcome: "To be specified",
-      timing: "To be specified",
       source_id: sourceId,
-      source_quote: row.source_quote,
-      confidence: 0.5,
-      status: "candidate",
-      lock: unlocked(),
+      objective: obj,
+      geography: state.asset.geography,
     });
-  }
-
-  const attachSourceNeedToGap = async (gapId: string, preferredStatement: string, quote: string) => {
-    const live = await loadState();
-    if (gapHasNeedFromSource(live, gapId, sourceId)) return;
-    const fromThisSource = live.needs.find(
-      (n) =>
-        n.source_id === sourceId &&
-        (similarRecord(n.statement, preferredStatement) || similarRecord(n.statement, quote)),
-    );
-    const role = primaryRoleForGap(live, gapId);
-    if (fromThisSource) {
-      await linkNeedOntoGap(fromThisSource.id, gapId, role);
-      return;
+    const role = hasPrimary.has(args2.gapId) ? "supporting" : "primary";
+    hasPrimary.add(args2.gapId);
+    await linkNeedOntoGap(needId, args2.gapId, role);
+    if (reviewed.has(args2.gapId)) {
+      await db()
+        .update(t.gaps)
+        .set({ new_source_at: now(), new_source_need_id: needId })
+        .where(eq(t.gaps.id, args2.gapId));
+      if (!flaggedGapIds.includes(args2.gapId)) flaggedGapIds.push(args2.gapId);
     }
-    await insertNeedForGap({
-      gapId,
-      sourceId,
-      statement: preferredStatement,
-      sourceQuote: quote,
-      role,
-      actor_function: args.stakeholder_function,
-    });
   };
 
-  for (const gapRow of gapPool) {
-    const live = await loadState();
-    const existing =
-      findMatchingLiveGap(live, gapRow.statement) ?? findMatchingLiveGap(live, gapRow.name);
-    if (existing) {
-      await attachSourceNeedToGap(existing.id, gapRow.statement, gapRow.source_quote);
-      continue;
+  for (const gapRow of args.gaps) {
+    let gapId: string;
+    if (gapRow.duplicate_of) {
+      gapId = gapRow.duplicate_of;
+      mergedGapIds.push(gapId);
+    } else {
+      gapId = await insertLiveOpenGap({
+        name: gapRow.name,
+        statement: gapRow.statement,
+        domain: gapRow.domain,
+        objectiveId: obj?.id ?? "",
+      });
+      createdGapIds.push(gapId);
     }
-    const gapId = await insertLiveOpenGap({
-      name: gapRow.name,
-      statement: gapRow.statement,
+    gapIdByRow[gapRow.id] = gapId;
+    const need = needByGapRow.get(gapRow.id);
+    await addNeed({
+      gapId,
+      statement: need?.statement ?? gapRow.statement,
+      quote: need?.source_quote ?? gapRow.source_quote,
       domain: gapRow.domain,
-      objectiveId: obj.id,
     });
-    createdGapIds.push(gapId);
-    await attachSourceNeedToGap(gapId, gapRow.statement, gapRow.source_quote);
+  }
+  for (const need of needsOnExistingGaps) {
+    const gap = (liveGaps.get(need.gap_id!) ?? setAsideGaps.get(need.gap_id!))!;
+    await addNeed({
+      gapId: gap.id,
+      statement: need.statement,
+      quote: need.source_quote,
+      domain: gap.domain,
+    });
+    gapIdByRow[need.id] = gap.id;
+  }
+  for (const overlap of args.overlaps ?? []) {
+    const id = newId("gsug");
+    await db().insert(t.gapSuggestions).values({
+      id,
+      gap_id: overlap.gap_id,
+      run_id: overlap.run_id,
+      candidate_row_id: overlap.candidate_row_id ?? null,
+      source_id: sourceId,
+      name: overlap.name,
+      statement: overlap.statement,
+      domain: overlap.domain,
+      source_quote: overlap.source_quote,
+      shared_part: overlap.shared_part,
+      new_part: overlap.new_part,
+      merged_name: overlap.merged_name,
+      merged_statement: overlap.merged_statement,
+      split_name: overlap.split_name,
+      split_statement: overlap.split_statement,
+      extra_sources: [],
+      status: "pending",
+      result_gap_id: null,
+      decided_by: null,
+      rationale: null,
+      created_at: now(),
+      decided_at: null,
+    });
+    suggestionIdByRow[overlap.id] = id;
   }
 
-  for (const needId of createdNeedIds) {
-    const live = await loadState();
-    const need = live.needs.find((n) => n.id === needId);
-    if (!need) continue;
-    if (live.need_gap_links.some((l) => l.need_id === needId)) continue;
-    const match = findMatchingLiveGap(live, need.statement);
-    if (match) {
-      await linkNeedOntoGap(needId, match.id, primaryRoleForGap(live, match.id));
+  const tacticIds = state.tactics.map((x) => x.id);
+  const createdTacticIds: string[] = [];
+  const skippedTacticIds: string[] = [];
+  for (const tac of args.tactics) {
+    if (tac.duplicate_of) {
+      skippedTacticIds.push(tac.id);
       continue;
     }
-    const gapId = await insertLiveOpenGap({
-      name: gapNameFromStatement(need.statement),
-      statement: need.statement,
-      domain: "unmet_need",
-      objectiveId: obj.id,
-    });
-    createdGapIds.push(gapId);
-    await linkNeedOntoGap(needId, gapId, "primary");
-  }
-
-  const createdTacticIds: string[] = [];
-  for (const tac of extractedTactics) {
-    const dup = state.tactics.find(
-      (existing) =>
-        similarRecord(existing.name, tac.name) ||
-        similarRecord(existing.evidence_question, tac.evidence_question, 0.45),
-    );
-    if (dup) continue;
     const tacticId = nextId("TAC", tacticIds);
     tacticIds.push(tacticId);
     createdTacticIds.push(tacticId);
@@ -2140,18 +3100,18 @@ export async function commitExtractedRecords(args: {
       id: tacticId,
       name: tac.name,
       type: tac.type,
-      description: `Extracted from ${args.title}. Human must assign this tactic to a prioritized gap. Not ideation — inventory from the source.`,
+      description: `Extracted from ${args.title}. Inventory from the source, not ideation.`,
       evidence_question: tac.evidence_question,
-      population: "To be specified",
-      intervention: "Velmara",
-      comparator: "To be specified",
-      outcomes: "To be specified",
+      population: "",
+      intervention: "",
+      comparator: "",
+      outcomes: "",
       geography: state.asset.geography,
       data_source: args.title,
-      study_design: "Extracted — not yet designed",
+      study_design: "",
       lifecycle_stage: "extracted",
-      status: tac.status ?? "proposed",
-      review_status: "accepted",
+      status: tac.status,
+      review_status: tac.review_status ?? "accepted",
       start_date: null,
       evidence_available: null,
       owner: args.actor_name,
@@ -2159,6 +3119,7 @@ export async function commitExtractedRecords(args: {
       budget: null,
       intended_use: `Extracted from ${sourceId}`,
       lock: unlocked(),
+      source_quote: (tac.source_quote ?? "").trim(),
     });
   }
 
@@ -2168,102 +3129,270 @@ export async function commitExtractedRecords(args: {
     "source",
     sourceId,
     "ingest",
-    `Ingested ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} gap(s), ${createdTacticIds.length} tactic(s); mappings applied.`,
+    `Committed ${args.title}; ${createdNeedIds.length} need(s), ${createdGapIds.length} new gap(s), ${mergedGapIds.length} joined as duplicates, ${Object.keys(suggestionIdByRow).length} overlap(s) to review, ${createdTacticIds.length} tactic(s), ${skippedTacticIds.length} duplicate tactic(s) skipped.`,
   );
-  if (args.apply_mappings !== false) {
-    await applyEngineMappings(args.actor_name, args.actor_function);
-  }
-  await persistEligibleResidualDrafts();
   await syncComputedGapStatuses();
   return {
     need_ids: createdNeedIds,
     gap_ids: createdGapIds,
     tactic_ids: createdTacticIds,
+    merged_gap_ids: mergedGapIds,
+    skipped_tactic_ids: skippedTacticIds,
+    gap_id_by_row: gapIdByRow,
+    suggestion_id_by_row: suggestionIdByRow,
+    flagged_gap_ids: flaggedGapIds,
   };
 }
 
-/** S0–S4 in one call: the original ingest path, kept as the monolith implementation. */
-export async function ingestNeedFromText(args: {
-  title: string;
-  source_type: IegpState["sources"][0]["source_type"];
-  stakeholder_function: ActorFunction;
-  text: string;
-  filename?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const { source_id, blocks } = await persistSourceAndBlocks({
-    title: args.title,
-    source_type: args.source_type,
-    stakeholder_function: args.stakeholder_function,
-    text: args.text,
-    filename: args.filename,
-  });
-  const extractedNeeds = extractCandidateNeeds(blocks);
-  const fallbackSentences = args.text
-    .split(/(?<=[.?!])\s+/)
-    .filter((s) => s.trim().length > 20)
-    .slice(0, 3)
-    .map((s, idx) => ({
-      id: `tmp-${idx}`,
-      statement: s,
-      source_quote: s,
-    }));
-  await commitExtractedRecords({
-    source_id,
-    title: args.title,
-    stakeholder_function: args.stakeholder_function,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    needs: extractedNeeds.length ? extractedNeeds : fallbackSentences,
-    gaps: extractCandidateGaps(blocks),
-    tactics: extractCandidateTactics(blocks),
-  });
-  return source_id;
+/**
+ * More sources for a pending suggestion: repeats of its candidate from other
+ * documents in the same run (KAN-74). They follow the suggestion's outcome, so
+ * no source is dropped whichever way a person decides.
+ */
+export async function addSuggestionSources(
+  suggestionId: string,
+  sources: GapSuggestionSource[],
+): Promise<void> {
+  if (sources.length === 0) return;
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === suggestionId);
+  if (!suggestion) throw new Error(`Suggestion ${suggestionId} not found. Nothing was saved.`);
+  await db()
+    .update(t.gapSuggestions)
+    .set({ extra_sources: [...suggestion.extra_sources, ...sources] })
+    .where(eq(t.gapSuggestions.id, suggestionId));
 }
 
-/** S4 commit: applies engine-ranked gap ↔ tactic mappings that are not yet joined. */
-export async function applyEngineMappings(actor_name: string, actor_function: ActorFunction) {
-  const suggestions = rankMappingSuggestions(await loadState());
-  for (const item of suggestions) {
-    const current = await loadState();
-    const exists = current.coverages.some(
-      (c) => c.gap_id === item.gap_id && c.tactic_id === item.tactic_id,
-    );
-    if (exists) continue;
-    const gap = current.gaps.find((g) => g.id === item.gap_id);
-    const tactic = current.tactics.find((x) => x.id === item.tactic_id);
-    if (!gap || !tactic || !isLiveGap(gap)) continue;
-    try {
-      await assignTacticToGap({
-        gap_id: item.gap_id,
-        tactic_id: item.tactic_id,
-        actor_name,
-        actor_function,
-        note: "Engine-applied mapping after ingest.",
-      });
-    } catch {
-      // Duplicate or ineligible pair — skip.
-    }
+type SuggestionDecision = {
+  suggestion_id: string;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+};
+
+async function pendingSuggestion(id: string) {
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === id);
+  if (!suggestion) throw new Error("Suggestion not found.");
+  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  const gap = state.gaps.find((row) => row.id === suggestion.gap_id);
+  if (!gap || gap.retired) {
+    throw new Error("The gap this suggestion is about was split or rewritten. Reject it, or add the source by hand.");
+  }
+  return { state, suggestion, gap };
+}
+
+async function closeSuggestion(
+  id: string,
+  status: Exclude<GapSuggestionStatus, "pending">,
+  args: SuggestionDecision & { result_gap_id?: string | null },
+) {
+  await db()
+    .update(t.gapSuggestions)
+    .set({
+      status,
+      result_gap_id: args.result_gap_id ?? null,
+      decided_by: args.actor_name,
+      rationale: args.rationale,
+      decided_at: now(),
+    })
+    .where(eq(t.gapSuggestions.id, id));
+}
+
+/** Every source a suggestion carries: its own candidate first, then repeats. */
+function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
+  return [
+    { source_id: suggestion.source_id, statement: suggestion.statement, source_quote: suggestion.source_quote },
+    ...suggestion.extra_sources,
+  ];
+}
+
+/**
+ * Accepts an overlap as a merge (KAN-75): the gap is reworded to cover the new
+ * part (a person's wording, locked like any edit), the incoming source joins it
+ * as a supporting need, and its tactic mappings are flagged for review because
+ * they were judged against the old wording. The caller resets the gap's
+ * validated priority (S8 owns that table).
+ */
+export async function acceptGapMerge(
+  args: SuggestionDecision & { name?: string; statement?: string },
+): Promise<{ gap_id: string }> {
+  const rationale = requireRationale(args.rationale);
+  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const name = (args.name ?? suggestion.merged_name).trim();
+  const statement = (args.statement ?? suggestion.merged_statement).trim();
+  if (!name) throw new Error("Give the merged gap a name.");
+  if (!statement) throw new Error("Give the merged gap a statement.");
+  const changes = diffFields(gap, { name, statement });
+  if (changes.length > 0) {
+    await db()
+      .update(t.gaps)
+      .set({ name, statement, lock: makeLock(args.actor_name, args.actor_function, rationale) })
+      .where(eq(t.gaps.id, gap.id));
+    await recordFieldEdits({
+      stage: "S2",
+      entity_type: "gap",
+      entity_id: gap.id,
+      changes,
+      rationale,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+  }
+  for (const source of suggestionSources(suggestion)) {
+    await insertNeedForGap({
+      gapId: gap.id,
+      sourceId: source.source_id,
+      statement: source.statement,
+      sourceQuote: source.source_quote,
+      role: "supporting",
+      actor_function: args.actor_function,
+    });
+  }
+  // Mappings were judged against the old wording.
+  await db().update(t.coverages).set({ needs_review: true }).where(eq(t.coverages.gap_id, gap.id));
+  await closeSuggestion(suggestion.id, "merged", { ...args, rationale });
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "merge_suggestion", rationale);
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "suggestion",
+    action: "accept",
+    before: gap.statement,
+    after: `merged: ${statement}`,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_accepted_proposal",
+  });
+  await syncComputedGapStatuses(gap.id);
+  return { gap_id: gap.id };
+}
+
+/**
+ * Accepts an overlap as a split (KAN-75): a new gap holds only the new part, with
+ * the incoming source as its primary need; the shared part joins the existing gap
+ * as a supporting need; and the two gaps are linked as related.
+ */
+export async function acceptGapSplit(
+  args: SuggestionDecision & { name?: string; statement?: string },
+): Promise<{ gap_id: string; new_gap_id: string }> {
+  const rationale = requireRationale(args.rationale);
+  const { suggestion, gap } = await pendingSuggestion(args.suggestion_id);
+  const name = (args.name ?? suggestion.split_name).trim();
+  const statement = (args.statement ?? suggestion.split_statement).trim();
+  if (!name) throw new Error("Give the new gap a name.");
+  if (!statement) throw new Error("Give the new gap a statement.");
+  const newGapId = await createGap({
+    name,
+    statement,
+    domain: suggestion.domain,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+    note: rationale,
+    source_id: suggestion.source_id,
+    source_quote: suggestion.source_quote,
+  });
+  for (const source of suggestion.extra_sources) {
+    await insertNeedForGap({
+      gapId: newGapId,
+      sourceId: source.source_id,
+      statement: source.statement,
+      sourceQuote: source.source_quote,
+      role: "supporting",
+      actor_function: args.actor_function,
+    });
+  }
+  await insertNeedForGap({
+    gapId: gap.id,
+    sourceId: suggestion.source_id,
+    statement: suggestion.shared_part,
+    sourceQuote: suggestion.source_quote,
+    role: "supporting",
+    actor_function: args.actor_function,
+  });
+  await linkRelatedGaps(gap.id, newGapId);
+  await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "split_suggestion", `${newGapId}: ${rationale}`);
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "suggestion",
+    action: "split",
+    before: gap.statement,
+    after: `${newGapId}: ${statement}`,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_accepted_proposal",
+  });
+  return { gap_id: gap.id, new_gap_id: newGapId };
+}
+
+/** Each gap lists the other as related; a link is never added twice. */
+async function linkRelatedGaps(a: string, b: string) {
+  const state = await loadState();
+  for (const [from, to] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    const gap = state.gaps.find((row) => row.id === from);
+    if (!gap) continue;
+    const related = gap.related_gap_ids ?? [];
+    if (related.includes(to)) continue;
+    await db().update(t.gaps).set({ related_gap_ids: [...related, to] }).where(eq(t.gaps.id, from));
   }
 }
 
-export async function ingestDemoSource(args: {
-  demo_id: string;
+/** Rejects an overlap: nothing changes in the plan, and the suggestion stays on record. */
+export async function rejectGapSuggestion(args: SuggestionDecision): Promise<GapSuggestion> {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const suggestion = state.gap_suggestions.find((row) => row.id === args.suggestion_id);
+  if (!suggestion) throw new Error("Suggestion not found.");
+  if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
+  await closeSuggestion(suggestion.id, "rejected", { ...args, rationale });
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: suggestion.gap_id,
+    field: "suggestion",
+    action: "reject",
+    before: null,
+    after: suggestion.statement,
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
+    signal_kind: "user_rejected_proposal",
+  });
+  return suggestion;
+}
+
+/** A person has looked at the source that joined a validated gap (KAN-74). */
+export async function clearNewSourceFlag(args: {
+  gap_id: string;
+  rationale: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
-  const { demoSourceById } = await import("./demo-pack");
-  const file = demoSourceById(args.demo_id);
-  if (!file) throw new Error("Demo source file not found.");
-  return ingestNeedFromText({
-    title: file.title,
-    source_type: file.source_type,
-    stakeholder_function: file.stakeholder_function,
-    text: file.text,
-    filename: file.filename,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+}): Promise<void> {
+  const rationale = requireRationale(args.rationale);
+  const state = await loadState();
+  const gap = state.gaps.find((row) => row.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (!gap.new_source_at) throw new Error("This gap has no new source to review.");
+  await db()
+    .update(t.gaps)
+    .set({ new_source_at: null, new_source_need_id: null })
+    .where(eq(t.gaps.id, gap.id));
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "new_source",
+    action: "validate",
+    before: gap.new_source_need_id ?? null,
+    after: "reviewed",
+    rationale,
+    actor: { name: args.actor_name, function: args.actor_function },
   });
 }
 
@@ -2295,36 +3424,153 @@ export async function lockTacticReview(args: {
     "lock_review",
     `${tactic.review_status} → ${args.review_status}`,
   );
+  const rationale = args.note?.trim() ?? "";
+  if (rationale.length >= 3) {
+    await recordEdit({
+      stage: "S3",
+      entity_type: "tactic",
+      entity_id: args.tactic_id,
+      field: "review_status",
+      action: args.review_status === "accepted" ? "accept" : "reject",
+      before: tactic.review_status,
+      after: args.review_status,
+      rationale,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+  }
 }
 
+/** Tactic fields a person can edit on /tactics/[id]. Dates are YYYY-MM or YYYY-MM-DD, or blank. */
+export const TACTIC_EDIT_FIELDS = [
+  "name",
+  "type",
+  "evidence_question",
+  "population",
+  "intervention",
+  "comparator",
+  "outcomes",
+  "study_design",
+  "data_source",
+  "geography",
+  "start_date",
+  "evidence_available",
+  // KAN-50: the design's side panel also edits the budget and who leads the tactic.
+  "budget",
+  "owner",
+  "function",
+] as const;
+export type TacticEditField = (typeof TACTIC_EDIT_FIELDS)[number];
+
+const TACTIC_DATE_FIELDS = new Set<TacticEditField>(["start_date", "evidence_available"]);
+
+/**
+ * Human edit of a tactic. Only the fields the caller names change; rationale is
+ * required, each change is filed as an edit record with before/after, and the
+ * tactic is locked to the editor. No stage rewrites an existing tactic (S3 skips
+ * a repeat as `duplicate_of`), so human values, dates included, survive re-runs.
+ */
 export async function modifyTactic(args: {
   tactic_id: string;
-  name: string;
-  evidence_question: string;
+  fields?: Partial<Record<TacticEditField, string | null>>;
+  /** Legacy shape: name and evidence question at the top level. */
+  name?: string;
+  evidence_question?: string;
+  /** A custom type to set (null clears it); omitted leaves it as it is (KAN-51). */
+  custom_type?: CustomTacticType | null;
+  rationale?: string;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
 }) {
+  const rationale = requireRationale(args.rationale ?? args.note);
   const state = await loadState();
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
   if (!tactic) throw new Error("Tactic not found");
+  const draft: Partial<Record<TacticEditField, string | null>> = {
+    ...(args.name !== undefined ? { name: args.name } : {}),
+    ...(args.evidence_question !== undefined ? { evidence_question: args.evidence_question } : {}),
+    ...(args.fields ?? {}),
+  };
+  const clean: Record<string, string | null> = {};
+  for (const field of TACTIC_EDIT_FIELDS) {
+    const raw = draft[field];
+    if (raw === undefined) continue;
+    const value = (raw ?? "").trim();
+    if (TACTIC_DATE_FIELDS.has(field)) {
+      clean[field] = optionalTacticDate(field as TacticDateField, value);
+      continue;
+    }
+    if ((field === "name" || field === "evidence_question") && !value) {
+      throw new Error(field === "name" ? "Tactic name is required." : "Evidence question is required.");
+    }
+    if (field === "type" && !TACTIC_TYPES.includes(value as IegpState["tactics"][0]["type"])) {
+      throw new Error("Tactic type is required.");
+    }
+    if (field === "function" && !ACTOR_FUNCTIONS.includes(value as ActorFunction)) {
+      throw new Error("Lead function must be one of the listed functions.");
+    }
+    if (field === "owner" && !value) throw new Error("Lead (owner) is required.");
+    if (field === "budget") {
+      if (value.length > 60) throw new Error("Budget can be at most 60 characters.");
+      clean[field] = value || null;
+      continue;
+    }
+    clean[field] = value;
+  }
+  // The pair is checked as it will stand: an edited date against the other, saved one.
+  assertTacticDateOrder(
+    "start_date" in clean ? clean.start_date : tactic.start_date,
+    "evidence_available" in clean ? clean.evidence_available : tactic.evidence_available,
+  );
+  const changes = diffFields(tactic, clean);
+  const customLabel = (value: CustomTacticType | null | undefined) =>
+    value ? `${value.label} (${value.color})` : null;
+  const customChanged =
+    args.custom_type !== undefined && customLabel(args.custom_type) !== customLabel(tactic.custom_type);
+  if (customChanged) {
+    changes.push({ field: "custom_type", before: customLabel(tactic.custom_type), after: customLabel(args.custom_type) });
+  }
+  if (changes.length === 0) throw new Error("Nothing changed.");
+  const set: Record<string, unknown> = {};
+  for (const change of changes) if (change.field !== "custom_type") set[change.field] = change.after;
+  if (customChanged) set.custom_type = args.custom_type ?? null;
   await db()
     .update(t.tactics)
-    .set({
-      name: args.name,
-      evidence_question: args.evidence_question,
-    })
+    .set({ ...set, lock: makeLock(args.actor_name, args.actor_function, rationale) })
     .where(eq(t.tactics.id, args.tactic_id));
+  if (customChanged) await applyCustomTypeColour(args.custom_type ?? null, state, args.tactic_id);
   await appendAudit(
     args.actor_name,
     args.actor_function,
     "tactic",
     args.tactic_id,
     "modify",
-    args.note || `${tactic.name} → ${args.name}`,
+    `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
   );
+  await recordFieldEdits({
+    stage: "S3",
+    entity_type: "tactic",
+    entity_id: args.tactic_id,
+    changes,
+    rationale,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  if (changes.some((c) => c.field === "type")) {
+    // Coverage status depends on tactic type; recompute the gaps this tactic maps to.
+    const gapIds = new Set(state.coverages.filter((c) => c.tactic_id === args.tactic_id).map((c) => c.gap_id));
+    for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
+  }
+  return changes;
 }
 
+/**
+ * Saves the setup wizard's IEGP context for the current workspace. The asset
+ * row and the objectives table mirror what the stages read directly; the whole
+ * context is kept in `assets.planning_context`. A draft (saved on each Continue)
+ * only refuses malformed values; `mark_complete` needs every required field.
+ * Once setup is complete, later edits keep it complete.
+ */
 export async function saveProductSetup(args: {
   context: PlanningContext;
   actor_name: string;
@@ -2333,30 +3579,23 @@ export async function saveProductSetup(args: {
 }) {
   const state = await loadState();
   const ctx = parsePlanningContext(args.context);
+  const issues = setupIssues(ctx, { required: Boolean(args.mark_complete) });
+  if (issues.length > 0) throw new Error(issues[0]!.message);
+
+  const objectives = await syncSetupObjectives(state, ctx);
+  const saved: PlanningContext = parsePlanningContext({ ...ctx, objectives, saved_at: nowIso() });
+  const complete = Boolean(args.mark_complete) || state.asset.setup_complete;
   await db()
     .update(t.assets)
     .set({
-      name: ctx.asset_name || state.asset.name,
-      inn: ctx.inn || state.asset.inn,
-      indication: ctx.indication || state.asset.indication,
-      geography: ctx.geography || state.asset.geography,
-      planning_context: ctx,
-      setup_complete: args.mark_complete ?? false,
+      name: saved.asset_name || state.asset.name,
+      inn: saved.inn || state.asset.inn,
+      indication: saved.indication || state.asset.indication,
+      geography: saved.geography || state.asset.geography,
+      planning_context: saved,
+      setup_complete: complete,
     })
     .where(eq(t.assets.id, state.asset.id));
-  if (state.objectives[0]) {
-    await db()
-      .update(t.objectives)
-      .set({
-        indication: ctx.indication || state.objectives[0].indication,
-        geography: ctx.geography || state.objectives[0].geography,
-        lifecycle_stage: ctx.lifecycle_stage || state.objectives[0].lifecycle_stage,
-        strategic_importance: ctx.strategic_importance,
-        key_decision: ctx.key_decision || state.objectives[0].key_decision,
-        decision_date: ctx.decision_date || state.objectives[0].decision_date,
-      })
-      .where(eq(t.objectives.id, state.objectives[0].id));
-  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -2364,9 +3603,56 @@ export async function saveProductSetup(args: {
     state.asset.id,
     args.mark_complete ? "complete_setup" : "save_setup",
     args.mark_complete
-      ? "Product setup wizard complete."
-      : "Saved asset and planning context from setup wizard.",
+      ? "Setup wizard complete: IEGP context saved."
+      : "Saved IEGP context from the setup wizard.",
   );
+  return saved;
+}
+
+/**
+ * Makes the objectives table match the wizard's list: rows are updated by id,
+ * new ones inserted, and ones removed from the list deleted, unless a gap or
+ * need still points at them. An empty list leaves the table alone (a draft
+ * saved before objectives were entered must not wipe them).
+ */
+async function syncSetupObjectives(state: IegpState, ctx: PlanningContext): Promise<SetupObjective[]> {
+  const listed = ctx.objectives.filter((objective) => objective.name);
+  if (listed.length === 0) return ctx.objectives;
+  const existing = new Map(state.objectives.map((objective) => [objective.id, objective]));
+  const out: SetupObjective[] = [];
+  for (const objective of listed) {
+    const row = {
+      name: objective.name,
+      description: objective.description,
+      lifecycle_stage: ctx.lifecycle_stage || existing.get(objective.id)?.lifecycle_stage || "",
+      indication: ctx.indication || state.asset.indication,
+      geography: ctx.geography || state.asset.geography,
+      strategic_importance: objective.strategic_importance,
+      key_decision: objective.key_decision,
+      decision_date: objective.decision_date,
+      owner: objective.owner,
+    };
+    if (objective.id && existing.has(objective.id)) {
+      await db().update(t.objectives).set(row).where(eq(t.objectives.id, objective.id));
+      out.push(objective);
+    } else {
+      const id = newId("OBJ");
+      await db().insert(t.objectives).values({ id, ...row });
+      out.push({ ...objective, id });
+    }
+  }
+  const kept = new Set(out.map((objective) => objective.id));
+  for (const objective of state.objectives) {
+    if (kept.has(objective.id)) continue;
+    const inUse =
+      state.gaps.some((gap) => gap.objective_id === objective.id) ||
+      state.needs.some((need) => need.objective_id === objective.id);
+    if (inUse) {
+      throw new Error(`“${objective.name}” is linked to gaps or needs in this plan. Keep it in the list, or move those first.`);
+    }
+    await db().delete(t.objectives).where(eq(t.objectives.id, objective.id));
+  }
+  return out;
 }
 
 export async function completeWizard(args: {
@@ -2404,7 +3690,21 @@ export async function unlockTacticsStage(args: {
 }) {
   const state = await loadState();
   if (!state.asset.wizard_complete) {
-    throw new Error("Prioritize open gaps before tactics.");
+    throw new Error("Finish Gaps first: on Gaps, choose Continue to prioritize, then come back to Tactics.");
+  }
+  // The same rule the Prioritize footer applies before it offers "Continue to
+  // tactics": every live Open gap has a validated band. Loaded lazily because
+  // the S8 module imports this store.
+  const { prioritizationProgress } = await import("@/modules/stages/s8-prioritization/module");
+  const progress = await prioritizationProgress(state);
+  if (progress.open === 0) {
+    throw new Error("There are no Open gaps to prioritize yet, so Tactics can't open. Validate at least one gap as Open on Gaps.");
+  }
+  if (progress.validated < progress.open) {
+    const left = progress.open - progress.validated;
+    throw new Error(
+      `Validate every Open gap's band on Prioritize first: ${progress.validated} of ${progress.open} validated, ${left} to go.`,
+    );
   }
   await db()
     .update(t.assets)
@@ -2772,7 +4072,9 @@ export async function rewritePartialGap(args: {
 
 export async function createAddressedGap(args: {
   name?: string;
-  statement: string;
+  statement?: string;
+  settings?: string[];
+  metadata?: unknown;
   domain?: EvidenceDomain;
   tactic_id?: string;
   missed_name?: string;
@@ -2790,11 +4092,14 @@ export async function createAddressedGap(args: {
     if (!args.missed_name?.trim()) {
       throw new Error("Addressed gaps need an accompanying tactic.");
     }
+    // The missed study's type and question are the person's; none is assumed.
+    if (!args.missed_type) throw new Error("Choose the missed tactic's type.");
+    if (!args.missed_evidence_question?.trim()) throw new Error("Enter the missed tactic's evidence question.");
     tacticId = await recordMissedTactic({
       name: args.missed_name,
-      type: args.missed_type || "rwe_study",
+      type: args.missed_type,
       description: args.missed_description,
-      evidence_question: args.missed_evidence_question || args.statement,
+      evidence_question: args.missed_evidence_question,
       status: args.missed_status || "",
       catch_up_reason: args.catch_up_reason,
       actor_name: args.actor_name,
@@ -2805,6 +4110,8 @@ export async function createAddressedGap(args: {
     name: args.name,
     statement: args.statement,
     domain: args.domain,
+    settings: args.settings,
+    metadata: args.metadata,
     actor_name: args.actor_name,
     actor_function: args.actor_function,
     note: args.note,
@@ -2922,4 +4229,72 @@ export async function unassignGapFromBreakoutGroup(args: {
     "unassign_gap",
     args.gap_id,
   );
+}
+
+/** Renames a breakout group or changes its focus note (KAN-55). */
+export async function updateBreakoutGroup(args: {
+  group_id: string;
+  name?: string;
+  note?: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  const name = args.name === undefined ? group.name : args.name.trim();
+  if (!name) throw new Error("A breakout group needs a name.");
+  const note = args.note === undefined ? group.note : args.note.trim() || null;
+  await db().update(t.breakoutGroups).set({ name, note }).where(eq(t.breakoutGroups.id, args.group_id));
+  await appendAudit(args.actor_name, args.actor_function, "breakout_group", args.group_id, "update", name);
+}
+
+/** Adds several gaps to one group in one call; gaps already in it are skipped (KAN-55). */
+export async function assignGapsToBreakoutGroup(args: {
+  group_id: string;
+  gap_ids: string[];
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<number> {
+  const state = await loadState();
+  const group = state.breakout_groups.find((g) => g.id === args.group_id);
+  if (!group) throw new Error("Breakout group not found");
+  const already = new Set(state.breakout_group_gaps.filter((row) => row.group_id === args.group_id).map((row) => row.gap_id));
+  const known = new Set(state.gaps.map((gap) => gap.id));
+  const fresh = [...new Set(args.gap_ids)].filter((id) => known.has(id) && !already.has(id));
+  if (args.gap_ids.some((id) => !known.has(id))) throw new Error("Gap not found");
+  if (fresh.length === 0) return 0;
+  await db().insert(t.breakoutGroupGaps).values(fresh.map((gap_id) => ({ group_id: args.group_id, gap_id })));
+  await appendAudit(
+    args.actor_name,
+    args.actor_function,
+    "breakout_group",
+    args.group_id,
+    "assign_gaps",
+    `${fresh.length} gap${fresh.length === 1 ? "" : "s"} → ${group.name}`,
+  );
+  return fresh.length;
+}
+
+/** Moves a gap from one group to another (KAN-55). */
+export async function moveGapToBreakoutGroup(args: {
+  gap_id: string;
+  from_group_id: string;
+  to_group_id: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+}) {
+  if (args.from_group_id === args.to_group_id) return;
+  await assignGapToBreakoutGroup({
+    group_id: args.to_group_id,
+    gap_id: args.gap_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
+  await unassignGapFromBreakoutGroup({
+    group_id: args.from_group_id,
+    gap_id: args.gap_id,
+    actor_name: args.actor_name,
+    actor_function: args.actor_function,
+  });
 }

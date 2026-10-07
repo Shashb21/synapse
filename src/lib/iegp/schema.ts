@@ -66,7 +66,8 @@ export const needs = pgTable("needs", {
   timing: text("timing").notNull(),
   source_id: text("source_id").notNull(),
   source_quote: text("source_quote").notNull(),
-  confidence: real("confidence").notNull(),
+  /** Null until a model or a human scores it; never a placeholder. */
+  confidence: real("confidence"),
   status: text("status").notNull(),
   lock: jsonb("lock").notNull(),
 });
@@ -88,6 +89,39 @@ export const gaps = pgTable("gaps", {
   human_validated: boolean("human_validated").notNull().default(false),
   parked_at: text("parked_at"),
   parked_reason: text("parked_reason"),
+  settings: jsonb("settings").notNull().default([]),
+  metadata: jsonb("metadata").notNull().default({}),
+  /** The gap's number as people read it: 001, 002… (KAN-56). Assigned once, never reused. */
+  number: integer("number"),
+  new_source_at: text("new_source_at"),
+  new_source_need_id: text("new_source_need_id"),
+  related_gap_ids: jsonb("related_gap_ids").$type<string[]>().notNull().default([]),
+});
+
+/** Overlap suggestions from the S2 judge, waiting on a person (KAN-74/75). */
+export const gapSuggestions = pgTable("gap_suggestions", {
+  id: text("id").primaryKey(),
+  gap_id: text("gap_id").notNull(),
+  run_id: text("run_id").notNull(),
+  candidate_row_id: text("candidate_row_id"),
+  source_id: text("source_id").notNull(),
+  name: text("name").notNull(),
+  statement: text("statement").notNull(),
+  domain: text("domain").notNull(),
+  source_quote: text("source_quote").notNull(),
+  shared_part: text("shared_part").notNull(),
+  new_part: text("new_part").notNull(),
+  merged_name: text("merged_name").notNull(),
+  merged_statement: text("merged_statement").notNull(),
+  split_name: text("split_name").notNull(),
+  split_statement: text("split_statement").notNull(),
+  extra_sources: jsonb("extra_sources").notNull().default([]),
+  status: text("status").notNull(),
+  result_gap_id: text("result_gap_id"),
+  decided_by: text("decided_by"),
+  rationale: text("rationale"),
+  created_at: text("created_at").notNull(),
+  decided_at: text("decided_at"),
 });
 
 export const gapVersions = pgTable("gap_versions", {
@@ -155,6 +189,8 @@ export const tactics = pgTable("tactics", {
   budget: text("budget"),
   intended_use: text("intended_use").notNull(),
   lock: jsonb("lock").notNull(),
+  source_quote: text("source_quote").notNull().default(""),
+  custom_type: jsonb("custom_type"),
 });
 
 export const coverages = pgTable("coverages", {

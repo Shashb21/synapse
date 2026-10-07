@@ -170,3 +170,18 @@ describe("snapshot completeness inspector", () => {
     });
   });
 });
+
+
+it("lets the current critic inspect nonempty headings and lowercase fragments", async () => {
+  const scope = [
+    { id: "heading", source_file_id: "source", index: 0, kind: "heading", text: "Need comparative evidence" },
+    { id: "fragment", source_file_id: "source", index: 1, kind: "prose", text: "regional survival evidence missing" },
+    { id: "empty", source_file_id: "source", index: 2, kind: "prose", text: "   " },
+  ];
+  let prompt = "";
+  const result = await inspectSnapshotCompleteness({ blocks: scope, items: [], prior_open_issues: [],
+    complete: completion({ checked_block_ids: ["heading", "fragment"], suspected_omissions: [], prior_issue_resolutions: [] },
+      text => { prompt = text; }) });
+  expect(JSON.parse(prompt).blocks.map((block: { id: string }) => block.id)).toEqual(["heading", "fragment"]);
+  expect(result).toMatchObject({ risk_level: "none_detected", checked_block_ids: ["heading", "fragment"], unchecked_block_ids: [] });
+});

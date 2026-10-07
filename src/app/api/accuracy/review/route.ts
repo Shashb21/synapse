@@ -1,13 +1,21 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CompletenessAuditOutput } from "@/accuracy/modules/completeness-audit/module";
 import { missFlagSuggestedSchema } from "@/accuracy/modules/completeness-audit/engine";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { createManualClaim } from "@/accuracy/store/claim-edit";
 import { recordMissFlagAction } from "@/accuracy/store/miss-flag-store";
 import { readParseBlocksByIds } from "@/accuracy/store/parse-store";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { listSourceFiles } from "@/accuracy/store/source-store";
+import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,25 +24,28 @@ registerAccuracyStack();
 
 /**
  * GET /api/accuracy/review?workspace_id=…
- * Runs completeness_audit and returns open miss flags (+ source filenames).
+ * Runs completeness_audit (LLM completeness critic) and returns open miss flags
+ * (+ source filenames). Without a connected LLM it fails; nothing is guessed.
+ * With the admin AI switch off the audit never runs: 409 { code: "ai_off" }.
  */
 export async function GET(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const url = new URL(req.url);
     const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
     if (!workspace_id) {
       return NextResponse.json({ ok: false, error: "workspace_id is required" }, { status: 400 });
     }
-    const org_id = await getWorkspaceOrgId(workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
+    const aiOff = await refuseWhenAiOff();
+    if (aiOff) return aiOff;
+    const { org_id } = await requireLabWorkspace(workspace_id);
 
     const result = await runAccuracyModule<CompletenessAuditOutput>({
       call_kind: "completeness_audit",
-      agent_role: "none",
+      agent_role: "critic",
       input: { workspace_id },
-      actor: { name: "Accuracy reviewer", function: "medical_affairs" },
+      actor: await labActor(),
       org_id,
       workspace_id,
     });
@@ -47,17 +58,24 @@ export async function GET(req: Request) {
       workspace_id,
       run_id: result.run_id,
       summary: result.summary,
+      mode: result.output.mode,
       scanned_blocks: result.output.scanned_blocks,
       open_flags: result.output.open_flags,
+      cited_blocks: result.output.cited_blocks,
+      judged_blocks: result.output.judged_blocks,
+      reused_verdicts: result.output.reused_verdicts,
       skipped_noise: result.output.skipped_noise,
-      skipped_by_reason: result.output.skipped_by_reason,
       flags: result.output.flags.map((flag) => ({
         ...flag,
         source_filename: filenameById.get(flag.source_file_id) ?? flag.source_file_id,
       })),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Review load failed";
+    const aiOff = aiOffFromError(error);
+    if (aiOff) return aiOff;
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Review load failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }
@@ -67,21 +85,23 @@ const postSchema = z.object({
   block_id: z.string().min(1),
   action: z.enum(["promote", "dismiss"]),
   suggested: missFlagSuggestedSchema.optional(),
+  /** Promote only: the reviewer's wording of the claim (defaults to the block excerpt). */
+  statement: z.string().max(2000).optional(),
   rationale: z.string().min(1),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the decision is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 /**
  * POST /api/accuracy/review — promote a miss flag to a draft claim, or dismiss with rationale.
  */
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = postSchema.parse(await req.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
-    }
+    const body = await parseLabBody(req, postSchema);
+    await requireLabWorkspace(body.workspace_id);
 
     const blocks = await readParseBlocksByIds(body.workspace_id, [body.block_id]);
     const block = blocks[0];
@@ -89,26 +109,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Unknown block_id" }, { status: 400 });
     }
 
-    const actor = {
-      name: body.actor_name?.trim() || "Accuracy reviewer",
-      function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-    };
+    const actor = await labActor();
 
     const suggested = body.suggested ?? "gap";
     let claim_id: string | null = null;
 
     if (body.action === "promote") {
       const excerpt = block.text.replace(/\s+/g, " ").trim().slice(0, 500);
-      const claim = await insertClaim({
+      const statement = body.statement?.trim() || excerpt;
+      // Promotion is a human decision: the claim is human-authored (statement locked).
+      const claim = await createManualClaim({
         workspace_id: body.workspace_id,
         claim_type: suggested,
-        statement: excerpt,
+        statement,
+        rationale: body.rationale,
+        actor,
+        action: "promote",
+        origin: "completeness_audit",
+        source_badge: "miss_flag",
         status: "draft",
-        validated: false,
         source_file_id: block.source_file_id,
         metadata: {
-          origin: "completeness_audit",
-          source_badge: "miss_flag",
+          ...(statement !== excerpt ? { promoted_from_excerpt: excerpt } : {}),
           provenance: [
             {
               source_file_id: block.source_file_id,
@@ -140,7 +162,9 @@ export async function POST(req: Request) {
       recorded_id: recorded.id,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Review action failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Review action failed");
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

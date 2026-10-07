@@ -1,10 +1,16 @@
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack } from "@/accuracy";
 import { saveFinalGanttPlan } from "@/accuracy/modules/gantt-project/save-final";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
-import type { ActorFunction } from "@/lib/iegp/enums";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,26 +21,23 @@ const bodySchema = z.object({
   workspace_id: z.string().min(1),
   note: z.string().min(1),
   status: z.enum(["draft", "final"]).optional(),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the plan is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
-    }
+    const body = await parseLabBody(request, bodySchema);
+    await requireLabWorkspace(body.workspace_id);
     await assertAccuracyCanProgress(body.workspace_id, "gantt_project");
     const result = await saveFinalGanttPlan({
       workspace_id: body.workspace_id,
       status: body.status ?? "final",
       note: body.note,
-      actor: {
-        name: body.actor_name?.trim() || "Accuracy reviewer",
-        function: (body.actor_function?.trim() || "medical_affairs") as ActorFunction,
-      },
+      actor: await labActor(),
     });
     return NextResponse.json({
       ok: true,
@@ -47,7 +50,9 @@ export async function POST(request: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Save final failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Save final failed");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

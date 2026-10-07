@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,14 +34,30 @@ export function MissFlagInbox({
   const [suggested, setSuggested] = useState<"gap" | "tactic" | null>(null);
   const [pending, setPending] = useState<"promote" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Reviewer's wording per flag (block id) for the promoted claim; absent = block excerpt. */
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [syncKey, setSyncKey] = useState(`${flags.length}::${workspaceId}`);
 
-  useEffect(() => {
+  // Reset when the flag list or workspace changes (derived-state pattern, no effect).
+  const nextSyncKey = `${flags.length}::${workspaceId}`;
+  if (nextSyncKey !== syncKey) {
+    setSyncKey(nextSyncKey);
     setIndex((i) => (flags.length === 0 ? 0 : Math.min(i, flags.length - 1)));
     setSuggested(null);
     setError(null);
-  }, [flags.length, workspaceId]);
+  }
 
   const current = flags[index] ?? null;
+  const statementDraft = current ? (drafts[current.block_id] ?? null) : null;
+  const setStatementDraft = (value: string | null) => {
+    if (!current) return;
+    setDrafts((prev) => {
+      const next = { ...prev };
+      if (value === null) delete next[current.block_id];
+      else next[current.block_id] = value;
+      return next;
+    });
+  };
   const progress =
     flags.length === 0
       ? "No open miss flags"
@@ -65,6 +81,9 @@ export function MissFlagInbox({
           action,
           suggested: suggested ?? current.suggested,
           rationale,
+          ...(action === "promote" && statementDraft?.trim()
+            ? { statement: statementDraft.trim() }
+            : {}),
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string; claim_id?: string };
@@ -74,6 +93,7 @@ export function MissFlagInbox({
       }
       setRationale("");
       setSuggested(null);
+      setStatementDraft(null);
       // Keep index; after refresh the resolved flag drops out and the next slides into place.
       router.refresh();
     } catch (err) {
@@ -88,7 +108,7 @@ export function MissFlagInbox({
       <p className="text-[12px] text-muted-foreground">
         Inbox clear — every auditable parse block is cited, overlaps a claim, or was resolved.{" "}
         <Link
-          href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+          href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
           className="text-foreground underline-offset-2 hover:underline"
         >
           Open Ledger
@@ -133,9 +153,9 @@ export function MissFlagInbox({
         </div>
       </div>
 
-      <article className="border border-border bg-card/40 p-4" aria-labelledby="miss-flag-title">
+      <article className="border border-border bg-card p-4 rounded-lg" aria-labelledby="miss-flag-title">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <h2 id="miss-flag-title" className="text-[15px] font-medium text-foreground">
+          <h2 id="miss-flag-title" className="text-[13px] font-semibold text-foreground">
             Miss flag
           </h2>
           <Badge variant="outline" className="text-[11px]">
@@ -177,6 +197,20 @@ export function MissFlagInbox({
           </div>
         </fieldset>
 
+        <label className="mb-3 grid gap-1">
+          <span className="text-[12px] text-muted-foreground">
+            Claim statement (edit before promoting — defaults to the block excerpt)
+          </span>
+          <Textarea
+            value={statementDraft ?? current.excerpt}
+            onChange={(e) => setStatementDraft(e.target.value)}
+            rows={3}
+            className="text-[13px]"
+            disabled={pending !== null}
+            data-testid="miss-flag-statement"
+          />
+        </label>
+
         <label className="grid gap-1">
           <span className="text-[12px] text-muted-foreground">Rationale (required)</span>
           <Textarea
@@ -214,7 +248,7 @@ export function MissFlagInbox({
             {pending === "dismiss" ? "Dismissing…" : "Dismiss"}
           </Button>
           <Link
-            href={`/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
+            href={`/admin/accuracy/ledger?workspace_id=${encodeURIComponent(workspaceId)}`}
             className="inline-flex h-8 items-center px-2 text-[12px] text-muted-foreground underline-offset-2 hover:underline"
           >
             Ledger

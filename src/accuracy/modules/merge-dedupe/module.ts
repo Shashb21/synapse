@@ -1,11 +1,15 @@
 import { z } from "zod";
-import { mechanicalModule } from "../_factory";
+import { agenticModule, mechanicalModule } from "../_factory";
 import {
   asTacticLifecycle,
+  equivalenceQuestions,
   mergeDedupeCandidates,
+  type EquivalentPair,
   type MergeCandidate,
   type MergeProvenance,
 } from "./engine";
+import { judgeEquivalence } from "./judge";
+import { isTestStub } from "@/modules/kernel/llm";
 import {
   claimMetadata,
   isActiveLedgerClaim,
@@ -14,15 +18,23 @@ import {
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
+import {
+  isHumanProtectedClaim,
+  mergeRejectedPairs,
+  preserveHumanLocks,
+} from "@/accuracy/store/claim-edit";
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
+import { nowIso } from "@/modules/kernel/ids";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 
 export {
   mergeDedupeCandidates,
+  equivalenceQuestions,
   identityKeys,
   packsMayMerge,
   extractDeterministicIds,
 } from "./engine";
+export { judgeEquivalence } from "./judge";
 
 function provenanceFromMeta(meta: AccuracyClaimMetadata): MergeProvenance[] {
   if (!Array.isArray(meta.provenance)) return [];
@@ -86,6 +98,7 @@ export function claimToMergeCandidate(
     tactic_status: asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status),
     provenance: provenanceFromMeta(meta),
     created_at: claim.created_at,
+    protected: isHumanProtectedClaim(claim),
   };
 }
 
@@ -101,26 +114,40 @@ const contradictionSchema = z.object({
 const mergeRowSchema = z.object({
   survivor_id: z.string(),
   duplicate_id: z.string(),
-  reason: z.enum(["identity", "statement", "block_overlap"]),
+  reason: z.enum(["identity", "statement", "model_equivalence", "transitive"]),
   keys: z.array(z.string()),
+  rationale: z.string().nullable().optional(),
 });
 
 export const mergeDedupeOutputSchema = z.object({
   workspace_id: z.string(),
+  /** `stub`: test stub, same-block pairs were not put to a model. */
+  mode: z.enum(["llm", "stub"]),
+  /** Same-block pairs put to the equivalence judge (or left unjudged under the stub). */
+  judged_pairs: z.number().int(),
   merged: z.number().int(),
   survivors: z.number().int(),
   contradictions: z.number().int(),
   merges: z.array(mergeRowSchema),
+  /** Merges found but not applied: the duplicate is validated / human-edited. A human confirms. */
+  proposed: z.number().int().default(0),
+  proposals: z.array(mergeRowSchema).default([]),
   contradiction_rows: z.array(contradictionSchema),
 });
 
 export type MergeDedupeOutput = z.infer<typeof mergeDedupeOutputSchema>;
 
-export const mergeDedupeModule = mechanicalModule({
-  id: "merge-dedupe.local-v1",
+/**
+ * Merge / dedupe. Shared study IDs and identical statements merge as facts;
+ * differently worded candidates citing the same block are merged only when the
+ * LLM equivalence judge says they are the same item. No LLM, no judgement:
+ * the run throws when there is a pair to decide and no model to ask.
+ */
+export const mergeDedupeModule = agenticModule({
+  id: "merge-dedupe.judge-v1",
   call_kind: "merge_dedupe",
   title: "Merge dedupe",
-  summary: "Study-ID aware merge of inventory + need candidates.",
+  summary: "Study-ID aware merge; LLM judge decides same-block equivalence.",
   inputSchema: z.object({ workspace_id: z.string() }),
   outputSchema: mergeDedupeOutputSchema,
   run: async (input, ctx) => {
@@ -133,12 +160,24 @@ export const mergeDedupeModule = mechanicalModule({
     );
     const active = claims.filter(isActiveLedgerClaim);
     const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
-    const result = mergeDedupeCandidates(candidates);
+    const blocked = mergeRejectedPairs(active);
+    const questions = equivalenceQuestions(candidates, blocked);
+    const stub = isTestStub();
+    let equivalent: EquivalentPair[] = [];
+    if (stub) {
+      // Test stub only: same-block pairs stay separate and are reported unjudged.
+      ctx.run.note("merge:test-stub", { unjudged_pairs: questions.length });
+    } else {
+      equivalent = await judgeEquivalence({ ctx, questions, candidates });
+    }
+    const result = mergeDedupeCandidates(candidates, { equivalent, blocked });
     const byId = new Map(active.map((row) => [row.id, row]));
 
     for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
       const duplicate = byId.get(duplicateId);
       if (!duplicate) continue;
+      // Defence in depth: never auto-merge away a validated or human-edited claim.
+      if (isHumanProtectedClaim(duplicate)) continue;
       const meta = claimMetadata(duplicate);
       const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
       await persistClaimPatch({
@@ -147,8 +186,10 @@ export const mergeDedupeModule = mechanicalModule({
         status: "merged",
         metadata: {
           ...meta,
+          pre_merge_status: duplicate.status,
           merged_into: survivorId,
-          merge_reason: mergeRow?.reason ?? "identity",
+          merge_reason: mergeRow?.reason ?? "transitive",
+          merge_rationale: mergeRow?.rationale ?? null,
         },
       });
       const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
@@ -176,7 +217,7 @@ export const mergeDedupeModule = mechanicalModule({
       await persistClaimPatch({
         workspace_id: input.workspace_id,
         claim_id: survivor.id,
-        metadata: {
+        metadata: preserveHumanLocks(meta, {
           ...meta,
           external_id: survivor.external_id ?? meta.external_id ?? null,
           reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
@@ -184,16 +225,53 @@ export const mergeDedupeModule = mechanicalModule({
           provenance: survivor.provenance,
           merged_from: mergedFrom,
           merged_into: null,
-        },
+        }),
       });
+    }
+
+    // Proposals: persist on the protected duplicate; a human confirms or dismisses.
+    const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));
+    const proposedAt = nowIso();
+    const fresh = (await listClaims(input.workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
+    for (const row of fresh) {
+      const meta = claimMetadata(row);
+      const proposal = proposalByDuplicate.get(row.id);
+      const existing = meta.merge_proposal ?? null;
+      if (proposal) {
+        if (existing && existing.survivor_id === proposal.survivor_id) continue;
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          claim_id: row.id,
+          metadata: {
+            ...meta,
+            merge_proposal: {
+              survivor_id: proposal.survivor_id,
+              reason: proposal.reason,
+              keys: proposal.keys,
+              rationale: proposal.rationale ?? null,
+              proposed_at: proposedAt,
+            },
+          },
+        });
+      } else if (existing) {
+        await persistClaimPatch({
+          workspace_id: input.workspace_id,
+          claim_id: row.id,
+          metadata: { ...meta, merge_proposal: null },
+        });
+      }
     }
 
     const output: MergeDedupeOutput = {
       workspace_id: input.workspace_id,
+      mode: stub ? "stub" : "llm",
+      judged_pairs: questions.length,
       merged: Object.keys(result.absorbed).length,
       survivors: result.survivors.length,
       contradictions: result.contradictions.length,
       merges: result.merges,
+      proposed: result.proposals.length,
+      proposals: result.proposals,
       contradiction_rows: result.contradictions,
     };
     ctx.run.note("merge:result", {
@@ -204,10 +282,21 @@ export const mergeDedupeModule = mechanicalModule({
     });
     return {
       output,
-      summary:
+      summary: `${
         output.merged === 0
           ? `Merge dedupe — ${output.survivors} survivor(s), no duplicates`
-          : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`,
+          : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`
+      }${
+        result.proposals.length > 0
+          ? ` · ${result.proposals.length} merge(s) proposed for human review (validated / human-edited)`
+          : ""
+      }${
+        stub && questions.length > 0
+          ? ` · test stub (SYNAPSE_TEST_STUB_LLM): ${questions.length} same-block pair(s) not judged`
+          : questions.length > 0
+            ? ` · judge decided ${questions.length} same-block pair(s)`
+            : ""
+      }`,
     };
   },
 });

@@ -1,19 +1,14 @@
+import { ownerGate } from "@/modules/auth/owner";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { registerAccuracyStack } from "@/accuracy";
-import {
-  LLAMA_PARSE_KEY_CODE,
-  LLAMA_PARSE_KEY_REQUIRED,
-  resolveParsePolicy,
-} from "@/accuracy/modules/parse/parse-policy";
-import { ingestFile } from "@/accuracy/modules/parse/ingest-file";
-import {
-  blocksFromParsedDocument,
-  persistParseBlocks,
-} from "@/accuracy/store/parse-store";
+import { runAccuracyModule } from "@/accuracy/kernel/run";
+import { AI_OFF_ADMIN_MESSAGE, aiEnabled } from "@/modules/kernel/ai-switch";
+import { resolveParsePolicy } from "@/accuracy/modules/parse/parse-policy";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { getWorkspace, getWorkspaceOrgId } from "@/accuracy/store/tenant";
 import { mimeForFilename } from "@/lib/ingest/local-parse";
+import { labActor } from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +25,8 @@ const DOC_ROLES = new Set([
 ]);
 
 export async function POST(req: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
     const form = await req.formData();
     const workspace_id = String(form.get("workspace_id") ?? "").trim();
@@ -50,6 +47,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "file too large (40MB max)" }, { status: 400 });
     }
 
+    // With AI off there is no parser; gaps and tactics are entered by hand.
+    if (!(await aiEnabled())) {
+      return NextResponse.json({ ok: false, error: AI_OFF_ADMIN_MESSAGE, code: "ai_off" }, { status: 409 });
+    }
+
     const workspace = await getWorkspace(workspace_id);
     if (!workspace) {
       return NextResponse.json({ ok: false, error: "Unknown workspace" }, { status: 404 });
@@ -59,16 +61,6 @@ export async function POST(req: Request) {
     const filename = file.name || "upload.bin";
     const mime = file.type || mimeForFilename(filename);
     const policy = resolveParsePolicy({ filename, mime });
-    if (policy.missing_key) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: LLAMA_PARSE_KEY_REQUIRED,
-          code: LLAMA_PARSE_KEY_CODE,
-        },
-        { status: 400 },
-      );
-    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const checksum = createHash("sha256").update(buffer).digest("hex");
@@ -83,26 +75,27 @@ export async function POST(req: Request) {
     });
 
     let block_count = 0;
-    let parser = policy.parser;
+    let parser: string = policy.parser;
     let parse_error: string | null = null;
 
+    // Parsing runs on the parse route's LLM, traced like any other module run.
     try {
-      const ingested = await ingestFile({ policy, filename, mime, buffer });
-      parser = ingested.effectiveParser;
-      const blocks = blocksFromParsedDocument({
+      const result = await runAccuracyModule<{ parser: string; block_count: number }>({
+        call_kind: "parse",
+        agent_role: "proposer",
+        input: {
+          workspace_id,
+          source_file_id: source.id,
+          filename,
+          mime,
+          content_base64: buffer.toString("base64"),
+        },
+        actor: await labActor(),
+        org_id,
         workspace_id,
-        source_file_id: source.id,
-        blocks: ingested.document.blocks.map((b, index) => ({
-          ...b,
-          id: `${source.id}-B${String(index + 1).padStart(3, "0")}`,
-        })),
       });
-      block_count = await persistParseBlocks({
-        workspace_id,
-        source_file_id: source.id,
-        parser: ingested.effectiveParser,
-        blocks,
-      });
+      parser = result.output.parser;
+      block_count = result.output.block_count;
     } catch (error) {
       parse_error = error instanceof Error ? error.message : "Parse failed";
     }

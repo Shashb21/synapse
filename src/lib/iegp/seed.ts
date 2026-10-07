@@ -79,6 +79,35 @@ function blocks(
   }));
 }
 
+
+/** Who a demo gap affects and where (KAN-49), so the design's gap details show in the demo. */
+const DEMO_GAP_METADATA: Record<string, IegpState["gaps"][0]["metadata"]> = {
+  "GAP-ELDERLY-CE": {
+    stakeholders: ["HTA bodies", "Payers", "Geriatric oncologists"],
+    geography: "EU5",
+    regional_nuances: "Germany: G-BA expects a comparator matching regional standard of care.\nFrance: HAS asks for age-stratified outcomes.",
+    notes: "",
+  },
+  "GAP-CNS": {
+    stakeholders: ["KOLs", "Neuro-oncologists"],
+    geography: "US, EU5",
+    regional_nuances: "",
+    notes: "Raised in every medical affairs KOL interview.",
+  },
+  "GAP-PERSIST": {
+    stakeholders: ["Payers", "Formulary committees"],
+    geography: "US",
+    regional_nuances: "",
+    notes: "",
+  },
+  "GAP-IRA": {
+    stakeholders: ["Payers", "Market access"],
+    geography: "US",
+    regional_nuances: "Medicare negotiation under the IRA applies to the US only.",
+    notes: "",
+  },
+};
+
 export function buildSeed(): IegpState {
   const rao: [string, ActorFunction] = ["A. Rao", "heor"];
   const hale: [string, ActorFunction] = ["M. Hale", "medical_affairs"];
@@ -1712,13 +1741,16 @@ export function buildSeed(): IegpState {
     gap_versions: [],
     breakout_groups: [],
     breakout_group_gaps: [],
+    gap_suggestions: [],
   };
 
   return {
     ...state,
     residual_gap_suggestions: [],
-    gaps: state.gaps.map((gap) => ({
+    // The demo gaps are numbered 001… in the order they are defined (KAN-56).
+    gaps: state.gaps.map((gap, index) => ({
       ...gap,
+      number: index + 1,
       parent_gap_id: null,
       computed_status:
         gap.status === "validated_open" ||
@@ -1731,6 +1763,8 @@ export function buildSeed(): IegpState {
       human_validated: gap.status !== "candidate" && gap.status !== "excluded",
       parked_at: null,
       parked_reason: null,
+      settings: [],
+      metadata: DEMO_GAP_METADATA[gap.id] ?? { stakeholders: [], geography: "", regional_nuances: "", notes: "" },
     })),
     residuals: state.residuals.map((residual) => ({
       ...residual,

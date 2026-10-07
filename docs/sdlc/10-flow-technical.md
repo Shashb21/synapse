@@ -1,185 +1,120 @@
 # Application flow — technical
 
-Module, API, and data path for the loop in [09-flow-high-level.md](./09-flow-high-level.md). Engineering process (PRs, CI, Grokbot) remains [05-process.md](./05-process.md).
+Module, API and data path for the loop in [09-flow-high-level.md](./09-flow-high-level.md). Architecture: [02-architecture.md](./02-architecture.md). Stage contracts: [../modules.md](../modules.md).
 
-Runtime is Next.js App Router, Node for zip/xml ingest. System of record is a flat **Canonical Insight Record** plus joins. Nested “document → slides → insights” JSON is not the store.
-
-## Pipeline
+## Stages
 
 ```mermaid
 flowchart TB
-  subgraph entry["Entry"]
-    seed["buildSeedState"]
-    post["POST /api/ingest"]
-    accept["POST /api/catalog"]
+  subgraph gate["Gates on every request"]
+    proxy["proxy.ts: session and workspace cookies"]
+    guard["api-guard: session, membership, role"]
+    aisw["AI switch: admin master switch AND section switch"]
   end
 
-  subgraph parse["Parse"]
-    llama["LlamaParse v2 agentic"]
-    ooxml["local OOXML / mammoth / xlsx"]
-    blocks["ParsedDocument + ParsedBlock"]
+  subgraph ingest["Ingest, AI on only"]
+    s0["S0 upload: source_files"]
+    s1["S1 parse: text extraction then LLM blocks"]
+    s2["S2 gap extraction"]
+    s3["S3 tactic extraction"]
+    s4["S4 mapping and coverage"]
   end
 
-  subgraph extract["Extract"]
-    claude["Claude Sonnet v1.4-claude"]
-    local["local proposer v1.0-v1.3"]
-    cir["CanonicalInsight rows"]
+  subgraph review["Review"]
+    s5["S5 validation gate"]
+    s6["S6 partial split"]
+    s7["S7 consolidation"]
   end
 
-  subgraph linkStep["Link"]
-    classify["classifyStatement"]
-    score["scoreTheme / linkInsightToThemes"]
-    cross["linkCrossDocument"]
-    residual["THEME-RESIDUAL if max score under floor"]
+  subgraph plan["Plan"]
+    s8["S8 prioritization matrix"]
+    s9["S9 ideation"]
+    s10["S10 timeline"]
   end
 
-  subgraph evolve["Catalog"]
-    propose["proposeCatalogChanges"]
-    emerge["emerge: Unassigned cluster"]
-    split["split: keyword partition"]
-    force["acceptProposal force-link"]
-  end
+  manual["Manual actions: /api/iegp, /api/plan, /api/sources/blocks"]
+  store["Workspace schema in Postgres"]
 
-  subgraph eval["Hill-climb automatic"]
-    sweep["runEvalSweep"]
-    critique["critique partial/wrong/missed/new"]
-    judge["judge + safety gate"]
-    champ["champion_prompt_version"]
-  end
-
-  subgraph persist["State"]
-    json["data/runtime/engine-state.json"]
-  end
-
-  subgraph read["Read models"]
-    monitor["Monitor"]
-    insights["insights"]
-    catalogUI["catalog"]
-    graphUI["graph"]
-    evals["evals tape"]
-  end
-
-  seed --> extract
-  post --> llama
-  llama -->|"fail or no key"| ooxml
-  llama --> blocks
-  ooxml --> blocks
-  blocks --> claude
-  claude -->|"no key or empty"| local
-  claude --> cir
-  local --> cir
-  cir --> classify --> score
-  score -->|named| cross
-  score -->|weak| residual --> cross
-  cross --> propose
-  propose --> emerge
-  propose --> split
-  accept --> force
-  force --> score
-  emerge --> persist
-  split --> persist
-  cross --> persist
-  persist --> sweep
-  sweep --> critique --> judge --> champ
-  champ --> persist
-  persist --> monitor
-  persist --> insights
-  persist --> catalogUI
-  persist --> graphUI
-  persist --> evals
+  proxy --> guard --> aisw
+  aisw -->|on| s0
+  s0 --> s1 --> s2 --> s3 --> s4 --> s5
+  s5 --> s6 --> s7 --> s8 --> s9 --> s10
+  guard --> manual
+  manual --> store
+  s1 --> store
+  s4 --> store
+  s8 --> store
+  s10 --> store
 ```
+
+S2, S3, S4, S6, S8 and S9 are agentic: a proposer, three critic exchanges, then a judge, on the model routed to the stage. S1 parse is an LLM stage too. With no model connected a stage fails with `no_llm`; with AI off it throws `AiDisabledError`. The manual actions never need a model.
 
 ## Ingest sequence
 
 ```mermaid
 sequenceDiagram
-  actor Analyst
-  participant Ingest as POST /api/ingest
-  participant Parse as ingestBuffer
-  participant Pipe as ingestParsedDocument
-  participant Store as engine-state.json
-  participant Eval as runEvalSweep
+  actor User
+  participant API as POST /api/iegp ingest
+  participant Kernel as runStage
+  participant Route as resolveRoute
+  participant LLM as Routed LLM
+  participant DB as Workspace schema
 
-  Analyst->>Ingest: PPTX DOCX XLSX or PDF
-  Ingest->>Parse: filename, buffer, mime
-  alt LlamaCloud key present
-    Parse->>Parse: LlamaParse agentic
-  else job fails or no key
-    Parse->>Parse: local OOXML
-  end
-  Parse-->>Ingest: ParsedDocument
-  Ingest->>Pipe: addDocument
-  Pipe->>Pipe: Claude or local proposeInsights
-  Pipe->>Pipe: assignThemes current catalog
-  Pipe->>Pipe: proposeCatalogChanges prior proposals
-  Pipe->>Eval: extract ladder v1.0-v1.3 vs gold
-  Eval-->>Pipe: champion if safety gate holds
-  Pipe->>Store: persist EngineState
-  Store-->>Analyst: dashboard JSON then UI refresh
+  User->>API: a file or pasted text
+  API->>API: AI section check
+  API->>Route: S2 S3 S4 each have a model
+  Route-->>API: ok, or no_llm before anything is written
+  API->>Kernel: S0 upload
+  Kernel->>DB: source_files
+  API->>Kernel: S1 parse
+  Kernel->>LLM: extracted text units
+  LLM-->>Kernel: blocks, kinds, headings
+  Kernel->>DB: sources and source_blocks
+  API->>Kernel: S2 then S3 then S4
+  Kernel->>LLM: propose, critique, judge
+  Kernel->>DB: gaps, needs, tactics, coverages
+  DB-->>User: Gaps place refreshes
 ```
 
-Catalog accept is a separate write path: `POST /api/catalog` → `decideCatalogProposal` → `acceptProposal` / `rejectProposal` → persist. Rejected fingerprints are not queued again. Accept appends `catalog[]`, re-runs `assignThemes`, and force-links `proposal.insight_ids` (`method: catalog_accept`). CIR rows are not copied.
+## Timeline by hand
+
+The timeline API (`POST /api/plan`) takes `create_activity`, `add_activity`, `move_activity`, `remove_activity` and `set_dependencies` with no stage run and no model; each write is an edit record with the signed-in actor, and viewers are refused. An S10 run keeps every hand edit. `save_plan` stores a draft or, for Medical Affairs, a final version in `iegp_plans`. The chart is exported client-side as a PNG.
 
 ## Data contract
 
-```
-documents[]  1—n  insights[]  1—n  theme_links[]  n—1  themes[]
-                  1—n  knowledge_state.corroborated_by
-catalog[]                    catalog_proposals[]
-```
+| Table (per workspace schema) | What |
+| --- | --- |
+| `source_files`, `sources`, `source_blocks` | Uploaded files and their parsed blocks |
+| gaps, needs, tactics, coverages, residuals | The IEGP domain (`src/lib/iegp/schema.ts`) |
+| `priority_axes`, `priority_placements` | S8 matrix configuration and placements |
+| `ideation_proposals` | S9 ideas, AI or by hand |
+| `timeline_activities`, `iegp_plans` | S10 activities and saved versions |
+| `edit_records`, audit | Every edit with its rationale, before and after, and actor |
 
-| Collection | File / type | Rule |
-| --- | --- | --- |
-| `documents` | `ParsedDocument` | Source blocks; parser used (`llamaparse` \| `local` \| `seed`). |
-| `insights` | `CanonicalInsight` | One claim, one id. `statement` lives only here. |
-| `theme_links` | `{ insight_id, theme_id, score, role, method }` | Source of truth for membership. |
-| `themes` | derived from catalog + links | IDs and counts only; no copied statements. |
-| `catalog` | `CatalogTheme` | Append-only ontology. `parent_theme_id` on splits. |
-| `catalog_proposals` | emerge \| split | `proposed` / `accepted` / `rejected`. |
-| `gold` / `eval_runs` | gold + tape | Evals key CIR ids, not theme names. |
-
-Graph revelations (`blend`, `bridge`, `gap_closure`) are **computed** in `src/lib/graph/connections.ts` on read. They are not a persisted table.
+Shared tables: `workspaces` (with `demo`; the legacy `ai_enabled` column no longer counts), `workspace_members`, `user_accounts`, `customers`, `seat_assignments`, `platform_settings` (the AI master switch and per-section switches).
 
 ## Code map
 
 | Concern | Path |
 | --- | --- |
-| HTTP ingest | `src/app/api/ingest/route.ts` |
-| Parse | `src/lib/ingest/llamaparse.ts`, `local-parse.ts` |
-| Extract | `src/lib/extract/proposer.ts`, `claude-proposer.ts` |
-| Classify | `src/lib/extract/classify.ts` |
-| Theme score + joins | `src/lib/cluster/cluster.ts` |
-| Emerge / split / accept | `src/lib/cluster/catalog-evolution.ts` |
-| Orchestration | `src/lib/pipeline.ts` |
-| Persistence | `src/lib/store.ts` |
-| Graph | `src/lib/graph/connections.ts` |
-| Eval ladder | `src/lib/eval/critique.ts`, `judge.ts` — protocol [06-eval-protocol.md](./06-eval-protocol.md), inventory [12-gold-set.md](./12-gold-set.md) |
-| Schema | `src/lib/schema.ts` |
+| Request gate | `src/proxy.ts`, `src/modules/auth/gate.ts`, `src/modules/auth/api-guard.ts` |
+| Sign-in and seats | `src/modules/auth/idp.ts`, `session.ts`, `customers.ts`, `accounts.ts`, `password-login.ts` |
+| Workspaces, blank and demo | `src/modules/workspaces/store.ts`, `contents.ts` |
+| AI switch | `src/modules/kernel/ai-switch.ts`, `ai-sections.ts` |
+| Stage runner and routing | `src/modules/kernel/run.ts`, `routing.ts`, `agentic.ts` |
+| Parsing | `src/lib/ingest/local-parse.ts`, `llm-structure.ts`, `src/modules/stages/s1-parse/` |
+| Ingest sequencing | `src/app/api/iegp/ingest-pipeline.ts` |
+| Domain store and status rules | `src/lib/iegp/store.ts`, `engine.ts` |
+| Timeline | `src/modules/stages/s10-timeline/`, `src/components/timeline/` |
 
 ## Surfaces
 
 | Route | Reads | Writes |
 | --- | --- | --- |
-| `/` | themes + `summarizeTheme` | none |
-| `/insights` | CIR + filters | none |
-| `/catalog` | catalog + proposals | `POST /api/catalog` |
-| `/graph` | `buildKnowledgeGraph(state)` | none |
-| `/ingest` | provider status | `POST /api/ingest` |
-| `/evals` | `eval_runs` | none (hill-climb is on seed/ingest) |
-| `/sdlc` | `docs/problem-and-solution.md` and `docs/sdlc/*` | none |
-
-## Thresholds the diagrams hide
-
-| Gate | Value | Module |
-| --- | --- | --- |
-| Named-theme primary floor | 0.45 | `cluster.ts` |
-| Secondary link | score ≥ 0.9 and ≥ 48% of primary, cap 4 | `cluster.ts` |
-| Cross-document corroboration | statement similarity ≥ 0.52 | `cluster.ts` |
-| Emerge | ≥ 2 Unassigned CIR, cohesion ≥ 0.34 | `catalog-evolution.ts` |
-| Split | named theme ≥ 4 CIR; exclusive keyword sets ≥ 2 | `catalog-evolution.ts` |
-| Exact gold pair | statement similarity ≥ 0.58 | `critique.ts` |
-| Partial gold pair | ≥ 0.32 | `critique.ts` |
-| Grounding (new vs wrong) | ≥ 0.28 | `critique.ts` / `proposer.ts` |
-| Promote composite delta | ≥ +0.01 and Δwrong ≤ +0.05; must-find recall drop ≤ 0.02 | `judge.ts` |
-
-Hill-climb always uses the **local** v1.0–v1.3 ladder so scores do not wobble when Claude is on for live extract.
+| `/` | domain state for the open workspace | `/api/iegp`, `/api/modules` |
+| `/sources` | sources and blocks | `/api/iegp` ingest, `/api/sources/blocks` |
+| `/ideation` | `ideation_proposals` | `/api/plan` |
+| `/timeline` | timeline model and plan history | `/api/plan` |
+| `/room`, `/room/audience` | room state (switched off: `ROOM_ENABLED = false`, redirects to the plan) | `/api/room` |
+| `/workspaces/[id]` | workspace, members, the AI state (read only) | `/api/workspaces/[id]`, `/members`; `/api/iegp` `load_demo` and `reset`. `/api/workspaces/[id]/ai` refuses every change since KAN-53 |
+| `/admin/*` | owner console | `/api/admin/*`, `/api/control`, `/api/accuracy/*` |

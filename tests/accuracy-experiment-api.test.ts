@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ideateInputSchema } from "@/accuracy/modules/ideate/module";
 
@@ -41,7 +41,7 @@ import { GET as getExperiment } from "@/app/api/accuracy/experiments/[experiment
 
 const signedInContributor = {
   signed_in: true,
-  session: { subject: "subject-source" },
+  session: { subject: "subject-source", provider_id: "sso", email: "owner@example.test" },
   actor: { name: "A contributor", function: "medical_affairs" },
   role: "contributor",
 };
@@ -58,6 +58,7 @@ function sourceWorkspaceRequest(path = "http://localhost/api/accuracy/experiment
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("OWNER_EMAILS", "owner@example.test");
   sessionContext.mockResolvedValue(signedInContributor);
   getWorkspace.mockResolvedValue({ id: "ws-source", org_id: "org-source" });
   getAuthorizedWorkspace.mockResolvedValue({ id: "ws-source", org_id: "org-source" });
@@ -242,3 +243,5 @@ describe("accuracy experiment API", () => {
     expect(exportExperimentsForSourceWorkspace).toHaveBeenLastCalledWith({ source_workspace_id: "ws-source", format: "json" });
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());

@@ -1,8 +1,15 @@
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
+import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
-import { getWorkspaceOrgId } from "@/accuracy/store/tenant";
+import {
+  labActor,
+  labErrorMessage,
+  labRequestErrorResponse,
+  parseLabBody,
+  requireLabWorkspace,
+} from "@/app/api/accuracy/_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,17 +21,17 @@ const bodySchema = z.object({
   claim_ids: z.array(z.string().min(1)).min(1),
   action: z.enum(["validate", "reject"]),
   rationale: z.string().min(1),
-  actor_name: z.string().min(1).optional(),
-  actor_function: z.string().min(1).optional(),
+  /** Ignored: the decision is credited to the signed-in owner. */
+  actor_name: z.string().optional(),
+  actor_function: z.string().optional(),
 });
 
 export async function POST(request: Request) {
+  const denied = await ownerGate();
+  if (denied) return denied;
   try {
-    const body = bodySchema.parse(await request.json());
-    const org_id = await getWorkspaceOrgId(body.workspace_id);
-    if (!org_id) {
-      return NextResponse.json({ error: "Unknown workspace_id" }, { status: 404 });
-    }
+    const body = await parseLabBody(request, bodySchema);
+    const { org_id } = await requireLabWorkspace(body.workspace_id);
     await assertAccuracyCanProgress(body.workspace_id, "validation_gate");
     const result = await runAccuracyModule({
       call_kind: "validation_gate",
@@ -35,10 +42,7 @@ export async function POST(request: Request) {
         action: body.action,
         rationale: body.rationale,
       },
-      actor: {
-        name: body.actor_name?.trim() || "Accuracy reviewer",
-        function: (body.actor_function?.trim() || "medical_affairs") as "medical_affairs",
-      },
+      actor: await labActor(),
       org_id,
       workspace_id: body.workspace_id,
     });
@@ -47,7 +51,9 @@ export async function POST(request: Request) {
     if (error instanceof AccuracyPausedError) {
       return NextResponse.json({ ok: false, error: error.message, blockers: error.blockers }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Validation failed";
+    const known = labRequestErrorResponse(error);
+    if (known) return known;
+    const message = labErrorMessage(error, "Validation failed");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

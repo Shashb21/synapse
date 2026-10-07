@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 async function extract(body: object, status: number) {
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: status < 400, status, json: async () => body })));
-  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1, gate: { ready: true, stub: true, connect_path: "/control" } })));
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1, gate: { ready: true, stub: true, connect_path: "/admin/control" } })));
   await act(async () => host.querySelector("button")!.click());
 }
 it("shows saved paused drafts, counts and review links and refreshes", async () => {
@@ -23,9 +23,9 @@ it("shows saved paused drafts, counts and review links and refreshes", async () 
   expect(host.textContent).toContain("Drafts saved"); expect(host.textContent).toContain("paused");
   expect(host.textContent).toContain("2 gap(s)"); expect(host.textContent).toContain("3 tactic(s)");
   expect(host.textContent).not.toContain("Extract failed");
-  expect(host.querySelector('a[href="/accuracy/runs/need-run?workspace_id=ws"]')).not.toBeNull();
-  expect(host.querySelector('a[href="/accuracy/runs/inventory-run?workspace_id=ws"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/admin/accuracy/runs/need-run?workspace_id=ws"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/admin/accuracy/runs/inventory-run?workspace_id=ws"]')).not.toBeNull();
   expect(refresh).toHaveBeenCalledOnce();
 });
 it("retains ordinary success", async () => { await extract({ ok: true, gaps_inserted: 1, tactics_inserted: 0 }, 200); expect(host.textContent).toContain("Extracted 1 gap(s)"); expect(refresh).toHaveBeenCalledOnce(); });
-it("retains the provider connection gate", async () => { await extract({ ok: false, error: "Connect provider", connect_path: "/control" }, 409); expect(host.textContent).toContain("Connect provider"); expect(host.querySelector('a[href="/control"]')).not.toBeNull(); expect(refresh).not.toHaveBeenCalled(); });
+it("retains the provider connection gate", async () => { await extract({ ok: false, error: "Connect provider", connect_path: "/admin/control" }, 409); expect(host.textContent).toContain("Connect provider"); expect(host.querySelector('a[href="/admin/control"]')).not.toBeNull(); expect(refresh).not.toHaveBeenCalled(); });

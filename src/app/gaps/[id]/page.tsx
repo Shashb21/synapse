@@ -1,14 +1,25 @@
 import Link from "next/link";
+import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { GapDetailsEditor } from "@/components/gap-metadata";
+import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
+import { RestoreGapButton, UnparkGapButton } from "@/components/restore-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
+import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
+import { NewSourceNote } from "@/components/gap-suggestions";
+import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
+import { sessionContext } from "@/modules/auth/session";
+import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import {
+  DOMAIN_LABELS,
+  EVIDENCE_DOMAINS,
   COVERAGE_DIMENSIONS,
   DIMENSION_LABELS,
   DIMENSION_QUESTIONS,
@@ -17,7 +28,7 @@ import {
   EXCLUSION_REASONS,
   GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
-  OVERALL_COVERAGE,
+  ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
 import {
@@ -27,8 +38,8 @@ import {
   displayedGapStatus,
   liveGapsMappedToTactic,
   mappedTactics,
-  suggestResidualGaps,
-  uncoveredDimensions,
+  persistedResidualGaps,
+  settingOptions,
 } from "@/lib/iegp/engine";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +51,16 @@ export default async function GapDetailPage({
 }) {
   const { id } = await params;
   await ensureGapHasConstituentNeed(id);
-  const state = await loadState();
+  const [state, session, ai] = await Promise.all([
+    loadState(),
+    sessionContext(),
+    aiSectionEnabled("partial_split").catch(() => false),
+  ]);
+  const identity: ActionIdentity = {
+    signed_in: session.signed_in,
+    actor_name: session.actor.name,
+    actor_function: session.actor.function,
+  };
   const gap = state.gaps.find((g) => g.id === id);
   if (!gap) notFound();
   const needs = state.need_gap_links
@@ -56,8 +76,8 @@ export default async function GapDetailPage({
     ...gap,
     computed_status: gap.computed_status ?? computed,
   });
-  const missing = uncoveredDimensions(coverages);
-  const leftover = suggestResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
+  // Only a leftover a person saved is shown; drafts come from S6 on demand.
+  const leftover = persistedResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const tactics = mappedTactics(state, gap.id);
   const library = buildTacticLibrary(state);
   const parent = gap.parent_gap_id
@@ -66,10 +86,17 @@ export default async function GapDetailPage({
 
   const mapped =
     shown === "validated_open" || shown === "validated_partial" || shown === "validated_addressed";
+  // Gaps a need can move onto: every gap still on record except this one.
+  const moveTargets = [
+    ...state.gaps
+      .filter((g) => g.id !== gap.id && !g.retired)
+      .map((g) => ({ value: g.id, label: `${g.id} · ${g.name}` })),
+    { value: "__new__", label: "A new gap made from this need" },
+  ];
 
   return (
     <AppShell active="gaps">
-      <PageIntro kicker={gap.id} title={gap.name} />
+      <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>
@@ -101,6 +128,63 @@ export default async function GapDetailPage({
         )}
       </div>
       <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
+      {gap.new_source_at ? (
+        <div className="mb-4">
+          <NewSourceNote gapId={gap.id} newSource={newSourceOf(state, gap.new_source_at, gap.new_source_need_id ?? null)} />
+        </div>
+      ) : null}
+      <div className="mb-4 border border-border bg-card p-3 rounded-lg">
+        <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
+        {(gap.related_gap_ids ?? []).length > 0 ? (
+          <p className="mt-2 text-[12px] text-muted-foreground" data-testid="related-gaps">
+            Related:{" "}
+            {(gap.related_gap_ids ?? []).map((id, index) => {
+              const related = state.gaps.find((row) => row.id === id);
+              return (
+                <span key={id}>
+                  {index > 0 ? ", " : null}
+                  <Link href={`/gaps/${id}`} className="text-foreground underline-offset-2 hover:underline">
+                    {related ? `${gapNumberLabel(related.number)} ${related.name}` : id}
+                  </Link>
+                </span>
+              );
+            })}
+          </p>
+        ) : null}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">{DOMAIN_LABELS[gap.domain]}</span>
+          {gap.retired ? null : (
+            <ActionDialog
+              endpoint="/api/iegp"
+              payload={{ action: "modify_gap", gap_id: gap.id }}
+              identity={identity}
+              label="Edit gap"
+              title={`Edit ${gap.id}`}
+              description="Your wording replaces the current name, statement and domain. It is locked to you and kept on every later AI run; the AI only adds needs to a gap, it never rewrites one."
+              confirmLabel="Save edit"
+              fields={[
+                { name: "name", label: "Name", defaultValue: gap.name, required: true },
+                { name: "statement", label: "Statement", type: "textarea", defaultValue: gap.statement, required: true },
+                {
+                  name: "domain",
+                  label: "Domain",
+                  type: "select",
+                  defaultValue: gap.domain,
+                  options: EVIDENCE_DOMAINS.map((domain) => ({ value: domain, label: DOMAIN_LABELS[domain] })),
+                },
+              ]}
+            />
+          )}
+        </div>
+        <div className="mt-3 border-t border-border pt-3">
+          {gap.retired ? (
+            <SettingChips settings={gap.settings} />
+          ) : (
+            <GapSettingsEditor gapId={gap.id} settings={gap.settings} options={settingOptions(state)} />
+          )}
+        </div>
+        <GapDetailsEditor gapId={gap.id} metadata={gap.metadata} readOnly={gap.retired} className="mt-3" />
+      </div>
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
         {GAP_STATUS_DEFINITIONS[shown]}{" "}
         {shown === "validated_partial"
@@ -109,12 +193,39 @@ export default async function GapDetailPage({
       </p>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">Constituent needs — sources</h2>
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
           Where this gap comes from. Constituent needs are the sourced statements extracted from
           documents or interviews. If the same gap was identified in several sources, every source
-          is listed. Role is primary or supporting.
+          is listed. Role is primary or supporting. If the AI joined a need onto the wrong gap,
+          move it to the right one (or to a new gap); later runs never re-link it.
         </p>
+        {gap.retired ? null : (
+          <div className="mb-3">
+            <ActionDialog
+              endpoint="/api/iegp"
+              payload={{ action: "create_need", gap_id: gap.id }}
+              identity={identity}
+              label="Add need"
+              description="Record a need by hand, e.g. from a meeting no uploaded source covers. Pick its source if it came from an ingested document."
+              confirmLabel="Add need"
+              fields={[
+                { name: "statement", label: "Need statement", type: "textarea", required: true },
+                { name: "source_quote", label: "Source quote (optional)", type: "textarea" },
+                {
+                  name: "source_id",
+                  label: "Source",
+                  type: "select",
+                  defaultValue: "",
+                  options: [
+                    { value: "", label: "Recorded by hand (no source file)" },
+                    ...state.sources.map((s) => ({ value: s.id, label: s.title })),
+                  ],
+                },
+              ]}
+            />
+          </div>
+        )}
         <div className="grid gap-2">
           {needs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">No constituent needs yet.</p>
@@ -122,13 +233,62 @@ export default async function GapDetailPage({
             needs.map(({ need, link }) => {
               const source = state.sources.find((s) => s.id === need.source_id);
               return (
-                <p key={need.id} className="border border-border bg-card p-3 text-[13px]">
+                <div key={need.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <span className="text-[11px] capitalize text-muted-foreground">
-                    {link.role} · {source?.title || need.source_id}
+                    {link.role} · {source?.title || need.source_id} · {need.id}
                   </span>
-                  <br />
-                  {need.statement}
-                </p>
+                  <p className="mt-1">{need.statement}</p>
+                  {need.source_quote && need.source_quote !== need.statement ? (
+                    <p className="mt-1 text-[12px] text-muted-foreground">“{need.source_quote}”</p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <ActionDialog
+                      endpoint="/api/iegp"
+                      payload={{ action: "edit_need", need_id: need.id }}
+                      identity={identity}
+                      label="Edit need"
+                      description="Correct the need's wording or its source quote. The edit is locked to you and kept on later AI runs."
+                      confirmLabel="Save edit"
+                      fields={[
+                        { name: "statement", label: "Statement", type: "textarea", defaultValue: need.statement, required: true },
+                        { name: "source_quote", label: "Source quote", type: "textarea", defaultValue: need.source_quote },
+                      ]}
+                    />
+                    <ActionDialog
+                      endpoint="/api/iegp"
+                      payload={{ action: "move_need", need_id: need.id, from_gap_id: gap.id }}
+                      identity={identity}
+                      label="Move to another gap"
+                      description="Moves this need off this gap. Use it when the AI merged a need into the wrong gap."
+                      confirmLabel="Move need"
+                      fields={[
+                        {
+                          name: "to_gap_id",
+                          label: "Move onto",
+                          type: "select",
+                          placeholder: "Choose where it goes",
+                          options: moveTargets,
+                          required: true,
+                        },
+                        {
+                          name: "new_gap_name",
+                          label: "Name for the new gap (only when moving to a new gap)",
+                          placeholder: "Blank: derived from the need",
+                        },
+                      ]}
+                    />
+                    {needs.length > 1 ? (
+                      <ActionDialog
+                        endpoint="/api/iegp"
+                        payload={{ action: "unlink_need", need_id: need.id, gap_id: gap.id }}
+                        identity={identity}
+                        label="Unlink"
+                        description="Removes this need from this gap. The need itself stays on the Needs page."
+                        confirmLabel="Unlink need"
+                      />
+                    ) : null}
+                  </div>
+                </div>
               );
             })
           )}
@@ -136,15 +296,20 @@ export default async function GapDetailPage({
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-[13px] text-muted-foreground">
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Tactic mappings (many-to-many, dimensional)
         </h2>
         <p className="mb-3 text-[12px] text-muted-foreground">
-          Uncovered or partial dimensions: {missing.join(", ") || "none"}. A tactic existing is not
-          coverage. A publication existing is not coverage.
+          Each row shows the recorded coverage verdict (from AI mapping or a person) and its ten
+          dimensions. A tactic existing is not coverage. A publication existing is not coverage.
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <MapExistingTactic
+            gapId={gap.id}
+            availableTactics={library}
+            mappedTacticIds={coverages.map((c) => c.tactic_id)}
+          />
+          <AssignTacticWithCoverage
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
@@ -155,7 +320,7 @@ export default async function GapDetailPage({
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
           const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);
           return (
-            <article key={c.id} className="mb-4 border border-border bg-card p-4">
+            <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
               <div className="flex flex-wrap items-center gap-2">
                 <Link href={`/tactics/${c.tactic_id}`} className="text-[13px] text-foreground">
                   {tactic?.name}
@@ -166,6 +331,7 @@ export default async function GapDetailPage({
                   overall={c.overall}
                   dimensions={coverageDimensionValues(c.dimensions)}
                 />
+                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} />
               </div>
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
@@ -189,7 +355,7 @@ export default async function GapDetailPage({
                 </div>
               ) : null}
               {c.needs_review ? (
-                <div className="mt-3 border border-border bg-card/40 p-3">
+                <div className="mt-3 border border-border bg-card p-3 rounded-lg">
                   <p className="mb-2 text-[12px] text-muted-foreground">
                     Another live gap that uses this tactic changed a dimension or overall. Confirm
                     or edit this gap&apos;s own coverage. Status is not auto-flipped until you do.
@@ -199,6 +365,7 @@ export default async function GapDetailPage({
                     action="confirm_coverage_review"
                     extra={{ coverage_id: c.id }}
                     confirmLabel="Confirm coverage"
+                    note={{ label: "Note (optional)" }}
                     description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
                   />
                 </div>
@@ -247,7 +414,21 @@ export default async function GapDetailPage({
                                   ))}
                                 </select>
                               </label>
-                              <input type="hidden" name="rationale" value={cell.rationale} />
+                              {cell.rationale ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Current rationale: {cell.rationale}
+                                </p>
+                              ) : null}
+                              <label className="grid gap-1 text-[12px] text-muted-foreground">
+                                Your rationale (required)
+                                <textarea
+                                  name="rationale"
+                                  required
+                                  minLength={3}
+                                  placeholder="Why this dimension has this value"
+                                  className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+                                />
+                              </label>
                             </LockForm>
                           </td>
                         </tr>
@@ -271,18 +452,25 @@ export default async function GapDetailPage({
                       defaultValue={c.overall}
                       className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
                     >
-                      {OVERALL_COVERAGE.map((v) => (
+                      {ASSESSED_COVERAGE.map((v) => (
                         <option key={v} value={v}>
                           {v.replaceAll("_", " ")}
                         </option>
                       ))}
                     </select>
                   </label>
+                  {c.overall_rationale ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Current rationale: {c.overall_rationale}
+                    </p>
+                  ) : null}
                   <label className="grid gap-1 text-[12px] text-muted-foreground">
-                    Rationale
+                    Your rationale (required)
                     <textarea
                       name="rationale"
-                      defaultValue={c.overall_rationale}
+                      required
+                      minLength={3}
+                      placeholder="Why this tactic covers the gap this much"
                       className="min-h-16 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
                     />
                   </label>
@@ -304,13 +492,13 @@ export default async function GapDetailPage({
 
       {children.length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[13px] text-muted-foreground">Leftover child gaps</h2>
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover child gaps</h2>
           <div className="grid gap-2">
             {children.map((child) => (
               <Link
                 key={child.id}
                 href={`/gaps/${child.id}`}
-                className="border border-border bg-card p-3 text-[13px] no-underline"
+                className="border border-border bg-card p-3 text-[13px] no-underline rounded-lg"
               >
                 {child.name}
               </Link>
@@ -319,28 +507,88 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {leftover && shown === "validated_partial" ? (
-        <section className="mb-8 border border-border bg-card p-4">
-          <h2 className="text-[13px] text-muted-foreground">Suggested leftover (right side of split)</h2>
-          <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
-          <ul className="mt-2 grid gap-1">
-            {leftover.reasons.map((reason) => (
-              <li key={reason} className="text-[12px] leading-5 text-muted-foreground">
-                {reason}
-              </li>
-            ))}
-          </ul>
+      {shown === "validated_partial" ? (
+        <section className="mb-8 border border-border bg-card p-4 rounded-lg">
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Leftover (right side of split)</h2>
+          {leftover ? (
+            <>
+              <p className="mt-2 text-[13px] text-foreground">{leftover.statement}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "accept_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Accept as new gap"
+                  variant="default"
+                  description="Creates the leftover as a new Open gap and locks this gap as Addressed. You can adjust the wording first."
+                  confirmLabel="Accept leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", defaultValue: leftover.statement, required: true },
+                  ]}
+                />
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "modify_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Edit leftover"
+                  description="Saves your wording as the leftover draft. Nothing is created until you accept it."
+                  confirmLabel="Save leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", defaultValue: leftover.statement, required: true },
+                  ]}
+                />
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "reject_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Reject leftover"
+                  description="Rejects this leftover. It will not be suggested again for this gap."
+                  confirmLabel="Reject leftover"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                {ai ? (
+                  <>
+                    No leftover drafted. Open Partially Addressed and use &ldquo;Suggest a split&rdquo; to
+                    have the AI propose the addressed slice and the open leftover, or write the
+                    leftover yourself.
+                  </>
+                ) : (
+                  <>
+                    No leftover drafted. Open Partially Addressed to split the gap,
+                    or write the leftover yourself.
+                  </>
+                )}
+              </p>
+              <div className="mt-3">
+                <ActionDialog
+                  endpoint="/api/iegp"
+                  payload={{ action: "modify_residual_gap", parent_gap_id: gap.id }}
+                  identity={identity}
+                  label="Write leftover"
+                  description="Saves your leftover as a draft on this gap. Accept it afterwards to create the new Open gap."
+                  confirmLabel="Save leftover"
+                  fields={[
+                    { name: "statement", label: "Leftover statement", type: "textarea", required: true },
+                  ]}
+                />
+              </div>
+            </>
+          )}
         </section>
       ) : null}
 
       {state.gap_versions.filter((row) => row.live_gap_id === gap.id).length > 0 ? (
         <section className="mb-8">
-          <h2 className="mb-2 text-[13px] text-muted-foreground">Version history</h2>
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Version history</h2>
           <ul className="grid gap-2">
             {state.gap_versions
               .filter((row) => row.live_gap_id === gap.id)
               .map((row) => (
-                <li key={row.id} className="border border-border bg-card p-3 text-[13px]">
+                <li key={row.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                     {row.event} · {row.retired_gap_id} · {row.at.slice(0, 10)} · {row.actor_name}
                   </p>
@@ -348,6 +596,26 @@ export default async function GapDetailPage({
                 </li>
               ))}
           </ul>
+        </section>
+      ) : null}
+
+      {!gap.retired && gap.status === "excluded" ? (
+        <section
+          className="mb-8 flex flex-wrap items-center justify-between gap-3 border border-border bg-card p-4 rounded-lg"
+          data-testid="gap-excluded"
+        >
+          <div>
+            <p className="text-[12px] text-foreground">
+              Excluded
+              {gap.exclusion_reason ? `: ${EXCLUSION_LABELS[gap.exclusion_reason as keyof typeof EXCLUSION_LABELS] ?? gap.exclusion_reason}` : ""}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {gap.status_lock.actor_name ? `By ${gap.status_lock.actor_name}. ` : ""}
+              {gap.status_lock.note ? `“${gap.status_lock.note}” ` : ""}
+              Out of Prioritize and Tactics. Restore it to bring it back as an unconfirmed gap.
+            </p>
+          </div>
+          <RestoreGapButton gapId={gap.id} />
         </section>
       ) : null}
 
@@ -361,16 +629,10 @@ export default async function GapDetailPage({
               Hidden from Prioritize and Tactics mapping while parked. Unpark to bring it back.
             </p>
           </div>
-          <LockForm
-            label="Unpark gap"
-            action="unpark_gap"
-            extra={{ gap_id: gap.id }}
-            confirmLabel="Unpark"
-            description="This brings the gap back into Prioritize and Tactics mapping."
-          />
+          <UnparkGapButton gapId={gap.id} />
         </section>
       ) : (
-        <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card/40 p-4">
+        <section className="mb-8 flex flex-wrap items-center gap-3 border border-border bg-card p-4 rounded-lg">
           <p className="flex-1 text-[12px] text-muted-foreground">
             Not sure this is a real gap yet? Park it instead of excluding it — parked gaps stay
             listed but drop out of Prioritize and Tactics until you unpark them.
@@ -396,15 +658,20 @@ export default async function GapDetailPage({
           action="lock_gap"
           extra={{ gap_id: gap.id, status: "excluded" }}
           confirmLabel="Exclude"
+          description="Takes the gap out of Prioritize and Tactics. It stays listed under Set aside on Gaps and can be restored."
+          note={{ label: "Rationale (required)", required: true }}
         >
           <label className="grid gap-1 text-[12px] text-muted-foreground">
             Exclusion reason
             <select
               name="exclusion_reason"
               className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-              defaultValue={gap.exclusion_reason ?? "not_defined"}
+              defaultValue={gap.exclusion_reason ?? ""}
               required
             >
+              <option value="" disabled>
+                Choose a reason
+              </option>
               {EXCLUSION_REASONS.map((r) => (
                 <option key={r} value={r}>
                   {EXCLUSION_LABELS[r]}
@@ -416,4 +683,11 @@ export default async function GapDetailPage({
       )}
     </AppShell>
   );
+}
+
+/** The need that joined after the gap was validated, for its "New source added" note (KAN-74). */
+function newSourceOf(state: Awaited<ReturnType<typeof loadState>>, at: string, needId: string | null) {
+  const need = state.needs.find((row) => row.id === needId);
+  const source = need ? state.sources.find((row) => row.id === need.source_id) : undefined;
+  return { at, statement: need?.statement ?? null, source_title: source?.title ?? null };
 }

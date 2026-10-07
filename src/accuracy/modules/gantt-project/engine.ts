@@ -10,6 +10,8 @@ export type GanttTacticInput = {
   tactic_type?: string | null;
   /** Fallback gap ids when coverage joins are not supplied. */
   gap_ids?: string[];
+  /** Human-entered dates: pinned, never shifted by date continuity. */
+  dates_locked?: boolean;
 };
 
 export type GanttCoverageJoin = {
@@ -212,7 +214,10 @@ function inferCoverageDependencies(args: {
   return inferred;
 }
 
-function applyDateContinuity(activities: GanttActivity[]): void {
+function applyDateContinuity(
+  activities: GanttActivity[],
+  pinned: Set<string> = new Set(),
+): void {
   const byId = new Map(activities.map((row) => [row.id, row]));
   const cyclic = cyclicActivityIds(activities);
   let changed = true;
@@ -221,7 +226,7 @@ function applyDateContinuity(activities: GanttActivity[]): void {
     changed = false;
     const ordered = [...activities].sort((a, b) => a.id.localeCompare(b.id));
     for (const activity of ordered) {
-      if (cyclic.has(activity.id)) continue;
+      if (cyclic.has(activity.id) || pinned.has(activity.id)) continue;
       const upstreams = activity.depends_on
         .map((id) => byId.get(id))
         .filter((row): row is GanttActivity => row != null && !cyclic.has(row.id));
@@ -316,7 +321,16 @@ export function projectGanttFromTactics(args: {
     ]);
   }
 
-  applyDateContinuity(working);
+  const pinned = new Set(
+    working
+      .filter((activity) => {
+        const tactic = args.tactics.find((row) => row.id === activity.tactic_id);
+        const override = overrideByTactic.get(activity.tactic_id);
+        return Boolean(tactic?.dates_locked) && !override?.start && !override?.end;
+      })
+      .map((activity) => activity.id),
+  );
+  applyDateContinuity(working, pinned);
 
   const projected: GanttActivity[] = working.map(
     ({ tactic_type: _tacticType, ...activity }) => activity,

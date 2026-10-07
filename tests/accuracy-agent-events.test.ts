@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 import { GET as detailGet } from "@/app/api/accuracy/runs/[run_id]/route";
-import AccuracyRunDetailPage from "@/app/accuracy/runs/[run_id]/page";
+import AccuracyRunDetailPage from "@/app/admin/accuracy/runs/[run_id]/page";
 import { appendAgentEvent, readAgentProgression } from "@/accuracy/kernel/agent-events";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
@@ -15,7 +15,9 @@ import { listActiveSourceClaims } from "@/accuracy/store/claim-store";
 
 const auth = vi.hoisted(() => ({ signed_in: true }));
 vi.mock("@/modules/auth/session", () => ({
-  sessionContext: async () => ({ signed_in: auth.signed_in, demo: true }),
+  sessionContext: async () => ({ signed_in: auth.signed_in, demo: true, role: "medical_affairs",
+    session: auth.signed_in ? { subject: "test", provider_id: "demo" } : null,
+    actor: { name: "test", function: "medical_affairs" } }),
 }));
 
 function renderPageContent(page: ReactElement): string {
