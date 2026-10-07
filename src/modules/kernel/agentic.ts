@@ -2,7 +2,7 @@ import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
 import { isTestStub } from "./llm";
-import { similarExamples, workedExamplesAsPrompt, type DecisionKind } from "./decision-examples";
+import { similarExamples, learningExclusions, workedExamplesAsPrompt, type DecisionKind } from "./decision-examples";
 
 /**
  * Locked shape of every agentic stage: propose → critique → revise, three times,
@@ -120,7 +120,7 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
     return "";
   }
   try {
-    const examples = await similarExamples({ stage, kinds: learning.kinds, text: learning.text, workspace_id: ctx.workspace_id });
+    const examples = await similarExamples({ stage, kinds: learning.kinds, text: learning.text, workspace_id: ctx.workspace_id, exclude_ids: [...learningExclusions()], allow_cross_workspace: true });
     ctx.run.note(
       "learning:worked-examples",
       { used: examples.map((example) => ({ id: example.id, scope: example.scope, kind: example.kind })) },

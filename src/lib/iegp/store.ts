@@ -608,6 +608,7 @@ export async function ensureAllLiveGapsHaveNeeds() {
   }
 }
 
+/** Persist an audit event and return its identity for decision capture deduplication. */
 export async function appendAudit(
   actor_name: string,
   actor_function: ActorFunction,
@@ -616,8 +617,9 @@ export async function appendAudit(
   action: string,
   detail: string,
 ) {
+  const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await db().insert(t.audit).values({
-    id: `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id,
     at: now(),
     actor_name,
     actor_function,
@@ -626,6 +628,7 @@ export async function appendAudit(
     action,
     detail,
   });
+  return id;
 }
 
 export function makeLock(
@@ -2218,7 +2221,7 @@ export async function saveMappingTableRow(args: {
     status: "accepted",
     lock: makeLock(args.actor_name, args.actor_function, rationale),
   });
-  await appendAudit(
+  const decisionEventId = await appendAudit(
     args.actor_name,
     args.actor_function,
     "mapping",
@@ -2226,6 +2229,7 @@ export async function saveMappingTableRow(args: {
     "save_mapping_row",
     `${mapping_status} · ${uniqueIds.join(", ") || "none"}${removed.length ? ` · removed ${removed.join(", ")}` : ""}: ${rationale}`,
   );
+  return { decision_event_id: decisionEventId };
 }
 
 /**

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
@@ -35,6 +35,7 @@ import { captureBandDecision } from "@/lib/iegp/learning-capture";
  */
 const placementsTable = pgTable("priority_placements", {
   gap_id: text("gap_id").primaryKey(),
+  run_id: text("run_id"),
   axis_scores: jsonb("axis_scores").notNull(),
   suggested_band: text("suggested_band").notNull(),
   suggested_rationale: text("suggested_rationale").notNull(),
@@ -55,6 +56,7 @@ const placementsTable = pgTable("priority_placements", {
 async function ensurePlacementSchema() {
   await ensurePlatformSchema();
   await ensureCurrentSchemaTables();
+  await db().execute(sql.raw("ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS run_id text"));
 }
 
 const humanAxesOf = (row: { human_axes: unknown } | undefined): string[] =>
@@ -463,6 +465,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         const values = locked
           ? {
               gap_id: placement.gap_id,
+              run_id: current?.run_id ?? null,
               axis_scores: { ...placement.axis_scores, ...currentScores },
               suggested_band: current!.suggested_band,
               suggested_rationale: current!.suggested_rationale,
@@ -477,6 +480,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             }
           : {
               gap_id: placement.gap_id,
+              run_id: ctx.run.id,
               axis_scores: { ...currentScores, ...placement.axis_scores, ...humanScores },
               suggested_band: placement.suggested_band,
               suggested_rationale: placement.rationale,
@@ -671,6 +675,7 @@ async function insertManualPlacement(values: {
 }): Promise<PlacementRow> {
   const row = {
     gap_id: values.gap_id,
+    run_id: null,
     axis_scores: values.axis_scores,
     suggested_band: values.band,
     suggested_rationale: "",
@@ -749,7 +754,7 @@ export async function validatePlacement(args: {
     await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
     row = { ...current, ...values };
   }
-  await recordEdit({
+  const decisionEdit = await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S8",
     entity_type: "gap",
@@ -764,11 +769,14 @@ export async function validatePlacement(args: {
   await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
   // Validating a band the model suggested is a learning example (KAN-78); a band
   // placed purely by hand has no AI output to compare against.
-  if (current?.suggested_band) {
+  if (current?.suggested_band && current.run_id) {
     const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === args.gap_id);
     if (gap) {
       await captureBandDecision({
         gap: { id: gap.id, name: gap.name, statement: gap.statement },
+        run_id: current.run_id,
+        capture_key: decisionEdit.id,
+        actor: args.actor,
         suggested_band: current.suggested_band,
         suggested_rationale: current.suggested_rationale,
         band: args.band,

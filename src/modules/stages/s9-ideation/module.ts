@@ -849,7 +849,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           type: proposal.type,
           rationale: proposal.rationale,
           evidence_question: proposal.evidence_question,
-          design: { ...proposal.design, rank: proposal.rank, origin: "ai" },
+          design: { ...proposal.design, rank: proposal.rank, origin: "ai", run_id: ctx.run.id },
           status: "proposed",
           critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
             .filter(Boolean)
@@ -972,6 +972,7 @@ export type StoredDesign = Omit<Design, "duration_months" | "readout_lag_months"
  */
 type DesignMeta = {
   rank?: number | null;
+  run_id?: string | null;
   origin?: "ai" | "human";
   edited_by?: string | null;
   edited_at?: string | null;
@@ -1003,6 +1004,7 @@ function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
     },
     meta: {
       rank: num(row.rank),
+      run_id: typeof row.run_id === "string" ? row.run_id : null,
       origin: row.origin === "human" ? "human" : "ai",
       edited_by: typeof row.edited_by === "string" ? row.edited_by : null,
       edited_at: typeof row.edited_at === "string" ? row.edited_at : null,
@@ -1339,7 +1341,7 @@ export async function decideIdeationProposal(args: {
     })
     .where(eq(t.ideationProposals.id, args.id));
 
-  await recordEdit({
+  const decisionEdit = await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S9",
     entity_type: "ideation_proposal",
@@ -1357,11 +1359,14 @@ export async function decideIdeationProposal(args: {
     const gap = (await loadState().catch(() => null))?.gaps.find((row) => row.id === asProposed.gap_id);
     await captureProposalDecision({
       proposal: asProposed,
+      capture_key: decisionEdit.id,
+      run_id: typeof (asProposed.design as Record<string, unknown> | null)?.run_id === "string" ? (asProposed.design as Record<string, unknown>).run_id as string : null,
+      actor: args.actor,
       gap: gap ? { name: gap.name, statement: gap.statement } : null,
       decision: args.decision,
       final:
         args.decision === "accept"
-          ? { name: proposal.name, type: proposal.type, evidence_question: proposal.evidence_question, rationale: proposal.rationale }
+          ? { name: proposal.name, type: proposal.type, evidence_question: proposal.evidence_question, rationale: proposal.rationale, design: proposal.design }
           : null,
       rationale,
       workspace_id: args.workspace_id,

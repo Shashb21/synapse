@@ -556,7 +556,7 @@ export async function POST(request: Request) {
         const mapping_status = requireMappingRowStatus(body.mapping_status);
         // The model's row for this gap, read before the save, for the learning example (KAN-78).
         const aiRow = (await latestS4MappingRows().catch(() => null))?.find((row) => row.gap_id === body.gap_id) ?? null;
-        await saveMappingTableRow({
+        const mappingDecision = await saveMappingTableRow({
           gap_id: body.gap_id,
           tactic_ids,
           mapping_status,
@@ -569,6 +569,9 @@ export async function POST(request: Request) {
           if (gap) {
             await captureMappingRowDecision({
               gap: { id: gap.id, name: gap.name, statement: gap.statement },
+              run_id: aiRow.origin_run_id,
+              capture_key: mappingDecision.decision_event_id,
+              actor: { name: actor_name, function: actor_function },
               ai: { mapping_status: aiRow.mapping_status, tactic_ids: aiRow.tactic_ids },
               saved: { mapping_status, tactic_ids },
               rationale,

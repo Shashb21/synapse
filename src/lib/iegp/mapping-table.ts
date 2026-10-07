@@ -57,7 +57,7 @@ const storedRows = z.array(mappingTableRowSchema);
  * verdict contract (per-tactic coverage, confidence and rationale) is ignored,
  * so older rule-derived statuses are never shown as proposals.
  */
-export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
+export async function latestS4MappingRows(): Promise<(MappingTableRow & { origin_run_id?: string })[] | null> {
   try {
     const runs = await listRuns({ stage: "S4", limit: 20 });
     // The newest successful run whose rows were stored whole: an output cut to a
@@ -67,7 +67,7 @@ export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
       const output = run.output as { rows?: unknown; accepted?: unknown };
       for (const candidate of [output.rows, output.accepted]) {
         const parsed = storedRows.safeParse(candidate);
-        if (parsed.success && parsed.data.length > 0) return parsed.data;
+        if (parsed.success && parsed.data.length > 0) return parsed.data.map(row => ({ ...row, origin_run_id: run.id }));
       }
     }
     return null;

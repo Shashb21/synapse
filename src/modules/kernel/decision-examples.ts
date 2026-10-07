@@ -1,11 +1,12 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
-import { scopedWorkspaceId } from "@/modules/workspaces/context";
-import type { JsonCompletion, StageId } from "./contracts";
+import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
+import type { Actor, JsonCompletion, StageId } from "./contracts";
 import { sharedDb } from "./db";
 import { newId, nowIso } from "./ids";
 import { isTestStub } from "./llm";
 import { canPrompt, completionFor, resolveRoute } from "./routing";
-import { closeRun, openRun, RunRecorder } from "./observability";
+import { closeRun, getRun, openRun, RunRecorder } from "./observability";
 import { aiSectionEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 
@@ -42,6 +43,11 @@ export type DecisionExample = {
   model: string | null;
   provider_id: string | null;
   created_at: string;
+  run_id?: string | null;
+  prompt_version?: string | null;
+  actor?: Actor | null;
+  replay_input?: Record<string, unknown> | null;
+  replay_exclusion_reason?: string | null;
 };
 
 export type DecisionExampleDraft = {
@@ -54,6 +60,15 @@ export type DecisionExampleDraft = {
   final?: Record<string, unknown> | null;
   rationale?: string | null;
   workspace_id?: string;
+  run_id?: string | null;
+  prompt_version?: string | null;
+  actor?: Actor | null;
+  replay_input?: Record<string, unknown> | null;
+  replay_exclusion_reason?: string | null;
+  /** Stable human-decision identity, shared by nested capture paths. */
+  capture_key?: string;
+  /** AI-only capture paths must prove their recorded run exists in this workspace. */
+  require_originating_run?: boolean;
 };
 
 export const DECISION_EXAMPLES_DDL = `CREATE TABLE IF NOT EXISTS decision_examples (
@@ -73,7 +88,14 @@ export const DECISION_EXAMPLES_DDL = `CREATE TABLE IF NOT EXISTS decision_exampl
   provider_id text,
   created_at text NOT NULL
 );
-CREATE INDEX IF NOT EXISTS decision_examples_stage_kind ON decision_examples(stage, kind)`;
+CREATE INDEX IF NOT EXISTS decision_examples_stage_kind ON decision_examples(stage, kind);
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS run_id text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS prompt_version text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor jsonb;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_input jsonb;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_exclusion_reason text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS capture_key text;
+CREATE UNIQUE INDEX IF NOT EXISTS decision_examples_capture_key ON decision_examples(workspace_id, capture_key)`;
 
 let tableReady: Promise<unknown> | null = null;
 /** One copy for every workspace: it lives in the public schema, like platform settings. */
@@ -104,6 +126,8 @@ function toExample(row: Row): DecisionExample {
     ai_input: asRecord(row.ai_input),
     ai_output: asRecord(row.ai_output),
     final: row.final == null ? null : asRecord(row.final),
+    replay_input: row.replay_input == null ? null : asRecord(row.replay_input),
+    replay_exclusion_reason: row.replay_exclusion_reason ?? (row.replay_input == null ? "No frozen originating stage input is available." : null),
   };
 }
 
@@ -116,19 +140,32 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
   try {
     await ensureTable();
     const workspace_id = draft.workspace_id ?? (await scopedWorkspaceId()) ?? "default";
-    const route = await resolveRoute(draft.stage).catch(() => null);
+    const run = draft.run_id ? await originatingRun(workspace_id, draft.run_id, draft.stage) : null;
+    if (draft.require_originating_run && (!run || run.status !== "ok")) {
+      console.warn("[learning] decision omitted: originating AI run unavailable", draft.kind, draft.subject_id);
+      return null;
+    }
+    const route = run?.route;
+    const promptVersion = draft.prompt_version ?? (run?.steps.find(step => step.name === "prompt:variant")?.data as { version?: string } | undefined)?.version ?? null;
+    const replay = draft.replay_input ?? null;
+    const captureKey = draft.capture_key ?? null;
     const id = newId("dex");
-    await sharedDb().execute(sql`
+    const inserted = await sharedDb().execute(sql`
       insert into decision_examples
         (id, workspace_id, stage, kind, subject_id, ai_input, ai_output, outcome, final, rationale,
-         lesson, lesson_status, model, provider_id, created_at)
+         lesson, lesson_status, model, provider_id, created_at, run_id, prompt_version, actor, replay_input, replay_exclusion_reason, capture_key)
       values
         (${id}, ${workspace_id}, ${draft.stage}, ${draft.kind}, ${draft.subject_id},
          ${JSON.stringify(draft.ai_input)}::jsonb, ${JSON.stringify(draft.ai_output)}::jsonb,
          ${draft.outcome}, ${draft.final == null ? null : JSON.stringify(draft.final)}::jsonb,
          ${draft.rationale?.trim() || null}, null, 'pending', ${route?.model ?? null},
-         ${route?.provider_id ?? null}, ${nowIso()})
+         ${route?.provider_id ?? null}, ${nowIso()}, ${draft.run_id ?? null}, ${promptVersion},
+         ${JSON.stringify(draft.actor ?? null)}::jsonb, ${replay == null ? null : JSON.stringify(replay)}::jsonb,
+         ${draft.replay_exclusion_reason ?? (replay ? null : "No frozen originating stage input is available.")}, ${captureKey})
+      on conflict (workspace_id, capture_key) do nothing
+      returning id
     `);
+    if ((inserted as unknown as { id: string }[]).length === 0) return null;
     // Off the request: the person's action does not wait for the lesson.
     void computeLesson(id).catch((error) => console.error("[learning] lesson failed", id, error));
     return id;
@@ -248,7 +285,8 @@ export function scrubLesson(lesson: string, rawTexts: string[], entityNames: str
   const text = lesson.replace(/\s+/g, " ").trim();
   if (!text || text.length > 400) return null;
   if (/\d/.test(text)) return null;
-  if (/["“”«»„]/.test(text)) return null;
+  if (/["“”«»„‘’]/.test(text)) return null;
+  if (/(?:^|\s)'[^']+'(?:$|[\s.,;:])/.test(text)) return null;
   if (INN_STEM.test(text)) return null;
   const { words, phrases } = riskyTerms(rawTexts, entityNames);
   const lower = text.toLowerCase();
@@ -309,19 +347,44 @@ export async function deidentifyLesson(
  */
 export async function computeLesson(id: string, complete?: JsonCompletion): Promise<LessonStatus | null> {
   const example = await getDecisionExample(id);
-  if (!example || example.lesson_status !== "pending") return example?.lesson_status ?? null;
+  if (!example || example.lesson_status === "ok") return example?.lesson_status ?? null;
+  try {
+    return await inRecordedWorkspace(example.workspace_id, () => computeRecordedLesson(example, complete));
+  } catch (error) {
+    await setLesson(id, null, "failed");
+    console.error("[learning] lesson processing failed", id, error);
+    return "failed";
+  }
+}
+
+/** Keep all context reads and lesson traces inside the example's recorded workspace. */
+async function computeRecordedLesson(example: DecisionExample, complete?: JsonCompletion): Promise<LessonStatus> {
+  const id = example.id;
   const section = sectionOfStage(example.stage);
   if (!complete) {
     if (isTestStub()) return "pending";
     if (section && !(await aiSectionEnabled(section))) return "pending";
   }
-  const entityNames = await workspaceEntityNames().catch(() => [] as string[]);
-  if (complete) {
-    const lesson = await deidentifyLesson(example, complete, entityNames);
-    await setLesson(id, lesson, lesson ? "ok" : "failed");
-    return lesson ? "ok" : "failed";
+  let entityNames: string[];
+  try {
+    entityNames = await entitiesForWorkspace(example.workspace_id);
+  } catch (error) {
+    console.error("[learning] entity context unavailable", id, error);
+    await setLesson(id, null, "failed");
+    return "failed";
   }
-  const route = await resolveRoute(example.stage);
+  if (complete) {
+    try {
+      const lesson = await deidentifyLesson(example, complete, entityNames);
+      await setLesson(id, lesson, lesson ? "ok" : "failed");
+      return lesson ? "ok" : "failed";
+    } catch (error) {
+      await setLesson(id, null, "failed");
+      console.error("[learning] lesson generation failed", id, error);
+      return "failed";
+    }
+  }
+  const route = await inRecordedWorkspace(example.workspace_id, () => resolveRoute(example.stage));
   if (!canPrompt(route)) return "pending";
   const recorder = new RunRecorder({
     workspace_id: example.workspace_id,
@@ -338,16 +401,17 @@ export async function computeLesson(id: string, complete?: JsonCompletion): Prom
     await closeRun({ recorder, status: "ok", route, output: { lesson_status: lesson ? "ok" : "failed" } });
     return lesson ? "ok" : "failed";
   } catch (error) {
+    await setLesson(id, null, "failed");
     await closeRun({ recorder, status: "error", route, output: {}, error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
 
-/** Admin: work out every pending lesson, oldest first. */
+/** Admin: work out pending lessons and retry failures, oldest first. */
 export async function computePendingLessons(limit = 50): Promise<{ ok: number; failed: number; pending: number }> {
   await ensureTable();
   const rows = (await sharedDb().execute(
-    sql`select id from decision_examples where lesson_status = 'pending' order by created_at asc limit ${limit}`,
+    sql`select id from decision_examples where lesson_status in ('pending', 'failed') order by created_at asc limit ${limit}`,
   )) as unknown as { id: string }[];
   const tally = { ok: 0, failed: 0, pending: 0 };
   for (const row of rows) {
@@ -417,12 +481,28 @@ export async function similarExamples(args: {
   text: string;
   workspace_id: string;
   take?: number;
+  exclude_ids?: string[];
+  allow_cross_workspace?: boolean;
 }): Promise<WorkedExample[]> {
   const take = args.take ?? 4;
-  const pool = (await listDecisionExamples({ stage: args.stage, kinds: args.kinds })).filter(
-    (example) => example.workspace_id === args.workspace_id || (example.lesson_status === "ok" && !!example.lesson),
-  );
-  const ranked = rankBySimilarity(args.text, pool, exampleText);
+  const excluded = new Set([...learningExclusions(), ...(args.exclude_ids ?? [])]);
+  const { learningSharingEligible } = await import("@/modules/workspaces/store");
+  const share = args.allow_cross_workspace === true && await learningSharingEligible(args.workspace_id);
+  const pool: DecisionExample[] = [];
+  for (const example of await listDecisionExamples({ stage: args.stage, kinds: args.kinds })) {
+    if (excluded.has(example.id)) continue;
+    if (example.workspace_id === args.workspace_id) { pool.push(example); continue; }
+    if (!share || example.lesson_status !== "ok" || !example.lesson) continue;
+    try {
+      if (!await learningSharingEligible(example.workspace_id)) continue;
+      const entities = await entitiesForWorkspace(example.workspace_id);
+      const lesson = scrubLesson(example.lesson, rawTextsOf(example), entities);
+      if (lesson) pool.push({ ...example, lesson });
+    } catch (error) {
+      console.error("[learning] foreign lesson withheld: entity context unavailable", example.id, error);
+    }
+  }
+  const ranked = rankBySimilarity(args.text, pool, example => example.workspace_id === args.workspace_id ? exampleText(example) : example.lesson!);
   const own = ranked.filter((row) => row.item.workspace_id === args.workspace_id);
   const others = ranked.filter((row) => row.item.workspace_id !== args.workspace_id);
   return [...own, ...others].slice(0, take).map(({ item }) =>
@@ -448,4 +528,44 @@ export const WORKED_EXAMPLES_FRAMING =
 export function workedExamplesAsPrompt(examples: WorkedExample[]): string {
   if (examples.length === 0) return "";
   return `${WORKED_EXAMPLES_FRAMING}\n${JSON.stringify(examples)}`;
+}
+
+/** Runs evaluation work without allowing its held-out answers into prompts. */
+export function withLearningExclusions<T>(ids: readonly string[], fn: () => Promise<T>): Promise<T> {
+  return exclusions.run([...new Set([...learningExclusions(), ...ids])], fn);
+}
+const exclusions = new AsyncLocalStorage<readonly string[]>();
+/** IDs withheld from all learning lookups in the current request. */
+export function learningExclusions(): readonly string[] { return exclusions.getStore() ?? []; }
+
+/** Resolve recorded workspace identity before reading customer context. */
+async function inRecordedWorkspace<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  const { getWorkspace } = await import("@/modules/workspaces/store");
+  const workspace = await getWorkspace(workspaceId);
+  if (!workspace) {
+    // The reserved pre-workspace plan lives in public even before its registry row exists.
+    if (workspaceId === DEFAULT_WORKSPACE_ID) return runInWorkspace({ workspace_id: DEFAULT_WORKSPACE_ID, schema: DEFAULT_SCHEMA }, fn);
+    throw new Error(`Learning workspace ${workspaceId} is unavailable.`);
+  }
+  return runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, fn);
+}
+/** Context must load successfully and contain an identifying asset, never an empty fallback. */
+async function entitiesForWorkspace(workspaceId: string): Promise<string[]> {
+  return inRecordedWorkspace(workspaceId, async () => {
+    const names = await workspaceEntityNames();
+    if (!names.length) throw new Error("Learning entity context is empty.");
+    return names;
+  });
+}
+/** Lookup only explicit originating lineage; never substitute today's configured route. */
+async function originatingRun(workspaceId: string, runId: string, stage: StageId) {
+  try {
+    return await inRecordedWorkspace(workspaceId, async () => {
+      const run = await getRun(runId);
+      return run?.workspace_id === workspaceId && run.stage === stage ? run : null;
+    });
+  } catch (error) {
+    console.error("[learning] originating run unavailable", runId, error);
+    return null;
+  }
 }
