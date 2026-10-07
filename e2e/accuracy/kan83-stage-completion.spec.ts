@@ -73,6 +73,12 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
     await expect(page.getByTestId(`ledger-claim-${nonCommittedGap.id}`)).toContainText("Computed: open · Effective: open");
 
     const first = await confirmSplit(page, request, workspaceId, gap.id);
+    // Explicit workspace configuration, never Default inheritance/backfill.
+    for (const pair of [{ scope: "all", x_axis: "decision_impact", y_axis: "time_pressure" }, { scope: "nsclc", x_axis: "effort_cost", y_axis: "payer_value" }]) {
+      const state = await (await request.get(`/api/accuracy/claims/priority?workspace_id=${workspaceId}`)).json();
+      const configured = await request.post("/api/accuracy/claims/priority", { data: { action: "configure", workspace_id: workspaceId, expected_config_revision: state.config.revision, ...pair, rationale: "Browser reviewer saves distinct setting pairs" } });
+      expect(configured.ok(), await configured.text()).toBe(true);
+    }
     await page.goto(workspaceUrl("/admin/accuracy/plan", workspaceId));
     await expect(page.getByTestId(`plan-gap-${gap.id}`)).toHaveCount(0);
     await expect(page.getByTestId(`plan-gap-${clean.id}`)).toContainText("partial");
@@ -81,9 +87,27 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
     const priority = priorityCard.getByRole("region", { name: "S8 priority review" });
     await expect(priority).toContainText("Eligible Open gap");
     await expect(priority).toContainText("Human working decision: None · Validation: unvalidated");
+    await priority.getByRole("button", { name: "Suggest S8 priority" }).click();
+    await expect(priority).toContainText("Fresh suggestion: defer", { timeout: 30_000 });
+    const storedDraft = (await (await request.get(`/api/accuracy/claims/priority?workspace_id=${workspaceId}`)).json()).placements.find((row: { gap_id: string }) => row.gap_id === first.open_residual_gap_id);
+    expect(storedDraft.selection).toMatchObject({ setting: "all", x_axis: "decision_impact", y_axis: "time_pressure" });
+    await priority.getByLabel("Setting", { exact: true }).fill("nsclc");
+    await priority.getByRole("button", { name: "Reload current priority inputs" }).click();
+    await expect(priority.getByLabel("Horizontal axis")).toHaveValue("effort_cost");
+    await expect(priority.getByLabel("Vertical axis")).toHaveValue("payer_value");
+    await expect(priority).toContainText("Saved axis pair");
+    await expect(priority).toContainText("Effort & cost (lower is higher priority)");
+    // This residual has no disease-setting fact: keep the real eligibility refusal.
+    await expect(priority).toContainText("Priority unavailable: outside_setting");
+    await priority.getByLabel("Setting", { exact: true }).fill("all");
+    await priority.getByRole("button", { name: "Reload current priority inputs" }).click();
+    await expect(priority.getByLabel("Horizontal axis")).toHaveValue("decision_impact");
+    await expect(priority.getByLabel("Vertical axis")).toHaveValue("time_pressure");
+    await expect(priority).toContainText("Saved axis pair");
     await priority.getByLabel("Horizontal axis").selectOption("effort_cost");
     await priority.getByLabel("Vertical axis").selectOption("decision_impact");
     await priority.getByRole("button", { name: "Reload current priority inputs" }).click();
+    await expect(priority).toContainText("Custom axis pair — not saved for this setting");
     await priority.getByText("Save Accuracy axis pair and planning context", { exact: true }).click();
     await priority.getByLabel("Key decision").fill("Comparator question for the next evidence study");
     await priority.getByLabel("Configuration rationale").fill("Use saved effort direction and decision impact for this residual");
@@ -94,6 +118,22 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
     await expect(priority).toContainText("Fresh suggestion: defer", { timeout: 30_000 });
     await expect(priority).toContainText("Human working decision: None · Validation: unvalidated");
     await expect(priority).toContainText("Validation: unvalidated");
+    const failedReadPattern = "**/api/accuracy/claims/priority?workspace_id=*&gap_id=*";
+    await page.route(failedReadPattern, route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Fixture read unavailable" }) }));
+    try {
+      await priority.getByRole("button", { name: "Reload current priority inputs" }).click();
+      await expect(priority.getByRole("alert")).toContainText("Fixture read unavailable");
+      await expect(priority.getByText(/^Fresh suggestion:/)).toHaveCount(0);
+    } finally { await page.unroute(failedReadPattern); }
+    const r1 = await (await request.get(`/api/accuracy/claims/priority?workspace_id=${workspaceId}`)).json();
+    const r2 = await request.post("/api/accuracy/claims/priority", { data: { action: "configure", workspace_id: workspaceId, expected_config_revision: r1.config.revision,
+      context: { key_decision: "Browser reviewer changes the decision after a failed read" }, rationale: "Read changed planning inputs after connection recovery" } });
+    expect(r2.ok(), await r2.text()).toBe(true);
+    await priority.getByRole("button", { name: "Reload current priority inputs" }).click();
+    await expect(priority.getByRole("button", { name: "Suggest S8 priority" })).toBeEnabled();
+    await expect(priority.getByText(/^Fresh suggestion:/)).toHaveCount(0);
+    await priority.getByRole("button", { name: "Suggest S8 priority" }).click();
+    await expect(priority).toContainText("Fresh suggestion: defer", { timeout: 30_000 });
     await request.get(`${KAN83_PROVIDER_URL}/fail-priority`);
     await priority.getByRole("button", { name: "Suggest S8 priority" }).click();
     await expect(priority.getByRole("alert")).toContainText("Enter a working band and rationale manually", { timeout: 30_000 });

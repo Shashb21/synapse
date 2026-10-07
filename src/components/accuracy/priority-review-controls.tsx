@@ -23,20 +23,35 @@ export function PriorityReviewControls({ workspaceId, gapId }: { workspaceId: st
   const [open, setOpen] = useState(false), [input, setInput] = useState<PriorityRead | null>(null), [catalog, setCatalog] = useState<PriorityAxis[]>([]);
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null);
   const [setting, setSetting] = useState("all"), [xAxis, setX] = useState(""), [yAxis, setY] = useState("");
+  const [useSavedPair, setUseSavedPair] = useState(false);
   const [band, setBand] = useState("medium"), [rationale, setRationale] = useState("");
   const [scores, setScores] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<FreshSuggestion[]>([]), [skipped, setSkipped] = useState<{ gap_id: string; reason: string }[]>([]);
   const [configRationale, setConfigRationale] = useState("");
   const [decision, setDecision] = useState(""), [decisionDate, setDecisionDate] = useState("");
 
-  async function load() {
+  async function load(preserveNewSuggestion = false) {
     setOpen(true); setPending(true); setError(null); setInput(null);
+    if (!preserveNewSuggestion) { setSuggestions([]); setSkipped([]); }
     try {
       const query = new URLSearchParams({ workspace_id: workspaceId, gap_id: gapId, setting });
-      if (xAxis && yAxis) { query.set("x_axis", xAxis); query.set("y_axis", yAxis); }
+      let selectedX = xAxis, selectedY = yAxis;
+      if (useSavedPair) {
+        // Read the canonical configuration without a gap so a stored placement
+        // cannot override the new setting's pair when axes are omitted.
+        const configQuery = new URLSearchParams({ workspace_id: workspaceId, setting });
+        const configResponse = await fetch(`/api/accuracy/claims/priority?${configQuery}`);
+        const configJson = await configResponse.json();
+        if (!configResponse.ok) { setSuggestions([]); setSkipped([]); setError(configJson.error ?? "Could not read saved priority configuration."); return; }
+        const config = configJson.config as AccuracyPriorityConfig;
+        const saved = config.scopes[setting.trim().toLowerCase() || "all"];
+        selectedX = saved?.x_axis ?? config.catalog.x_axis;
+        selectedY = saved?.y_axis ?? config.catalog.y_axis;
+      }
+      if (selectedX && selectedY) { query.set("x_axis", selectedX); query.set("y_axis", selectedY); }
       const response = await fetch(`/api/accuracy/claims/priority?${query}`);
       const json = await response.json();
-      if (!response.ok) { setError(json.error ?? "Could not read priority inputs."); return; }
+      if (!response.ok) { setSuggestions([]); setSkipped([]); setError(json.error ?? "Could not read priority inputs."); return; }
       const read = json as PriorityRead;
       if (input && (read.expected_input_revision !== input.expected_input_revision || read.expected_config_revision !== input.expected_config_revision)) {
         setSuggestions([]); setSkipped([]);
@@ -46,7 +61,7 @@ export function PriorityReviewControls({ workspaceId, gapId }: { workspaceId: st
       setBand(placement?.band ?? placement?.suggested_band ?? "medium");
       setScores(Object.fromEntries(Object.entries(placement?.axis_scores ?? {}).map(([id, value]) => [id, String(value)])));
       setDecision(String(read.context.key_decision ?? "")); setDecisionDate(String(read.context.decision_date ?? ""));
-    } catch { setError("Could not read current priority inputs. Retry; manual work remains available."); }
+    } catch { setSuggestions([]); setSkipped([]); setError("Could not read current priority inputs. Retry; manual work remains available."); }
     finally { setPending(false); }
   }
   async function save(validate: boolean) {
@@ -70,7 +85,7 @@ export function PriorityReviewControls({ workspaceId, gapId }: { workspaceId: st
     if (!result.ok) { setError(`${result.error} Enter a working band and rationale manually, or retry the suggestion.`); return; }
     setSuggestions((result.json.suggestions ?? []) as FreshSuggestion[]); setSkipped((result.json.skipped ?? []) as { gap_id: string; reason: string }[]);
     setMessage(`Priority suggestion (${result.json.mode ?? "unknown"}); review before human validation.`);
-    await load(); router.refresh();
+    await load(true); router.refresh();
   }
   async function configure() {
     if (!input) return;
@@ -83,18 +98,21 @@ export function PriorityReviewControls({ workspaceId, gapId }: { workspaceId: st
     setMessage("Accuracy configuration saved. Recheck any stale human priority decisions."); await load(); router.refresh();
   }
   const placement = input?.placements.find(row => row.gap_id === gapId);
+  const savedPair = input?.config.scopes?.[setting.trim().toLowerCase() || "all"];
+  const matchesSavedPair = savedPair?.x_axis === input?.x_axis && savedPair?.y_axis === input?.y_axis;
   return <div className="mt-3 grid gap-2">
     <button className={buttonClass} type="button" disabled={pending} onClick={() => open ? setOpen(false) : void load()}>{open ? "Close S8 priority" : "Review S8 priority"}</button>
     {open ? <section className="grid gap-2 border-t border-border pt-2" aria-label="S8 priority review">
       <div className="grid gap-2 sm:grid-cols-3">
-        <label className="grid gap-1 text-[12px]">Setting<input className={inputClass} value={setting} onChange={e => { setSetting(e.target.value); setInput(null); setSuggestions([]); setSkipped([]); }} /></label>
-        {(["x", "y"] as const).map(axis => <label key={axis} className="grid gap-1 text-[12px]">{axis === "x" ? "Horizontal" : "Vertical"} axis<select className={inputClass} value={axis === "x" ? xAxis : yAxis} onChange={e => { (axis === "x" ? setX : setY)(e.target.value); setInput(null); setSuggestions([]); setSkipped([]); }}>
-          {!catalog.length ? <option value="">Saved axis</option> : catalog.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}
+        <label className="grid gap-1 text-[12px]">Setting<input className={inputClass} disabled={pending} value={setting} onChange={e => { setSetting(e.target.value); setUseSavedPair(true); setX(""); setY(""); setInput(null); setSuggestions([]); setSkipped([]); }} /></label>
+        {(["x", "y"] as const).map(axis => <label key={axis} className="grid gap-1 text-[12px]">{axis === "x" ? "Horizontal" : "Vertical"} axis<select className={inputClass} disabled={pending || (useSavedPair && !input)} value={axis === "x" ? xAxis : yAxis} onChange={e => { (axis === "x" ? setX : setY)(e.target.value); setUseSavedPair(false); setInput(null); setSuggestions([]); setSkipped([]); }}>
+          <option value="">Saved axis</option>
+          {catalog.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}
         </select></label>)}
       </div>
       <button className={buttonClass} type="button" disabled={pending} onClick={() => void load()}>Reload current priority inputs</button>
       {input ? <>
-        <p className="text-[12px]">{input.eligible ? "Eligible Open gap" : `Priority unavailable: ${input.skipped_reason}`} · {input.pair_chosen ? "Saved axis pair" : "Axis pair not saved — choose and save it below"}</p>
+        <p className="text-[12px]">{input.eligible ? "Eligible Open gap" : `Priority unavailable: ${input.skipped_reason}`} · {matchesSavedPair ? "Saved axis pair" : "Custom axis pair — not saved for this setting"}</p>
         <p className="text-[12px]">Suggestion: {placement?.suggested_band ?? "None"} · {placement?.suggested_rationale ?? "No model suggestion"}</p>
         <p className="text-[12px]">Human working decision: {placement?.human_revision ? placement.band : "None"} · Validation: {placement?.validation?.freshness ?? "unvalidated"}{placement?.actor_name ? ` · ${placement.actor_name} · ${placement.rationale}` : ""}</p>
         {placement?.validation ? <p className="text-[11px]">Validated by {placement.validation.by} · {placement.validation.at} · {placement.validation.rationale}</p> : null}
