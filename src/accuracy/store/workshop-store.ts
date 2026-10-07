@@ -125,7 +125,7 @@ export async function buildWorkshopInventory(workspace_id: string): Promise<Work
   const claims = (await listClaims(workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
   const gapRows = claims.filter((row) => row.claim_type === "gap");
   const tacticRows = claims.filter((row) => row.claim_type === "tactic");
-  const joins = await listCoverageJoins(workspace_id);
+  const joins = await listCoverageJoins(workspace_id, { effective: true });
   const joinLites = joins.map((join) => ({
     id: join.id,
     gap_id: join.gap_id,

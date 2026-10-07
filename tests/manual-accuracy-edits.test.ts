@@ -31,6 +31,7 @@ import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import { ownerAccess } from "@/modules/auth/owner";
+import { coverageProvenance } from "./support/coverage-provenance";
 
 registerAccuracyStack();
 
@@ -624,7 +625,8 @@ describe("gantt: human dates survive re-projection", () => {
 describe("coverage: decide any pair", () => {
   it("accepts an unlinked inventory pair, lists it, and rejects unknown claims", async () => {
     const { workspace_id } = await freshWorkspace("coverage-any");
-    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need OS" });
+    const provenance = await coverageProvenance(workspace_id, "Need OS; inventory provides partial OS evidence.");
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need OS", metadata: { provenance } });
     const tactics = [];
     for (let i = 0; i < 5; i += 1) {
       tactics.push(await insertClaim({ workspace_id, claim_type: "tactic", statement: `Tactic ${i}` }));

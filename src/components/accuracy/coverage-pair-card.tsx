@@ -13,7 +13,7 @@ export type CoveragePairCardModel = {
   rationale: string | null;
   validated: boolean;
   gap_revision?: string; tactic_revision?: string; freshness?: string; validation_freshness?: string;
-  assessment_state?: string; failure_reason?: string | null; evidence?: string[]; protected?: boolean;
+  assessment_state?: string; failure_reason?: string | null; pending_reason?: string | null; evidence?: string[]; protected?: boolean;
 };
 
 export function CoveragePairCard({
@@ -73,6 +73,7 @@ export function CoveragePairCard({
         Assessment: {pair.assessment_state ?? "pending"} · {overall} · {pair.freshness ?? "unknown"}. Validation: {pair.validated ? "current" : pair.validation_freshness ?? "unvalidated"}
       </p>
       {pair.failure_reason ? <p className="text-[12px] text-destructive">{pair.failure_reason}</p> : null}
+      {pair.pending_reason === "missing_provenance" ? <p className="text-[12px] text-destructive">Missing factual source provenance. Supporting coverage remains pending.</p> : null}
       <p className="text-[11px] text-muted-foreground">{pair.evidence?.length ? `Cited evidence: ${pair.evidence.join(", ")}` : "No cited evidence attached to this decision."}</p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Rationale (required)</span>

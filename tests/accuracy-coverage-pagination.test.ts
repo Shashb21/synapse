@@ -3,6 +3,7 @@ import { createOrganization, createWorkspace, getWorkspace } from "@/accuracy/st
 import { getClaim, insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { listCoveragePage, listCoveragePairs, upsertCoverageDecision, saveCoverageAssessment,
   coveragePairRevisions, rejectCoveragePair, listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
 import { assessCoveragePage } from "@/accuracy/store/coverage-store";
 import { accuracyTransactionActive, accuracyDb, withAccuracyTransaction, withAccuracyWorkspaceMutation } from "@/accuracy/store/db";
 import { COVERAGE_PAIR_MIGRATION } from "@/accuracy/store/schema";
@@ -10,6 +11,8 @@ import { insertSourceFile } from "@/accuracy/store/source-store";
 import { AiDisabledError } from "@/modules/kernel/ai-switch";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { sql } from "drizzle-orm";
+import { coverageProvenance } from "./support/coverage-provenance";
+import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
 
 // Exercise real concurrent backend connections rather than Vitest's single-connection queue.
 vi.stubEnv("VITEST", "");
@@ -21,6 +24,98 @@ async function workspace() {
 }
 
 describe("exhaustive coverage assessment", () => {
+  it("retains a supported human decision and history when later facts lose their provenance", async () => {
+    const workspace_id = await workspace();
+    const provenance = await coverageProvenance(workspace_id, "Evidence need with a small inventory overlap.");
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence", metadata: { provenance } });
+    const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Inventory" });
+    const identity = { workspace_id, gap_id: gap.id, tactic_id: tactic.id };
+    const actor = { name: "Reviewer", function: "medical_affairs" as const };
+    await upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall: "limited",
+      rationale: "Source-backed overlap", evidence: [], actor });
+    await persistClaimPatch({ workspace_id, claim_id: gap.id, metadata: { provenance: [] } });
+    // The claim owner correctly marks prior validation stale; the rejected replacement must make no further mutation.
+    const saved = await listCoverageJoins(workspace_id);
+    expect(saved[0]).toMatchObject({ overall: "limited", rationale: "Source-backed overlap", validated: false,
+      dimensions: { actor, validation_stale: true } });
+    await expect(upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall: "full",
+      rationale: "Unsupported replacement", evidence: [], actor })).rejects.toMatchObject({ code: "missing_provenance" });
+    expect(await listCoverageJoins(workspace_id)).toEqual(saved);
+    const page = await listCoveragePage({ workspace_id });
+    expect(page.pairs[0]).toMatchObject({ overall: "pending", validated: false, freshness: "stale", protected: true,
+      pending_reason: "missing_provenance" });
+    expect(page.progress).toMatchObject({ assessed: 0, validated: 0, pending: 1, stale: 1, missing_provenance: 1 });
+  });
+
+  it("exposes old unsupported validation as protected pending without deleting the saved decision", async () => {
+    const workspace_id = await workspace();
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
+    const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Inventory" });
+    const identity = { workspace_id, gap_id: gap.id, tactic_id: tactic.id };
+    const row = await insertCoverageJoin({ ...identity, overall: "limited", validated: true, rationale: "Old unsupported human decision" });
+    const revisions = await coveragePairRevisions(identity);
+    // Reproduce a row accepted by the previous implementation, including its current factual tokens.
+    await accuracyDb().execute(sql`UPDATE accuracy_coverage_joins SET dimensions = ${JSON.stringify({
+      gap_revision: revisions.expected_gap_revision, tactic_revision: revisions.expected_tactic_revision,
+      actor: { name: "Previous reviewer", function: "medical_affairs" }, evidence: [], assessment_state: "successful",
+    })}::jsonb WHERE id = ${row.id}`);
+    const saved = await listCoverageJoins(workspace_id);
+    const page = await listCoveragePage({ workspace_id });
+    expect(page.pairs[0]).toMatchObject({ overall: "pending", validated: false, freshness: "unknown", validation_freshness: "unknown",
+      assessment_state: "pending", pending_reason: "missing_provenance", protected: true });
+    expect(page.progress).toMatchObject({ pending: 1, assessed: 0, validated: 0, unknown: 1, missing_provenance: 1 });
+    const retry = await assessCoveragePage({ workspace_id, assess: async () => { throw new Error("Protected human decision must not reach provider"); } });
+    expect(retry.attempts).toEqual([]);
+    expect(await listCoverageJoins(workspace_id)).toEqual(saved);
+  });
+
+  it("requires factual quote provenance even when a real workspace source ID is attached", async () => {
+    const workspace_id = await workspace();
+    const [span] = await coverageProvenance(workspace_id, "A real source which was not attached as claim provenance.");
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence", source_file_id: span.source_file_id });
+    const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Inventory" });
+    const identity = { workspace_id, gap_id: gap.id, tactic_id: tactic.id };
+    await expect(upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall: "full",
+      rationale: "Source ID alone is insufficient", actor: { name: "Reviewer", function: "medical_affairs" }, evidence: [] }))
+      .rejects.toMatchObject({ code: "missing_provenance" });
+    expect((await listCoveragePage({ workspace_id })).progress).toMatchObject({ pending: 1, missing_provenance: 1, validated: 0 });
+  });
+
+  it("retains unsupported model assessments as missing-provenance pending work across retry and queue", async () => {
+    const workspace_id = await workspace();
+    await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
+    for (const statement of ["Full inventory", "Partial inventory", "Limited inventory"])
+      await insertClaim({ workspace_id, claim_type: "tactic", statement });
+    const assess = async (pair: { tactic: { statement: string } }) => ({ overall: pair.tactic.statement.split(" ")[0].toLowerCase(),
+      rationale: "Scripted unsupported overlap", evidence: [], run_id: "fixture-unsupported" });
+    const first = await assessCoveragePage({ workspace_id, page_size: 2, assess });
+    expect(first.progress).toMatchObject({ eligible_total: 3, assessed: 0, validated: 0, pending: 3, missing_provenance: 3, failed: 2 });
+    expect(first.pairs.every((p) => !p.validated && p.overall === "pending" && p.pending_reason === "missing_provenance")).toBe(true);
+    expect(first.attempts.every((a) => /source provenance/i.test(a.error ?? ""))).toBe(true);
+    const retry = await assessCoveragePage({ workspace_id, assess });
+    expect(retry.attempts).toHaveLength(3);
+    expect(retry.progress).toMatchObject({ assessed: 0, pending: 3, missing_provenance: 3, failed: 3 });
+    const queue = buildCoverageQueue(retry.pairs);
+    expect(queue).toMatchObject({ assessed_count: 0, decided_count: 0, missing_provenance_count: 3 });
+    expect(queue.assessment_pending).toHaveLength(3);
+  });
+
+  it.each(["full", "partial", "limited"])("keeps source-less %s confirmations pending with an explicit provenance diagnostic", async (overall) => {
+    const workspace_id = await workspace();
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
+    const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Inventory" });
+    const identity = { workspace_id, gap_id: gap.id, tactic_id: tactic.id };
+    await expect(upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall,
+      rationale: "Reviewer overlap", actor: { name: "Reviewer", function: "medical_affairs" }, evidence: [] }))
+      .rejects.toMatchObject({ code: "missing_provenance" });
+    expect(await listCoverageJoins(workspace_id)).toEqual([]);
+    const page = await listCoveragePage({ workspace_id });
+    expect(page.pairs[0]).toMatchObject({ overall: "pending", validated: false, assessment_state: "pending",
+      pending_reason: "missing_provenance" });
+    expect(page.progress).toMatchObject({ pending: 1, assessed: 0, validated: 0, missing_provenance: 1,
+      assessment_complete: false, validation_complete: false });
+  });
+
   it("includes every unlinked tactic beyond the first hundred pairs", async () => {
     const workspace_id = await workspace();
     await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
@@ -85,17 +180,19 @@ describe("exhaustive coverage assessment", () => {
     await upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall: "not_relevant",
       rationale: "Wrong indication", actor: { name: "Reviewer", function: "medical_affairs" } });
     const page = await listCoveragePage({ workspace_id, page_size: 3 });
-    expect(page.progress).toMatchObject({ eligible_total: 8, pending: 7, assessed: 1, validated: 1, excluded_claims: 5 });
+    expect(page.progress).toMatchObject({ eligible_total: 8, pending: 7, assessed: 1, validated: 1, missing_provenance: 7, excluded_claims: 5 });
     const all = await listCoveragePairs(workspace_id);
     expect(all).toHaveLength(8);
     expect(all.filter((p) => p.overall === "not_relevant")).toHaveLength(1);
+    expect(all.find((p) => p.overall === "not_relevant")!.pending_reason).toBeNull();
     expect((await getClaim(workspace_id, tactics[0].id))!.metadata).not.toHaveProperty("gap_ids");
     expect(page.progress.exclusions.map((c) => c.reason).sort()).toEqual(["excluded", "ideated", "merged", "rejected", "retired"]);
   });
 
   it("round trips Limited, protects human decisions and rejects stale writes before mutation", async () => {
     const workspace_id = await workspace();
-    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
+    const provenance = await coverageProvenance(workspace_id, "Need evidence; inventory provides small overlap.");
+    const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence", metadata: { provenance } });
     const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Inventory" });
     const pair = { workspace_id, gap_id: gap.id, tactic_id: tactic.id };
     const expected = await coveragePairRevisions(pair);
@@ -144,12 +241,14 @@ describe("exhaustive coverage assessment", () => {
     await saveCoverageAssessment({ ...pair, ...expected, overall: "full", rationale: "Model rerun", run_id: "rerun", evidence: [] });
     expect((await listCoveragePage({ workspace_id })).pairs[0]).toMatchObject({ overall: "pending", evidence: [],
       assessment_state: "rejected", validated: false, protected: true });
+    expect((await listCoveragePage({ workspace_id })).progress).toMatchObject({ pending: 1, assessed: 0, validated: 0, rejected: 1, missing_provenance: 0 });
     expect(accuracyTransactionActive()).toBe(false);
   });
 
   it("keeps omitted and failed assessments visible and resumes only pending or failed work", async () => {
     const workspace_id = await workspace();
-    await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence" });
+    const provenance = await coverageProvenance(workspace_id, "Need evidence; inventory provides small overlap.");
+    await insertClaim({ workspace_id, claim_type: "gap", statement: "Need evidence", metadata: { provenance } });
     for (let n = 0; n < 4; n++) await insertClaim({ workspace_id, claim_type: "tactic", statement: `Inventory ${n}` });
     const calls: string[] = [];
     const first = await assessCoveragePage({ workspace_id, assess: async (pair) => {

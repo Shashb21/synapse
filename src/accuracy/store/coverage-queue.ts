@@ -18,6 +18,7 @@ export type CoverageQueueSnapshot = {
   failed_count: number;
   stale_count: number;
   rejected_count: number;
+  missing_provenance_count: number;
 };
 
 /** Split pairs into undecided-first queue (one decision at a time). */
@@ -36,6 +37,7 @@ export function buildCoverageQueue(pairs: CoverageQueuePair[]): CoverageQueueSna
     failed_count: pairs.filter((p) => p.assessment_state === "failed").length,
     stale_count: pairs.filter((p) => p.freshness === "stale").length,
     rejected_count: pairs.filter((p) => p.assessment_state === "rejected").length,
+    missing_provenance_count: pairs.filter((p) => p.pending_reason === "missing_provenance").length,
   };
 }
 

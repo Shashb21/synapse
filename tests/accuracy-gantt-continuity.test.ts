@@ -11,6 +11,7 @@ import { upsertCoverageDecision, coveragePairRevisions } from "@/accuracy/store/
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import { registerAccuracyStack } from "@/accuracy";
+import { coverageProvenance } from "./support/coverage-provenance";
 
 function spanDays(start: string, end: string): number {
   return (
@@ -316,10 +317,12 @@ describe("workspace gantt reads coverage joins", () => {
         tactic_type: "publication",
       },
     });
+    const provenance = await coverageProvenance(workspace_id, "Need RWE in 1L; registry collects RWE and manuscript disseminates it.");
     const gap = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Need RWE in 1L",
+      metadata: { provenance },
       validated: true,
       status: "validated",
     });

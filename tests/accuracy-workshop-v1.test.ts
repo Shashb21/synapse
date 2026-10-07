@@ -12,12 +12,16 @@ import { assertWorkshopAction } from "@/accuracy/modules/workshop/actions";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { listCoverageJoins, upsertCoverageDecision, coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
-import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { sql } from "drizzle-orm";
+import { coverageProvenance } from "./support/coverage-provenance";
+import { insertCoverageJoin, listCoveragePage } from "@/accuracy/store/coverage-store";
 import {
   applyWorkshopAction,
   createWorkshopSnapshot,
   getWorkshopSnapshot,
   latestWorkshopSnapshot,
+  workshopReadiness,
 } from "@/accuracy/store/workshop-store";
 
 async function freshWorkspace(label: string) {
@@ -31,15 +35,17 @@ async function freshWorkspace(label: string) {
   return { org_id, workspace_id };
 }
 
-async function seedReadyWorkspace(label: string) {
+async function seedReadyWorkspace(label: string, source_backed = true) {
   const ctx = await freshWorkspace(label);
+  const provenance = source_backed ? await coverageProvenance(ctx.workspace_id,
+    "Need OS by biomarker subgroup; prospective follow-up collects biomarker OS evidence.") : [];
   const gap = await insertClaim({
     workspace_id: ctx.workspace_id,
     claim_type: "gap",
     statement: "Need OS by biomarker subgroup",
     validated: true,
     status: "validated",
-    metadata: { source_badge: "interview" },
+    metadata: { source_badge: "interview", provenance },
   });
   const tactic = await insertClaim({
     workspace_id: ctx.workspace_id,
@@ -169,10 +175,12 @@ describe("workshop snapshot store", () => {
   it("refuses to freeze validated partial residuals", async () => {
     registerAccuracyStack();
     const { workspace_id } = await freshWorkspace("ws-partial");
+    const provenance = await coverageProvenance(workspace_id, "Partially covered need; inventory covers only the safety slice.");
     const gap = await insertClaim({
       workspace_id,
       claim_type: "gap",
       statement: "Partially covered need",
+      metadata: { provenance },
       validated: true,
       status: "validated",
     });
@@ -219,6 +227,37 @@ describe("workshop snapshot store", () => {
 });
 
 describe("workshop rationale-gated writes", () => {
+  it("does not capture an old source-less validated Full as addressed coverage", async () => {
+    const ready = await seedReadyWorkspace("act-old-missing", false);
+    const identity = { workspace_id: ready.workspace_id, gap_id: ready.gap.id, tactic_id: ready.tactic.id };
+    const row = await insertCoverageJoin({ ...identity, overall: "full", validated: true, rationale: "Old unsupported decision" });
+    const revisions = await coveragePairRevisions(identity);
+    await accuracyDb().execute(sql`UPDATE accuracy_coverage_joins SET dimensions = ${JSON.stringify({
+      gap_revision: revisions.expected_gap_revision, tactic_revision: revisions.expected_tactic_revision,
+      actor: { name: "Previous reviewer", function: "medical_affairs" },
+    })}::jsonb WHERE id = ${row.id}`);
+    const saved = await listCoverageJoins(ready.workspace_id);
+    const { inventory } = await workshopReadiness(ready.workspace_id);
+    expect(inventory.gaps[0].coverage_status).toBe("open");
+    expect(inventory.joins[0]).toMatchObject({ overall: "pending", validated: false });
+    expect(await listCoverageJoins(ready.workspace_id)).toEqual(saved);
+  });
+
+  it.each(["mark_addressed", "remap"] as const)("refuses source-less %s without changing the snapshot or coverage", async (kind) => {
+    const ready = await seedReadyWorkspace(`act-missing-${kind}`, false);
+    const snapshot = await createWorkshopSnapshot({ workspace_id: ready.workspace_id,
+      actor: { name: "Ada", function: "medical_affairs" } });
+    await expect(applyWorkshopAction({ workspace_id: ready.workspace_id, snapshot_id: snapshot.id,
+      actor: { name: "Ada", function: "medical_affairs" }, action: { kind, gap_id: ready.gap.id,
+        tactic_id: ready.tactic.id, overall: "partial", rationale: "Reviewer overlap without a source" } }))
+      .rejects.toMatchObject({ code: "missing_provenance" });
+    expect(await getWorkshopSnapshot(ready.workspace_id, snapshot.id)).toEqual(snapshot);
+    expect(await listCoverageJoins(ready.workspace_id)).toEqual([]);
+    const page = await listCoveragePage({ workspace_id: ready.workspace_id });
+    expect(page.pairs[0]).toMatchObject({ overall: "pending", validated: false, pending_reason: "missing_provenance" });
+    expect(page.progress).toMatchObject({ assessed: 0, validated: 0, pending: 1, missing_provenance: 1 });
+  });
+
   it("does not write coverage when mark addressed has no rationale", async () => {
     registerAccuracyStack();
     const ready = await seedReadyWorkspace("act-norat");

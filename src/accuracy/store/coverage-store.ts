@@ -19,17 +19,17 @@ export type CoveragePair = {
   gap_revision?: string; tactic_revision?: string;
   freshness?: CoverageFreshness; validation_freshness?: CoverageFreshness;
   assessment_state?: "pending" | "successful" | "failed" | "rejected";
-  failure_reason?: string | null; protected?: boolean;
+  failure_reason?: string | null; pending_reason?: "missing_provenance" | null; protected?: boolean;
   evidence?: string[];
 };
 export type CoverageProgress = {
   eligible_total: number; pending: number; assessed: number; validated: number;
-  stale: number; unknown: number; failed: number; rejected: number;
+  stale: number; unknown: number; failed: number; rejected: number; missing_provenance: number;
   excluded_claims: number; exclusions: { claim_id: string; reason: string }[];
   assessment_complete: boolean; validation_complete: boolean;
 };
 export class CoverageError extends Error {
-  constructor(readonly code: "stale_snapshot" | "invalid_cursor" | "stale_revision" | "invalid_evidence" | "protected_pair", message: string) {
+  constructor(readonly code: "stale_snapshot" | "invalid_cursor" | "stale_revision" | "invalid_evidence" | "missing_provenance" | "protected_pair", message: string) {
     super(message); this.name = "CoverageError";
   }
 }
@@ -54,19 +54,71 @@ export function coverageExclusionReason(claim: AccuracyClaimRow): string | null 
 function dimensions(join?: CoverageJoinRow): Record<string, unknown> {
   return (join?.dimensions ?? {}) as Record<string, unknown>;
 }
+function coverageSpans(claim: AccuracyClaimRow) {
+  const parsed = provenanceSpanSchema.array().safeParse(claimMetadata(claim).provenance ?? []);
+  if (!parsed.success) throw new CoverageError("invalid_evidence", "Pair provenance has an invalid evidence span.");
+  return [...parsed.data, ...structuredProvenance(readStructuredFields(claim))];
+}
+function needsSupportingProvenance(overall: CoverageOverall) {
+  return overall === "full" || overall === "partial" || overall === "limited";
+}
+type ProvenanceState = { supported: boolean; error?: string };
+/** Batch the same source/quote checks for the complete inventory; never infer support from a source ID alone. */
+async function coverageProvenanceStates(claims: AccuracyClaimRow[]): Promise<Map<string, ProvenanceState>> {
+  const spansByClaim = new Map<string, ReturnType<typeof coverageSpans>>();
+  const states = new Map<string, ProvenanceState>();
+  if (!claims.length) return states;
+  for (const claim of claims) {
+    try { spansByClaim.set(claim.id, coverageSpans(claim)); }
+    catch { states.set(claim.id, { supported: false, error: "Pair provenance has an invalid evidence span." }); }
+  }
+  const spans = [...spansByClaim.values()].flat();
+  const sourceIds = [...new Set([...claims.map((c) => c.source_file_id), ...spans.map((s) => s.source_file_id)]
+    .filter((id): id is string => typeof id === "string"))];
+  const workspace_id = claims[0].workspace_id;
+  const sources = sourceIds.length ? await accuracyDb().select({ id: t.accuracySourceFiles.id }).from(t.accuracySourceFiles)
+    .where(eq(t.accuracySourceFiles.workspace_id, workspace_id)) : [];
+  const sourceSet = new Set(sources.map((s) => s.id));
+  const blocks = new Map((await readParseBlocksByIds(workspace_id, [...new Set(spans.map((s) => s.block_id))])).map((b) => [b.id, b]));
+  for (const claim of claims) {
+    if (states.has(claim.id)) continue;
+    const ownSpans = spansByClaim.get(claim.id)!;
+    const invalidSource = [claim.source_file_id, ...ownSpans.map((s) => s.source_file_id)]
+      .some((id) => typeof id === "string" && !sourceSet.has(id));
+    const invalidQuote = ownSpans.some((span) => {
+      const block = blocks.get(span.block_id);
+      return !block || !validateProvenance({ block: block as ParseBlock, span }).ok;
+    });
+    states.set(claim.id, { supported: ownSpans.length > 0 && !invalidSource && !invalidQuote,
+      ...(invalidSource ? { error: "Pair source provenance is outside this workspace or missing." }
+        : invalidQuote ? { error: "Pair provenance is missing or does not match the original workspace evidence." } : {}) });
+  }
+  return states;
+}
+function pairHasProvenance(gap: ProvenanceState, tactic: ProvenanceState) {
+  return !gap.error && !tactic.error && (gap.supported || tactic.supported);
+}
 /** Freshness is factual, never timestamp-based. Legacy validation stays unknown. */
 export function coverageFreshness(join: CoverageJoinRow, gap: AccuracyClaimRow, tactic: AccuracyClaimRow): CoverageFreshness {
   const d = dimensions(join);
   if (join.workspace_id !== gap.workspace_id || join.workspace_id !== tactic.workspace_id || join.gap_id !== gap.id || join.tactic_id !== tactic.id) return "stale";
   if (d.validation_stale === true) return "stale";
   if (!d.gap_revision || !d.tactic_revision) return "unknown";
-  return d.gap_revision === claimFactualRevision(gap) && d.tactic_revision === claimFactualRevision(tactic) ? "current" : "stale";
+  if (d.gap_revision !== claimFactualRevision(gap) || d.tactic_revision !== claimFactualRevision(tactic)) return "stale";
+  if (needsSupportingProvenance(canonicalCoverageOverall(join.overall))) {
+    try { if (!coverageSpans(gap).length && !coverageSpans(tactic).length) return "unknown"; }
+    catch { return "unknown"; }
+  }
+  return "current";
 }
-function pairFrom(gap: AccuracyClaimRow, tactic: AccuracyClaimRow, join?: CoverageJoinRow): CoveragePair {
+function pairFrom(gap: AccuracyClaimRow, tactic: AccuracyClaimRow, join?: CoverageJoinRow, supported?: boolean): CoveragePair {
   const d = dimensions(join);
-  const freshness = join ? coverageFreshness(join, gap, tactic) : "unassessed";
+  let freshness = join ? coverageFreshness(join, gap, tactic) : "unassessed";
   const rejected = d.human_rejected === true;
-  const overall = rejected ? "pending" : canonicalCoverageOverall(join?.overall);
+  const requestedOverall = canonicalCoverageOverall(join?.overall);
+  const missing = supported === false && !rejected && requestedOverall !== "not_relevant";
+  const overall = rejected || missing ? "pending" : requestedOverall;
+  if (missing && needsSupportingProvenance(requestedOverall) && freshness === "current") freshness = "unknown";
   const failed = d.assessment_state === "failed" && freshness === "current";
   return { id: join?.id ?? `pair_${gap.id}_${tactic.id}`, gap, tactic, overall,
     rationale: join?.rationale ?? null, validated: Boolean(join?.validated && freshness === "current" && overall !== "pending" && !rejected),
@@ -74,6 +126,7 @@ function pairFrom(gap: AccuracyClaimRow, tactic: AccuracyClaimRow, join?: Covera
     validation_freshness: join?.validated || d.prior_validated === true ? freshness : "unassessed",
     assessment_state: rejected ? "rejected" : failed ? "failed" : overall !== "pending" && freshness === "current" ? "successful" : "pending",
     failure_reason: typeof d.failure_reason === "string" ? d.failure_reason : null,
+    pending_reason: missing ? "missing_provenance" : null,
     protected: Boolean(rejected || d.actor || join?.validated || d.prior_validated),
     evidence: !rejected && Array.isArray(d.evidence) ? d.evidence.filter((id): id is string => typeof id === "string") : [] };
 }
@@ -141,14 +194,22 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
       offset = cursor.offset;
     }
     const joins = await listCoverageJoins(args.workspace_id);
+    const provenance = await coverageProvenanceStates(eligible);
+    const hasProvenance = (gap: AccuracyClaimRow, tactic: AccuracyClaimRow) => pairHasProvenance(provenance.get(gap.id)!, provenance.get(tactic.id)!);
     const byKey = new Map(joins.map((j) => [`${j.gap_id}::${j.tactic_id}`, j]));
     const gapById = new Map(gaps.map((g) => [g.id, g]));
     const tacticById = new Map(tactics.map((g) => [g.id, g]));
     let assessed = 0, validated = 0, stale = 0, unknown = 0, failed = 0, rejected = 0;
+    const valid = (claim: AccuracyClaimRow) => !provenance.get(claim.id)!.error;
+    const empty = (claim: AccuracyClaimRow) => valid(claim) && !provenance.get(claim.id)!.supported;
+    let missing_provenance = total - (gaps.filter(valid).length * tactics.filter(valid).length
+      - gaps.filter(empty).length * tactics.filter(empty).length);
     for (const j of joins) {
       const g = gapById.get(j.gap_id), tac = tacticById.get(j.tactic_id);
       if (!g || !tac) continue;
-      const p = pairFrom(g, tac, j);
+      const supported = hasProvenance(g, tac);
+      const p = pairFrom(g, tac, j, supported);
+      if (!supported && (dimensions(j).human_rejected === true || canonicalCoverageOverall(j.overall) === "not_relevant")) missing_provenance--;
       if (p.assessment_state === "successful") assessed++;
       if (p.validated) validated++;
       if (p.freshness === "stale") stale++;
@@ -160,11 +221,11 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
     const end = Math.min(total, offset + page_size);
     for (let n = offset; n < end; n++) {
       const gap = gaps[Math.floor(n / tactics.length)], tactic = tactics[n % tactics.length];
-      pairs.push(pairFrom(gap, tactic, byKey.get(`${gap.id}::${tactic.id}`)));
+      pairs.push(pairFrom(gap, tactic, byKey.get(`${gap.id}::${tactic.id}`), hasProvenance(gap, tactic)));
     }
     return { pairs, snapshot, next_cursor: end < total ? Buffer.from(JSON.stringify({ v: 1,
       workspace_id: args.workspace_id, snapshot, offset: end })).toString("base64url") : null,
-      progress: { eligible_total: total, pending: total - assessed, assessed, validated, stale, unknown, failed, rejected,
+      progress: { eligible_total: total, pending: total - assessed, assessed, validated, stale, unknown, failed, rejected, missing_provenance,
         excluded_claims: exclusions.length, exclusions, assessment_complete: assessed === total, validation_complete: validated === total } };
   });
 }
@@ -215,29 +276,15 @@ async function checkedClaims(args: CoverageWrite) {
   return claims;
 }
 /** Evidence can only refer to original, still-valid provenance of this pair in this workspace. */
-export async function requireCoverageEvidence(args: PairIdentity & { evidence?: string[] }, claims?: { gap: AccuracyClaimRow; tactic: AccuracyClaimRow }): Promise<void> {
+export async function requireCoverageEvidence(args: PairIdentity & { evidence?: string[]; overall?: string }, claims?: { gap: AccuracyClaimRow; tactic: AccuracyClaimRow }): Promise<void> {
   const { gap, tactic } = claims ?? await requireCoveragePairClaims(args);
-  const spans = [gap, tactic].flatMap((c) => {
-    const provenance = claimMetadata(c).provenance;
-    const parsed = provenanceSpanSchema.array().safeParse(provenance ?? []);
-    if (!parsed.success) throw new CoverageError("invalid_evidence", "Pair provenance has an invalid evidence span.");
-    return [...parsed.data, ...structuredProvenance(readStructuredFields(c))];
-  });
-  const sourceIds = new Set([gap.source_file_id, tactic.source_file_id, ...spans.map((span) => span.source_file_id)]
-    .filter((id): id is string => typeof id === "string"));
-  if (sourceIds.size) {
-    const sources = await accuracyDb().select({ id: t.accuracySourceFiles.id }).from(t.accuracySourceFiles)
-      .where(and(eq(t.accuracySourceFiles.workspace_id, args.workspace_id), inArray(t.accuracySourceFiles.id, [...sourceIds])));
-    if (sources.length !== sourceIds.size) throw new CoverageError("invalid_evidence", "Pair source provenance is outside this workspace or missing.");
-  }
+  const states = await coverageProvenanceStates([gap, tactic]);
+  for (const state of states.values()) if (state.error) throw new CoverageError("invalid_evidence", state.error);
+  const spans = [gap, tactic].flatMap(coverageSpans);
   const allowed = new Set(spans.map((span) => span.block_id));
   if ((args.evidence ?? []).some((id) => !allowed.has(id))) throw new CoverageError("invalid_evidence", "Evidence is outside this pair's permitted provenance.");
-  const blocks = await readParseBlocksByIds(args.workspace_id, [...allowed]);
-  for (const span of spans) {
-    const block = blocks.find((b) => b.id === span.block_id);
-    if (!block || !validateProvenance({ block: block as ParseBlock, span }).ok)
-      throw new CoverageError("invalid_evidence", "Pair provenance is missing or does not match the original workspace evidence.");
-  }
+  if (needsSupportingProvenance(canonicalCoverageOverall(args.overall)) && !pairHasProvenance(states.get(gap.id)!, states.get(tactic.id)!))
+    throw new CoverageError("missing_provenance", "Supporting coverage requires valid factual source provenance; this pair remains pending.");
 }
 function historyOf(existing?: CoverageJoinRow): unknown[] {
   if (!existing) return [];
@@ -314,9 +361,21 @@ export async function assessCoveragePage(args: CoveragePageInput & {
   return { ...(await listCoveragePage(args)), attempts };
 }
 export async function rejectCoveragePair(args: Omit<CoverageWrite, "overall">): Promise<void> { await writeCoverage({ ...args, overall: "pending" }, "rejection"); }
-export async function listCoverageJoins(workspace_id: string): Promise<CoverageJoinRow[]> {
+/** Default retains original history flags. Consumers can explicitly request current, provenance-checked decisions. */
+export async function listCoverageJoins(workspace_id: string, options?: { effective?: boolean }): Promise<CoverageJoinRow[]> {
   await ensureAccuracySchema();
-  return accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
+  const joins = await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
+  if (!options?.effective || !joins.length) return joins;
+  const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id));
+  const eligible = claims.filter((claim) => !coverageExclusionReason(claim));
+  const byId = new Map(eligible.map((claim) => [claim.id, claim]));
+  const provenance = await coverageProvenanceStates(eligible);
+  return joins.map((join) => {
+    const gap = byId.get(join.gap_id), tactic = byId.get(join.tactic_id);
+    if (gap?.claim_type !== "gap" || tactic?.claim_type !== "tactic") return { ...join, overall: "pending", validated: false };
+    const pair = pairFrom(gap, tactic, join, pairHasProvenance(provenance.get(gap.id)!, provenance.get(tactic.id)!));
+    return { ...join, overall: pair.overall ?? "pending", validated: pair.validated };
+  });
 }
 /** Trusted legacy/import boundary. Missing revision/actor remains unknown; it cannot create current validation. */
 export async function insertCoverageJoin(args: PairIdentity & { overall: string; validated?: boolean; rationale?: string | null }): Promise<CoverageJoinRow> {

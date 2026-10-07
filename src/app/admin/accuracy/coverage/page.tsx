@@ -87,7 +87,7 @@ export default async function AccuracyCoveragePage({
             Workspace · {active ? workspaceLabel(active) : workspaceId} · {page?.progress.eligible_total ?? 0} eligible pair(s) ·{" "}
             {page?.progress.assessed ?? 0} assessed · {page?.progress.validated ?? 0} validated · {page?.progress.pending ?? 0} pending ·{" "}
             {page?.progress.stale ?? 0} stale · {page?.progress.unknown ?? 0} unknown freshness · {page?.progress.failed ?? 0} failed ·{" "}
-            {page?.progress.rejected ?? 0} rejected · {page?.progress.excluded_claims ?? 0} excluded claims
+            {page?.progress.rejected ?? 0} rejected · {page?.progress.missing_provenance ?? 0} missing provenance · {page?.progress.excluded_claims ?? 0} excluded claims
           </p>
           {ready ? (
             <WorkshopSaveCta
@@ -121,7 +121,7 @@ export default async function AccuracyCoveragePage({
                 rationale: pair.rationale,
                 validated: pair.validated, gap_revision: pair.gap_revision, tactic_revision: pair.tactic_revision,
                 freshness: pair.freshness, validation_freshness: pair.validation_freshness,
-                assessment_state: pair.assessment_state, failure_reason: pair.failure_reason,
+                assessment_state: pair.assessment_state, failure_reason: pair.failure_reason, pending_reason: pair.pending_reason,
                 evidence: pair.evidence, protected: pair.protected,
               }))}
             />

@@ -23,7 +23,8 @@ import { ExtractKeyGateBanner, SourceExtractActions } from "@/components/accurac
 import { ManualSourceForm } from "@/components/platform/manual-source-form";
 import { ParseBlockPreview } from "@/components/accuracy/parse-block-preview";
 import { LedgerNewClaimForm } from "@/components/accuracy/ledger-new-claim-form";
-import { claimMetadata, getClaim } from "@/accuracy/store/claim-store";
+import { claimMetadata, getClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
+import { coverageProvenance } from "./support/coverage-provenance";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { listCompletenessVerdicts } from "@/accuracy/store/completeness-verdict-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
@@ -129,6 +130,9 @@ describe("the accuracy app with AI off", () => {
     );
     expect(tacticRes.status).toBe(200);
     const tacticId = (tacticRes.json.claim as { id: string }).id;
+    const provenance = await coverageProvenance(workspace_id,
+      "No prospective pneumonitis data in community practice; community oncology registry collects part of that evidence.");
+    await persistClaimPatch({ workspace_id, claim_id: gapId, metadata: { provenance } });
 
     const validated = await call(
       await validatePost(

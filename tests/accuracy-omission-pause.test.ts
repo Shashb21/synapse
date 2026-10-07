@@ -32,6 +32,7 @@ import { POST as workshopTags } from "@/app/api/accuracy/workshop/tags/route";
 import { POST as workshopActions } from "@/app/api/accuracy/workshop/actions/route";
 import { addFacilitatorTag, createWorkshopSnapshot, getWorkshopSnapshot, latestWorkshopSnapshot } from "@/accuracy/store/workshop-store";
 import { POST as saveFinal } from "@/app/api/accuracy/gantt/save-final/route";
+import { coverageProvenance } from "./support/coverage-provenance";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
@@ -62,8 +63,9 @@ async function fixture(importance: "important" | "advisory" | null = "important"
     await accuracyDb().insert(t.accuracyExtractionBatches).values({ id: newId("batch"), workspace_id, source_file_id,
       requested_kinds: ["need_extract"], run_ids: [run_id], created_claim_ids: [], drafts_persisted: true, created_at: nowIso() });
   }
+  const provenance = await coverageProvenance(workspace_id, "Need comparator evidence; comparator study collects this evidence.");
   const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need comparator evidence", validated: true,
-    status: "open", metadata: { priority: "high" } });
+    status: "open", metadata: { priority: "high", provenance } });
   const tactic = await insertClaim({ workspace_id, claim_type: "tactic", statement: "Comparator study", validated: true,
     status: "validated", metadata: { start: "2026-01-01", end: "2026-06-01" } });
   return { org_id, workspace_id, source_file_id, run_id, gap, tactic };
