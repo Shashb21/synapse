@@ -1,0 +1,19 @@
+# KAN-39 Vitest suite diagnosis (read-only)
+
+Worktree: `/private/tmp/synapse-kan39-worktree`, commit `2bf2b75`. Original full-suite evidence: `/private/tmp/kan39-full-vitest.log` (`24 failed`, `984 passed`, four failed files, elapsed `5483.31s`). No source or test code changed during this diagnosis.
+
+## Established facts
+
+- The first failing file in the original log is `tests/accuracy-assembly-approval-integration.test.ts`. The first two failures are the direct priority and metadata publication race cases. They exceed the configured 20-second timeout by a large margin (`997271ms`, `727748ms`). The first race's `afterEach` also fails while deleting its workspace: Postgres `23503`, `accuracy_item_versions_source_file_id_fkey`, because a source file is still referenced by an item version. The next failures in that file have `CONNECTION_ENDED` at `127.0.0.1:5432`. The log proves this sequence; it does **not** prove what first held the lock or why the connection ended.
+- The race test creates an independent `postgres(..., { max: 8 })` client and temporarily replaces `globalThis.drizzle`. It holds a row lock, starts a mutation, waits for a blocking PID, starts publication, then waits for that transaction behind the writer. Its `finally` releases the holder and awaits all three promises. `afterEach` calls `deleteWorkspace` for recorded workspaces. These are relevant lifecycle points if the race stalls; no specific stuck await was captured in the original run.
+- A previous investigator ran the four `serializes direct` race cases together in isolation; all four passed in 3.24 seconds. A `pg_stat_activity` snapshot after the original failure was empty. Neither observation rules out transient blocking during the failed run.
+- The three other original timeout cases pass individually against the local test DB: revision `675ms` (log `/private/tmp/kan39-revision-isolate.log`), omission workshop `846ms` (`/private/tmp/kan39-omission-isolate.log`), and gold seed `2150ms` (`/private/tmp/kan39-seed-isolate.log`). The revision and omission tests had a configured 20-second limit; the seed test had an explicit 60-second limit.
+- All three affected files also pass together: `62 passed`, `3 files passed`, `28.68s` total; `/private/tmp/kan39-three-files.log`. This rules out a consistent failure caused merely by their co-presence or order in that reduced group.
+- `vitest.config.ts` sets `fileParallelism: false`, `testTimeout: 20_000`, and `DATABASE_URL` to `synapse_test` by default. The shared Postgres client in `src/lib/iegp/db.ts` has `max: 1` under Vitest. The race test's independent pool is therefore intentional to permit competing DB requests.
+- A first isolated revision attempt under the ordinary sandbox failed at DB connection with `EPERM 127.0.0.1:5432`; the successful reproduction checks used escalated local-DB access. The `EPERM` result is an environment permission failure, not a regression in revision logic.
+
+## Current conclusion and limit
+
+The original full-suite failure has a **confirmed timeout/cleanup/connection cascade** in the approval integration file. The direct race tests and the three later timeouts are **not consistently reproducible** in targeted runs. The later three timeouts are correlated with the original long-running suite but their individual root causes remain unknown; the available log has no active query, blocking PID, or stack at the moment each stalls. In particular, do not ascribe the three later timeouts to KAN-39 revision behavior from this evidence alone.
+
+A decisive follow-up would rerun the first approval race with bounded live `pg_stat_activity` / `pg_blocking_pids` capture during the stall and record the exact await and transaction holding each lock. A full-suite rerun without that instrumentation would cost roughly 91 minutes at the observed duration and may yield the same ambiguous timeout sequence.

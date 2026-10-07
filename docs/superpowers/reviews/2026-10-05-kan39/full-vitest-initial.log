@@ -1,0 +1,951 @@
+
+ RUN  v3.2.4 /private/tmp/synapse-kan39-worktree
+
+ ❯ tests/accuracy-assembly-approval-integration.test.ts (49 tests | 21 failed) 1741806ms
+   ✓ KAN-38 assembly approval enforcement > blocks managed live readers until approval and then serves exact approved payloads  1128ms
+   ✓ KAN-38 assembly approval enforcement > pauses immediately after rejection or newer applied publication without falling back  539ms
+   ✓ KAN-38 assembly approval enforcement > rejects explicit ID bypasses while allowing isolated experiments  674ms
+   ✓ KAN-38 assembly approval enforcement > rejects supplied production payloads that differ from the approved inventory  606ms
+   ✓ KAN-38 assembly approval enforcement > rejects an unselected Gantt tactic before opening a run  320ms
+   ✓ KAN-38 assembly approval enforcement > rejects forged ideation statement before opening a run 247ms
+   ✓ KAN-38 assembly approval enforcement > rejects forged ideation eligibility before opening a run  332ms
+   ✓ KAN-38 assembly approval enforcement > rejects forged ideation names before opening a run  306ms
+   ✓ KAN-38 assembly approval enforcement > rejects empty status coverages without changing persisted metadata  851ms
+   ✓ KAN-38 assembly approval enforcement > rejects empty status tactics without changing persisted metadata  793ms
+   ✓ KAN-38 assembly approval enforcement > rejects partial status coverages for full-plus-partial approved evidence  835ms
+   ✓ KAN-38 assembly approval enforcement > rejects partial status tactics for full-plus-partial approved evidence  787ms
+   ✓ KAN-38 assembly approval enforcement > selects gaps while retaining complete evidence and respecting persist false  1718ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against empty coverage evidence  481ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against empty tactics evidence  435ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against partial coverage evidence  419ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against partial tactics evidence  426ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt coverage before opening a run 292ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt dependencies before opening a run 288ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt activity dependencies before opening a run 294ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt gap mapping before opening a run  442ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt parent gap before opening a run  460ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt validation before opening a run  401ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt tactic type before opening a run  301ms
+   ✓ KAN-38 assembly approval enforcement > preserves approved Gantt relationships with scheduling overrides and ideation workflow options  765ms
+   ✓ KAN-38 assembly approval enforcement > persists only computed status fields for an approved assembly  1006ms
+   ✓ KAN-38 assembly approval enforcement > blocks direct public and store claim insertion for managed heads before approval  334ms
+   ✓ KAN-38 assembly approval enforcement > rejects unsupported metadata and status mutations on approved members  452ms
+   × KAN-38 assembly approval enforcement > serializes direct priority route gate and write against publication 997271ms
+     → Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+     → Failed query: delete from "accuracy_source_files" where "accuracy_source_files"."workspace_id" = $1 returning "id"
+params: ws_20261004T081324_0646_xoyd
+   × KAN-38 assembly approval enforcement > serializes direct metadata gate and write against publication 727748ms
+     → Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+     → Failed query: CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    version integer NOT NULL,
+    scene text NOT NULL,
+    payload jsonb NOT NULL,
+    note text,
+    saved_by text NOT NULL,
+    saved_function text NOT NULL,
+    saved_at text NOT NULL
+  )
+params:
+   × KAN-38 assembly approval enforcement > serializes direct patch gate and write against publication 354ms
+     → Failed query: select "id", "org_id", "name", "slug", "planning_context", "created_at", "archived_at" from "accuracy_workspaces" where "accuracy_workspaces"."id" = $1 limit $2
+params: ws_20261004T084209_0687_7f46,1
+   × KAN-38 assembly approval enforcement > serializes direct validation gate and write against publication 495ms
+     → Failed query: select "id", "org_id", "name", "slug", "planning_context", "created_at", "archived_at" from "accuracy_workspaces" where "accuracy_workspaces"."id" = $1 limit $2
+params: ws_20261004T084210_0709_m018,1
+   × KAN-38 assembly approval enforcement > lists only approved coverage or mapping pairs for managed workspaces 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0729_3i1v,kan38-org_20261004T084210_0728_bdlf,2026-10-04T08:42:10.735Z
+   × KAN-38 assembly approval enforcement > rolls back module writes when approved heads change during execution 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0731_mmqd,kan38-org_20261004T084210_0730_mdrj,2026-10-04T08:42:10.735Z
+   × KAN-38 assembly approval enforcement > does not save agentic success output when approved heads change during provider work 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0733_gf33,kan38-org_20261004T084210_0732_2os1,2026-10-04T08:42:10.735Z
+   × KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes pending 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0735_xiag,kan38-org_20261004T084210_0734_3gp4,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes approved 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0737_xiwv,kan38-org_20261004T084210_0736_tjbm,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes rejected 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0739_bwtp,kan38-org_20261004T084210_0738_uxpi,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes missing 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0741_7qbb,kan38-org_20261004T084210_0740_4gxi,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > rolls back legacy mechanical writes when execution enters managed mode 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0743_svtr,kan38-org_20261004T084210_0742_jftg,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > allows automatic version-bound generation before human approval 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0745_ufm1,kan38-org_20261004T084210_0744_57n9,2026-10-04T08:42:10.736Z
+   × KAN-38 assembly approval enforcement > rejects stale workshop snapshots when new approved bindings keep the same canonical IDs 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0747_q1io,kan38-org_20261004T084210_0746_lo0x,2026-10-04T08:42:10.737Z
+   × assembly review API > derives reviewer identity from the authenticated session and exposes state metadata 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0749_gwn9,kan38-org_20261004T084210_0748_6oqi,2026-10-04T08:42:10.737Z
+   × assembly review API > enforces strict body, workspace grants, reviewer role, and expected review id 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0751_00x1,kan38-org_20261004T084210_0750_pyh6,2026-10-04T08:42:10.737Z
+   × miss-flag review API claim promotion boundary > requires authenticated granted access before reading or promoting miss flags 1ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0753_acuf,kan38-org_20261004T084210_0752_owj8,2026-10-04T08:42:10.737Z
+   × miss-flag review API claim promotion boundary > preserves authorized unmanaged promotion and derives actor from the session 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0755_j992,kan38-org_20261004T084210_0754_a9r0,2026-10-04T08:42:10.738Z
+   × miss-flag review API claim promotion boundary > refuses unapproved managed promotion before insert and records no miss-flag action 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0757_uhzn,kan38-org_20261004T084210_0756_rkug,2026-10-04T08:42:10.739Z
+   × miss-flag review API claim promotion boundary > refuses rejected managed promotion before insert and records no miss-flag action 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0759_cgvu,kan38-org_20261004T084210_0758_lzba,2026-10-04T08:42:10.739Z
+   × miss-flag review API claim promotion boundary > refuses approved managed new content as a revision-required conflict before insert 0ms
+     → Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0761_kvjq,kan38-org_20261004T084210_0760_dofx,2026-10-04T08:42:10.739Z
+ ❯ tests/accuracy-omission-pause.test.ts (47 tests | 1 failed) 1033973ms
+   ✓ downstream omission pause > applies the complete call-kind policy to upload before starting a run  305ms
+   ✓ downstream omission pause > applies the complete call-kind policy to parse before starting a run 146ms
+   ✓ downstream omission pause > applies the complete call-kind policy to inventory_extract before starting a run 177ms
+   ✓ downstream omission pause > applies the complete call-kind policy to need_extract before starting a run 176ms
+   ✓ downstream omission pause > applies the complete call-kind policy to merge_dedupe before starting a run 170ms
+   ✓ downstream omission pause > applies the complete call-kind policy to completeness_audit before starting a run 197ms
+   ✓ downstream omission pause > applies the complete call-kind policy to pair_generate before starting a run 213ms
+   ✓ downstream omission pause > applies the complete call-kind policy to coverage_decide before starting a run 205ms
+   ✓ downstream omission pause > applies the complete call-kind policy to coverage_critic before starting a run 223ms
+   ✓ downstream omission pause > applies the complete call-kind policy to validation_gate before starting a run 212ms
+   ✓ downstream omission pause > applies the complete call-kind policy to partial_split before starting a run 220ms
+   ✓ downstream omission pause > applies the complete call-kind policy to status_derive before starting a run 235ms
+   ✓ downstream omission pause > applies the complete call-kind policy to prioritize before starting a run 284ms
+   ✓ downstream omission pause > applies the complete call-kind policy to ideate before starting a run  5105ms
+   ✓ downstream omission pause > applies the complete call-kind policy to gantt_project before starting a run  2687ms
+   ✓ downstream omission pause > rejects conflicting workspace before any run or mutation  570ms
+   ✓ downstream omission pause > rejects conflicting organization before any run or mutation  310ms
+   ✓ downstream omission pause > rejects conflicting missing workspace before any run or mutation 254ms
+   ✓ downstream omission pause > allows downstream progress with advisory findings  1231ms
+   ✓ downstream omission pause > allows downstream progress with null findings 140ms
+   ✓ downstream omission pause > does not leak another workspace's blockers  686ms
+   ✓ downstream omission pause > returns scoped 409 before coverage GET generates candidate pairs  1157ms
+   ✓ downstream omission pause > renders paused coverage without generating or rendering a new pair queue  551ms
+   ✓ downstream omission pause > continues coverage candidate generation with advisory findings  972ms
+   ✓ downstream omission pause > continues coverage candidate generation with null findings 193ms
+   ✓ downstream omission pause > keeps approved coverage decisions readable through audit while paused  539ms
+   ✓ downstream omission pause > renders a visible pause message when the timeline page calls projection directly  354ms
+   ✓ downstream omission pause > pauses the direct Gantt project helper used by server pages  467ms
+   ✓ downstream omission pause > pauses the direct Gantt save helper used by server pages  677ms
+   ✓ downstream omission pause > pauses workshop snapshot before changing frozen inventory or ledger  873ms
+   ✓ downstream omission pause > pauses workshop scene before changing frozen inventory or ledger  1297ms
+   ✓ downstream omission pause > pauses workshop add tag before changing frozen inventory or ledger  3883ms
+   ✓ downstream omission pause > pauses workshop assign tag before changing frozen inventory or ledger  17900ms
+   ✓ downstream omission pause > pauses workshop mark_addressed before changing frozen inventory or ledger  1292ms
+   ✓ downstream omission pause > pauses workshop remap before changing frozen inventory or ledger  855ms
+   × downstream omission pause > pauses workshop set_priority before changing frozen inventory or ledger 984047ms
+     → Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ downstream omission pause > pauses workshop park before changing frozen inventory or ledger  1358ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for coverage  377ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for assist  336ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for validate  404ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for manual ideate  347ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for live ideate  528ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for priority  373ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for claim insert validated  398ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for claim insert draft 298ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for gantt  383ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for save-final  365ms
+ ❯ tests/accuracy-assembly-revision.test.ts (14 tests | 1 failed) 1007826ms
+   ✓ KAN-39 immutable human revisions > removes with reason and lineage, preserves baseline, and requires fresh approval  660ms
+   × KAN-39 immutable human revisions > rejects blank reasons, missing selected IDs, and stale competing parents atomically 969539ms
+     → Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ KAN-39 immutable human revisions > adds explicit human history and edits cumulatively with exact unaffected coverage  1451ms
+   ✓ KAN-39 immutable human revisions > durably saves incomplete linking and retries only missing successful pairs  884ms
+   ✓ KAN-39 immutable human revisions > projects opposite-kind additions on a one-kind source batch after fresh approval  627ms
+   ✓ KAN-39 immutable human revisions > invalidates in-flight linking when a newer extraction publishes  653ms
+   ✓ KAN-39 immutable human revisions > rejects malformed payloads and source quotes without leaving versions or changes  673ms
+   ✓ KAN-39 immutable human revisions > allows only scoped contributors and rejects spoofed request identity  1524ms
+   ✓ KAN-39 immutable human revisions > serializes competing contributors so exactly one current successor is published  907ms
+   ✓ KAN-39 immutable human revisions > rejects opposite-kind additions when a separate current production head owns that scope  932ms
+   ✓ KAN-39 immutable human revisions > refuses an approved human gap addition after a new extraction owns its kind  6214ms
+   ✓ KAN-39 immutable human revisions > refuses an approved human tactic addition after a new extraction owns its kind  9367ms
+   ✓ KAN-39 immutable human revisions > preserves original extraction and evaluator gold scores, and refuses experiment revision targets  7516ms
+   ✓ KAN-39 immutable human revisions > binds live provider inputs to exact edited content and refuses publication after a new revision  6877ms
+ ✓ tests/accuracy-pass-comparison-api.test.ts (61 tests) 27370ms
+   ✓ authenticated controlled pass comparison API > rejects client-owned condition control comparison_id before copying  403ms
+   ✓ authenticated controlled pass comparison API > rejects trimmed duplicate source IDs before the runner or copy boundary  484ms
+   ✓ authenticated controlled pass comparison API > rejects an unknown pack and a source from another workspace before copying  907ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'workspace_id' under real 'need_extract' input keys before any copy  693ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'source_file_id' under real 'need_extract' input keys before any copy  484ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'block_ids' under real 'need_extract' input keys before any copy  516ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'workspace_id' under real 'need_extract' input keys before any copy  610ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'source_file_id' under real 'need_extract' input keys before any copy  457ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'block_ids' under real 'need_extract' input keys before any copy  584ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'workspace_id' under real 'inventory_extract' input keys before any copy  361ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'source_file_id' under real 'inventory_extract' input keys before any copy  335ms
+   ✓ authenticated controlled pass comparison API > rejects 'foreign' 'block_ids' under real 'inventory_extract' input keys before any copy  390ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'workspace_id' under real 'inventory_extract' input keys before any copy  572ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'source_file_id' under real 'inventory_extract' input keys before any copy  437ms
+   ✓ authenticated controlled pass comparison API > rejects 'copied' 'block_ids' under real 'inventory_extract' input keys before any copy  392ms
+   ✓ authenticated controlled pass comparison API > accepts original 'explicit' block selection for 'need_extract'  1296ms
+   ✓ authenticated controlled pass comparison API > accepts original 'whole_source' block selection for 'need_extract'  1023ms
+   ✓ authenticated controlled pass comparison API > accepts original 'explicit' block selection for 'inventory_extract'  2265ms
+   ✓ authenticated controlled pass comparison API > accepts original 'whole_source' block selection for 'inventory_extract'  4240ms
+   ✓ authenticated controlled pass comparison API > returns independently copied 1/2/3 attempts and permits a granted reader to recompute them  1710ms
+   ✓ authenticated controlled pass comparison API > retains incomplete failed conditions with no recommendation  884ms
+   ✓ authenticated controlled pass comparison API > accepts the extraction pipeline shape and retains both extractor version sequences  3090ms
+ ✓ tests/iegp-store.test.ts (19 tests) 14267ms
+   ✓ IEGP postgres store > ingests a source into mapped gaps with computed status, not a candidate inbox  800ms
+   ✓ IEGP postgres store > ingests a demo pack file from a blank workspace  1690ms
+   ✓ IEGP postgres store > modifies a candidate gap without accepting it  460ms
+   ✓ IEGP postgres store > reviews extracted tactics and only assigns accepted ones  1545ms
+   ✓ IEGP postgres store > shows mapped tactics on the gaps workbench after ingest  1207ms
+   ✓ IEGP postgres store > puts accepted and created tactics in the library so one tactic tags many gaps  1721ms
+   ✓ IEGP postgres store > flags every source that identified the same gap as a constituent need  621ms
+   ✓ IEGP postgres store > repairs a live gap that lost its constituent need links  528ms
+   ✓ IEGP postgres store > maps a newly created open gap onto an extracted tactic  2399ms
+   ✓ IEGP postgres store > computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save  1200ms
+   ✓ IEGP postgres store > parks a gap out of Prioritize/Tactics with a reason, and unparks it back in  460ms
+   ✓ IEGP postgres store > creates a breakout group, assigns and unassigns gaps, and deletes cleanly  528ms
+ ✓ tests/accuracy-pass-comparison-run.test.ts (14 tests) 12281ms
+   ✓ isolated pass cohorts > runs three independent single_call attempts with actual exact versions and preserves baseline rows  1052ms
+   ✓ isolated pass cohorts > runs three independent pipeline attempts with actual exact versions and preserves baseline rows  2656ms
+   ✓ isolated pass cohorts > repeating a request creates a separate cohort and six isolated attempts  1567ms
+   ✓ isolated pass cohorts > covers both extractors and every repeated downstream call for two selected sources  4117ms
+   ✓ isolated pass cohorts > returns uniform not-found for absent and foreign-workspace experiments  699ms
+   ✓ isolated pass cohorts > retains failed attempts, snapshots and error evaluations  670ms
+   ✓ isolated pass cohorts > makes a control-ignoring module's completed single snapshot ineligible  646ms
+ ✓ tests/accuracy-experiment-copy.test.ts (19 tests) 11109ms
+   ✓ copyExperimentWorkspace > copies a parsed source with no baseline claims  461ms
+   ✓ copyExperimentWorkspace > copies selected baseline rows with remapped foreign keys and fingerprints  453ms
+   ✓ copyExperimentWorkspace > preserves history-only baseline exclusion without inventing copied snapshots  515ms
+   ✓ copyExperimentWorkspace > rejects omitted metadata claim endpoints without leaving a copy  2452ms
+   ✓ copyExperimentWorkspace > rejects unknown metadata claim endpoints without leaving a copy  1777ms
+   ✓ copyExperimentWorkspace > rejects cross-workspace metadata claim endpoints without leaving a copy  2133ms
+   ✓ copyExperimentWorkspace > copies a claim selected through table provenance even without a direct source id  313ms
+   ✓ copyExperimentWorkspace > keeps fingerprints stable for an unchanged baseline and changes the baseline fingerprint after a claim edit  565ms
+   ✓ copyExperimentWorkspace > waits for the established workspace mutation lock before reading the baseline  533ms
+   ✓ copyExperimentWorkspace > rejects an unknown source before creating an experiment workspace  355ms
+   ✓ copyExperimentWorkspace > rejects an cross-workspace source before creating an experiment workspace  337ms
+ ✓ tests/accuracy-experiment-pipeline.test.ts (13 tests) 10991ms
+   ✓ isolated extraction-pipeline experiments > propagates three fixed passes through the actual single_call path and retains terminal assessments  992ms
+   ✓ isolated extraction-pipeline experiments > propagates three fixed passes through the actual pipeline path and retains terminal assessments  945ms
+   ✓ isolated extraction-pipeline experiments > scores V0 and revision snapshots from the real inventory module in single_call mode  391ms
+   ✓ isolated extraction-pipeline experiments > scores V0 and revision snapshots from the real inventory module in pipeline mode  661ms
+   ✓ isolated extraction-pipeline experiments > retains every controlled snapshot and exports a separate error after critic failure at V0  405ms
+   ✓ isolated extraction-pipeline experiments > retains every controlled snapshot and exports a separate error after critic failure at V1  364ms
+   ✓ isolated extraction-pipeline experiments > retains every controlled snapshot and exports a separate error after critic failure at V2  381ms
+   ✓ isolated extraction-pipeline experiments > retains every controlled snapshot and exports a separate error after critic failure at V3  409ms
+   ✓ isolated extraction-pipeline experiments > recovers a partially retained version without duplicate calls after an evaluation write fails once  377ms
+   ✓ isolated extraction-pipeline experiments > persists extracted drafts in the copy before downstream stages and retains evaluations  3848ms
+   ✓ isolated extraction-pipeline experiments > retains successful merge evidence when status fails and keeps the journal replayable  462ms
+   ✓ isolated extraction-pipeline experiments > fails copied assembly coverage without appending a false status error version  966ms
+   ✓ isolated extraction-pipeline experiments > pauses the copied pipeline for an important extractor omission without touching the live workspace  784ms
+ ✓ tests/accuracy-item-history-api.test.ts (46 tests) 7165ms
+   ✓ authorized item history API > scopes existing foreign claims and proposals exactly like missing ones  503ms
+   ✓ authorized item history API > persists contributor confirm with trimmed rationale and server actor  346ms
+   ✓ authorized item history API > maps store invalid input and foreign proposal claims to 400 and 404  425ms
+   ✓ authorized item history API > refreshes stale proposals without changing their audit record or bypassing fresh conflicts  545ms
+ ✓ tests/accuracy-assembly-review-store.test.ts (10 tests) 8651ms
+   ✓ assembly review store > stores exact approved review decisions and returns an identical initial retry  1188ms
+   ✓ assembly review store > rechecks persisted body and checks instead of trusting stored output/checks  668ms
+   ✓ assembly review store > returns null for legacy workspaces and exposes exact approved payloads with safe workflow overlays only  751ms
+   ✓ assembly review store > approves empty production assemblies and keeps manual approvals out of implicit head resolution  746ms
+   ✓ assembly review store > fails closed for missing, rejected, stale, or experiment-only managed heads without falling back  885ms
+   ✓ assembly review store > retains an approved tactic head when a later gap-only head is approved  647ms
+   ✓ assembly review store > scopes projected selected items by source and kind  773ms
+   ✓ assembly review store > rejects selected item versions from stale or undeclared extraction runs  463ms
+   ✓ assembly review store > uses an earlier selected snapshot payload and fails closed for changed-version coverage  1175ms
+   ✓ assembly review store > serializes concurrent review and batch publication and cleans up review records  1342ms
+ ✓ tests/accuracy-item-history-store.test.ts (15 tests) 7424ms
+   ✓ generated item history store > retains two source-backed alternatives under one exact entry and keeps origins  330ms
+   ✓ generated item history store > leaves pending identity proposals review-only, then confirms a join without changing version origins  663ms
+   ✓ generated item history store > rejects cross-workspace, duplicate, and self relationships before writing  487ms
+   ✓ generated item history store > enforces split and merge cardinality, history-only successors, and one decision  694ms
+   ✓ generated item history store > resolves retired exact owners before reusing a judged claim on later runs  393ms
+   ✓ generated item history store > preserves a retiring claim's validation and every unknown final payload field  656ms
+   ✓ joins third and fourth alternatives through canonical groups without rewriting origins  1476ms
+   ✓ continues confirmed ancestry with new descendants while rejecting cycles and reused descendants  490ms
+   ✓ proposes later published alternatives after compatible confirmed joins  591ms
+   ✓ detects a stale alias proposal when another member of its canonical group gains a version  454ms
+ ✓ tests/iegp-gap-flow.test.ts (11 tests) 8515ms
+   ✓ partial split and rewrite > splits a partial into addressed + open children and retires the original into history  1986ms
+   ✓ partial split and rewrite > rewrites a partial as Open and keeps the original in version history  1036ms
+   ✓ partial split and rewrite > rewrites a partial as Addressed only with an accompanying tactic  470ms
+   ✓ partial split and rewrite > refuses to lock Partial, override Partial, or proceed to Prioritize while Partial remains  532ms
+   ✓ partial split and rewrite > lets the user add an Addressed gap with a tactic, and requires validation before Prioritize  453ms
+   ✓ partial split and rewrite > splits with multiple tactics and copies constituent need links onto both children  1646ms
+   ✓ partial split and rewrite > flags sibling coverage needs_review without copying dimension values  796ms
+   ✓ Gaps map existing vs record missed vs proposed > maps an existing library tactic onto a gap from the Gaps path  480ms
+   ✓ Gaps map existing vs record missed vs proposed > records missed ongoing, completed, and planned tactics and auto-maps them onto the gap  616ms
+ ✓ tests/accuracy-omission-resume.test.ts (15 tests) 6877ms
+   ✓ extraction omission resume > pauses a fully applied batch and resumes without extraction or duplicate drafts; replay is identical  698ms
+   ✓ extraction omission resume > replays initial success without repeating downstream work  460ms
+   ✓ extraction omission resume > rejects unauthorized resume and completed replay: 401  450ms
+   ✓ extraction omission resume > rejects unauthorized resume and completed replay: 403  482ms
+   ✓ extraction omission resume > returns the server source and batch even when an applied run has no findings  472ms
+   ✓ extraction omission resume > rejects mismatched and superseded batches  714ms
+   ✓ extraction omission resume > rolls back an interrupted stage's mutations and retries using its reserved run identity  495ms
+   ✓ extraction omission resume > rejects an earlier need batch when a later inventory-only batch applies  540ms
+   ✓ extraction omission resume > rolls back a real merge interrupted after the duplicate patch, then recovers both claims  479ms
+   ✓ extraction omission resume > serializes initial downstream work against an explicit resume  340ms
+   ✓ extraction omission resume > recovers a completed reserved module run instead of repeating its downstream effects  401ms
+   ✓ extraction omission resume > preserves the applied extraction context when status pauses after merge publishes another source blocker  696ms
+ ✓ tests/accuracy-experiment-run.test.ts (24 tests) 4293ms
+   ✓ isolated accuracy experiments > replaces an upload org_id supplied by the client with the copied organization  310ms
+   ✓ isolated accuracy experiments > retains snapshots and the resolved route when an agentic critic fails  333ms
+   ✓ isolated accuracy experiments > remaps coverage block bundles so the module reads copied evidence  365ms
+   ✓ isolated accuracy experiments > creates independent attempts for identical immutable requests  496ms
+   ✓ isolated accuracy experiments > remaps every status-derive claim reference into the copied workspace  327ms
+   ✓ isolated accuracy experiments > terminalizes an experiment when failed-call evaluation persistence fails without hiding the module error  399ms
+ ✓ tests/accuracy-assembly-store.test.ts (11 tests) 4826ms
+   ✓ assembly store > creates, reads, and retries an immutable mixed-origin assembly with server-resolved coverage  594ms
+   ✓ assembly store > scopes reads, selections, sources, and coverage runs to the workspace  665ms
+   ✓ assembly store > rejects tampered item origins but allows final-only origins  351ms
+   ✓ assembly store > preserves exact original array positions when resolving snapshot origins  300ms
+   ✓ assembly store > rejects coordinated source tampering across version and run input  309ms
+   ✓ assembly store > rolls back a successful nested assembly write when the outer transaction fails  378ms
+   ✓ assembly store > serializes independent assembly creation and identity decision transactions under the workspace lock  521ms
+   ✓ assembly store > cleans up tenant assembly rows and leaves current claim readers unchanged  401ms
+   ✓ assembly store > captures canonical identities once when later relationship decisions change the current group  681ms
+   ✓ assembly store > does not change downstream readers or validation state when creating an assembly  348ms
+ ❯ tests/accuracy-seed-from-gold.test.ts (1 test | 1 failed) 1029335ms
+   × seed workspace from gold > creates workspace with BGB gold gaps and tactics and parses pptx locally 1029333ms
+     → Test timed out in 60000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ✓ tests/modules-pipeline.test.ts (18 tests) 1588ms
+   ✓ modular pipeline, S0 to S10 > extracts gaps through proposer, critic and judge and commits only what it accepts  632ms
+ ✓ tests/accuracy-assembly-generation.test.ts (6 tests) 1462ms
+   ✓ generateExtractionAssembly > selects persisted judged versions, runs exact selected-version coverage, saves mappings, and retries by generation key  421ms
+ ✓ tests/accuracy-extract-api.test.ts (7 tests) 1322ms
+   ✓ accuracy extract API > returns a generic logged 500 with resumable batch identity when assembly linking fails, then resumes without re-extraction  360ms
+   ✓ accuracy extract API > maps private fresh and resume assembly runtime failures to one generic 500 log  323ms
+ ✓ tests/accuracy-omission-actions.test.ts (36 tests) 1064ms
+ ✓ tests/accuracy-item-history-eligibility.test.ts (4 tests) 5457ms
+   ✓ keeps history-only drafts reviewable but blocks promotion, metadata removal and coverage  534ms
+   ✓ counts eligible claims, but not matching history-only drafts, toward completeness inventory  1668ms
+   ✓ reads eligible downstream inventory before row caps even with more than 1000 newer review drafts  2722ms
+   ✓ filters requested item type before the SQL cap and keeps stored excluded references out of Gantt  531ms
+ ✓ tests/accuracy-experiment-records.test.ts (9 tests) 8729ms
+   ✓ experiment records > allows a source workspace only to its granted subject or an operator  2551ms
+   ✓ experiment records > keeps identical attempts, all call versions, and complete exports  562ms
+   ✓ experiment records > rejects reads outside the owning workspace  820ms
+   ✓ experiment records > exports tied child records in a stable call and row order  1167ms
+   ✓ experiment records > rejects a missing source lineage and mismatched evaluation identities  1700ms
+   ✓ experiment records > allows exactly one concurrent terminal transition  843ms
+   ✓ experiment records > serializes a blocked append before concurrent finalization  640ms
+ ✓ tests/accuracy-item-history-publication.test.ts (3 tests) 3084ms
+   ✓ rolls back publication and batch together, then publishes canonical judged IDs with retry-safe raw origins  1601ms
+   ✓ publishes stored production run snapshots and retains response counts while batch IDs resolve canonically  1034ms
+   ✓ preserves distinct generated questions through persisted publication and downstream resume despite legacy identity hints  446ms
+ ✓ tests/accuracy-workshop-v1.test.ts (16 tests) 8551ms
+   ✓ workshop rationale-gated writes > park requires rationale and does not edit the ledger claim  614ms
+   ✓ workshop HTTP routes > GET is workspace-scoped and POST freeze then tag assign works  6827ms
+ ✓ tests/accuracy-omission-review-store.test.ts (8 tests) 499ms
+ ✓ tests/accuracy-assembly-api.test.ts (8 tests) 414ms
+ ✓ tests/accuracy-experiment-api-integration.test.ts (1 test) 358ms
+   ✓ experiment API integration > grants the authenticated workspace creator and remaps a valid source workspace input into the isolated copy  357ms
+ ✓ tests/accuracy-ledger-filters.test.ts (10 tests) 414ms
+   ✓ workspace plan_label (IEP vs IEGP) > seeds BGB gold with IEP + SI and Tisle gold with IEGP + chapter  322ms
+ ✓ tests/accuracy-gantt-save-final.test.ts (11 tests) 342ms
+ ✓ tests/accuracy-hygiene.test.ts (9 tests) 347ms
+ ✓ tests/accuracy-ideate-api.test.ts (5 tests) 288ms
+ ✓ tests/accuracy-agent-events.test.ts (12 tests) 318ms
+ ✓ tests/iegp-engine.test.ts (31 tests) 252ms
+ ✓ tests/accuracy-merge-status-store.test.ts (2 tests) 210ms
+ ✓ tests/accuracy-organization-grants-api.test.ts (3 tests) 184ms
+ ✓ tests/accuracy-review-miss-flags.test.ts (2 tests) 174ms
+ ✓ tests/accuracy-coverage-assist-api.test.ts (2 tests) 174ms
+ ✓ tests/accuracy-parse-block-preview.test.ts (8 tests) 133ms
+ ✓ tests/accuracy-validation-gate.test.ts (5 tests) 159ms
+ ✓ tests/accuracy-source-upload.test.ts (5 tests) 132ms
+ ✓ tests/accuracy-completeness-skip-rules.test.ts (23 tests) 122ms
+ ✓ tests/accuracy-parse-ingest.test.ts (5 tests) 116ms
+ ✓ tests/accuracy-gantt-project.test.ts (7 tests) 92ms
+ ✓ tests/accuracy-gantt-continuity.test.ts (12 tests) 156ms
+ ✓ tests/accuracy-extract-gate.test.ts (8 tests) 85ms
+ ✓ tests/accuracy-module-run.test.ts (1 test) 108ms
+ ✓ tests/iegp-mapping.test.ts (6 tests) 85ms
+ ✓ tests/accuracy-coverage-decide.test.ts (7 tests) 95ms
+ ✓ tests/accuracy-routing-defaults.test.ts (1 test) 77ms
+ ✓ tests/modules-contracts.test.ts (23 tests) 66ms
+ ✓ tests/accuracy-pass-comparison.test.ts (49 tests) 25ms
+ ✓ tests/accuracy-experiment-api.test.ts (26 tests) 18ms
+ ✓ tests/accuracy-assembly.test.ts (15 tests) 17ms
+ ✓ tests/accuracy-inventory-extract.test.ts (7 tests) 13ms
+ ✓ tests/accuracy-need-extract.test.ts (8 tests) 13ms
+ ✓ tests/accuracy-item-history.test.ts (3 tests) 11ms
+ ✓ tests/accuracy-assembly-review.test.ts (4 tests) 11ms
+ ✓ tests/accuracy-snapshot-completeness.test.ts (11 tests) 11ms
+ ✓ tests/iegp-demo-pack.test.ts (3 tests) 11ms
+ ✓ tests/accuracy-experiment-gold.test.ts (15 tests) 9ms
+ ✓ tests/accuracy-agentic-cycle.test.ts (20 tests) 8ms
+ ✓ tests/accuracy-ideate.test.ts (5 tests) 8ms
+ ✓ tests/iegp-create-buttons.test.ts (5 tests) 7ms
+ ✓ tests/accuracy-completeness-audit.test.ts (6 tests) 6ms
+ ✓ tests/accuracy-pack-recall.test.ts (7 tests) 4ms
+ ✓ tests/accuracy-merge-dedupe.test.ts (8 tests) 4ms
+ ✓ tests/iegp-seed.test.ts (16 tests) 4ms
+ ✓ tests/accuracy-llamaparse-gate.test.ts (3 tests) 4ms
+ ✓ tests/accuracy-reference-gold.test.ts (3 tests) 3ms
+ ✓ tests/accuracy-parse-policy.test.ts (5 tests) 3ms
+ ✓ tests/accuracy-iegp-semantics.test.ts (6 tests) 2ms
+ ✓ tests/accuracy-gantt-export-svg.test.ts (4 tests) 2ms
+ ✓ tests/accuracy-coverage-schema.test.ts (1 test) 2ms
+ ✓ tests/accuracy-cost-rollup.test.ts (3 tests) 2ms
+ ✓ tests/accuracy-coverage-queue.test.ts (4 tests) 2ms
+ ✓ tests/accuracy-run-api-key.test.ts (1 test) 2ms
+ ✓ tests/accuracy-status-engine.test.ts (9 tests) 2ms
+ ✓ tests/llm-api-key-routing.test.ts (3 tests) 2ms
+ ✓ tests/accuracy-gantt-activity-detail.test.ts (2 tests) 2ms
+ ✓ tests/accuracy-local-text-parse.test.ts (1 test) 2ms
+ ✓ tests/accuracy-reference-manifest.test.ts (1 test) 2ms
+ ✓ tests/accuracy-quote-validator.test.ts (2 tests) 1ms
+ ✓ tests/planning-context.test.ts (1 test) 1ms
+ ✓ tests/accuracy-cost.test.ts (1 test) 2ms
+ ✓ tests/accuracy-assembly-revision-ui.test.ts (18 tests) 430ms
+ ✓ tests/accuracy-assembly-review-ui.test.ts (8 tests) 149ms
+ ✓ tests/accuracy-omission-controls.test.ts (22 tests) 121ms
+ ✓ tests/accuracy-item-history-ui.test.ts (9 tests) 91ms
+ ✓ tests/accuracy-assembly-ui.test.ts (5 tests) 88ms
+ ✓ tests/req-docs-mermaid.test.ts (1 test) 78ms
+ ✓ tests/accuracy-source-extract-actions.test.ts (4 tests) 34ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 24 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct priority route gate and write against publication
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct metadata gate and write against publication
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:504:64
+    502|   });
+    503|
+    504|   it.each(["priority route", "metadata", "patch", "validation"])("seri…
+       |                                                                ^
+    505|     // The normal test pool has one connection; use real independent r…
+    506|     const client = postgres(process.env.DATABASE_URL!, { max: 8, onnot…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct priority route gate and write against publication
+Error: Failed query: delete from "accuracy_source_files" where "accuracy_source_files"."workspace_id" = $1 returning "id"
+params: ws_20261004T081324_0646_xoyd
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ ../../../Users/calixtan/personal-projects/synapse/node_modules/src/postgres-js/session.ts:58:17
+ ❯ Module.deleteWorkspace src/accuracy/store/tenant.ts:265:7
+    263|     ),
+    264|     source_files: await deletedCount(
+    265|       await db
+       |       ^
+    266|         .delete(t.accuracySourceFiles)
+    267|         .where(eq(t.accuracySourceFiles.workspace_id, workspace_id))
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:187:42
+
+Caused by: PostgresError: update or delete on table "accuracy_source_files" violates foreign key constraint "accuracy_item_versions_source_file_id_fkey" on table "accuracy_item_versions"
+ ❯ ErrorResponse ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/connection.js:815:30
+ ❯ handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/connection.js:489:6
+ ❯ Socket.data ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/connection.js:324:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { severity_local: 'ERROR', severity: 'ERROR', code: '23503', detail: 'Key (id)=(src_20261004T081324_0648_319o) is still referenced from table "accuracy_item_versions".', schema_name: 'public', table_name: 'accuracy_item_versions', constraint_name: 'accuracy_item_versions_source_file_id_fkey', file: 'ri_triggers.c', routine: 'ri_ReportViolation', query: 'delete from "accuracy_source_files" where "accuracy_source_files"."workspace_id" = $1 returning "id"', parameters: [ 'ws_20261004T081324_0646_xoyd' ], args: [ 'ws_20261004T081324_0646_xoyd' ], types: [ 25 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct metadata gate and write against publication
+Error: Failed query: CREATE TABLE IF NOT EXISTS accuracy_workshop_snapshots (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    version integer NOT NULL,
+    scene text NOT NULL,
+    payload jsonb NOT NULL,
+    note text,
+    saved_by text NOT NULL,
+    saved_function text NOT NULL,
+    saved_at text NOT NULL
+  )
+params:
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ ensureAccuracySchema src/accuracy/store/db.ts:75:7
+     73|     const d = accuracyDb();
+     74|     for (const stmt of extra) {
+     75|       await d.execute(sql.raw(stmt));
+       |       ^
+     76|     }
+     77|   }
+ ❯ Module.deleteWorkspace src/accuracy/store/tenant.ts:201:3
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:187:42
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct patch gate and write against publication
+Error: Failed query: select "id", "org_id", "name", "slug", "planning_context", "created_at", "archived_at" from "accuracy_workspaces" where "accuracy_workspaces"."id" = $1 limit $2
+params: ws_20261004T084209_0687_7f46,1
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ ../../../Users/calixtan/personal-projects/synapse/node_modules/src/postgres-js/session.ts:58:17
+ ❯ getWorkspace src/accuracy/store/tenant.ts:99:16
+     97| export async function getWorkspace(workspace_id: string) {
+     98|   await ensureAccuracySchema();
+     99|   const rows = await accuracyDb()
+       |                ^
+    100|     .select()
+    101|     .from(t.accuracyWorkspaces)
+ ❯ Module.deleteWorkspace src/accuracy/store/tenant.ts:199:21
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:187:42
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > serializes direct validation gate and write against publication
+Error: Failed query: select "id", "org_id", "name", "slug", "planning_context", "created_at", "archived_at" from "accuracy_workspaces" where "accuracy_workspaces"."id" = $1 limit $2
+params: ws_20261004T084210_0709_m018,1
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ ../../../Users/calixtan/personal-projects/synapse/node_modules/src/postgres-js/session.ts:58:17
+ ❯ getWorkspace src/accuracy/store/tenant.ts:99:16
+     97| export async function getWorkspace(workspace_id: string) {
+     98|   await ensureAccuracySchema();
+     99|   const rows = await accuracyDb()
+       |                ^
+    100|     .select()
+    101|     .from(t.accuracyWorkspaces)
+ ❯ Module.deleteWorkspace src/accuracy/store/tenant.ts:199:21
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:187:42
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > lists only approved coverage or mapping pairs for managed workspaces
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0729_3i1v,kan38-org_20261004T084210_0728_bdlf,2026-10-04T08:42:10.735Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:568:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > rolls back module writes when approved heads change during execution
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0731_mmqd,kan38-org_20261004T084210_0730_mdrj,2026-10-04T08:42:10.735Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:591:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > does not save agentic success output when approved heads change during provider work
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0733_gf33,kan38-org_20261004T084210_0732_2os1,2026-10-04T08:42:10.735Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:633:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes pending
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0735_xiag,kan38-org_20261004T084210_0734_3gp4,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:686:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes approved
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0737_xiwv,kan38-org_20261004T084210_0736_tjbm,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:686:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes rejected
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0739_bwtp,kan38-org_20261004T084210_0738_uxpi,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:686:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > refuses legacy provider output after the first managed batch becomes missing
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0741_7qbb,kan38-org_20261004T084210_0740_4gxi,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:686:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > rolls back legacy mechanical writes when execution enters managed mode
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0743_svtr,kan38-org_20261004T084210_0742_jftg,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:725:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > allows automatic version-bound generation before human approval
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0745_ufm1,kan38-org_20261004T084210_0744_57n9,2026-10-04T08:42:10.736Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:754:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > KAN-38 assembly approval enforcement > rejects stale workshop snapshots when new approved bindings keep the same canonical IDs
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0747_q1io,kan38-org_20261004T084210_0746_lo0x,2026-10-04T08:42:10.737Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:765:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > assembly review API > derives reviewer identity from the authenticated session and exposes state metadata
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0749_gwn9,kan38-org_20261004T084210_0748_6oqi,2026-10-04T08:42:10.737Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:810:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > assembly review API > enforces strict body, workspace grants, reviewer role, and expected review id
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0751_00x1,kan38-org_20261004T084210_0750_pyh6,2026-10-04T08:42:10.737Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:831:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > miss-flag review API claim promotion boundary > requires authenticated granted access before reading or promoting miss flags
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0753_acuf,kan38-org_20261004T084210_0752_owj8,2026-10-04T08:42:10.737Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:864:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > miss-flag review API claim promotion boundary > preserves authorized unmanaged promotion and derives actor from the session
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0755_j992,kan38-org_20261004T084210_0754_a9r0,2026-10-04T08:42:10.738Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:883:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > miss-flag review API claim promotion boundary > refuses unapproved managed promotion before insert and records no miss-flag action
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0757_uhzn,kan38-org_20261004T084210_0756_rkug,2026-10-04T08:42:10.739Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:910:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > miss-flag review API claim promotion boundary > refuses rejected managed promotion before insert and records no miss-flag action
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0759_cgvu,kan38-org_20261004T084210_0758_lzba,2026-10-04T08:42:10.739Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:910:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/26]⎯
+
+ FAIL  tests/accuracy-assembly-approval-integration.test.ts > miss-flag review API claim promotion boundary > refuses approved managed new content as a revision-required conflict before insert
+Error: Failed query: insert into "accuracy_organizations" ("id", "name", "created_at") values ($1, $2, $3)
+params: org_20261004T084210_0761_kvjq,kan38-org_20261004T084210_0760_dofx,2026-10-04T08:42:10.739Z
+ ❯ PostgresJsPreparedQuery.queryWithCache ../../../Users/calixtan/personal-projects/synapse/node_modules/src/pg-core/session.ts:73:11
+ ❯ Module.createOrganization src/accuracy/store/tenant.ts:41:3
+     39|   await ensureAccuracySchema();
+     40|   const id = newId("org");
+     41|   await accuracyDb()
+       |   ^
+     42|     .insert(t.accuracyOrganizations)
+     43|     .values({ id, name, created_at: nowIso() });
+ ❯ fixture tests/accuracy-assembly-approval-integration.test.ts:48:18
+ ❯ tests/accuracy-assembly-approval-integration.test.ts:926:19
+
+Caused by: Error: write CONNECTION_ENDED 127.0.0.1:5432
+ ❯ Query.handler ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/index.js:331:34
+ ❯ Query.handle ../../../Users/calixtan/personal-projects/synapse/node_modules/postgres/src/query.js:140:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'CONNECTION_ENDED', errno: 'CONNECTION_ENDED', address: [ '127.0.0.1' ], port: [ 5432 ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/26]⎯
+
+ FAIL  tests/accuracy-assembly-revision.test.ts > KAN-39 immutable human revisions > rejects blank reasons, missing selected IDs, and stale competing parents atomically
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/accuracy-assembly-revision.test.ts:242:3
+    240|     expect((await approvedLiveInventory(scope.workspace_id))?.claims.m…
+    241|   });
+    242|   it("rejects blank reasons, missing selected IDs, and stale competing…
+       |   ^
+    243|     const scope = await fixture();
+    244|     const { assembly, gapVersion } = await publishAssembly(scope);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/26]⎯
+
+ FAIL  tests/accuracy-omission-pause.test.ts > downstream omission pause > pauses workshop set_priority before changing frozen inventory or ledger
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/accuracy-omission-pause.test.ts:249:108
+    247|     expect(await latestAccuracyPlan(scope.workspace_id)).toBeNull();
+    248|   });
+    249|   it.each(["snapshot", "scene", "add tag", "assign tag", "mark_address…
+       |                                                                                                            ^
+    250|     const scope = await fixture();
+    251|     const approvedCoverage = await listCoverageJoins(scope.workspace_i…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/26]⎯
+
+ FAIL  tests/accuracy-seed-from-gold.test.ts > seed workspace from gold > creates workspace with BGB gold gaps and tactics and parses pptx locally
+Error: Test timed out in 60000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/accuracy-seed-from-gold.test.ts:7:3
+      5|
+      6| describe("seed workspace from gold", () => {
+      7|   it("creates workspace with BGB gold gaps and tactics and parses pptx…
+       |   ^
+      8|     const result = await seedWorkspaceFromGold({
+      9|       packId: "beone-bgb-58067-prmt5i",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/26]⎯
+
+
+ Test Files  4 failed | 87 passed (91)
+      Tests  24 failed | 984 passed (1008)
+   Start at  09:13:07
+   Duration  5483.31s (transform 2.36s, setup 0ms, collect 44.09s, tests 4974.57s, environment 2.42s, prepare 4.95s)

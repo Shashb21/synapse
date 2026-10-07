@@ -1,6 +1,6 @@
 "use client";
 
-/** On-demand immutable generated versions and contributor identity review in the ledger. */
+/** On-demand immutable generated and human versions with contributor identity review in the ledger. */
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ItemHistory, ItemRelationship } from "@/accuracy/domain/item-history";
@@ -72,9 +72,17 @@ export function ClaimHistory({ workspaceId, claimId }: { workspaceId: string; cl
             <dl className="grid gap-1 text-muted-foreground">
               <div><dt className="inline">Original claim: </dt><dd className="inline">{version.claim_id}</dd></div>
               <div><dt className="inline">Source: </dt><dd className="inline">{version.source_file_id}</dd></div>
-              <div><dt className="inline">Run: </dt><dd className="inline">{version.run_id}</dd></div>
-              <div><dt className="inline">Snapshot: </dt><dd className="inline">{version.snapshot_id ?? "Judged final output (no snapshot)"}</dd></div>
-              <div><dt className="inline">Iteration: </dt><dd className="inline">{version.iteration ?? "Judged final output"}</dd></div>
+              {version.human_origin ? <>
+                <div><dt className="inline">Human contributor: </dt><dd className="inline">{version.human_origin.actor.name} ({version.human_origin.actor.function})</dd></div>
+                <div><dt className="inline">Change: </dt><dd className="inline">{version.human_origin.action} · {version.human_origin.reason}</dd></div>
+                <div><dt className="inline">Revision: </dt><dd className="inline">{version.human_origin.revision_id}</dd></div>
+                <div><dt className="inline">Parent proposal: </dt><dd className="inline">{version.human_origin.parent_assembly_id}</dd></div>
+                <div><dt className="inline">Predecessor version: </dt><dd className="inline">{version.human_origin.predecessor_version_id ?? "New addition"}</dd></div>
+              </> : <>
+                <div><dt className="inline">Run: </dt><dd className="inline">{version.run_id}</dd></div>
+                <div><dt className="inline">Snapshot: </dt><dd className="inline">{version.snapshot_id ?? "Judged final output (no snapshot)"}</dd></div>
+                <div><dt className="inline">Iteration: </dt><dd className="inline">{version.iteration ?? "Judged final output"}</dd></div>
+              </>}
               <div><dt className="inline">Item index: </dt><dd className="inline">{version.item_index}</dd></div>
               <div><dt className="inline">Recorded: </dt><dd className="inline">{version.created_at}</dd></div>
             </dl>

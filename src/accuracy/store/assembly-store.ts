@@ -160,8 +160,8 @@ export async function resolveAssemblyItems(workspace_id: string, selections: Ass
 
   const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id));
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
-  const runIds = [...new Set(rows.map((row) => row.run_id))];
-  const runs = await accuracyDb().select().from(t.accuracyModuleRuns)
+  const runIds = [...new Set(rows.flatMap((row) => row.run_id ? [row.run_id] : []))];
+  const runs = runIds.length === 0 ? [] : await accuracyDb().select().from(t.accuracyModuleRuns)
     .where(and(eq(t.accuracyModuleRuns.workspace_id, workspace_id), inArray(t.accuracyModuleRuns.id, runIds)));
   const runsById = new Map(runs.map((run) => [run.id, run]));
   const sourceIds = [...new Set(rows.map((row) => row.source_file_id))];
@@ -184,16 +184,28 @@ export async function resolveAssemblyItems(workspace_id: string, selections: Ass
     if (!source || claim.source_file_id !== row.source_file_id) {
       throw new AssemblyError("invalid_input", "Selected item version source origin is invalid.");
     }
-    const run = runsById.get(row.run_id);
-    assertExtractionRun(row, run);
-    if (run!.org_id !== source.org_id) {
-      throw new AssemblyError("invalid_input", "Selected item version run and source organizations do not match.");
+    if (row.human_origin) {
+      const origin = row.human_origin;
+      if (row.run_id !== null || row.snapshot_id !== null || row.iteration !== null
+        || origin.kind !== "human" || !origin.subject?.trim() || !origin.provider?.trim()
+        || !origin.actor?.name?.trim() || !origin.actor?.function?.trim() || !origin.reason?.trim()
+        || !origin.revision_id || !origin.parent_assembly_id || !["add", "edit"].includes(origin.action)
+        || origin.source_file_id !== row.source_file_id || !sameJson(origin.provenance, row.payload.provenance)) {
+        throw new AssemblyError("invalid_input", "Selected human item version origin is invalid.");
+      }
+    } else {
+      const run = row.run_id ? runsById.get(row.run_id) : undefined;
+      assertExtractionRun(row, run);
+      if (run!.org_id !== source.org_id) {
+        throw new AssemblyError("invalid_input", "Selected item version run and source organizations do not match.");
+      }
+      assertVersionOrigin(row, run!, row.snapshot_id ? snapshotsById.get(row.snapshot_id) : undefined);
     }
-    assertVersionOrigin(row, run!, row.snapshot_id ? snapshotsById.get(row.snapshot_id) : undefined);
     return {
       id: row.id,
       claim_id: row.claim_id,
       run_id: row.run_id,
+      ...(row.human_origin ? { human_origin: row.human_origin } : {}),
       snapshot_id: row.snapshot_id,
       iteration: row.iteration,
       item_index: row.item_index,

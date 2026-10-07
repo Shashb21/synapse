@@ -22,7 +22,8 @@ import { coverageDecisionSchema } from "@/accuracy/modules/coverage-decide/schem
 import { lockAssemblyWorkspace, withAssemblyWorkspaceLock } from "@/accuracy/kernel/assembly-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
-import { readAssembly } from "./assembly-store";
+import { assemblyRevisionState, currentRevisionAssemblyId } from "./assembly-revision-store";
+import { readAssembly, resolveAssemblyItems } from "./assembly-store";
 import { claimMetadata, type AccuracyClaimMetadata, type AccuracyClaimRow, type AccuracyClaimType } from "./claim-store";
 import type { ParseBlock } from "./quote-validator";
 import * as t from "./schema";
@@ -158,6 +159,21 @@ async function recheckedAssembly(workspace_id: string, assembly_id: string): Pro
 }> {
   const assembly = await readAssembly(workspace_id, assembly_id);
   if (!assembly) throw new AssemblyReviewError("not_found", "Assembly not found.");
+  const resolved = await resolveAssemblyItems(workspace_id, assembly.items.map(item => ({ item_version_id: item.id, reason: item.reason })));
+  if (!sameJson(resolved, assembly.items)) throw new AssemblyReviewError("conflict", "Assembly items no longer match immutable version history.");
+  for (const item of resolved.filter(item => item.human_origin)) {
+    const origin = item.human_origin!;
+    const [row] = await accuracyDb().select().from(t.accuracyAssemblyRevisions).where(and(
+      eq(t.accuracyAssemblyRevisions.workspace_id, workspace_id), eq(t.accuracyAssemblyRevisions.id, origin.revision_id),
+    )).limit(1);
+    const change = row?.change;
+    if (!change || change.successor_version_id !== item.id || change.parent_assembly_id !== origin.parent_assembly_id
+      || change.predecessor_version_id !== origin.predecessor_version_id || change.action !== origin.action
+      || change.reason !== origin.reason || change.author.subject !== origin.subject || change.author.provider !== origin.provider
+      || !sameJson(change.author.actor, origin.actor) || !sameJson(change.provenance, origin.provenance)) {
+      throw new AssemblyReviewError("conflict", "Human version origin has no matching immutable revision lineage.");
+    }
+  }
   const expectedOutput = outputFromItems(assembly.items);
   if (!sameJson(assembly.output, expectedOutput)) {
     throw new AssemblyReviewError("conflict", "Stored assembly output no longer matches selected immutable items.");
@@ -257,16 +273,24 @@ async function currentProductionHeads(workspace_id: string): Promise<ProductionH
 }
 
 async function assemblyCurrentForDeclaredProductionRuns(assembly: Assembly): Promise<boolean> {
+  const revisionState = await assemblyRevisionState(assembly.workspace_id, assembly.id);
+  if (!revisionState.is_current) return false;
+  const baseline = revisionState.revision ? await readAssembly(assembly.workspace_id, revisionState.baseline_assembly_id) : assembly;
+  if (!baseline) return false;
   const declared = await verifiedDeclaredProductionRuns(assembly);
   if (declared.length === 0) return false;
   assertSelectedItemsBoundToDeclaredRuns(assembly, declared);
   const heads = await currentProductionHeads(assembly.workspace_id);
   if (!heads) return false;
+  for (const item of assembly.items.filter(item => item.human_origin)) {
+    const counterpart = heads.find(head => head.source_file_id === item.source_file_id && head.call_kind === itemExtractionKind(item));
+    if (counterpart && !assemblyCoversHead(assembly, counterpart)) return false;
+  }
   const headsByScope = new Map(heads.map((head) => [`${head.source_file_id}\u0000${head.call_kind}`, head]));
   return declared.every((run) => {
     const head = headsByScope.get(`${run.source_file_id}\u0000${run.call_kind}`);
     if (!head || head.run_id !== run.run_id) return false;
-    return assembly.generation_key ? head.batch_id === assembly.generation_key : true;
+    return baseline.generation_key ? head.batch_id === baseline.generation_key : true;
   });
 }
 
@@ -288,7 +312,14 @@ function itemExtractionKind(item: ResolvedAssemblyItem): ExtractionKind {
 function assertSelectedItemsBoundToDeclaredRuns(assembly: Assembly, declared: VerifiedDeclaredProductionRun[]) {
   const declaredByRunId = new Map(declared.map((run) => [run.run_id, run]));
   for (const item of assembly.items) {
-    const run = declaredByRunId.get(item.run_id);
+    if (item.human_origin) {
+      if (item.run_id !== null || item.human_origin.source_file_id !== item.source_file_id
+        || !declared.some(run => run.source_file_id === item.source_file_id)) {
+        throw new AssemblyReviewError("conflict", "Human item is outside the declared production source scope.");
+      }
+      continue;
+    }
+    const run = item.run_id ? declaredByRunId.get(item.run_id) : undefined;
     if (!run || run.source_file_id !== item.source_file_id || run.call_kind !== itemExtractionKind(item)) {
       throw new AssemblyReviewError("conflict", "Assembly selected item version is not bound to a declared production extraction run.");
     }
@@ -465,7 +496,13 @@ async function assemblyForHead(workspace_id: string, head: ProductionHead): Prom
     eq(t.accuracyAssemblies.generation_key, head.batch_id),
   )).limit(1);
   if (!row) failApproval("Current production extraction head has no complete assembly.");
-  const { assembly, checks, checks_fingerprint } = await recheckedAssembly(workspace_id, row.id);
+  const { assembly, checks, checks_fingerprint } = await recheckedAssembly(workspace_id, await currentRevisionAssemblyId(workspace_id, row.id));
+  // Human revisions are approved as a whole selection and cannot authorize a partial projection.
+  // Generated assemblies retain their existing per-kind projection when another kind is replaced.
+  const revisionState = await assemblyRevisionState(workspace_id, assembly.id);
+  if (revisionState.revision && !await assemblyCurrentForDeclaredProductionRuns(assembly)) {
+    failApproval("Human revision is stale for the current production extraction ownership.");
+  }
   assertSelectedItemsBoundToDeclaredRuns(assembly, await verifiedDeclaredProductionRuns(assembly));
   if (!assembly.linking_complete || checks.status !== "passed") failApproval("Current production assembly is not complete and passing.");
   if (!assemblyCoversHead(assembly, head)) failApproval("Current production assembly does not bind the head extraction run.");
@@ -499,7 +536,10 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
       bindings.push({ source_file_id: head.source_file_id, call_kind: head.call_kind, batch_id: head.batch_id,
         run_id: head.run_id, assembly_id: assembly.id, assembly_fingerprint: assembly.fingerprint, review_id: review.id });
       const selectedType: "gap" | "tactic" = head.call_kind === "need_extract" ? "gap" : "tactic";
-      for (const item of assembly.items.filter((entry) => entry.claim_type === selectedType && entry.source_file_id === head.source_file_id)) {
+      const projectedItems = assembly.items.filter(entry => entry.source_file_id === head.source_file_id
+        && (entry.claim_type === selectedType || (Boolean(entry.human_origin) && !heads.some(candidate =>
+          candidate.source_file_id === entry.source_file_id && candidate.call_kind === itemExtractionKind(entry)))));
+      for (const item of projectedItems) {
         const projected = claimFromApprovedItem(item, claimsById.get(item.canonical_claim_id));
         projected.workspace_id = workspace_id;
         const prior = claimsByCanonical.get(projected.id);

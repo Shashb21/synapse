@@ -4,15 +4,22 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Assembly, AssemblyCoverage, ResolvedAssemblyItem } from "@/accuracy/domain/assembly";
 import type { AssemblyReview } from "@/accuracy/domain/assembly-review";
+import type { AssemblyRevisionChange, AssemblyRevisionState } from "@/accuracy/domain/assembly-revision";
 import type { AssemblyReviewState } from "@/accuracy/store/assembly-review-store";
+import { AssemblyRevisionForm, type RevisionEvidenceBlock, type RevisionFormTarget } from "@/components/accuracy/assembly-revision-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-type AssemblyListState = { assemblies: Assembly[] } | null;
+type AssemblyListState = { assemblies: Assembly[]; revisionStates: Record<string, AssemblyRevisionState> } | null;
 type AssemblyDetailState = {
   assembly: Assembly;
   reviewState: AssemblyReviewState | null;
   canReview: boolean;
+  canRevise: boolean;
+  canRetryRevision: boolean;
+  revisionState: AssemblyRevisionState | null;
+  evidenceBlocks: RevisionEvidenceBlock[];
+  fresh: boolean;
 };
 type AdvisoryFormState = Record<string, { acknowledged: boolean; reason: string }>;
 type ReviewFormState = { rationale: string; advisories: AdvisoryFormState };
@@ -124,13 +131,20 @@ function reviewStatusText(reviewState: AssemblyReviewState | null): string {
   return reviewState ? `Review status: ${reviewState.status}` : "Review status unavailable";
 }
 
-function ListSummary({ assembly }: { assembly: Assembly }) {
+function revisionLabel(assembly: Assembly, state: AssemblyRevisionState | null | undefined): string {
+  if (!state) return "Origin metadata unavailable";
+  if (!state.revision) return "Agent baseline";
+  return `Human revision · ${assembly.linking_complete ? "Linking complete" : state.linking_error ? "Linking failed" : "Linking incomplete"}`;
+}
+
+function ListSummary({ assembly, revisionState }: { assembly: Assembly; revisionState?: AssemblyRevisionState }) {
   return (
     <div className="grid gap-1">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="font-medium text-foreground">{assembly.id}</p>
         <span className="text-[11px] text-[var(--unknown)]">Complete proposal</span>
       </div>
+      <p className="text-foreground">{revisionLabel(assembly, revisionState)}</p>
       <p className="text-muted-foreground">
         {statusText(assembly.checks.status)} · {assembly.linking_complete ? "Linking complete" : "Linking incomplete"}
       </p>
@@ -148,16 +162,27 @@ function Lineage({ item }: { item: ResolvedAssemblyItem }) {
       <div><dt className="inline">Original claim: </dt><dd className="inline">{item.claim_id}</dd></div>
       <div><dt className="inline">Canonical claim: </dt><dd className="inline">{item.canonical_claim_id}</dd></div>
       <div><dt className="inline">Source: </dt><dd className="inline">{item.source_file_id}</dd></div>
-      <div><dt className="inline">Run: </dt><dd className="inline">{item.run_id}</dd></div>
-      <div><dt className="inline">Snapshot: </dt><dd className="inline">{item.snapshot_id ?? "Judged final output (no snapshot)"}</dd></div>
-      <div><dt className="inline">Iteration: </dt><dd className="inline">{item.iteration ?? "Judged final output"}</dd></div>
+      {item.human_origin ? <>
+        <div><dt className="inline">Human contributor: </dt><dd className="inline">{item.human_origin.actor.name} ({item.human_origin.actor.function})</dd></div>
+        <div><dt className="inline">Change: </dt><dd className="inline">{item.human_origin.action} · {item.human_origin.reason}</dd></div>
+        <div><dt className="inline">Revision: </dt><dd className="inline">{item.human_origin.revision_id}</dd></div>
+        <div><dt className="inline">Parent proposal: </dt><dd className="inline">{item.human_origin.parent_assembly_id}</dd></div>
+        <div><dt className="inline">Predecessor version: </dt><dd className="inline">{item.human_origin.predecessor_version_id ?? "New addition"}</dd></div>
+      </> : item.run_id ? <>
+        <div><dt className="inline">Run: </dt><dd className="inline">{item.run_id}</dd></div>
+        <div><dt className="inline">Snapshot: </dt><dd className="inline">{item.snapshot_id ?? "Judged final output (no snapshot)"}</dd></div>
+        <div><dt className="inline">Iteration: </dt><dd className="inline">{item.iteration ?? "Judged final output"}</dd></div>
+      </> : <div><dt className="inline">Origin: </dt><dd className="inline">Unavailable</dd></div>}
       <div><dt className="inline">Item index: </dt><dd className="inline">{item.item_index}</dd></div>
       <div><dt className="inline">Selection reason: </dt><dd className="inline">{item.reason}</dd></div>
     </dl>
   );
 }
 
-function SelectedItem({ item }: { item: ResolvedAssemblyItem }) {
+function SelectedItem({ item, canRevise, disabled, onChange }: {
+  item: ResolvedAssemblyItem; canRevise: boolean; disabled: boolean;
+  onChange: (target: RevisionFormTarget) => void;
+}) {
   return (
     <li className="border-b border-border pb-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -173,6 +198,10 @@ function SelectedItem({ item }: { item: ResolvedAssemblyItem }) {
           </div>
         ))}
       </dl>
+      {canRevise ? <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ action: "edit", item })}>Edit {item.claim_type} {item.id}</Button>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ action: "remove", item })}>Remove {item.claim_type} {item.id}</Button>
+      </div> : null}
     </li>
   );
 }
@@ -217,6 +246,8 @@ function ReviewControls({
   onFormChange,
   onSubmit,
   onRefresh,
+  busy,
+  fresh,
 }: {
   assembly: Assembly;
   reviewState: AssemblyReviewState | null;
@@ -227,6 +258,8 @@ function ReviewControls({
   onFormChange: (form: ReviewFormState) => void;
   onSubmit: (decision: "approve" | "reject") => void;
   onRefresh: () => void;
+  busy: boolean;
+  fresh: boolean;
 }) {
   const rationale = form.rationale.trim();
   const findings = reviewState?.checks.findings ?? assembly.checks.findings;
@@ -237,10 +270,8 @@ function ReviewControls({
     return state?.acknowledged && state.reason.trim();
   });
   const currentPending = reviewState?.status === "pending" && reviewState.head_status === "current";
-  const busy = submitting !== null;
-  const submittingThis = submitting?.assemblyId === assembly.id;
-  const approveDisabled = busy || !canReview || !currentPending || !rationale || blocking.length > 0 || !advisoryComplete;
-  const rejectDisabled = busy || !canReview || !currentPending || !rationale || !advisoryComplete;
+  const approveDisabled = busy || !fresh || !canReview || !currentPending || !rationale || blocking.length > 0 || !advisoryComplete;
+  const rejectDisabled = busy || !fresh || !canReview || !currentPending || !rationale || !advisoryComplete;
   const setRationale = (value: string) => onFormChange({ ...form, rationale: value });
 
   if (!reviewState) return <p className="text-muted-foreground">Review metadata was not returned for this proposal.</p>;
@@ -276,7 +307,7 @@ function ReviewControls({
         <textarea
           className="min-h-20 border border-border bg-background p-2 text-foreground"
           value={form.rationale}
-          disabled={submittingThis}
+          disabled={busy || !fresh}
           required
           onInput={(event) => setRationale(event.currentTarget.value)}
           onChange={(event) => setRationale(event.currentTarget.value)}
@@ -309,7 +340,7 @@ function ReviewControls({
                   <input
                     type="checkbox"
                     checked={advisory.acknowledged}
-                    disabled={submittingThis}
+                    disabled={busy || !fresh}
                     onInput={(event) => setAcknowledged(event.currentTarget.checked)}
                     onChange={(event) => setAcknowledged(event.currentTarget.checked)}
                   />
@@ -320,7 +351,7 @@ function ReviewControls({
                   <input
                     className="border border-border bg-background p-2 text-foreground"
                     value={advisory.reason}
-                    disabled={submittingThis}
+                    disabled={busy || !fresh}
                     required
                     onInput={(event) => setReason(event.currentTarget.value)}
                     onChange={(event) => setReason(event.currentTarget.value)}
@@ -372,6 +403,17 @@ function AssemblyDetail({
   onFormChange,
   onReview,
   onRefresh,
+  revisionState,
+  evidenceBlocks,
+  canRevise,
+  canRetryRevision,
+  fresh,
+  busy,
+  revisionSubmitting,
+  revisionError,
+  onRevise,
+  onRetryRevision,
+  onNavigate,
 }: {
   assembly: Assembly;
   reviewState: AssemblyReviewState | null;
@@ -382,7 +424,19 @@ function AssemblyDetail({
   onFormChange: (form: ReviewFormState) => void;
   onReview: (decision: "approve" | "reject") => void;
   onRefresh: () => void;
+  revisionState: AssemblyRevisionState | null;
+  evidenceBlocks: RevisionEvidenceBlock[];
+  canRevise: boolean;
+  canRetryRevision: boolean;
+  fresh: boolean;
+  busy: boolean;
+  revisionSubmitting: boolean;
+  revisionError: string | null;
+  onRevise: (change: AssemblyRevisionChange) => void;
+  onRetryRevision: () => void;
+  onNavigate: (assemblyId: string) => void;
 }) {
+  const [revisionTarget, setRevisionTarget] = useState<RevisionFormTarget | null>(null);
   const selectedMappedGapIds = mappedGapIds(assembly);
   const gaps = assembly.items.filter((item) => item.claim_type === "gap");
   const uncovered = gaps.filter((gap) => !selectedMappedGapIds.has(gap.id));
@@ -390,6 +444,7 @@ function AssemblyDetail({
   return (
     <div className="mt-3 grid gap-4 border-t border-border pt-3">
       <section className="grid gap-1" aria-label={`Proposal identity ${assembly.id}`}>
+        <p className="font-medium">{revisionLabel(assembly, revisionState)}</p>
         <p className="font-medium">{reviewStatusText(reviewState)}</p>
         {reviewState ? <p className="text-muted-foreground">Live head: {reviewState.head_status}</p> : null}
         <p className="break-words text-muted-foreground">Fingerprint: {assembly.fingerprint}</p>
@@ -401,6 +456,38 @@ function AssemblyDetail({
         </p>
         <p className="text-muted-foreground">Actor: {assembly.actor.name} ({assembly.actor.function})</p>
         <p className="text-muted-foreground">{assembly.linking_complete ? "Linking complete" : "Linking incomplete"}</p>
+      </section>
+
+      {revisionState?.revision ? <section className="grid gap-2" aria-label="Human revision history">
+        <p>Change: {revisionState.revision.action} · {revisionState.revision.reason}</p>
+        <p className="text-muted-foreground">Contributor: {revisionState.revision.author.actor.name} ({revisionState.revision.author.actor.function}) · {revisionState.revision.created_at}</p>
+        <p className="text-muted-foreground">Predecessor: {revisionState.revision.predecessor_version_id ?? "New addition"} · Successor: {revisionState.revision.successor_version_id ?? "Removed from selection"}</p>
+        <p className="text-muted-foreground">Baseline: {revisionState.baseline_assembly_id} · Parent: {revisionState.revision.parent_assembly_id}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => onNavigate(revisionState.baseline_assembly_id)}>Inspect agent baseline</Button>
+          {revisionState.current_head_id !== assembly.id ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onNavigate(revisionState.current_head_id)}>Inspect current successor</Button> : null}
+        </div>
+      </section> : revisionState && revisionState.current_head_id !== assembly.id ? <div>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => onNavigate(revisionState.current_head_id)}>Inspect current successor</Button>
+      </div> : null}
+
+      <section className="grid gap-2" aria-label="Contributor changes">
+        {revisionState?.linking_error ? <p role="alert" className="text-destructive">Linking failed: {revisionState.linking_error}. This saved revision cannot be used live until linking and fresh approval succeed.</p> : null}
+        {revisionSubmitting ? <p role="status">Saving revision and linking evidence…</p> : null}
+        {revisionError ? <div role="alert" className="grid gap-2 text-destructive"><p>{revisionError} Refresh proposal before trying again.</p><div><Button size="sm" variant="outline" disabled={busy} onClick={onRefresh}>Refresh proposal</Button></div></div> : null}
+        {canRetryRevision ? <div><Button size="sm" variant="outline" disabled={busy || !fresh} onClick={onRetryRevision}>Retry revision linking</Button></div> : null}
+        {canRevise ? <>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy || !fresh} onClick={() => setRevisionTarget({ action: "add", claimType: "gap" })}>Add gap</Button>
+            <Button size="sm" variant="outline" disabled={busy || !fresh} onClick={() => setRevisionTarget({ action: "add", claimType: "tactic" })}>Add tactic</Button>
+          </div>
+          {revisionTarget ? <AssemblyRevisionForm
+            key={`${revisionTarget.action}:${revisionTarget.action === "add" ? revisionTarget.claimType : revisionTarget.item.id}`}
+            target={revisionTarget} sourceIds={assembly.source_file_ids} evidenceBlocks={evidenceBlocks}
+            disabled={busy || !fresh} onSave={onRevise} onCancel={() => setRevisionTarget(null)}
+          /> : null}
+        </> : null}
+        {!fresh && !revisionError && !reviewError ? <div><p className="text-muted-foreground">Refresh proposal before making changes or deciding.</p><Button size="sm" variant="outline" disabled={busy} onClick={onRefresh}>Refresh proposal</Button></div> : null}
       </section>
 
       {reviewState?.latest_decision ? <ReviewDecision decision={reviewState.latest_decision} /> : null}
@@ -417,16 +504,18 @@ function AssemblyDetail({
           onFormChange={onFormChange}
           onSubmit={onReview}
           onRefresh={onRefresh}
+          busy={busy}
+          fresh={fresh}
         />
       </section>
 
-      <section className="grid gap-2" aria-label="Selected generated items">
-        <p className="font-medium">Selected generated items</p>
+      <section className="grid gap-2" aria-label="Selected items">
+        <p className="font-medium">Selected items</p>
         {assembly.items.length === 0 ? (
-          <p className="text-muted-foreground">No generated gaps or tactics were selected.</p>
+          <p className="text-muted-foreground">No gaps or tactics were selected.</p>
         ) : (
           <ol className="grid gap-3">
-            {assembly.items.map((item) => <SelectedItem key={item.id} item={item} />)}
+            {assembly.items.map((item) => <SelectedItem key={item.id} item={item} canRevise={canRevise} disabled={busy || !fresh} onChange={setRevisionTarget} />)}
           </ol>
         )}
       </section>
@@ -520,6 +609,8 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   const [reviewForms, setReviewForms] = useState<Record<string, ReviewFormState>>({});
   const [reviewSubmitting, setReviewSubmitting] = useState<ReviewSubmitState>(null);
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
+  const [revisionSubmitting, setRevisionSubmitting] = useState<string | null>(null);
+  const [revisionErrors, setRevisionErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     mounted.current = true;
@@ -532,6 +623,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     };
   }, []);
 
+  function invalidateControls() {
+    // Inspection can stay visible, but only a new detail response restores mutation authority.
+    detailRequestToken.current += 1;
+    setDetailLoading(null);
+    setDetails(current => Object.fromEntries(Object.entries(current).map(([id, detail]) => [id, { ...detail, fresh: false }])));
+  }
+
   async function loadList() {
     const token = listRequestToken.current + 1;
     listRequestToken.current = token;
@@ -540,12 +638,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     try {
       const query = new URLSearchParams({ workspace_id: workspaceId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
-      const body = await response.json() as { assemblies?: Assembly[]; error?: string };
+      const body = await response.json() as { assemblies?: Assembly[]; revision_states?: Record<string, AssemblyRevisionState>; error?: string };
       if (!mounted.current || token !== listRequestToken.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not load complete proposals");
-      setList({ assemblies: body.assemblies ?? [] });
+      setList({ assemblies: body.assemblies ?? [], revisionStates: body.revision_states ?? {} });
     } catch (cause) {
       if (!mounted.current || token !== listRequestToken.current) return;
+      invalidateControls();
       setListError(cause instanceof Error ? cause.message : "Could not load complete proposals");
     } finally {
       if (mounted.current && token === listRequestToken.current) setListLoading(false);
@@ -563,22 +662,39 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     });
     setDetailError((current) => ({ ...current, [assemblyId]: "" }));
     setReviewErrors((current) => ({ ...current, [assemblyId]: "" }));
+    setRevisionErrors((current) => ({ ...current, [assemblyId]: "" }));
     try {
       const query = new URLSearchParams({ workspace_id: workspaceId, assembly_id: assemblyId });
       const response = await fetch(`/api/accuracy/assemblies?${query}`, { cache: "no-store" });
-      const body = await response.json() as { assembly?: Assembly; review_state?: AssemblyReviewState; can_review?: boolean; error?: string };
+      const body = await response.json() as {
+        assembly?: Assembly; review_state?: AssemblyReviewState; revision_state?: AssemblyRevisionState;
+        evidence_blocks?: RevisionEvidenceBlock[]; can_review?: boolean; can_revise?: boolean; can_retry_revision?: boolean; error?: string;
+      };
       if (!mounted.current || token !== detailRequestToken.current) return;
       if (!response.ok || !body.assembly) throw new Error(body.error ?? "Could not load proposal");
+      const fetchedAssembly = body.assembly;
+      setList(current => ({
+        assemblies: current?.assemblies.some(row => row.id === assemblyId)
+          ? current.assemblies.map(row => row.id === assemblyId ? fetchedAssembly : row)
+          : [...(current?.assemblies ?? []), fetchedAssembly],
+        revisionStates: { ...(current?.revisionStates ?? {}), ...(body.revision_state ? { [assemblyId]: body.revision_state } : {}) },
+      }));
       setDetails((current) => ({
         ...current,
         [assemblyId]: {
           assembly: body.assembly!,
           reviewState: body.review_state ?? null,
           canReview: Boolean(body.can_review),
+          canRevise: Boolean(body.can_revise),
+          canRetryRevision: Boolean(body.can_retry_revision),
+          revisionState: body.revision_state ?? null,
+          evidenceBlocks: body.evidence_blocks ?? [],
+          fresh: true,
         },
       }));
     } catch (cause) {
       if (!mounted.current || token !== detailRequestToken.current) return;
+      invalidateControls();
       setDetailError((current) => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not load proposal" }));
     } finally {
       if (mounted.current && token === detailRequestToken.current) setDetailLoading(null);
@@ -597,7 +713,7 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
 
   async function submitReview(assemblyId: string, decision: "approve" | "reject") {
     const detail = details[assemblyId];
-    if (reviewInFlight.current || !detail?.reviewState) return;
+    if (reviewInFlight.current || !detail?.reviewState || !detail.fresh || !detail.canReview) return;
     const form = reviewForm(detail.assembly, detail.reviewState);
     const advisory_overrides = (detail.reviewState.advisories ?? []).map((finding) => ({
       code: finding.code,
@@ -626,11 +742,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
       const body = await response.json() as { error?: string };
       if (!mounted.current || token !== reviewRequestToken.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not record review decision");
+      invalidateControls();
       await loadList();
       if (!mounted.current || token !== reviewRequestToken.current) return;
       await loadDetail(assemblyId);
     } catch (cause) {
       if (!mounted.current || token !== reviewRequestToken.current) return;
+      invalidateControls();
       setReviewErrors((current) => ({
         ...current,
         [assemblyId]: cause instanceof Error ? cause.message : "Could not record review decision",
@@ -643,6 +761,55 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
     }
   }
 
+  async function submitRevision(assemblyId: string, change?: AssemblyRevisionChange) {
+    const detail = details[assemblyId];
+    if (reviewInFlight.current || !detail?.fresh || !detail.revisionState || !(change ? detail.canRevise : detail.canRetryRevision)) return;
+    const token = reviewRequestToken.current + 1;
+    reviewRequestToken.current = token;
+    reviewInFlight.current = true;
+    setRevisionSubmitting(assemblyId);
+    setRevisionErrors(current => ({ ...current, [assemblyId]: "" }));
+    setReviewErrors(current => ({ ...current, [assemblyId]: "" }));
+    try {
+      const request = change ? {
+        action: "revise", workspace_id: workspaceId, parent_assembly_id: assemblyId,
+        expected_fingerprint: detail.assembly.fingerprint, expected_head_id: detail.revisionState.current_head_id, change,
+      } : {
+        action: "retry_revision", workspace_id: workspaceId, assembly_id: assemblyId,
+        expected_fingerprint: detail.assembly.fingerprint, expected_head_id: detail.revisionState.current_head_id,
+      };
+      const response = await fetch("/api/accuracy/assemblies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+      const body = await response.json() as { assembly?: Assembly; revision_state?: AssemblyRevisionState; error?: string };
+      if (!mounted.current || token !== reviewRequestToken.current) return;
+      if (!response.ok || !body.assembly) throw new Error(body.error ?? "Could not save revision");
+      const successor = body.assembly;
+      invalidateControls();
+      // Keep the saved target navigable even if the following list refresh fails.
+      setList(current => ({
+        assemblies: [successor, ...(current?.assemblies ?? []).filter(row => row.id !== successor.id)],
+        revisionStates: { ...(current?.revisionStates ?? {}), ...(body.revision_state ? { [successor.id]: body.revision_state } : {}) },
+      }));
+      setOpenAssemblyId(successor.id);
+      await loadList();
+      if (!mounted.current || token !== reviewRequestToken.current) return;
+      await loadDetail(successor.id);
+    } catch (cause) {
+      if (!mounted.current || token !== reviewRequestToken.current) return;
+      invalidateControls();
+      setRevisionErrors(current => ({ ...current, [assemblyId]: cause instanceof Error ? cause.message : "Could not save revision" }));
+    } finally {
+      if (mounted.current && token === reviewRequestToken.current) {
+        reviewInFlight.current = false;
+        setRevisionSubmitting(null);
+      }
+    }
+  }
+
+  function navigateDetail(assemblyId: string) {
+    setOpenAssemblyId(assemblyId);
+    void loadDetail(assemblyId);
+  }
+
   function toggleList() {
     const next = !expanded;
     if (next && !list && !listLoading) void loadList();
@@ -652,8 +819,13 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
   function toggleDetail(assemblyId: string) {
     const next = openAssemblyId === assemblyId ? null : assemblyId;
     setOpenAssemblyId(next);
-    if (next && !details[assemblyId] && detailLoading !== assemblyId) void loadDetail(assemblyId);
+    if (next && (!details[assemblyId] || !details[assemblyId].fresh) && detailLoading !== assemblyId) void loadDetail(assemblyId);
   }
+
+  // A current-head pointer can refer to a successor created after the list was fetched.
+  // Keep its row visible while detail is loading or failing, before an authorized detail adds it.
+  const visibleAssemblyIds = (list?.assemblies ?? []).map(assembly => assembly.id);
+  if (openAssemblyId && !visibleAssemblyIds.includes(openAssemblyId)) visibleAssemblyIds.push(openAssemblyId);
 
   return (
     <section className="mb-6 grid gap-2 text-[12px]" aria-label="Complete assembly proposals">
@@ -677,49 +849,61 @@ function AssemblyHistoryPanel({ workspaceId }: { workspaceId: string }) {
               <Button size="sm" variant="outline" disabled={listLoading} onClick={() => void loadList()}>Retry proposals</Button>
             </div>
           ) : null}
-          {list && list.assemblies.length === 0 ? (
+          {list && visibleAssemblyIds.length === 0 ? (
             <p className="text-muted-foreground">No complete proposals recorded for this workspace.</p>
           ) : null}
-          {list && list.assemblies.length > 0 ? (
+          {visibleAssemblyIds.length > 0 ? (
             <ul className="grid gap-3">
-              {list.assemblies.map((assembly) => {
-                const detailId = `${listPanelId}-${assembly.id}`;
-                const open = openAssemblyId === assembly.id;
+              {visibleAssemblyIds.map((assemblyId) => {
+                const assembly = list?.assemblies.find(row => row.id === assemblyId);
+                const detailId = `${listPanelId}-${assemblyId}`;
+                const open = openAssemblyId === assemblyId;
                 return (
-                  <li key={assembly.id} className="border border-border bg-card/40 p-3">
-                    <ListSummary assembly={assembly} />
+                  <li key={assemblyId} className="border border-border bg-card/40 p-3">
+                    {assembly ? <ListSummary assembly={assembly} revisionState={list?.revisionStates[assemblyId]} /> : <p className="font-medium">Proposal {assemblyId}</p>}
                     <div className="mt-3">
                       <Button
                         size="sm"
                         variant="outline"
                         aria-expanded={open}
                         aria-controls={detailId}
-                        disabled={detailLoading !== null && detailLoading !== assembly.id}
-                        onClick={() => toggleDetail(assembly.id)}
+                        disabled={detailLoading !== null && detailLoading !== assemblyId}
+                        onClick={() => toggleDetail(assemblyId)}
                       >
-                        Inspect proposal {assembly.id}
+                        Inspect proposal {assemblyId}
                       </Button>
                     </div>
                     {open ? (
                       <div id={detailId}>
-                        {detailLoading === assembly.id ? <p role="status" className="mt-2">Loading proposal detail…</p> : null}
-                        {detailError[assembly.id] ? (
+                        {detailLoading === assemblyId ? <p role="status" className="mt-2">Loading proposal detail…</p> : null}
+                        {detailError[assemblyId] ? (
                           <div className="mt-2">
-                            <p role="alert" className="text-destructive">{detailError[assembly.id]}</p>
-                            <Button size="sm" variant="outline" disabled={detailLoading !== null} onClick={() => void loadDetail(assembly.id)}>Retry proposal</Button>
+                            <p role="alert" className="text-destructive">{detailError[assemblyId]}</p>
+                            <Button size="sm" variant="outline" disabled={detailLoading !== null} onClick={() => void loadDetail(assemblyId)}>Retry proposal</Button>
                           </div>
                         ) : null}
-                        {details[assembly.id] ? (
+                        {details[assemblyId] ? (
                           <AssemblyDetail
-                            assembly={details[assembly.id].assembly}
-                            reviewState={details[assembly.id].reviewState}
-                            canReview={details[assembly.id].canReview}
-                            form={reviewForm(details[assembly.id].assembly, details[assembly.id].reviewState)}
+                            assembly={details[assemblyId].assembly}
+                            reviewState={details[assemblyId].reviewState}
+                            canReview={details[assemblyId].canReview}
+                            form={reviewForm(details[assemblyId].assembly, details[assemblyId].reviewState)}
                             submitting={reviewSubmitting}
-                            reviewError={reviewErrors[assembly.id] || null}
-                            onFormChange={(form) => setReviewForms((current) => ({ ...current, [assembly.id]: form }))}
-                            onReview={(decision) => void submitReview(assembly.id, decision)}
-                            onRefresh={() => void loadDetail(assembly.id)}
+                            reviewError={reviewErrors[assemblyId] || null}
+                            onFormChange={(form) => setReviewForms((current) => ({ ...current, [assemblyId]: form }))}
+                            onReview={(decision) => void submitReview(assemblyId, decision)}
+                            onRefresh={() => void loadDetail(assemblyId)}
+                            revisionState={details[assemblyId].revisionState}
+                            evidenceBlocks={details[assemblyId].evidenceBlocks}
+                            canRevise={details[assemblyId].canRevise}
+                            canRetryRevision={details[assemblyId].canRetryRevision}
+                            fresh={details[assemblyId].fresh}
+                            busy={reviewSubmitting !== null || revisionSubmitting !== null}
+                            revisionSubmitting={revisionSubmitting === assemblyId}
+                            revisionError={revisionErrors[assemblyId] || null}
+                            onRevise={change => void submitRevision(assemblyId, change)}
+                            onRetryRevision={() => void submitRevision(assemblyId)}
+                            onNavigate={navigateDetail}
                           />
                         ) : null}
                       </div>
