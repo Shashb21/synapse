@@ -1,3 +1,4 @@
+import { sourceUnitHeader } from "../../domain/source-pages";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 
 /**
@@ -13,10 +14,12 @@ export const INVENTORY_PROPOSER_SYSTEM = `You extract tactics already committed 
 A tactic is a study, analysis, publication, registry entry, or dissemination activity that exists, is running, is planned, or is explicitly proposed in the document. Do not invent tactics and do not turn an evidence gap into a tactic.
 
 Rules:
+- external_id is the stated study, protocol or registry ID when supplied, otherwise null.
 - Every tactic must have origin "inventory" (found in the source — not created for a gap).
 - type must be one of: ${TACTIC_TYPES.join(", ")}.
 - status must be one of: ${[...TACTIC_STATUSES, "unknown"].join(", ")} and must reflect what the document says.
 - evidence_question is the decision-relevant question the tactic answers, in one sentence.
+- Slice headers use ORIGINAL block IDs and ORIGINAL character offsets. Cite only the supplied slice. Include char_start/char_end using original offsets, especially for repeated words.
 - provenance is one or more verbatim quote spans: source_file_id, block_id, quote (substring of that block's text).
 - Every tactic includes structured.version=1 and description, objective, owner, timing, outputs, lifecycle.
 - Each field is {state:"known",value:...,provenance:[...]} with its OWN supporting original block spans, or {state:"unknown",value:null,reason:"not_stated",provenance:[]}. Never invent an owner, date, deliverable or evidence. Missing fields remain unknown; these are suggestions, never human validation.
@@ -30,18 +33,17 @@ export function inventoryProposerUser(args: {
   workspace_id: string;
   source_file_id: string;
   block_ids: string[];
-  blocks: { id: string; heading: string | null; text: string }[];
+  blocks: { id: string; heading: string | null; text: string; char_start?: number; char_end?: number }[];
   hints: string;
   critiques: string[];
 }): string {
   const blockSection = args.blocks
-    .map((b) => `### block_id=${b.id}${b.heading ? ` · ${b.heading}` : ""}\n${b.text}`)
-    .join("\n\n")
-    .slice(0, 40_000);
+    .map((b) => `${b.char_start === undefined ? `### block_id=${b.id}${b.heading ? ` · ${b.heading}` : ""}\n` : sourceUnitHeader({ block_id: b.id, heading: b.heading, char_start: b.char_start, char_end: b.char_end! })}${b.text}`)
+    .join("\n\n");
   return [
     `workspace_id=${args.workspace_id}`,
     `source_file_id=${args.source_file_id}`,
-    args.block_ids.length ? `target_block_ids: ${args.block_ids.join(", ")}` : "",
+    args.block_ids.length && !args.blocks.some(b => b.char_start !== undefined) ? `target_block_ids: ${args.block_ids.join(", ")}` : "",
     args.hints ? `\n${args.hints}\n` : "",
     args.critiques.length ? `Critic issues to fix:\n${args.critiques.map((c) => `- ${c}`).join("\n")}` : "",
     "Parse blocks:",

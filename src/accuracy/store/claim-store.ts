@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
@@ -208,9 +208,11 @@ export async function listClaims(
 export async function listActiveSourceClaims(
   workspace_id: string,
   source_file_id: string,
+  opts?: { for_update?: boolean },
 ): Promise<AccuracyClaimRow[]> {
   await ensureAccuracySchema();
-  const rows = await accuracyDb()
+  if (opts?.for_update && !accuracyTransactionActive()) throw new Error("Source claim locks require an Accuracy transaction.");
+  const query = accuracyDb()
     .select()
     .from(t.accuracyClaims)
     .where(and(
@@ -218,6 +220,7 @@ export async function listActiveSourceClaims(
       eq(t.accuracyClaims.source_file_id, source_file_id),
       inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
     ));
+  const rows = await (opts?.for_update ? query.for("update") : query);
   return rows.filter(isActiveLedgerClaim);
 }
 

@@ -52,7 +52,7 @@ async function sourceFixture() {
 async function addSource(args: { workspace_id: string; org_id: string; filename: string }) {
   const source = await insertSourceFile({ workspace_id: args.workspace_id, org_id: args.org_id, filename: args.filename, mime: "text/plain", checksum: newId("checksum") });
   const block_id = newId("block");
-  await persistParseBlocks({ workspace_id: args.workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Second source evidence." }] });
+  await persistParseBlocks({ workspace_id: args.workspace_id, source_file_id: source.id, parser: "test", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Source evidence. Second source." }] });
   return { source_file_id: source.id, block_id };
 }
 

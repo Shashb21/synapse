@@ -14,15 +14,15 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import type { RequestIdentity } from "@/modules/auth/request";
 
 const { identity, closePool } = vi.hoisted(() => ({ identity: vi.fn(), closePool: vi.fn() }));
-// Keep real SQL and transactions, but permit concurrent transactions in this file.
-vi.mock("@/accuracy/store/db", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/accuracy/store/db")>();
+// Replace only the external pool; keep the Accuracy transaction context and real SQL.
+vi.mock("@/lib/iegp/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/iegp/db")>();
   const { default: postgres } = await import("postgres");
   const { drizzle } = await import("drizzle-orm/postgres-js");
   const client = postgres(process.env.DATABASE_URL!, { max: 2, connection: { application_name: "kan33-omission-actions-test" } });
   const database = drizzle(client);
   closePool.mockImplementation(() => client.end({ timeout: 5 }));
-  return { ...actual, accuracyDb: () => database };
+  return { ...actual, sharedDb: () => database };
 });
 afterAll(() => closePool());
 vi.mock("@/modules/auth/request", () => ({ requestIdentity: identity }));

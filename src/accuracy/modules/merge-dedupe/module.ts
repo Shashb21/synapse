@@ -1,3 +1,4 @@
+import { sourceEntityIdentities, sourceHash } from "../../domain/source-pages";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import type { AccuracyModuleContext, ModuleResult } from "@/accuracy/kernel/contracts";
@@ -45,7 +46,7 @@ function provenanceFromMeta(meta: AccuracyClaimMetadata): MergeProvenance[] {
   const out: MergeProvenance[] = [];
   for (const raw of meta.provenance) {
     if (!raw || typeof raw !== "object") continue;
-    const span = raw as { source_file_id?: unknown; block_id?: unknown; quote?: unknown };
+    const span = raw as { source_file_id?: unknown; block_id?: unknown; quote?: unknown; char_start?: unknown; char_end?: unknown };
     if (
       typeof span.source_file_id === "string" &&
       typeof span.block_id === "string" &&
@@ -55,6 +56,8 @@ function provenanceFromMeta(meta: AccuracyClaimMetadata): MergeProvenance[] {
         source_file_id: span.source_file_id,
         block_id: span.block_id,
         quote: span.quote,
+        ...(typeof span.char_start === "number" ? { char_start: span.char_start } : {}),
+        ...(typeof span.char_end === "number" ? { char_end: span.char_end } : {}),
       });
     }
   }
@@ -99,6 +102,8 @@ export function claimToMergeCandidate(
     source_file_id: claim.source_file_id,
     reference_pack_id: packFromClaim(claim, packBySource),
     external_id: externalIdFromMeta(meta),
+    source_revision: typeof meta.extraction_source_revision === "string" ? meta.extraction_source_revision : null,
+    source_entity_identity: typeof meta.extraction_identity === "string" ? meta.extraction_identity : null,
     tactic_status: asTacticLifecycle(meta.tactic_status) ?? asTacticLifecycle(claim.status),
     provenance: provenanceFromMeta(meta),
     structured: readStructuredFields(claim),
@@ -237,6 +242,8 @@ export async function applyMergeJudgment(inputs: MergeInputs, judgment: MergeJud
           return duplicate ? [readStructuredFields(duplicate)] : [];
         })),
         provenance: survivor.provenance,
+        extraction_aliases: [...new Map([row, ...absorbedIds.flatMap(id => byId.get(id) ? [byId.get(id)!] : [])]
+          .flatMap(claim => sourceEntityIdentities(claimMetadata(claim))).map(alias => [sourceHash(alias), alias])).values()],
         merged_from: mergedFrom,
         merged_into: null,
       }),
@@ -344,4 +351,4 @@ export const pairGenerateModule = mechanicalModule({
   run: async () => ({ output: { pairs: [] }, summary: "Pair generator stub" }),
 });
 
-mergeDedupeModule.manifest.version = "0.2.0";
+mergeDedupeModule.manifest.version = "0.3.0";

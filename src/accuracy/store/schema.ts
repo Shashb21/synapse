@@ -1,3 +1,4 @@
+import type { SourceProgress } from "../domain/source-pages";
 import { boolean, index, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
 
 /** Multi-tenant accuracy stack — one workspace = one IEGP. */
@@ -190,6 +191,7 @@ export const accuracyExtractionBatches = pgTable("accuracy_extraction_batches", 
   run_ids: jsonb("run_ids").$type<string[]>().notNull(),
   created_claim_ids: jsonb("created_claim_ids").$type<string[]>().notNull(),
   drafts_persisted: boolean("drafts_persisted").notNull().default(false),
+  source_progress: jsonb("source_progress").$type<SourceProgress>(),
   created_at: text("created_at").notNull(),
 }, (table) => ({
   source: index("accuracy_extraction_batches_source_idx").on(table.workspace_id, table.source_file_id),
@@ -528,4 +530,5 @@ export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS preparation_token text`,
   `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS preparation_started_at text`,
   `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS prepared_merge jsonb`,
+  `ALTER TABLE accuracy_extraction_batches ADD COLUMN IF NOT EXISTS source_progress jsonb`,
 ];

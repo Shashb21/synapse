@@ -1,3 +1,5 @@
+import { extractSourcePages, resolvedExtractionClaimIds, type SourceExtractOutput, type SourceExtractKind } from "@/accuracy/store/source-extraction";
+import { getSourceFile } from "@/accuracy/store/source-store";
 /** Extract source drafts, pause applied batches for review, and safely resume downstream work. */
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
@@ -7,18 +9,12 @@ import {
   extractKeyGateJson,
   inspectLiveExtractGate,
 } from "@/accuracy/kernel/extract-gate";
-import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
-import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
 import type { RejectedCandidate } from "@/accuracy/domain/structured-fields";
-import { insertClaim } from "@/accuracy/store/claim-store";
-import { readParseBlocks } from "@/accuracy/store/parse-store";
-import { listSourceFiles } from "@/accuracy/store/source-store";
-import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
 import { and, eq, inArray } from "drizzle-orm";
 import { accuracyDb } from "@/accuracy/store/db";
 import * as tables from "@/accuracy/store/schema";
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
-import { createExtractionBatch, applyExtractionBatch, resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
+import { resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
 import { requestIdentity } from "@/modules/auth/request";
 import { assertCan, ForbiddenError } from "@/modules/auth/roles";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -39,7 +35,9 @@ registerAccuracyStack();
 
 const bodySchema = z.object({
   workspace_id: z.string().min(1),
-  source_file_id: z.string().min(1),
+  source_file_id: z.string().trim().min(1),
+  cursor: z.string().trim().min(1).max(1024).optional(),
+  block_ids: z.array(z.string().trim().min(1)).min(1).optional(),
   kinds: z
     .array(z.enum(["need", "inventory"]))
     .min(1)
@@ -52,7 +50,6 @@ const bodySchema = z.object({
 const resumeSchema = z.object({ action: z.literal("resume"), workspace_id: z.string().min(1), source_file_id: z.string().min(1),
   extraction_batch_id: z.string().min(1), idempotency_key: z.string().trim().min(1) });
 
-const MAX_EXTRACT_BLOCKS = 80;
 
 /**
  * Run need_extract and/or inventory_extract for a source file's parse blocks,
@@ -86,7 +83,7 @@ export async function POST(req: Request) {
           const downstream = await runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
             merge_id: journal.merge_operation_id, status_id: journal.status_operation_id, prepared_merge: prepared });
           return { ok: true, workspace_id: request.workspace_id, source_file_id: request.source_file_id,
-            extraction_batch_id: batch.id, gaps_inserted: runs.filter(run => run.call_kind === "need_extract").reduce((sum, run) => sum + run.count, 0),
+            extraction_batch_id: batch.id, source_progress: batch.source_progress, claim_ids: resolvedExtractionClaimIds(batch.created_claim_ids, downstream.merge.output.merges), gaps_inserted: runs.filter(run => run.call_kind === "need_extract").reduce((sum, run) => sum + run.count, 0),
             tactics_inserted: runs.filter(run => run.call_kind === "inventory_extract").reduce((sum, run) => sum + run.count, 0),
             merge: downstream.merge.output, statuses: downstream.status.output, runs: [...runs, ...downstream.runs] };
         } });
@@ -95,26 +92,7 @@ export async function POST(req: Request) {
     const body = bodySchema.parse(raw);
     const { org_id } = await requireLabWorkspace(body.workspace_id);
 
-    const sources = await listSourceFiles(body.workspace_id);
-    const source = sources.find((row) => row.id === body.source_file_id);
-    if (!source) {
-      return NextResponse.json({ ok: false, error: "Unknown source_file_id" }, { status: 404 });
-    }
-
-    const allBlocks = await readParseBlocks(body.workspace_id, body.source_file_id);
-    if (allBlocks.length === 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No parse blocks for this source — upload/re-parse before extracting.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const sorted = [...allBlocks].sort((a, b) => a.index - b.index);
-    const blocks = sorted.slice(0, MAX_EXTRACT_BLOCKS);
-    const block_ids = blocks.map((b) => b.id);
+    if (!await getSourceFile(body.workspace_id, body.source_file_id)) return NextResponse.json({ ok: false, error: "Unknown source_file_id" }, { status: 404 });
 
     const gate = await inspectLiveExtractGate();
     if (!gate.ready) {
@@ -123,110 +101,21 @@ export async function POST(req: Request) {
 
     const actor = await labActor();
 
-    const kinds = body.kinds;
-    const batch = await createExtractionBatch(body.workspace_id, body.source_file_id, kinds.map(kind => `${kind}_extract`));
-    const created_claim_ids: string[] = [];
-    const draftClaims: Array<Parameters<typeof insertClaim>[0]> = [];
-    let gaps_inserted = 0;
-    let tactics_inserted = 0;
-    const runs: Array<{
-      call_kind: string;
-      run_id: string;
-      summary: string;
-      count: number;
-      rejected_candidates?: RejectedCandidate[];
-    }> = [];
-
-    if (kinds.includes("need")) {
-      const result = await runAccuracyModule<NeedExtractOutput>({
-        call_kind: "need_extract",
-        agent_role: "proposer",
-        input: {
-          workspace_id: body.workspace_id,
-          source_file_id: body.source_file_id,
-          block_ids,
-        },
-        actor,
-        org_id,
-        workspace_id: body.workspace_id,
-      });
-      for (const gap of result.output.gaps) {
-        draftClaims.push({
-          id: gap.id,
-          workspace_id: body.workspace_id,
-          claim_type: "gap",
-          statement: gap.statement,
-          status: "draft",
-          validated: false,
-          source_file_id: body.source_file_id,
-          metadata: {
-            origin: "need_extract",
-            source_badge: "extract",
-            external_id: gap.external_id,
-            si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null,
-            provenance: gap.provenance, structured: gap.structured,
-            reference_pack_id: source.reference_pack_id ?? null,
-          },
-        });
-        created_claim_ids.push(gap.id);
-        gaps_inserted += 1;
-      }
-      runs.push({
-        call_kind: "need_extract",
-        run_id: result.run_id,
-        summary: result.summary,
-        count: result.output.gaps.length,
-        ...(result.output.rejected_candidates?.length ? { rejected_candidates: result.output.rejected_candidates } : {}),
-      });
+    const extracted = await extractSourcePages({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
+      kinds: body.kinds.map(kind => `${kind}_extract` as SourceExtractKind), block_ids: body.block_ids, cursor: body.cursor,
+      run: (call_kind, input, reserved_run_id) => runAccuracyModule<SourceExtractOutput>({ call_kind, input, reserved_run_id,
+        agent_role: "proposer", actor, org_id, workspace_id: body.workspace_id }) });
+    const { batch, runs } = extracted;
+    const source_progress = batch.source_progress!;
+    const gaps_inserted = runs.filter(run => run.call_kind === "need_extract").reduce((n, run) => n + run.count, 0);
+    const tactics_inserted = runs.filter(run => run.call_kind === "inventory_extract").reduce((n, run) => n + run.count, 0);
+    const outcome = { extraction_batch_id: batch.id, claim_ids: batch.created_claim_ids, source_progress, runs, gaps_inserted, tactics_inserted };
+    if (!source_progress.complete) {
+      const aiOff = aiOffFromError(extracted.failure) ?? await refuseWhenAiOff();
+      if (aiOff) return NextResponse.json({ ...await aiOff.json(), incomplete: true, ...outcome }, { status: 409 });
+      return NextResponse.json({ ok: false, incomplete: true, ...outcome,
+        error: extracted.failure instanceof Error ? extracted.failure.message : "Declared source pages or upstream parse units are incomplete." }, { status: 409 });
     }
-
-    if (kinds.includes("inventory")) {
-      const result = await runAccuracyModule<InventoryExtractOutput>({
-        call_kind: "inventory_extract",
-        agent_role: "proposer",
-        input: {
-          workspace_id: body.workspace_id,
-          source_file_id: body.source_file_id,
-          block_ids,
-        },
-        actor,
-        org_id,
-        workspace_id: body.workspace_id,
-      });
-      for (const tactic of result.output.tactics) {
-        draftClaims.push({
-          id: tactic.id,
-          workspace_id: body.workspace_id,
-          claim_type: "tactic",
-          statement: tactic.name,
-          status: tactic.status,
-          validated: false,
-          source_file_id: body.source_file_id,
-          metadata: {
-            origin: "inventory",
-            source_badge: "extract",
-            type: tactic.type,
-            evidence_question: tactic.evidence_question,
-            provenance: tactic.provenance, structured: tactic.structured,
-            tactic_status: tactic.status,
-            reference_pack_id: source.reference_pack_id ?? null,
-          },
-        });
-        created_claim_ids.push(tactic.id);
-        tactics_inserted += 1;
-      }
-      runs.push({
-        call_kind: "inventory_extract",
-        run_id: result.run_id,
-        summary: result.summary,
-        count: result.output.tactics.length,
-        ...(result.output.rejected_candidates?.length ? { rejected_candidates: result.output.rejected_candidates } : {}),
-      });
-    }
-
-    await applyExtractionBatch(batch, runs.map(run => run.run_id), created_claim_ids, async () => {
-      for (const claim of draftClaims) await insertClaim(claim);
-    });
     try {
       await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
       const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
@@ -235,7 +124,7 @@ export async function POST(req: Request) {
           const downstream = await runExtractionDownstream({ workspace_id: body.workspace_id, org_id, actor,
             merge_id: journal.merge_operation_id, status_id: journal.status_operation_id, prepared_merge: prepared });
           return { ok: true, workspace_id: body.workspace_id, source_file_id: body.source_file_id,
-            extraction_batch_id: batch.id, block_count: allBlocks.length, blocks_used: blocks.length,
+            extraction_batch_id: batch.id, claim_ids: resolvedExtractionClaimIds(batch.created_claim_ids, downstream.merge.output.merges), source_progress, block_count: source_progress.expected_blocks, blocks_used: source_progress.block_ids.length,
             gaps_inserted, tactics_inserted, merge: downstream.merge.output, statuses: downstream.status.output,
             runs: [...runs, ...downstream.runs], stub: gate.stub, provider_id: gate.stub ? null : gate.provider_id,
             provider_label: gate.stub ? null : gate.provider_label, auth: gate.stub ? null : gate.auth };
@@ -243,7 +132,7 @@ export async function POST(req: Request) {
       return NextResponse.json(response);
     } catch (error) {
       if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers,
-        extraction_batch_id: batch.id, runs, gaps_inserted, tactics_inserted }, { status: 409 });
+        ...outcome }, { status: 409 });
       throw error;
     }
   } catch (error) {

@@ -1,3 +1,4 @@
+import { sourcePageInputSchema, resolveSourcePage, locatePageEvidence, sourcePromptUser } from "../../domain/source-pages";
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { inspectQuoteSpans, runShallowAgenticCycle } from "../../kernel/agentic";
@@ -21,6 +22,7 @@ const tacticTypeSchema = z.enum(TACTIC_TYPES);
 export const inventoryTacticSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
+  external_id: z.string().nullable().optional(),
   type: tacticTypeSchema,
   status: tacticStatusSchema,
   evidence_question: z.string().min(1),
@@ -36,12 +38,14 @@ export const inventoryExtractOutputSchema = z.object({
   source_file_id: z.string(),
   tactics: z.array(inventoryTacticSchema),
   rejected_candidates: z.array(rejectedCandidateSchema).optional(),
+  source_complete: z.boolean().optional(),
 });
 
 export type InventoryExtractOutput = z.infer<typeof inventoryExtractOutputSchema>;
 
 const proposerTacticSchema = z.object({
   name: z.string(),
+  external_id: z.string().nullable().optional(),
   type: z.string(),
   status: z.string().default("unknown"),
   evidence_question: z.string(),
@@ -128,7 +132,7 @@ function judgeDraft(draft: InventoryDraft, source_file_id: string, blocks: Param
       Object.assign(structured, { lifecycle: { state: "known", value: tactic.status, provenance: tactic.provenance ?? [] } });
     }
     const parsed = inventoryTacticSchema.safeParse({ id: newId("tac"), name: tactic.name.trim(), type: tactic.type,
-      status: tactic.status, evidence_question: tactic.evidence_question.trim(), origin: "inventory",
+      external_id: tactic.external_id?.trim() || null, status: tactic.status, evidence_question: tactic.evidence_question.trim(), origin: "inventory",
       provenance: tactic.provenance ?? [], structured });
     let error = parsed.success ? validateFieldEvidence({ structured: parsed.data.structured,
       provenance: parsed.data.provenance, source_file_id, blocks })
@@ -159,14 +163,14 @@ async function proposeInventory(
   }
   const raw = await completeJson(ctx.complete, {
     system: INVENTORY_PROPOSER_SYSTEM,
-    user: inventoryProposerUser({
+    user: sourcePromptUser(INVENTORY_PROPOSER_SYSTEM, inventoryProposerUser({
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
       block_ids,
       blocks,
       hints: "",
       critiques: round === 0 ? [] : critiques,
-    }),
+    })),
     purpose: `inventory_extract:proposer:r${round}`,
   });
   if (round > 0 && prior && (!raw || (raw as { tactics?: unknown[] }).tactics?.length === 0)) {
@@ -184,14 +188,18 @@ export const inventoryExtractModule = agenticModule({
     workspace_id: z.string(),
     source_file_id: z.string(),
     block_ids: z.array(z.string()),
+    source_page: sourcePageInputSchema.optional(),
   }),
   outputSchema: inventoryExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = isTestStub();
-    const blocks = stub ? [] : (input.block_ids.length
+    const originalBlocks = stub ? [] : (input.block_ids.length
       ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
       : await readParseBlocks(input.workspace_id, input.source_file_id))
       .filter((row) => row.source_file_id === input.source_file_id);
+    const pageBlocks = input.source_page && !stub ? resolveSourcePage(originalBlocks, input.source_page) : undefined;
+    const blocks = pageBlocks ?? originalBlocks;
+    let sourceChecked = stub;
     const block_ids = blocks.map((block) => block.id);
     const availableIds = new Set(blocks.map((block) => block.id));
     const missingIds = input.block_ids.filter((id) => !availableIds.has(id));
@@ -230,6 +238,7 @@ export const inventoryExtractModule = agenticModule({
         const assessment = await inspectSnapshotCompleteness({
           blocks, items, prior_open_issues, complete: ctx.complete,
         });
+        sourceChecked = assessment.risk_level !== "check_failed" && assessment.unchecked_block_ids.length === 0 && missingIds.length === 0;
         if (missingIds.length === 0) return assessment;
         return { ...assessment,
           risk_level: assessment.risk_level === "check_failed" ? "check_failed" : "important" as const,
@@ -246,11 +255,22 @@ export const inventoryExtractModule = agenticModule({
     ctx.run.note("agentic:trace", cycle.trace);
 
     const { tactics, rejected_candidates } = stub ? { tactics: [], rejected_candidates: [] } : judgeDraft(cycle.final, input.source_file_id, blocks);
+    if (input.source_page && !stub) {
+      const resolved = tactics.flatMap((candidate, index) => {
+        try { return [locatePageEvidence(candidate, pageBlocks!)]; }
+        catch (error) {
+          rejected_candidates.push({ index, field: "provenance", reason: error instanceof Error ? error.message : "invalid_page_evidence" });
+          return [];
+        }
+      });
+      tactics.splice(0, tactics.length, ...resolved);
+    }
     if (rejected_candidates.length) ctx.run.note("extract:rejected_candidates", rejected_candidates);
     const output = {
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
       tactics,
+      source_complete: sourceChecked && rejected_candidates.length === 0,
       ...(rejected_candidates.length ? { rejected_candidates } : {}),
     };
 
@@ -263,4 +283,4 @@ export const inventoryExtractModule = agenticModule({
   },
 });
 
-inventoryExtractModule.manifest.version = "0.2.0";
+inventoryExtractModule.manifest.version = "0.3.0";

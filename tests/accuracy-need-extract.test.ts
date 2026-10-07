@@ -220,6 +220,7 @@ describe("need extract module", () => {
       workspace_id: "ws-test",
       source_file_id: "src-1",
       gaps: [],
+      source_complete: true,
     });
     expect(result.summary).toContain("SYNAPSE_TEST_STUB_LLM");
   });

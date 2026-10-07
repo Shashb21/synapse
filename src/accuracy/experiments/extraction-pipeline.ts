@@ -5,21 +5,15 @@ import type { Actor, CallKind, ExperimentCycleControl } from "@/accuracy/kernel/
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule, type AccuracyRunResult, type PreparedAccuracyMerge } from "@/accuracy/kernel/run";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
-import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
-import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
-import { siThemeFromGapId } from "@/accuracy/domain/ledger-filters";
-import { insertClaim } from "@/accuracy/store/claim-store";
-import { readParseBlocks } from "@/accuracy/store/parse-store";
-import { getSourceFile } from "@/accuracy/store/source-store";
-import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
+import { resumeExtractionBatch, ExtractionBatchError } from "@/accuracy/store/extraction-batch-store";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { getExperiment, recordExperimentCall, recordVersionEvaluation } from "./records";
 import { newId } from "@/modules/kernel/ids";
 
-const MAX_EXTRACT_BLOCKS = 80;
+import { extractSourcePages, type SourceExtractOutput } from "@/accuracy/store/source-extraction";
 
 export type PipelineExperimentContext = {
   workspace_id: string;
@@ -106,25 +100,11 @@ async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: Ca
 
 /** Run inventory, needs, merge, and status for one copied source using the production batch journal. */
 export async function runExtractionPipelineForSource(context: PipelineExperimentContext, source_file_id: string): Promise<void> {
-  const source = await getSourceFile(context.workspace_id, source_file_id);
-  if (!source) throw new Error(`Unresolved copied source_file_id: ${source_file_id}`);
-  const blocks = (await readParseBlocks(context.workspace_id, source_file_id)).sort((a, b) => a.index - b.index).slice(0, MAX_EXTRACT_BLOCKS);
-  if (!blocks.length) throw new Error("No parse blocks for copied source.");
-  const input = { workspace_id: context.workspace_id, source_file_id, block_ids: blocks.map(block => block.id) };
-  const batch = await createExtractionBatch(context.workspace_id, source_file_id, ["inventory_extract", "need_extract"]);
-  const inventory = await runAndRetain<InventoryExtractOutput>(context, "inventory_extract", input);
-  const needs = await runAndRetain<NeedExtractOutput>(context, "need_extract", input);
-  const drafts: Array<Parameters<typeof insertClaim>[0]> = [
-    ...inventory.output.tactics.map(tactic => ({ id: tactic.id, workspace_id: context.workspace_id, claim_type: "tactic" as const, statement: tactic.name,
-      status: tactic.status, validated: false, source_file_id, metadata: { origin: "inventory", source_badge: "extract", type: tactic.type,
-        evidence_question: tactic.evidence_question, provenance: tactic.provenance, structured: tactic.structured, tactic_status: tactic.status, reference_pack_id: source.reference_pack_id ?? null } })),
-    ...needs.output.gaps.map(gap => ({ id: gap.id, workspace_id: context.workspace_id, claim_type: "gap" as const, statement: gap.statement,
-      status: "draft", validated: false, source_file_id, metadata: { origin: "need_extract", source_badge: "extract", external_id: gap.external_id,
-        si_theme: siThemeFromGapId(gap.external_id)?.slug ?? null, provenance: gap.provenance, structured: gap.structured, reference_pack_id: source.reference_pack_id ?? null } })),
-  ];
-  await applyExtractionBatch(batch, [inventory.run_id, needs.run_id], drafts.map(draft => draft.id!), async () => {
-    for (const draft of drafts) await insertClaim(draft);
-  });
+  const extracted = await extractSourcePages({ workspace_id: context.workspace_id, source_file_id, kinds: ["inventory_extract", "need_extract"],
+    run: (kind, input, run_id) => runAndRetain<SourceExtractOutput>(context, kind, input, run_id) });
+  const batch = extracted.batch;
+  if (extracted.failure) throw extracted.failure;
+  if (!batch.source_progress?.complete) throw new ExtractionBatchError("source_incomplete", "Declared source pages or upstream parse units are incomplete.");
   const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null; merge: AccuracyRunResult<MergeDedupeOutput> | null; status: AccuracyRunResult<StatusDeriveOutput> | null } = { current: null, merge: null, status: null };
   try {
     await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, merge_context: { org_id: context.org_id, actor: context.actor, evaluation_context: "experiment" },

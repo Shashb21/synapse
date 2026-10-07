@@ -11,7 +11,7 @@ import { emptyGapStructuredFields, emptyTacticStructuredFields } from "@/accurac
 import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 
 /** A persisted decision; its request fingerprint protects idempotent retries. */
@@ -26,7 +26,7 @@ export type OmissionReviewItem = {
   issue: SuspectedOmission; latest_action: OmissionAction | null; blocking: boolean;
 };
 type Executor = Pick<ReturnType<typeof accuracyDb>, "select" | "insert" | "update" | "execute">;
-type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"] };
+type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"]; batch_id: string; batch_created_at: string; page_id: string };
 
 /** Human importance decisions override the model default until a closing action. */
 function isBlocking(issue: SuspectedOmission, action: OmissionAction | null): boolean {
@@ -49,20 +49,23 @@ async function appliedRuns(workspace_id: string, d: Executor = accuracyDb()): Pr
     if (!input || input.workspace_id !== workspace_id || typeof input.source_file_id !== "string"
       || (input.call_kind !== undefined && input.call_kind !== run.call_kind)) return [];
     const source_file_id = input.source_file_id;
-    if (!batches.some((batch) => batch.source_file_id === source_file_id
-      && batch.requested_kinds.includes(run.call_kind) && batch.run_ids.includes(run.id))) return [];
-    return [{ ...run, source_file_id, call_kind: run.call_kind }];
+    const batch = batches.find(batch => batch.source_file_id === source_file_id && batch.requested_kinds.includes(run.call_kind) && batch.run_ids.includes(run.id));
+    if (!batch) return [];
+    const page = batch.source_progress?.pages.find(p => p.attempts[run.call_kind]?.run_id === run.id);
+    if (batch.source_progress && (!page || (input.source_page as { id?: string } | undefined)?.id !== page.id)) return [];
+    return [{ ...run, source_file_id, call_kind: run.call_kind, batch_id: batch.id, batch_created_at: batch.created_at, page_id: page?.id ?? "legacy" }];
   });
 }
 
-/** Select the newest successfully applied run separately for each source and kind. */
+/** Keep every accepted page of the newest applied batch for each source/kind. */
 function currentRuns(runs: AppliedRun[]): AppliedRun[] {
-  const seen = new Set<string>();
-  return runs.filter((run) => {
+  const sorted = [...runs].sort((a, b) => b.batch_created_at.localeCompare(a.batch_created_at) || b.batch_id.localeCompare(a.batch_id));
+  const latest = new Map<string, string>();
+  for (const run of sorted) {
     const key = JSON.stringify([run.source_file_id, run.call_kind]);
-    if (seen.has(key)) return false;
-    seen.add(key); return true;
-  });
+    if (!latest.has(key)) latest.set(key, run.batch_id);
+  }
+  return runs.filter(run => latest.get(JSON.stringify([run.source_file_id, run.call_kind])) === run.batch_id);
 }
 
 /** Return immutable decisions oldest first, scoped to their parent workspace/run.
@@ -203,7 +206,8 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
     confirmed_distinct: input.action === "add" ? input.confirmed_distinct ?? false : false,
     new_importance: input.action === "reclassify" ? input.new_importance : null });
   await ensureAccuracySchema();
-  return accuracyDb().transaction(async (tx) => {
+  return withAccuracyTransaction(async () => {
+    const tx = accuracyDb();
     // Serialize this workspace's omission decisions, including shared claim provenance and request keys.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${input.workspace_id}`}, 0))`);
     const parents = await tx.select().from(t.accuracyModuleRuns).where(and(

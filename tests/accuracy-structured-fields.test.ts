@@ -303,8 +303,9 @@ describe("source-backed structured extraction", () => {
         const response = await extractPost(new Request("http://localhost/api/accuracy/extract", { method: "POST",
           headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) }));
         const body = await response.json();
-        expect(body).toMatchObject({ ok: true, gaps_inserted: 1, tactics_inserted: mode === "production_rejected" ? 0 : 1 });
-        expect(response.status).toBe(200);
+        expect(body).toMatchObject({ ok: mode !== "production_rejected", gaps_inserted: 1, tactics_inserted: mode === "production_rejected" ? 0 : 1 });
+        expect(response.status).toBe(mode === "production_rejected" ? 409 : 200);
+        if (mode === "production_rejected") expect(body.source_progress).toMatchObject({ complete: false, next_cursor: expect.any(String) });
         if (mode === "production_rejected") {
           expect(body.runs.find((run: { call_kind: string }) => run.call_kind === "inventory_extract")).toMatchObject({
             count: 0, rejected_candidates: [{ index: 0, field: "structured.owner", reason: "quote_not_substring" }] });

@@ -5,7 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { GET as omissionGet } from "@/app/api/accuracy/omissions/route";
 import { POST } from "@/app/api/accuracy/extract/route";
-import { registerAccuracyStack } from "@/accuracy";
+import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { activateAccuracyModule, activeAccuracyModuleId, registerAccuracyModule } from "@/accuracy/kernel/registry";
 import { mechanicalModule } from "@/accuracy/modules/_factory";
 import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module";
@@ -23,7 +23,7 @@ import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omi
 import * as claimStore from "@/accuracy/store/claim-store";
 import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
-import { applyExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
+import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
 const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
@@ -347,8 +347,19 @@ describe("extraction omission resume", () => {
   });
   it("does not supersede a blocker when a successful extraction's draft cannot persist", async () => {
     const scope = await fixture(); const body = await paused(scope);
-    const claims = await listClaims(scope.workspace_id); installExtractor(false, [newId("gap"), claims[0].id]);
-    expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
+    const claims = await listClaims(scope.workspace_id); installExtractor(false);
+    const suffix = crypto.randomUUID().replace(/-/g, "");
+    const fn = `page_failure_${suffix}`;
+    await accuracyDb().execute(sql.raw(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.workspace_id = '${scope.workspace_id}' THEN RAISE EXCEPTION 'simulated page write interruption'; END IF; RETURN NEW; END $$`));
+    await accuracyDb().execute(sql.raw(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON accuracy_claims FOR EACH ROW EXECUTE FUNCTION ${fn}()`));
+    try {
+      const response = await post({ ...scope, kinds: ["need"] });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ incomplete: true, source_progress: { complete: false, failed_units: 1 } });
+    } finally {
+      await accuracyDb().execute(sql.raw(`DROP TRIGGER ${fn} ON accuracy_claims`));
+      await accuracyDb().execute(sql.raw(`DROP FUNCTION ${fn}()`));
+    }
     expect(await listClaims(scope.workspace_id)).toEqual(claims);
     expect(await listBlockingOmissions(scope.workspace_id)).toEqual([expect.objectContaining({ run_id: body.runs[0].run_id })]);
   });
@@ -473,8 +484,13 @@ describe("extraction omission resume", () => {
       run: async () => {
         // The first request's preflight has passed and its merge is already running.
         installExtractor(true);
-        const otherResponse = await post({ workspace_id: scope.workspace_id, source_file_id: otherSource.id, kinds: ["need"] });
-        expect(otherResponse.status).toBe(409);
+        // Publish an already-computed page during apply; never invoke extraction/providers in this transaction.
+        const batch = await createExtractionBatch(scope.workspace_id, otherSource.id, ["need_extract"]);
+        const result = await runAccuracyModule({ call_kind: "need_extract", workspace_id: scope.workspace_id, org_id: scope.org_id,
+          actor: { name: "Test", function: "heor" }, input: { workspace_id: scope.workspace_id, source_file_id: otherSource.id, block_ids: [otherBlock] } });
+        await applyExtractionBatch(batch, [result.run_id], [], async () => {
+          await insertClaim({ workspace_id: scope.workspace_id, source_file_id: otherSource.id, claim_type: "gap", statement: "Other source gap" });
+        });
         return { output: { merged: 0 }, summary: "Merge completed before the new blocker" };
       } }));
     activateAccuracyModule({ call_kind: kind, module_id: id, activated_by: "test" });

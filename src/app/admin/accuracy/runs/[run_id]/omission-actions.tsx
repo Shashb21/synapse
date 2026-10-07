@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { OmissionAction, OmissionReviewItem } from "@/accuracy/store/omission-review-store";
 
 type Review = { current: boolean; items: OmissionReviewItem[]; actions: OmissionAction[];
-  extraction_batch_id: string | null; source_file_id: string | null; downstream_state: "completed" | "resumable" | "stale" };
+  extraction_batch_id: string | null; source_file_id: string | null; downstream_state: "completed" | "resumable" | "stale" | "incomplete" };
 type Decision = "add" | "link_existing" | "dismiss" | "reclassify";
 const fieldClass = "w-full border border-border bg-background p-2 text-[12px] text-foreground";
 const buttonClass = "border border-border px-3 py-2 text-[12px] text-foreground disabled:opacity-50";
@@ -170,6 +170,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
     {!loading && !error && !review ? <p className="mt-2">No applied extraction review is available for this run.</p> : null}
     {review ? <>
       <p className="mt-2">{review.current ? "Current extraction" : "Superseded extraction · historical findings"} · Run {runId}</p>
+      {review.downstream_state === "incomplete" ? <p className="mt-1">Source extraction is incomplete. Retry remaining pages from the source before resuming downstream work.</p> : null}
       {review.downstream_state === "completed" ? <p className="mt-1">Downstream work completed.</p> : null}
       {review.current && blockers.length ? <p className="mt-1">Paused · {blockers.length} important unresolved {blockers.length === 1 ? "finding" : "findings"} in this workspace.</p> : null}
       <ul className="mt-2 grid gap-3">{review.items.map((item) => {

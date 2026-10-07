@@ -29,3 +29,19 @@ it("shows saved paused drafts, counts and review links and refreshes", async () 
 });
 it("retains ordinary success", async () => { await extract({ ok: true, gaps_inserted: 1, tactics_inserted: 0 }, 200); expect(host.textContent).toContain("Extracted 1 gap(s)"); expect(refresh).toHaveBeenCalledOnce(); });
 it("retains the provider connection gate", async () => { await extract({ ok: false, error: "Connect provider", connect_path: "/admin/control" }, 409); expect(host.textContent).toContain("Connect provider"); expect(host.querySelector('a[href="/admin/control"]')).not.toBeNull(); expect(refresh).not.toHaveBeenCalled(); });
+
+it("shows saved incomplete pages and retries with their source cursor", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ ok: false, incomplete: true, gaps_inserted: 1,
+    source_progress: { complete: false, next_cursor: "page-cursor", processed_units: 1, expected_units: 2 },
+    runs: [{ run_id: "page1", call_kind: "need_extract" }] }) }).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, gaps_inserted: 2 }) });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 90, gate: { ready: true, stub: true, connect_path: "/admin/control" } })));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.textContent).toContain("incomplete");
+  expect(host.textContent).toContain("1/2");
+  const retry = [...host.querySelectorAll("button")].find(b => b.textContent === "Retry remaining pages");
+  expect(retry).toBeDefined();
+  await act(async () => retry!.click());
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ workspace_id: "ws", source_file_id: "source", cursor: "page-cursor", kinds: ["need", "inventory"] });
+  expect(host.textContent).toContain("Extracted 2 gap(s)");
+});

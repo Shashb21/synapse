@@ -1,3 +1,4 @@
+import { sourceUnitHeader } from "../../domain/source-pages";
 import { SOURCE_EVIDENCE_CATEGORY_DOMAINS } from "@/lib/iegp/enums";
 
 /**
@@ -14,6 +15,7 @@ A gap is a decision-relevant evidence hole: what is unknown, insufficient, or no
 Rules:
 - statement is one clear sentence for the evidence need.
 - external_id is optional: use deck IDs when present (e.g. NSCLC_HI_04, NSCLC_CE_01). Null when none.
+- Slice headers use ORIGINAL block IDs and ORIGINAL character offsets. Cite only the supplied slice. Include char_start/char_end using original offsets, especially for repeated words.
 - provenance is one or more verbatim quote spans: source_file_id, block_id, quote (substring of that block's text).
 - Every gap includes structured.version=1 and these fields: description, indication, disease_setting, category, rationale, supporting_documents, interview_quotes.
 - Each field is {state:"known",value:...,provenance:[...]} with its OWN supporting original block spans, or {state:"unknown",value:null,reason:"not_stated",provenance:[]}. Never invent absent facts, quotations or evidence. These are suggestions, never human validation.
@@ -28,17 +30,16 @@ export function needProposerUser(args: {
   workspace_id: string;
   source_file_id: string;
   block_ids: string[];
-  blocks: { id: string; heading: string | null; text: string }[];
+  blocks: { id: string; heading: string | null; text: string; char_start?: number; char_end?: number }[];
   critiques: string[];
 }): string {
   const blockSection = args.blocks
-    .map((b) => `### block_id=${b.id}${b.heading ? ` · ${b.heading}` : ""}\n${b.text}`)
-    .join("\n\n")
-    .slice(0, 40_000);
+    .map((b) => `${b.char_start === undefined ? `### block_id=${b.id}${b.heading ? ` · ${b.heading}` : ""}\n` : sourceUnitHeader({ block_id: b.id, heading: b.heading, char_start: b.char_start, char_end: b.char_end! })}${b.text}`)
+    .join("\n\n");
   return [
     `workspace_id=${args.workspace_id}`,
     `source_file_id=${args.source_file_id}`,
-    args.block_ids.length ? `target_block_ids: ${args.block_ids.join(", ")}` : "",
+    args.block_ids.length && !args.blocks.some(b => b.char_start !== undefined) ? `target_block_ids: ${args.block_ids.join(", ")}` : "",
     args.critiques.length
       ? `Critic issues to fix:\n${args.critiques.map((c) => `- ${c}`).join("\n")}`
       : "",

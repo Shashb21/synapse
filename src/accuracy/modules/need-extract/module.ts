@@ -1,3 +1,4 @@
+import { sourcePageInputSchema, resolveSourcePage, locatePageEvidence, sourcePromptUser } from "../../domain/source-pages";
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { inspectQuoteSpans, runShallowAgenticCycle } from "../../kernel/agentic";
@@ -28,6 +29,7 @@ export const needExtractOutputSchema = z.object({
   source_file_id: z.string(),
   gaps: z.array(needGapSchema),
   rejected_candidates: z.array(rejectedCandidateSchema).optional(),
+  source_complete: z.boolean().optional(),
 });
 
 export type NeedExtractOutput = z.infer<typeof needExtractOutputSchema>;
@@ -127,13 +129,13 @@ async function proposeNeeds(
   }
   const raw = await completeJson(ctx.complete, {
     system: NEED_PROPOSER_SYSTEM,
-    user: needProposerUser({
+    user: sourcePromptUser(NEED_PROPOSER_SYSTEM, needProposerUser({
       workspace_id: input.workspace_id,
       source_file_id: input.source_file_id,
       block_ids,
       blocks,
       critiques: round === 0 ? [] : critiques,
-    }),
+    })),
     purpose: `need_extract:proposer:r${round}`,
   });
   if (round > 0 && prior && (!raw || (raw as { gaps?: unknown[] }).gaps?.length === 0)) {
@@ -151,14 +153,18 @@ export const needExtractModule = agenticModule({
     workspace_id: z.string(),
     source_file_id: z.string(),
     block_ids: z.array(z.string()),
+    source_page: sourcePageInputSchema.optional(),
   }),
   outputSchema: needExtractOutputSchema,
   run: async (input, ctx) => {
     const stub = isTestStub();
-    const blocks = stub ? [] : (input.block_ids.length
+    const originalBlocks = stub ? [] : (input.block_ids.length
       ? await readParseBlocksByIds(input.workspace_id, input.block_ids)
       : await readParseBlocks(input.workspace_id, input.source_file_id))
       .filter((row) => row.source_file_id === input.source_file_id);
+    const pageBlocks = input.source_page && !stub ? resolveSourcePage(originalBlocks, input.source_page) : undefined;
+    const blocks = pageBlocks ?? originalBlocks;
+    let sourceChecked = stub;
     const block_ids = blocks.map((block) => block.id);
     const availableIds = new Set(blocks.map((block) => block.id));
     const missingIds = input.block_ids.filter((id) => !availableIds.has(id));
@@ -196,6 +202,7 @@ export const needExtractModule = agenticModule({
         const assessment = await inspectSnapshotCompleteness({
           blocks, items, prior_open_issues, complete: ctx.complete,
         });
+        sourceChecked = assessment.risk_level !== "check_failed" && assessment.unchecked_block_ids.length === 0 && missingIds.length === 0;
         if (missingIds.length === 0) return assessment;
         return { ...assessment,
           risk_level: assessment.risk_level === "check_failed" ? "check_failed" : "important" as const,
@@ -211,12 +218,23 @@ export const needExtractModule = agenticModule({
 
     ctx.run.note("agentic:trace", cycle.trace);
     const { gaps, rejected_candidates } = stub ? { gaps: [], rejected_candidates: [] } : judgeDraft(cycle.final, input.source_file_id, blocks);
+    if (input.source_page && !stub) {
+      const resolved = gaps.flatMap((candidate, index) => {
+        try { return [locatePageEvidence(candidate, pageBlocks!)]; }
+        catch (error) {
+          rejected_candidates.push({ index, field: "provenance", reason: error instanceof Error ? error.message : "invalid_page_evidence" });
+          return [];
+        }
+      });
+      gaps.splice(0, gaps.length, ...resolved);
+    }
     if (rejected_candidates.length) ctx.run.note("extract:rejected_candidates", rejected_candidates);
     return {
       output: {
         workspace_id: input.workspace_id,
         source_file_id: input.source_file_id,
         gaps,
+        source_complete: sourceChecked && rejected_candidates.length === 0,
         ...(rejected_candidates.length ? { rejected_candidates } : {}),
       },
       summary: stub
@@ -226,4 +244,4 @@ export const needExtractModule = agenticModule({
   },
 });
 
-needExtractModule.manifest.version = "0.2.0";
+needExtractModule.manifest.version = "0.3.0";

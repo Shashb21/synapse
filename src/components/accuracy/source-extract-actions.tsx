@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import type { SourceProgress } from "@/accuracy/domain/source-pages";
 import type { LiveExtractGate } from "@/accuracy/kernel/extract-gate";
 
 export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
@@ -52,9 +53,11 @@ export function SourceExtractActions({
   const [connectPath, setConnectPath] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [reviewRuns, setReviewRuns] = useState<Array<{ run_id: string; call_kind: string }>>([]);
+  const [retry, setRetry] = useState<{ cursor: string; kinds: Array<"need" | "inventory"> } | null>(null);
   const extractReady = gate.ready;
 
-  function runExtract(kinds: Array<"need" | "inventory">) {
+  function runExtract(kinds: Array<"need" | "inventory">, cursor?: string) {
+    setRetry(null);
     setError(null);
     setConnectPath(null);
     setSummary(null);
@@ -66,7 +69,7 @@ export function SourceExtractActions({
         body: JSON.stringify({
           workspace_id: workspaceId,
           source_file_id: sourceFileId,
-          kinds,
+          kinds, cursor,
         }),
       });
       const json = (await res.json()) as {
@@ -79,8 +82,18 @@ export function SourceExtractActions({
         gate?: string;
         connect_path?: string;
         paused?: boolean;
+        incomplete?: boolean;
+        source_progress?: SourceProgress;
         runs?: Array<{ summary: string; run_id: string; call_kind: string }>;
       };
+      if (json.incomplete && json.source_progress) {
+        const progress = json.source_progress;
+        setSummary(`Drafts saved: ${json.gaps_inserted ?? 0} gap(s) · ${json.tactics_inserted ?? 0} tactic(s). Source extraction incomplete: ${progress.processed_units}/${progress.expected_units} units complete.${progress.upstream_dropped_units?.length ? ` ${progress.upstream_dropped_units.length} excluded parse unit(s) need review.` : ""}`);
+        setReviewRuns((json.runs ?? []).filter(run => run.call_kind === "need_extract" || run.call_kind === "inventory_extract"));
+        if (progress.next_cursor) setRetry({ cursor: progress.next_cursor, kinds });
+        router.refresh();
+        return;
+      }
       if (json.paused) {
         setSummary(`Drafts saved: ${json.gaps_inserted ?? 0} gap(s) · ${json.tactics_inserted ?? 0} tactic(s). Downstream work is paused for omission review.`);
         setReviewRuns((json.runs ?? []).filter(run => run.call_kind === "need_extract" || run.call_kind === "inventory_extract"));
@@ -147,6 +160,10 @@ export function SourceExtractActions({
           Ledger →
         </Link>
       </div>
+      {retry ? <button type="button" disabled={pending || !extractReady} onClick={() => runExtract(retry.kinds, retry.cursor)}
+        className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40">
+        Retry remaining pages
+      </button> : null}
       {error ? (
         <p className="text-[11px] text-destructive" data-testid="extract-outcome">
           {error}

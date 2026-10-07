@@ -18,6 +18,8 @@ export type MergeProvenance = {
   source_file_id: string;
   block_id: string;
   quote: string;
+  char_start?: number;
+  char_end?: number;
 };
 
 export type TacticLifecycle = "completed" | "ongoing" | "planned" | "proposed" | "cancelled" | "unknown";
@@ -32,6 +34,8 @@ export type MergeCandidate = {
   source_file_id: string | null;
   reference_pack_id: string | null;
   external_id: string | null;
+  source_revision?: string | null;
+  source_entity_identity?: string | null;
   tactic_status?: TacticLifecycle | null;
   provenance: MergeProvenance[];
   structured?: GapStructuredFields | TacticStructuredFields;
@@ -213,7 +217,7 @@ function unionProvenance(a: MergeProvenance[], b: MergeProvenance[]): MergeProve
   const seen = new Set<string>();
   const out: MergeProvenance[] = [];
   for (const span of [...a, ...b]) {
-    const key = `${span.source_file_id}::${span.block_id}::${span.quote}`;
+    const key = JSON.stringify([span.source_file_id, span.block_id, span.quote, span.char_start ?? null, span.char_end ?? null]);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(span);
@@ -253,6 +257,9 @@ function mechanicalMatch(a: MergeCandidate, b: MergeCandidate): PairMatch | null
   if (sharedIds.length > 0) {
     return { reason: "identity", keys: sharedIds };
   }
+
+  if (a.source_file_id === b.source_file_id && a.source_revision && a.source_revision === b.source_revision
+    && a.source_entity_identity && b.source_entity_identity && a.source_entity_identity !== b.source_entity_identity) return null;
 
   const sa = normalizeStatement(a.statement);
   const sb = normalizeStatement(b.statement);
