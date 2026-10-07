@@ -26,6 +26,8 @@ export type GapTimelineItem = {
   /** Unique per row: an activity can answer several gaps and shows under each. */
   key: string;
   activity_id: string;
+  /** A family label only, never an activity, coverage claim or saved schedule. */
+  context_only?: boolean;
   tactic_id: string;
   expansion_id?: string;
   parent_tactic_name?: string;
@@ -204,6 +206,21 @@ export function gapTimelineView(args: {
     };
   };
 
+  const parentContext = (gapId: string, tacticId: string): GapTimelineItem | null => {
+    const parent = tacticById.get(tacticId);
+    if (!parent) return null;
+    return {
+      key: `${gapId}:${activityId(tacticId)}`,
+      activity_id: activityId(tacticId),
+      tactic_id: tacticId,
+      tactic_name: parent.name,
+      tactic_status: parent.status,
+      context_only: true,
+      activity: null,
+      pending: null,
+    };
+  };
+
   const shown = new Set<string>();
   const groupFor = (gap: IegpState["gaps"][number], band: PriorityBand | null): GapTimelineGroup => {
     // The same tactics the Tactics place lists under this gap: mapped by coverage,
@@ -212,13 +229,14 @@ export function gapTimelineView(args: {
     const mapped = mappedTactics(state, gap.id, residual?.id);
     const tacticIds = [...new Set(mapped.map(tactic => tactic.id))];
     const items = nestedItems(tacticIds.flatMap(tacticId => {
-      const parent = itemFor(gap.id, tacticId);
+      let parent = itemFor(gap.id, tacticId);
       const children = [...new Set(mapped.filter(tactic => tactic.id === tacticId && tactic.expansion_id).map(tactic => tactic.expansion_id!))]
         .map(childId => itemFor(gap.id, tacticId, childId))
         .filter((item): item is GapTimelineItem => item !== null);
+      if (!parent && children.length > 0) parent = parentContext(gap.id, tacticId);
       return [...(parent ? [parent] : []), ...children];
     }));
-    for (const item of items) shown.add(item.activity_id);
+    for (const item of items) if (!item.context_only) shown.add(item.activity_id);
     const starts = items.flatMap((item) => (item.activity ? [item.activity.start_date] : [])).sort();
     const ends = items.flatMap((item) => (item.activity ? [item.activity.end_date] : [])).sort();
     return {
@@ -285,6 +303,12 @@ export function gapTimelineView(args: {
       activity: null,
       pending: row,
     });
+  }
+
+  for (const tacticId of new Set(other.filter(item => item.expansion_id).map(item => item.tactic_id))) {
+    if (other.some(item => item.tactic_id === tacticId && !item.expansion_id)) continue;
+    const parent = parentContext("other", tacticId);
+    if (parent) other.push(parent);
   }
 
   const markers = timelineMarkers(state);

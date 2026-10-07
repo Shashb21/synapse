@@ -25,6 +25,46 @@ function fixture() {
 }
 
 describe("independent expansion timeline", () => {
+  it("shows parent context for child-only mappings without inventing parent coverage or a schedule", () => {
+    const args = fixture();
+    args.overrides = [];
+    const model = buildTimeline(args);
+    const view = gapTimelineView({...args, model});
+    const items = view.not_prioritized.find(group => group.gap_id === args.gap.id)!.items;
+    expect(items.map(item => item.activity_id)).toEqual([`ACT-${args.parent.id}`, "ACT-EXP-A", "ACT-EXP-B"]);
+    expect(items[0]).toMatchObject({context_only: true, activity: null, pending: null});
+    expect(model.activities).toEqual([]);
+    expect(model.pending.map(item => item.activity_id)).toEqual(["ACT-EXP-A", "ACT-EXP-B"]);
+    // Parent grouping also survives when its children appear in Other activities.
+    args.gap.computed_status = "validated_addressed";
+    expect(gapTimelineView({...args, model: buildTimeline(args)}).other.map(item => item.activity_id))
+      .toEqual([`ACT-${args.parent.id}`, "ACT-EXP-A", "ACT-EXP-B"]);
+  });
+  it("keeps a removed parent as context only without restoring its schedule or copying child coverage", () => {
+    const args = fixture();
+    args.overrides[0]!.meta!.removed = true;
+    const before = structuredClone(args.overrides);
+    const model = buildTimeline(args);
+    const items = gapTimelineView({...args, model}).not_prioritized.find(group => group.gap_id === args.gap.id)!.items;
+    expect(items[0]).toMatchObject({activity_id: `ACT-${args.parent.id}`, context_only: true, activity: null, pending: null});
+    expect(model.removed.map(row => row.activity_id)).toEqual([`ACT-${args.parent.id}`]);
+    expect(model.activities.map(row => row.id)).toEqual(["ACT-EXP-A", "ACT-EXP-B"]);
+    expect(model.pending).toEqual([]);
+    expect(args.overrides).toEqual(before);
+    expect(JSON.parse(JSON.stringify(model)).activities).toHaveLength(2);
+  });
+  it("carries independent status and coverage eligibility before child dates exist", () => {
+    const args = fixture();
+    args.overrides = args.overrides.filter(row => row.id !== "ACT-EXP-A");
+    const parentAndSibling = buildTimeline(args).activities;
+    const scope = structuredClone(args.state.expansions[0]!.scope);
+    expect(buildTimeline(args).pending[0]).toMatchObject({activity_id: "ACT-EXP-A", tactic_status: "proposed", parent_activity_id: `ACT-${args.parent.id}`, meta: {counts_toward_addressing: false}});
+    args.state.expansions[0]!.status = "planned";
+    const planned = buildTimeline(args);
+    expect(planned.pending[0]).toMatchObject({tactic_status: "planned", expansion_scope: scope, meta: {counts_toward_addressing: true}});
+    expect(planned.activities).toEqual(parentAndSibling);
+    expect(args.state.expansions[0]!.scope).toEqual(scope);
+  });
   it("keeps distinct parent and children with child-only status, scope and eligibility", () => {
     const args = fixture();
     const model = buildTimeline(args);

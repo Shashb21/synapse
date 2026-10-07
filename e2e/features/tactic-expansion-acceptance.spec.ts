@@ -27,15 +27,12 @@ test("schedules nested children, changes only child status, preserves scope and 
     const at = "2026-10-07T12:00:00.000Z";
     const unlocked = {locked: false, actor_name: null, actor_function: null, locked_at: null, note: null};
     const dimensions = Object.fromEntries(COVERAGE_DIMENSIONS.map(key => [key, {value: "unknown", rationale: "", lock: unlocked}]));
-    await pg`insert into ${pg(`${schema}.coverages`)} ${pg({id: "COV-BROWSER-PARENT", tactic_id: tacticId, gap_id: gap!.id,
-      dimensions: pg.json(dimensions), overall: "limited", overall_rationale: "Locked parent assessment",
-      overall_lock: pg.json({...unlocked, locked: true, actor_name: actor.name}), stale: false, needs_review: false})}`;
     for (const id of ["EXP-BROWSER-ONE", "EXP-BROWSER-TWO"]) {
       const scope = {name: id === "EXP-BROWSER-ONE" ? "Community expansion" : "Second expansion",
         evidence_question: "Added community question", population: "Community patients", outcomes: "ILD", geography: "US",
         data_cut: "2026", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis",
         gap_coverage: "Community evidence", cost_effort: "Two analyst weeks", timing: "Q4", feasibility_risks: "Small subgroup",
-        post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: "2026-10-08", evidence_available: "2026-12-01"};
+        post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
       await pg`insert into ${pg(`${schema}.tactic_expansions`)} ${pg({id, tactic_id: tacticId, proposal_id: `browser:${id}`,
         gap_ids: pg.json([gap!.id]), scope: pg.json(scope), status: "proposed", version: id, created_at: at, updated_at: at,
         actor: pg.json(actor), history: pg.json([{action: "accept", at, actor, rationale: "Browser fixture accepted", status: "proposed", version: id}])})}`;
@@ -46,14 +43,18 @@ test("schedules nested children, changes only child status, preserves scope and 
     const beforeParents = await pg`select * from ${pg(`${schema}.tactics`)}`;
     const beforeScope = await pg`select id,scope from ${pg(`${schema}.tactic_expansions`)} order by id`;
     await validateBandHigh(request, String(gap!.id), "Timeline acceptance priority");
-    for (const expansion_id of [undefined, "EXP-BROWSER-ONE", "EXP-BROWSER-TWO"]) {
-      await planAction(request, {action: "add_activity", tactic_id: tacticId, expansion_id, start_date: "2026-10-08", end_date: "2027-01-01", rationale: "Team approved distinct dates"});
-    }
     await page.goto("/timeline");
+    await expect.soft(page.locator(`[data-activity-id="ACT-${tacticId}"]`).first()).toContainText("Parent context");
+    await page.getByRole("button", {name: "Add activity", exact: true}).first().click();
+    const chooser = page.getByRole("dialog");
+    await expect(chooser.getByRole("combobox", {name: "Tactic", exact: true})).toContainText("Locked parent study");
+    await page.keyboard.press("Escape");
     const first = page.locator('[data-activity-id="ACT-EXP-EXP-BROWSER-ONE"]').first();
     await expect(first).toHaveAttribute("data-parent-activity-id", `ACT-${tacticId}`);
     await expect(first).toHaveAttribute("aria-label", /expansion of Locked parent study, proposed, not counting/);
-    await first.click();
+    await expect(first).toHaveAttribute("aria-label", /unscheduled/);
+    await first.focus();
+    await page.keyboard.press("Enter");
     const panel = page.getByRole("dialog");
     await expect(panel.getByText("Not counting toward addressing", {exact: true})).toBeVisible();
     await panel.getByRole("button", {name: "Change expansion status"}).click();
@@ -63,6 +64,33 @@ test("schedules nested children, changes only child status, preserves scope and 
     await status.getByRole("button", {name: "Save status", exact: true}).click();
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await expect(panel.getByText("counts toward addressing", {exact: true})).toBeVisible();
+    await expect(first).toHaveAttribute("aria-label", /unscheduled.*planned/);
+    expect(await pg`select * from ${pg(`${schema}.timeline_activities`)}`).toHaveLength(0);
+    expect(await pg`select * from ${pg(`${schema}.tactics`)}`).toEqual(beforeParents);
+    expect(await pg`select id,scope from ${pg(`${schema}.tactic_expansions`)} order by id`).toEqual(beforeScope);
+    expect((await pg`select status from ${pg(`${schema}.tactic_expansions`)} where id = 'EXP-BROWSER-TWO'`)[0]!.status).toBe("proposed");
+    await panel.evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({path: ".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-7-fix1-unscheduled.png", fullPage: true});
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.screenshot({path: ".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-7-fix1-family.png", fullPage: true});
+    await page.getByRole("button", {name: "Add activity", exact: true}).first().click();
+    await chooser.getByRole("combobox", {name: "Tactic", exact: true}).selectOption(`ACT-${tacticId}`);
+    await chooser.getByLabel("Start", {exact: true}).fill("2026-10-08");
+    await chooser.getByLabel("End", {exact: true}).fill("2027-01-01");
+    await chooser.getByLabel("Rationale (required)").fill("Schedule the original parent independently");
+    await chooser.getByRole("button", {name: "Save dates", exact: true}).click();
+    await expect(chooser).toHaveCount(0);
+    await expect(first).toHaveAttribute("aria-label", /unscheduled.*planned/);
+    await expect(page.locator('[data-activity-id="ACT-EXP-EXP-BROWSER-TWO"]').first()).toHaveAttribute("aria-label", /unscheduled.*proposed/);
+    const parentSchedule = await pg`select id, start_date, end_date, readout_date, lane, depends_on from ${pg(`${schema}.timeline_activities`)}`;
+    expect(parentSchedule).toHaveLength(1);
+    expect(parentSchedule[0]!.id).toBe(`ACT-${tacticId}`);
+    for (const expansion_id of ["EXP-BROWSER-ONE", "EXP-BROWSER-TWO"]) {
+      await planAction(request, {action: "add_activity", tactic_id: tacticId, expansion_id, start_date: "2026-10-08", end_date: "2027-01-01", rationale: "Team approved distinct dates"});
+    }
+    await page.reload();
+    await first.click();
     await panel.getByRole("button", {name: "Edit", exact: true}).click();
     await expect(panel.getByLabel("Activity name", {exact: true})).toHaveCount(0);
     await panel.getByLabel("Start", {exact: true}).fill("2026-11-01");
@@ -82,6 +110,7 @@ test("schedules nested children, changes only child status, preserves scope and 
     const svg = await page.locator("svg[role=img]").evaluate(node => node.outerHTML);
     expect(svg).toContain(`data-parent-activity-id="ACT-${tacticId}"`);
     expect(svg).toContain("expansion of Locked parent study");
+    expect(await pg`select id, start_date, end_date, readout_date, lane, depends_on from ${pg(`${schema}.timeline_activities`)} where id = ${`ACT-${tacticId}`}`).toEqual(parentSchedule);
     const saved = await planAction(request, {action: "save_plan", status: "final", note: "Nested activities reviewed"});
     expect(JSON.stringify(saved)).toContain("ACT-EXP-EXP-BROWSER-ONE");
     expect(await pg`select * from ${pg(`${schema}.tactics`)}`).toEqual(beforeParents);

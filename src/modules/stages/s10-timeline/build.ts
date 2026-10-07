@@ -99,7 +99,15 @@ export type RemovedActivity = {
   reason: string;
 };
 
-export type PendingActivity = {
+/** Details shared by dated and pending activities; contains no fabricated schedule. */
+export type ActivityDetails = Pick<TimelineActivity,
+  "tactic_type" | "tactic_custom_type" | "tactic_status" | "band" | "gap_ids" | "gap_names"
+> & {meta: Pick<TimelineActivity["meta"],
+  "evidence_question" | "population" | "comparator" | "outcomes" | "data_source" |
+  "study_design" | "owner" | "budget" | "function" | "priority_rationale" | "counts_toward_addressing"
+>};
+
+export type PendingActivity = ActivityDetails & {
   activity_id: string;
   tactic_id: string;
   expansion_id?: string;
@@ -300,6 +308,32 @@ export function timelineCandidates(args: {
   return candidates;
 }
 
+/** Read details from this scope and the shared coverage engine, independent of dates. */
+function activityDetails(candidate: TimelineCandidate): ActivityDetails {
+  const tactic = candidate.tactic;
+  return {
+    tactic_type: tactic.type,
+    tactic_custom_type: tactic.custom_type ?? null,
+    tactic_status: tactic.status,
+    band: candidate.band,
+    gap_ids: candidate.gap_ids,
+    gap_names: candidate.gap_names,
+    meta: {
+      evidence_question: tactic.evidence_question,
+      population: tactic.population,
+      comparator: tactic.comparator,
+      outcomes: tactic.outcomes,
+      data_source: tactic.data_source,
+      study_design: tactic.study_design,
+      owner: tactic.owner,
+      budget: tactic.budget ?? null,
+      function: tactic.function,
+      priority_rationale: candidate.priority_rationale,
+      counts_toward_addressing: candidate.counting,
+    },
+  };
+}
+
 /** Which schedule fields no human, saved row or design supplies, so a model must estimate them. */
 export function missingSchedule(candidate: TimelineCandidate): ScheduleField[] {
   if (candidate.saved) return [];
@@ -381,6 +415,7 @@ export function buildTimeline(args: {
 
     if (!start || duration === null || missing.length > 0) {
       pending.push({
+        ...activityDetails(candidate),
         activity_id: candidate.id,
         tactic_id: tactic.id,
         ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
@@ -471,40 +506,26 @@ export function buildTimeline(args: {
     const tactic = candidate.tactic;
     const laneLocked = candidate.saved?.meta?.lane_locked === true;
     const savedLane = candidate.saved?.lane as TimelineBand | undefined;
+    const details = activityDetails(candidate);
     const activity: TimelineActivity = {
+      ...details,
       id,
       tactic_id: tactic.id,
       ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
       tactic_name: tactic.name,
-      tactic_type: tactic.type,
-      tactic_custom_type: tactic.custom_type ?? null,
-      tactic_status: tactic.status,
       lane: laneLocked && savedLane && TIMELINE_LANES.includes(savedLane) ? savedLane : candidate.band,
-      band: candidate.band,
       start_date: start,
       end_date: end,
       readout_date: readout,
       depends_on: upstream.map((dependency) => dependency.id),
-      gap_ids: candidate.gap_ids,
-      gap_names: candidate.gap_names,
       meta: {
-        evidence_question: tactic.evidence_question,
-        population: tactic.population,
-        comparator: tactic.comparator,
-        outcomes: tactic.outcomes,
-        data_source: tactic.data_source,
-        study_design: tactic.study_design,
-        owner: tactic.owner,
-        budget: tactic.budget ?? null,
-        function: tactic.function,
-        priority_rationale: candidate.priority_rationale,
+        ...details.meta,
         dependency_note:
           reasons.length > 0
             ? reasons.map((dependency) => `${placed.get(dependency.id)?.tactic_name ?? dependency.id}: ${dependency.reason}`).join(" ")
             : upstream.length > 0
               ? (candidate.saved?.meta?.dependency_note ?? null)
               : null,
-        counts_toward_addressing: candidate.counting,
         schedule_rationale: row.rationale,
         schedule_basis: { start: row.startSource, end: row.endSource, readout: readout ? row.readoutSource : null },
         lane_locked: laneLocked,
