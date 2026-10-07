@@ -218,6 +218,26 @@ export const accuracyAssemblyReviews = pgTable("accuracy_assembly_reviews", {
   assembly: index("accuracy_assembly_reviews_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
 }));
 
+/** Append-only observations about exact approved output consumed by a production run. */
+export const accuracyAssemblyFeedback = pgTable("accuracy_assembly_feedback", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  assembly_fingerprint: text("assembly_fingerprint").notNull(),
+  approval_review_id: text("approval_review_id").notNull().references(() => accuracyAssemblyReviews.id),
+  consumer_run_id: text("consumer_run_id").notNull().references(() => accuracyModuleRuns.id),
+  selected_item_version_ids: jsonb("selected_item_version_ids").$type<string[]>().notNull(),
+  category: text("category").notNull(),
+  rationale: text("rationale").notNull(),
+  actor_subject: text("actor_subject").notNull(),
+  actor_provider: text("actor_provider").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  assembly: index("accuracy_assembly_feedback_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
+}));
+
 /** Immutable reasoned human change; linking completions publish new assembly heads. */
 export const accuracyAssemblyRevisions = pgTable("accuracy_assembly_revisions", {
   id: text("id").primaryKey(),
@@ -583,6 +603,18 @@ export const ACCURACY_DDL = [
     created_at text NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_feedback (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    assembly_fingerprint text NOT NULL,
+    approval_review_id text NOT NULL REFERENCES accuracy_assembly_reviews(id),
+    consumer_run_id text NOT NULL REFERENCES accuracy_module_runs(id),
+    selected_item_version_ids jsonb NOT NULL,
+    category text NOT NULL, rationale text NOT NULL,
+    actor_subject text NOT NULL, actor_provider text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_feedback_assembly_idx ON accuracy_assembly_feedback (workspace_id, assembly_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_proposals (
     id text PRIMARY KEY, workspace_id text NOT NULL, kind text NOT NULL, predecessor_ids jsonb NOT NULL,
     successor_ids jsonb NOT NULL, basis_version_ids jsonb NOT NULL, rationale text NOT NULL, actor_name text NOT NULL,
@@ -716,6 +748,18 @@ export const ACCURACY_MIGRATIONS = [
     created_at text NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_feedback (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    assembly_fingerprint text NOT NULL,
+    approval_review_id text NOT NULL REFERENCES accuracy_assembly_reviews(id),
+    consumer_run_id text NOT NULL REFERENCES accuracy_module_runs(id),
+    selected_item_version_ids jsonb NOT NULL,
+    category text NOT NULL, rationale text NOT NULL,
+    actor_subject text NOT NULL, actor_provider text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_feedback_assembly_idx ON accuracy_assembly_feedback (workspace_id, assembly_id, created_at)`,
   `ALTER TABLE accuracy_item_versions ALTER COLUMN run_id DROP NOT NULL`,
   `ALTER TABLE accuracy_item_versions ADD COLUMN IF NOT EXISTS human_origin jsonb`,
   `CREATE TABLE IF NOT EXISTS accuracy_assembly_revisions (
