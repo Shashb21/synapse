@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
@@ -152,8 +152,8 @@ async function numberGaps(state: IegpState): Promise<IegpState> {
 
 export { gapNumberLabel } from "./gap-number";
 
-async function readState(): Promise<IegpState> {
-  const d = db();
+/** Reads a workspace using the supplied transaction when composing atomic mutations. */
+export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db()): Promise<IegpState> {
   const [
     assetRows,
     objectives,
@@ -176,6 +176,7 @@ async function readState(): Promise<IegpState> {
     breakout_groups,
     breakout_group_gaps,
     gap_suggestions,
+    expansions,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -198,6 +199,7 @@ async function readState(): Promise<IegpState> {
     d.select().from(t.breakoutGroups),
     d.select().from(t.breakoutGroupGaps),
     d.select().from(t.gapSuggestions),
+    d.select().from(t.tacticExpansions),
   ]);
   const asset = assetRows[0]!;
   return {
@@ -246,6 +248,7 @@ async function readState(): Promise<IegpState> {
       ...l,
       role: l.role as "primary" | "supporting",
     })),
+    expansions: expansions as IegpState["expansions"],
     tactics: tactics.map((x) => ({
       ...x,
       type: x.type as IegpState["tactics"][0]["type"],
@@ -364,6 +367,7 @@ export async function persistState(state: IegpState) {
   }
   if (state.need_gap_links.length) await d.insert(t.needGapLinks).values(state.need_gap_links);
   if (state.tactics.length) await d.insert(t.tactics).values(state.tactics);
+  if (state.expansions?.length) await d.insert(t.tacticExpansions).values(state.expansions);
   if (state.coverages.length) await d.insert(t.coverages).values(state.coverages);
   if (state.mapping_suggestions.length) {
     await d.insert(t.mappingSuggestions).values(state.mapping_suggestions);
@@ -610,6 +614,14 @@ export async function ensureAllLiveGapsHaveNeeds() {
 
 /** Persist an audit event and return its identity for decision capture deduplication. */
 export async function appendAudit(
+  actor_name: string, actor_function: ActorFunction, entity_type: string,
+  entity_id: string, action: string, detail: string,
+) {
+  return appendAuditOn(db(), actor_name, actor_function, entity_type, entity_id, action, detail);
+}
+
+async function appendAuditOn(
+  d: Pick<ReturnType<typeof db>, "insert">,
   actor_name: string,
   actor_function: ActorFunction,
   entity_type: string,
@@ -618,7 +630,7 @@ export async function appendAudit(
   detail: string,
 ) {
   const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await db().insert(t.audit).values({
+  await d.insert(t.audit).values({
     id,
     at: now(),
     actor_name,
@@ -982,9 +994,9 @@ async function applyMappedStatusSideEffects(args: {
   status: MappedGapStatus;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert">) {
   if (args.status === "validated_addressed") {
-    const after = await loadState();
+    const after = transaction ? await readState(transaction) : await loadState();
     const existing = after.residual_gap_suggestions.find((row) => row.parent_gap_id === args.gap_id);
     if (existing?.status === "candidate") {
       await upsertResidualGapSuggestion({
@@ -995,7 +1007,7 @@ async function applyMappedStatusSideEffects(args: {
         actor_name: args.actor_name,
         actor_function: args.actor_function,
         note: "Addressed. No residual.",
-      });
+      }, transaction);
     }
   }
 }
@@ -1016,25 +1028,27 @@ function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
  * applies. Otherwise (a model run, an ingest) a human override or a
  * human-validated status is kept and only flagged stale when it disagrees.
  */
-export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }) {
-  const state = await loadState();
+export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert">) {
+  const d = transaction ?? db();
+  const state = transaction ? await readState(transaction) : await loadState();
   const children = childParents(state);
   const gaps = gapId ? state.gaps.filter((g) => g.id === gapId) : state.gaps;
   for (const gap of gaps) {
     if (gap.status === "candidate" || gap.status === "excluded" || gap.retired) {
       if (gap.computed_status !== null) {
-        await db().update(t.gaps).set({ computed_status: null }).where(eq(t.gaps.id, gap.id));
+        await d.update(t.gaps).set({ computed_status: null }).where(eq(t.gaps.id, gap.id));
       }
       continue;
     }
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const computed = computeGapStatus(coverages, state.tactics, {
       hasAcceptedChild: children.has(gap.id),
+      expansions: state.expansions,
     });
     const override = gap.status_override;
     if (override) {
       const stale = override.status !== computed;
-      await db()
+      await d
         .update(t.gaps)
         .set({
           computed_status: computed,
@@ -1043,7 +1057,7 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
         })
         .where(eq(t.gaps.id, gap.id));
       if (stale && !override.stale) {
-        await appendAudit(
+        await appendAuditOn(d,
           "Engine",
           "evidence_lead",
           "gap",
@@ -1067,11 +1081,11 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
         at: lock.locked_at ?? now(),
         stale: true,
       };
-      await db()
+      await d
         .update(t.gaps)
         .set({ computed_status: computed, status_override: kept })
         .where(eq(t.gaps.id, gap.id));
-      await appendAudit(
+      await appendAuditOn(d,
         "Engine",
         "evidence_lead",
         "gap",
@@ -1083,11 +1097,11 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
     }
     if (gap.status === computed && gap.computed_status !== computed) {
       // Same status, newly recorded computation: nothing a person decided changes.
-      await db().update(t.gaps).set({ computed_status: computed }).where(eq(t.gaps.id, gap.id));
+      await d.update(t.gaps).set({ computed_status: computed }).where(eq(t.gaps.id, gap.id));
       continue;
     }
     if (gap.status !== computed) {
-      await db()
+      await d
         .update(t.gaps)
         .set({
           status: computed,
@@ -1097,7 +1111,7 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
           human_validated: false,
         })
         .where(eq(t.gaps.id, gap.id));
-      await appendAudit(
+      await appendAuditOn(d,
         "Engine",
         "evidence_lead",
         "gap",
@@ -1110,7 +1124,7 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
         status: computed,
         actor_name: "Engine",
         actor_function: "evidence_lead",
-      });
+      }, transaction);
     }
   }
 }
@@ -1137,6 +1151,7 @@ export async function lockGapStatus(args: {
     const cov = state.coverages.filter((c) => c.gap_id === args.gap_id);
     const computed = computeGapStatus(cov, state.tactics, {
       hasAcceptedChild: childParents(state).has(gap.id),
+      expansions: state.expansions,
     });
     if (computed !== "validated_addressed" && !args.note) {
       throw new Error(
@@ -1214,6 +1229,7 @@ export async function overrideGapStatus(args: {
     gap.computed_status ??
     computeGapStatus(coverages, state.tactics, {
       hasAcceptedChild: childParents(state).has(gap.id),
+      expansions: state.expansions,
     });
   const from = gap.status;
   const override: GapStatusOverride = {
@@ -1421,7 +1437,7 @@ export async function lockCoverageDimension(args: {
     .update(t.coverages)
     .set({ dimensions, stale: false, needs_review: false })
     .where(eq(t.coverages.id, args.coverage_id));
-  await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id);
+  await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1457,7 +1473,7 @@ export async function lockCoverageOverall(args: {
       needs_review: false,
     })
     .where(eq(t.coverages.id, args.coverage_id));
-  await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id);
+  await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1469,11 +1485,11 @@ export async function lockCoverageOverall(args: {
   await syncComputedGapStatuses(row.gap_id, { human: true });
 }
 
-async function flagSiblingCoveragesForReview(tactic_id: string, except_gap_id: string) {
+async function flagSiblingCoveragesForReview(tactic_id: string, except_gap_id: string, expansion_id?: string | null) {
   const state = await loadState();
   const liveGapIds = new Set(state.gaps.filter(isLiveGap).map((g) => g.id));
   const siblings = state.coverages.filter(
-    (c) => c.tactic_id === tactic_id && c.gap_id !== except_gap_id && liveGapIds.has(c.gap_id),
+    (c) => c.tactic_id === tactic_id && (c.expansion_id ?? null) === (expansion_id ?? null) && c.gap_id !== except_gap_id && liveGapIds.has(c.gap_id),
   );
   for (const sibling of siblings) {
     if (sibling.needs_review) continue;
@@ -1900,6 +1916,13 @@ function humanRejection(state: IegpState, gap_id: string, tactic_id: string) {
   );
 }
 
+/** Explicit human acceptance belongs only to this child's parent/gap/scope. */
+export function humanAcceptedExpansionScope(state: IegpState, gap_id: string, tactic_id: string, expansion_id: string): boolean {
+  const child = state.expansions?.find(e => e.id === expansion_id);
+  return Boolean(child && child.tactic_id === tactic_id && child.gap_ids.includes(gap_id) &&
+    child.history?.some(event => event.action === "accept" && event.actor?.name?.trim() && event.rationale?.trim().length >= 3));
+}
+
 /** `gap_id::tactic_id` of every pair a person rejected or removed. */
 export function humanRejectedPairs(state: IegpState): Set<string> {
   return new Set(
@@ -1923,6 +1946,7 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
 export async function assignTacticToGap(args: {
   gap_id: string;
   tactic_id: string;
+  expansion_id?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
@@ -1941,16 +1965,23 @@ export async function assignTacticToGap(args: {
   if (tactic.review_status !== "accepted") {
     throw new Error("Only accepted tactics can be assigned to a gap.");
   }
+  if (args.expansion_id) {
+    const child = state.expansions.find((e) => e.id === args.expansion_id);
+    if (!child || child.tactic_id !== args.tactic_id || !child.gap_ids.includes(args.gap_id)) {
+      throw new Error("Expansion scope does not belong to this parent and gap in this workspace.");
+    }
+    if (child.status === "cancelled") throw new Error("Cancelled expansion cannot be mapped.");
+  }
   const rejection = humanRejection(state, args.gap_id, args.tactic_id);
-  if (rejection && !args.human) {
+  if (rejection && !args.human && !(args.expansion_id && humanAcceptedExpansionScope(state, args.gap_id, args.tactic_id, args.expansion_id))) {
     throw new Error(
       `${rejection.lock.actor_name ?? "A reviewer"} rejected or removed "${tactic.name}" for this gap; only a person can map it again.`,
     );
   }
   const existing = state.coverages.find(
-    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
+    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id && (c.expansion_id ?? null) === (args.expansion_id ?? null),
   );
-  if (existing) {
+  if (existing && !(args.expansion_id && existing.overall === "unassessed" && !existing.overall_lock.locked && Object.values(existing.dimensions).every((d) => !d.lock.locked))) {
     throw new Error("That tactic is already assigned to this gap.");
   }
   const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
@@ -1966,11 +1997,12 @@ export async function assignTacticToGap(args: {
       dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
     }
   }
-  const coverageId = nextId("COV", state.coverages.map((c) => c.id));
-  await db().insert(t.coverages).values({
+  const coverageId = existing?.id ?? nextId("COV", state.coverages.map((c) => c.id));
+  const row = {
     id: coverageId,
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
+    expansion_id: args.expansion_id ?? null,
     dimensions,
     overall,
     overall_rationale: rationale,
@@ -1980,7 +2012,17 @@ export async function assignTacticToGap(args: {
         : unlocked(),
     stale: false,
     needs_review: false,
-  });
+  };
+  if (existing) {
+    // Compare the observed assessment in the UPDATE itself: a human may lock it after our read.
+    const written = await db().update(t.coverages).set(row).where(and(
+      eq(t.coverages.id, existing.id), eq(t.coverages.overall, "unassessed"),
+      eq(t.coverages.overall_lock, existing.overall_lock), eq(t.coverages.dimensions, existing.dimensions),
+      sql`exists (select 1 from tactic_expansions e where e.id = ${args.expansion_id} and e.status <> 'cancelled')`,
+    )).returning({id: t.coverages.id});
+    if (!written.length) throw new Error("Expansion assessment changed or was locked; refresh before mapping.");
+  }
+  else await db().insert(t.coverages).values(row);
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -2018,7 +2060,7 @@ export async function unassignTacticFromGap(args: {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
-  const row = state.coverages.find((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  const row = state.coverages.find((c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
   if (!row) throw new Error("That tactic is not mapped to this gap.");
   await db().delete(t.coverages).where(eq(t.coverages.id, row.id));
   await upsertMappingSuggestion({
@@ -2096,7 +2138,7 @@ export async function acceptMapping(args: {
     throw new Error("Only accepted, non-cancelled tactics can be mapped.");
   }
   const note = args.note?.trim() || "Accepted mapping suggestion.";
-  const covered = state.coverages.some((c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
+  const covered = state.coverages.some((c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id);
   if (covered) {
     await upsertMappingSuggestion({ ...args, status: "accepted", note });
   } else {
@@ -2197,7 +2239,7 @@ export async function saveMappingTableRow(args: {
     const tactic = state.tactics.find((x) => x.id === tactic_id);
     if (!tactic) throw new Error(`Tactic ${tactic_id} not found`);
   }
-  const current = state.coverages.filter((c) => c.gap_id === args.gap_id).map((c) => c.tactic_id);
+  const current = state.coverages.filter((c) => !c.expansion_id && c.gap_id === args.gap_id).map((c) => c.tactic_id);
   const removed = current.filter((id) => !uniqueIds.includes(id));
   const actor = { actor_name: args.actor_name, actor_function: args.actor_function };
   for (const tactic_id of removed) {
@@ -2250,7 +2292,7 @@ export async function rejectMapping(args: {
   const tactic = state.tactics.find((x) => x.id === args.tactic_id);
   if (!tactic) throw new Error("Tactic not found");
   const covered = state.coverages.find(
-    (c) => c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
+    (c) => !c.expansion_id && c.gap_id === args.gap_id && c.tactic_id === args.tactic_id,
   );
   if (covered) {
     await unassignTacticFromGap({
@@ -2285,8 +2327,9 @@ async function upsertResidualGapSuggestion(args: {
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
-}) {
-  const state = await loadState();
+}, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert">) {
+  const d = transaction ?? db();
+  const state = transaction ? await readState(transaction) : await loadState();
   const row = {
     parent_gap_id: args.parent_gap_id,
     statement: args.statement,
@@ -2296,7 +2339,7 @@ async function upsertResidualGapSuggestion(args: {
   };
   const existing = state.residual_gap_suggestions.find((m) => m.parent_gap_id === args.parent_gap_id);
   if (existing) {
-    await db()
+    await d
       .update(t.residualGapSuggestions)
       .set({
         statement: row.statement,
@@ -2307,7 +2350,7 @@ async function upsertResidualGapSuggestion(args: {
       .where(eq(t.residualGapSuggestions.parent_gap_id, args.parent_gap_id));
     return;
   }
-  await db().insert(t.residualGapSuggestions).values(row);
+  await d.insert(t.residualGapSuggestions).values(row);
 }
 
 async function consumeResidualRecord(args: {

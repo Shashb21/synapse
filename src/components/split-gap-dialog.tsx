@@ -40,7 +40,7 @@ function TacticChecklist({
   return (
     <ul className="mt-2 grid gap-1.5">
       {tactics.map((tactic) => (
-        <li key={tactic.id}>
+        <li key={tactic.expansion_id ?? tactic.id}>
           <label className="flex items-start gap-2 text-[12px] text-foreground">
             <input
               type="checkbox"

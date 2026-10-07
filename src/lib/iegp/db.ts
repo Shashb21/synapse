@@ -196,6 +196,12 @@ CREATE TABLE IF NOT EXISTS tactics (
   start_date text, evidence_available text, owner text NOT NULL,
   function text NOT NULL, budget text, intended_use text NOT NULL, lock jsonb NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tactic_expansions (
+  id text PRIMARY KEY, tactic_id text NOT NULL, proposal_id text NOT NULL UNIQUE,
+  gap_ids jsonb NOT NULL, scope jsonb NOT NULL, status text NOT NULL,
+  version text NOT NULL, history jsonb NOT NULL,
+  created_at text NOT NULL, updated_at text NOT NULL, actor jsonb NOT NULL
+);
 CREATE TABLE IF NOT EXISTS coverages (
   id text PRIMARY KEY, gap_id text NOT NULL, tactic_id text NOT NULL,
   dimensions jsonb NOT NULL, overall text NOT NULL, overall_rationale text NOT NULL,
@@ -276,6 +282,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS tactics_unlocked boolean NOT NULL DEFAULT false",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS retired boolean NOT NULL DEFAULT false",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS human_validated boolean NOT NULL DEFAULT false",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS expansion_id text",
+    "CREATE UNIQUE INDEX IF NOT EXISTS coverage_expansion_scope_unique ON coverages (gap_id, tactic_id, expansion_id) WHERE expansion_id IS NOT NULL",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
@@ -390,6 +398,7 @@ export async function wipeIegp() {
     "priorities",
     "residuals",
     "coverages",
+    "tactic_expansions",
     "mapping_suggestions",
     "residual_gap_suggestions",
     "need_gap_links",

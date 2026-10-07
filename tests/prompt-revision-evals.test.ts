@@ -143,6 +143,23 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
             expect((await revisionHistory(f.ws.id))).toHaveLength(2);
         });
     });
+    it('refuses promotion after the evaluated stage manifest version changes', async () => {
+        const f = await evaluationFixture();
+        scriptedModel();
+        await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
+            const evaluation = await evaluatePromptRevision({ revision_id: f.revision.id, workspace_id: f.ws.id, actor });
+            expect(evaluation.eligible).toBe(true);
+            const evaluatedVersion = prioritizationModule.manifest.version;
+            try {
+                prioritizationModule.manifest.version = `${evaluatedVersion}-changed`;
+                await expect(activatePromptRevision({ revision_id: f.revision.id, evaluation_id: evaluation.id, expected_active_id: null, actor })).rejects.toThrow('Stage implementation changed since evaluation.');
+                expect(await activeRevisionPointer(f.ws.id, 'S8')).toEqual({ revision_id: null, generation: 0 });
+                expect(await revisionHistory(f.ws.id)).toEqual([]);
+            } finally {
+                prioritizationModule.manifest.version = evaluatedVersion;
+            }
+        });
+    });
     it('refuses changed route and mutation input without executing a stage', async () => {
         const f = await evaluationFixture();
         scriptedModel();

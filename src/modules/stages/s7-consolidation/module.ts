@@ -97,6 +97,7 @@ export const consolidationModule: SynapseModule<ConsolidationInput, Consolidatio
         countingCoverages(
           state.coverages.filter((coverage) => coverage.gap_id === gap.id),
           state.tactics,
+          state.expansions,
         ).length === 0
       ) {
         flags.push({

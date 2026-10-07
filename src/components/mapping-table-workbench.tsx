@@ -161,6 +161,11 @@ function ProposalDecisions({ row }: { row: MappingTableViewRow }) {
   return (
     <ul className="mt-2 grid gap-2">
       {bearing.map((mapping) => {
+        if (mapping.expansion_id && mapping.parent_tactic_id) return <li key={mapping.expansion_id} className="border border-border/70 p-2">
+          <p className="text-[11px]">Expansion: {mapping.tactic_name} · AI coverage {mapping.coverage.replaceAll("_", " ")}</p>
+          <p className="text-[10px] text-muted-foreground">{mapping.rationale}</p>
+          <Link href={`/tactics/${mapping.parent_tactic_id}`} className="text-[12px] underline">Review expansion scope and coverage</Link>
+        </li>;
         const decision = row.decisions[mapping.tactic_id];
         const pair = { gap_id: row.gap_id, tactic_id: mapping.tactic_id };
         return (
@@ -220,7 +225,7 @@ function MappingRowEditor({
   tactics: TacticLibraryItem[];
   ai: boolean;
 }) {
-  const [tacticIds, setTacticIds] = useState(row.tactic_ids.join(","));
+  const [tacticIds, setTacticIds] = useState(row.tactic_ids.filter(id => tactics.some(t => t.id === id)).join(","));
   const [status, setStatus] = useState(row.mapping_status);
   const [rationale, setRationale] = useState("");
 

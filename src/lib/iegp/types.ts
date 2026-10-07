@@ -269,8 +269,56 @@ export type Tactic = {
   custom_type?: CustomTacticType | null;
 };
 
+/** Added study scope, kept separate from the parent's locked evidence question. */
+export type ExpansionScope = {
+  name: string;
+  evidence_question: string;
+  population: string;
+  outcomes: string;
+  geography: string;
+  data_cut: string;
+  analysis: string;
+  instrument: string;
+  study_design: string;
+  gap_coverage: string;
+  cost_effort: string;
+  timing: string;
+  feasibility_risks: string;
+  post_hoc: boolean;
+  prospective_enrolment: boolean;
+  protocol_amendment: boolean;
+  start_date: string | null;
+  evidence_available: string | null;
+};
+
+export type ExpansionHistoryEntry = {
+  action: "accept" | "status";
+  at: string;
+  actor: Actor;
+  rationale: string;
+  status: TacticStatus;
+  version: string;
+};
+
+/** An accepted added scope with an independent lifecycle and append-only history. */
+export type TacticExpansion = {
+  id: string;
+  tactic_id: string;
+  gap_ids: string[];
+  scope: ExpansionScope;
+  status: TacticStatus;
+  proposal_id: string;
+  version: string;
+  history: ExpansionHistoryEntry[];
+  created_at: string;
+  updated_at: string;
+  actor: Actor;
+};
+
 export type GapTacticCoverage = {
   id: string;
+  /** Null/absent means original parent scope; otherwise this assessment is child-only. */
+  expansion_id?: string | null;
   gap_id: string;
   tactic_id: string;
   dimensions: Record<CoverageDimension, DimensionAssessment>;
@@ -365,6 +413,7 @@ export type IegpState = {
   gaps: EvidenceGap[];
   need_gap_links: NeedGapLink[];
   tactics: Tactic[];
+  expansions: TacticExpansion[];
   coverages: GapTacticCoverage[];
   mapping_suggestions: MappingSuggestionRecord[];
   residual_gap_suggestions: ResidualGapSuggestionRecord[];

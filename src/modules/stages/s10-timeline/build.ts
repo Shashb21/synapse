@@ -264,6 +264,7 @@ export function timelineCandidates(args: {
         countingCoverages(
           args.state.coverages.filter((coverage) => coverage.tactic_id === tactic.id),
           args.state.tactics,
+          args.state.expansions,
         ).length > 0,
       design: args.designs?.get(tactic.id) ?? {},
       saved,

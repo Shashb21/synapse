@@ -44,6 +44,7 @@ function emptyState(asset: Asset, detail: string): IegpState {
     breakout_groups: [],
     breakout_group_gaps: [],
     gap_suggestions: [],
+    expansions: [],
   };
 }
 

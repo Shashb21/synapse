@@ -98,7 +98,7 @@ export function buildMappingTableView(
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
-    const locked = state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.tactic_id);
+    const locked = state.coverages.filter((c) => !c.expansion_id && c.gap_id === gap.id).map((c) => c.tactic_id);
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);

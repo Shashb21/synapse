@@ -240,7 +240,7 @@ function GapDetailPane({
           {card.tactics.length === 0 ? (
             <li className="text-[12px] text-muted-foreground">No tactics mapped</li>
           ) : (
-            card.tactics.map((tactic) => <MappedTacticRow key={tactic.id} tactic={tactic} />)
+            card.tactics.map((tactic) => <MappedTacticRow key={tactic.expansion_id ?? tactic.id} tactic={tactic} />)
           )}
         </ul>
       </div>

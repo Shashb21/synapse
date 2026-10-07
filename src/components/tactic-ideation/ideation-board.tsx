@@ -180,9 +180,9 @@ function GapIdeationCard({
               <ul className="grid gap-1.5">
                 {linked.map((tactic) => (
                   <LinkedTacticRow
-                    key={tactic.id}
+                    key={tactic.expansion_id ?? tactic.id}
                     tactic={tactic}
-                    onEdit={onEditTactic ? () => void onEditTactic(tactic.id) : undefined}
+                    onEdit={!tactic.expansion_id && onEditTactic ? () => void onEditTactic(tactic.id) : undefined}
                   />
                 ))}
               </ul>

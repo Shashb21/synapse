@@ -22,7 +22,8 @@ import {
 } from "@/modules/stages/s9-ideation/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { loadState } from "@/lib/iegp/store";
-import { TACTIC_TYPES } from "@/lib/iegp/enums";
+import { setExpansionStatus } from "@/lib/iegp/tactic-expansions";
+import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
 import {
   addTimelineActivity,
@@ -108,6 +109,16 @@ export async function POST(request: Request) {
     const identity = await requireCustomerContext({ body });
     const rationale = String(body.rationale ?? body.note ?? "").trim();
     switch (action) {
+      case "set_expansion_status": {
+        assertCan(identity.role, "validate");
+        const expansion = await setExpansionStatus({
+          expansion_id: field(z.string().trim().min(1), body.expansion_id, "expansion_id"),
+          status: field(z.enum(TACTIC_STATUSES), body.status, "status"),
+          expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          rationale, actor: identity.actor,
+        });
+        return NextResponse.json({ok: true, expansion});
+      }
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
