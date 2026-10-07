@@ -8,6 +8,7 @@ export type AdminSectionId =
   | "harness"
   | "pipeline"
   | "runs"
+  | "learning"
   | "evals"
   | "catalog"
   | "modules"
@@ -50,6 +51,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   },
   { id: "pipeline", href: "/admin/pipeline", label: "Pipeline", summary: "Run any stage S0–S10, or the chain, and its evals." },
   { id: "runs", href: "/admin/runs", label: "Runs & traces", summary: "Every stage run: inputs, outputs, route, timing, scores." },
+  { id: "learning", href: "/admin/learning", label: "Decision learning", summary: "Reviewer agreement and immutable prompt candidates from validated lessons." },
   { id: "evals", href: "/admin/evals", label: "Evals", summary: "Gold recall and coverage scores for the committed plan." },
   { id: "catalog", href: "/admin/catalog", label: "Catalog", summary: "Every registered module and prompt variant." },
   { id: "modules", href: "/admin/modules", label: "Module versions", summary: "Which module version each stage runs." },

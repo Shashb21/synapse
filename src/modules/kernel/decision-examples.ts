@@ -186,15 +186,15 @@ export async function getDecisionExample(id: string): Promise<DecisionExample | 
 export async function listDecisionExamples(args: {
   stage?: StageId;
   kinds?: DecisionKind[];
-  limit?: number;
+  limit?: number | null;
+  workspace_id?: string;
 }): Promise<DecisionExample[]> {
   await ensureTable();
-  const limit = args.limit ?? 500;
-  const rows = (await sharedDb().execute(
-    args.stage
-      ? sql`select * from decision_examples where stage = ${args.stage} order by created_at desc limit ${limit}`
-      : sql`select * from decision_examples order by created_at desc limit ${limit}`,
-  )) as unknown as Row[];
+  const clauses = [sql`true`];
+  if (args.stage) clauses.push(sql`stage = ${args.stage}`);
+  if (args.workspace_id) clauses.push(sql`workspace_id = ${args.workspace_id}`);
+  const limit = args.limit === null ? sql`` : sql`limit ${args.limit ?? 500}`;
+  const rows = (await sharedDb().execute(sql`select * from decision_examples where ${sql.join(clauses, sql` and `)} order by created_at desc ${limit}`)) as unknown as Row[];
   const kinds = args.kinds?.length ? new Set<string>(args.kinds) : null;
   return rows.map(toExample).filter((example) => !kinds || kinds.has(example.kind));
 }
