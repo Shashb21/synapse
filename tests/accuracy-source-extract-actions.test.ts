@@ -28,4 +28,19 @@ it("shows saved paused drafts, counts and review links and refreshes", async () 
   expect(refresh).toHaveBeenCalledOnce();
 });
 it("retains ordinary success", async () => { await extract({ ok: true, gaps_inserted: 1, tactics_inserted: 0 }, 200); expect(host.textContent).toContain("Extracted 1 gap(s)"); expect(refresh).toHaveBeenCalledOnce(); });
+it("shows incomplete proposal linking and can resume the same batch", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ ok: false, assembly_incomplete: true, gaps_inserted: 1, tactics_inserted: 1, extraction_batch_id: "batch-link", runs: [{ run_id: "need-run", call_kind: "need_extract", summary: "Extracted" }] }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, gaps_inserted: 1, tactics_inserted: 1 }) });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1, gate: { ready: true, stub: true, connect_path: "/control" } })));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.textContent).toContain("Complete proposal linking is incomplete");
+  const resume = [...host.querySelectorAll("button")].find(button => button.textContent === "Resume proposal linking")!;
+  await act(async () => resume.click());
+  expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/extract", expect.objectContaining({
+    body: JSON.stringify({ action: "resume", workspace_id: "ws", source_file_id: "source", extraction_batch_id: "batch-link", idempotency_key: "resume:batch-link" }),
+  }));
+  expect(host.textContent).toContain("Extracted 1 gap(s)");
+});
 it("retains the provider connection gate", async () => { await extract({ ok: false, error: "Connect provider", connect_path: "/control" }, 409); expect(host.textContent).toContain("Connect provider"); expect(host.querySelector('a[href="/control"]')).not.toBeNull(); expect(refresh).not.toHaveBeenCalled(); });

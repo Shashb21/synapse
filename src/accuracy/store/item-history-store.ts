@@ -51,6 +51,20 @@ function rawItems(claim_type: AccuracyClaimType, output: unknown): Array<{ item:
     ? [{ item: item as Record<string, unknown>, item_index }] : []);
 }
 
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, field]) => [key, canonical(field)]));
+  }
+  return value;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
 function itemStatement(type: AccuracyClaimType, payload: Record<string, unknown>) {
   return String(payload[type === "gap" ? "statement" : "name"]);
 }
@@ -406,7 +420,7 @@ export async function publishGeneratedItemHistory(args: PublishArgs): Promise<{ 
     }
     for (const [index, item] of finals.entries()) {
       const fingerprint = finalFingerprints[index];
-      if (rawOrigins.some(raw => raw.fingerprint === fingerprint)) continue;
+      if (rawOrigins.some(raw => raw.fingerprint === fingerprint && sameJson(raw.item, item))) continue;
       const key = `final:${args.run_id}:${args.claim_type}:${index}`;
       const [prior] = await accuracyDb().select().from(t.accuracyItemVersions).where(and(
         eq(t.accuracyItemVersions.workspace_id, args.workspace_id), eq(t.accuracyItemVersions.origin_key, key)));
