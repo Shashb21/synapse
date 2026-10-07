@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { insertClaim, listClaims, type AccuracyClaimType } from "@/accuracy/store/claim-store";
-import { createManualClaim, updateClaim } from "@/accuracy/store/claim-edit";
+import { createManualClaim, updateClaim, validateStructuredClaimEvidence } from "@/accuracy/store/claim-edit";
 import { actorFieldsSchema, claimPatchSchema } from "@/accuracy/store/claim-patch-schema";
 import {
   labActor,
@@ -64,6 +64,13 @@ export async function POST(request: Request) {
     const body = await parseLabBody(request, insertSchema);
     await requireLabWorkspace(body.workspace_id);
     await assertAccuracyCanProgress(body.workspace_id, "validation_gate");
+    const hasStructuredFacts = body.metadata?.structured !== undefined || body.fields?.structured !== undefined;
+    if (hasStructuredFacts && (body.validated || body.status === "validated" || body.metadata?.validation != null)) {
+      return NextResponse.json(
+        { error: "Validate structured facts through the validation gate, not on create." },
+        { status: 400 },
+      );
+    }
     if (body.rationale !== undefined) {
       if (body.validated) {
         return NextResponse.json(
@@ -83,6 +90,9 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ ok: true, claim });
     }
+    const metadata = body.metadata?.structured !== undefined ? { ...body.metadata,
+      structured: await validateStructuredClaimEvidence(body.workspace_id, body.claim_type,
+        body.source_file_id ?? null, body.metadata.structured) } : body.metadata;
     const claim = await insertClaim({
       workspace_id: body.workspace_id,
       claim_type: body.claim_type,
@@ -90,7 +100,7 @@ export async function POST(request: Request) {
       status: body.status,
       validated: body.validated,
       source_file_id: body.source_file_id,
-      metadata: body.metadata,
+      metadata,
     });
     return NextResponse.json({ ok: true, claim });
   } catch (error) {

@@ -23,7 +23,7 @@ import {
   type ClaimEditEntry,
 } from "./claim-store";
 import { emptyGapStructuredFields, emptyTacticStructuredFields, gapStructuredFieldsSchema, tacticStructuredFieldsSchema,
-  gapStructuredPatchSchema, tacticStructuredPatchSchema, validateFieldEvidence, type StructuredPatch } from "@/accuracy/domain/structured-fields";
+  gapStructuredPatchSchema, tacticStructuredPatchSchema, validateFieldEvidence, structuredProvenance, type StructuredPatch } from "@/accuracy/domain/structured-fields";
 import { readParseBlocksByIds } from "./parse-store";
 import { listSourceFiles } from "./source-store";
 
@@ -490,21 +490,21 @@ async function validateStructuredPatchEvidence(workspace_id: string, claim_type:
   const structured = claim_type === "tactic"
     ? tacticStructuredFieldsSchema.parse({ ...emptyTacticStructuredFields("not_edited"), ...partial })
     : gapStructuredFieldsSchema.parse({ ...emptyGapStructuredFields("not_edited"), ...partial });
-  const spans: Array<{ block_id: string }> = [];
-  const collect = (value: unknown) => {
-    if (!value || typeof value !== "object") return;
-    if (Array.isArray(value)) { value.forEach(collect); return; }
-    const record = value as Record<string, unknown>;
-    if (typeof record.block_id === "string") spans.push({ block_id: record.block_id });
-    Object.values(record).forEach(collect);
-  };
-  collect(structured);
+  await validateStructuredClaimEvidence(workspace_id, claim_type, source_file_id, structured);
+}
+
+/** Validate the complete effective payload at untrusted claim creation boundaries. */
+export async function validateStructuredClaimEvidence(workspace_id: string, claim_type: AccuracyClaimType,
+  source_file_id: string | null, payload: unknown) {
+  const structured = (claim_type === "tactic" ? tacticStructuredFieldsSchema : gapStructuredFieldsSchema).parse(payload);
+  const spans = structuredProvenance(structured);
   const blocks = await readParseBlocksByIds(workspace_id, [...new Set(spans.map(span => span.block_id))]);
   const sources = await listSourceFiles(workspace_id);
   const error = validateFieldEvidence({ structured, provenance: [], source_file_id: source_file_id ?? "manual", blocks,
     source_file_ids: new Set(sources.map(source => source.id)),
     resolved_source_ids: new Set(sources.map(source => source.id)) });
   if (error) throw new Error(`${error.field}: ${error.reason}`);
+  return structured;
 }
 
 /** Write statement/status/metadata for one claim (no lock logic — callers decide). */
@@ -626,7 +626,6 @@ export async function createManualClaim(args: {
     source_badge: args.source_badge ?? "manual",
   };
   const fields = args.fields ?? {};
-  await validateStructuredPatchEvidence(args.workspace_id, args.claim_type, args.source_file_id ?? null, fields);
   const applied = applyClaimPatch({ statement, metadata: base }, fields, {
     claim_id: id,
     claim_type: args.claim_type,
@@ -636,6 +635,8 @@ export async function createManualClaim(args: {
     at,
     tactic_ids: fields.depends_on?.length ? await workspaceTacticIds(args.workspace_id) : new Set(),
   });
+  applied.metadata.structured = await validateStructuredClaimEvidence(args.workspace_id, args.claim_type,
+    args.source_file_id ?? null, applied.metadata.structured);
   const metadata = withHumanEdit(applied.metadata, {
     action: args.action ?? "create",
     fields: ["statement", ...applied.changed],
