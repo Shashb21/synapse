@@ -108,7 +108,7 @@ Local: `http://localhost:43217/api/auth/callback`. LLM providers need no redirec
 | `/admin/users` | After signing in as the `create-admin` account: the staff Users table |
 | `/admin/customers` | Customers with seats used / total; assign and unassign seats |
 | `/admin/control` | AI master switch; each LLM provider shows "Key set" or "No key" and its env var (Grok default); per-stage routing; no API-key fields |
-| `/control`, `/pipeline`, `/runs`, `/admin/accuracy` | Redirect to the matching `/admin/...` page (owner only) |
+| `/control`, `/pipeline`, `/runs`, `/accuracy` | Redirect to the matching `/admin/...` page (owner only) |
 | `/workspaces` | Create a workspace: **Start blank** (default) or **Start with demo data (Velmara)**; a demo workspace shows a **Demo** badge |
 | `/` | Blank workspace: Upload (AI on) or Start (AI off) |
 | `/timeline` | Every prioritized gap with its activities; create, date, drag and sequence by hand; PNG export; save as final (Medical Affairs only) |

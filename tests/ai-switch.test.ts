@@ -110,6 +110,9 @@ it("checks AI on the Accuracy transaction connection and still refuses agentic w
   const { accuracyDb, withAccuracyTransaction } = await import("@/accuracy/store/db");
   const { createOrganization, createWorkspace, deleteWorkspace } = await import("@/accuracy/store/tenant");
   const { aiEnabled } = await import("@/modules/kernel/ai-switch");
+  const { captureMergeInputs } = await import("@/accuracy/modules/merge-dedupe/module");
+  const { prepareAccuracyMerge } = await import("@/accuracy/kernel/run");
+  const { newId } = await import("@/modules/kernel/ids");
   const org_id = await createOrganization("Transaction AI test");
   const workspace_id = await createWorkspace({ org_id, name: "Transaction AI", slug: `transaction-ai-${Date.now()}` });
   const args = { call_kind: "merge_dedupe" as const, input: { workspace_id }, org_id, workspace_id, actor: ACTOR };
@@ -120,9 +123,18 @@ it("checks AI on the Accuracy transaction connection and still refuses agentic w
       await expect(runAccuracyModule(args)).rejects.toBeInstanceOf(AiDisabledError);
     });
     await setAiEnabled({ enabled: true, actor_name: ACTOR.name });
+    const reserved_run_id = newId("arun");
+    const prepared_merge = await prepareAccuracyMerge({ workspace_id, org_id, actor: ACTOR,
+      run_id: reserved_run_id, inputs: await captureMergeInputs(workspace_id) });
+    await setAiEnabled({ enabled: false, actor_name: ACTOR.name });
+    await withAccuracyTransaction(async () => {
+      expect(await aiEnabled(accuracyDb())).toBe(false);
+      await expect(runAccuracyModule({ ...args, reserved_run_id, prepared_merge })).rejects.toBeInstanceOf(AiDisabledError);
+    });
+    await setAiEnabled({ enabled: true, actor_name: ACTOR.name });
     const result = await withAccuracyTransaction(async () => {
       expect(await aiEnabled(accuracyDb())).toBe(true);
-      return runAccuracyModule(args);
+      return runAccuracyModule({ ...args, reserved_run_id, prepared_merge });
     });
     expect(result.run_id).toBeTruthy();
   } finally {

@@ -72,7 +72,7 @@ export async function POST(req: Request) {
       const { org_id } = await requireLabWorkspace(request.workspace_id);
       const actor = await labActor();
       const response = await resumeExtractionBatch({ workspace_id: request.workspace_id, source_file_id: request.source_file_id,
-        batch_id: request.extraction_batch_id, execute: async (batch, journal) => {
+        batch_id: request.extraction_batch_id, merge_context: { org_id, actor }, execute: async (batch, journal, prepared) => {
           await assertAccuracyCanProgress(request.workspace_id, "merge_dedupe");
           const extractionRuns = await accuracyDb().select().from(tables.accuracyModuleRuns).where(and(
             eq(tables.accuracyModuleRuns.workspace_id, request.workspace_id), inArray(tables.accuracyModuleRuns.id, batch.run_ids)));
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
             return { call_kind: run.call_kind, run_id: id, summary: run.summary, count: output.gaps?.length ?? output.tactics?.length ?? 0 };
           });
           const downstream = await runExtractionDownstream({ workspace_id: request.workspace_id, org_id, actor,
-            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
+            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id, prepared_merge: prepared });
           return { ok: true, workspace_id: request.workspace_id, source_file_id: request.source_file_id,
             extraction_batch_id: batch.id, gaps_inserted: runs.filter(run => run.call_kind === "need_extract").reduce((sum, run) => sum + run.count, 0),
             tactics_inserted: runs.filter(run => run.call_kind === "inventory_extract").reduce((sum, run) => sum + run.count, 0),
@@ -223,11 +223,12 @@ export async function POST(req: Request) {
       for (const claim of draftClaims) await insertClaim(claim);
     });
     try {
+      await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
       const response = await resumeExtractionBatch({ workspace_id: body.workspace_id, source_file_id: body.source_file_id,
-        batch_id: batch.id, execute: async (_batch, journal) => {
+        batch_id: batch.id, merge_context: { org_id, actor }, execute: async (_batch, journal, prepared) => {
           await assertAccuracyCanProgress(body.workspace_id, "merge_dedupe");
           const downstream = await runExtractionDownstream({ workspace_id: body.workspace_id, org_id, actor,
-            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id });
+            merge_id: journal.merge_operation_id, status_id: journal.status_operation_id, prepared_merge: prepared });
           return { ok: true, workspace_id: body.workspace_id, source_file_id: body.source_file_id,
             extraction_batch_id: batch.id, block_count: allBlocks.length, blocks_used: blocks.length,
             gaps_inserted, tactics_inserted, merge: downstream.merge.output, statuses: downstream.status.output,

@@ -204,6 +204,9 @@ export const accuracyResumeJournals = pgTable("accuracy_resume_journals", {
   merge_state: text("merge_state").notNull().default("reserved"),
   status_operation_id: text("status_operation_id").notNull(),
   status_state: text("status_state").notNull().default("reserved"),
+  preparation_token: text("preparation_token"),
+  preparation_started_at: text("preparation_started_at"),
+  prepared_merge: jsonb("prepared_merge"),
   final_response: jsonb("final_response"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
@@ -522,4 +525,7 @@ export const ACCURACY_MIGRATIONS = [
   `DELETE FROM accuracy_agent_events AS event
    WHERE NOT EXISTS (SELECT 1 FROM accuracy_module_runs AS run WHERE run.id = event.run_id)`,
   `ALTER TABLE accuracy_agent_events VALIDATE CONSTRAINT accuracy_agent_events_run_fk`,
+  `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS preparation_token text`,
+  `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS preparation_started_at text`,
+  `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS prepared_merge jsonb`,
 ];

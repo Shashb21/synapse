@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import type { AccuracyModuleContext, ModuleResult } from "@/accuracy/kernel/contracts";
+import { accuracyTransactionActive } from "@/accuracy/store/db";
 import { agenticModule, mechanicalModule } from "../_factory";
 import {
   asTacticLifecycle,
@@ -137,6 +140,174 @@ export const mergeDedupeOutputSchema = z.object({
 
 export type MergeDedupeOutput = z.infer<typeof mergeDedupeOutputSchema>;
 
+/** Exact server-captured inputs, including human locks, rejections and pack identity. */
+export async function captureMergeInputs(workspace_id: string) {
+  const [claims, sources] = await Promise.all([
+    listClaims(workspace_id, { limit: 1000 }),
+    listSourceFiles(workspace_id),
+  ]);
+  const packBySource = new Map(
+    sources.map((row) => [row.id, row.reference_pack_id ?? null]),
+  );
+  const active = claims.filter(isActiveLedgerClaim).sort((a, b) => a.id.localeCompare(b.id));
+  const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
+  const blocked = mergeRejectedPairs(active);
+  const questions = equivalenceQuestions(candidates, blocked);
+  const revision = createHash("sha256").update(JSON.stringify({ active,
+    packs: [...packBySource.entries()].sort(([a], [b]) => a.localeCompare(b)),
+  }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
+  return { workspace_id, revision, active, candidates, blocked, questions };
+}
+
+export type MergeInputs = Awaited<ReturnType<typeof captureMergeInputs>>;
+export type MergeJudgment = { revision: string; stub: boolean; equivalent: EquivalentPair[] };
+
+/** Preparation never applies ledger or coverage changes. */
+export async function prepareMergeJudgment(inputs: MergeInputs, ctx: AccuracyModuleContext): Promise<MergeJudgment> {
+  if (accuracyTransactionActive()) throw new Error("Merge preparation must run outside every Accuracy transaction.");
+  const stub = isTestStub();
+  if (stub) ctx.run.note("merge:test-stub", { unjudged_pairs: inputs.questions.length });
+  const equivalent = stub ? [] : await judgeEquivalence({ ctx, questions: inputs.questions, candidates: inputs.candidates });
+  return { revision: inputs.revision, stub, equivalent };
+}
+
+/** A prepared judgment can only apply to precisely the captured server input. */
+export async function applyMergeJudgment(inputs: MergeInputs, judgment: MergeJudgment, ctx: AccuracyModuleContext): Promise<ModuleResult<MergeDedupeOutput>> {
+  if (inputs.revision !== judgment.revision) throw new Error("Prepared merge inputs are stale.");
+  const input = { workspace_id: inputs.workspace_id };
+  const { active, candidates, blocked, questions } = inputs;
+  const { stub, equivalent } = judgment;
+  const result = mergeDedupeCandidates(candidates, { equivalent, blocked });
+  const byId = new Map(active.map((row) => [row.id, row]));
+
+  for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
+    const duplicate = byId.get(duplicateId);
+    if (!duplicate) continue;
+    // Defence in depth: never auto-merge away a validated or human-edited claim.
+    if (isHumanProtectedClaim(duplicate)) continue;
+    const meta = claimMetadata(duplicate);
+    const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
+    await persistClaimPatch({
+      workspace_id: input.workspace_id,
+      claim_id: duplicateId,
+      status: "merged",
+      metadata: {
+        ...meta,
+        pre_merge_status: duplicate.status,
+        merged_into: survivorId,
+        merge_reason: mergeRow?.reason ?? "transitive",
+        merge_rationale: mergeRow?.rationale ?? null,
+      },
+    });
+    const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
+    await reassignCoverageClaimId({
+      workspace_id: input.workspace_id,
+      from_id: duplicateId,
+      to_id: survivorId,
+      role,
+    });
+  }
+
+  for (const survivor of result.survivors) {
+    const row = byId.get(survivor.id);
+    if (!row) continue;
+    const meta = claimMetadata(row);
+    const absorbedIds = Object.entries(result.absorbed)
+      .filter(([, keep]) => keep === survivor.id)
+      .map(([dup]) => dup);
+    if (absorbedIds.length === 0 && survivor.provenance.length === provenanceFromMeta(meta).length) {
+      continue;
+    }
+    const mergedFrom = [
+      ...new Set([...(Array.isArray(meta.merged_from) ? meta.merged_from : []), ...absorbedIds]),
+    ];
+    await persistClaimPatch({
+      workspace_id: input.workspace_id,
+      claim_id: survivor.id,
+      metadata: preserveHumanLocks(meta, {
+        ...meta,
+        external_id: survivor.external_id ?? meta.external_id ?? null,
+        reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
+        tactic_status: survivor.tactic_status ?? meta.tactic_status ?? null,
+        provenance: survivor.provenance,
+        merged_from: mergedFrom,
+        merged_into: null,
+      }),
+    });
+  }
+
+  // Proposals: persist on the protected duplicate; a human confirms or dismisses.
+  const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));
+  const proposedAt = nowIso();
+  const fresh = (await listClaims(input.workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
+  for (const row of fresh) {
+    const meta = claimMetadata(row);
+    const proposal = proposalByDuplicate.get(row.id);
+    const existing = meta.merge_proposal ?? null;
+    if (proposal) {
+      if (existing && existing.survivor_id === proposal.survivor_id) continue;
+      await persistClaimPatch({
+        workspace_id: input.workspace_id,
+        claim_id: row.id,
+        metadata: {
+          ...meta,
+          merge_proposal: {
+            survivor_id: proposal.survivor_id,
+            reason: proposal.reason,
+            keys: proposal.keys,
+            rationale: proposal.rationale ?? null,
+            proposed_at: proposedAt,
+          },
+        },
+      });
+    } else if (existing) {
+      await persistClaimPatch({
+        workspace_id: input.workspace_id,
+        claim_id: row.id,
+        metadata: { ...meta, merge_proposal: null },
+      });
+    }
+  }
+
+  const output: MergeDedupeOutput = {
+    workspace_id: input.workspace_id,
+    mode: stub ? "stub" : "llm",
+    judged_pairs: questions.length,
+    merged: Object.keys(result.absorbed).length,
+    survivors: result.survivors.length,
+    contradictions: result.contradictions.length,
+    merges: result.merges,
+    proposed: result.proposals.length,
+    proposals: result.proposals,
+    contradiction_rows: result.contradictions,
+  };
+  ctx.run.note("merge:result", {
+    merged: output.merged,
+    survivors: output.survivors,
+    contradictions: output.contradictions,
+    absorbed: result.absorbed,
+  });
+  return {
+    output,
+    summary: `${
+      output.merged === 0
+        ? `Merge dedupe — ${output.survivors} survivor(s), no duplicates`
+        : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`
+    }${
+      result.proposals.length > 0
+        ? ` · ${result.proposals.length} merge(s) proposed for human review (validated / human-edited)`
+        : ""
+    }${
+      stub && questions.length > 0
+        ? ` · test stub (SYNAPSE_TEST_STUB_LLM): ${questions.length} same-block pair(s) not judged`
+        : questions.length > 0
+          ? ` · judge decided ${questions.length} same-block pair(s)`
+          : ""
+    }`,
+  };
+}
+
 /**
  * Merge / dedupe. Shared study IDs and identical statements merge as facts;
  * differently worded candidates citing the same block are merged only when the
@@ -151,153 +322,9 @@ export const mergeDedupeModule = agenticModule({
   inputSchema: z.object({ workspace_id: z.string() }),
   outputSchema: mergeDedupeOutputSchema,
   run: async (input, ctx) => {
-    const [claims, sources] = await Promise.all([
-      listClaims(input.workspace_id, { limit: 1000 }),
-      listSourceFiles(input.workspace_id),
-    ]);
-    const packBySource = new Map(
-      sources.map((row) => [row.id, row.reference_pack_id ?? null]),
-    );
-    const active = claims.filter(isActiveLedgerClaim);
-    const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
-    const blocked = mergeRejectedPairs(active);
-    const questions = equivalenceQuestions(candidates, blocked);
-    const stub = isTestStub();
-    let equivalent: EquivalentPair[] = [];
-    if (stub) {
-      // Test stub only: same-block pairs stay separate and are reported unjudged.
-      ctx.run.note("merge:test-stub", { unjudged_pairs: questions.length });
-    } else {
-      equivalent = await judgeEquivalence({ ctx, questions, candidates });
-    }
-    const result = mergeDedupeCandidates(candidates, { equivalent, blocked });
-    const byId = new Map(active.map((row) => [row.id, row]));
-
-    for (const [duplicateId, survivorId] of Object.entries(result.absorbed)) {
-      const duplicate = byId.get(duplicateId);
-      if (!duplicate) continue;
-      // Defence in depth: never auto-merge away a validated or human-edited claim.
-      if (isHumanProtectedClaim(duplicate)) continue;
-      const meta = claimMetadata(duplicate);
-      const mergeRow = result.merges.find((m) => m.duplicate_id === duplicateId);
-      await persistClaimPatch({
-        workspace_id: input.workspace_id,
-        claim_id: duplicateId,
-        status: "merged",
-        metadata: {
-          ...meta,
-          pre_merge_status: duplicate.status,
-          merged_into: survivorId,
-          merge_reason: mergeRow?.reason ?? "transitive",
-          merge_rationale: mergeRow?.rationale ?? null,
-        },
-      });
-      const role = duplicate.claim_type === "tactic" ? "tactic" : "gap";
-      await reassignCoverageClaimId({
-        workspace_id: input.workspace_id,
-        from_id: duplicateId,
-        to_id: survivorId,
-        role,
-      });
-    }
-
-    for (const survivor of result.survivors) {
-      const row = byId.get(survivor.id);
-      if (!row) continue;
-      const meta = claimMetadata(row);
-      const absorbedIds = Object.entries(result.absorbed)
-        .filter(([, keep]) => keep === survivor.id)
-        .map(([dup]) => dup);
-      if (absorbedIds.length === 0 && survivor.provenance.length === provenanceFromMeta(meta).length) {
-        continue;
-      }
-      const mergedFrom = [
-        ...new Set([...(Array.isArray(meta.merged_from) ? meta.merged_from : []), ...absorbedIds]),
-      ];
-      await persistClaimPatch({
-        workspace_id: input.workspace_id,
-        claim_id: survivor.id,
-        metadata: preserveHumanLocks(meta, {
-          ...meta,
-          external_id: survivor.external_id ?? meta.external_id ?? null,
-          reference_pack_id: survivor.reference_pack_id ?? meta.reference_pack_id ?? null,
-          tactic_status: survivor.tactic_status ?? meta.tactic_status ?? null,
-          provenance: survivor.provenance,
-          merged_from: mergedFrom,
-          merged_into: null,
-        }),
-      });
-    }
-
-    // Proposals: persist on the protected duplicate; a human confirms or dismisses.
-    const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));
-    const proposedAt = nowIso();
-    const fresh = (await listClaims(input.workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
-    for (const row of fresh) {
-      const meta = claimMetadata(row);
-      const proposal = proposalByDuplicate.get(row.id);
-      const existing = meta.merge_proposal ?? null;
-      if (proposal) {
-        if (existing && existing.survivor_id === proposal.survivor_id) continue;
-        await persistClaimPatch({
-          workspace_id: input.workspace_id,
-          claim_id: row.id,
-          metadata: {
-            ...meta,
-            merge_proposal: {
-              survivor_id: proposal.survivor_id,
-              reason: proposal.reason,
-              keys: proposal.keys,
-              rationale: proposal.rationale ?? null,
-              proposed_at: proposedAt,
-            },
-          },
-        });
-      } else if (existing) {
-        await persistClaimPatch({
-          workspace_id: input.workspace_id,
-          claim_id: row.id,
-          metadata: { ...meta, merge_proposal: null },
-        });
-      }
-    }
-
-    const output: MergeDedupeOutput = {
-      workspace_id: input.workspace_id,
-      mode: stub ? "stub" : "llm",
-      judged_pairs: questions.length,
-      merged: Object.keys(result.absorbed).length,
-      survivors: result.survivors.length,
-      contradictions: result.contradictions.length,
-      merges: result.merges,
-      proposed: result.proposals.length,
-      proposals: result.proposals,
-      contradiction_rows: result.contradictions,
-    };
-    ctx.run.note("merge:result", {
-      merged: output.merged,
-      survivors: output.survivors,
-      contradictions: output.contradictions,
-      absorbed: result.absorbed,
-    });
-    return {
-      output,
-      summary: `${
-        output.merged === 0
-          ? `Merge dedupe — ${output.survivors} survivor(s), no duplicates`
-          : `Merge dedupe — collapsed ${output.merged} duplicate(s) into ${output.survivors} survivor(s)`
-      }${
-        result.proposals.length > 0
-          ? ` · ${result.proposals.length} merge(s) proposed for human review (validated / human-edited)`
-          : ""
-      }${
-        stub && questions.length > 0
-          ? ` · test stub (SYNAPSE_TEST_STUB_LLM): ${questions.length} same-block pair(s) not judged`
-          : questions.length > 0
-            ? ` · judge decided ${questions.length} same-block pair(s)`
-            : ""
-      }`,
-    };
+    const inputs = await captureMergeInputs(input.workspace_id);
+    const judgment = await prepareMergeJudgment(inputs, ctx);
+    return applyMergeJudgment(inputs, judgment, ctx);
   },
 });
 

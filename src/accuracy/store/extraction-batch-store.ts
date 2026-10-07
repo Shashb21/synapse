@@ -1,8 +1,15 @@
 /** Applied extraction identities and durable, atomic downstream resume operations. */
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { isDeepStrictEqual } from "node:util";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
+import { captureMergeInputs, mergeDedupeModule } from "@/accuracy/modules/merge-dedupe/module";
+import { activeAccuracyModule } from "@/accuracy/kernel/registry";
+import { prepareAccuracyMerge, type PreparedAccuracyMerge } from "@/accuracy/kernel/run";
+import { reservedAccuracyRun, DEFAULT_STALE_RUN_MAX_AGE_MS } from "@/accuracy/kernel/observability";
+import type { Actor } from "@/accuracy/kernel/contracts";
+import { isTestStub } from "@/modules/kernel/llm";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
 export type ExtractionBatch = typeof t.accuracyExtractionBatches.$inferSelect;
@@ -10,7 +17,7 @@ export type ResumeJournal = typeof t.accuracyResumeJournals.$inferSelect;
 
 /** Conflict response for invalid identities or an active resume transaction. */
 export class ExtractionBatchError extends Error {
-  constructor(readonly code: "stale_batch" | "resume_in_progress", message: string) { super(message); }
+  constructor(readonly code: "stale_batch" | "stale_merge_inputs" | "resume_in_progress", message: string) { super(message); }
 }
 
 /** Serialize batch application, omission decisions, and downstream writes in a workspace. */
@@ -82,45 +89,94 @@ async function currentBatch(workspace_id: string, source_file_id: string, batch_
   return batch;
 }
 
-/** Reserve stage IDs durably, then atomically commit their effects and replayable response. */
+/** Reserve/capture briefly, judge without locks, then atomically apply the unchanged inputs. */
 export async function resumeExtractionBatch<T>(args: { workspace_id: string; source_file_id: string; batch_id: string;
-  execute: (batch: ExtractionBatch, journal: ResumeJournal) => Promise<T> }): Promise<T> {
-  // Reservation survives a later failed stage; no running marker needs timeout-based takeover.
-  await withAccuracyTransaction(async () => {
+  merge_context: { org_id: string; actor: Actor; evaluation_context?: "production" | "experiment" };
+  execute: (batch: ExtractionBatch, journal: ResumeJournal, prepared?: PreparedAccuracyMerge) => Promise<T> }): Promise<T> {
+  // Never let the preparation phase join a caller's outer transaction.
+  if (accuracyTransactionActive()) throw new Error("Extraction resume must start outside every Accuracy transaction.");
+  const token = newId("prepare");
+  const reservation = await withAccuracyTransaction(async () => {
     await lockWorkspace(args.workspace_id, false);
-    await currentBatch(args.workspace_id, args.source_file_id, args.batch_id);
+    const batch = await currentBatch(args.workspace_id, args.source_file_id, args.batch_id);
     await accuracyDb().insert(t.accuracyResumeJournals).values({ id: newId("resume"), workspace_id: args.workspace_id,
       batch_id: args.batch_id, merge_operation_id: newId("arun"), status_operation_id: newId("arun"), created_at: nowIso(), updated_at: nowIso() })
       .onConflictDoNothing();
-  });
-  const result = await withAccuracyTransaction(async () => {
-    await lockWorkspace(args.workspace_id, false);
-    const batch = await currentBatch(args.workspace_id, args.source_file_id, args.batch_id);
     const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
       eq(t.accuracyResumeJournals.workspace_id, args.workspace_id), eq(t.accuracyResumeJournals.batch_id, args.batch_id)));
-    if (journal.final_response !== null) return { response: journal.final_response as T };
-    let response: T;
-    try { response = await args.execute(batch, journal); }
-    catch (error) {
-      if (!(error instanceof AccuracyPausedError)) throw error;
-      // A pause is a valid checkpoint: preserve completed stage effects and their IDs.
-      // Actual stage failures still throw through the transaction and roll back all writes.
-      const completed = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(
-        eq(t.accuracyModuleRuns.workspace_id, args.workspace_id), eq(t.accuracyModuleRuns.status, "ok"),
-        inArray(t.accuracyModuleRuns.id, [journal.merge_operation_id, journal.status_operation_id])));
-      await accuracyDb().update(t.accuracyResumeJournals).set({
-        merge_state: completed.some(run => run.id === journal.merge_operation_id) ? "completed" : "reserved",
-        status_state: completed.some(run => run.id === journal.status_operation_id) ? "completed" : "reserved",
-        updated_at: nowIso(),
-      }).where(eq(t.accuracyResumeJournals.id, journal.id));
-      return { pause: error };
+    if (journal.final_response !== null) return { replay: true as const, response: journal.final_response as T };
+    // A durable, fenced lease rejects duplicate providers across server processes.
+    // Expiration recovers a crashed worker; a superseded worker cannot publish.
+    if (journal.preparation_token && Date.now() - Date.parse(journal.preparation_started_at ?? "") < DEFAULT_STALE_RUN_MAX_AGE_MS) {
+      throw new ExtractionBatchError("resume_in_progress", "A resume judgment or application is already in progress.");
     }
-    await accuracyDb().update(t.accuracyResumeJournals).set({ merge_state: "completed", status_state: "completed",
-      final_response: response, updated_at: nowIso() }).where(eq(t.accuracyResumeJournals.id, journal.id));
-    return { response };
-  });
-  if ("pause" in result) throw result.pause;
-  return result.response;
+    const implementation = await activeAccuracyModule("merge_dedupe");
+    const completed = await reservedAccuracyRun(args.workspace_id, journal.merge_operation_id);
+    const inputs = implementation.manifest.id === mergeDedupeModule.manifest.id && !completed
+      ? await captureMergeInputs(args.workspace_id) : undefined;
+    const cached = journal.prepared_merge as PreparedAccuracyMerge | null;
+    const prepared = inputs && cached && cached.judgment.revision === inputs.revision
+      && cached.judgment.stub === isTestStub()
+      && cached.module_id === implementation.manifest.id && cached.module_version === implementation.manifest.version
+      && cached.workspace_id === args.workspace_id && cached.org_id === args.merge_context.org_id
+      && cached.run_id === journal.merge_operation_id ? cached : undefined;
+    await accuracyDb().update(t.accuracyResumeJournals).set({ preparation_token: token,
+      preparation_started_at: nowIso(), updated_at: nowIso() }).where(eq(t.accuracyResumeJournals.id, journal.id));
+    return { replay: false as const, batch, journal, inputs, prepared, prior: cached ?? undefined };
+  }, { isolationLevel: "serializable" });
+  if (reservation.replay) return reservation.response;
+  let prepared = reservation.prepared;
+  try {
+    if (reservation.inputs && !prepared) {
+      prepared = await prepareAccuracyMerge({ ...args.merge_context, workspace_id: args.workspace_id,
+        run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs, prior: reservation.prior });
+      // Successful paid judgment survives an apply rollback. CAS fences lease takeover.
+      const saved = await accuracyDb().update(t.accuracyResumeJournals).set({ prepared_merge: prepared, updated_at: nowIso() })
+        .where(and(eq(t.accuracyResumeJournals.id, reservation.journal.id), eq(t.accuracyResumeJournals.preparation_token, token))).returning();
+      if (!saved.length) throw new ExtractionBatchError("resume_in_progress", "Resume reservation was superseded.");
+    }
+    const result = await withAccuracyTransaction(async () => {
+      await lockWorkspace(args.workspace_id, false);
+      const batch = await currentBatch(args.workspace_id, args.source_file_id, args.batch_id);
+      if (!isDeepStrictEqual(batch, reservation.batch)) throw new ExtractionBatchError("stale_batch", "Applied extraction batch changed during resume preparation.");
+      const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
+        eq(t.accuracyResumeJournals.workspace_id, args.workspace_id), eq(t.accuracyResumeJournals.batch_id, args.batch_id)));
+      if (journal.final_response !== null) return { response: journal.final_response as T };
+      if (journal.preparation_token !== token) throw new ExtractionBatchError("resume_in_progress", "Resume reservation was superseded.");
+      if (prepared) {
+        const implementation = await activeAccuracyModule("merge_dedupe");
+        const inputs = await captureMergeInputs(args.workspace_id);
+        if (implementation.manifest.id !== prepared.module_id || implementation.manifest.version !== prepared.module_version
+          || inputs.revision !== prepared.judgment.revision) {
+          throw new ExtractionBatchError("stale_merge_inputs", "Merge inputs changed during judgment. Resume again to prepare the current inputs.");
+        }
+      }
+      let response: T;
+      try { response = await args.execute(batch, journal, prepared); }
+      catch (error) {
+        if (!(error instanceof AccuracyPausedError)) throw error;
+        // A pause is a valid checkpoint: preserve completed stage effects and their IDs.
+        // Actual stage failures still throw through the transaction and roll back all writes.
+        const completed = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(
+          eq(t.accuracyModuleRuns.workspace_id, args.workspace_id), eq(t.accuracyModuleRuns.status, "ok"),
+          inArray(t.accuracyModuleRuns.id, [journal.merge_operation_id, journal.status_operation_id])));
+        await accuracyDb().update(t.accuracyResumeJournals).set({
+          merge_state: completed.some(run => run.id === journal.merge_operation_id) ? "completed" : "reserved",
+          status_state: completed.some(run => run.id === journal.status_operation_id) ? "completed" : "reserved",
+          updated_at: nowIso(),
+        }).where(eq(t.accuracyResumeJournals.id, journal.id));
+        return { pause: error };
+      }
+      await accuracyDb().update(t.accuracyResumeJournals).set({ merge_state: "completed", status_state: "completed",
+        final_response: response, updated_at: nowIso() }).where(eq(t.accuracyResumeJournals.id, journal.id));
+      return { response };
+    }, { isolationLevel: "serializable" });
+    if ("pause" in result) throw result.pause;
+    return result.response;
+  } finally {
+    await accuracyDb().update(t.accuracyResumeJournals).set({ preparation_token: null, preparation_started_at: null, updated_at: nowIso() })
+      .where(and(eq(t.accuracyResumeJournals.id, reservation.journal.id), eq(t.accuracyResumeJournals.preparation_token, token)));
+  }
 }
 
 /** Report server-owned downstream eligibility independently of finding currency. */

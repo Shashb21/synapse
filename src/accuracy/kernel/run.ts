@@ -23,6 +23,22 @@ import { estimateCostUsd } from "./cost";
 import { getWorkspaceOrgId } from "../store/tenant";
 import { assertAccuracyCanProgress } from "./omission-pause";
 import { isTestStub } from "@/modules/kernel/llm";
+import { applyMergeJudgment, captureMergeInputs, mergeDedupeModule, prepareMergeJudgment,
+  type MergeInputs, type MergeJudgment } from "../modules/merge-dedupe/module";
+import type { JsonCompletion, RunStep } from "./contracts";
+
+function completionOutsideTransaction(complete: JsonCompletion): JsonCompletion {
+  return async args => {
+    if (accuracyTransactionActive()) throw new Error("Model completion must run outside every Accuracy transaction.");
+    return complete(args);
+  };
+}
+
+/** Trusted server preparation; never parsed from a module's client input. */
+export type PreparedAccuracyMerge = {
+  workspace_id: string; org_id: string; run_id: string; module_id: string; module_version: string;
+  judgment: MergeJudgment; route: ResolvedAccuracyRoute | null; steps: RunStep[]; costs: CostEstimate[]; started_at: string;
+};
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -55,11 +71,22 @@ export async function runAccuracyModule<O = unknown>(args: {
   /** Internal boundary for isolated experiments; production remains the default. */
   evaluation_context?: "production" | "experiment";
   experiment_cycle_control?: ExperimentCycleControl;
+  /** Internal merge-only boundary. HTTP handlers never forward these from client input. */
+  merge_preparation?: MergeInputs;
+  prepared_merge?: PreparedAccuracyMerge;
 }): Promise<AccuracyRunResult<O>> {
+  if (args.merge_preparation && accuracyTransactionActive()) throw new Error("Merge preparation cannot join an outer transaction.");
   const agent_role = args.agent_role ?? "proposer";
   const evaluation_context = args.evaluation_context ?? "production";
   const experiment_cycle_control = validateExperimentCycleControl(args.experiment_cycle_control, evaluation_context, args.call_kind);
   const implementation = await activeAccuracyModule(args.call_kind);
+  if ((args.merge_preparation || args.prepared_merge) && (args.call_kind !== "merge_dedupe"
+    || implementation.manifest.id !== mergeDedupeModule.manifest.id)) throw new Error("Prepared merge module identity conflicts.");
+  if (args.merge_preparation && args.merge_preparation.workspace_id !== args.workspace_id) throw new Error("Merge preparation workspace identity conflicts.");
+  if (args.prepared_merge && (args.prepared_merge.workspace_id !== args.workspace_id
+    || args.prepared_merge.org_id !== args.org_id || args.prepared_merge.run_id !== args.reserved_run_id
+    || args.prepared_merge.module_id !== implementation.manifest.id
+    || args.prepared_merge.module_version !== implementation.manifest.version)) throw new Error("Prepared merge operation identity conflicts.");
   await ensureAccuracySchema(implementation.migrations ?? []);
   // The admin AI switch: with AI off, no agentic module runs at all.
   if (implementation.manifest.agentic && !(await aiEnabled(accuracyTransactionActive() ? accuracyDb() : undefined))) {
@@ -106,14 +133,17 @@ export async function runAccuracyModule<O = unknown>(args: {
     input: args.input,
     evaluation_context,
     experiment_cycle_control,
-  }, args.reserved_run_id);
-  await openAccuracyRun(recorder);
+  }, args.reserved_run_id, args.prepared_merge?.started_at);
+  if (!args.merge_preparation) await openAccuracyRun(recorder);
+  if (args.prepared_merge) recorder.restorePreparation(args.prepared_merge.steps, args.prepared_merge.costs);
 
-  recorder.note("input:accepted", parsedInput.data);
+  if (!args.prepared_merge) recorder.note("input:accepted", parsedInput.data);
 
   let route = null;
   try {
-    if (isTestStub()) {
+    if (args.prepared_merge) {
+      route = args.prepared_merge.route;
+    } else if (isTestStub()) {
       // Vitest / Playwright: allow agentic modules without a live provider.
       const stub = await resolveAccuracyRoute({
         call_kind: args.call_kind,
@@ -140,7 +170,7 @@ export async function runAccuracyModule<O = unknown>(args: {
   } catch (error) {
     if (implementation.manifest.agentic) {
       const message = error instanceof Error ? error.message : String(error);
-      await closeAccuracyRun({ recorder, status: "error", error: message });
+      if (!args.merge_preparation) await closeAccuracyRun({ recorder, status: "error", error: message });
       throw error;
     }
   }
@@ -172,7 +202,7 @@ export async function runAccuracyModule<O = unknown>(args: {
       reason: "mechanical",
     },
     complete: llmReady
-      ? accuracyCompletionFor({
+      ? completionOutsideTransaction(accuracyCompletionFor({
           route: route!,
           run: recorder,
           onUsage: (usage, cost_usd) => {
@@ -190,7 +220,7 @@ export async function runAccuracyModule<O = unknown>(args: {
             costs.push(c);
             recorder.addCost(c);
           },
-        })
+        }))
       : async () => {
           throw new Error(
             isTestStub()
@@ -205,7 +235,20 @@ export async function runAccuracyModule<O = unknown>(args: {
   };
 
   try {
-    const result = await implementation.run(parsedInput.data, ctx);
+    if (args.merge_preparation) {
+      recorder.note("merge:prepared-inputs", { revision: args.merge_preparation.revision });
+      const judgment = await prepareMergeJudgment(args.merge_preparation, ctx);
+      const prepared: PreparedAccuracyMerge = { workspace_id: args.workspace_id, org_id: args.org_id,
+        run_id: recorder.id, module_id: implementation.manifest.id, module_version: implementation.manifest.version,
+        judgment, route, steps: recorder.steps(), costs, started_at: recorder.startedAtIso() };
+      const summary = recorder.usageSummary();
+      return { run_id: recorder.id, call_kind: args.call_kind, module_id: implementation.manifest.id,
+        module_version: implementation.manifest.version, output: prepared as O, summary: "Merge judgment prepared",
+        evals: [], ...summary, route };
+    }
+    const result = args.prepared_merge
+      ? await applyMergeJudgment(await captureMergeInputs(args.workspace_id), args.prepared_merge.judgment, ctx)
+      : await implementation.run(parsedInput.data, ctx);
     const parsedOutput = implementation.outputSchema.safeParse(result.output);
     if (!parsedOutput.success) {
       const message = parsedOutput.error.issues.map((i) => i.message).join("; ");
@@ -235,7 +278,26 @@ export async function runAccuracyModule<O = unknown>(args: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await closeAccuracyRun({ recorder, status: "error", error: message, route });
+    if (!args.merge_preparation) await closeAccuracyRun({ recorder, status: "error", error: message, route });
     throw error;
   }
+}
+
+/** Use the ordinary kernel gates/routing/recorder without opening or applying a run. */
+export async function prepareAccuracyMerge(args: { workspace_id: string; org_id: string; actor: Actor;
+  run_id: string; inputs: MergeInputs; evaluation_context?: "production" | "experiment";
+  prior?: PreparedAccuracyMerge }): Promise<PreparedAccuracyMerge> {
+  const result = await runAccuracyModule<PreparedAccuracyMerge>({ ...args, call_kind: "merge_dedupe", agent_role: "judge",
+    reserved_run_id: args.run_id, input: { workspace_id: args.workspace_id }, merge_preparation: args.inputs });
+  const prepared = result.output;
+  // Repreparing stale inputs spends again. Keep all successful paid attempts
+  // under the same journal operation rather than losing their cost/evidence.
+  const prior = args.prior;
+  if (prior && prior.workspace_id === prepared.workspace_id && prior.org_id === prepared.org_id
+    && prior.run_id === prepared.run_id) {
+    prepared.steps = [...prior.steps, ...prepared.steps];
+    prepared.costs = [...prior.costs, ...prepared.costs];
+    prepared.started_at = prior.started_at ?? prepared.started_at;
+  }
+  return prepared;
 }

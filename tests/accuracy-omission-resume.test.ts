@@ -1,7 +1,7 @@
 /** Behavioral extraction and durable resume checks against the real database. */
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { GET as omissionGet } from "@/app/api/accuracy/omissions/route";
 import { POST } from "@/app/api/accuracy/extract/route";
@@ -10,7 +10,11 @@ import { activateAccuracyModule, activeAccuracyModuleId, registerAccuracyModule 
 import { mechanicalModule } from "@/accuracy/modules/_factory";
 import { needExtractOutputSchema } from "@/accuracy/modules/need-extract/module";
 import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
-import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
+import { openAi, xaiGrok } from "@/modules/llm/provider";
+import { accuracyRouteConfig, setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
+import { updateClaim } from "@/accuracy/store/claim-edit";
+import * as session from "@/modules/auth/session";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
@@ -19,6 +23,7 @@ import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omi
 import * as claimStore from "@/accuracy/store/claim-store";
 import { getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { applyExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
 const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
@@ -71,7 +76,204 @@ async function resolve(scope: Awaited<ReturnType<typeof fixture>>, body: { runs:
 }
 const runs = (workspace_id: string) => accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, workspace_id));
 
+async function liveJudge<T>(complete: typeof xaiGrok.complete, operation: () => Promise<T>) {
+  const previousStub = process.env.SYNAPSE_TEST_STUB_LLM;
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousRoute = await accuracyRouteConfig("merge_dedupe", "judge");
+  process.env.SYNAPSE_TEST_STUB_LLM = "";
+  process.env.OPENAI_API_KEY = "scripted-provider-key";
+  await setAccuracyRouteConfig({ call_kind: "merge_dedupe", agent_role: "judge", provider_id: "openai",
+    model: "gpt-5.1", actor_name: "test", fallbacks: [] });
+  const owner = vi.spyOn(session, "sessionContext").mockResolvedValue({ session: null,
+    actor: { name: "Owner", function: "medical_affairs" }, role: "operator", demo: false, signed_in: true });
+  const provider = vi.spyOn(openAi, "complete").mockImplementation(complete);
+  try { return await operation(); }
+  finally {
+    provider.mockRestore(); owner.mockRestore();
+    if (previousStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
+    else process.env.SYNAPSE_TEST_STUB_LLM = previousStub;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    await setAccuracyRouteConfig({ ...previousRoute, actor_name: previousRoute.updated_by,
+      temperature: previousRoute.params.temperature, max_tokens: previousRoute.params.max_tokens });
+  }
+}
+async function judgedFixture() {
+  const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+  const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
+    statement: "Need comparator evidence", source_file_id: scope.source_file_id,
+    metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
+  const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "scripted-resume" };
+  return { scope, duplicate, request };
+}
+const decision = (same: boolean) => JSON.stringify({ decisions: [{ pair_id: "p1", same, rationale: "Same comparator need" }] });
+
 describe("extraction omission resume", () => {
+  it("rejects an applied batch changed during the provider wait even when its run IDs remain current", async () => {
+    const { scope, request } = await judgedFixture();
+    const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.id, request.extraction_batch_id));
+    let entered!: () => void; let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    await liveJudge(async () => { entered(); await hold; return decision(true); }, async () => {
+      const pending = post(request);
+      await Promise.race([started, pending.then(() => { throw new Error("Provider was never reached"); })]);
+      try {
+        await applyExtractionBatch(batch, batch.run_ids, [...batch.created_claim_ids, newId("gap")], async () => {});
+      } finally { release(); }
+      const stale = await pending;
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ code: "stale_batch" });
+      expect(await runs(scope.workspace_id)).toHaveLength(1);
+      expect((await listClaims(scope.workspace_id)).every(row => row.status === "draft")).toBe(true);
+    });
+  });
+
+  it("refuses an outer transaction before a resume preparation or apply callback can run", async () => {
+    const { scope, request } = await judgedFixture();
+    let executed = false;
+    await expect(withAccuracyTransaction(() => resumeExtractionBatch({ workspace_id: scope.workspace_id,
+      source_file_id: scope.source_file_id, batch_id: request.extraction_batch_id,
+      merge_context: { org_id: scope.org_id, actor: { name: "Owner", function: "medical_affairs" } },
+      execute: async () => { executed = true; return {}; } }))).rejects.toThrow("outside every Accuracy transaction");
+    expect(executed).toBe(false);
+    expect(await runs(scope.workspace_id)).toHaveLength(1);
+  });
+
+  it("rejects stale judgment when a human changes its inputs during the provider wait and prepares again", async () => {
+    const { scope, duplicate, request } = await judgedFixture();
+    let entered!: () => void; let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const prompts: string[] = [];
+    await liveJudge(async ({ user }) => {
+      expect(accuracyTransactionActive()).toBe(false);
+      prompts.push(user);
+      if (prompts.length === 1) { entered(); await hold; }
+      return decision(prompts.length === 1);
+    }, async () => {
+      const pending = post(request);
+      await Promise.race([started, pending.then(() => { throw new Error("Provider was never reached"); })]);
+      try {
+        await updateClaim({ workspace_id: scope.workspace_id, claim_id: duplicate.id,
+          patch: { statement: "Need survival evidence for another population" }, rationale: "Corrected source interpretation",
+          actor: { name: "Reviewer", function: "medical_affairs" } });
+      } finally { release(); }
+      const stale = await pending;
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ code: "stale_merge_inputs" });
+      expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("draft");
+      expect(await runs(scope.workspace_id)).toHaveLength(1);
+      const retry = await post(request);
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toMatchObject({ merge: { mode: "llm", merged: 0 } });
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toContain("Need survival evidence for another population");
+      const mergeRun = (await runs(scope.workspace_id)).find(run => run.call_kind === "merge_dedupe")!;
+      expect((mergeRun.steps as { name: string }[]).filter(step => step.name.startsWith("llm:judge:"))).toHaveLength(2);
+    });
+  });
+
+  it("releases the workspace lock during judgment and rejects concurrent duplicate resumes and client decisions", async () => {
+    const { scope, duplicate, request } = await judgedFixture();
+    let entered!: () => void; let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    await liveJudge(async () => { calls++; expect(accuracyTransactionActive()).toBe(false); entered(); await hold; return decision(true); }, async () => {
+      const pending = post({ ...request, prepared_merge: { judgment: { equivalent: [], stub: true } }, merge_preparation: { equivalent: [] } });
+      await Promise.race([started, pending.then(() => { throw new Error("Provider was never reached"); })]);
+      try {
+        const acquired = await withAccuracyTransaction(async () => {
+          const rows = await accuracyDb().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`omission:${scope.workspace_id}`}, 0)) as acquired`);
+          return rows[0].acquired;
+        });
+        expect(acquired).toBe(true);
+        const overlapping = await post(request);
+        expect(overlapping.status).toBe(409);
+        expect(await overlapping.json()).toMatchObject({ code: "resume_in_progress" });
+      } finally { release(); }
+      const completed = await pending;
+      expect(completed.status).toBe(200);
+      const body = await completed.json();
+      expect(body).toMatchObject({ merge: { mode: "llm", merged: 1 } });
+      expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+      expect(await (await post(request)).json()).toEqual(body);
+      expect(calls).toBe(1);
+      expect(await runs(scope.workspace_id)).toHaveLength(3);
+    });
+  });
+
+  it("reuses paid judgment and run evidence after the final journal write rolls back merge and status", async () => {
+    const { scope, duplicate, request } = await judgedFixture();
+    const before = await listClaims(scope.workspace_id);
+    const trigger = `resume_failure_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    // Fail a real DB write at the end of the atomic unit, after both stages wrote.
+    await accuracyDb().execute(sql.raw(`CREATE FUNCTION ${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.workspace_id = '${scope.workspace_id}' AND NEW.final_response IS NOT NULL THEN
+        RAISE EXCEPTION 'scripted final journal write failure';
+      END IF; RETURN NEW; END $$`));
+    await accuracyDb().execute(sql.raw(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON accuracy_resume_journals FOR EACH ROW EXECUTE FUNCTION ${trigger}()`));
+    let calls = 0;
+    try {
+      await liveJudge(async () => { calls++; expect(accuracyTransactionActive()).toBe(false); return decision(true); }, async () => {
+        expect((await post(request)).status).toBe(400);
+        expect(await listClaims(scope.workspace_id)).toEqual(before);
+        expect(await runs(scope.workspace_id)).toHaveLength(1);
+        const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
+        expect(journal).toMatchObject({ merge_state: "reserved", status_state: "reserved", final_response: null,
+          preparation_token: null, prepared_merge: expect.objectContaining({ run_id: journal.merge_operation_id }) });
+        await accuracyDb().execute(sql.raw(`DROP TRIGGER ${trigger} ON accuracy_resume_journals`));
+        const completed = await post(request); expect(completed.status).toBe(200);
+        const body = await completed.json();
+        expect(body.runs.slice(1).map((run: { run_id: string }) => run.run_id)).toEqual([journal.merge_operation_id, journal.status_operation_id]);
+        expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+        const mergeRun = (await runs(scope.workspace_id)).find(run => run.id === journal.merge_operation_id)!;
+        expect(Number(mergeRun.cost_usd)).toBeGreaterThan(0);
+        expect(mergeRun.steps).toEqual(expect.arrayContaining([expect.objectContaining({ name: "llm:judge:merge_dedupe:judge:a1:b1" })]));
+        const modelStep = (mergeRun.steps as { name: string; at: string }[]).find(step => step.name.startsWith("llm:judge:"))!;
+        expect(Date.parse(mergeRun.started_at)).toBeLessThanOrEqual(Date.parse(modelStep.at));
+        expect(await (await post(request)).json()).toEqual(body);
+        expect(calls).toBe(1);
+        expect(await runs(scope.workspace_id)).toHaveLength(3);
+      });
+    } finally {
+      await accuracyDb().execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger} ON accuracy_resume_journals`));
+      await accuracyDb().execute(sql.raw(`DROP FUNCTION ${trigger}()`));
+    }
+  });
+
+  it("judges a production resume outside transactions and applies the model equivalence", async () => {
+    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
+      statement: "Need comparator evidence", source_file_id: scope.source_file_id,
+      metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
+    const previousStub = process.env.SYNAPSE_TEST_STUB_LLM;
+    const previousKey = process.env.XAI_API_KEY;
+    process.env.SYNAPSE_TEST_STUB_LLM = "";
+    process.env.XAI_API_KEY = "scripted-provider-key";
+    vi.spyOn(session, "sessionContext").mockResolvedValue({ session: null, actor: { name: "Owner", function: "medical_affairs" },
+      role: "operator", demo: false, signed_in: true });
+    const transactions: boolean[] = [];
+    const provider = vi.spyOn(xaiGrok, "complete").mockImplementation(async () => {
+      transactions.push(accuracyTransactionActive());
+      return JSON.stringify({ decisions: [{ pair_id: "p1", same: true, rationale: "Same comparator need" }] });
+    });
+    try {
+      const response = await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "live-judge" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ merge: { mode: "llm", merged: 1,
+        merges: [expect.objectContaining({ reason: "model_equivalence", rationale: "Same comparator need" })] } });
+      expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+      expect(transactions).toEqual([false]);
+    } finally {
+      provider.mockRestore();
+      if (previousStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
+      else process.env.SYNAPSE_TEST_STUB_LLM = previousStub;
+      if (previousKey === undefined) delete process.env.XAI_API_KEY;
+      else process.env.XAI_API_KEY = previousKey;
+    }
+  });
   it("pauses a fully applied batch and resumes without extraction or duplicate drafts; replay is identical", async () => {
     const scope = await fixture(); const body = await paused(scope);
     const read = await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${body.runs[0].run_id}`));

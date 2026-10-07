@@ -3,7 +3,7 @@ import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { Actor, CallKind, ExperimentCycleControl } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
-import { runAccuracyModule, type AccuracyRunResult } from "@/accuracy/kernel/run";
+import { runAccuracyModule, type AccuracyRunResult, type PreparedAccuracyMerge } from "@/accuracy/kernel/run";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
 import type { InventoryExtractOutput } from "@/accuracy/modules/inventory-extract/module";
 import type { NeedExtractOutput } from "@/accuracy/modules/need-extract/module";
@@ -31,9 +31,9 @@ export type PipelineExperimentContext = {
 };
 
 /** Shared merge/status tail used after an applied extraction batch has reserved its journal IDs. */
-export async function runExtractionDownstream(args: { workspace_id: string; org_id: string; actor: Actor; merge_id: string; status_id: string }) {
+export async function runExtractionDownstream(args: { workspace_id: string; org_id: string; actor: Actor; merge_id: string; status_id: string; prepared_merge?: PreparedAccuracyMerge }) {
   const merge = await runAccuracyModule<MergeDedupeOutput>({ call_kind: "merge_dedupe", agent_role: "judge", input: { workspace_id: args.workspace_id },
-    actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.merge_id });
+    actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.merge_id, prepared_merge: args.prepared_merge });
   const status = await runAccuracyModule<StatusDeriveOutput>({ call_kind: "status_derive", agent_role: "none", input: { workspace_id: args.workspace_id },
     actor: args.actor, org_id: args.org_id, workspace_id: args.workspace_id, reserved_run_id: args.status_id });
   return { merge, status, runs: [{ call_kind: "merge_dedupe", run_id: merge.run_id, summary: merge.summary, count: merge.output.merged },
@@ -90,11 +90,11 @@ async function retainFailure(args: PipelineExperimentContext & { call_kind: Call
   await retainVersion({ ...args, version_index: errorVersion, output_error, module_version, route });
 }
 
-async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: CallKind, input: Record<string, unknown>, reserved_run_id?: string, retain = true): Promise<AccuracyRunResult<O>> {
+async function runAndRetain<O>(context: PipelineExperimentContext, call_kind: CallKind, input: Record<string, unknown>, reserved_run_id?: string, retain = true, prepared_merge?: PreparedAccuracyMerge): Promise<AccuracyRunResult<O>> {
   const call_id = reserved_run_id ?? newId("arun");
   try {
     const result = await runAccuracyModule<O>({ call_kind, input, actor: context.actor, org_id: context.org_id, workspace_id: context.workspace_id,
-      reserved_run_id: call_id, agent_role: call_kind === "merge_dedupe" ? "judge" : call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment",
+      reserved_run_id: call_id, prepared_merge, agent_role: call_kind === "merge_dedupe" ? "judge" : call_kind === "status_derive" ? "none" : "proposer", evaluation_context: "experiment",
       ...((call_kind === "inventory_extract" || call_kind === "need_extract") ? { experiment_cycle_control: context.experiment_cycle_control } : {}) });
     if (retain) await retainResult({ ...context, call_kind, input, result });
     return result;
@@ -127,10 +127,10 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
   });
   const downstream: { current: { call_kind: "merge_dedupe" | "status_derive"; input: Record<string, unknown>; call_id: string } | null; merge: AccuracyRunResult<MergeDedupeOutput> | null; status: AccuracyRunResult<StatusDeriveOutput> | null } = { current: null, merge: null, status: null };
   try {
-    await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, execute: async (_batch, journal) => {
+    await resumeExtractionBatch({ workspace_id: context.workspace_id, source_file_id, batch_id: batch.id, merge_context: { org_id: context.org_id, actor: context.actor, evaluation_context: "experiment" }, execute: async (_batch, journal, prepared) => {
       await assertAccuracyCanProgress(context.workspace_id, "merge_dedupe");
       downstream.current = { call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, call_id: journal.merge_operation_id };
-      downstream.merge = await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false);
+      downstream.merge = await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false, prepared);
       downstream.current = { call_kind: "status_derive", input: { workspace_id: context.workspace_id }, call_id: journal.status_operation_id };
       downstream.status = await runAndRetain<StatusDeriveOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false);
       return { source_file_id, batch_id: batch.id };

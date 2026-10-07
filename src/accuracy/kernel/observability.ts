@@ -34,7 +34,7 @@ function trim(data: unknown): unknown {
 export class AccuracyRunRecorder implements RunHandle {
   readonly id: string;
   private readonly collected: RunStep[] = [];
-  private readonly startedAtMs = Date.now();
+  private readonly startedAtMs: number;
   private totalUsage: TokenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   private totalCostUsd = 0;
 
@@ -52,9 +52,13 @@ export class AccuracyRunRecorder implements RunHandle {
       input: unknown;
     },
     id?: string,
+    preparedStartedAt?: string,
   ) {
     this.id = id ?? newId("arun");
+    this.startedAtMs = preparedStartedAt ? Date.parse(preparedStartedAt) : Date.now();
   }
+
+  startedAtIso() { return new Date(this.startedAtMs).toISOString(); }
 
   get evaluation_context(): "production" | "experiment" { return this.meta.evaluation_context; }
 
@@ -107,6 +111,12 @@ export class AccuracyRunRecorder implements RunHandle {
     return [...this.collected];
   }
 
+  /** Reuse durable provider evidence when applying a previously prepared merge. */
+  restorePreparation(steps: RunStep[], costs: CostEstimate[]) {
+    this.collected.push(...steps);
+    for (const cost of costs) this.addCost(cost);
+  }
+
   usageSummary() {
     return { token_usage: this.totalUsage, cost_usd: this.totalCostUsd };
   }
@@ -134,7 +144,7 @@ export async function openAccuracyRun(recorder: AccuracyRunRecorder) {
       module_id: recorder.meta.module_id,
       module_version: recorder.meta.module_version,
       status: "running",
-      started_at: nowIso(),
+      started_at: recorder.startedAtIso(),
       finished_at: null,
       duration_ms: null,
       actor_name: recorder.meta.actor.name,
