@@ -16,7 +16,7 @@ import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { claimMetadata, getClaim, insertClaim, listClaims } from "@/accuracy/store/claim-store";
-import { listCoverageJoins, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { listCoverageJoins, upsertCoverageDecision, coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { projectWorkspaceGantt, saveFinalGanttPlan } from "@/accuracy/modules/gantt-project/save-final";
 import { latestAccuracyPlan } from "@/accuracy/store/plan-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -163,11 +163,11 @@ describe("downstream omission pause", () => {
   });
   it("keeps saved coverage decisions readable through audit while paused", async () => {
     const scope = await fixture();
-    await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id, overall: "covers", rationale: "Historical source review" });
+    await upsertCoverageDecision({ actor: { name: "Ada", function: "medical_affairs" }, ...(await coveragePairRevisions({ workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id })), workspace_id: scope.workspace_id, gap_id: scope.gap.id, tactic_id: scope.tactic.id, overall: "covers", rationale: "Historical source review" });
     const page = await AccuracyAuditPage({ searchParams: Promise.resolve({ workspace_id: scope.workspace_id }) });
     const html = renderToStaticMarkup((page as ReactElement<{ children: ReactNode }>).props.children);
     expect(html).toContain("Historical source review");
-    expect(html).toContain("coverage · covers");
+    expect(html).toContain("coverage · full");
     expect(html).not.toContain("Accuracy work is paused");
   });
   it("renders a visible pause message when the timeline page calls projection directly", async () => {

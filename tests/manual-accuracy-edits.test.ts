@@ -20,7 +20,7 @@ import {
   preserveHumanLocks,
   updateClaim,
 } from "@/accuracy/store/claim-edit";
-import { listCoverageJoins, listCoveragePairs } from "@/accuracy/store/coverage-store";
+import { listCoverageJoins, listCoveragePairs, coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { projectWorkspaceGantt } from "@/accuracy/modules/gantt-project/save-final";
 import { projectGanttFromTactics } from "@/accuracy/modules/gantt-project/engine";
 import { mergeDedupeCandidates, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
@@ -622,7 +622,7 @@ describe("gantt: human dates survive re-projection", () => {
 });
 
 describe("coverage: decide any pair", () => {
-  it("accepts a non-candidate pair, lists it, and rejects unknown claims", async () => {
+  it("accepts an unlinked inventory pair, lists it, and rejects unknown claims", async () => {
     const { workspace_id } = await freshWorkspace("coverage-any");
     const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need OS" });
     const tactics = [];
@@ -630,16 +630,17 @@ describe("coverage: decide any pair", () => {
       tactics.push(await insertClaim({ workspace_id, claim_type: "tactic", statement: `Tactic ${i}` }));
     }
     const before = await listCoveragePairs(workspace_id);
-    const outside = tactics.find(
-      (t) => !before.some((p) => p.tactic.id === t.id && p.gap.id === gap.id),
-    )!;
-    expect(outside).toBeTruthy();
+    // All inventory pairs now appear; an unlinked fourth tactic remains manually selectable.
+    expect(before).toHaveLength(5);
+    const outside = tactics[3]!;
+    expect(before.some((p) => p.tactic.id === outside.id && p.gap.id === gap.id)).toBe(true);
 
     const res = await coveragePost(
       req("/api/accuracy/coverage", "POST", {
         workspace_id,
         gap_id: gap.id,
         tactic_id: outside.id,
+        ...(await coveragePairRevisions({ workspace_id, gap_id: gap.id, tactic_id: outside.id })),
         overall: "partial",
         rationale: "Partially answers OS",
       }),

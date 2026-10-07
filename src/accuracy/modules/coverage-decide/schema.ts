@@ -3,7 +3,7 @@ import { z } from "zod";
 export const coverageDecisionSchema = z.object({
   gap_id: z.string(),
   tactic_id: z.string(),
-  overall: z.enum(["full", "partial", "limited", "not_relevant"]),
+  overall: z.enum(["pending", "full", "partial", "limited", "not_relevant"]),
   quote_block_ids: z.array(z.string()),
   confidence: z.number().min(0).max(1),
   rationale: z.string(),

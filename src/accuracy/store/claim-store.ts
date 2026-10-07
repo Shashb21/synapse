@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm";
-import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
@@ -181,7 +181,7 @@ export async function insertClaim(args: {
     created_at: now,
     updated_at: now,
   };
-  return withAccuracyTransaction(async () => {
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
       await accuracyDb().insert(t.accuracyClaims).values(row);
       await syncClaimProvenance(row as AccuracyClaimRow);
       return row as AccuracyClaimRow;
@@ -263,7 +263,7 @@ export async function applyClaimValidation(args: {
   }
 
   await ensureAccuracySchema();
-  return withAccuracyTransaction(async () => {
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
     const existing = await accuracyDb().select().from(t.accuracyClaims).where(and(
       eq(t.accuracyClaims.workspace_id, args.workspace_id), inArray(t.accuracyClaims.id, args.claim_ids))).for("update");
     if (existing.length !== args.claim_ids.length) {
@@ -369,7 +369,7 @@ export async function persistClaimPatch(args: {
   at?: string;
   expected_factual_revision?: string;
 }): Promise<AccuracyClaimRow> {
-  return withAccuracyTransaction(async () => {
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
       const [existing] = await accuracyDb().select().from(t.accuracyClaims).where(and(
         eq(t.accuracyClaims.id, args.claim_id), eq(t.accuracyClaims.workspace_id, args.workspace_id))).for("update");
       if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);

@@ -175,6 +175,21 @@ describe("S4 on the model path", () => {
     expect(judgedA.revised_after_review).toBe(false);
   });
 
+  it("keeps assessments beyond the assignment cap", async () => {
+    const [t1, t2] = tacticIds as [string, string];
+    const { ctx } = context((call) => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      return { rows: gapIdsOf(call).map((id) => ({ ...mapped(id, t1), mappings: [
+        mapped(id, t1).mappings[0], mapped(id, t2, "limited").mappings[0],
+      ] })) };
+    });
+    const { output } = await kgMappingModule.run({ ...input(), max_per_gap: 1 }, ctx);
+    expect(output.accepted).toHaveLength(2);
+    expect(output.accepted.every((row) => row.mappings.length === 2)).toBe(true);
+    expect(output.accepted[0].mappings[1].coverage).toBe("limited");
+  });
+
   it("re-asks for a row with an invalid status instead of deriving one", async () => {
     const [a, b] = gapIds as [string, string];
     const [t1] = tacticIds as [string, string];

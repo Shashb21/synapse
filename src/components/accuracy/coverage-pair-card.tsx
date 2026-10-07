@@ -12,6 +12,8 @@ export type CoveragePairCardModel = {
   overall: string | null;
   rationale: string | null;
   validated: boolean;
+  gap_revision?: string; tactic_revision?: string; freshness?: string; validation_freshness?: string;
+  assessment_state?: string; failure_reason?: string | null; evidence?: string[]; protected?: boolean;
 };
 
 export function CoveragePairCard({
@@ -24,10 +26,10 @@ export function CoveragePairCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [rationale, setRationale] = useState(pair.rationale ?? "");
-  const [overall, setOverall] = useState(pair.overall ?? "unknown");
+  const [overall, setOverall] = useState(pair.overall ?? "pending");
   const [error, setError] = useState<string | null>(null);
 
-  function submit(next: "covers" | "partial" | "none" | "unknown") {
+  function submit(next: "full" | "partial" | "limited" | "not_relevant" | "pending", reject = false) {
     setError(null);
     startTransition(async () => {
       const res = await fetch("/api/accuracy/coverage", {
@@ -38,12 +40,14 @@ export function CoveragePairCard({
           gap_id: pair.gap_id,
           tactic_id: pair.tactic_id,
           overall: next,
-          rationale,
+          rationale, action: reject ? "reject" : "decide",
+          expected_gap_revision: pair.gap_revision, expected_tactic_revision: pair.tactic_revision,
+          evidence: reject ? [] : pair.evidence ?? [],
         }),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+      const body = (await res.json()) as { ok?: boolean; error?: string | { message: string } };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? "Save failed");
+        setError(typeof body.error === "string" ? body.error : body.error?.message ?? "Save failed");
         return;
       }
       setOverall(next);
@@ -66,8 +70,10 @@ export function CoveragePairCard({
         </div>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Status: {pair.validated ? `decided · ${overall}` : "undecided"}
+        Assessment: {pair.assessment_state ?? "pending"} · {overall} · {pair.freshness ?? "unknown"}. Validation: {pair.validated ? "current" : pair.validation_freshness ?? "unvalidated"}
       </p>
+      {pair.failure_reason ? <p className="text-[12px] text-destructive">{pair.failure_reason}</p> : null}
+      <p className="text-[11px] text-muted-foreground">{pair.evidence?.length ? `Cited evidence: ${pair.evidence.join(", ")}` : "No cited evidence attached to this decision."}</p>
       <label className="grid gap-1 text-[12px]">
         <span className="text-muted-foreground">Rationale (required)</span>
         <textarea
@@ -79,7 +85,7 @@ export function CoveragePairCard({
       </label>
       {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
-        {(["covers", "partial", "none", "unknown"] as const).map((value) => (
+        {(["full", "partial", "limited", "not_relevant", "pending"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -87,9 +93,13 @@ export function CoveragePairCard({
             onClick={() => submit(value)}
             className="border border-border px-2 py-1 text-[11px] capitalize text-foreground disabled:opacity-40 hover:bg-muted/40"
           >
-            {value}
+            {value.replaceAll("_", " ")}
           </button>
         ))}
+        <button type="button" disabled={pending || rationale.trim().length < 3} onClick={() => submit("pending", true)}
+          className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/40">
+          Reject pair
+        </button>
       </div>
     </article>
   );

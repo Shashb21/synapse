@@ -21,7 +21,7 @@ export type MappingStatus = z.infer<typeof mappingStatusSchema>;
 const inputSchema = z.object({
   gap_ids: z.array(z.string()).optional(),
   tactic_ids: z.array(z.string()).optional(),
-  /** Maximum tactics assigned per gap row. */
+  /** Maximum assignments per gap row; every inventory pair can still be assessed. */
   max_per_gap: z.number().int().min(1).max(20).default(6),
   dry_run: z.boolean().default(false),
 });
@@ -111,7 +111,7 @@ Each TABLE ROW is one evidence gap. For each gap you are given, decide which tac
 - mapping_status must agree with the mappings. A "full", "partial" or "limited" mapping bears on the gap, so a row with any of them is never "open". When the only tactics that bear on a gap are "limited", the status is "partially_addressed"; if a tactic does not really bear on it, mark that mapping "not_relevant" instead. "open" means every mapping is "not_relevant" (or there are none).
 - confidence (0-100) and a one-sentence rationale for the row as a whole.
 
-At most max_tactics_per_gap mappings per gap may have coverage other than "not_relevant". Do not map dissemination-only tactics unless the gap is about dissemination. Tactics already assigned to a gap are listed on it; judge them like any other. A gap may list human_rejected_tactic_ids: a reviewer rejected or removed those tactics for that gap, so never map them to it.
+Assess every eligible tactic for each gap, including explicit not_relevant verdicts. max_assigned_tactics_per_gap limits only downstream assignments; it never limits assessments. Do not map dissemination-only tactics unless the gap is about dissemination. Tactics already assigned to a gap are listed on it; judge them like any other. A gap may list human_rejected_tactic_ids: a reviewer rejected or removed those tactics for that gap, so never map them to it.
 
 When a gap carries a previous row and a critic objection, answer the objection: change the mappings or status it names, or keep them and say why in the rationale.
 
@@ -196,8 +196,7 @@ function localTableRows(state: IegpState, input: MappingInput): Row[] {
       .filter((tactic) => !covered.has(pairKey(gap.id, tactic.id)) && !blocked.has(pairKey(gap.id, tactic.id)))
       .map((tactic) => ({ tactic, result: scoreGapTacticMapping(gap, tactic, {}) }))
       .filter((item) => item.result.score >= MAPPING_SCORE_FLOOR)
-      .sort((a, b) => b.result.score - a.result.score)
-      .slice(0, input.max_per_gap);
+      .sort((a, b) => b.result.score - a.result.score);
     const mappings: TacticMapping[] = scored.map(({ tactic, result }) => ({
       tactic_id: tactic.id,
       tactic_name: tactic.name,
@@ -244,7 +243,6 @@ function parseProposedRow(
   raw: RawRow,
   gap: Gap,
   tactics: TacticRow[],
-  maxPerGap: number,
   blocked: Set<string> = new Set(),
   /** Told why a row is rejected, so the next attempt can say so (KAN-66). */
   onReject: (reason: string) => void = () => {},
@@ -287,7 +285,6 @@ function parseProposedRow(
     });
   }
   const bearing = mappings.filter(bearsOnGap);
-  if (bearing.length > maxPerGap) return reject(`at most ${maxPerGap} mappings may be other than not_relevant.`);
   // The status must agree with the mappings the model gave: open means none bear on the gap.
   if (status.data === "open" && bearing.length > 0) {
     return reject(
@@ -396,7 +393,7 @@ async function llmProposals(
         };
       }),
       tactics: promptTactics(shared.tactics),
-      max_tactics_per_gap: shared.input.max_per_gap,
+      max_assigned_tactics_per_gap: shared.input.max_per_gap,
     }),
     purpose: "mapping-table-proposer",
   })) as { rows?: RawRow[] } | null;
@@ -404,7 +401,7 @@ async function llmProposals(
   for (const raw of payload?.rows ?? []) {
     const gap = typeof raw?.gap_id === "string" ? shared.gapById.get(raw.gap_id) : undefined;
     if (!gap || !args.gapIds.includes(gap.id)) continue;
-    const row = parseProposedRow(raw, gap, shared.tactics, shared.input.max_per_gap, shared.blocked, (reason) =>
+    const row = parseProposedRow(raw, gap, shared.tactics, shared.blocked, (reason) =>
       shared.rejections.set(gap.id, reason),
     );
     if (row) {
@@ -429,7 +426,7 @@ async function llmReviews(
         : undefined,
       rows: args.rows.map((row) => ({ gap: promptGap(shared, row.gap_id), ...promptRow(row) })),
       tactics: promptTactics(shared.tactics),
-      max_tactics_per_gap: shared.input.max_per_gap,
+      max_assigned_tactics_per_gap: shared.input.max_per_gap,
     }),
     purpose: "mapping-table-critic",
   })) as {
@@ -508,7 +505,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
     stage: "S4",
-    version: "3.0.0",
+    version: "3.1.0",
     title: "LLM mapping table (proposer ↔ critic ×3 → judge)",
     summary:
       "A model proposes one row per gap with a coverage verdict, confidence and rationale for each tactic; a model critic challenges each row over three exchanges and a model judge accepts or rejects it. Needs a connected LLM.",
@@ -680,7 +677,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     if (!input.dry_run) {
       for (const row of outcome.accepted) {
         const joined: string[] = [];
-        for (const mapping of row.mappings.filter(bearsOnGap)) {
+        for (const mapping of row.mappings.filter(bearsOnGap).slice(0, input.max_per_gap)) {
           if (shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id))) continue;
           try {
             await assignTacticToGap({

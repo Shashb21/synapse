@@ -1,3 +1,4 @@
+import { coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({
@@ -177,6 +178,7 @@ describe("the accuracy app with AI off", () => {
           workspace_id,
           gap_id: gapId,
           tactic_id: tacticId,
+          ...(await coveragePairRevisions({ workspace_id, gap_id: gapId, tactic_id: tacticId })),
           overall: "partial",
           rationale: "Registry covers part of the need",
         }),

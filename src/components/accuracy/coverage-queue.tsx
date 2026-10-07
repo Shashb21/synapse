@@ -9,7 +9,7 @@ import {
 import { useAiEnabled } from "@/components/platform/ai-status";
 
 type AssistSuggestion = {
-  overall: "covers" | "partial" | "none" | "unknown";
+  overall: "pending" | "full" | "partial" | "limited" | "not_relevant";
   schema_overall: string;
   rationale: string;
   confidence: number;
@@ -22,10 +22,11 @@ type AssistSuggestion = {
  */
 export function CoverageQueue({
   workspaceId,
-  pairs,
+  pairs, cursor, snapshot,
 }: {
   workspaceId: string;
   pairs: CoveragePairCardModel[];
+  cursor?: string; snapshot?: string;
 }) {
   const router = useRouter();
   const undecided = useMemo(() => pairs.filter((p) => !p.validated), [pairs]);
@@ -40,7 +41,7 @@ export function CoverageQueue({
 
   // Reset the cursor and any suggestion when the queue changes (adjust during
   // render rather than in an effect, so there is no cascading re-render).
-  const queueKey = `${workspaceId}:${undecided.length}`;
+  const queueKey = `${workspaceId}:${snapshot}:${pairs.map((p) => `${p.id}:${p.gap_revision}:${p.tactic_revision}:${p.overall}:${p.assessment_state}:${p.validated}`).join("|")}`;
   const [seenQueueKey, setSeenQueueKey] = useState(queueKey);
   if (seenQueueKey !== queueKey) {
     setSeenQueueKey(queueKey);
@@ -61,27 +62,42 @@ export function CoverageQueue({
     setAssistError(null);
     setSuggestion(null);
     startAssist(async () => {
-      const res = await fetch("/api/accuracy/coverage/assist", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          gap_id: current.gap_id,
-          tactic_id: current.tactic_id,
-        }),
-      });
-      const body = (await res.json()) as {
-        ok?: boolean;
-        error?: string;
-        mode?: string;
-        suggestion?: AssistSuggestion;
-      };
-      if (!res.ok || !body.ok || !body.suggestion) {
-        setAssistError(body.error ?? "Assist failed");
-        return;
-      }
-      setSuggestion(body.suggestion);
-      setAssistMode(body.mode ?? null);
+      try {
+        const res = await fetch("/api/accuracy/coverage/assist", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            gap_id: current.gap_id,
+            tactic_id: current.tactic_id,
+          }),
+        });
+        const body = (await res.json()) as {
+          ok?: boolean;
+          error?: string | { message: string };
+          mode?: string;
+          suggestion?: AssistSuggestion;
+        };
+        if (!res.ok || !body.ok || !body.suggestion) {
+          setAssistError(typeof body.error === "string" ? body.error : body.error?.message ?? "Assist failed");
+          return;
+        }
+        setSuggestion(body.suggestion);
+        setAssistMode(body.mode ?? null);
+      } catch { setAssistError("Assist request failed; retry this pair."); }
+    });
+  }
+
+  function assessPage() {
+    setAssistError(null);
+    startAssist(async () => {
+      try {
+        const res = await fetch("/api/accuracy/coverage", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "assess", workspace_id: workspaceId, cursor, snapshot, page_size: 100 }) });
+        const body = await res.json();
+        if (!res.ok) { setAssistError(typeof body.error === "string" ? body.error : body.error?.message ?? "Assessment failed"); return; }
+        router.refresh();
+      } catch { setAssistError("Assessment request failed; retry this page."); }
     });
   }
 
@@ -125,14 +141,20 @@ export function CoverageQueue({
             Skip / next
           </button>
           {aiOn ? (
+            <>
+            <button type="button" disabled={assistPending} onClick={assessPage}
+              className="border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/40">
+              {assistPending ? "Assessing…" : "Assess pending pairs on this page"}
+            </button>
             <button
               type="button"
-              disabled={!current || assistPending}
+              disabled={!current || current.protected || assistPending}
               onClick={requestAssist}
               className="border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground disabled:opacity-40 hover:bg-muted/50"
             >
               {assistPending ? "Suggesting…" : "Suggest with LLM"}
             </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -156,12 +178,13 @@ export function CoverageQueue({
 
       {current ? (
         <CoveragePairCard
-          key={`${current.id}-${suggestion?.overall ?? "none"}-${suggestion?.rationale ?? ""}`}
+          key={`${current.id}:${current.gap_revision}:${current.tactic_revision}:${current.overall}:${current.validated}:${suggestion?.overall ?? "none"}:${suggestion?.rationale ?? ""}`}
           workspaceId={workspaceId}
           pair={{
             ...current,
             overall: suggestion?.overall ?? current.overall,
             rationale: suggestion?.rationale ?? current.rationale,
+            evidence: suggestion?.quote_block_ids ?? current.evidence,
           }}
         />
       ) : (

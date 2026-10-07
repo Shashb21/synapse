@@ -7,7 +7,7 @@ import {
 } from "@/accuracy/modules/gantt-project/engine";
 import { projectWorkspaceGantt } from "@/accuracy/modules/gantt-project/save-final";
 import { insertClaim } from "@/accuracy/store/claim-store";
-import { upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { upsertCoverageDecision, coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import { registerAccuracyStack } from "@/accuracy";
@@ -324,6 +324,8 @@ describe("workspace gantt reads coverage joins", () => {
       status: "validated",
     });
     await upsertCoverageDecision({
+      actor: { name: "Ada", function: "medical_affairs" },
+      ...(await coveragePairRevisions({ workspace_id, gap_id: gap.id, tactic_id: study.id })),
       workspace_id,
       gap_id: gap.id,
       tactic_id: study.id,
@@ -331,6 +333,8 @@ describe("workspace gantt reads coverage joins", () => {
       rationale: "Registry covers the RWE gap",
     });
     await upsertCoverageDecision({
+      actor: { name: "Ada", function: "medical_affairs" },
+      ...(await coveragePairRevisions({ workspace_id, gap_id: gap.id, tactic_id: pub.id })),
       workspace_id,
       gap_id: gap.id,
       tactic_id: pub.id,

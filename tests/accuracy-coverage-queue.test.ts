@@ -42,10 +42,10 @@ function pair(
 
 describe("mapCoverageOverallToUi", () => {
   it("maps schema overalls onto UI decide labels", () => {
-    expect(mapCoverageOverallToUi("full")).toBe("covers");
+    expect(mapCoverageOverallToUi("full")).toBe("full");
     expect(mapCoverageOverallToUi("partial")).toBe("partial");
-    expect(mapCoverageOverallToUi("limited")).toBe("partial");
-    expect(mapCoverageOverallToUi("not_relevant")).toBe("none");
+    expect(mapCoverageOverallToUi("limited")).toBe("limited");
+    expect(mapCoverageOverallToUi("not_relevant")).toBe("not_relevant");
   });
 });
 
@@ -58,6 +58,20 @@ describe("coverageRouteAllowsLlm", () => {
 });
 
 describe("buildCoverageQueue", () => {
+  it("separates assessment retries from human validation and retains failed/stale/protected work", () => {
+    const gap = claim({ id: "gap_1", claim_type: "gap", statement: "Need" });
+    const tactic = claim({ id: "tac_1", claim_type: "tactic", statement: "Inventory" });
+    const snapshot = buildCoverageQueue([
+      { ...pair(gap, tactic), id: "suggestion", assessment_state: "successful", freshness: "current", overall: "limited" },
+      { ...pair(gap, tactic), id: "failed", assessment_state: "failed", failure_reason: "Provider failure" },
+      { ...pair(gap, tactic), id: "rejected", assessment_state: "rejected", protected: true },
+    ]);
+    expect(snapshot.assessment_pending.map((p) => p.id)).toEqual(["failed"]);
+    expect(snapshot.undecided_count).toBe(3);
+    expect(snapshot.assessed_count).toBe(1);
+    expect(snapshot.failed_count).toBe(1);
+    expect(snapshot.rejected_count).toBe(1);
+  });
   it("puts undecided first and exposes current", () => {
     const g1 = claim({ id: "gap_1", claim_type: "gap", statement: "Need A" });
     const g2 = claim({ id: "gap_2", claim_type: "gap", statement: "Need B" });

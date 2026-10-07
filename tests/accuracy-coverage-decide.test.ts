@@ -130,7 +130,7 @@ describe("coverage_decide pair run", () => {
         gap_id: "WRONG",
         tactic_id: "WRONG",
         overall: "partial",
-        quote_block_ids: ["B1", "outside"],
+        quote_block_ids: ["B1"],
         confidence: 0.71,
         rationale: "Registry overlaps population in B1.",
       }),
@@ -155,6 +155,17 @@ describe("coverage_decide pair run", () => {
     expect(result.output.quote_block_ids).toEqual(["B1"]);
     expect(ctx.complete).toHaveBeenCalledOnce();
     vi.unstubAllEnvs();
+  });
+
+  it("refuses model evidence outside the pair instead of silently deleting its citation", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "");
+    try {
+      const ctx = mockCtx(true);
+      ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ overall: "full", quote_block_ids: ["outside"],
+        confidence: 0.9, rationale: "Unpermitted citation" }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+      await expect(runCoverageDecide({ workspace_id: "ws-1", gap_id: "G1", tactic_id: "T1", block_bundle_ids: ["B1"] }, ctx, sampleBlocks))
+        .rejects.toThrow(/did not return a complete coverage decision/);
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("uses ctx.complete when LLM is connected via api_key and locks ids to the pair", async () => {
@@ -194,6 +205,22 @@ describe("coverage_decide pair run", () => {
     expect(result.output.overall).toBe("full");
     expect(ctx.complete).toHaveBeenCalledOnce();
     vi.unstubAllEnvs();
+  });
+
+  it("gives the provider factual revisions and structured facts alongside pair labels", async () => {
+    vi.stubEnv("SYNAPSE_TEST_STUB_LLM", "");
+    try {
+      const ctx = mockCtx(true);
+      const facts = { gap: { statement: "Need comparator evidence", structured: { description: "Known gap" }, factual_revision: "gap-revision" },
+        tactic: { statement: "Comparative registry", structured: { objective: "Comparator evidence" }, lifecycle: "ongoing", factual_revision: "tactic-revision" } };
+      ctx.complete = vi.fn(async (request) => {
+        expect(JSON.parse(request.user)).toMatchObject({ facts, gap: { statement: "Need comparator evidence" } });
+        return { raw: JSON.stringify({ overall: "limited", quote_block_ids: ["B1"], confidence: 0.5, rationale: "Small overlap" }),
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      });
+      const result = await runCoverageDecide({ workspace_id: "ws-1", gap_id: "G1", tactic_id: "T1", block_bundle_ids: ["B1"], facts }, ctx, sampleBlocks);
+      expect(result.output.overall).toBe("limited");
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("module run wires decide helper", async () => {

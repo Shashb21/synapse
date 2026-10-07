@@ -1,4 +1,5 @@
 import type { AccuracyClaimRow } from "./claim-store";
+import { structuredProvenance, readStructuredFields } from "@/accuracy/domain/structured-fields";
 import { claimMetadata } from "./claim-store";
 import type { CoveragePair } from "./coverage-store";
 
@@ -12,6 +13,11 @@ export type CoverageQueueSnapshot = {
   undecided_count: number;
   decided_count: number;
   total_count: number;
+  assessment_pending: CoverageQueuePair[];
+  assessed_count: number;
+  failed_count: number;
+  stale_count: number;
+  rejected_count: number;
 };
 
 /** Split pairs into undecided-first queue (one decision at a time). */
@@ -25,6 +31,11 @@ export function buildCoverageQueue(pairs: CoverageQueuePair[]): CoverageQueueSna
     undecided_count: undecided.length,
     decided_count: decided.length,
     total_count: pairs.length,
+    assessment_pending: pairs.filter((p) => !p.protected && p.assessment_state !== "successful" && !p.validated),
+    assessed_count: pairs.filter((p) => p.assessment_state === "successful").length,
+    failed_count: pairs.filter((p) => p.assessment_state === "failed").length,
+    stale_count: pairs.filter((p) => p.freshness === "stale").length,
+    rejected_count: pairs.filter((p) => p.assessment_state === "rejected").length,
   };
 }
 
@@ -37,7 +48,7 @@ export function blockBundleIdsForPair(gap: AccuracyClaimRow, tactic: AccuracyCla
   const seen = new Set<string>();
   for (const claim of [gap, tactic]) {
     const meta = claimMetadata(claim);
-    const provenance = Array.isArray(meta.provenance) ? meta.provenance : [];
+    const provenance = [...(Array.isArray(meta.provenance) ? meta.provenance : []), ...structuredProvenance(readStructuredFields(claim))];
     for (const span of provenance) {
       if (!span || typeof span !== "object") continue;
       const blockId = (span as { block_id?: unknown }).block_id;

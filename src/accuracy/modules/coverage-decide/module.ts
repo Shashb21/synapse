@@ -14,11 +14,13 @@ export {
   type CoverageUiOverall,
 } from "./overall-map";
 
-const coverageDecideInputSchema = z.object({
+export const coverageDecideInputSchema = z.object({
   workspace_id: z.string(),
   gap_id: z.string(),
   tactic_id: z.string(),
   block_bundle_ids: z.array(z.string()),
+  facts: z.object({ gap: z.object({ statement: z.string(), structured: z.unknown(), factual_revision: z.string().optional(), fields: z.record(z.string(), z.unknown()).optional() }),
+    tactic: z.object({ statement: z.string(), structured: z.unknown(), factual_revision: z.string().optional(), fields: z.record(z.string(), z.unknown()).optional(), lifecycle: z.string() }) }).optional(),
 });
 
 export const coverageDecideModule = agenticModule({
@@ -34,6 +36,8 @@ export const coverageDecideModule = agenticModule({
     return { output: result.output, summary: result.summary };
   },
 });
+
+coverageDecideModule.manifest.version = "0.2.0";
 
 export const coverageCriticModule = agenticModule({
   id: "coverage-critic.agent-v1",

@@ -10,6 +10,7 @@ export type CoveragePromptState = {
   tactic_id: string;
   gap: { id: string; name: string | null; statement: string | null };
   tactic: { id: string; name: string | null; evidence_question: string | null; type: string | null };
+  facts?: unknown;
   evidence_blocks: { id: string; heading: string | null; text: string }[];
 };
 
@@ -20,6 +21,7 @@ export function buildStateFromBlocks(args: {
   block_bundle_ids: string[];
   blocks: Pick<ParseBlock, "id" | "heading" | "text">[];
   labels?: CoveragePairLabels;
+  facts?: unknown;
 }): CoveragePromptState {
   const byId = new Map(args.blocks.map((block) => [block.id, block]));
   const evidence_blocks = args.block_bundle_ids.flatMap((id) => {
@@ -29,6 +31,7 @@ export function buildStateFromBlocks(args: {
   });
 
   return {
+    facts: args.facts,
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
     gap: {

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import type { CoverageDecision } from "@/accuracy/modules/coverage-decide/schema";
 import { mapCoverageOverallToUi } from "@/accuracy/modules/coverage-decide/overall-map";
-import { getClaimsByIds } from "@/accuracy/store/claim-store";
+import { CoverageError, requireCoveragePairClaims, requireCoverageEvidence, coveragePairRevisions, coverageFactsForPair } from "@/accuracy/store/coverage-store";
 import { blockBundleIdsForPair } from "@/accuracy/store/coverage-queue";
 import { isTestStub } from "@/modules/kernel/llm";
 import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
@@ -47,21 +47,14 @@ export async function POST(req: Request) {
     const { org_id } = await requireLabWorkspace(body.workspace_id);
 
     await assertAccuracyCanProgress(body.workspace_id, "coverage_decide");
-    const claims = await getClaimsByIds(body.workspace_id, [body.gap_id, body.tactic_id]);
-    const gap = claims.find((c) => c.id === body.gap_id);
-    const tactic = claims.find((c) => c.id === body.tactic_id);
-    if (!gap || gap.claim_type !== "gap") {
-      return NextResponse.json({ ok: false, error: "Unknown gap_id" }, { status: 400 });
-    }
-    if (!tactic || tactic.claim_type !== "tactic") {
-      return NextResponse.json({ ok: false, error: "Unknown tactic_id" }, { status: 400 });
-    }
-
+    const { gap, tactic } = await requireCoveragePairClaims(body);
+    const expected = await coveragePairRevisions(body, { gap, tactic });
     const block_bundle_ids =
       body.block_bundle_ids && body.block_bundle_ids.length > 0
         ? body.block_bundle_ids
         : blockBundleIdsForPair(gap, tactic);
 
+    await requireCoverageEvidence({ ...body, evidence: block_bundle_ids }, { gap, tactic });
     const actor = await labActor();
 
     const result = await runAccuracyModule<CoverageDecision>({
@@ -71,7 +64,7 @@ export async function POST(req: Request) {
         workspace_id: body.workspace_id,
         gap_id: body.gap_id,
         tactic_id: body.tactic_id,
-        block_bundle_ids,
+        block_bundle_ids, facts: coverageFactsForPair({ gap, tactic }),
       },
       actor,
       org_id,
@@ -84,6 +77,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      ...expected,
       suggestion: {
         overall: ui_overall,
         schema_overall: result.output.overall,
@@ -97,6 +91,7 @@ export async function POST(req: Request) {
       stub: mode === "stub",
     });
   } catch (error) {
+    if (error instanceof CoverageError) return NextResponse.json({ ok: false, error: error.message, code: error.code }, { status: 400 });
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
     if (error instanceof AccuracyPausedError) {

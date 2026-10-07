@@ -1,27 +1,8 @@
 import type { CoverageDecision } from "./schema";
 
-/** Manual coverage UI / store overall labels. */
-export type CoverageUiOverall = "covers" | "partial" | "none" | "unknown";
-
-/**
- * Map schema-locked LLM overall (`full` | `partial` | `limited` | `not_relevant`)
- * onto the Coverage UI decide buttons.
- */
-export function mapCoverageOverallToUi(
-  overall: CoverageDecision["overall"],
-): CoverageUiOverall {
-  switch (overall) {
-    case "full":
-      return "covers";
-    case "partial":
-    case "limited":
-      return "partial";
-    case "not_relevant":
-      return "none";
-    default:
-      return "unknown";
-  }
-}
+/** Canonical assessment labels are also the UI labels; Limited stays distinct. */
+export type CoverageUiOverall = CoverageDecision["overall"];
+export function mapCoverageOverallToUi(overall: CoverageDecision["overall"]): CoverageUiOverall { return overall; }
 
 /** True when the accuracy route can call a live completion (its API key is set). */
 export function coverageRouteAllowsLlm(route: {

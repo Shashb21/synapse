@@ -9,10 +9,10 @@ import {
   deleteWorkspace,
   getWorkspace,
 } from "@/accuracy/store/tenant";
-import { insertClaim } from "@/accuracy/store/claim-store";
+import { insertClaim, persistClaimPatch } from "@/accuracy/store/claim-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
-import { insertCoverageJoin } from "@/accuracy/store/coverage-store";
+import { insertCoverageJoin, upsertCoverageDecision, coveragePairRevisions, listCoveragePairs, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { newId } from "@/modules/kernel/ids";
 import { copyExperimentWorkspace } from "@/accuracy/experiments/copy-workspace";
 
@@ -140,6 +140,7 @@ describe("copyExperimentWorkspace", () => {
     expect(copiedClaims).toHaveLength(2);
     expect(copiedProvenance).toHaveLength(1);
     expect(copiedCoverage).toHaveLength(1);
+    expect((await listCoveragePairs(copy.workspace_id))[0]).toMatchObject({ freshness: "unknown", validated: false });
     expect((copy.baseline_snapshot as { source_files: Array<Record<string, unknown>> }).source_files[0]).toMatchObject({
       original_id: source.source_file_id,
       copied_id: copy.source_id_map[source.source_file_id],
@@ -157,6 +158,24 @@ describe("copyExperimentWorkspace", () => {
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, source.workspace_id))).toEqual(before.claims);
     expect(await accuracyDb().select().from(t.accuracyProvenance).where(eq(t.accuracyProvenance.workspace_id, source.workspace_id))).toEqual(before.provenance);
     expect(await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, source.workspace_id))).toEqual(before.coverage);
+  });
+
+  it("preserves current coverage validation after trusted identity remapping without refreshing unknown legacy joins", async () => {
+    const source = await fixture();
+    const identity = { workspace_id: source.workspace_id, gap_id: source.claim.id, tactic_id: source.tactic.id };
+    expect((await listCoveragePairs(source.workspace_id))[0]).toMatchObject({ freshness: "unknown", validated: false });
+    const span = { source_file_id: source.source_file_id, block_id: source.block_id, quote: "The source evidence supports the proposed need." };
+    await persistClaimPatch({ workspace_id: source.workspace_id, claim_id: source.claim.id, metadata: { provenance: [span] } });
+    await upsertCoverageDecision({ ...identity, ...(await coveragePairRevisions(identity)), overall: "limited",
+      rationale: "Reviewer confirmed small overlap", evidence: [source.block_id], actor: { name: "Ada", function: "medical_affairs" } });
+    const original = await listCoverageJoins(source.workspace_id);
+    const copy = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(copy.workspace_id);
+    expect((await listCoveragePairs(copy.workspace_id))[0]).toMatchObject({ overall: "limited", freshness: "current", validated: true });
+    const copied = (await listCoverageJoins(copy.workspace_id))[0];
+    expect((await listCoveragePairs(copy.workspace_id))[0].evidence).toEqual([copy.block_id_map[source.block_id]]);
+    expect(copied.dimensions).toMatchObject({ actor: { name: "Ada", function: "medical_affairs" } });
+    expect(await listCoverageJoins(source.workspace_id)).toEqual(original);
   });
 
   it("remaps every supported metadata claim relationship inside the copy", async () => {

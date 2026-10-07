@@ -5,7 +5,7 @@
  * never clobbers what a human set by hand.
  */
 import { and, eq } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor } from "@/accuracy/kernel/contracts";
@@ -536,7 +536,7 @@ export async function updateClaim(args: {
   const rationale = requireValidationRationale(args.rationale);
   requireClaimActor(args.actor);
   await ensureAccuracySchema();
-  return withAccuracyTransaction(async () => {
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
     const [existing] = await accuracyDb().select().from(t.accuracyClaims).where(and(
       eq(t.accuracyClaims.workspace_id, args.workspace_id), eq(t.accuracyClaims.id, args.claim_id))).for("update");
     if (!existing) throw new Error(`Unknown claim: ${args.claim_id}`);

@@ -1,3 +1,4 @@
+import { claimFactualRevision } from "@/accuracy/domain/structured-fields";
 import { and, desc, eq } from "drizzle-orm";
 import type { Actor } from "@/accuracy/kernel/contracts";
 import {
@@ -36,7 +37,7 @@ import {
   updateClaimMetadata,
   type AccuracyClaimRow,
 } from "./claim-store";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { withAccuracyWorkspaceMutation, accuracyDb, ensureAccuracySchema } from "./db";
 import * as t from "./schema";
 import { listCoverageJoins, upsertCoverageDecision } from "./coverage-store";
 
@@ -97,6 +98,7 @@ function toGapLite(
   return {
     id: claim.id,
     statement: claim.statement,
+    factual_revision: claimFactualRevision(claim),
     validated: claim.validated,
     status: claim.status,
     coverage_status,
@@ -110,6 +112,7 @@ function toTacticLite(claim: AccuracyClaimRow): WorkshopTacticLite {
   return {
     id: claim.id,
     statement: claim.statement,
+    factual_revision: claimFactualRevision(claim),
     validated: claim.validated,
     origin: typeof meta.origin === "string" ? meta.origin : null,
     tactic_status:
@@ -335,86 +338,94 @@ export async function applyWorkshopAction(args: {
   actor: Actor;
   action: WorkshopActionInput;
 }): Promise<WorkshopSnapshotRecord> {
-  const parsed = assertWorkshopAction(args.action);
-  const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
-  if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
-  requireSnapshotGap(snapshot, parsed.gap_id);
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+    const parsed = assertWorkshopAction(args.action);
+    const snapshot = await getWorkshopSnapshot(args.workspace_id, args.snapshot_id);
+    if (!snapshot) throw new Error("Workshop snapshot not found in this workspace.");
+    requireSnapshotGap(snapshot, parsed.gap_id);
 
-  const overlays: Record<string, WorkshopGapOverlay> = { ...snapshot.payload.overlays };
-  const overlay: WorkshopGapOverlay = { ...(overlays[parsed.gap_id] ?? {}) };
-  const detail: Record<string, unknown> = {};
+    const overlays: Record<string, WorkshopGapOverlay> = { ...snapshot.payload.overlays };
+    const overlay: WorkshopGapOverlay = { ...(overlays[parsed.gap_id] ?? {}) };
+    const detail: Record<string, unknown> = {};
 
-  if (parsed.kind === "mark_addressed" && parsed.tactic_id) {
-    requireSnapshotTactic(snapshot, parsed.tactic_id);
-    await upsertCoverageDecision({
-      workspace_id: args.workspace_id,
+    if (parsed.kind === "mark_addressed" && parsed.tactic_id) {
+      requireSnapshotTactic(snapshot, parsed.tactic_id);
+      await upsertCoverageDecision({
+        actor: args.actor,
+        expected_gap_revision: requireSnapshotGap(snapshot, parsed.gap_id).factual_revision,
+        expected_tactic_revision: requireSnapshotTactic(snapshot, parsed.tactic_id).factual_revision,
+        workspace_id: args.workspace_id,
+        gap_id: parsed.gap_id,
+        tactic_id: parsed.tactic_id,
+        overall: "covers",
+        rationale: parsed.rationale,
+      });
+      overlay.coverage_status = "addressed";
+      overlay.parked = false;
+      detail.tactic_id = parsed.tactic_id;
+      detail.overall = "covers";
+      detail.ledger = "coverage";
+    } else if (parsed.kind === "remap" && parsed.tactic_id && parsed.overall) {
+      requireSnapshotTactic(snapshot, parsed.tactic_id);
+      await upsertCoverageDecision({
+        actor: args.actor,
+        expected_gap_revision: requireSnapshotGap(snapshot, parsed.gap_id).factual_revision,
+        expected_tactic_revision: requireSnapshotTactic(snapshot, parsed.tactic_id).factual_revision,
+        workspace_id: args.workspace_id,
+        gap_id: parsed.gap_id,
+        tactic_id: parsed.tactic_id,
+        overall: parsed.overall,
+        rationale: parsed.rationale,
+      });
+      overlay.coverage_status = coverageStatusAfterOverall(parsed.overall);
+      detail.tactic_id = parsed.tactic_id;
+      detail.overall = parsed.overall;
+      detail.ledger = "coverage";
+    } else if (parsed.kind === "set_priority" && parsed.priority) {
+      const claim = await getClaim(args.workspace_id, parsed.gap_id);
+      if (!claim) throw new Error("Gap not found in this workspace.");
+      const meta = claimMetadata(claim);
+      await updateClaimMetadata({
+        workspace_id: args.workspace_id,
+        claim_id: parsed.gap_id,
+        metadata: {
+          ...meta,
+          priority: parsed.priority,
+          priority_rationale: parsed.rationale,
+          priority_origin: "workshop",
+        },
+      });
+      overlay.priority = parsed.priority;
+      overlay.priority_rationale = parsed.rationale;
+      detail.priority = parsed.priority;
+      detail.ledger = "priority";
+    } else if (parsed.kind === "park") {
+      overlay.parked = true;
+      overlay.park_rationale = parsed.rationale;
+      overlay.parked_at = nowIso();
+      overlay.parked_by = args.actor.name;
+      detail.ledger = "none";
+    }
+
+    overlays[parsed.gap_id] = overlay;
+    const log: WorkshopActionLog = {
+      id: newId("wact"),
+      kind: parsed.kind,
       gap_id: parsed.gap_id,
-      tactic_id: parsed.tactic_id,
-      overall: "covers",
       rationale: parsed.rationale,
-    });
-    overlay.coverage_status = "addressed";
-    overlay.parked = false;
-    detail.tactic_id = parsed.tactic_id;
-    detail.overall = "covers";
-    detail.ledger = "coverage";
-  } else if (parsed.kind === "remap" && parsed.tactic_id && parsed.overall) {
-    requireSnapshotTactic(snapshot, parsed.tactic_id);
-    await upsertCoverageDecision({
-      workspace_id: args.workspace_id,
-      gap_id: parsed.gap_id,
-      tactic_id: parsed.tactic_id,
-      overall: parsed.overall,
-      rationale: parsed.rationale,
-    });
-    overlay.coverage_status = coverageStatusAfterOverall(parsed.overall);
-    detail.tactic_id = parsed.tactic_id;
-    detail.overall = parsed.overall;
-    detail.ledger = "coverage";
-  } else if (parsed.kind === "set_priority" && parsed.priority) {
-    const claim = await getClaim(args.workspace_id, parsed.gap_id);
-    if (!claim) throw new Error("Gap not found in this workspace.");
-    const meta = claimMetadata(claim);
-    await updateClaimMetadata({
-      workspace_id: args.workspace_id,
-      claim_id: parsed.gap_id,
-      metadata: {
-        ...meta,
-        priority: parsed.priority,
-        priority_rationale: parsed.rationale,
-        priority_origin: "workshop",
-      },
-    });
-    overlay.priority = parsed.priority;
-    overlay.priority_rationale = parsed.rationale;
-    detail.priority = parsed.priority;
-    detail.ledger = "priority";
-  } else if (parsed.kind === "park") {
-    overlay.parked = true;
-    overlay.park_rationale = parsed.rationale;
-    overlay.parked_at = nowIso();
-    overlay.parked_by = args.actor.name;
-    detail.ledger = "none";
-  }
-
-  overlays[parsed.gap_id] = overlay;
-  const log: WorkshopActionLog = {
-    id: newId("wact"),
-    kind: parsed.kind,
-    gap_id: parsed.gap_id,
-    rationale: parsed.rationale,
-    origin: "workshop",
-    at: nowIso(),
-    by: args.actor.name,
-    detail,
-  };
-  const payload: WorkshopSnapshotPayload = {
-    ...snapshot.payload,
-    overlays,
-    actions: [...snapshot.payload.actions, log],
-  };
-  await persistPayload(snapshot, payload);
-  return { ...snapshot, payload };
+      origin: "workshop",
+      at: nowIso(),
+      by: args.actor.name,
+      detail,
+    };
+    const payload: WorkshopSnapshotPayload = {
+      ...snapshot.payload,
+      overlays,
+      actions: [...snapshot.payload.actions, log],
+    };
+    await persistPayload(snapshot, payload);
+    return { ...snapshot, payload };
+  });
 }
 
 export { isLiveWorkshopGap, evaluateWorkshopReadiness };

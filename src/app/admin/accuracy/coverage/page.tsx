@@ -4,11 +4,10 @@ import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
 import { CoverageQueue } from "@/components/accuracy/coverage-queue";
 import { CoverageManualPairForm } from "@/components/accuracy/coverage-manual-pair-form";
-import { isActiveLedgerClaim, listClaims } from "@/accuracy/store/claim-store";
+import { claimFactualRevision } from "@/accuracy/domain/structured-fields";
 import { WorkshopSaveCta } from "@/components/accuracy/workshop-save-cta";
 import { registerAccuracyStack } from "@/accuracy";
-import { listCoveragePairs } from "@/accuracy/store/coverage-store";
-import { buildCoverageQueue } from "@/accuracy/store/coverage-queue";
+import { listCoveragePage, listCoverageInventory, type CoveragePage } from "@/accuracy/store/coverage-store";
 import { workspacePlanLabel } from "@/accuracy/domain/plan-label";
 import { getWorkspace } from "@/accuracy/store/tenant";
 import { UnknownWorkspaceNotice, workspaceLabel } from "@/components/accuracy/unknown-workspace";
@@ -23,15 +22,16 @@ registerAccuracyStack();
 export default async function AccuracyCoveragePage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace_id?: string }>;
+  searchParams: Promise<{ workspace_id?: string; cursor?: string }>;
 }) {
   await requireOwnerPage();
-  const { workspace_id: workspaceId = "" } = await searchParams;
+  const { workspace_id: workspaceId = "", cursor } = await searchParams;
   let active: Awaited<ReturnType<typeof getWorkspace>> = null;
-  let pairs: Awaited<ReturnType<typeof listCoveragePairs>> = [];
+  let page: Awaited<ReturnType<typeof listCoveragePage>> | null = null;
+  let pairs: CoveragePage["pairs"] = [];
   let loadError: string | null = null;
-  let gapOptions: { id: string; statement: string }[] = [];
-  let tacticOptions: { id: string; statement: string }[] = [];
+  let gapOptions: { id: string; statement: string; revision: string }[] = [];
+  let tacticOptions: { id: string; statement: string; revision: string }[] = [];
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
   let hasSnapshot = false;
   const aiOn = await aiEnabled();
@@ -40,14 +40,11 @@ export default async function AccuracyCoveragePage({
     if (workspaceId) active = await getWorkspace(workspaceId);
     if (active) {
       await assertAccuracyCanProgress(workspaceId, "pair_generate");
-      pairs = await listCoveragePairs(workspaceId);
-      const live = (await listClaims(workspaceId, { limit: 500 })).filter(isActiveLedgerClaim);
-      gapOptions = live
-        .filter((c) => c.claim_type === "gap")
-        .map((c) => ({ id: c.id, statement: c.statement }));
-      tacticOptions = live
-        .filter((c) => c.claim_type === "tactic")
-        .map((c) => ({ id: c.id, statement: c.statement }));
+      page = await listCoveragePage({ workspace_id: workspaceId, cursor, page_size: 100 });
+      pairs = page.pairs;
+      const inventory = await listCoverageInventory(workspaceId);
+      gapOptions = inventory.gaps.map((c) => ({ id: c.id, statement: c.statement, revision: claimFactualRevision(c) }));
+      tacticOptions = inventory.tactics.map((c) => ({ id: c.id, statement: c.statement, revision: claimFactualRevision(c) }));
       const workshop = await workshopReadiness(workspaceId);
       ready = workshop.readiness;
       hasSnapshot = Boolean(await latestWorkshopSnapshot(workspaceId));
@@ -59,19 +56,18 @@ export default async function AccuracyCoveragePage({
   }
 
   const unknownWorkspace = Boolean(workspaceId) && !active && !loadError;
-  const queue = buildCoverageQueue(pairs);
 
   return (
     <AccuracyAppShell active="coverage" planLabel={workspacePlanLabel(active)}>
       <PageIntro kicker="Pairwise · one decision at a time" title="Coverage">
         {aiOn
-          ? "Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and rationale — you still confirm with a decide button. Linked inventory pairs are preferred."
+          ? "Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and rationale — you still confirm with a decide button. Every eligible inventory pair is available across the pages."
           : "Work one undecided gap↔tactic pair at a time: pick an overall and write the rationale yourself (AI is off, so there are no suggestions). Use the pair picker for any gap↔tactic pair."}
       </PageIntro>
 
       {loadError ? (
         <p className="mb-4 border border-destructive/40 bg-card p-2 text-[12px] text-destructive rounded-lg">
-          {loadError}
+          {loadError} <Link href={`/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`} className="underline">Restart from first page</Link>
         </p>
       ) : null}
 
@@ -88,8 +84,10 @@ export default async function AccuracyCoveragePage({
       ) : (
         <>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Workspace · {active ? workspaceLabel(active) : workspaceId} · {queue.total_count} pair(s) ·{" "}
-            {queue.undecided_count} undecided
+            Workspace · {active ? workspaceLabel(active) : workspaceId} · {page?.progress.eligible_total ?? 0} eligible pair(s) ·{" "}
+            {page?.progress.assessed ?? 0} assessed · {page?.progress.validated ?? 0} validated · {page?.progress.pending ?? 0} pending ·{" "}
+            {page?.progress.stale ?? 0} stale · {page?.progress.unknown ?? 0} unknown freshness · {page?.progress.failed ?? 0} failed ·{" "}
+            {page?.progress.rejected ?? 0} rejected · {page?.progress.excluded_claims ?? 0} excluded claims
           </p>
           {ready ? (
             <WorkshopSaveCta
@@ -112,6 +110,7 @@ export default async function AccuracyCoveragePage({
           ) : (
             <CoverageQueue
               workspaceId={workspaceId}
+              cursor={cursor} snapshot={page?.snapshot}
               pairs={pairs.map((pair) => ({
                 id: pair.id,
                 gap_id: pair.gap.id,
@@ -120,10 +119,20 @@ export default async function AccuracyCoveragePage({
                 tactic_statement: pair.tactic.statement,
                 overall: pair.overall,
                 rationale: pair.rationale,
-                validated: pair.validated,
+                validated: pair.validated, gap_revision: pair.gap_revision, tactic_revision: pair.tactic_revision,
+                freshness: pair.freshness, validation_freshness: pair.validation_freshness,
+                assessment_state: pair.assessment_state, failure_reason: pair.failure_reason,
+                evidence: pair.evidence, protected: pair.protected,
               }))}
             />
           )}
+          <nav className="mt-3 flex gap-3 text-[12px]" aria-label="Coverage pages">
+            {cursor ? <Link href={`/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}`} className="underline">First page / restart</Link> : null}
+            {page?.next_cursor ? <Link href={`/admin/accuracy/coverage?workspace_id=${encodeURIComponent(workspaceId)}&cursor=${encodeURIComponent(page.next_cursor)}`} className="underline">Next 100 pairs</Link> : null}
+          </nav>
+          {page?.progress.exclusions.length ? <details className="mt-3 text-[12px]"><summary>Excluded claims and reasons</summary>
+            <ul>{page.progress.exclusions.map((c) => <li key={c.claim_id}>{c.claim_id}: {c.reason}</li>)}</ul>
+          </details> : null}
         </>
       )}
     </AccuracyAppShell>

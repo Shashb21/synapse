@@ -14,6 +14,7 @@ export type CoverageDecideInput = {
   gap_id: string;
   tactic_id: string;
   block_bundle_ids: string[];
+  facts?: { gap: { statement: string; structured: unknown; factual_revision?: string; fields?: Record<string, unknown> }; tactic: { statement: string; structured: unknown; lifecycle: string; factual_revision?: string; fields?: Record<string, unknown> } };
 };
 
 /**
@@ -43,9 +44,10 @@ function lockDecision(args: {
   };
   const parsed = coverageDecisionSchema.parse(merged);
   const allowed = new Set(args.input.block_bundle_ids);
+  if (parsed.quote_block_ids.some((id) => !allowed.has(id))) throw new Error("Coverage citation is outside the permitted pair evidence.");
   return {
     ...parsed,
-    quote_block_ids: parsed.quote_block_ids.filter((id) => allowed.has(id)),
+    quote_block_ids: [...new Set(parsed.quote_block_ids)],
   };
 }
 
@@ -80,6 +82,8 @@ export async function runCoverageDecide(
     tactic_id: input.tactic_id,
     block_bundle_ids: input.block_bundle_ids,
     blocks: bundleBlocks,
+    labels: input.facts ? { gap: { statement: input.facts.gap.statement }, tactic: { name: input.facts.tactic.statement } } : undefined,
+    facts: input.facts,
   });
   ctx.run.note("coverage:state", state);
 

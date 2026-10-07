@@ -1,5 +1,6 @@
 /** Clone a selected accuracy workspace state for an isolated experiment. */
 
+import { rebaseCopiedCoverage } from "@/accuracy/store/coverage-store";
 import { createHash } from "node:crypto";
 import { claimFactualRevision, claimValidationFreshness } from "@/accuracy/domain/structured-fields";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -245,7 +246,7 @@ export async function copyExperimentWorkspace(
         throw new ExperimentCopyError("unresolved_reference", `Coverage join ${row.id} points to an omitted claim.`);
       }
     }
-    const copiedCoverage = copiedCoverageRows.filter((row) => copiedClaimIds.has(row.gap_id) && copiedClaimIds.has(row.tactic_id));
+    let copiedCoverage = copiedCoverageRows.filter((row) => copiedClaimIds.has(row.gap_id) && copiedClaimIds.has(row.tactic_id));
 
     const copiedMetadata = new Map(copiedClaimRows.map((claim) => [claim.id,
       remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
@@ -264,6 +265,13 @@ export async function copyExperimentWorkspace(
       metadata.factual_revision = revision;
       metadata.validation = { ...validation, copied_from_factual_revision: validation.factual_revision, factual_revision: revision };
     }
+    const claimsById = new Map(copiedClaimRows.map((claim) => [claim.id, claim]));
+    const copiedClaim = (claim: typeof t.accuracyClaims.$inferSelect) => ({ ...claim, id: claim_id_map[claim.id], workspace_id,
+      source_file_id: claim.source_file_id ? source_id_map[claim.source_file_id] : null, metadata: copiedMetadata.get(claim.id)! });
+    copiedCoverage = copiedCoverage.map((join) => {
+      const gap = claimsById.get(join.gap_id)!, tactic = claimsById.get(join.tactic_id)!;
+      return rebaseCopiedCoverage({ join, gap, tactic, copied_gap: copiedClaim(gap), copied_tactic: copiedClaim(tactic), block_id_map });
+    });
     const created_at = nowIso();
     await db.insert(t.accuracyOrganizations).values({ id: org_id, name: `${sourceOrg.name} (experiment)`, created_at });
     await db.insert(t.accuracyWorkspaces).values({

@@ -10,7 +10,7 @@ import {
 } from "@/accuracy/modules/workshop/readiness";
 import { assertWorkshopAction } from "@/accuracy/modules/workshop/actions";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
-import { listCoverageJoins, upsertCoverageDecision } from "@/accuracy/store/coverage-store";
+import { listCoverageJoins, upsertCoverageDecision, coveragePairRevisions } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import {
@@ -185,6 +185,8 @@ describe("workshop snapshot store", () => {
       metadata: { tactic_status: "planned" },
     });
     await upsertCoverageDecision({
+      actor: { name: "Ada", function: "medical_affairs" },
+      ...(await coveragePairRevisions({ workspace_id, gap_id: gap.id, tactic_id: tactic.id })),
       workspace_id,
       gap_id: gap.id,
       tactic_id: tactic.id,
@@ -260,7 +262,7 @@ describe("workshop rationale-gated writes", () => {
     });
     const joins = await listCoverageJoins(ready.workspace_id);
     expect(joins).toHaveLength(1);
-    expect(joins[0]?.overall).toBe("covers");
+    expect(joins[0]?.overall).toBe("full");
     expect(joins[0]?.rationale).toMatch(/KOL panel/);
     expect(joins[0]?.validated).toBe(true);
     expect(next.payload.overlays[ready.gap.id]?.coverage_status).toBe("addressed");

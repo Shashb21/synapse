@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { rationaleError, sendJson } from "@/components/accuracy/claim-api";
 
-type Option = { id: string; statement: string };
+type Option = { id: string; statement: string; revision: string };
 
 const OVERALLS = [
-  { value: "covers", label: "Covers" },
+  { value: "full", label: "Full" },
   { value: "partial", label: "Partial" },
-  { value: "none", label: "Does not cover" },
-  { value: "unknown", label: "Unknown" },
+  { value: "limited", label: "Limited" },
+  { value: "not_relevant", label: "Not relevant" },
+  { value: "pending", label: "Pending" },
 ] as const;
 
 const selectClass =
@@ -32,7 +33,7 @@ export function CoverageManualPairForm({
   const [open, setOpen] = useState(false);
   const [gapId, setGapId] = useState("");
   const [tacticId, setTacticId] = useState("");
-  const [overall, setOverall] = useState<(typeof OVERALLS)[number]["value"]>("covers");
+  const [overall, setOverall] = useState<(typeof OVERALLS)[number]["value"]>("full");
   const [rationale, setRationale] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,10 +59,13 @@ export function CoverageManualPairForm({
       tactic_id: tacticId,
       overall,
       rationale,
+      expected_gap_revision: gaps.find((row) => row.id === gapId)?.revision,
+      expected_tactic_revision: tactics.find((row) => row.id === tacticId)?.revision,
     });
     setPending(false);
     if (!result.ok) {
-      setError(result.error);
+      const detail = result.json.error;
+      setError(detail && typeof detail === "object" && "message" in detail ? String(detail.message) : result.error);
       return;
     }
     setMessage(`Saved: ${gapId} ↔ ${tacticId} · ${overall}`);

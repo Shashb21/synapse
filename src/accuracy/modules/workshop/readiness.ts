@@ -13,6 +13,7 @@ export type WorkshopScene = "gaps" | "prioritize";
 export type WorkshopGapLite = {
   id: string;
   statement: string;
+  factual_revision?: string;
   validated: boolean;
   status: string;
   coverage_status: WorkshopCoverageStatus;
@@ -23,6 +24,7 @@ export type WorkshopGapLite = {
 export type WorkshopTacticLite = {
   id: string;
   statement: string;
+  factual_revision?: string;
   validated: boolean;
   origin: string | null;
   tactic_status: string | null;

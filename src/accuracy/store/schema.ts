@@ -114,7 +114,7 @@ export const accuracyCoverageJoins = pgTable("accuracy_coverage_joins", {
   confidence: numeric("confidence"),
   validated: boolean("validated").notNull().default(false),
   rationale: text("rationale"),
-});
+}, (table) => ({ pair: unique("accuracy_coverage_pair_key").on(table.workspace_id, table.gap_id, table.tactic_id) }));
 
 export const accuracyModuleRuns = pgTable("accuracy_module_runs", {
   id: text("id").primaryKey(),
@@ -499,6 +499,39 @@ export const ACCURACY_DDL = [
   )`,
 ];
 
+/** Reconcile before uniqueness in one locked transaction. Whole historical rows retain all human decisions. */
+export const COVERAGE_PAIR_MIGRATION = `DO $$ BEGIN
+  LOCK TABLE accuracy_coverage_joins IN SHARE ROW EXCLUSIVE MODE;
+  WITH groups AS (
+    SELECT workspace_id, gap_id, tactic_id,
+      (array_agg(id ORDER BY (validated OR COALESCE((dimensions->>'prior_validated') = 'true', false)
+        OR COALESCE(dimensions->'actor' <> 'null'::jsonb, false) OR COALESCE((dimensions->>'human_rejected') = 'true', false)) DESC,
+        COALESCE(dimensions->>'decided_at', '') DESC, id ASC))[1] AS survivor,
+      jsonb_agg(to_jsonb(accuracy_coverage_joins) ORDER BY id) AS history
+    FROM accuracy_coverage_joins GROUP BY workspace_id, gap_id, tactic_id HAVING count(*) > 1
+  )
+  UPDATE accuracy_coverage_joins AS pair SET dimensions = pair.dimensions ||
+    jsonb_build_object('legacy_duplicates', groups.history)
+  FROM groups WHERE pair.id = groups.survivor;
+  WITH ranked AS (
+    SELECT id, row_number() OVER (PARTITION BY workspace_id, gap_id, tactic_id
+      ORDER BY (validated OR COALESCE((dimensions->>'prior_validated') = 'true', false)
+        OR COALESCE(dimensions->'actor' <> 'null'::jsonb, false) OR COALESCE((dimensions->>'human_rejected') = 'true', false)) DESC,
+        COALESCE(dimensions->>'decided_at', '') DESC, id ASC) AS position FROM accuracy_coverage_joins
+  ) DELETE FROM accuracy_coverage_joins AS pair USING ranked WHERE pair.id = ranked.id AND ranked.position > 1;
+  UPDATE accuracy_coverage_joins SET dimensions = dimensions || jsonb_build_object(
+      'legacy_rejection', to_jsonb(accuracy_coverage_joins), 'evidence', '[]'::jsonb, 'prior_validated', false),
+      overall = 'pending', validated = false
+    WHERE dimensions->>'human_rejected' = 'true' AND (overall <> 'pending' OR validated
+      OR COALESCE(dimensions->'evidence', '[]'::jsonb) <> '[]'::jsonb);
+  UPDATE accuracy_coverage_joins SET overall = CASE lower(trim(overall))
+    WHEN 'covers' THEN 'full' WHEN 'none' THEN 'not_relevant' WHEN 'unknown' THEN 'pending'
+    WHEN 'full' THEN 'full' WHEN 'partial' THEN 'partial' WHEN 'limited' THEN 'limited'
+    WHEN 'not_relevant' THEN 'not_relevant' ELSE 'pending' END;
+  CREATE UNIQUE INDEX IF NOT EXISTS accuracy_coverage_pair_key
+    ON accuracy_coverage_joins (workspace_id, gap_id, tactic_id);
+END $$`;
+
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_module_runs ADD COLUMN IF NOT EXISTS evaluation_context text NOT NULL DEFAULT 'production'`,
@@ -531,4 +564,5 @@ export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS preparation_started_at text`,
   `ALTER TABLE accuracy_resume_journals ADD COLUMN IF NOT EXISTS prepared_merge jsonb`,
   `ALTER TABLE accuracy_extraction_batches ADD COLUMN IF NOT EXISTS source_progress jsonb`,
+  COVERAGE_PAIR_MIGRATION,
 ];
