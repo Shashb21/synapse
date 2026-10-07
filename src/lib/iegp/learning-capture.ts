@@ -130,11 +130,13 @@ export function captureMappingRowDecision(args: Origin & {
   gap: GapText & { id: string };
   ai: { mapping_status: string; tactic_ids: string[] };
   saved: { mapping_status: string; tactic_ids: string[] };
+  /** Authoritative parent inventory from the parent-only save owner. */
+  parent_tactic_ids?: string[];
   rationale: string;
   workspace_id?: string;
 }) {
   return safely(async () => {
-    const sort = (ids: string[]) => [...new Set(ids)].sort();
+    const sort = (ids: string[]) => [...new Set(ids.filter(id => !args.parent_tactic_ids || args.parent_tactic_ids.includes(id)))].sort();
     const unchanged =
       args.ai.mapping_status === args.saved.mapping_status &&
       sort(args.ai.tactic_ids).join(",") === sort(args.saved.tactic_ids).join(",");
@@ -144,7 +146,7 @@ export function captureMappingRowDecision(args: Origin & {
       stage: "S4",
       kind: "s4_mapping",
       subject_id: args.gap.id,
-      ai_input: { gap: { name: args.gap.name, statement: args.gap.statement } },
+      ai_input: { gap: { name: args.gap.name, statement: args.gap.statement }, ...(args.parent_tactic_ids ? {mapping_scope: "parents", parent_tactic_ids: args.parent_tactic_ids} : {}) },
       ai_output: { mapping_status: args.ai.mapping_status, tactic_ids: sort(args.ai.tactic_ids) },
       outcome: unchanged ? "accepted" : "edited",
       final: unchanged ? null : { mapping_status: args.saved.mapping_status, tactic_ids: sort(args.saved.tactic_ids) },

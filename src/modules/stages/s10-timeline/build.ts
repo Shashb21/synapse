@@ -45,7 +45,7 @@ export type TimelineActivity = {
   expansion_version?: string;
   expansion_scope?: ExpansionScope;
   tactic_name: string;
-  tactic_type: TacticType;
+  tactic_type: TacticType | "not_recorded";
   /** A person's own type name and colour, drawn instead of the type's family colour (KAN-51). */
   tactic_custom_type?: CustomTacticType | null;
   tactic_status: TacticStatus;
@@ -185,7 +185,7 @@ export function isRemoved(saved: SavedActivity | null | undefined): boolean {
 
 export type TimelineCandidate = {
   id: string;
-  tactic: Tactic;
+  tactic: Omit<Tactic, "type"> & {type: TacticType | "not_recorded"};
   expansion?: TacticExpansion;
   parent_name?: string;
   band: TimelineBand;
@@ -270,7 +270,7 @@ export function timelineCandidates(args: {
   const scopes = args.state.tactics.flatMap(parent => [
     {tactic: parent, expansion: undefined as TacticExpansion | undefined, parent_name: parent.name},
     ...(args.state.expansions ?? []).filter(child => child.tactic_id === parent.id).map(expansion => ({
-      tactic: {...parent, ...expansion.scope, status: expansion.status, budget: expansion.scope.cost_effort},
+      tactic: {...parent, ...expansion.scope, type: expansion.scope.type ?? "not_recorded" as const, custom_type: null, comparator: expansion.scope.comparator ?? "", data_source: expansion.scope.data_source ?? "", status: expansion.status, budget: expansion.scope.cost_effort},
       expansion, parent_name: parent.name,
     })),
   ]);

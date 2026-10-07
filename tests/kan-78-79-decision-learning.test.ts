@@ -4,7 +4,7 @@ import { loadState, persistState } from "@/lib/iegp/store";
 import { getWorkspace } from "@/modules/workspaces/store";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { createWorkspace, setLearningSharingEligible } from "@/modules/workspaces/store";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
@@ -32,6 +32,9 @@ import type { GapSuggestion } from "@/lib/iegp/types";
  * past cases as worked examples, never as rules, and raw customer text never
  * reaches another workspace's prompt.
  */
+
+const ownedSharingIds: string[] = [];
+afterEach(async () => { for (const id of ownedSharingIds.splice(0)) await setLearningSharingEligible(id,false); });
 
 const unique = () => `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
 
@@ -95,6 +98,7 @@ describe("KAN-79 worked examples never leak raw text across workspaces", () => {
     const a = (await createWorkspace({ name: `wsA-${unique()}`, owner: "learning-test" })).id;
     const b = (await createWorkspace({ name: `wsB-${unique()}`, owner: "learning-test" })).id;
     await provideEntityContext(a);
+    ownedSharingIds.push(a,b);
     await setLearningSharingEligible(a, true);
     await setLearningSharingEligible(b, true);
     const secret = `ZELVORA${unique().slice(-4).toUpperCase()}`;
@@ -178,7 +182,7 @@ describe("KAN-78 de-identified lessons", () => {
 
 describe("KAN-78 decision capture", () => {
   it("records merge, split and reject on a gap suggestion, with edited vs accepted", async () => {
-    const ws = `wsC-${unique()}`;
+    const ws = (await createWorkspace({name:`wsC-${unique()}`,owner:"learning-test"})).id;
     const merged = suggestion();
     await captureGapSuggestionDecision({ suggestion: merged, gap: { name: "g", statement: "s" }, decision: "merge", rationale: "one gap", workspace_id: ws });
     const split = suggestion();
@@ -287,19 +291,23 @@ describe("decision originating provenance", () => {
 
   it("retains a supplied frozen replay payload and does not replace missing origin with today's route", async () => {
     const configuredRoute = vi.spyOn(routing, "resolveRoute");
+    const logged = vi.spyOn(console,"error").mockImplementation(() => {});
     const replay = { stage_input: { gap_ids: ["GAP-test"] }, context: { gaps: [{ id: "GAP-test", statement: "Original question" }] } };
     const id = await recordDecisionExample({ workspace_id: "unknown-origin-workspace", stage: "S8", kind: "s8_band", subject_id: unique(), ai_input: {}, ai_output: { band: "high" }, outcome: "accepted", replay_input: replay });
     const saved = (await getDecisionExample(id!))!;
     expect(saved.replay_input).toEqual(replay); expect(saved.replay_exclusion_reason).toBeNull();
     expect(saved.model).toBeNull(); expect(saved.provider_id).toBeNull(); expect(saved.run_id).toBeNull(); expect(saved.prompt_version).toBeNull();
     expect(configuredRoute).not.toHaveBeenCalled(); configuredRoute.mockRestore();
+    await vi.waitFor(async () => expect((await getDecisionExample(id!))?.lesson_status).toBe("failed"));
+    expect(logged).toHaveBeenCalledExactlyOnceWith("[learning] lesson processing failed",id,expect.objectContaining({message:"Learning workspace unknown-origin-workspace is unavailable."}));
+    logged.mockRestore();
   });
 });
 
 
 describe("residual learning requires AI lineage", () => {
   it("skips a human-only residual draft and an unavailable originating run", async () => {
-    const ws = `manual-${unique()}`;
+    const ws = (await createWorkspace({name:`manual-${unique()}`,owner:"learning-test"})).id;
     const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
     const args = { workspace_id: ws, parent_gap_id: "manual-gap", proposed: "A human wrote this draft", final: "A human wrote this draft", decision: "accept" as const, rationale: "Keep my draft" };
     await captureResidualDecision(args); await captureResidualDecision({ ...args, run_id: "missing-run" });
@@ -310,7 +318,7 @@ describe("residual learning requires AI lineage", () => {
 
 describe("distinct human decision events", () => {
   it("coalesces the same event while preserving identical content from different events", async () => {
-    const ws = `events-${unique()}`;
+    const ws = (await createWorkspace({name:`events-${unique()}`,owner:"learning-test"})).id;
     const draft = { workspace_id: ws, stage: "S4" as const, kind: "s4_mapping" as const, subject_id: "event-gap", ai_input: {}, ai_output: {}, outcome: "accepted" as const };
     await recordDecisionExample({ ...draft, capture_key: "edit-first" });
     await recordDecisionExample({ ...draft, capture_key: "edit-first" });
@@ -348,8 +356,10 @@ describe("distinct human decision events", () => {
     const workspace = await createWorkspace({ name: `s9-events-${unique()}`, owner: "learning-test" });
     const actor = { name: "Idea reviewer", function: "medical_affairs" as const };
     await runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, async () => {
-      await ensurePlatformSchema(); const id = `IDEA-${unique()}`;
-      await db().insert(ideationProposals).values({ id, gap_id: "original-gap", name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "Question", design: { origin: "ai" }, created_at: new Date().toISOString() });
+      await ensurePlatformSchema(); await loadState(); const id = `IDEA-${unique()}`;
+      // Stored legacy-new rows may lack kind, but still need their actual saved design/comparison.
+      const original={name:"AI idea",type:"rwe_study",rationale:"AI rationale",evidence_question:"Question",comparative_rationale:"A new cohort supplies missing data",design:{population:"Adults",comparator:"Care",outcomes:"Safety",data_source:"Registry",study_design:"Cohort",duration_months:12,readout_lag_months:2,timing_rationale:"Annual data"}};
+      await db().insert(ideationProposals).values({id,gap_id:"original-gap",...original,design:{...original.design,origin:"ai",original_ai:original},created_at:new Date().toISOString()});
       const decision = { id, decision: "reject" as const, rationale: "Not appropriate", actor, workspace_id: workspace.id };
       await decideIdeationProposal(decision); await restoreIdeationProposal({ id, rationale: "Reconsider the idea", actor }); await decideIdeationProposal(decision);
       expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = ${workspace.id} and subject_id = ${id}`)).toHaveLength(2);
@@ -402,7 +412,9 @@ describe("review round one real decision paths", () => {
       await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
       const id = `IDEA-${unique()}`;
       const design = { population: "Original population", comparator: "Care", outcomes: "Survival", data_source: "Registry", study_design: "Cohort", duration_months: 12, readout_lag_months: 2, timing_rationale: "Follow-up" };
-      const original = { name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "AI question", design };
+      const original = { proposal_kind: "new", comparative_rationale:"New cohort supplies missing data", name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "AI question", design };
+      const {validatePlacement}=await import("@/modules/stages/s8-prioritization/module");
+      await validatePlacement({gap_id:gap,band:"high",rationale:"Blocks review decision",actor});
       await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original }, created_at: new Date().toISOString() });
       if (edited) await editIdeationProposal({ id, fields: { name: "Human idea", population: "Human population" }, rationale: "Narrow population", actor });
       await decideIdeationProposal({ id, decision: "accept", rationale: "Adopt this idea", actor });
@@ -425,7 +437,7 @@ describe("review round one real decision paths", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
-        await ensurePlatformSchema(); const id = `IDEA-${unique()}`;
+        await ensurePlatformSchema(); await loadState(); const id = `IDEA-${unique()}`;
         await db().insert(ideationProposals).values({ id, gap_id: "legacy-gap", name: "Previously edited human values", type: "rwe_study", rationale: "Edited rationale", evidence_question: "Edited question", design: { origin: "ai", edited_by: actor.name, edited_at: new Date().toISOString() }, created_at: new Date().toISOString() });
         await decideIdeationProposal({ id, decision: "reject", rationale: "Reject legacy idea", actor });
         expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = ${ws.id}`)).toHaveLength(0);

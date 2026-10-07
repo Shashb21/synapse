@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensureCurrentSchemaTables } from "./db";
 import * as t from "./schema";
-import { ACTOR_FUNCTIONS, TACTIC_STATUSES, type TacticStatus } from "./enums";
+import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES, type TacticStatus } from "./enums";
 import { emptyDimensions, unlocked } from "./engine";
 import { readState, syncComputedGapStatuses } from "./store";
 import { tacticDatesError } from "./tactic-dates";
@@ -17,6 +17,7 @@ const text = z.string().trim();
 const requiredText = text.min(1);
 /** Shared strict payload contract for S3/S9 proposals and canonical acceptance. */
 export const expansionScopeSchema = z.object({
+  type: z.enum(TACTIC_TYPES).optional(), comparator: text.optional(), data_source: text.optional(),
   name: requiredText, evidence_question: requiredText, population: text, outcomes: text,
   geography: text, data_cut: text, analysis: text, instrument: text,
   study_design: requiredText, gap_coverage: requiredText, cost_effort: requiredText,

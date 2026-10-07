@@ -176,7 +176,7 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
 import { validatePlacement } from '@/modules/stages/s8-prioritization/module';
 import { ideationModule, decideIdeationProposal, listIdeationProposals } from '@/modules/stages/s9-ideation/module';
 import { frozenReplayCase, projectReplayDecision, scoreDecisionReplay } from '@/modules/kernel/decision-replay';
-it('preserves future S9 pre-generation slots through human edit and full isolated replay', async () => {
+it('preserves future S9 pre-generation slots through a rationale-only edit and full isolated replay', async () => {
     const f = await evaluationFixture();
     await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
         await validatePlacement({ gap_id: f.gap.id, band: 'high', rationale: 'This blocks the decision.', actor, workspace_id: f.ws.id });
@@ -202,7 +202,7 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
             return { tactics: body.gaps.flatMap((g: {
                     id: string;
                     proposal_slots: string[];
-                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, name: args.system.includes('Edited design') ? 'Human-approved study' : 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', rationale: 'Answer the evidence gap', comparative_rationale:'New registry answers unavailable scope; credible feasibility but slower and costlier than secondary analysis', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
+                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, proposal_kind:'new',target_tactic_id:null,expansion_scope:null, name: 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', rationale: args.system.includes('Edited design') ? 'Corrected proposal explanation' : 'Answer the evidence gap', comparative_rationale:'New registry answers unavailable scope; credible feasibility but slower and costlier than secondary analysis', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
         });
         const live = await runStage({ stage: 'S9', workspace_id: f.ws.id, input: { gap_ids: [f.gap.id], per_gap: 1 }, actor, role: 'medical_affairs' });
         const [proposal] = await listIdeationProposals();
@@ -210,7 +210,8 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
         const snapshot = await originatingSnapshot(live.run_id, f.ws.id, 'S9') as unknown as FrozenReplayCase;
         expect(JSON.stringify(snapshot)).not.toContain('Original study');
         expect(snapshot.facts.proposal_slots).toEqual({ [f.gap.id]: [`${f.gap.id}:proposal:1`] });
-        const accepted = await decideIdeationProposal({ id: proposal.id, decision: 'accept', rationale: 'Use the approved study title.', actor, workspace_id: f.ws.id, fields: { name: 'Human-approved study' } });
+        await expect(executeFrozenStage({module:ideationModule as SynapseModule<unknown,unknown>,snapshot:{...snapshot,module_version:'2.1.0'},route:{...route,stage:'S9'},revision:{id:null,instruction:''},actor,excluded_ids:[]})).rejects.toThrow('different stage implementation');
+        const accepted = await decideIdeationProposal({ id: proposal.id, decision: 'accept', rationale: 'The proposal explanation needs correction.', actor, workspace_id: f.ws.id, fields: { idea_rationale:'Corrected proposal explanation' } });
         const [decision] = await examples.listDecisionExamples({ workspace_id: f.ws.id, stage: 'S9' });
         await vi.waitFor(async () => expect((await examples.getDecisionExample(decision.id))?.lesson_status).toBe('ok'));
         await vi.waitFor(async () => {
@@ -236,8 +237,10 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
         const output = await executeFrozenStage({ module: ideationModule as SynapseModule<unknown, unknown>, snapshot: frozen, route: { ...route, stage: 'S9' }, revision: { id: 'candidate', instruction: 'Edited design' }, actor, excluded_ids: [decision.id] });
         const score = scoreDecisionReplay(decision, projectReplayDecision(decision, output));
         expect(score.reason).toBeNull();
-        expect(score.metrics).toHaveLength(14);
+        expect(score.metrics).toHaveLength(15);
         expect(score.metrics.every(m => m.value === 1)).toBe(true);
+        const originalOutput = await executeFrozenStage({ module: ideationModule as SynapseModule<unknown, unknown>, snapshot: frozen, route: { ...route, stage: 'S9' }, revision: { id: 'original', instruction: 'Original design' }, actor, excluded_ids: [decision.id] });
+        expect(scoreDecisionReplay(decision, projectReplayDecision(decision,originalOutput)).metrics.find(m=>m.name==='rationale_literal_agreement')?.value).toBe(0);
         expect(await liveContents()).toEqual(before);
         const o = output as {
             proposals: unknown[];

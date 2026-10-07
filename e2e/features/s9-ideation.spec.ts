@@ -226,6 +226,9 @@ test.describe("S9 tactics ideation", () => {
       await card.getByRole("button",{name:`Edit ${scope.name}`,exact:true}).click();
       let dialog=page.getByRole("dialog");
       await dialog.getByRole("textbox",{name:"Added scope: cost effort",exact:true}).fill("One analyst month");
+      await dialog.getByRole("textbox",{name:"Comparator",exact:true}).fill("Active comparator cohort");
+      await dialog.getByRole("textbox",{name:"Data source",exact:true}).fill("Linked registry");
+      await dialog.getByRole("textbox",{name:"Population",exact:true}).fill("Age 80+");
       await dialog.getByLabel(/rationale.*required/i).last().fill("Updated analyst budget");
       await dialog.getByRole("button",{name:"Save edit",exact:true}).click(); await expect(dialog).toBeHidden();
       await expect(card).toContainText("One analyst month");
@@ -241,9 +244,22 @@ test.describe("S9 tactics ideation", () => {
       expect((await pg`select id from ${pg(`${schema}.tactics`)}`).length).toBe(count);
       const [child]=await pg`select * from ${pg(`${schema}.tactic_expansions`)} where proposal_id=${proposal.id}`;
       expect(child.status).toBe("proposed"); expect(child.scope.cost_effort).toBe("One analyst month");
+      expect(child.scope).toMatchObject({type:"subgroup_analysis",population:"Age 80+",comparator:"Active comparator cohort",data_source:"Linked registry"});
       const [unchanged]=await pg`select * from ${pg(`${schema}.tactics`)} where id=${parent.id}`; expect(unchanged).toEqual(parent);
       const retry=await planActionExpectingError(request,{action:"decide_proposal",id:proposal.id,decision:"accept",rationale:"Duplicate click"}); expect(retry.error).toMatch(/already accepted/);
-      await page.screenshot({path:".superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/task-6-ideation-desktop.png",fullPage:true});
+      await page.goto('/timeline');
+      await page.locator(`[data-activity-id="ACT-EXP-${child.id}"]`).first().focus();
+      await page.keyboard.press("Enter");
+      const details=page.getByRole('dialog');
+      await expect(details).toContainText('Active comparator cohort');
+      await expect(details).toContainText('Linked registry');
+      await expect(details).toContainText('Age 80+');
+      await expect(details).toContainText('Subgroup');
+      await planAction(request,{action:'add_activity',tactic_id:parent.id,expansion_id:child.id,start_date:'2026-11-01',end_date:'2027-02-01',rationale:'Independent child dates'});
+      await page.reload();await page.locator(`[data-activity-id="ACT-EXP-${child.id}"]`).first().focus();
+      await page.keyboard.press("Enter");
+      await expect(details).toContainText('Active comparator cohort');await expect(details).toContainText('Linked registry');
+      await page.screenshot({path:'.superpowers/sdd/2026-10-07-kan77-kan76-learning-expansions/final-fix-child-design.png',fullPage:true});
     } finally {await pg.end();}
   });
 

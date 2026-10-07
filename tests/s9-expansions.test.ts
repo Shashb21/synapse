@@ -4,7 +4,7 @@ import '@/modules';
 import { eq } from 'drizzle-orm';
 import * as core from '@/lib/iegp/schema';
 import { db, wipePlatform } from '@/modules/kernel/db';
-import { createGap, createProposedTactic, loadState, resetDemoSetup } from '@/lib/iegp/store';
+import { createGap, createProposedTactic, loadState, resetDemoSetup, assignTacticToGap } from '@/lib/iegp/store';
 import { validatePlacement } from '@/modules/stages/s8-prioritization/module';
 import { ideationModule, addIdeationProposal, decideIdeationProposal, editIdeationProposal, listIdeationProposals, restoreIdeationProposal } from '@/modules/stages/s9-ideation/module';
 const actor = { name: 'Expansion reviewer', function: 'medical_affairs' as const };
@@ -32,6 +32,34 @@ describe('S9 expansion source gate', () => {
         expect(after.expansions[0]).toMatchObject({ tactic_id: targetId, status: 'proposed', scope: { cost_effort: 'One analyst month' } });
         expect(after.coverages.find(c => c.expansion_id === after.expansions[0].id)?.overall).toBe('unassessed');
         expect((await listIdeationProposals()).find(p => p.id === proposal.id)).toMatchObject({ status: 'accepted', tactic_id: targetId, expansion_id: after.expansions[0].id });
+    });
+    it('preserves edited child design, reconciles one-sided fields and rejects conflicting edits', async()=>{
+        const p=await add();
+        const before=await loadState();
+        await editIdeationProposal({id:p.id,fields:{population:'Age 80+',comparator:'Active comparator cohort',data_source:'Linked registry'},rationale:'Refine child design',actor});
+        const edited=(await listIdeationProposals()).find(row=>row.id===p.id)!;
+        expect(edited.expansion_scope?.population).toBe('Age 80+');
+        expect(edited.design.population).toBe('Age 80+');
+        await expect(editIdeationProposal({id:p.id,fields:{population:'Age 90+',expansion_scope:{...edited.expansion_scope!,population:'Age 85+'}},rationale:'Conflicting duplicate inputs',actor})).rejects.toThrow(/conflict.*population/i);
+        await decideIdeationProposal({id:p.id,decision:'accept',rationale:'Reviewed child design',actor});
+        const after=await loadState();
+        expect(after.tactics).toEqual(before.tactics);
+        expect(after.expansions[0].scope).toMatchObject({type:'subgroup_analysis',population:'Age 80+',comparator:'Active comparator cohort',data_source:'Linked registry'});
+    });
+    it('accepts new and expansion proposals before two ordinary tactic and parent-mapping writes',async()=>{
+        const newProposal=await addIdeationProposal({gap_id:gapId,fields:{name:'Fresh cohort',type:'rwe_study',evidence_question:'Q'},rationale:'New data needed',actor});
+        const accepted=await decideIdeationProposal({id:newProposal.id,decision:'accept',rationale:'Fund review',actor});
+        const expansion=await add();await decideIdeationProposal({id:expansion.id,decision:'accept',rationale:'Added analysis',actor});
+        const canonical=(await loadState()).expansions;
+        const ids:string[]=[];
+        for(const name of ['Manual A','Manual B']) {
+          const id=await createProposedTactic({name,type:'rwe_study',description:name,evidence_question:'Q',population:'Adults',intervention:'Asset',comparator:'SOC',outcomes:'AE',owner:actor.name,function:actor.function,residual_ids:[],actor_name:actor.name,actor_function:actor.function});
+          ids.push(id);await assignTacticToGap({gap_id:gapId,tactic_id:id,actor_name:actor.name,actor_function:actor.function,note:'Human mapping',human:true});
+        }
+        const after=await loadState();
+        expect(new Set([accepted.tactic_id,...ids]).size).toBe(3);
+        expect(after.expansions).toEqual(canonical);
+        const mappings=after.coverages.filter(c=>ids.includes(c.tactic_id));expect(mappings).toHaveLength(2);expect(new Set(mappings.map(c=>c.id)).size).toBe(2);
     });
     it('keeps rejection memory and restores the same editable target', async () => {
         const proposal = await add();
@@ -65,7 +93,7 @@ describe('S9 expansion source gate', () => {
     });
     it('requires an explicit credible amendment for prospective additions to an ongoing target',async()=>{
         await db().update(core.tactics).set({status:'ongoing'}).where(eq(core.tactics.id,targetId));
-        const fields={name:'Prospective elderly instrument',type:'pro_study',evidence_question:'QoL in 75+?',proposal_kind:'expansion' as const,target_tactic_id:targetId,comparative_rationale:'Uses existing sites; approval and extra recruitment needed',duration_months:12,readout_lag_months:2,expansion_scope:{...scope,analysis:'Prospective PRO collection',post_hoc:false,prospective_enrolment:true}};
+        const fields={name:scope.name,type:'pro_study',evidence_question:scope.evidence_question,proposal_kind:'expansion' as const,target_tactic_id:targetId,comparative_rationale:'Uses existing sites; approval and extra recruitment needed',duration_months:12,readout_lag_months:2,expansion_scope:{...scope,analysis:'Prospective PRO collection',post_hoc:false,prospective_enrolment:true}};
         await expect(addIdeationProposal({gap_id:gapId,fields,rationale:'Review prospective scope',actor})).rejects.toThrow(/credible protocol amendment/);
         fields.expansion_scope={...fields.expansion_scope,protocol_amendment:true,study_design:'Prospective protocol amendment',feasibility_risks:'Requires ethics approval and instrument validation'};
         const p=await addIdeationProposal({gap_id:gapId,fields,rationale:'Review contingent amendment',actor});
@@ -80,7 +108,7 @@ describe('S9 expansion source gate', () => {
 import { scoreDecisionReplay } from '@/modules/kernel/decision-replay';
 import type { DecisionExample } from '@/modules/kernel/decision-examples';
 it('scores expansion kind, parent and full scope even when common new-tactic fields match', () => {
-    const fields = { proposal_kind: 'expansion', target_tactic_id: 'TAC-known', expansion_scope: scope, comparative_rationale: 'Existing data saves time', name: 'Analysis', type: 'subgroup_analysis', evidence_question: 'Q', design: { population: 'Adults', comparator: 'SOC', outcomes: 'AE', data_source: 'Trial', study_design: 'Analysis', duration_months: 3, readout_lag_months: 1, timing_rationale: 'Analyst capacity' } };
+    const fields = { proposal_kind: 'expansion', target_tactic_id: 'TAC-known', expansion_scope: scope, comparative_rationale: 'Existing data saves time', rationale: 'Answers elderly safety', name: 'Analysis', type: 'subgroup_analysis', evidence_question: 'Q', design: { population: 'Adults', comparator: 'SOC', outcomes: 'AE', data_source: 'Trial', study_design: 'Analysis', duration_months: 3, readout_lag_months: 1, timing_rationale: 'Analyst capacity' } };
     const example = { kind: 's9_proposal', subject_id: 'idea-test', outcome: 'accepted', ai_output: fields } as unknown as DecisionExample;
     const score = (actual: Record<string, unknown>) => scoreDecisionReplay(example, { kind: example.kind, subject_id: example.subject_id, decision: 'accept', fields: actual });
     expect(score(fields).metrics.every(m => m.value === 1)).toBe(true);

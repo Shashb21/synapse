@@ -343,7 +343,7 @@ describe("S3 on the model path", () => {
     });
     const {output} = await tacticExtractModule.run(input(), ctx);
     expect(output.accepted[0]).toMatchObject({match: "new", target_tactic_id: null});
-    expect(tacticExtractModule.manifest.version).toBe("3.0.0");
+    expect(tacticExtractModule.manifest.version).toBe("3.1.0");
   });
   it.each([
     {match: "same", target_tactic_id: null},

@@ -5,7 +5,7 @@ import "@/modules";
 import { db } from "@/lib/iegp/db";
 import * as t from "@/lib/iegp/schema";
 import { buildSeed } from "@/lib/iegp/seed";
-import { commitExtractedRecords, loadState, persistState } from "@/lib/iegp/store";
+import { commitExtractedRecords, createProposedTactic, loadState, persistState } from "@/lib/iegp/store";
 import { tacticVersion } from "@/lib/iegp/tactic-expansions";
 import type { ExpansionScope } from "@/lib/iegp/types";
 import * as suggestions from "@/modules/stages/s3-tactic-extract/suggestions";
@@ -52,6 +52,7 @@ describe("S3 source matching", () => {
     const after = await loadState();
     expect(after.tactics).toEqual(before.tactics); expect(after.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages);
     expect(after.expansions).toHaveLength(1); expect(after.expansions[0]).toMatchObject({id: result.result_expansion_id, status: "proposed", scope: {name: "Reviewed subgroup"}});
+    expect(after.expansions[0].scope.type).toBeUndefined(); // Separate-alternative type is not child evidence.
     expect(result.original_expansion.name).toBe(scope.name); expect(result.history).toHaveLength(2);
     await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Retry", actor})).rejects.toThrow(/already decided/);
     expect((await loadState()).expansions).toHaveLength(1);
@@ -63,6 +64,15 @@ describe("S3 source matching", () => {
     expect(after.tactics.find(t => t.id === result.result_tactic_id)).toMatchObject({name: row.separate.name, status: "planned", source_quote: row.source_quote});
     expect(after.tactics.find(t => t.id === parentId)).toEqual(before.tactics.find(t => t.id === parentId));
   });
+  it("keeps ordinary creation working after actual separate-source acceptance",async()=>{
+    const row=await proposal();
+    const accepted=await suggestions.decideTacticSuggestion({id:row.id,decision:'separate',rationale:'Distinct source activity',actor});
+    const canonical=(await loadState()).tactics.find(t=>t.id===accepted.result_tactic_id);
+    const ids:string[]=[];
+    for(const name of ['Ordinary first','Ordinary second']) ids.push(await createProposedTactic({name,type:'rwe_study',description:'Manual',evidence_question:'Q',population:'Adults',intervention:'Asset',comparator:'SOC',outcomes:'Safety',owner:actor.name,function:actor.function,residual_ids:[],actor_name:actor.name,actor_function:actor.function}));
+    expect(new Set([accepted.result_tactic_id,...ids]).size).toBe(3);
+    expect((await loadState()).tactics.find(t=>t.id===accepted.result_tactic_id)).toEqual(canonical);
+  });
   it.each(["expand", "separate", "reject"] as const)("requires rationale before %s", async decision => {
     const row = await proposal(); await expect(suggestions.decideTacticSuggestion({id: row.id, decision, rationale: "", actor})).rejects.toThrow(/rationale/i);
     expect((await suggestions.listTacticSuggestions())[0]!.status).toBe("pending");
@@ -70,7 +80,12 @@ describe("S3 source matching", () => {
   it("refuses stale parent snapshot instead of computing a fresh acceptance version", async () => {
     const row = await proposal(); await suggestions.editTacticSuggestion({id: row.id, gap_id: gapId, rationale: "Select gap", actor});
     await db().update(t.tactics).set({evidence_question: "Human changed question"}).where(eq(t.tactics.id, parentId));
-    await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Accept addition", actor})).rejects.toThrow(/changed|stale/i);
+    await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "expand", rationale: "Accept addition", actor})).rejects.toThrow(/reject this obsolete suggestion or review a new source proposal/i);
+    const {POST}=await import('@/app/api/plan/route');
+    const current=(await suggestions.listTacticSuggestions()).find(p=>p.id===row.id)!;
+    const response=await POST(new Request('http://localhost/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'decide_tactic_suggestion',suggestion_id:row.id,decision:'expand',expected_version:current.version,rationale:'Accept addition',actor_name:actor.name,actor_function:actor.function})}));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/reject this obsolete suggestion or review a new source proposal/i);
     expect((await loadState()).expansions).toHaveLength(0); expect((await suggestions.listTacticSuggestions())[0]!.status).toBe("pending");
   });
   it("rejects missing source, target, gap and arbitrary suggestion IDs without partial mutations", async () => {
@@ -94,7 +109,7 @@ describe("S3 source matching", () => {
   it("refuses stale separate review and accepts rejection without renewing the parent snapshot", async () => {
     const row = await proposal();
     await db().update(t.tactics).set({study_design: "New human protocol"}).where(eq(t.tactics.id, parentId));
-    await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "separate", rationale: "Accept independent", actor})).rejects.toThrow(/changed|stale/i);
+    await expect(suggestions.decideTacticSuggestion({id: row.id, decision: "separate", rationale: "Accept independent", actor})).rejects.toThrow(/reject this obsolete suggestion or review a new source proposal/i);
     const result = await suggestions.decideTacticSuggestion({id: row.id, decision: "reject", rationale: "Review obsolete", actor});
     expect(result.expected_tactic_version).toBe(row.expected_tactic_version);
   });

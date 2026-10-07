@@ -18,7 +18,7 @@ describe('decision replay scoring', () => {
     });
 });
 
-const newFields = { proposal_kind: 'new', comparative_rationale: 'Existing studies lack these data; the new registry costs more but can recruit.', name: 'Registry', type: 'rwe_study', evidence_question: 'Compare outcomes', design: { population: 'Adults', comparator: 'SOC', outcomes: 'Survival', data_source: 'Registry', study_design: 'Cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual cycle' } };
+const newFields = { proposal_kind: 'new', rationale: 'Addresses missing safety evidence', comparative_rationale: 'Existing studies lack these data; the new registry costs more but can recruit.', name: 'Registry', type: 'rwe_study', evidence_question: 'Compare outcomes', design: { population: 'Adults', comparator: 'SOC', outcomes: 'Survival', data_source: 'Registry', study_design: 'Cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual cycle' } };
 const newExample = { kind: 's9_proposal', subject_id: 'idea-new', outcome: 'accepted', ai_output: newFields } as unknown as DecisionExample;
 const replayNew = (fields: Record<string, unknown>) => ({ kind: 's9_proposal', subject_id: 'idea-new', decision: 'accept', fields });
 describe('new S9 comparison replay', () => {
@@ -47,7 +47,30 @@ describe('new S9 comparison replay', () => {
         const legacy = { ...newFields, proposal_kind: undefined };
         const score = scoreDecisionReplay({ ...newExample, ai_output: legacy }, replayNew(legacy));
         expect(score.reason).toBeNull();
-        expect(score.metrics).toHaveLength(14);
+        expect(score.metrics).toHaveLength(15);
         expect(score.metrics.every(m => m.value === 1)).toBe(true);
+    });
+});
+
+
+describe('S9 proposal rationale evidence', () => {
+    it.each(['new', 'expansion'])('scores original and edited proposal rationale for %s without scoring human decision reason', kind => {
+        const scope = {name:'Child',evidence_question:'Q',population:'Older adults',outcomes:'Safety',geography:'',data_cut:'',analysis:'Subgroup',instrument:'',study_design:'Analysis',gap_coverage:'Safety',cost_effort:'Low',timing:'Soon',feasibility_risks:'Small sample',post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
+        const fields = {...newFields, proposal_kind:kind, ...(kind === 'expansion' ? {target_tactic_id:'TAC-001',expansion_scope:scope} : {})};
+        for (const outcome of ['accepted','edited'] as const) {
+            const final = {...fields,rationale:'Human corrected proposal explanation'};
+            const example = {...newExample,outcome,ai_output:fields,final,rationale:'Separate private decision reason'};
+            const target = outcome === 'accepted' ? fields : final;
+            for (const rationale of [target.rationale,'Wrong explanation',undefined]) {
+                const score = scoreDecisionReplay(example,replayNew({...target,rationale}));
+                expect(score.reason).toBeNull();
+                expect(score.metrics.find(m => m.name === 'rationale_literal_agreement')?.value).toBe(rationale === target.rationale ? 1 : 0);
+            }
+            for (const incomplete of [{...example,ai_output:{...fields,rationale:undefined}}, {...example,outcome:'edited' as const,final:{...final,rationale:undefined}}]) {
+                const score = scoreDecisionReplay(incomplete,replayNew(target));
+                expect(score.metrics).toEqual([]);
+                expect(score.reason).toMatch(/rationale/i);
+            }
+        }
     });
 });

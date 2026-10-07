@@ -7,14 +7,16 @@ import * as stateStore from "@/lib/iegp/store";
 import * as routing from "@/modules/kernel/routing";
 import * as llm from "@/modules/kernel/llm";
 import { activePromptVersion } from "@/modules/kernel/prompt-variant";
-import { createWorkspace } from "@/modules/workspaces/store";
+import { createWorkspace, setLearningSharingEligible, learningSharingEligible } from "@/modules/workspaces/store";
 import { AiDisabledError, setAiEnabled } from "@/modules/kernel/ai-switch";
 import { freezeRevisionCohort, getRevisionCohort, getPromptRevision, listPromptRevisions, proposePromptRevision } from "@/modules/kernel/prompt-revisions";
 
+const ownedWorkspaceIds: string[] = [];
 const actor = { name: "Owner", function: "medical_affairs" as const };
-afterEach(async () => { vi.restoreAllMocks(); await setAiEnabled({ enabled: true, actor_name: "test" }); });
+afterEach(async () => { vi.restoreAllMocks(); await setAiEnabled({ enabled: true, actor_name: "test" }); for (const id of ownedWorkspaceIds.splice(0)) { await setLearningSharingEligible(id,false); expect(await learningSharingEligible(id)).toBe(false); } });
 async function fixture() {
   const ws = await createWorkspace({ name: `revision-${crypto.randomUUID()}`, owner: "revision-test" });
+  ownedWorkspaceIds.push(ws.id);
   vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: { name: "Secretbrand" }, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
   const ids: string[] = [];
   for (let i = 0; i < 6; i++) {

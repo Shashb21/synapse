@@ -142,7 +142,7 @@ For each candidate decide:
 - match: exactly "same", "overlaps" or "new". Same is the same activity and scope; overlaps shares an existing activity but adds distinct scope; new is an independent activity.
 - target_tactic_id: an existing library id for same/overlaps, null for new. Never target a batch candidate.
 - shared_scope and new_scope: nonblank descriptions for overlaps, null otherwise.
-- expansion: for overlaps a complete added scope with name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. All fields must be explicit; unused dimensions may be empty strings and dates may be null. Specify at least one added dimension; describe unknown costs/timing/risks honestly, never invent commitments. Completed studies cannot acquire prospective enrolment; identify post-hoc work and protocol amendment needs. Null otherwise.
+- expansion: for overlaps a complete added scope with name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. Optional type, comparator and data_source may be included only when the source explicitly supports that child design; omit them when not recorded, never copy the parent or separate alternative. All required fields must be explicit; unused dimensions may be empty strings and dates may be null. Specify at least one added dimension; describe unknown costs/timing/risks honestly, never invent commitments. Completed studies cannot acquire prospective enrolment; identify post-hoc work and protocol amendment needs. Null otherwise.
 - separate: for overlaps a separate linked activity option with name, type, status and evidence_question supported by the source; preserve the candidate's documented type and status. Null otherwise.
 - duplicate_of: optional batch-repeat id only for rejecting repeats of another candidate; keep the better one. Same library references are recorded through target_tactic_id.
 - confidence: 0–100 in your verdict.
@@ -515,7 +515,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   manifest: {
     id: "s3-tactic-extract.pcj",
     stage: "S3",
-    version: "3.0.0",
+    version: "3.1.0",
     title: "Tactic extraction (proposer → critic → judge)",
     summary:
       "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge classifies same, overlapping and new scope. Overlaps await human source review. Needs a connected LLM.",

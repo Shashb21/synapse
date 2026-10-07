@@ -271,6 +271,10 @@ export type Tactic = {
 
 /** Added study scope, kept separate from the parent's locked evidence question. */
 export type ExpansionScope = {
+  /** Recorded child design; absent on historical/source scopes that never supplied it. */
+  type?: TacticType;
+  comparator?: string;
+  data_source?: string;
   name: string;
   evidence_question: string;
   population: string;

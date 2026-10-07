@@ -570,6 +570,7 @@ export async function POST(request: Request) {
               gap: { id: gap.id, name: gap.name, statement: gap.statement },
               run_id: aiRow.origin_run_id,
               capture_key: mappingDecision.decision_event_id,
+              parent_tactic_ids: mappingDecision.parent_tactic_ids,
               actor: { name: actor_name, function: actor_function },
               ai: { mapping_status: aiRow.mapping_status, tactic_ids: aiRow.tactic_ids },
               saved: { mapping_status, tactic_ids },

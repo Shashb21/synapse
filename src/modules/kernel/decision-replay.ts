@@ -62,6 +62,14 @@ export function frozenReplayCase(example: DecisionExample): FrozenReplayCase | n
     return value?.version === 1 && value.workspace_id === example.workspace_id && value.stage === example.stage && value.run_id === example.run_id && !!value.facts?.state && !!value.module_id && !!value.module_version && !!value.route && Array.isArray(value.examples) && !!value.input ? value : null;
 }
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' ? v as Record<string, unknown> : {};
+/** Apply the recorded human decision scope; retained children were not reviewed by the parent form. */
+function mappingTargets(example: DecisionExample, ids: unknown): string[] {
+    const values = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+    if (example.ai_input?.mapping_scope !== 'parents') return values;
+    const parents = example.ai_input.parent_tactic_ids;
+    return Array.isArray(parents) ? values.filter(id => parents.includes(id)) : [];
+}
+
 /** Literal field agreement: each scored field contributes one match out of one known target. */
 export function scoreDecisionReplay(example: DecisionExample, output: unknown): ReplayScore {
     const excluded = (reason: string): ReplayScore => ({ metrics: [], reason });
@@ -90,7 +98,7 @@ export function scoreDecisionReplay(example: DecisionExample, output: unknown): 
             return excluded('No explicit coverage verdict target.');
         metric('coverage_verdict_agreement', p.mapping_status === status);
         if (Array.isArray(target.tactic_ids))
-            metric('tactic_set_agreement', evidenceHash([...(p.tactic_ids as string[] ?? [])].sort()) === evidenceHash([...target.tactic_ids].sort()));
+            metric('tactic_set_agreement', evidenceHash(mappingTargets(example,p.tactic_ids).sort()) === evidenceHash([...target.tactic_ids].sort()));
     }
     else if (example.kind === 'gap_suggestion') {
         if (!['same', 'overlaps', 'new'].includes(String(target.classification)))
@@ -106,6 +114,11 @@ export function scoreDecisionReplay(example: DecisionExample, output: unknown): 
         if (fields.some(k => target[k] == null) || designFields.some(k => design[k] == null))
             return excluded('Proposal target lacks required final design fields.');
         if (example.kind === 's9_proposal') {
+            if (typeof example.ai_output.rationale !== 'string' || !example.ai_output.rationale.trim())
+                return excluded('Original proposal lacks saved rationale evidence.');
+            if (typeof target.rationale !== 'string' || !target.rationale.trim())
+                return excluded('Proposal target lacks required rationale evidence.');
+            metric('rationale_literal_agreement', evidenceHash(target.rationale) === evidenceHash(actual.rationale ?? null));
             const kind = target.proposal_kind ?? 'new';
             if (!['new', 'expansion'].includes(String(kind))) return excluded('Unknown proposal kind.');
             // Missing old comparison evidence is excluded, never filled from final values.
@@ -154,7 +167,7 @@ export function projectReplayDecision(example: DecisionExample, output: unknown)
     if (example.kind === 's4_mapping') {
         const row = find('accepted', 'gap_id');
         const rejected = find('rejected', 'gap_id') ?? find('withdrawn', 'gap_id');
-        return row ? { kind: example.kind, subject_id: example.subject_id, decision: 'accept', mapping_status: String(row.mapping_status ?? row.status), tactic_ids: row.tactic_ids as string[] } : rejected ? { kind: example.kind, subject_id: example.subject_id, decision: 'reject' } : null;
+        return row ? { kind: example.kind, subject_id: example.subject_id, decision: 'accept', mapping_status: String(row.mapping_status ?? row.status), tactic_ids: mappingTargets(example,row.tactic_ids) } : rejected ? { kind: example.kind, subject_id: example.subject_id, decision: 'reject' } : null;
     }
     return null;
 }

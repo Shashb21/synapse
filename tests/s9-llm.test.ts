@@ -1,5 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/modules";
+import * as routing from '@/modules/kernel/routing';
+import {listDecisionExamples,getDecisionExample} from '@/modules/kernel/decision-examples';
 import { wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -63,6 +65,9 @@ const judgeGapsOf = (call: Call) => call.body.gaps as JudgeGap[];
 function tactic(gap_id: string, name: string, overrides: Record<string, unknown> = {}) {
   return {
     gap_id,
+    proposal_kind: "new",
+    target_tactic_id: null,
+    expansion_scope: null,
     name,
     type: "rwe_study",
     evidence_question: `Question for ${name}`,
@@ -77,6 +82,7 @@ function tactic(gap_id: string, name: string, overrides: Record<string, unknown>
     readout_lag_months: 4,
     timing_rationale: `Timing for ${name}`,
     ...overrides,
+    ...(overrides.expansion_scope ? Object.fromEntries(Object.entries(overrides.expansion_scope as Record<string,unknown>).filter(([key]) => ["name","evidence_question","population","outcomes","study_design"].includes(key))) : {}),
   };
 }
 
@@ -102,6 +108,7 @@ describe("S9 on the model path", () => {
   let ids: string[] = [];
   let libraryId = "";
   let savedStub: string | undefined;
+  let priorExamples = new Set<string>();
 
   beforeAll(async () => {
     await resetDemoSetup();
@@ -138,11 +145,20 @@ describe("S9 on the model path", () => {
     libraryId = state.tactics[0]!.id;
   }, 60_000);
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    priorExamples = new Set((await listDecisionExamples({workspace_id:'default',stage:'S9',limit:null})).map(row=>row.id));
+    vi.spyOn(routing,'resolveRoute').mockResolvedValue(route(true));
+    vi.spyOn(routing,'completionFor').mockReturnValue(async () => ({lesson:'Reviewers require feasible added scope.'}));
     savedStub = process.env.SYNAPSE_TEST_STUB_LLM;
     delete process.env.SYNAPSE_TEST_STUB_LLM;
   });
-  afterEach(() => {
+  afterEach(async () => {
+    const created=(await listDecisionExamples({workspace_id:'default',stage:'S9',limit:null})).filter(row=>!priorExamples.has(row.id));
+    // Await test-owned background work before restoring its completion provider.
+    for(const row of created) {
+      if (process.env.SYNAPSE_TEST_STUB_LLM !== '1') await vi.waitFor(async()=>expect((await getDecisionExample(row.id))?.lesson_status).toBe('ok'));
+    }
+    vi.restoreAllMocks();
     if (savedStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
     else process.env.SYNAPSE_TEST_STUB_LLM = savedStub;
   });
@@ -266,10 +282,17 @@ describe("S9 on the model path", () => {
     await restoreIdeationProposal({id:p.id,rationale:"New feasibility information",actor:ACTOR});
     const restored=await ideationModule.run(input(),context(script).ctx); expect(restored.output.proposals.some(p=>p.gap_id===ids[0])).toBe(true);
     const editedScope={...scope,cost_effort:"One analyst month"};
-    await editIdeationProposal({id:p.id,fields:{expansion_scope:editedScope},rationale:"Human budget refinement",actor:ACTOR});
+    await editIdeationProposal({id:p.id,fields:{expansion_scope:editedScope,comparator:"Active comparator cohort",data_source:"Linked registry"},rationale:"Human budget refinement",actor:ACTOR});
     await ideationModule.run({...input(),dry_run:false},context(script).ctx);
     expect((await listIdeationProposals()).find(r=>r.id===p.id)?.expansion_scope).toEqual(editedScope);
     await decideIdeationProposal({id:p.id,decision:"accept",rationale:"Credible existing data",actor:ACTOR});
+    const acceptedState=await loadState();
+    const acceptedChild=acceptedState.expansions.find(child=>child.proposal_id===p.id)!;
+    expect(acceptedChild.scope).toMatchObject({type:'rwe_study',comparator:'Active comparator cohort',data_source:'Linked registry'});
+    const {buildTimeline}=await import('@/modules/stages/s10-timeline/build');
+    const timelineArgs={state:acceptedState,placements:[]};
+    expect(buildTimeline(timelineArgs).pending.find(row=>row.expansion_id===acceptedChild.id)).toMatchObject({tactic_type:'rwe_study',meta:{comparator:'Active comparator cohort',data_source:'Linked registry'}});
+    expect(buildTimeline({...timelineArgs,overrides:[{id:`ACT-EXP-${acceptedChild.id}`,start_date:'2026-11-01',end_date:'2027-02-01',readout_date:null,lane:'high',depends_on:[],meta:{manual:true}}]}).activities.find(row=>row.expansion_id===acceptedChild.id)).toMatchObject({tactic_type:'rwe_study',meta:{comparator:'Active comparator cohort',data_source:'Linked registry'}});
     const observations=await sharedDb().execute(sql`select ai_output, final, outcome from decision_examples where run_id=${recorder.id} and subject_id=${p.id}`);
     expect(observations).toHaveLength(2);
     const accepted=observations.find(row=>row.outcome==='edited')!;
@@ -283,6 +306,46 @@ describe("S9 on the model path", () => {
     const scope={name:"Elderly analysis",evidence_question:"Safety in 75+?",population:"Age 75+",outcomes:"AESI",geography:"",data_cut:"Locked data",analysis:"Post-hoc subgroup",instrument:"",study_design:"Retrospective analysis",gap_coverage:"Elderly safety",cost_effort:defect === "incomplete-scope" ? "" : "Two analyst months",timing:"3 months",feasibility_risks:"Small sample",post_hoc:defect !== "unmarked-posthoc",prospective_enrolment:defect === "completed-prospective",protocol_amendment:false,start_date:null,evidence_available:null};
     const {ctx}=context(call=>({tactics:gapsOf(call).map(g=>tactic(g.id,"Invalid expansion",{proposal_kind:"expansion",target_tactic_id:defect === "unknown-target" ? "TAC-unknown" : target,expansion_scope:scope}))}));
     await expect(ideationModule.run(input(),ctx)).rejects.toThrow(/did not return a complete set of tactic designs/);
+  });
+  it('repairs contradictory common and added scope designs rather than dropping either',async()=>{
+    const target=await createProposedTactic({name:'Completed conflict trial',type:'phase3_trial',description:'Dataset',evidence_question:'Safety',population:'Adults',intervention:'Asset',comparator:'SOC',outcomes:'AE',owner:ACTOR.name,function:ACTOR.function,residual_ids:[],status:'completed',actor_name:ACTOR.name,actor_function:ACTOR.function});
+    const scope={name:'Child',evidence_question:'Added Q',population:'Older adults',outcomes:'Safety',geography:'',data_cut:'',analysis:'Post-hoc subgroup',instrument:'',study_design:'Analysis',gap_coverage:'Safety',cost_effort:'Low',timing:'Soon',feasibility_risks:'Small sample',post_hoc:true,prospective_enrolment:false,protocol_amendment:false,start_date:null,evidence_available:null};
+    let attempts=0;
+    const {ctx,calls}=context(call=>{
+      if(call.purpose === 'ideation-critic')return keepAll(call);
+      if(call.purpose === 'ideation-judge')return judgeFirst(call,1);
+      attempts++;
+      return {tactics:gapsOf(call).map(g=>({...tactic(g.id,'Child',{proposal_kind:'expansion',target_tactic_id:target,expansion_scope:scope}),population:attempts===1?'Conflicting adults':scope.population}))};
+    });
+    const {output}=await ideationModule.run(input(),ctx);
+    expect(calls.filter(c=>c.purpose==='ideation-proposer').length).toBeGreaterThan(1);
+    expect(output.proposals.every(p=>p.design.population===scope.population)).toBe(true);
+  });
+  it.each([
+    {proposal_kind:undefined}, {proposal_kind:null}, {target_tactic_id:undefined}, {target_tactic_id:123},
+    {target_tactic_id:{id:'TAC-001'}}, {proposal_kind:'unknown'},
+    {proposal_kind:'new',target_tactic_id:'TAC-001'}, {proposal_kind:'expansion',target_tactic_id:null},
+  ])('repairs malformed current discriminator/target %j before persistence', async defect => {
+    const {listIdeationProposals}=await import('@/modules/stages/s9-ideation/module');
+    let attempts=0;
+    const {ctx,calls}=context(call => {
+      if(call.purpose === 'ideation-critic') return keepAll(call);
+      if(call.purpose === 'ideation-judge') return judgeFirst(call,1);
+      attempts++;
+      return {tactics:gapsOf(call).map(g=>tactic(g.id,attempts === 1 ? 'Invalid current contract' : 'Repaired explicit kind',attempts === 1 ? defect : {}))};
+    });
+    const before=(await listIdeationProposals()).map(p=>p.id);
+    const {output}=await ideationModule.run({...input(),dry_run:false},ctx);
+    expect(calls.filter(c=>c.purpose === 'ideation-proposer').length).toBeGreaterThan(1);
+    expect(output.proposals.every(p=>p.name === 'Repaired explicit kind' && p.proposal_kind === 'new' && p.target_tactic_id === null)).toBe(true);
+    expect((await listIdeationProposals()).filter(p=>!before.includes(p.id)).every(p=>p.name === 'Repaired explicit kind')).toBe(true);
+  });
+  it('fails without persistence when an absent kind is never repaired',async()=>{
+    const {listIdeationProposals}=await import('@/modules/stages/s9-ideation/module');
+    const before=await listIdeationProposals();
+    const {ctx}=context(call=>call.purpose === 'ideation-proposer' ? {tactics:gapsOf(call).map(g=>tactic(g.id,'Never valid',{proposal_kind:undefined}))} : call.purpose === 'ideation-critic' ? keepAll(call) : judgeFirst(call,1));
+    await expect(ideationModule.run({...input(),dry_run:false},ctx)).rejects.toThrow(/complete set of tactic designs/);
+    expect(await listIdeationProposals()).toEqual(before);
   });
   it("asks again for a gap whose tactic has an invalid type or no duration", async () => {
     const [a, b] = ids as [string, string];
@@ -410,10 +473,13 @@ describe("S9 on the model path", () => {
     if (flow === "saved-edit") expect((await post({ action: "edit_proposal", name: "Human idea", population: "Human population" })).status).toBe(200);
     const humanComparison = "Human comparison: existing analyses cannot measure this outcome; the new registry costs more but has feasible recruitment.";
     if (flow === "comparison-edit") expect((await post({ action: "edit_proposal", comparative_rationale: humanComparison })).status).toBe(200);
+    const omitted = flow.includes("missing-comparison") ? vi.spyOn(console,"warn").mockImplementation(() => {}) : null;
     expect((await post({ action: "decide_proposal", decision: "accept", ...(flow === "inline-edit" ? { name: "Human idea", population: "Human population" } : {}) })).status).toBe(200);
     const examples = await sharedDb().execute(sql`select ai_output, ai_input, final, outcome, run_id, actor from decision_examples where run_id = ${recorder.id}`);
     if (flow.includes("missing-comparison")) {
       expect(examples).toHaveLength(0);
+      expect(omitted).toHaveBeenCalledExactlyOnceWith("[learning] S9 decision omitted: immutable original AI baseline unavailable",row.id);
+      omitted!.mockRestore();
       return;
     }
     expect(examples).toHaveLength(1); expect(examples[0].ai_output).toEqual(original);

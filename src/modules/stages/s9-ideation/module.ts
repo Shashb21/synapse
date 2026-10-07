@@ -121,6 +121,8 @@ const IDEATION_SYSTEM = `You design evidence tactics that would close a prioriti
 
 Each tactic must be a runnable study, analysis or publication with a population, comparator, outcomes, a data source and a design. Do not restate the gap. Consider both expanding an existing accepted active tactic and a new tactic. Explicitly compare evidence quality, incremental cost/effort, time and feasibility in comparative_rationale. Do not invent an expansion when no sensible target exists. A new tactic must not duplicate the library. An expansion must add specified scope beyond the parent and any existing child expansions you are given, and retain target_tactic_id; tactic_id is never the target. Completed trials permit only post-hoc analyses using existing data; prospective additions require a credible protocol amendment on an active study or a new study.
 
+For an expansion, name, evidence_question, population, outcomes and study_design must exactly match expansion_scope. These are the child design, not the parent. If optional type, comparator or data_source are present in expansion_scope they must match the common design too.
+
 type is one of: ${TACTIC_TYPES.join(", ")}.
 duration_months is how long the tactic runs from start to last data in; readout_lag_months is how long from last data in to a usable readout. Estimate both for this specific design and say why in timing_rationale. Where a design has no comparator, say so in comparator (for example "None — descriptive") rather than leaving it empty.
 
@@ -383,14 +385,17 @@ function parseTactic(raw: Record<string, unknown>, library: LibraryTactic[]): { 
     problems.push("readout_lag_months must be zero or a positive number of months");
   }
   if (!text(raw.comparative_rationale)) problems.push("comparative_rationale must explicitly compare expansion and new alternatives for quality, time/cost and feasibility");
-  const kind = raw.proposal_kind ?? "new";
+  const kind = raw.proposal_kind;
   let scope: ExpansionScope | null = null;
   const target = typeof raw.target_tactic_id === "string" ? raw.target_tactic_id : null;
+  if (raw.target_tactic_id !== null && typeof raw.target_tactic_id !== "string") problems.push("target_tactic_id must explicitly be a string or null");
   if (kind !== "new" && kind !== "expansion") problems.push("proposal_kind must be new or expansion");
-  if (kind === "new" && (target || raw.expansion_scope)) problems.push("New tactics cannot carry expansion target or scope");
+  if (kind === "new" && (raw.target_tactic_id !== null || raw.expansion_scope !== null)) problems.push("New tactics cannot carry expansion target or scope");
   if (kind === "expansion") {
     try {
+      if (!target?.trim()) throw new Error("Expansion requires an explicit nonempty target_tactic_id");
       scope = expansionScopeSchema.parse(raw.expansion_scope);
+      assertExpansionDesign({name: fields.name, evidence_question: fields.evidence_question, type, design: fields}, scope);
       validateExpansion(library.find(t => t.id === target), scope, text(raw.comparative_rationale));
     } catch (error) { problems.push(error instanceof Error ? error.message : "Invalid expansion"); }
   }
@@ -489,7 +494,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   manifest: {
     id: "s9-ideation.pcj",
     stage: "S9",
-    version: "2.1.0",
+    version: "2.2.0",
     title: "Tactics ideation (proposer → critic → judge)",
     summary:
       "A model compares new tactics and expansions, timing included, for open gaps whose priority a human validated as High; a model critic challenges them against the gap and the tactic library over three exchanges; a model judge keeps and ranks up to the per-gap cap. Needs a connected LLM.",
@@ -1220,6 +1225,43 @@ async function recordById(id: string): Promise<IdeationProposalRecord> {
   return record;
 }
 
+/** Duplicated representations must describe the same accepted child, never its parent. */
+function assertExpansionDesign(value: {name: string; evidence_question: string; type: string; design: {population: string; outcomes: string; study_design: string; comparator: string; data_source: string}}, scope: ExpansionScope) {
+    const common = {...value.design, name: value.name, evidence_question: value.evidence_question, type: value.type};
+    for (const key of ["name", "evidence_question", "population", "outcomes", "study_design", "type", "comparator", "data_source"] as const) {
+        if (scope[key] !== undefined && scope[key] !== common[key]) throw new Error(`Conflicting expansion design field: ${key}. Review both representations.`);
+    }
+}
+
+/** Reconcile a single human edit against the saved source; contradictory two-sided changes are refused. */
+function reconcileExpansionDesign(next: ReturnType<typeof applyFields>, scope: ExpansionScope, fields: ProposalFields, before?: ReturnType<typeof applyFields>, previousScope?: ExpansionScope) {
+    const result = {...scope};
+    for (const key of ["name", "evidence_question", "population", "outcomes", "study_design"] as const) {
+        const oldCommon = key === "name" || key === "evidence_question" ? before?.[key] : before?.design[key];
+        const common = key === "name" || key === "evidence_question" ? next[key] : next.design[key];
+        const commonChanged = fields[key] !== undefined && common !== oldCommon;
+        const scopeChanged = fields.expansion_scope !== undefined && result[key] !== previousScope?.[key];
+        if (commonChanged && scopeChanged && common !== result[key]) throw new Error(`Conflicting expansion design field: ${key}. Review both representations.`);
+        if (commonChanged) result[key] = common;
+        if (key === "name" || key === "evidence_question") next[key] = result[key];
+        else next.design[key] = result[key];
+    }
+    // Optional fields only enter canonical scope when their source explicitly supplied them.
+    for (const key of ["type", "comparator", "data_source"] as const) {
+        if (result[key] === undefined) continue;
+        const common = key === "type" ? next.type : next.design[key];
+        const oldCommon = key === "type" ? before?.type : before?.design[key];
+        if (fields[key] !== undefined && common !== oldCommon) {
+            if (fields.expansion_scope && result[key] !== previousScope?.[key] && result[key] !== common) throw new Error(`Conflicting expansion design field: ${key}. Review both representations.`);
+            if (key === "type") result.type = common as TacticType;
+            else result[key] = common;
+        } else if (key === "type") next.type = result[key]!;
+        else next.design[key] = result[key]!;
+    }
+    assertExpansionDesign(next, result);
+    return expansionScopeSchema.parse(result);
+}
+
 /** Enforce credible additional scope before generation, editing or acceptance. */
 function validateExpansion(parent: Tactic | undefined, scope: ExpansionScope, comparison: string) {
     if (!parent)
@@ -1256,9 +1298,10 @@ async function editPending(row: ProposalRow, fields: ProposalFields, rationale: 
     const { design, meta } = splitDesign(row.design);
     const before = { name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design };
     const next = applyFields(before, fields);
-    const scope = fields.expansion_scope ?? row.expansion_scope as ExpansionScope | null;
+    let scope = fields.expansion_scope ?? row.expansion_scope as ExpansionScope | null;
     const comparison = fields.comparative_rationale?.trim() ?? row.comparative_rationale;
     if (row.proposal_kind === "expansion") {
+        scope = reconcileExpansionDesign(next, expansionScopeSchema.parse(scope), fields, before, row.expansion_scope as ExpansionScope);
         const state = await readState(tx);
         validateExpansion(state.tactics.find(t => t.id === row.target_tactic_id), expansionScopeSchema.parse(scope), comparison);
         if (next.design.duration_months === null || next.design.readout_lag_months === null)
@@ -1312,7 +1355,7 @@ export async function addIdeationProposal(args: {
   const state = await eligibleGap(args.gap_id);
   const kind = args.fields.proposal_kind ?? "new";
   const target = kind === "expansion" ? state.tactics.find(t => t.id === args.fields.target_tactic_id) : null;
-  const scope = kind === "expansion" ? expansionScopeSchema.parse(args.fields.expansion_scope) : null;
+  let scope = kind === "expansion" ? expansionScopeSchema.parse(args.fields.expansion_scope) : null;
   if (kind === "expansion") validateExpansion(target ?? undefined, scope!, args.fields.comparative_rationale ?? "");
   else if (args.fields.target_tactic_id || args.fields.expansion_scope) throw new Error("New tactics cannot carry expansion target or scope.");
   const empty: StoredDesign = {
@@ -1326,6 +1369,7 @@ export async function addIdeationProposal(args: {
     timing_rationale: "",
   };
   const next = applyFields({ name: "", type: "", evidence_question: "", rationale, design: empty }, args.fields);
+  if (scope) scope = reconcileExpansionDesign(next, scope, args.fields);
   if (kind === "expansion" && (next.design.duration_months === null || next.design.readout_lag_months === null)) throw new Error("Expansion numeric timing is required.");
   if (!next.name) throw new Error("Name is required.");
   if (!next.type) throw new Error("Type is required.");
@@ -1405,8 +1449,10 @@ export async function decideIdeationProposal(args: {
                 if (timing.duration_months === null || timing.duration_months <= 0 || timing.readout_lag_months === null || timing.readout_lag_months < 0)
                     throw new Error("Expansion requires valid numeric duration and readout lag.");
                 const scope = expansionScopeSchema.parse(proposal.expansion_scope);
+                assertExpansionDesign({...proposal, design: timing}, scope);
+                const acceptedScope = {...scope, type: proposal.type as TacticType, comparator: timing.comparator, data_source: timing.data_source};
                 validateExpansion(state.tactics.find(t => t.id === proposal.target_tactic_id), scope, proposal.comparative_rationale);
-                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope, expected_tactic_version: tacticVersion(parent), rationale, actor: args.actor }, tx);
+                const child = await acceptTacticExpansion({ proposal_id: proposal.id, tactic_id: parent.id, gap_id: proposal.gap_id, scope: acceptedScope, expected_tactic_version: tacticVersion(parent), rationale, actor: args.actor }, tx);
                 tactic_id = child.tactic_id;
                 expansion_id = child.id;
             }

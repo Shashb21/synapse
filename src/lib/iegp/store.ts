@@ -431,12 +431,17 @@ function now() {
   return new Date().toISOString();
 }
 
-function nextId(prefix: string, existing: string[]) {
-  const nums = existing
-    .map((id) => Number(id.split("-").pop()?.replace(/\D/g, "") || 0))
-    .filter((n) => Number.isFinite(n));
-  const n = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `${prefix}-${String(n).padStart(3, "0")}`;
+/** Allocate the next safe legacy numeric ID without interpreting canonical timestamp IDs. */
+export function nextId(prefix: string, existing: string[]): string {
+  const suffixes = existing.filter(id => id.startsWith(`${prefix}-`))
+    .map(id => id.slice(prefix.length + 1))
+    .filter(suffix => /^\d+$/.test(suffix))
+    .map(Number).filter(n => Number.isSafeInteger(n) && n >= 0);
+  const used = new Set(suffixes);
+  const maximum = suffixes.reduce((max, value) => Math.max(max, value), 0);
+  let next = maximum < Number.MAX_SAFE_INTEGER ? maximum + 1 : 1;
+  while (used.has(next)) next += 1;
+  return `${prefix}-${String(next).padStart(3, "0")}`;
 }
 
 type StoreTransaction = Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0];
@@ -2281,7 +2286,7 @@ export async function saveMappingTableRow(args: {
     "save_mapping_row",
     `${mapping_status} · ${uniqueIds.join(", ") || "none"}${removed.length ? ` · removed ${removed.join(", ")}` : ""}: ${rationale}`,
   );
-  return { decision_event_id: decisionEventId };
+  return { decision_event_id: decisionEventId, parent_tactic_ids: state.tactics.map(tactic => tactic.id) };
 }
 
 /**

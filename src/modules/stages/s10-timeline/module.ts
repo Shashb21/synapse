@@ -363,7 +363,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   manifest: {
     id: "s10-timeline.gantt",
     stage: "S10",
-    version: "2.1.0",
+    version: "2.2.0",
     title: "Interactive Gantt timeline",
     summary:
       "Lays out the final IEGP as dated activities. Dates a user set and durations the tactic's design carries are kept; a model infers the dependencies between activities and estimates any start, duration or readout lag nobody supplied. Only validated bands place an activity. A user can date, add, remove, re-lane and re-sequence any activity by hand; those values are marked human and survive every rebuild. Needs a connected LLM only while something is left for it to estimate.",

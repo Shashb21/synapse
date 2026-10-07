@@ -110,7 +110,7 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
     if (!parent) throw new Error("Target tactic no longer exists in this workspace.");
     if (args.decision !== "reject") {
       const current = (await readState(tx)).tactics.find(t => t.id === row.target_tactic_id)!;
-      if (tacticVersion(current) !== row.expected_tactic_version) throw new Error("Tactic changed; refresh the stale review before accepting.");
+      if (tacticVersion(current) !== row.expected_tactic_version) throw new Error("Tactic changed; reject this obsolete suggestion or review a new source proposal before accepting.");
     }
     let result_expansion_id: string | null = null, result_tactic_id: string | null = null;
     if (args.decision === "expand") {

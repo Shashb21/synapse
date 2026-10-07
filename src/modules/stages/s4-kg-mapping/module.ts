@@ -167,10 +167,10 @@ function candidateSets(state: IegpState, input: MappingInput) {
     if (!parent || !tacticEligibleForMapping(parent) || child.status === "cancelled" ||
       (input.tactic_ids?.length && !input.tactic_ids.includes(parent.id)) ||
       (input.expansion_ids?.length && !input.expansion_ids.includes(child.id))) return [];
-    return [{...parent, ...child.scope, id: child.id, parent_tactic_id: parent.id,
+    return [{...parent, ...child.scope, type: child.scope.type ?? "not_recorded" as const, custom_type: null, comparator: child.scope.comparator ?? "", data_source: child.scope.data_source ?? "", id: child.id, parent_tactic_id: parent.id,
       expansion_id: child.id, gap_ids: child.gap_ids, status: child.status}];
   });
-  const tactics: (IegpState["tactics"][number] & {parent_tactic_id?: string; expansion_id?: string; gap_ids?: string[]})[] =
+  const tactics: (Omit<IegpState["tactics"][number], "type"> & {type: IegpState["tactics"][number]["type"] | "not_recorded"; parent_tactic_id?: string; expansion_id?: string; gap_ids?: string[]})[] =
     [...(input.expansion_ids?.length ? [] : parents), ...children];
   return { gaps, tactics };
 }
@@ -345,6 +345,7 @@ function promptTactics(tactics: TacticRow[]) {
     evidence_question: tactic.evidence_question,
     population: tactic.population,
     comparator: tactic.comparator,
+    data_source: tactic.data_source,
     outcomes: tactic.outcomes,
     parent_tactic_id: tactic.parent_tactic_id,
     expansion_id: tactic.expansion_id,
@@ -538,7 +539,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
     stage: "S4",
-    version: "3.1.0",
+    version: "3.2.0",
     title: "LLM mapping table (proposer ↔ critic ×3 → judge)",
     summary:
       "A model proposes one row per gap with a coverage verdict, confidence and rationale for each tactic; a model critic challenges each row over three exchanges and a model judge accepts or rejects it. Needs a connected LLM.",

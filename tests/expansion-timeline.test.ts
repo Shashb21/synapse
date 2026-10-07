@@ -25,6 +25,18 @@ function fixture() {
 }
 
 describe("independent expansion timeline", () => {
+  it('uses recorded child type/comparator/data source in dated and undated details and leaves missing history unknown',()=>{
+    const args=fixture(), before=structuredClone(args.state.tactics);
+    Object.assign(args.state.expansions[0].scope,{type:'subgroup_analysis',comparator:'Active cohort',data_source:'Linked registry'});
+    const dated=buildTimeline(args);
+    expect(dated.activities.find(a=>a.expansion_id==='A')).toMatchObject({tactic_type:'subgroup_analysis',tactic_custom_type:null,meta:{comparator:'Active cohort',data_source:'Linked registry'}});
+    expect(dated.activities.find(a=>a.expansion_id==='B')).toMatchObject({tactic_type:'not_recorded',tactic_custom_type:null,meta:{comparator:'',data_source:''}});
+    args.overrides=[];
+    const undated=buildTimeline(args);
+    expect(undated.pending.find(a=>a.expansion_id==='A')).toMatchObject({tactic_type:'subgroup_analysis',meta:{comparator:'Active cohort',data_source:'Linked registry'}});
+    expect(undated.pending.find(a=>a.expansion_id==='B')).toMatchObject({tactic_type:'not_recorded',meta:{comparator:'',data_source:''}});
+    expect(args.state.tactics).toEqual(before);
+  });
   it("shows parent context for child-only mappings without inventing parent coverage or a schedule", () => {
     const args = fixture();
     args.overrides = [];

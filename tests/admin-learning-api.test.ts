@@ -8,7 +8,15 @@ import { sql } from "drizzle-orm";
 import { sharedDb } from "@/modules/kernel/db";
 import { listDecisionExamples } from "@/modules/kernel/decision-examples";
 import { NextResponse } from "next/server";
-afterEach(() => vi.restoreAllMocks());
+const ownedReportWorkspaces: string[] = [];
+afterEach(async () => {
+  vi.restoreAllMocks();
+  // These report-only rows have no immutable cohort/history references.
+  for (const id of ownedReportWorkspaces.splice(0)) {
+    await sharedDb().execute(sql`delete from decision_examples where workspace_id=${id}`);
+    expect(await listDecisionExamples({workspace_id:id,limit:null})).toEqual([]);
+  }
+});
 const request = (body: unknown) => new Request("http://localhost/api/admin/learning", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
 describe("owner learning API", () => {
   it("denies non-owners before reading or generating", async () => {
@@ -33,6 +41,7 @@ describe("owner learning API", () => {
   });
   it("reports every selected-workspace decision beyond the former global cap", async () => {
     const workspace_id = `report-${crypto.randomUUID()}`;
+    ownedReportWorkspaces.push(workspace_id);
     await listDecisionExamples({ limit: 1 });
     await sharedDb().execute(sql`insert into decision_examples (id, workspace_id, stage, kind, subject_id, ai_input, ai_output, outcome, created_at)
       select ${workspace_id} || '-' || n, ${workspace_id}, 'S2', 'gap_suggestion', 'subject-' || n, '{}'::jsonb, '{}'::jsonb, 'accepted', '2026-10-05T12:00:00Z' from generate_series(1, 501) n`);

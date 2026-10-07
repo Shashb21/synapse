@@ -1,3 +1,4 @@
+import * as llm from "@/modules/kernel/llm";
 import * as workspaceStore from "@/modules/workspaces/store";
 import { runAgenticCycle } from "@/modules/kernel/agentic";
 import { RunRecorder } from "@/modules/kernel/observability";
@@ -12,11 +13,22 @@ import { runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context"
 import { computeLesson, getDecisionExample, recordDecisionExample, similarExamples, withLearningExclusions, workedExamplesAsPrompt } from "@/modules/kernel/decision-examples";
 
 const unique = () => `privacy-${crypto.randomUUID()}`;
-async function workspace() { return createWorkspace({ name: unique(), owner: "privacy-test" }); }
+const ownedWorkspaceIds: string[] = [];
+async function workspace() {
+  const ws = await createWorkspace({ name: unique(), owner: "privacy-test" });
+  ownedWorkspaceIds.push(ws.id);
+  return ws;
+}
 async function example(workspace_id: string) {
   return (await recordDecisionExample({ workspace_id, stage: "S2", kind: "gap_suggestion", subject_id: unique(), ai_input: { text: "secretbrand corneal population" }, ai_output: {}, outcome: "accepted" }))!;
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const id of ownedWorkspaceIds.splice(0)) {
+    await setLearningSharingEligible(id, false);
+    expect(await learningSharingEligible(id)).toBe(false);
+  }
+});
 
 describe("decision learning fails closed", () => {
   it("loads the recorded workspace rather than the ambient workspace", async () => {
@@ -32,9 +44,12 @@ describe("decision learning fails closed", () => {
 
   it("refuses sharing when entity lookup fails", async () => {
     const b = await workspace(); const id = await example(b.id);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(stateStore, "loadState").mockRejectedValue(new Error("entity context unavailable"));
     expect(await computeLesson(id, async () => ({ lesson: "Reviewers keep a narrower population separate." }))).toBe("failed");
     expect((await getDecisionExample(id))?.lesson).toBeNull();
+    expect(logged).toHaveBeenCalledExactlyOnceWith("[learning] entity context unavailable", id, expect.objectContaining({message:"entity context unavailable"}));
+    logged.mockRestore();
     vi.spyOn(stateStore, "loadState").mockResolvedValue({ asset: { name: "Brand" }, sources: [], tactics: [] } as unknown as Awaited<ReturnType<typeof stateStore.loadState>>);
     expect(await computeLesson(id, async () => ({ lesson: "Reviewers keep a narrower population separate." }))).toBe("ok");
   });
@@ -107,9 +122,15 @@ describe("reserved default workspace context", () => {
     });
     expect(await computeLesson(id, async () => ({ lesson: "Reviewers keep a narrower population separate." }))).toBe("ok");
     expect(loaded).toEqual(["default"]);
+    const skipped = vi.spyOn(llm,"isTestStub");
     const another = await example("default");
+    // Wait for the queued stub lesson to finish before injecting the retry failure.
+    await vi.waitFor(() => expect(skipped).toHaveBeenCalled());
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(workspaceStore, "getWorkspace").mockRejectedValue(new Error("workspace registry unavailable"));
     expect(await computeLesson(another, async () => ({ lesson: "Reviewers keep a narrower population separate." }))).toBe("failed");
+    expect(logged).toHaveBeenCalledExactlyOnceWith("[learning] lesson processing failed", another, expect.objectContaining({message:"workspace registry unavailable"}));
+    logged.mockRestore();
     expect((await getDecisionExample(another))?.lesson).toBeNull();
   });
 });

@@ -157,7 +157,7 @@ describe("canonical expansion acceptance", () => {
     expect(after.expansions[0]!.history).toHaveLength(2);
   });
   it("publishes changed S4 implementation identity for stale evaluation rejection", () => {
-    expect(kgMappingModule.manifest.version).toBe("3.1.0");
+    expect(kgMappingModule.manifest.version).toBe("3.2.0");
   });
   it("accepts and changes lifecycle successfully inside a nondefault workspace", async () => {
     await runInWorkspace({workspace_id: "expansion-success", schema: "ws_expansion_success"}, async () => {
@@ -275,12 +275,12 @@ describe("canonical expansion acceptance", () => {
     expect((await request(payload)).status).toBe(400);
     expect((await request({action: "accept_tactic_expansion", ...args})).status).toBe(400);
   });
-  it("S4 supplies distinct child scope targets by default and commits only to the child assessment", async () => {
-    const child = await acceptTacticExpansion(args);
+  it.each([false, true])("S4 supplies distinct child scope targets with recorded design %s and commits only to child assessment", async (recorded) => {
+    const child = await acceptTacticExpansion({...args, scope: {...args.scope, ...(recorded ? {type: "subgroup_analysis" as const, comparator:"Active comparator cohort", data_source:"Linked registry"} : {})}});
     const before = await loadState();
     const saved = process.env.SYNAPSE_TEST_STUB_LLM;
     delete process.env.SYNAPSE_TEST_STUB_LLM;
-    let inventory: {id: string; expansion_id?: string; evidence_question: string}[] = [];
+    let inventory: {id: string; expansion_id?: string; evidence_question: string; comparator?: string; data_source?: string; type: string}[] = [];
     const ctx: ModuleContext = {
       ai: true, workspace_id: "default", actor, role: "medical_affairs",
       route: {stage: "S4", provider_id: "anthropic-claude", provider_label: "Claude", model: "test", auth: "api_key", connected: true, params: {temperature: 0, max_tokens: 4096}, fallbacks: [], degraded: false, reason: null},
@@ -298,6 +298,9 @@ describe("canonical expansion acceptance", () => {
     try {
       await kgMappingModule.run(kgMappingModule.inputSchema.parse({gap_ids: [args.gap_id]}), ctx);
       expect(inventory.find(t => t.expansion_id === child.id)?.evidence_question).toBe(scope.evidence_question);
+      expect(inventory.find(t => t.expansion_id === child.id)?.comparator).toBe(recorded ? "Active comparator cohort" : "");
+      expect(inventory.find(t => t.expansion_id === child.id)?.data_source).toBe(recorded ? "Linked registry" : "");
+      expect(inventory.find(t => t.expansion_id === child.id)?.type).toBe(recorded ? "subgroup_analysis" : "not_recorded");
       expect(inventory.find(t => t.id === args.tactic_id)?.evidence_question).toBe(before.tactics[0]!.evidence_question);
       const after = await loadState();
       expect(after.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages.filter(c => !c.expansion_id));

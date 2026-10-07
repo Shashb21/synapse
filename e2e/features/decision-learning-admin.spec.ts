@@ -5,6 +5,15 @@ import { freshWorkspace } from "../support/session";
 
 const ws = freshWorkspace({ name: "decision-learning" });
 test.describe.configure({ mode: "serial" });
+test.afterAll(async () => {
+  const db = postgres(process.env.DATABASE_URL!, {max:1});
+  try {
+    // Keep immutable cohort/history evidence inside the disposable database, with sharing off.
+    await db`update workspaces set learning_sharing_eligible=false where id=${ws.id}`;
+    const [row] = await db`select learning_sharing_eligible from workspaces where id=${ws.id}`;
+    if (row) expect(row.learning_sharing_eligible).toBe(false);
+  } finally { await db.end(); }
+});
 
 test("owner sees counts and creates a candidate; customers are refused", async ({ page, context, browser }) => {
   const selected = await context.request.post("/api/admin/workspace", { data: { workspace_id: ws.id } });
