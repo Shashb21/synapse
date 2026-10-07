@@ -179,11 +179,13 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
   },
   inputSchema,
   outputSchema,
+  freeze: freezeFacts,
   async run(input, ctx) {
+    if (ctx.replay?.evaluation && input.apply) throw new Error("A split apply command cannot be replayed.");
     if (input.apply) return applySplit(input.gap_id, input.apply, ctx);
 
     requireLlm(ctx, "The partial split proposal");
-    const state = await loadState();
+    const { state } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
     const gap = state.gaps.find((row) => row.id === input.gap_id);
     if (!gap) throw new Error(`Unknown gap ${input.gap_id}`);
     const coverages = state.coverages.filter((row) => row.gap_id === gap.id);
@@ -510,10 +512,10 @@ export async function decidePartialSplit(args: {
 }
 
 partialSplitModule.evals = {
-  async cases() {
+  async cases(facts) {
     // Gold cases are the partially addressed gaps in the workspace. Proposing is
     // read-only, so scoring never applies a split.
-    const state = await loadState();
+    const state = facts?.state as Awaited<ReturnType<typeof loadState>> ?? await loadState();
     return state.gaps
       .filter((gap) => !gap.retired && displayedGapStatus(gap) === "validated_partial")
       .slice(0, 4)
@@ -541,3 +543,9 @@ partialSplitModule.evals = {
 };
 
 registerModule(partialSplitModule);
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  if (input.apply) throw new Error("A split apply command cannot be replayed.");
+  return { state: await loadState() };
+}

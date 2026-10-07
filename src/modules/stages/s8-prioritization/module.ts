@@ -260,9 +260,10 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   },
   inputSchema,
   outputSchema,
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Prioritization");
-    const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]);
+    const { state, axesConfig } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
     const axisById = (id: string | undefined) => axesConfig.axes.find((axis) => axis.id === id);
     const xAxis = axisById(input.x_axis) ?? axisById(axesConfig.x_axis) ?? axesConfig.axes[0]!;
     const yAxis =
@@ -437,7 +438,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         }),
     }, { kinds: ["s8_band"], text: openGaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
       const existing = await db().select().from(placementsTable);
       for (const placement of outcome.accepted) {
@@ -972,3 +973,8 @@ export async function movePlacement(args: {
 }
 
 export type { StoredAxes };
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]); return { state, axesConfig };
+}

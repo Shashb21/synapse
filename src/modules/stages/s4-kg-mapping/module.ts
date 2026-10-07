@@ -519,9 +519,10 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   inputSchema,
   outputSchema,
   migrations: [MAPPING_CANDIDATES_DDL],
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Mapping");
-    const state = await loadState();
+    const { state } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
     const { gaps, tactics } = candidateSets(state, input);
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
@@ -674,10 +675,10 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
         rationale: [mapping.rationale, `coverage:${mapping.coverage}`, ...rowNote],
       }));
     });
-    if (rows.length > 0) await db().insert(mappingCandidates).values(rows);
+    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(mappingCandidates).values(rows);
 
     const committed: { gap_id: string; tactic_ids: string[] }[] = [];
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const row of outcome.accepted) {
         const joined: string[] = [];
         for (const mapping of row.mappings.filter(bearsOnGap)) {
@@ -802,4 +803,9 @@ registerModule(kgMappingModule);
 export async function listMappingCandidates(limit = 300) {
   await ensurePlatformSchema([MAPPING_CANDIDATES_DDL]);
   return db().select().from(mappingCandidates).orderBy(desc(mappingCandidates.created_at)).limit(limit);
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  return { state: await loadState() };
 }

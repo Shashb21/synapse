@@ -47,3 +47,22 @@ describe("owner learning API", () => {
   });
 
 });
+
+import * as evaluations from '@/modules/kernel/prompt-revision-evals';
+it('authorises evaluate/approve/rollback and validates pointer and workspace boundaries',async()=>{
+ const actor={name:'Authenticated Owner',function:'medical_affairs' as const};
+ vi.spyOn(owner,'ownerAccess').mockResolvedValue({owner:true,actor} as Awaited<ReturnType<typeof owner.ownerAccess>>);
+ vi.spyOn(admin,'withAdminWorkspace').mockImplementation(async fn=>fn({id:'selected',name:'Selected',schema_name:'public',demo:false,source:'picked'}));
+ const evaluate=vi.spyOn(evaluations,'evaluatePromptRevision').mockResolvedValue({id:'pre_test',eligible:false} as evaluations.RevisionEvaluation);
+ const approve=vi.spyOn(revisions,'activatePromptRevision').mockRejectedValue(new Error('Active prompt changed since evaluation.'));
+ const rollback=vi.spyOn(revisions,'rollbackPromptRevision').mockResolvedValue(null);
+ expect((await POST(request({action:'evaluate',revision_id:'prv_test'}))).status).toBe(200);
+ expect(evaluate).toHaveBeenCalledWith({revision_id:'prv_test',workspace_id:'selected',actor});
+ const stale=await POST(request({action:'approve',revision_id:'prv_test',evaluation_id:'pre_test',expected_active_id:null}));
+ expect(stale.status).toBe(400);expect((await stale.json()).error).toContain('changed');expect(approve).toHaveBeenCalledTimes(1);
+ expect((await POST(request({action:'rollback',stage:'S8',expected_active_id:'prv_test'}))).status).toBe(200);expect(rollback).toHaveBeenCalledWith(expect.objectContaining({stage:'S8',expected_active_id:'prv_test',actor}));
+ expect((await POST(request({action:'approve',revision_id:'prv_test',evaluation_id:'pre_test'}))).status).toBe(400);
+ expect((await POST(request({action:'evaluate',revision_id:'prv_test',workspace_id:'foreign'}))).status).toBe(400);
+ vi.spyOn(owner,'ownerGate').mockResolvedValue(NextResponse.json({code:'owner_only'},{status:403}));
+ for(const action of ['evaluate','approve','rollback']) expect((await POST(request({action,revision_id:'prv_test'}))).status).toBe(403);
+});

@@ -82,7 +82,7 @@ export function captureGapSuggestionDecision(args: Origin & {
 
 /** Accept, edit-and-accept or reject on an S9 idea the model wrote. */
 export function captureProposalDecision(args: Origin & {
-  proposal: { id: string; name: string; type: string; evidence_question: string; rationale: string; design?: unknown };
+  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown };
   gap: GapText | null;
   decision: "accept" | "reject";
   /** The idea as accepted, when the person changed it first. */
@@ -105,7 +105,7 @@ export function captureProposalDecision(args: Origin & {
       stage: "S9",
       kind: "s9_proposal",
       subject_id: proposal.id,
-      ai_input: { gap: args.gap },
+      ai_input: { gap: args.gap, slot_id: proposal.slot_id ?? null },
       ai_output: {
         name: proposal.name,
         type: proposal.type,

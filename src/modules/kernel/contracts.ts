@@ -225,6 +225,8 @@ export type ModuleContext = {
   complete: JsonCompletion;
   /** False while an admin has AI switched off; no model may be called. */
   ai: boolean;
+  /** Frozen source facts; evaluation never loads live domain data or persists stage output. */
+  replay?: { evaluation: boolean; input: unknown; facts: Record<string, unknown>; examples?: import("./decision-examples").WorkedExample[]; module_id: string; module_version: string; prompt_version: string };
 };
 
 export type ModuleResult<O> = {
@@ -250,7 +252,7 @@ export type EvalCase<I> = {
 
 export type EvalHarness<I, O> = {
   /** Gold cases the stage scores itself against. */
-  cases: () => Promise<EvalCase<I>[]>;
+  cases: (facts?: Record<string, unknown>) => Promise<EvalCase<I>[]>;
   score: (args: { case: EvalCase<I>; output: O }) => EvalScore[];
 };
 
@@ -258,6 +260,8 @@ export interface SynapseModule<I, O> {
   manifest: ModuleManifest;
   inputSchema: ZodType<I>;
   outputSchema: ZodType<O>;
+  /** Capture domain facts before computation; used unchanged by both evaluation arms. */
+  freeze?(input: I): Promise<Record<string, unknown>>;
   run(input: I, ctx: ModuleContext): Promise<ModuleResult<O>>;
   evals?: EvalHarness<I, O>;
   /** DDL owned by this module. The kernel applies it before the first run. */

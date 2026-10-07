@@ -75,6 +75,7 @@ const outputSchema = z.object({
   proposals: z.array(proposalSchema),
   rejected: z.array(proposalSchema),
   gaps_considered: z.number(),
+  withdrawn: z.array(z.object({ slot_id: z.string(), note: z.string() })).optional(),
 });
 
 export type IdeationInput = z.infer<typeof inputSchema>;
@@ -406,6 +407,8 @@ type PromptGap = IdeationGap & {
   revise?: { id: string; previous: Omit<Proposal, "score" | "critic_note" | "judge_note" | "rank">; objection: string }[];
   /** What was wrong with the model's last answer for this gap. */
   problems?: string[];
+  /** Stable anonymous output positions assigned before generation; contain no human answers. */
+  proposal_slots?: string[];
 };
 
 /**
@@ -437,7 +440,7 @@ async function askProposerOnce(
   args: { gaps: PromptGap[]; perGap: number; hints: string; library: LibraryTactic[]; round: number; plan?: unknown },
 ): Promise<Record<string, unknown>[]> {
   const payload = (await ctx.complete({
-    system: IDEATION_SYSTEM,
+    system: `${IDEATION_SYSTEM}\nWhen a gap supplies proposal_slots, return each tactic id from that exact list, once only. Keep that id through all revisions. Never invent a different id.`,
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
       exchange: args.round === 1 ? undefined : `${args.round - 1} of ${PROPOSER_CRITIC_EXCHANGES}`,
@@ -481,9 +484,11 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
   },
   inputSchema,
   outputSchema,
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Ideation");
-    const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+    const { state, placements } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
+    const proposal_slots = ctx.replay?.facts.proposal_slots as Record<string, string[]> | undefined;
     const planContext = prioritizationContextFromState(state);
     // Ideation is for open gaps a human validated as High (KAN-8). Explicit gap_ids pick among them.
     const order = ideationBandOrder(placements);
@@ -544,7 +549,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
             perGap: input.per_gap,
             library,
             round: 1,
-            gaps: missing.map((id) => ({ ...gapById.get(id)!, problems: problems.get(id) })),
+            gaps: missing.map((id) => ({ ...gapById.get(id)!, problems: problems.get(id), proposal_slots: proposal_slots?.[id] })),
           });
           const found = new Map<string, Proposal[]>();
           const bad = new Map<string, string[]>();
@@ -556,16 +561,23 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
               bad.set(gapId, [...(bad.get(gapId) ?? []), `${text(raw.name) || "unnamed tactic"}: ${parsed.problem}`]);
               continue;
             }
+            const slots = proposal_slots?.[gapId];
+            const slotId = text(raw.id);
+            if (slots && (!slots.includes(slotId) || (found.get(gapId) ?? []).some(p => p.id === slotId))) {
+              bad.set(gapId, [...(bad.get(gapId) ?? []), "Return each supplied proposal slot id exactly once; unknown or duplicate slot."]);
+              continue;
+            }
             nextId += 1;
             found.set(gapId, [
               ...(found.get(gapId) ?? []),
-              { ...parsed.tactic, id: `${gapId}-L${nextId}`, gap_id: gapId, score: 0, critic_note: "", judge_note: "", rank: null },
+              { ...parsed.tactic, id: slots ? slotId : `${gapId}-L${nextId}`, gap_id: gapId, score: 0, critic_note: "", judge_note: "", rank: null },
             ]);
           }
           const complete = new Map<string, Proposal[]>();
           for (const id of missing) {
             if (bad.has(id)) problems.set(id, bad.get(id)!);
             else if (!found.has(id)) problems.set(id, ["no tactic was returned for this gap"]);
+            else if (proposal_slots?.[id] && found.get(id)!.length !== proposal_slots[id].length) problems.set(id, ["Return a proposal for every supplied slot."]);
             else complete.set(id, found.get(id)!);
           }
           return complete;
@@ -839,7 +851,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
       },
     }, { kinds: ["s9_proposal"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
-    if (!input.dry_run && outcome.accepted.length > 0) {
+    if (!ctx.replay?.evaluation && !input.dry_run && outcome.accepted.length > 0) {
       await ensurePlatformSchema();
       for (const proposal of outcome.accepted) {
         const values = {
@@ -850,6 +862,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           rationale: proposal.rationale,
           evidence_question: proposal.evidence_question,
           design: { ...proposal.design, rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
+            slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
             original_ai: { name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
           },
           status: "proposed",
@@ -869,6 +882,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
         proposals: outcome.accepted,
         rejected: outcome.rejected.map((item) => item.candidate),
         gaps_considered: gaps.length,
+        withdrawn: outcome.withdrawn.map(item => ({ slot_id: item.subject, note: item.note })),
       },
       summary: `${plural(outcome.accepted.length, "tactic proposal")} for ${plural(gaps.length, "prioritized gap")}${
         input.dry_run ? " (dry run)" : ""
@@ -973,6 +987,7 @@ export type StoredDesign = Omit<Design, "duration_months" | "readout_lag_months"
  * so it never replaces or rewrites it.
  */
 type DesignMeta = {
+  slot_id?: string | null;
   original_ai?: { name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
   rank?: number | null;
   run_id?: string | null;
@@ -1016,6 +1031,7 @@ function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
     },
     meta: {
       original_ai: originalProposal(row.original_ai),
+      slot_id: typeof row.slot_id === "string" ? row.slot_id : null,
       rank: num(row.rank),
       run_id: typeof row.run_id === "string" ? row.run_id : null,
       origin: row.origin === "human" ? "human" : "ai",
@@ -1302,7 +1318,7 @@ export async function decideIdeationProposal(args: {
   const original = originalMeta.original_ai ?? (!originalMeta.edited_at && !originalMeta.edited_by && Object.keys(args.fields ?? {}).length === 0
     ? { name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: splitDesign(proposal.design).design }
     : null);
-  const asProposed = original ? { ...proposal, ...original } : null;
+  const asProposed = original ? { ...proposal, ...original, slot_id: originalMeta.slot_id } : null;
   if (args.decision === "accept" && args.fields && Object.keys(args.fields).length > 0) {
     try {
       await editIdeationProposal({
@@ -1436,4 +1452,11 @@ export async function restoreIdeationProposal(args: {
   });
   await appendAudit(args.actor.name, args.actor.function, "ideation_proposal", args.id, "restore", `rejected → proposed: ${rationale}`);
   return recordById(args.id);
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+  const proposal_slots = Object.fromEntries(state.gaps.map(gap => [gap.id, Array.from({length:input.per_gap},(_,index)=>`${gap.id}:proposal:${index+1}`)]));
+  return { state, placements, proposal_slots };
 }

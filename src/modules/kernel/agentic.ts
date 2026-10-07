@@ -1,3 +1,4 @@
+import { saveReplaySnapshot } from "./decision-replay";
 import type { EvalScore, ModuleContext, StageId } from "./contracts";
 import { canPrompt } from "./routing";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -115,7 +116,13 @@ export type LearningInput = {
  * failure never fails the stage: it runs without examples.
  */
 async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: LearningInput | undefined): Promise<string> {
+  if (ctx.replay?.evaluation) {
+    const examples = ctx.replay.examples ?? [];
+    ctx.run.note("learning:worked-examples", { used: examples.map(e => ({ id: e.id, scope: e.scope, kind: e.kind })) });
+    return workedExamplesAsPrompt(examples);
+  }
   if (!learning || !learning.text.trim()) {
+    await saveReplaySnapshot(ctx, stage, []);
     ctx.run.note("learning:worked-examples", { used: [] });
     return "";
   }
@@ -126,6 +133,7 @@ async function workedExamplesFor(ctx: ModuleContext, stage: StageId, learning: L
       { used: examples.map((example) => ({ id: example.id, scope: example.scope, kind: example.kind })) },
       `${examples.length} similar past decision(s) shown as examples`,
     );
+    await saveReplaySnapshot(ctx, stage, examples);
     return workedExamplesAsPrompt(examples);
   } catch (error) {
     ctx.run.note("learning:worked-examples", { used: [], error: error instanceof Error ? error.message : String(error) });

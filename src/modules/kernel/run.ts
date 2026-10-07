@@ -1,3 +1,6 @@
+import { scopedWorkspaceId } from "@/modules/workspaces/context";
+import { activeRevisionPointer, getPromptRevision } from "./prompt-revisions";
+import { activePromptVersion, scopedPromptRevision, revisionCompletion } from "./prompt-variant";
 import { ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
@@ -17,7 +20,7 @@ import type { RunStep } from "./contracts";
 export const DEFAULT_WORKSPACE = "default";
 
 /** Agentic stages require a connected LLM; mechanical stages may run without one. */
-async function resolveRouteForRun(stage: StageId) {
+export async function resolveRouteForRun(stage: StageId) {
   // Test stub only: modules swap the model for labelled local output, so the
   // route is marked connected without a real provider behind it.
   if (isTestStub()) {
@@ -135,6 +138,9 @@ export async function runStage<O = unknown>(args: {
   force_ai?: boolean;
 }): Promise<StageRunResult<O>> {
   assertCan(args.role, CAPABILITY_BY_STAGE[args.stage]);
+  const scopedWorkspace = await scopedWorkspaceId() ?? DEFAULT_WORKSPACE;
+  if (args.workspace_id && args.workspace_id !== scopedWorkspace) throw new Error("Stage workspace does not match the authorised database scope.");
+  const workspace_id = scopedWorkspace;
   const implementation = await activeModule(args.stage);
   await ensurePlatformSchema(implementation.migrations ?? []);
   // Refused before a run is opened: with AI off an AI stage is not a failure, it is off.
@@ -151,7 +157,6 @@ export async function runStage<O = unknown>(args: {
     throw new AiDisabledError(stageLabel(args.stage));
   }
 
-  const workspace_id = args.workspace_id ?? DEFAULT_WORKSPACE;
   const recorder = new RunRecorder({
     workspace_id,
     stage: args.stage,
@@ -191,6 +196,16 @@ export async function runStage<O = unknown>(args: {
   };
 
   try {
+    const pointer = await activeRevisionPointer(workspace_id, args.stage);
+    const revision = pointer.revision_id ? await getPromptRevision(pointer.revision_id, workspace_id) : null;
+    const selected = scopedPromptRevision() ?? { id: revision?.id ?? null, instruction: revision?.instruction_text ?? "" };
+    ctx.complete = revisionCompletion(ctx.complete, selected.instruction);
+    recorder.note("prompt:variant", { version: selected.id ?? activePromptVersion() });
+    const isApply = !!(parsedInput.data as { apply?: unknown })?.apply;
+    if (implementation.freeze && !isApply) ctx.replay = {
+      evaluation: false, input: parsedInput.data, facts: await implementation.freeze(parsedInput.data),
+      module_id: manifest.id, module_version: manifest.version, prompt_version: selected.id ?? activePromptVersion(),
+    };
     const result = await implementation.run(parsedInput.data as never, ctx);
     const parsedOutput = implementation.outputSchema.safeParse(result.output);
     if (!parsedOutput.success) {

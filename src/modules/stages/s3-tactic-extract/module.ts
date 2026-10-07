@@ -1,3 +1,4 @@
+import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -501,9 +502,13 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   inputSchema,
   outputSchema,
   migrations: [TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL],
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Tactic extraction");
-    const documents = await listParsedDocuments(input.document_ids);
+    const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
+    const sourceFacts = frozen ?? await freezeFacts(input);
+    const state = sourceFacts.state;
+    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
     if (documents.length === 0) {
       return {
         output: {
@@ -516,7 +521,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         summary: "No parsed documents to extract from",
       };
     }
-    const state = await loadState();
+
     const library: LibraryTactic[] = state.tactics.map((tactic) => ({
       id: tactic.id,
       name: tactic.name,
@@ -656,10 +661,10 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       proposer: outcome.mode,
       created_at: nowIso(),
     }));
-    if (rows.length > 0) await db().insert(tacticCandidates).values(rows);
+    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(tacticCandidates).values(rows);
 
     const committed_tactic_ids: string[] = [];
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const document of documents) {
         const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id);
         if (fromDocument.length === 0) continue;
@@ -720,7 +725,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
   },
   evals: {
-    async cases() {
+    async cases(facts) {
+      if (facts) {
+        const documents = facts.documents as ParsedDocumentRecord[];
+        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S3").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S3").find(source => source.source_id === document.source_id)!) : undefined }));
+      }
       const curated = await curatedS3Cases();
       if (curated.length > 0) return curated;
       const documents = await listParsedDocuments();
@@ -774,4 +783,9 @@ registerModule(tacticExtractModule);
 export async function listTacticCandidates(limit = 200) {
   await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
   return db().select().from(tacticCandidates).orderBy(desc(tacticCandidates.created_at)).limit(limit);
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
 }

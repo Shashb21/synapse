@@ -236,3 +236,13 @@ export const PROMPT_REVISION_DDL = [
   `CREATE OR REPLACE TRIGGER prompt_revisions_immutable BEFORE UPDATE OR DELETE ON prompt_revisions FOR EACH ROW EXECUTE FUNCTION public.protect_prompt_revision_evidence()`,
   `CREATE OR REPLACE TRIGGER prompt_revision_cohorts_immutable BEFORE UPDATE OR DELETE ON prompt_revision_cohorts FOR EACH ROW EXECUTE FUNCTION public.protect_prompt_revision_evidence()`,
 ];
+
+/** Immutable full replay/evaluation evidence and a workspace/stage active pointer. */
+export const PROMPT_EVALUATION_DDL = [
+ `CREATE TABLE IF NOT EXISTS prompt_replay_snapshots (run_id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, snapshot jsonb NOT NULL)`,
+ `CREATE TABLE IF NOT EXISTS prompt_revision_evaluations (id text PRIMARY KEY, workspace_id text NOT NULL, revision_id text NOT NULL, created_at text NOT NULL, evidence jsonb NOT NULL)`,
+ `CREATE TABLE IF NOT EXISTS prompt_active_revisions (workspace_id text NOT NULL, stage text NOT NULL, revision_id text, generation integer NOT NULL DEFAULT 0, PRIMARY KEY(workspace_id,stage))`,
+ `CREATE TABLE IF NOT EXISTS prompt_revision_history (id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, before_id text, after_id text, evaluation_id text, actor jsonb NOT NULL, action text NOT NULL, created_at text NOT NULL, generation integer NOT NULL)`,
+ `CREATE OR REPLACE FUNCTION immutable_prompt_evidence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Prompt evidence is immutable'; END $$`,
+ ...['prompt_replay_snapshots','prompt_revision_evaluations','prompt_revision_history'].map(table=>`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '${table}_immutable') THEN CREATE TRIGGER ${table}_immutable BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION immutable_prompt_evidence(); END IF; END $$`),
+];

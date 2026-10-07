@@ -1,5 +1,5 @@
 /** Immutable prompt candidates generated from revalidated lessons and frozen, lineage-separated evidence. */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Actor, StageId } from "./contracts";
 import { listDecisionExamples, scrubLesson, workspaceEntityNames, type DecisionExample } from "./decision-examples";
@@ -9,10 +9,10 @@ import { newId, nowIso } from "./ids";
 import { assertAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { isTestStub } from "./llm";
-import { resolveRoute, completionFor } from "./routing";
+import { resolveRoute, completionFor, routeConfig, type RouteConfig } from "./routing";
 import { RunRecorder, openRun, closeRun } from "./observability";
 import { activePromptVersion } from "./prompt-variant";
-import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace } from "@/modules/workspaces/context";
+import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { getWorkspace } from "@/modules/workspaces/store";
 
 export const REVISION_STAGES = ["S2", "S3", "S4", "S6", "S8", "S9"] as const;
@@ -86,8 +86,8 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
       return lesson ? [{ id: example.id, lesson }] : [];
     });
     if (!lessons.length) throw new Error("No validated disagreement lessons remain outside the held-out cohort.");
-    const active = (await listPromptRevisions(args.workspace_id)).find(revision => revision.stage === args.stage && revision.state === "active");
-    const parent = active?.id ?? activePromptVersion();
+    const pointer = await activeRevisionPointer(args.workspace_id, args.stage);
+    const parent = pointer.revision_id ?? activePromptVersion();
     const stub = isTestStub();
     const route = stub ? null : await resolveRoute(args.stage);
     const recorder = new RunRecorder({ workspace_id: args.workspace_id, stage: args.stage, module_id: "learning.prompt-revision", module_version: "1.0.0", actor: args.actor, input: { cohort_id: cohort.id, parent_revision: parent, lesson_count: lessons.length } });
@@ -126,4 +126,73 @@ export async function getPromptRevision(id: string, workspace_id: string): Promi
   await ensurePlatformSchema();
   const [row] = await sharedDb().select().from(tables.promptRevisions).where(and(eq(tables.promptRevisions.id, id), eq(tables.promptRevisions.workspace_id, workspace_id)));
   return row ? row as PromptRevision : null;
+}
+
+/** Read the current pointer and its monotonic generation (guards change-away-and-back races). */
+export async function activeRevisionPointer(workspace_id: string, stage: StageId): Promise<{revision_id:string|null;generation:number}> {
+ await ensurePlatformSchema();
+ const rows=await sharedDb().execute(sql`select revision_id,generation from prompt_active_revisions where workspace_id=${workspace_id} and stage=${stage}`);
+ return rows[0] ? {revision_id:rows[0].revision_id as string|null,generation:Number(rows[0].generation)} : {revision_id:null,generation:0};
+}
+/** Immutable before/after history, visible only inside the selected workspace. */
+export async function revisionHistory(workspace_id:string) {
+ await ensurePlatformSchema();
+ return await sharedDb().execute(sql`select * from prompt_revision_history where workspace_id=${workspace_id} order by generation desc, created_at desc`);
+}
+/** Compare-and-swap the pointer and append history in one transaction. */
+export async function activatePromptRevision(args: {revision_id:string;evaluation_id:string;expected_active_id:string|null;actor:Actor}):Promise<PromptRevision> {
+ const workspace_id=await scopedWorkspaceId();
+ if(!workspace_id) throw new Error('An authorised workspace is required.');
+ const revision=await getPromptRevision(args.revision_id,workspace_id);
+ if(!revision) throw new Error('Unknown candidate in this workspace.');
+ const {getRevisionEvaluation,promotionEligibility,routeIdentity}=await import('./prompt-revision-evals');
+ const evaluation=await getRevisionEvaluation(args.evaluation_id,workspace_id);
+ if(!evaluation||evaluation.revision_id!==revision.id||!promotionEligibility(evaluation).eligible) throw new Error('Evaluation is missing or ineligible.');
+ const configuredRoute=await routeConfig(revision.stage);
+ const route=await resolveRoute(revision.stage,configuredRoute);
+ if(routeIdentity(route)!==evaluation.route_hash) throw new Error('Routing changed since evaluation. Evaluate again.');
+ const {activeModule}=await import('./registry');const module=await activeModule(revision.stage);
+ if(module.manifest.id!==evaluation.module_id||module.manifest.version!==evaluation.module_version) throw new Error('Stage implementation changed since evaluation.');
+ await sharedDb().transaction(async tx=>{
+  await tx.execute(sql`insert into prompt_active_revisions(workspace_id,stage) values(${workspace_id},${revision.stage}) on conflict do nothing`);
+  const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${revision.stage} for update`);
+  const pointer=rows[0];
+  if(pointer.revision_id!==args.expected_active_id||pointer.revision_id!==evaluation.baseline_revision_id||Number(pointer.generation)!==evaluation.pointer_generation) throw new Error('Active prompt changed since evaluation. Evaluate again.');
+  // Lock route config against simultaneous administrative updates through commit.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-route:${revision.stage}`}))`);
+  const routeRows=await tx.execute(sql`select * from routing_config where stage=${revision.stage}`);
+  const lockedConfig=routeRows[0] as RouteConfig | undefined ?? configuredRoute;
+  if(routeIdentity(await resolveRoute(revision.stage,lockedConfig))!==evaluation.route_hash) throw new Error('Routing changed since evaluation.');
+  if(revision.parent_revision!==(pointer.revision_id??'v1.0-baseline')) throw new Error('Candidate was generated from a stale baseline.');
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-module:${revision.stage}`}))`);
+  const moduleRows=await tx.execute(sql`select module_id from stage_modules where stage=${revision.stage}`);
+  if((moduleRows[0]?.module_id??module.manifest.id)!==evaluation.module_id) throw new Error('Stage implementation changed since evaluation.');
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-evaluation:${revision.id}`}))`);
+  const latest=await tx.execute(sql`select id from prompt_revision_evaluations where workspace_id=${workspace_id} and revision_id=${revision.id} order by created_at desc,id desc limit 1`);
+  if(latest[0]?.id!==evaluation.id) throw new Error('A newer evaluation exists. Review the latest evaluation.');
+  const generation=Number(pointer.generation)+1;
+  await tx.execute(sql`update prompt_active_revisions set revision_id=${revision.id}, generation=${generation} where workspace_id=${workspace_id} and stage=${revision.stage}`);
+  if(pointer.revision_id) await tx.execute(sql`update prompt_revisions set state='superseded' where id=${pointer.revision_id}`);
+  await tx.execute(sql`update prompt_revisions set state='active' where id=${revision.id}`);
+  await tx.execute(sql`insert into prompt_revision_history(id,workspace_id,stage,before_id,after_id,evaluation_id,actor,action,created_at,generation) values(${newId('prh')},${workspace_id},${revision.stage},${pointer.revision_id},${revision.id},${evaluation.id},${JSON.stringify(args.actor)}::jsonb,'approve',${nowIso()},${generation})`);
+ });
+ return {...revision,state:'active'};
+}
+/** Restore the revision that preceded the current approval; baseline is represented by null. */
+export async function rollbackPromptRevision(args:{stage:StageId;expected_active_id:string;actor:Actor}):Promise<PromptRevision|null> {
+ const workspace_id=await scopedWorkspaceId();if(!workspace_id) throw new Error('An authorised workspace is required.');
+ await ensurePlatformSchema();
+ let previous:string|null=null;
+ await sharedDb().transaction(async tx=>{
+  const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${args.stage} for update`);const pointer=rows[0];
+  if(!pointer||pointer.revision_id!==args.expected_active_id) throw new Error('Active prompt changed. Reload before rollback.');
+  const history=await tx.execute(sql`select before_id from prompt_revision_history where workspace_id=${workspace_id} and stage=${args.stage} and after_id=${args.expected_active_id} and action='approve' order by generation desc limit 1`);
+  if(!history[0]) throw new Error('No prior approved prompt exists.');previous=history[0].before_id as string|null;
+  const generation=Number(pointer.generation)+1;
+  await tx.execute(sql`update prompt_active_revisions set revision_id=${previous},generation=${generation} where workspace_id=${workspace_id} and stage=${args.stage}`);
+  await tx.execute(sql`update prompt_revisions set state='superseded' where id=${args.expected_active_id}`);
+  if(previous) await tx.execute(sql`update prompt_revisions set state='active' where id=${previous}`);
+  await tx.execute(sql`insert into prompt_revision_history(id,workspace_id,stage,before_id,after_id,actor,action,created_at,generation) values(${newId('prh')},${workspace_id},${args.stage},${args.expected_active_id},${previous},${JSON.stringify(args.actor)}::jsonb,'rollback',${nowIso()},${generation})`);
+ });
+ return previous?getPromptRevision(previous,workspace_id):null;
 }

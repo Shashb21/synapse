@@ -6,6 +6,7 @@ import { sharedDb } from "./db";
 import { newId, nowIso } from "./ids";
 import { isTestStub } from "./llm";
 import { canPrompt, completionFor, resolveRoute } from "./routing";
+import { originatingSnapshot } from "./decision-replay";
 import { closeRun, getRun, openRun, RunRecorder } from "./observability";
 import { aiSectionEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
@@ -147,7 +148,7 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
     }
     const route = run?.route;
     const promptVersion = draft.prompt_version ?? (run?.steps.find(step => step.name === "prompt:variant")?.data as { version?: string } | undefined)?.version ?? null;
-    const replay = draft.replay_input ?? null;
+    const replay = draft.replay_input ?? (run?.status === "ok" ? await originatingSnapshot(run.id, workspace_id, draft.stage) : null);
     const captureKey = draft.capture_key ?? null;
     const id = newId("dex");
     const inserted = await sharedDb().execute(sql`

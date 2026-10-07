@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, ensureCurrentSchemaTables, sharedDb } from "@/lib/iegp/db";
-import { PROMPT_REVISION_DDL } from "./schema";
+import { PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
 import { KERNEL_WORKSPACE_DDL } from "@/lib/iegp/workspace-tables";
 
 export { db, sharedDb };
@@ -68,6 +68,7 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
       await sharedDb().execute(sql`set client_min_messages to warning`);
       await applyDdl(SHARED_DDL.split(";"), sharedDb);
       await applyDdl(PROMPT_REVISION_DDL, sharedDb);
+      await applyDdl(PROMPT_EVALUATION_DDL, sharedDb);
       await applyDdl(WORKSPACE_DDL.split(";"), sharedDb);
     })();
     // A failed attempt is forgotten, so the next call retries.
