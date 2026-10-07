@@ -390,6 +390,8 @@ export async function ensureCurrentSchemaTables(): Promise<void> {
 export async function wipeIegp() {
   const d = db();
   const tables = [
+    "tactic_suggestions",
+    "tactic_source_references",
     "gap_suggestions",
     "gold_coverages",
     "gold_needs",

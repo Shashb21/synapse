@@ -21,7 +21,7 @@ import { sectionOfStage } from "./ai-sections";
  * lesson is used, and only once the scrubber has passed it.
  */
 
-export type DecisionKind = "gap_suggestion" | "s9_proposal" | "s4_mapping" | "s8_band" | "residual_split";
+export type DecisionKind = "tactic_suggestion" | "gap_suggestion" | "s9_proposal" | "s4_mapping" | "s8_band" | "residual_split";
 export type DecisionOutcome = "accepted" | "edited" | "rejected";
 export type LessonStatus = "pending" | "ok" | "failed";
 

@@ -1688,18 +1688,21 @@ export function customTypeFromFields(label: unknown, color: unknown): CustomTact
   return normalizeCustomType({ label, color });
 }
 
-async function insertLibraryTactic(args: LibraryTacticDraft) {
-  const state = await loadState();
+/** Canonical library insertion; source owners may compose it with their existing transaction. */
+export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?: StoreTransaction) {
+  const state = transaction ? await readState(transaction) : await loadState();
+  const d = transaction ?? db();
   const custom_type = args.custom_type ?? null;
+  if (custom_type && transaction) throw new Error("Transactional source tactics cannot assign a custom type.");
   if (!args.name.trim()) throw new Error("Tactic name is required.");
   if (!args.evidence_question.trim()) throw new Error("Evidence question is required.");
   if (!TACTIC_TYPES.includes(args.type)) throw new Error("Tactic type is required.");
   const start_date = optionalTacticDate("start_date", args.start_date);
   const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
   assertTacticDateOrder(start_date, evidence_available);
-  const id = nextId("TAC", state.tactics.map((x) => x.id));
+  const id = transaction ? newId("TAC") : nextId("TAC", state.tactics.map((x) => x.id));
   const reasonNote = args.note?.trim() || null;
-  await db().insert(t.tactics).values({
+  await d.insert(t.tactics).values({
     id,
     name: args.name.trim(),
     type: args.type,
@@ -1735,6 +1738,7 @@ async function insertLibraryTactic(args: LibraryTacticDraft) {
     id,
     args.audit_action,
     args.name.trim(),
+    transaction,
   );
   return id;
 }
@@ -3144,6 +3148,8 @@ export async function commitExtractedRecords(args: {
   const skippedTacticIds: string[] = [];
   for (const tac of args.tactics) {
     if (tac.duplicate_of) {
+      const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+      if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tac.duplicate_of, source_id: sourceId, source_quote: tac.source_quote});
       skippedTacticIds.push(tac.id);
       continue;
     }
@@ -3175,6 +3181,8 @@ export async function commitExtractedRecords(args: {
       lock: unlocked(),
       source_quote: (tac.source_quote ?? "").trim(),
     });
+    const { attachTacticSource } = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    if (tac.source_quote?.trim()) await attachTacticSource({tactic_id: tacticId, source_id: sourceId, source_quote: tac.source_quote});
   }
 
   await appendAudit(

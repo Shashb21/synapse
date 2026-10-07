@@ -1,5 +1,5 @@
 import { recordDecisionExample, type DecisionExampleDraft, type DecisionOutcome } from "@/modules/kernel/decision-examples";
-import type { GapSuggestion } from "./types";
+import type { GapSuggestion, TacticSuggestion } from "./types";
 
 /**
  * Turns people's decisions on AI output into learning examples (KAN-78). Each
@@ -189,5 +189,18 @@ export function captureResidualDecision(args: Origin & {
     ai_output: typeof args.proposed === "string" ? { statement: args.proposed } : args.proposed,
     outcome: args.decision === "reject" ? "rejected" : args.decision === "edit" || (typeof args.proposed === "string" && !same(args.proposed, typeof args.final === "string" ? args.final : null)) ? "edited" : "accepted",
     final: args.final == null ? null : typeof args.final === "string" ? { statement: args.final } : args.final, rationale: args.rationale,
+  }));
+}
+
+/** Source overlap review keeps original model options separate from the final human decision. */
+export function captureTacticSuggestionDecision(args: Origin & {suggestion: TacticSuggestion; decision: "expand" | "separate" | "reject"; rationale: string}) {
+  const row = args.suggestion;
+  const edited = JSON.stringify(row.expansion) !== JSON.stringify(row.original_expansion) || JSON.stringify(row.separate) !== JSON.stringify(row.original_separate);
+  return safely(() => recordDecisionExample({
+    ...origin(args), run_id: row.run_id, capture_key: `tactic-suggestion:${row.id}`, stage: "S3", kind: "tactic_suggestion", subject_id: row.id,
+    ai_input: {existing_tactic: row.reviewed_parent, source_id: row.source_id, source_quote: row.source_quote},
+    ai_output: {match: "overlaps", shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate},
+    outcome: args.decision === "reject" ? "rejected" : edited ? "edited" : "accepted",
+    final: {decision: args.decision, expansion: row.expansion, separate: row.separate, gap_id: row.gap_id}, rationale: args.rationale,
   }));
 }

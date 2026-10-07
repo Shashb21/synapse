@@ -431,3 +431,17 @@ export type IegpState = {
   breakout_group_gaps: BreakoutGroupGap[];
   gap_suggestions: GapSuggestion[];
 };
+
+/** Source-owned overlap proposal; model baseline and human edits are retained separately. */
+export type TacticSuggestion = {
+  id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
+  target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;
+  shared_scope: string; new_scope: string; expansion: ExpansionScope; original_expansion: ExpansionScope;
+  separate: SeparateTacticOption; original_separate: SeparateTacticOption; gap_id: string | null;
+  status: "pending" | "expanded" | "separate" | "rejected";
+  result_expansion_id: string | null; result_tactic_id: string | null;
+  history: {action: "edit" | "expand" | "separate" | "reject"; actor: Actor; rationale: string; at: string; expansion: ExpansionScope; separate: SeparateTacticOption; gap_id: string | null}[];
+  created_at: string; updated_at: string;
+};
+/** The source, rather than the model's preference, supplies the activity lifecycle. */
+export type SeparateTacticOption = {name: string; type: TacticType; status: TacticStatus; evidence_question: string};

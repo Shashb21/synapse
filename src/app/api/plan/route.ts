@@ -22,6 +22,7 @@ import {
 } from "@/modules/stages/s9-ideation/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { loadState } from "@/lib/iegp/store";
+import {decideTacticSuggestion, editTacticSuggestion, listTacticSuggestions} from "@/modules/stages/s3-tactic-extract/suggestions";
 import { setExpansionStatus } from "@/lib/iegp/tactic-expansions";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
@@ -46,7 +47,7 @@ export async function GET() {
   } catch (error) {
     return apiErrorResponse(error);
   }
-  const [placements, axes, proposals, timeline, plan, history, state] = await Promise.all([
+  const [placements, axes, proposals, timeline, plan, history, state, tactic_suggestions] = await Promise.all([
     listPlacements(),
     loadAxes(),
     listIdeationProposals(),
@@ -54,10 +55,11 @@ export async function GET() {
     latestPlan(),
     planHistory(5),
     loadState(),
+    listTacticSuggestions(),
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history });
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -109,6 +111,33 @@ export async function POST(request: Request) {
     const identity = await requireCustomerContext({ body });
     const rationale = String(body.rationale ?? body.note ?? "").trim();
     switch (action) {
+      case "decide_tactic_suggestion": {
+        assertCan(identity.role, "validate");
+        const suggestion = await decideTacticSuggestion({id: field(z.string().trim().min(1), body.suggestion_id, "suggestion_id"), decision: field(z.enum(["expand", "separate", "reject"]), body.decision, "decision"), expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"), rationale, actor: identity.actor});
+        return NextResponse.json({ok: true, suggestion});
+      }
+      case "edit_tactic_suggestion": {
+        assertCan(identity.role, "validate");
+        const id = field(z.string().trim().min(1), body.suggestion_id, "suggestion_id");
+        const row = (await listTacticSuggestions()).find(r => r.id === id);
+        if (!row) throw new Error("Tactic suggestion not found in this workspace.");
+        const option = field(z.enum(["expansion", "separate"]), body.option, "option");
+        const expansion = {...row.expansion};
+        const separate = {...row.separate};
+        if (option === "expansion") {
+          for (const key of ["name", "evidence_question", "population", "outcomes", "geography", "data_cut", "analysis", "instrument", "study_design", "gap_coverage", "cost_effort", "timing", "feasibility_risks"] as const) {
+            if (body[key] !== undefined) expansion[key] = field(z.string(), body[key], key);
+          }
+          for (const key of ["start_date", "evidence_available"] as const) if (body[key] !== undefined) expansion[key] = body[key] === null ? null : field(z.string(), body[key], key).trim() || null;
+          for (const key of ["post_hoc", "prospective_enrolment", "protocol_amendment"] as const) if (body[key] !== undefined) expansion[key] = field(z.enum(["yes", "no"]), body[key], key) === "yes";
+        } else {
+          for (const key of ["name", "evidence_question"] as const) if (body[key] !== undefined) separate[key] = field(z.string(), body[key], key);
+        }
+        const suggestion = await editTacticSuggestion({id, expansion: option === "expansion" ? expansion : undefined, separate: option === "separate" ? separate : undefined,
+          gap_id: body.gap_id === undefined ? undefined : field(z.string(), body.gap_id, "gap_id"), expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"), rationale, actor: identity.actor});
+        return NextResponse.json({ok: true, suggestion});
+      }
+
       case "set_expansion_status": {
         assertCan(identity.role, "validate");
         const expansion = await setExpansionStatus({

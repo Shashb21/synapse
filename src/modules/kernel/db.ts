@@ -94,6 +94,8 @@ const WORKSPACE_TABLES = [
   "parsed_documents",
   "gap_candidates",
   "tactic_candidates",
+  "tactic_suggestions",
+  "tactic_source_references",
   "mapping_candidates",
   "priority_placements",
   "ideation_proposals",

@@ -7,6 +7,7 @@ import { ActionDialog, type ActionIdentity } from "@/components/platform/action-
 import { isLiveGap } from "@/lib/iegp/engine";
 import { ASSESSED_COVERAGE, COVERAGE_DIMENSIONS, DIMENSION_LABELS, DIMENSION_VALUES, OVERALL_COVERAGE_LABELS, TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
+import { listTacticSourceReferences } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { sessionContext } from "@/modules/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export default async function TacticDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [state, session] = await Promise.all([loadState(), sessionContext()]);
+  const [state, session, sourceReferences] = await Promise.all([loadState(), sessionContext(), listTacticSourceReferences(id)]);
   const tactic = state.tactics.find((x) => x.id === id);
   if (!tactic) notFound();
   // Only live gaps: a split or rewritten parent is retired into version history.
@@ -118,6 +119,7 @@ export default async function TacticDetailPage({
         <Item k="Owner" v={`${tactic.owner} · ${tactic.function.replaceAll("_", " ")}`} />
         <Item k="Budget" v={tactic.budget ?? "—"} />
       </dl>
+      {sourceReferences.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{sourceReferences.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.source_quote}” · {state.sources.find(s => s.id === ref.source_id)?.title ?? ref.source_id}</blockquote>)}</section> : null}
       <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">
         {maps.length === 0 ? (
@@ -136,7 +138,7 @@ export default async function TacticDetailPage({
       </div>
       {expansions.length > 0 ? <section className="mb-6" aria-label="Tactic expansions">
         <h2 className="mb-2 text-sm font-semibold">Expansions</h2>
-        {expansions.map((child) => <div key={child.id} className="mb-4 border-t border-border pt-3">
+        {expansions.map((child) => <div id={child.id} key={child.id} className="mb-4 border-t border-border pt-3">
           <h3 className="text-sm font-medium">{child.scope.name}</h3>
           <p className="mb-2 text-[13px]">{child.status} · {["planned", "ongoing", "completed"].includes(child.status) ? "Eligible for coverage review" : "Does not count toward coverage"}</p>
           <dl className="mb-3 grid gap-2 text-[13px] sm:grid-cols-2">

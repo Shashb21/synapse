@@ -1,4 +1,7 @@
 import Link from "next/link";
+import {TacticSourceReviews} from "@/components/tactic-source-reviews";
+import {listTacticSuggestions} from "@/modules/stages/s3-tactic-extract/suggestions";
+import {can} from "@/modules/auth/roles";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { TacticsPlace } from "@/components/tactics-place";
 import { loadTacticIdeation } from "@/components/tactic-ideation/data";
@@ -14,11 +17,12 @@ import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 export const dynamic = "force-dynamic";
 
 export default async function TacticsPage() {
-  const [state, session, rejected, ai] = await Promise.all([
+  const [state, session, rejected, ai, suggestions] = await Promise.all([
     loadState(),
     sessionContext(),
     listRejectedTacticCandidates(),
     aiSectionEnabled("tactic_extraction").catch(() => false),
+    listTacticSuggestions(),
   ]);
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
@@ -43,6 +47,7 @@ export default async function TacticsPage() {
       </PageIntro>
       <TacticsPlace ready={gates.tacticsUnlocked} availableTactics={workspace.availableTactics} {...ideation} />
       <RejectedTactics tactics={state.tactics} />
+      <TacticSourceReviews suggestions={suggestions} state={state} identity={identity} canReview={can(session.role, "validate")} />
       {/* With AI off nothing new is rejected; the list shows only if earlier runs left some. */}
       {ai || rejected.length > 0 ? (
       <section className="mt-8">

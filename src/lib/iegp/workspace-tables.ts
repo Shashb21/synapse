@@ -1,7 +1,7 @@
 import { SOURCE_FILES_DDL } from "@/modules/stages/s0-upload/schema";
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { GAP_CANDIDATES_DDL } from "@/modules/stages/s2-gap-extract/schema";
-import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL } from "@/modules/stages/s3-tactic-extract/schema";
+import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL } from "@/modules/stages/s3-tactic-extract/schema";
 import { MAPPING_CANDIDATES_DDL } from "@/modules/stages/s4-kg-mapping/schema";
 
 /**
@@ -119,6 +119,7 @@ export const STAGE_MODULE_DDL = [
   GAP_CANDIDATES_DDL,
   TACTIC_CANDIDATES_DDL,
   TACTIC_CANDIDATES_DUPLICATE_DDL,
+  TACTIC_MATCHING_DDL,
   MAPPING_CANDIDATES_DDL,
 ];
 
