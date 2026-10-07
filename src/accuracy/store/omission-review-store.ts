@@ -1,5 +1,5 @@
 /** Current extraction findings and their append-only contributor decision history. */
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
@@ -11,8 +11,9 @@ import { emptyGapStructuredFields, emptyTacticStructuredFields } from "@/accurac
 import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, ensureAccuracySchema, lockAccuracyWorkspace, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
+import { isNewerSourceCoverage, newerSourceCoverageCovers, successfulSourceUnits, type SourceCoverageBatch, type SourceCoverageUnit } from "../domain/extraction-coverage";
 
 /** A persisted decision; its request fingerprint protects idempotent retries. */
 export type OmissionAction = Omit<typeof t.accuracyOmissionActions.$inferSelect, "action" | "new_importance"> & {
@@ -26,7 +27,8 @@ export type OmissionReviewItem = {
   issue: SuspectedOmission; latest_action: OmissionAction | null; blocking: boolean;
 };
 type Executor = Pick<ReturnType<typeof accuracyDb>, "select" | "insert" | "update" | "execute">;
-type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"]; batch_id: string; batch_created_at: string; page_id: string };
+type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"];
+  batch: SourceCoverageBatch; units: SourceCoverageUnit[] | null; successful_coverage: boolean };
 
 /** Human importance decisions override the model default until a closing action. */
 function isBlocking(issue: SuspectedOmission, action: OmissionAction | null): boolean {
@@ -43,6 +45,9 @@ async function appliedRuns(workspace_id: string, d: Executor = accuracyDb()): Pr
   const runs = await d.select().from(t.accuracyModuleRuns).where(and(
     eq(t.accuracyModuleRuns.workspace_id, workspace_id), eq(t.accuracyModuleRuns.status, "ok")))
     .orderBy(desc(t.accuracyModuleRuns.finished_at), desc(t.accuracyModuleRuns.id));
+  const critiques = await d.select().from(t.accuracyAgentEvents).where(and(
+    eq(t.accuracyAgentEvents.workspace_id, workspace_id), eq(t.accuracyAgentEvents.event_type, "critique")))
+    .orderBy(desc(t.accuracyAgentEvents.iteration));
   return runs.flatMap((run): AppliedRun[] => {
     if (!run.finished_at || (run.call_kind !== "need_extract" && run.call_kind !== "inventory_extract")) return [];
     const input = run.input as Record<string, unknown> | null;
@@ -53,19 +58,31 @@ async function appliedRuns(workspace_id: string, d: Executor = accuracyDb()): Pr
     if (!batch) return [];
     const page = batch.source_progress?.pages.find(p => p.attempts[run.call_kind]?.run_id === run.id);
     if (batch.source_progress && (!page || (input.source_page as { id?: string } | undefined)?.id !== page.id)) return [];
-    return [{ ...run, source_file_id, call_kind: run.call_kind, batch_id: batch.id, batch_created_at: batch.created_at, page_id: page?.id ?? "legacy" }];
+    const completeness = (critiques.find(event => event.run_id === run.id)?.payload as AgentCritiqueEvent | undefined)?.completeness;
+    const scopedBatch: SourceCoverageBatch = { ...batch, legacy_block_ids: Array.isArray(input.block_ids) ? input.block_ids as string[] : undefined };
+    const units = page?.units ?? scopedBatch.legacy_block_ids?.map(block_id => ({ block_id, char_start: 0, char_end: Infinity })) ?? null;
+    return [{ ...run, source_file_id, call_kind: run.call_kind, batch: scopedBatch, units,
+      successful_coverage: (!page || page.attempts[run.call_kind]?.state === "successful")
+        && completeness?.risk_level !== "check_failed" && !completeness?.unchecked_block_ids.length }];
   });
 }
 
-/** Keep every accepted page of the newest applied batch for each source/kind. */
+/** A later successful inspection replaces only the original units it actually covered. */
+function unitsCurrent(run: AppliedRun, runs: AppliedRun[], units: SourceCoverageUnit[]): boolean {
+  return !runs.some(newer => newer.call_kind === run.call_kind && newer.successful_coverage && newerSourceCoverageCovers(run.batch, newer.batch, run.call_kind, units));
+}
+
+function issueCurrent(run: AppliedRun, runs: AppliedRun[], issue: SuspectedOmission): boolean {
+  const units = run.units?.filter(unit => unit.block_id === issue.source_ref.block_id)
+    ?? [{ block_id: issue.source_ref.block_id, char_start: 0, char_end: Infinity }];
+  return units.length > 0 && unitsCurrent(run, runs, units);
+}
+
+/** Keep partially replaced runs so findings on untouched blocks/pages remain actionable. */
 function currentRuns(runs: AppliedRun[]): AppliedRun[] {
-  const sorted = [...runs].sort((a, b) => b.batch_created_at.localeCompare(a.batch_created_at) || b.batch_id.localeCompare(a.batch_id));
-  const latest = new Map<string, string>();
-  for (const run of sorted) {
-    const key = JSON.stringify([run.source_file_id, run.call_kind]);
-    if (!latest.has(key)) latest.set(key, run.batch_id);
-  }
-  return runs.filter(run => latest.get(JSON.stringify([run.source_file_id, run.call_kind])) === run.batch_id);
+  return runs.filter(run => run.units ? run.units.some(unit => unitsCurrent(run, runs, [unit])) : !runs.some(newer => newer.call_kind === run.call_kind && newer.successful_coverage
+    && isNewerSourceCoverage(run.batch, newer.batch, run.call_kind)
+    && (successfulSourceUnits(newer.batch, run.call_kind) === null || newer.batch.source_progress?.full_source_complete)));
 }
 
 /** Return immutable decisions oldest first, scoped to their parent workspace/run.
@@ -107,8 +124,9 @@ async function reviewsForRun(run: AppliedRun) {
  * @returns Both blocking and advisory findings, with decisions applied.
  */
 export async function listCurrentOmissionReviews(workspace_id: string): Promise<OmissionReviewItem[]> {
-  const result = await Promise.all(currentRuns(await appliedRuns(workspace_id)).map(reviewsForRun));
-  return result.flatMap((run) => run.items);
+  const runs = await appliedRuns(workspace_id);
+  const result = await Promise.all(currentRuns(runs).map(async run => (await reviewsForRun(run)).items.filter(item => issueCurrent(run, runs, item.issue))));
+  return result.flat();
 }
 
 /** Read only unresolved important explicit findings that pause downstream work.
@@ -209,7 +227,7 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
   return withAccuracyTransaction(async () => {
     const tx = accuracyDb();
     // Serialize this workspace's omission decisions, including shared claim provenance and request keys.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${input.workspace_id}`}, 0))`);
+    await lockAccuracyWorkspace(input.workspace_id);
     const parents = await tx.select().from(t.accuracyModuleRuns).where(and(
       eq(t.accuracyModuleRuns.workspace_id, input.workspace_id), eq(t.accuracyModuleRuns.id, input.run_id))).for("update");
     if (!parents.length) throw new OmissionActionError(404, "Unknown run in workspace.");
@@ -231,6 +249,7 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
       && issue.source_ref.source_file_id === run.source_file_id) ?? [];
     if (issues.length !== 1) throw new OmissionActionError(404, "Unknown or ambiguous finding in run.");
     const issue = issues[0];
+    if (!issueCurrent(run, runs, issue)) throw new OmissionActionError(409, "Finding was superseded by successful inspection of its source units.");
     const history = await tx.select().from(t.accuracyOmissionActions).where(and(
       eq(t.accuracyOmissionActions.workspace_id, input.workspace_id), eq(t.accuracyOmissionActions.run_id, input.run_id),
       eq(t.accuracyOmissionActions.issue_id, input.issue_id))).orderBy(desc(t.accuracyOmissionActions.created_at), desc(t.accuracyOmissionActions.id));

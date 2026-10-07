@@ -55,9 +55,13 @@ async function upsertSourceDraft(draft: Parameters<typeof insertClaim>[0], revis
     combined.structured = mergeStructuredFields(readStructuredFields(existing), [modelMetadata.structured!]);
   }
   const next = preserveHumanLocks(previous, combined);
+  // Lifecycle mirrors describe the accepted aggregate, including restored human facts.
+  if (draft.claim_type === "tactic" && next.structured && "lifecycle" in next.structured) {
+    next.tactic_status = next.structured.lifecycle.state === "known" ? next.structured.lifecycle.value : "unknown";
+  }
   const locked = humanLockedFields(previous);
   const statement = locked.includes("statement") ? existing.statement : draft.statement;
-  const status = existing.validated || locked.includes("tactic_status") ? existing.status : draft.status;
+  const status = existing.validated ? existing.status : draft.claim_type === "tactic" ? String(next.tactic_status) : draft.status;
   // Retain conflicting inference for review without changing human-locked facts or validation tokens.
   if (statement !== draft.statement || Object.keys(modelMetadata).some(key => (key !== "provenance" || locked.includes("provenance")) && sourceHash(next[key]) !== sourceHash(modelMetadata[key]))) {
     const suggestions = Array.isArray(previous.extraction_suggestions) ? [...previous.extraction_suggestions] : [];

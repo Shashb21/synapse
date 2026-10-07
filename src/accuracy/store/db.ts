@@ -45,6 +45,28 @@ export async function withAccuracyTransaction<T>(
   return db().transaction((tx) => transactionContext.run(tx, operation), config);
 }
 
+/** One effective lock for source evidence mutations, extraction publication and source reviews.
+ * Acquire inside the transaction before reading the facts checked by the eventual write.
+ * Providers must run after the transaction/lock has released.
+ */
+export async function lockAccuracyWorkspace(workspace_id: string, wait = true): Promise<boolean> {
+  if (!accuracyTransactionActive()) throw new Error("Workspace locking requires an Accuracy transaction.");
+  if (wait) {
+    await accuracyDb().execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${workspace_id}`}, 0))`);
+    return true;
+  }
+  const result = await accuracyDb().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`omission:${workspace_id}`}, 0)) as acquired`);
+  return Boolean(result[0]?.acquired);
+}
+
+/** Source owners join an existing atomic operation or protect their entire check-through-write interval. */
+export async function withAccuracyWorkspaceMutation<T>(workspace_id: string, operation: () => Promise<T>): Promise<T> {
+  return withAccuracyTransaction(async () => {
+    await lockAccuracyWorkspace(workspace_id);
+    return operation();
+  });
+}
+
 const globalAccuracy = globalThis as unknown as {
   accuracySchema?: Promise<void>;
   accuracyMigrated?: Promise<void>;

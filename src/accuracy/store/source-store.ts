@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { getWorkspaceOrgId } from "./tenant";
@@ -15,22 +15,24 @@ export async function insertSourceFile(args: {
   doc_role?: string;
   reference_pack_id?: string | null;
 }): Promise<SourceFileRow> {
-  await ensureAccuracySchema();
-  const org_id = args.org_id ?? (await getWorkspaceOrgId(args.workspace_id));
-  if (!org_id) throw new Error(`Unknown workspace: ${args.workspace_id}`);
-  const row = {
-    id: newId("src"),
-    workspace_id: args.workspace_id,
-    org_id,
-    filename: args.filename,
-    mime: args.mime,
-    doc_role: args.doc_role ?? "other",
-    checksum: args.checksum,
-    uploaded_at: nowIso(),
-    reference_pack_id: args.reference_pack_id ?? null,
-  };
-  await accuracyDb().insert(t.accuracySourceFiles).values(row);
-  return row as SourceFileRow;
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+    await ensureAccuracySchema();
+    const org_id = args.org_id ?? (await getWorkspaceOrgId(args.workspace_id));
+    if (!org_id) throw new Error(`Unknown workspace: ${args.workspace_id}`);
+    const row = {
+      id: newId("src"),
+      workspace_id: args.workspace_id,
+      org_id,
+      filename: args.filename,
+      mime: args.mime,
+      doc_role: args.doc_role ?? "other",
+      checksum: args.checksum,
+      uploaded_at: nowIso(),
+      reference_pack_id: args.reference_pack_id ?? null,
+    };
+    await accuracyDb().insert(t.accuracySourceFiles).values(row);
+    return row as SourceFileRow;
+  });
 }
 
 export async function listSourceFiles(workspace_id: string, limit = 100): Promise<SourceFileRow[]> {

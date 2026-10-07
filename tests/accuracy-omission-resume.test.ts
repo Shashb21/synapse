@@ -382,17 +382,18 @@ describe("extraction omission resume", () => {
     expect(await listClaims(scope.workspace_id)).toHaveLength(2);
     expect(await runs(scope.workspace_id)).toHaveLength(3);
   });
-  it("rejects an earlier need batch when a later inventory-only batch applies", async () => {
+  it("keeps an earlier paged need batch resumable when independent inventory coverage applies", async () => {
     const scope = await fixture(); const body = await paused(scope);
     const inventory = await post({ ...scope, kinds: ["inventory"] });
     expect(inventory.status).toBe(409);
     const latest = await inventory.json();
     expect(latest.extraction_batch_id).not.toBe(body.extraction_batch_id);
     const oldReview = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${body.runs[0].run_id}`))).json();
-    expect(oldReview).toMatchObject({ current: true, downstream_state: "stale" });
-    const stale = await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "changed-set" });
-    expect(stale.status).toBe(409); expect(await stale.json()).toMatchObject({ code: "stale_batch" });
+    expect(oldReview).toMatchObject({ current: true, downstream_state: "resumable" });
+    const pausedResume = await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "independent-kind" });
+    expect(pausedResume.status).toBe(409); expect(await pausedResume.json()).toMatchObject({ paused: true });
     await resolve(scope, body);
+    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "need-after-review" })).status).toBe(200);
     expect((await post({ ...scope, action: "resume", extraction_batch_id: latest.extraction_batch_id, idempotency_key: "latest" })).status).toBe(200);
   });
   it("rolls back a real merge interrupted after the duplicate patch, then recovers both claims", async () => {

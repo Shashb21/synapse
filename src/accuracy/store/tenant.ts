@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Role } from "@/modules/auth/roles";
-import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { WORKSHOP_SNAPSHOT_DDL } from "./workshop-store";
@@ -207,120 +207,122 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
   org_deleted: boolean;
   deleted: WorkspaceDeleteCounts;
 }> {
-  const workspace = await getWorkspace(workspace_id);
-  if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
-  await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
-  const db = accuracyDb();
+  return withAccuracyWorkspaceMutation(workspace_id, async () => {
+    const workspace = await getWorkspace(workspace_id);
+    if (!workspace) throw new Error(`Unknown workspace: ${workspace_id}`);
+    await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
+    const db = accuracyDb();
 
-  const deleted: WorkspaceDeleteCounts = {
-    experiment_evaluations: await deletedCount(await db.delete(t.accuracyExperimentEvaluations).where(eq(t.accuracyExperimentEvaluations.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentEvaluations.id })),
-    experiment_calls: await deletedCount(await db.delete(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentCalls.id })),
-    experiments: await deletedCount(await db.delete(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, workspace_id)).returning({ id: t.accuracyExperiments.id })),
-    omission_actions: await deletedCount(
-      await db.delete(t.accuracyOmissionActions)
-        .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))
-        .returning({ id: t.accuracyOmissionActions.id }),
-    ),
-    resume_journals: await deletedCount(
-      await db.delete(t.accuracyResumeJournals)
-        .where(eq(t.accuracyResumeJournals.workspace_id, workspace_id))
-        .returning({ id: t.accuracyResumeJournals.id }),
-    ),
-    extraction_batches: await deletedCount(
-      await db.delete(t.accuracyExtractionBatches)
-        .where(eq(t.accuracyExtractionBatches.workspace_id, workspace_id))
-        .returning({ id: t.accuracyExtractionBatches.id }),
-    ),
-    // The parent-run foreign key also cascades events inserted after this cleanup statement.
-    agent_events: await deletedCount(
-      await db
-        .delete(t.accuracyAgentEvents)
-        .where(eq(t.accuracyAgentEvents.workspace_id, workspace_id))
-        .returning({ id: t.accuracyAgentEvents.id }),
-    ),
-    miss_flag_actions: await deletedCount(
-      await db
-        .delete(t.accuracyMissFlagActions)
-        .where(eq(t.accuracyMissFlagActions.workspace_id, workspace_id))
-        .returning({ id: t.accuracyMissFlagActions.id }),
-    ),
-    provenance: await deletedCount(
-      await db
-        .delete(t.accuracyProvenance)
-        .where(eq(t.accuracyProvenance.workspace_id, workspace_id))
-        .returning({ id: t.accuracyProvenance.id }),
-    ),
-    coverage_joins: await deletedCount(
-      await db
-        .delete(t.accuracyCoverageJoins)
-        .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id))
-        .returning({ id: t.accuracyCoverageJoins.id }),
-    ),
-    parse_blocks: await deletedCount(
-      await db
-        .delete(t.accuracyParseBlocks)
-        .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id))
-        .returning({ id: t.accuracyParseBlocks.id }),
-    ),
-    source_files: await deletedCount(
-      await db
-        .delete(t.accuracySourceFiles)
-        .where(eq(t.accuracySourceFiles.workspace_id, workspace_id))
-        .returning({ id: t.accuracySourceFiles.id }),
-    ),
-    claims: await deletedCount(
-      await db
-        .delete(t.accuracyClaims)
-        .where(eq(t.accuracyClaims.workspace_id, workspace_id))
-        .returning({ id: t.accuracyClaims.id }),
-    ),
-    runs: await deletedCount(
-      await db
-        .delete(t.accuracyModuleRuns)
-        .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
-        .returning({ id: t.accuracyModuleRuns.id }),
-    ),
-    plans: await deletedCount(
-      await db
-        .delete(t.accuracyPlans)
-        .where(eq(t.accuracyPlans.workspace_id, workspace_id))
-        .returning({ id: t.accuracyPlans.id }),
-    ),
-    workshop_snapshots: await deletedCount(
-      await db
-        .delete(t.accuracyWorkshopSnapshots)
-        .where(eq(t.accuracyWorkshopSnapshots.workspace_id, workspace_id))
-        .returning({ id: t.accuracyWorkshopSnapshots.id }),
-    ),
-    workspace: 0,
-  };
+    const deleted: WorkspaceDeleteCounts = {
+      experiment_evaluations: await deletedCount(await db.delete(t.accuracyExperimentEvaluations).where(eq(t.accuracyExperimentEvaluations.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentEvaluations.id })),
+      experiment_calls: await deletedCount(await db.delete(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentCalls.id })),
+      experiments: await deletedCount(await db.delete(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, workspace_id)).returning({ id: t.accuracyExperiments.id })),
+      omission_actions: await deletedCount(
+        await db.delete(t.accuracyOmissionActions)
+          .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))
+          .returning({ id: t.accuracyOmissionActions.id }),
+      ),
+      resume_journals: await deletedCount(
+        await db.delete(t.accuracyResumeJournals)
+          .where(eq(t.accuracyResumeJournals.workspace_id, workspace_id))
+          .returning({ id: t.accuracyResumeJournals.id }),
+      ),
+      extraction_batches: await deletedCount(
+        await db.delete(t.accuracyExtractionBatches)
+          .where(eq(t.accuracyExtractionBatches.workspace_id, workspace_id))
+          .returning({ id: t.accuracyExtractionBatches.id }),
+      ),
+      // The parent-run foreign key also cascades events inserted after this cleanup statement.
+      agent_events: await deletedCount(
+        await db
+          .delete(t.accuracyAgentEvents)
+          .where(eq(t.accuracyAgentEvents.workspace_id, workspace_id))
+          .returning({ id: t.accuracyAgentEvents.id }),
+      ),
+      miss_flag_actions: await deletedCount(
+        await db
+          .delete(t.accuracyMissFlagActions)
+          .where(eq(t.accuracyMissFlagActions.workspace_id, workspace_id))
+          .returning({ id: t.accuracyMissFlagActions.id }),
+      ),
+      provenance: await deletedCount(
+        await db
+          .delete(t.accuracyProvenance)
+          .where(eq(t.accuracyProvenance.workspace_id, workspace_id))
+          .returning({ id: t.accuracyProvenance.id }),
+      ),
+      coverage_joins: await deletedCount(
+        await db
+          .delete(t.accuracyCoverageJoins)
+          .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id))
+          .returning({ id: t.accuracyCoverageJoins.id }),
+      ),
+      parse_blocks: await deletedCount(
+        await db
+          .delete(t.accuracyParseBlocks)
+          .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id))
+          .returning({ id: t.accuracyParseBlocks.id }),
+      ),
+      source_files: await deletedCount(
+        await db
+          .delete(t.accuracySourceFiles)
+          .where(eq(t.accuracySourceFiles.workspace_id, workspace_id))
+          .returning({ id: t.accuracySourceFiles.id }),
+      ),
+      claims: await deletedCount(
+        await db
+          .delete(t.accuracyClaims)
+          .where(eq(t.accuracyClaims.workspace_id, workspace_id))
+          .returning({ id: t.accuracyClaims.id }),
+      ),
+      runs: await deletedCount(
+        await db
+          .delete(t.accuracyModuleRuns)
+          .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
+          .returning({ id: t.accuracyModuleRuns.id }),
+      ),
+      plans: await deletedCount(
+        await db
+          .delete(t.accuracyPlans)
+          .where(eq(t.accuracyPlans.workspace_id, workspace_id))
+          .returning({ id: t.accuracyPlans.id }),
+      ),
+      workshop_snapshots: await deletedCount(
+        await db
+          .delete(t.accuracyWorkshopSnapshots)
+          .where(eq(t.accuracyWorkshopSnapshots.workspace_id, workspace_id))
+          .returning({ id: t.accuracyWorkshopSnapshots.id }),
+      ),
+      workspace: 0,
+    };
 
-  const removed = await accuracyDb()
-    .delete(t.accuracyWorkspaces)
-    .where(eq(t.accuracyWorkspaces.id, workspace_id))
-    .returning({ id: t.accuracyWorkspaces.id });
-  deleted.workspace = removed.length;
+    const removed = await accuracyDb()
+      .delete(t.accuracyWorkspaces)
+      .where(eq(t.accuracyWorkspaces.id, workspace_id))
+      .returning({ id: t.accuracyWorkspaces.id });
+    deleted.workspace = removed.length;
 
-  const remaining = await accuracyDb()
-    .select({ id: t.accuracyWorkspaces.id })
-    .from(t.accuracyWorkspaces)
-    .where(eq(t.accuracyWorkspaces.org_id, workspace.org_id))
-    .limit(1);
-  let org_deleted = false;
-  if (remaining.length === 0) {
-    await accuracyDb()
-      .delete(t.accuracyOrganizationGrants)
-      .where(eq(t.accuracyOrganizationGrants.org_id, workspace.org_id));
-    await accuracyDb()
-      .delete(t.accuracyOrganizations)
-      .where(eq(t.accuracyOrganizations.id, workspace.org_id));
-    org_deleted = true;
-  }
+    const remaining = await accuracyDb()
+      .select({ id: t.accuracyWorkspaces.id })
+      .from(t.accuracyWorkspaces)
+      .where(eq(t.accuracyWorkspaces.org_id, workspace.org_id))
+      .limit(1);
+    let org_deleted = false;
+    if (remaining.length === 0) {
+      await accuracyDb()
+        .delete(t.accuracyOrganizationGrants)
+        .where(eq(t.accuracyOrganizationGrants.org_id, workspace.org_id));
+      await accuracyDb()
+        .delete(t.accuracyOrganizations)
+        .where(eq(t.accuracyOrganizations.id, workspace.org_id));
+      org_deleted = true;
+    }
 
-  return {
-    workspace_id,
-    org_id: workspace.org_id,
-    org_deleted,
-    deleted,
-  };
+    return {
+      workspace_id,
+      org_id: workspace.org_id,
+      org_deleted,
+      deleted,
+    };
+  });
 }

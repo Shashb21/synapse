@@ -51,7 +51,10 @@ export function buildSourcePages(blocks: ParseBlock[], budget: number): SourcePa
       let end = Math.min(block.text.length, offset + budget - prompt_chars - overhead);
       // Do not bisect a UTF-16 surrogate pair at a page boundary.
       if (end < block.text.length && end > offset && /[\uD800-\uDBFF]/.test(block.text[end - 1])) end--;
-      if (end === offset && block.text.length > offset) { flush(); continue; }
+      if (end === offset && block.text.length > offset) {
+        if (!units.length) throw new Error(`Block ${block.id} cannot fit its next character in the source page budget.`);
+        flush(); continue;
+      }
       const unit = { ...base, char_end: end, text: block.text.slice(offset, end) };
       units.push(unit); prompt_chars += sourceUnitHeader(unit).length + unit.text.length + 2;
       offset = end;

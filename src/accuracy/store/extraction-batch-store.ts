@@ -1,10 +1,11 @@
 import { sourceHash, type SourceProgress } from "../domain/source-pages";
+import { newerSourceCoverageOverlaps, type SourceCoverageUnit } from "../domain/extraction-coverage";
 import { readParseBlocks, listDroppedUnits } from "./parse-store";
 import { getSourceFile } from "./source-store";
 /** Applied extraction identities and durable, atomic downstream resume operations. */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
-import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "./db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, lockAccuracyWorkspace, withAccuracyTransaction, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
 import { captureMergeInputs, mergeDedupeModule } from "@/accuracy/modules/merge-dedupe/module";
@@ -25,20 +26,22 @@ export class ExtractionBatchError extends Error {
 
 /** Serialize batch application, omission decisions, and downstream writes in a workspace. */
 async function lockWorkspace(workspace_id: string, wait = true) {
-  if (wait) {
-    await accuracyDb().execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${workspace_id}`}, 0))`);
-  } else {
-    const result = await accuracyDb().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`omission:${workspace_id}`}, 0)) as acquired`);
-    if (!result[0]?.acquired) throw new ExtractionBatchError("resume_in_progress", "A resume or source review is already in progress.");
-  }
+  if (!await lockAccuracyWorkspace(workspace_id, wait)) throw new ExtractionBatchError("resume_in_progress", "A resume or source review is already in progress.");
 }
 
 /** Create a server-owned batch before extraction, with no downstream eligibility yet. */
 export async function createExtractionBatch(workspace_id: string, source_file_id: string, requested_kinds: string[], source_progress?: SourceProgress) {
   await ensureAccuracySchema();
-  const [batch] = await accuracyDb().insert(t.accuracyExtractionBatches).values({ id: newId("batch"), workspace_id,
-    source_file_id, source_progress: source_progress ?? null, requested_kinds: [...new Set(requested_kinds)], run_ids: [], created_claim_ids: [], drafts_persisted: false, created_at: nowIso() }).returning();
-  return batch;
+  return withAccuracyWorkspaceMutation(workspace_id, async () => {
+    const [latest] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(and(
+      eq(t.accuracyExtractionBatches.workspace_id, workspace_id), eq(t.accuracyExtractionBatches.source_file_id, source_file_id)))
+      .orderBy(desc(t.accuracyExtractionBatches.created_at)).limit(1);
+    // Strict creation order avoids random ID ordering when concurrent requests share a millisecond.
+    const created_at = new Date(Math.max(Date.now(), latest ? Date.parse(latest.created_at) + 1 : 0)).toISOString();
+    const [batch] = await accuracyDb().insert(t.accuracyExtractionBatches).values({ id: newId("batch"), workspace_id,
+      source_file_id, source_progress: source_progress ?? null, requested_kinds: [...new Set(requested_kinds)], run_ids: [], created_claim_ids: [], drafts_persisted: false, created_at }).returning();
+    return batch;
+  });
 }
 
 /** Publish a batch only after its successful extractor runs and all draft writes finish. */
@@ -74,8 +77,7 @@ async function currentBatch(workspace_id: string, source_file_id: string, batch_
   if (batch?.source_progress) {
     await assertSourceRevision(batch);
     if (!batch.source_progress.complete) throw new ExtractionBatchError("source_incomplete", "Declared source pages are not complete.");
-    const latest = batches.filter(b => b.drafts_persisted).sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0];
-    if (latest?.id !== batch.id) return fail();
+    if (batch.requested_kinds.some(kind => batches.some(newer => newerSourceCoverageOverlaps(batch, newer, kind, batch.source_progress!.pages.flatMap(page => page.units))))) return fail();
     const members = batch.source_progress.pages.flatMap(page => batch.requested_kinds.map(kind => ({ page, kind, attempt: page.attempts[kind] })));
     if (members.some(m => m.attempt.state !== "successful" || !m.attempt.run_id) || members.length !== batch.run_ids.length) return fail();
     const runs = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(eq(t.accuracyModuleRuns.workspace_id, workspace_id), inArray(t.accuracyModuleRuns.id, batch.run_ids)));
@@ -263,6 +265,15 @@ export function refreshSourceProgress(batch_id: string, progress: SourceProgress
     next_cursor: next ? sourcePageCursor(batch_id, next.id) : null };
 }
 
+/** Must run under the workspace lock, covering the fence through claim/membership writes. */
+async function assertPagePublicationCurrent(batch: ExtractionBatch, kind: string, units: SourceCoverageUnit[]) {
+  const batches = await accuracyDb().select().from(t.accuracyExtractionBatches).where(and(
+    eq(t.accuracyExtractionBatches.workspace_id, batch.workspace_id), eq(t.accuracyExtractionBatches.source_file_id, batch.source_file_id)));
+  if (batches.some(newer => newerSourceCoverageOverlaps(batch, newer, kind, units))) {
+    throw new ExtractionBatchError("stale_batch", "Newer successful extraction already covers this source page and kind.");
+  }
+}
+
 /** Reserve a page attempt briefly; provider work follows after the transaction releases. */
 export async function reserveExtractionPage(args: { workspace_id: string; source_file_id: string; batch_id: string; page_id: string; kind: string; run_id: string }) {
   return withAccuracyTransaction(async () => {
@@ -273,6 +284,7 @@ export async function reserveExtractionPage(args: { workspace_id: string; source
     const page = progress?.pages.find(p => p.id === args.page_id);
     const attempt = page?.attempts[args.kind];
     if (!progress || !page || !attempt) throw new ExtractionBatchError("stale_batch", "Page is outside the declared extraction selection.");
+    await assertPagePublicationCurrent(batch, args.kind, page.units);
     if (attempt.state === "successful") return null;
     if (attempt.token && Date.now() - Date.parse(attempt.started_at ?? "") < DEFAULT_STALE_RUN_MAX_AGE_MS) throw new ExtractionBatchError("resume_in_progress", "Source page is already running.");
     const token = newId("page");
@@ -294,6 +306,7 @@ export async function applyExtractionPage(args: { workspace_id: string; source_f
     const page = progress.pages.find(p => p.id === args.page_id)!;
     const previous = page?.attempts[args.kind];
     if (!progress || !page || !previous || previous.token !== args.token) throw new ExtractionBatchError("resume_in_progress", "Source page reservation was superseded.");
+    await assertPagePublicationCurrent(batch, args.kind, page.units);
     const claim_ids = args.persist ? await args.persist() : previous.claim_ids ?? [];
     page.attempts[args.kind] = { state: args.error ? "failed" : args.complete ? "successful" : "incomplete", run_id: args.run_id,
       claim_ids, ...(args.error ? { error: args.error } : {}), ...(args.rejected_candidates?.length ? { rejected_candidates: args.rejected_candidates } : {}) };

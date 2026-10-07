@@ -75,6 +75,13 @@ describe("current omission review store", () => {
       token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } });
     expect((await listBlockingOmissions(scope.workspace_id)).map((x) => x.issue.issue_id)).toEqual(["retained"]);
   });
+  it("does not let a legacy failed completeness check supersede earlier unresolved findings", async () => {
+    const scope = await fixture();
+    const original = await run(scope, [issue(scope.source_file_id, "unresolved")]);
+    await run(scope, [], { risk: "check_failed" });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(item => item.run_id)).toEqual([original]);
+    expect((await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: original }))?.current).toBe(true);
+  });
   it("rejects mismatched persisted scope and keeps workspaces separate", async () => {
     const scope = await fixture(); const other = await fixture();
     await run(other, [issue(other.source_file_id, "other")]);

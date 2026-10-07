@@ -2,8 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { claimFactualRevision, claimValidationFreshness } from "@/accuracy/domain/structured-fields";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyTransaction } from "@/accuracy/store/db";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, lockAccuracyWorkspace, withAccuracyTransaction } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
@@ -158,7 +158,7 @@ export async function copyExperimentWorkspace(
     const db = accuracyDb();
     // Match extraction-batch and omission-review mutations so the baseline is read
     // after all earlier workspace writes and no coordinated write can interleave.
-    await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`omission:${args.source_workspace_id}`}, 0))`);
+    await lockAccuracyWorkspace(args.source_workspace_id);
     const workspaceRows = await db.select().from(t.accuracyWorkspaces).where(eq(t.accuracyWorkspaces.id, args.source_workspace_id)).limit(1);
     const sourceWorkspace = workspaceRows[0];
     if (!sourceWorkspace) throw new ExperimentCopyError("unknown_workspace", `Unknown workspace: ${args.source_workspace_id}`);
