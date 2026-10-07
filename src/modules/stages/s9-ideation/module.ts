@@ -904,6 +904,30 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
 };
 
 ideationModule.evals = {
+  async reserveGold(facts, subject_ids) {
+    const source = facts as Awaited<ReturnType<typeof freezeFacts>>;
+    // Old snapshots cannot acquire provenance from current proposal records.
+    if (!Array.isArray(source.proposal_lineage)) return { facts, cases: [], subject_ids: [], reason: "Frozen S9 library proposal lineage is unavailable." };
+    const order = ideationBandOrder(source.placements);
+    const gaps = source.state.gaps.filter(gap => subject_ids.includes(gap.id) && order.has(gap.id) && isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
+    const ids = gaps.map(gap => gap.id);
+    const libraryIds = new Set(source.state.tactics.map(tactic => tactic.id));
+    const linked = source.proposal_lineage.filter(row => row.tactic_id && libraryIds.has(row.tactic_id));
+    if (linked.some(row => row.origin !== "human" && !row.run_id)) return { facts, cases: [], subject_ids: [], reason: "Frozen S9 library contains a proposal with unknown originating run." };
+    const slots = Object.fromEntries(ids.map(id => [id, source.proposal_slots[id] ?? []]));
+    const perGap = ids.length ? slots[ids[0]].length : 0;
+    if (ids.some(id => !slots[id].length || slots[id].length !== perGap)) return { facts, cases: [], subject_ids: [], reason: "Frozen S9 gold proposal slots are incomplete." };
+    const state = Object.fromEntries(Object.entries(source.state).map(([key, value]) =>
+      [key, key === "gaps" ? gaps : ["asset", "objectives", "tactics"].includes(key) ? value : Array.isArray(value) ? [] : value],
+    )) as typeof source.state;
+    return {
+      facts: { state, placements: source.placements.filter(row => ids.includes(row.gap_id)), proposal_slots: slots, proposal_lineage: linked },
+      subject_ids: ids, lineage_subject_ids: linked.flatMap(row => [row.subject_id, row.gap_id]),
+      lineage_run_ids: linked.flatMap(row => row.run_id ? [row.run_id] : []),
+      // Existing coverage/design ratios use only these withheld gaps/proposals.
+      cases: ids.length ? [{ name: "heldout-prioritized-gaps", input: { gap_ids: ids, per_gap: perGap, dry_run: true } }] : [],
+    };
+  },
   async cases() {
     return [{ name: "prioritized-open-gaps", input: { per_gap: 2, dry_run: true } }];
   },
@@ -1456,7 +1480,13 @@ export async function restoreIdeationProposal(args: {
 
 /** Freeze the source facts this stage consumes, before any proposal or human decision. */
 async function freezeFacts(input: z.infer<typeof inputSchema>) {
-  const [state, placements] = await Promise.all([loadState(), listPlacements()]);
+  const [state, placements, proposals] = await Promise.all([loadState(), listPlacements(), db().select().from(t.ideationProposals)]);
+  // Capture the persisted acceptance linkage now, before generation. Library
+  // provenance contains identities only, never another proposal's answer text.
+  const proposal_lineage = proposals.map(proposal => {
+    const meta = splitDesign(proposal.design).meta;
+    return { subject_id: proposal.id, gap_id: proposal.gap_id, tactic_id: proposal.tactic_id, run_id: meta.run_id ?? null, origin: meta.origin ?? "ai" };
+  });
   const proposal_slots = Object.fromEntries(state.gaps.map(gap => [gap.id, Array.from({length:input.per_gap},(_,index)=>`${gap.id}:proposal:${index+1}`)]));
-  return { state, placements, proposal_slots };
+  return { state, placements, proposal_slots, proposal_lineage };
 }

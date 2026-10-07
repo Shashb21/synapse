@@ -254,6 +254,11 @@ export type EvalHarness<I, O> = {
   /** Gold cases the stage scores itself against. */
   cases: (facts?: Record<string, unknown>) => Promise<EvalCase<I>[]>;
   score: (args: { case: EvalCase<I>; output: O }) => EvalScore[];
+  /** Stage-owned restricted gold context; preserve score semantics over this subject subset. */
+  reserveGold?: (facts: Record<string, unknown>, subject_ids: string[]) => Promise<{
+    facts: Record<string, unknown>; cases: EvalCase<I>[]; subject_ids: string[];
+    lineage_subject_ids?: string[]; lineage_run_ids?: string[]; reason?: string;
+  }>;
 };
 
 export interface SynapseModule<I, O> {

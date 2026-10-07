@@ -538,6 +538,22 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     };
   },
   evals: {
+    async reserveGold(facts, subject_ids) {
+      const source = facts as Awaited<ReturnType<typeof freezeFacts>>;
+      const gaps = source.state.gaps.filter(gap => subject_ids.includes(gap.id) && isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
+      // S8 consumes asset/objective planning context and gap text only. Remove all
+      // other subject collections so unrelated human answers cannot enter gold facts.
+      const state = Object.fromEntries(Object.entries(source.state).map(([key, value]) =>
+        [key, key === "gaps" ? gaps : key === "asset" || key === "objectives" ? value : Array.isArray(value) ? [] : value],
+      )) as typeof source.state;
+      const ids = gaps.map(gap => gap.id);
+      return {
+        facts: { state, axesConfig: structuredClone(source.axesConfig) }, subject_ids: ids,
+        // Completeness/explanation ratios and band spread retain their definitions,
+        // now measured only on the explicitly reserved open-gap subset.
+        cases: ids.length ? [{ name: "heldout-open-list", input: { gap_ids: ids, dry_run: true } }] : [],
+      };
+    },
     async cases() {
       return [{ name: "open-list", input: { dry_run: true } }];
     },

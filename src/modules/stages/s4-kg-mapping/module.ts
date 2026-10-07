@@ -763,6 +763,23 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     };
   },
   evals: {
+    async reserveGold(facts, subject_ids) {
+      const source = facts as Awaited<ReturnType<typeof freezeFacts>>;
+      const { gaps } = candidateSets(source.state, inputSchema.parse({ gap_ids: subject_ids }));
+      const ids = gaps.filter(gap => subject_ids.includes(gap.id)).map(gap => gap.id);
+      const state = Object.fromEntries(Object.entries(source.state).map(([key, value]) =>
+        [key, key === "gaps" ? gaps.filter(gap => ids.includes(gap.id))
+          : key === "coverages" ? source.state.coverages.filter(row => ids.includes(row.gap_id))
+          : key === "mapping_suggestions" ? source.state.mapping_suggestions.filter(row => ids.includes(row.gap_id))
+          : key === "tactics" || key === "asset" ? value : Array.isArray(value) ? [] : value],
+      )) as typeof source.state;
+      return {
+        facts: { state }, subject_ids: ids,
+        // Rationale/selectivity ratios and unmapped counts keep the existing
+        // definitions; their population is precisely these withheld gaps.
+        cases: ids.length ? [{ name: "heldout-mapping-gaps", input: { gap_ids: ids, max_per_gap: 6, dry_run: true } }] : [],
+      };
+    },
     async cases() {
       return [{ name: "workspace", input: { max_per_gap: 6, dry_run: true } }];
     },

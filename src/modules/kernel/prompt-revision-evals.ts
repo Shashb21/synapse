@@ -1,7 +1,7 @@
 import { resolveRouteForRun } from "./run";
 /** Compare two instructions against one frozen case set without running the live persistence wrapper. */
 import { sql } from 'drizzle-orm';
-import type { Actor, EvalCase, EvalScore, ModuleContext, ResolvedRoute, StageId, SynapseModule } from './contracts';
+import type { Actor, EvalScore, ModuleContext, ResolvedRoute, StageId, SynapseModule } from './contracts';
 import { ensurePlatformSchema, sharedDb } from './db';
 import { activeRevisionPointer, getPromptRevision, getRevisionCohort } from './prompt-revisions';
 import { frozenReplayCase, evidenceHash, projectReplayDecision, scoreDecisionReplay, type FrozenReplayCase } from './decision-replay';
@@ -163,28 +163,16 @@ export async function evaluatePromptRevision(args: {
         const route = await resolveRouteForRun(revision.stage);
         const failures: string[] = [];
         const excluded: Record<string, string> = {};
-        // Gold harness cases are loaded exactly once. Each stage owns its existing score semantics.
-        // Reuse pre-execution snapshots for gold too: calling live loaders here can migrate,
-        // bootstrap or renumber domain records even when a caller asks for a dry run.
-        const snapshotRows = await sharedDb().execute(sql `select snapshot from prompt_replay_snapshots where workspace_id=${args.workspace_id} and stage=${revision.stage} order by run_id`);
-        const source = snapshotRows.map(r => r.snapshot as FrozenReplayCase).find(s => s.version === 1 && s.module_id === module.manifest.id && s.module_version === module.manifest.version && !!s.facts.state);
-        const cases = source ? structuredClone(await module.evals?.cases(source.facts) ?? []) : [];
-        const gold: {
-            testCase: EvalCase<unknown>;
-            snapshot: FrozenReplayCase;
-        }[] = [];
-        for (const testCase of cases) {
-            try {
-                const input = module.inputSchema.parse(testCase.input);
-                gold.push({ testCase, snapshot: { ...source!, run_id: `gold:${testCase.name}`, input, facts: structuredClone(source!.facts), examples: [], route } });
-            }
-            catch (error) {
-                failures.push(`Gold ${testCase.name}: ${String(error)}`);
-            }
-        }
+        // Gold identity, inputs and facts were fixed before generation. Old candidates
+        // cannot be repaired with current snapshots: their training already happened.
+        const reservation = cohort.gold_reservation;
+        const gold = reservation?.version === 1 ? structuredClone(reservation.cases) : [];
+        if (!reservation) excluded.gold = 'Legacy candidate has no gold facts reserved before generation.';
+        else if (reservation.reason) excluded.gold = reservation.reason;
+        if (!gold.length) failures.push(excluded.gold ?? 'Reserved gold case set is empty.');
         const replay = cohort.examples.filter(e => cohort.heldout_ids.includes(e.id)).flatMap(example => {
             const snapshot = frozenReplayCase(example);
-            let reason = example.replay_exclusion_reason;
+            let reason: string | null = cohort.replay_exclusions[example.id] ?? example.replay_exclusion_reason;
             if (!snapshot)
                 reason = reason ?? 'No complete frozen originating facts.';
             else if (snapshot.module_id !== module.manifest.id || snapshot.module_version !== module.manifest.version)
@@ -193,8 +181,8 @@ export async function evaluatePromptRevision(args: {
                 reason = 'This originating decision lacks a stable supported replay subject/target.';
             else if (example.kind === 's9_proposal' && (typeof example.ai_input.slot_id !== 'string' || !Object.values(snapshot.facts.proposal_slots ?? {}).some(slots => Array.isArray(slots) && slots.includes(example.ai_input.slot_id))))
                 reason = 'Proposal has no complete frozen slot correspondence.';
-            // Validate the target independently of any generated response.
-            else {
+            // Validate the target independently without clearing a stored exclusion.
+            else if (!reason) {
                 const target = example.outcome === 'accepted' ? example.ai_output : example.final;
                 const probe = { kind: example.kind, subject_id: example.subject_id, decision: example.outcome === 'rejected' ? 'reject' : 'accept', band: target?.band ?? target?.suggested_band, mapping_status: target?.mapping_status ?? target?.status, tactic_ids: target?.tactic_ids, fields: target };
                 reason = scoreDecisionReplay(example, probe).reason;

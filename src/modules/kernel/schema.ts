@@ -197,6 +197,7 @@ export const promptRevisionCohorts = pgTable("prompt_revision_cohorts", {
   created_at: text("created_at").notNull(), training_ids: jsonb("training_ids").notNull(),
   heldout_ids: jsonb("heldout_ids").notNull(), excluded_ids: jsonb("excluded_ids").notNull(),
   examples: jsonb("examples").notNull(), replay_exclusions: jsonb("replay_exclusions").notNull(),
+  gold_reservation: jsonb("gold_reservation"),
 });
 
 /** Instruction/evidence columns are immutable; only lifecycle state may change. */
@@ -216,6 +217,7 @@ export const PROMPT_REVISION_DDL = [
     training_ids jsonb NOT NULL, heldout_ids jsonb NOT NULL, excluded_ids jsonb NOT NULL,
     examples jsonb NOT NULL, replay_exclusions jsonb NOT NULL
   )`,
+  `ALTER TABLE prompt_revision_cohorts ADD COLUMN IF NOT EXISTS gold_reservation jsonb`,
   `CREATE TABLE IF NOT EXISTS prompt_revisions (
     id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, parent_revision text NOT NULL,
     instruction_text text NOT NULL, creator jsonb NOT NULL, created_at text NOT NULL,

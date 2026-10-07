@@ -1,7 +1,7 @@
 /** Immutable prompt candidates generated from revalidated lessons and frozen, lineage-separated evidence. */
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Actor, StageId } from "./contracts";
+import type { Actor, StageId, EvalCase } from "./contracts";
 import { listDecisionExamples, scrubLesson, workspaceEntityNames, type DecisionExample } from "./decision-examples";
 import { ensurePlatformSchema, sharedDb } from "./db";
 import * as tables from "./schema";
@@ -15,6 +15,75 @@ import { activePromptVersion } from "./prompt-variant";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace, scopedWorkspaceId } from "@/modules/workspaces/context";
 import { getWorkspace } from "@/modules/workspaces/store";
 
+import { evidenceHash, frozenReplayCase, type FrozenReplayCase } from "./decision-replay";
+import { moduleById } from "./registry";
+
+/** Link S9 proposal IDs to their proven pre-generation gap slot, never inferred text. */
+function decisionSubjects(example: DecisionExample): string[] {
+  if (example.kind !== "s9_proposal") return [example.subject_id];
+  const slots = frozenReplayCase(example)?.facts.proposal_slots as Record<string, unknown> | undefined;
+  const gaps = Object.entries(slots ?? {}).filter(([, values]) => Array.isArray(values) && values.includes(example.ai_input.slot_id)).map(([id]) => id);
+  return gaps.length === 1 ? [example.subject_id, gaps[0]] : [example.subject_id];
+}
+
+/** Reserve the full execution scope of historical replay, including library provenance. */
+function replayLineage(examples: DecisionExample[], heldout: Set<string>) {
+  const subjects = new Set<string>(), runs = new Set<string>();
+  const exclusions: Record<string, string> = {};
+  for (const example of examples.filter(row => heldout.has(row.id))) {
+    const snapshot = frozenReplayCase(example);
+    if (!snapshot || !["S4", "S8", "S9"].includes(snapshot.stage)) continue;
+    runs.add(snapshot.run_id);
+    const state = snapshot.facts.state as { gaps: { id: string }[]; tactics?: { id: string }[] };
+    const input = snapshot.input as { gap_ids?: string[] };
+    // Broad runs include all frozen gap subjects, even if just one human target
+    // was captured. Explicit gap lists give a safe (possibly conservative) scope.
+    for (const id of input.gap_ids?.length ? input.gap_ids : state.gaps.map(gap => gap.id)) subjects.add(id);
+    if (snapshot.stage === "S9") {
+      const provenance = snapshot.facts.proposal_lineage as { subject_id: string; gap_id: string; tactic_id: string | null; run_id: string | null; origin: string }[] | undefined;
+      if (!Array.isArray(provenance)) {
+        exclusions[example.id] = "Frozen S9 replay library proposal lineage is unavailable.";
+        continue;
+      }
+      const library = new Set((state.tactics ?? []).map(tactic => tactic.id));
+      for (const row of provenance.filter(row => row.tactic_id && library.has(row.tactic_id))) {
+        subjects.add(row.subject_id); subjects.add(row.gap_id);
+        if (row.run_id) runs.add(row.run_id);
+        else if (row.origin !== "human") exclusions[example.id] = "Frozen S9 replay library has an unknown originating run.";
+      }
+    }
+  }
+  return { subjects, runs, exclusions };
+}
+
+/** Reserve only originating held-out facts, never today's workspace or arbitrary snapshots. */
+async function reserveGold(examples: DecisionExample[], heldout: Set<string>): Promise<GoldReservation> {
+  const result: GoldReservation = { version: 1, cases: [], excluded_ids: [], subject_ids: [], run_ids: [], reason: null };
+  const sources = examples.filter(example => heldout.has(example.id)).flatMap(example => {
+    const snapshot = frozenReplayCase(example);
+    return snapshot ? [snapshot] : [];
+  });
+  const source = sources.find(snapshot => {
+    const module = moduleById(snapshot.module_id);
+    return module?.manifest.version === snapshot.module_version && !!module.evals;
+  });
+  if (!source) return { ...result, reason: "No held-out originating snapshot supports a gold reservation." };
+  const module = moduleById(source.module_id)!;
+  const heldSubjects = examples.filter(example => heldout.has(example.id)).flatMap(decisionSubjects);
+  if (!module.evals!.reserveGold) return { ...result, reason: "Stage has no complete gold subject-lineage reservation contract." };
+  const restricted = await module.evals!.reserveGold(structuredClone(source.facts), heldSubjects);
+  const facts = restricted.facts;
+  const cases = restricted.cases;
+  result.reason = restricted.reason ?? null;
+  result.subject_ids = [...new Set([...restricted.subject_ids, ...(restricted.lineage_subject_ids ?? [])])];
+  const runs = new Set([source.run_id, ...(restricted.lineage_run_ids ?? [])]);
+  result.excluded_ids = examples.filter(example => heldout.has(example.id) || decisionSubjects(example).some(id => result.subject_ids.includes(id)) || !!example.run_id && runs.has(example.run_id)).map(example => example.id);
+  result.run_ids = [...new Set([...runs, ...examples.filter(example => result.excluded_ids.includes(example.id)).flatMap(example => example.run_id ? [example.run_id] : [])])];
+  result.cases = cases.map(testCase => ({ testCase: structuredClone(testCase), snapshot: { ...structuredClone(source), input: module.inputSchema.parse(testCase.input), facts: structuredClone(facts), examples: [] } }));
+  if (!result.cases.length && !result.reason) result.reason = "No eligible held-out subjects remain for the stage gold harness.";
+  return result;
+}
+
 export const REVISION_STAGES = ["S2", "S3", "S4", "S6", "S8", "S9"] as const;
 /** One latest lineage group in every five is reserved for testing, with at least one held out. */
 const HOLDOUT_GROUP_FRACTION = 0.2;
@@ -25,10 +94,16 @@ export type PromptRevision = {
   training_ids: string[]; heldout_ids: string[]; excluded_ids: string[];
   generation_run_id: string; model: string | null; provider_id: string | null;
 };
+/** Exact cases and context reserved before generation; null marks legacy cohorts. */
+export type GoldReservation = {
+  version: 1; cases: { testCase: EvalCase<unknown>; snapshot: FrozenReplayCase }[];
+  excluded_ids: string[]; subject_ids: string[]; run_ids: string[]; reason: string | null;
+};
 export type RevisionCohort = {
   id: string; workspace_id: string; stage: StageId; created_at: string;
   training_ids: string[]; heldout_ids: string[]; excluded_ids: string[];
   examples: DecisionExample[]; replay_exclusions: Record<string, string>;
+  gold_reservation: GoldReservation | null;
 };
 type CohortArgs = { stage: StageId; workspace_id: string; exclude_ids: string[] };
 
@@ -40,7 +115,7 @@ export async function freezeRevisionCohort(args: CohortArgs): Promise<RevisionCo
   // A connected component keeps indirect links together: A shares run with B; B shares subject with C.
   const groups: DecisionExample[][] = [];
   for (const example of examples) {
-    const matches = groups.filter(group => group.some(other => (example.run_id && example.run_id === other.run_id) || (example.kind === other.kind && example.subject_id === other.subject_id)));
+    const matches = groups.filter(group => group.some(other => (example.run_id && example.run_id === other.run_id) || (example.kind === other.kind && decisionSubjects(example).some(id => decisionSubjects(other).includes(id)))));
     const joined = [...matches.flat(), example];
     for (const match of matches) groups.splice(groups.indexOf(match), 1);
     groups.push(joined);
@@ -50,13 +125,25 @@ export async function freezeRevisionCohort(args: CohortArgs): Promise<RevisionCo
   const heldout = new Set(groups.slice(-Math.max(1, Math.ceil(groups.length * HOLDOUT_GROUP_FRACTION))).flat().map(example => example.id));
   // An explicit exclusion expands to the entire originating group; callers may only enlarge the holdout.
   for (const group of groups) if (group.some(example => explicit.has(example.id))) for (const example of group) explicit.add(example.id);
-  const replay_exclusions: Record<string, string> = {};
+  const gold_reservation = await reserveGold(examples, heldout);
+  for (const id of gold_reservation.excluded_ids) explicit.add(id);
+  const replay = replayLineage(examples, heldout);
+  for (const example of examples) if (decisionSubjects(example).some(id => replay.subjects.has(id)) || !!example.run_id && replay.runs.has(example.run_id)) explicit.add(example.id);
+  gold_reservation.subject_ids.push(...replay.subjects);
+  gold_reservation.run_ids.push(...replay.runs);
+  // Gold reservations expand through the same complete connected lineage as replay.
+  for (const group of groups) if (group.some(example => explicit.has(example.id))) for (const example of group) explicit.add(example.id);
+  gold_reservation.excluded_ids = [...explicit].sort();
+  const goldLineage = examples.filter(example => explicit.has(example.id));
+  gold_reservation.subject_ids = [...new Set([...gold_reservation.subject_ids, ...goldLineage.flatMap(decisionSubjects)])].sort();
+  gold_reservation.run_ids = [...new Set([...gold_reservation.run_ids, ...goldLineage.flatMap(example => example.run_id ? [example.run_id] : [])])].sort();
+  const replay_exclusions: Record<string, string> = { ...replay.exclusions };
   for (const example of examples) if (!example.replay_input || example.replay_exclusion_reason) replay_exclusions[example.id] = example.replay_exclusion_reason || "No frozen originating stage input is available.";
   const cohort: RevisionCohort = {
     id: newId("prc"), workspace_id: args.workspace_id, stage: args.stage, created_at: nowIso(),
     training_ids: examples.filter(example => !heldout.has(example.id) && !explicit.has(example.id)).map(example => example.id),
     heldout_ids: examples.filter(example => heldout.has(example.id)).map(example => example.id),
-    excluded_ids: [...new Set([...heldout, ...explicit])].sort(), examples, replay_exclusions,
+    excluded_ids: [...new Set([...heldout, ...explicit])].sort(), examples, replay_exclusions, gold_reservation,
   };
   await sharedDb().insert(tables.promptRevisionCohorts).values(cohort);
   return cohort;
@@ -148,6 +235,8 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
  const {getRevisionEvaluation,promotionEligibility,routeIdentity}=await import('./prompt-revision-evals');
  const evaluation=await getRevisionEvaluation(args.evaluation_id,workspace_id);
  if(!evaluation||evaluation.revision_id!==revision.id||!promotionEligibility(evaluation).eligible) throw new Error('Evaluation is missing or ineligible.');
+ const cohort=await getRevisionCohort(revision.cohort_id,workspace_id);
+ if(!cohort?.gold_reservation?.cases.length || evidenceHash(evaluation.gold_cases)!==evidenceHash(cohort.gold_reservation.cases)) throw new Error('Gold facts were not reserved before generation. Generate a new candidate.');
  const configuredRoute=await routeConfig(revision.stage);
  const route=await resolveRoute(revision.stage,configuredRoute);
  if(routeIdentity(route)!==evaluation.route_hash) throw new Error('Routing changed since evaluation. Evaluate again.');
