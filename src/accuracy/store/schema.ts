@@ -116,6 +116,22 @@ export const accuracyCoverageJoins = pgTable("accuracy_coverage_joins", {
   rationale: text("rationale"),
 }, (table) => ({ pair: unique("accuracy_coverage_pair_key").on(table.workspace_id, table.gap_id, table.tactic_id) }));
 
+/** One split-specific reversible snapshot and its append-only human audit. */
+export const accuracySplitOperations = pgTable("accuracy_split_operations", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  operation_key: text("operation_key").notNull(),
+  request_fingerprint: text("request_fingerprint").notNull(),
+  parent_gap_id: text("parent_gap_id").notNull(),
+  addressed_gap_id: text("addressed_gap_id").notNull(),
+  open_residual_gap_id: text("open_residual_gap_id").notNull(),
+  state: text("state").notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  audit: jsonb("audit").notNull(),
+  created_at: text("created_at").notNull(),
+  rolled_back_at: text("rolled_back_at"),
+}, (table) => ({ retry: unique("accuracy_split_retry_key").on(table.workspace_id, table.operation_key) }));
+
 export const accuracyModuleRuns = pgTable("accuracy_module_runs", {
   id: text("id").primaryKey(),
   org_id: text("org_id").notNull(),
@@ -288,6 +304,14 @@ export const accuracyExperimentEvaluations = pgTable("accuracy_experiment_evalua
 }, (table) => ({ version: unique("accuracy_experiment_evaluations_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
 
 export const ACCURACY_DDL = [
+  `CREATE TABLE IF NOT EXISTS accuracy_split_operations (
+    id text PRIMARY KEY, workspace_id text NOT NULL, operation_key text NOT NULL,
+    request_fingerprint text NOT NULL, parent_gap_id text NOT NULL,
+    addressed_gap_id text NOT NULL, open_residual_gap_id text NOT NULL,
+    state text NOT NULL, snapshot jsonb NOT NULL, audit jsonb NOT NULL,
+    created_at text NOT NULL, rolled_back_at text,
+    CONSTRAINT accuracy_split_retry_key UNIQUE (workspace_id, operation_key)
+  )`,
   `CREATE TABLE IF NOT EXISTS accuracy_organizations (
     id text PRIMARY KEY,
     name text NOT NULL,

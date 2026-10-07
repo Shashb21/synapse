@@ -1,5 +1,6 @@
 /** Clone a selected accuracy workspace state for an isolated experiment. */
 
+import { splitFingerprint, type SplitSnapshot } from "@/accuracy/store/partial-split-store";
 import { rebaseCopiedCoverage } from "@/accuracy/store/coverage-store";
 import { createHash } from "node:crypto";
 import { claimFactualRevision, claimValidationFreshness } from "@/accuracy/domain/structured-fields";
@@ -104,14 +105,18 @@ function remapMetadata(value: unknown, maps: {
   source: Record<string, string>;
   block: Record<string, string>;
   claim: Record<string, string>;
+  operation?: Record<string, string>;
+  workspace?: Record<string, string>;
 }): unknown {
   if (Array.isArray(value)) return value.map((item) => remapMetadata(item, maps));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => {
     const ids = key === "source_file_id" ? maps.source : key === "block_id" ? maps.block
-      : ["claim_id", "gap_id", "tactic_id", "parent_gap_id", "merged_into"].includes(key) ? maps.claim : null;
+      : ["claim_id", "gap_id", "tactic_id", "parent_gap_id", "merged_into", "addressed_gap_id", "open_residual_gap_id"].includes(key) ? maps.claim
+      : ["operation_id", "split_operation_id"].includes(key) ? maps.operation ?? {}
+      : key === "workspace_id" ? maps.workspace ?? {} : null;
     if (ids) return [key, child === null ? null : remapReference(key, child, ids)];
-    if (["merged_from", "gap_ids", "depends_on"].includes(key)) {
+    if (["merged_from", "gap_ids", "depends_on", "addressed_tactic_ids"].includes(key)) {
       if (!Array.isArray(child)) throw new ExperimentCopyError("unresolved_reference", `Metadata ${key} must be an array of claim IDs.`);
       return [key, child.map((item) => remapReference(key, item, maps.claim))];
     }
@@ -248,12 +253,21 @@ export async function copyExperimentWorkspace(
     }
     let copiedCoverage = copiedCoverageRows.filter((row) => copiedClaimIds.has(row.gap_id) && copiedClaimIds.has(row.tactic_id));
 
-    const copiedMetadata = new Map(copiedClaimRows.map((claim) => [claim.id,
-      remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map }) as Record<string, unknown>,
-    ]));
-
+    const splitRows = await db.select().from(t.accuracySplitOperations).where(eq(t.accuracySplitOperations.workspace_id, args.source_workspace_id));
+    const copiedSplitRows = sortedById(splitRows.filter(op => [op.parent_gap_id, op.addressed_gap_id, op.open_residual_gap_id].some(id => copiedClaimIds.has(id))));
+    const operation_id_map = Object.fromEntries(copiedSplitRows.map(op => [op.id, newId("split")]));
+    for (const op of copiedSplitRows) {
+      const snapshot = op.snapshot as SplitSnapshot;
+      if ([op.parent_gap_id, op.addressed_gap_id, op.open_residual_gap_id, ...snapshot.dependencies.map(d => d.id)].some(id => !copiedClaimIds.has(id))) {
+        throw new ExperimentCopyError("unresolved_reference", `Split ${op.id} points to omitted claims or supporting tactics.`);
+      }
+    }
     const org_id = newId("org");
     const workspace_id = newId("ws");
+    const copiedMetadata = new Map(copiedClaimRows.map((claim) => [claim.id,
+      remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map, operation: operation_id_map, workspace: { [args.source_workspace_id]: workspace_id } }) as Record<string, unknown>,
+    ]));
+
     // A trusted, isomorphic baseline copy changes IDs rather than facts. Translate
     // current human decision tokens only; never freshen legacy or stale decisions.
     for (const claim of copiedClaimRows) {
@@ -271,6 +285,46 @@ export async function copyExperimentWorkspace(
     copiedCoverage = copiedCoverage.map((join) => {
       const gap = claimsById.get(join.gap_id)!, tactic = claimsById.get(join.tactic_id)!;
       return rebaseCopiedCoverage({ join, gap, tactic, copied_gap: copiedClaim(gap), copied_tactic: copiedClaim(tactic), block_id_map });
+    });
+    // Rebase the historical snapshot itself, never replace it with current rows:
+    // later edits must continue to block rollback in the isolated copy.
+    const snapshotClaim = (claim: typeof t.accuracyClaims.$inferSelect) => {
+      const metadata = remapMetadata(claim.metadata, { source: source_id_map, block: block_id_map, claim: claim_id_map, operation: operation_id_map, workspace: { [args.source_workspace_id]: workspace_id } }) as Record<string, unknown>;
+      const row = { ...claim, id: claim_id_map[claim.id], workspace_id, source_file_id: claim.source_file_id ? source_id_map[claim.source_file_id] : null, metadata };
+      if (claimValidationFreshness(claim) === "current") {
+        const validation = metadata.validation as Record<string, unknown>;
+        const revision = claimFactualRevision(row);
+        metadata.factual_revision = revision;
+        metadata.validation = { ...validation, copied_from_factual_revision: validation.factual_revision, factual_revision: revision };
+      }
+      return row;
+    };
+    const copiedSplits = copiedSplitRows.map(op => {
+      const snapshot = op.snapshot as SplitSnapshot;
+      const after_claims = sortedById(snapshot.after_claims.map(snapshotClaim));
+      const after_coverage = snapshot.after_coverage.map(join => {
+        const gap = snapshot.after_claims.find(c => c.id === join.gap_id)!;
+        const tactic = claimsById.get(join.tactic_id)!;
+        // Historical coverage can refer to later-retired children; preserve history
+        // and rebase only factual tokens known to match the saved inputs.
+        const copy = rebaseCopiedCoverage({ join, gap, tactic, copied_gap: snapshotClaim(gap), copied_tactic: copiedClaim(tactic), block_id_map });
+        return { ...copy, id: coverage_id_map[join.id] ?? newId("cov"), workspace_id,
+          gap_id: claim_id_map[join.gap_id], tactic_id: claim_id_map[join.tactic_id] };
+      });
+      const after_provenance = snapshot.after_provenance.map(row => ({ ...row, id: provenance_id_map[row.id] ?? newId("prov"), workspace_id,
+        claim_id: claim_id_map[row.claim_id], source_file_id: source_id_map[row.source_file_id], block_id: block_id_map[row.block_id] }));
+      const dependencies = snapshot.dependencies.map(d => {
+        const original = claimsById.get(d.id)!;
+        return { id: claim_id_map[d.id], revision: d.revision === claimFactualRevision(original) ? claimFactualRevision(copiedClaim(original)) : d.revision };
+      });
+      const copied_snapshot: SplitSnapshot = { before_parent: snapshotClaim(snapshot.before_parent), after_claims, after_coverage, after_provenance, dependencies,
+        evidence_state: { blocks: sortedById(snapshot.evidence_state.blocks.map(row => ({ ...row, id: block_id_map[row.id], workspace_id, source_file_id: source_id_map[row.source_file_id] }))),
+          sources: sortedById(snapshot.evidence_state.sources.map(row => ({ ...row, id: source_id_map[row.id], workspace_id, org_id }))) } };
+      return { ...op, id: operation_id_map[op.id], workspace_id, parent_gap_id: claim_id_map[op.parent_gap_id],
+        addressed_gap_id: claim_id_map[op.addressed_gap_id], open_residual_gap_id: claim_id_map[op.open_residual_gap_id],
+        // Historical requests remain audit data, never authorization to replay a source-workspace request.
+        operation_key: `copied:${operation_id_map[op.id]}`, request_fingerprint: splitFingerprint({ copied_from: op.request_fingerprint, workspace_id }),
+        snapshot: copied_snapshot, audit: remapMetadata(op.audit, { source: source_id_map, block: block_id_map, claim: claim_id_map, operation: operation_id_map, workspace: { [args.source_workspace_id]: workspace_id } }) };
     });
     const created_at = nowIso();
     await db.insert(t.accuracyOrganizations).values({ id: org_id, name: `${sourceOrg.name} (experiment)`, created_at });
@@ -314,7 +368,10 @@ export async function copyExperimentWorkspace(
       })));
     }
 
+    if (copiedSplits.length) await db.insert(t.accuracySplitOperations).values(copiedSplits);
+
     const baseline_snapshot = {
+      split_operations: copiedSplits,
       source_files: sourceRows.map((row) => ({ original_id: row.id, copied_id: source_id_map[row.id], ...row, id: source_id_map[row.id], workspace_id, org_id })),
       parse_blocks: blockRows.map((row) => ({ original_id: row.id, copied_id: block_id_map[row.id], ...row, id: block_id_map[row.id], workspace_id, source_file_id: source_id_map[row.source_file_id] })),
       claims: copiedClaimRows.map((row) => ({ original_id: row.id, copied_id: claim_id_map[row.id], ...row, id: claim_id_map[row.id], workspace_id, source_file_id: row.source_file_id ? source_id_map[row.source_file_id] : null, metadata: copiedMetadata.get(row.id)! })),
@@ -328,6 +385,7 @@ export async function copyExperimentWorkspace(
       claims: copiedClaimRows,
       provenance: copiedProvenanceRows,
       coverage_joins: copiedCoverage,
+      split_operations: copiedSplitRows,
     });
     return { workspace_id, org_id, source_id_map, block_id_map, claim_id_map, source_fingerprint, baseline_fingerprint, baseline_snapshot };
   }, { isolationLevel: "repeatable read" });

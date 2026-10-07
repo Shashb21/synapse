@@ -125,7 +125,9 @@ export type ClaimEditAction =
   | "promote"
   | "merge"
   | "unmerge"
-  | "merge_dismiss";
+  | "merge_dismiss"
+  | "split"
+  | "rollback";
 
 export type ClaimEditEntry = {
   id: string;
@@ -357,7 +359,7 @@ export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
 
 /** Active ledger rows — skip merged duplicates and rejected claims. */
 export function isActiveLedgerClaim(claim: Pick<AccuracyClaimRow, "status">): boolean {
-  return claim.status !== "merged" && claim.status !== "rejected";
+  return !["merged", "rejected", "retired", "split"].includes(claim.status);
 }
 
 export async function persistClaimPatch(args: {

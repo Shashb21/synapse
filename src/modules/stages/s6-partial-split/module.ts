@@ -25,8 +25,13 @@ const inputSchema = z.object({
     .optional(),
 });
 
+const splitEvidenceSchema = z.object({ source_file_id: z.string(), block_id: z.string(), quote: z.string(),
+  char_start: z.number().int().nonnegative().optional(), char_end: z.number().int().nonnegative().optional() });
+
 const proposalSchema = z.object({
   parent_gap_id: z.string(),
+  addressed_evidence: z.array(splitEvidenceSchema).optional(),
+  open_evidence: z.array(splitEvidenceSchema).optional(),
   addressed_name: z.string(),
   addressed_statement: z.string(),
   addressed_tactic_ids: z.array(z.string()),
@@ -60,6 +65,7 @@ You are given the parent gap, the evidence needs behind it, and every tactic map
 - The addressed child is the slice the mapped tactics genuinely close. addressed_tactic_ids lists the tactics that close it, chosen only from tactics with counts_toward_addressing true; name at least one.
 - The open child is the leftover question that no mapped tactic answers. uncovered_dimensions lists the coverage dimensions (from coverage_dimensions) the leftover is about; name at least one.
 - Names are short gap titles; statements are one full sentence each. Neither child may restate the parent verbatim, and the two children must not overlap.
+- If require_slice_evidence is true, return addressed_evidence and open_evidence arrays of exact span objects from permitted_evidence. Addressed evidence is required; an open slice without direct evidence has an empty array and inherited context only. Never invent quotes or treat copied context as closure.
 - confidence is 0–100 that this split is right. rationale says, in one or two sentences, which coverage evidence drove the split.
 
 When you are given a previous proposal and a critic objection, answer the objection: change what it names, or keep it and say why in the rationale.
@@ -118,6 +124,8 @@ function parseProposal(raw: unknown, gapId: string, countingIds: Set<string>): P
   if (dimensions.length === 0 || dimensions.some((dimension) => !allowed.includes(dimension))) return null;
   return {
     parent_gap_id: gapId,
+    ...(Array.isArray(row.addressed_evidence) && splitEvidenceSchema.array().safeParse(row.addressed_evidence).success ? { addressed_evidence: splitEvidenceSchema.array().parse(row.addressed_evidence) } : {}),
+    ...(Array.isArray(row.open_evidence) && splitEvidenceSchema.array().safeParse(row.open_evidence).success ? { open_evidence: splitEvidenceSchema.array().parse(row.open_evidence) } : {}),
     addressed_name,
     addressed_statement,
     addressed_tactic_ids: tactics,
@@ -149,6 +157,8 @@ function parseJudgement(raw: unknown): Judgement | null {
 
 function promptProposal(proposal: Proposal) {
   return {
+    addressed_evidence: proposal.addressed_evidence,
+    open_evidence: proposal.open_evidence,
     addressed_name: proposal.addressed_name,
     addressed_statement: proposal.addressed_statement,
     addressed_tactic_ids: proposal.addressed_tactic_ids,
@@ -245,6 +255,26 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
       coverage_dimensions: COVERAGE_DIMENSIONS,
     };
 
+    return proposePartialSplit(facts, countingIds, ctx);
+  },
+};
+
+/** Explicit facts boundary shared by S6 plan and Accuracy; this function never loads or writes either store. */
+export type PartialSplitFacts = {
+  gap: { id: string; name: string; statement: string; domain?: string };
+  evidence_needs: unknown[];
+  mapped_tactics: unknown[];
+  coverage_dimensions: readonly string[];
+  [key: string]: unknown;
+};
+export async function proposePartialSplit(
+  facts: PartialSplitFacts,
+  countingIds: Set<string>,
+  ctx: ModuleContext,
+  validate?: (raw: unknown) => boolean,
+): Promise<{ output: SplitOutput; summary: string; evals: import("@/modules/kernel/contracts").EvalScore[] }> {
+  requireLlm(ctx, "The partial split proposal");
+  const gap = facts.gap;
     // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
     let reviewerHints = "";
     let judgement: Judgement | null = null;
@@ -293,7 +323,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
           previous: previous ? promptProposal(previous) : undefined,
           objection,
         },
-        parse: (raw) => parseProposal(raw, gap.id, countingIds),
+        parse: (raw) => validate && !validate(raw) ? null : parseProposal(raw, gap.id, countingIds),
       });
 
     const outcome = await runAgenticCycle<Proposal>(ctx, "S6", {
@@ -411,8 +441,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
           }. Fill the split in yourself or run S6 again.`,
       evals: outcome.metrics,
     };
-  },
-};
+}
 
 /** The user validated a split: apply exactly what they sent. No model is asked. */
 async function applySplit(
