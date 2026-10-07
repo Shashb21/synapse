@@ -164,7 +164,8 @@ describe("experiment records", () => {
       await db.execute(sql.raw("CREATE TEMP TABLE legacy_accuracy_experiments (id text PRIMARY KEY, source_workspace_id text NOT NULL)"));
       await db.execute(sql.raw("INSERT INTO legacy_accuracy_workspaces (id, org_id) VALUES ('source-present', 'source-org')"));
       await db.execute(sql.raw("INSERT INTO legacy_accuracy_experiments (id, source_workspace_id) VALUES ('resolved', 'source-present'), ('deleted', 'source-gone')"));
-      for (const migration of ACCURACY_MIGRATIONS.slice(0, 5)) {
+      // Select fixture migrations by target; unrelated additive migrations may be prepended.
+      for (const migration of ACCURACY_MIGRATIONS.filter(statement => statement.includes("accuracy_experiments"))) {
         await db.execute(sql.raw(migration.replaceAll("accuracy_experiments", "legacy_accuracy_experiments").replaceAll("accuracy_workspaces", "legacy_accuracy_workspaces")));
       }
       const rows = await db.execute<{ id: string; source_org_id: string }>(sql.raw("SELECT id, source_org_id FROM legacy_accuracy_experiments ORDER BY id"));

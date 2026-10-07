@@ -4,8 +4,9 @@ import * as t from "./schema";
 import { newId } from "@/modules/kernel/ids";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
-  listClaims,
+  getClaimsByIds,
+  isDownstreamClaim,
+  listDownstreamClaims,
   type AccuracyClaimRow,
 } from "./claim-store";
 
@@ -22,9 +23,9 @@ export type CoveragePair = {
 
 export async function listCoveragePairs(workspace_id: string): Promise<CoveragePair[]> {
   await ensureAccuracySchema();
-  const claims = await listClaims(workspace_id, { limit: 500 });
-  const gaps = claims.filter((c) => c.claim_type === "gap" && isActiveLedgerClaim(c));
-  const tactics = claims.filter((c) => c.claim_type === "tactic" && isActiveLedgerClaim(c));
+  const claims = await listDownstreamClaims(workspace_id, { limit: 500 });
+  const gaps = claims.filter((c) => c.claim_type === "gap" && isDownstreamClaim(c));
+  const tactics = claims.filter((c) => c.claim_type === "tactic" && isDownstreamClaim(c));
   const joins = await accuracyDb()
     .select()
     .from(t.accuracyCoverageJoins)
@@ -66,6 +67,8 @@ export async function upsertCoverageDecision(args: {
   rationale: string;
 }): Promise<void> {
   await ensureAccuracySchema();
+  const claims = await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
+  if (claims.length !== 2 || !claims.every(isDownstreamClaim)) throw new Error("Coverage requires eligible claims in this workspace.");
   const existing = await accuracyDb()
     .select()
     .from(t.accuracyCoverageJoins)

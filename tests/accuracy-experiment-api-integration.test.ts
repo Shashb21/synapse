@@ -70,5 +70,17 @@ describe("experiment API integration", () => {
     expect(experiment.calls[0]?.input.workspace_id).not.toBe(workspace_id);
     const persisted = await accuracyDb().select().from(tables.accuracyExperimentCalls).where(eq(tables.accuracyExperimentCalls.experiment_id, experiment.id));
     expect(persisted[0]?.input).toMatchObject({ workspace_id: experiment.workspace_id });
+
+    // Legacy callers may supply a previous copied workspace ID; the existing endpoint still remaps it.
+    const legacy = await startExperiment(new Request("http://localhost/api/accuracy/experiments", {
+      method: "POST", body: JSON.stringify({ mode: "single_call", source_workspace_id: workspace_id,
+        source_file_ids: [source.id], pack_id: "beone-bgb-58067-prmt5i", condition: {},
+        call: { call_kind: "need_extract", input: { workspace_id: experiment.workspace_id, source_file_id: source.id, block_ids: [block_id] } } }),
+    }));
+    expect(legacy.status).toBe(201);
+    const { experiment: legacyExperiment } = await legacy.json() as { experiment: typeof experiment };
+    createdWorkspaces.push(legacyExperiment.workspace_id);
+    expect(legacyExperiment.workspace_id).not.toBe(experiment.workspace_id);
+    expect(legacyExperiment.calls[0]?.input.workspace_id).toBe(legacyExperiment.workspace_id);
   });
 });
