@@ -580,14 +580,14 @@ export function GapGantt({
           }
           const item = row.item;
           const activity = item.activity;
-          const indent = row.group ? 26 : 16;
+          const indent = (row.group ? 26 : 16) + (item.expansion_id ? 16 : 0);
           if (!activity) {
             return (
               <g key={row.key} aria-label={`${item.tactic_name}, unscheduled`}>
                 <title>{`${item.tactic_name} · unscheduled${item.pending ? ` · ${item.pending.reason}` : ""}`}</title>
                 <rect x={0} y={row.y} width={width} height={row.h} fill={palette.background} opacity={index % 2 ? 0 : 0.35} />
                 <text x={indent} y={row.y + 18} fill={palette.muted} fontSize={11}>
-                  {truncate(item.tactic_name, 40)}
+                  {truncate(`${item.expansion_id ? "↳ " : ""}${item.tactic_name}`, 40)}
                 </text>
                 <text x={LABEL_W + 10} y={row.y + 19} fill={palette.muted} fontSize={10} fontStyle="italic">
                   Unscheduled
@@ -612,7 +612,8 @@ export function GapGantt({
               key={row.key}
               role="button"
               tabIndex={0}
-              aria-label={`${activity.tactic_name}, ${start} to ${end}`}
+              aria-label={`${activity.tactic_name}, ${start} to ${end}${activity.expansion_id ? `, expansion of ${activity.parent_tactic_name}, ${activity.tactic_status}, ${activity.meta.counts_toward_addressing ? "counts toward addressing" : "not counting"}` : ""}`}
+              data-parent-activity-id={activity.parent_activity_id}
               data-activity-id={activity.id}
               className="cursor-pointer focus:outline-none"
               onClick={() => select(activity.id)}
@@ -635,10 +636,10 @@ export function GapGantt({
                 opacity={selected ? 0.1 : index % 2 === 0 ? 0.5 : 0}
               />
               <text x={indent} y={row.y + 13} fill={palette.foreground} fontSize={11}>
-                {truncate(activity.tactic_name, 40)}
+                {truncate(`${activity.expansion_id ? "↳ " : ""}${activity.tactic_name}`, 40)}
               </text>
               <text x={indent} y={row.y + 25} fill={palette.muted} fontSize={9.5}>
-                {`${start} → ${end}`}
+                {activity.expansion_id ? truncate(`${activity.tactic_status} · Expansion of ${activity.parent_tactic_name}`, 52) : `${start} → ${end}`}
               </text>
               <rect
                 data-bar="body"
@@ -824,7 +825,7 @@ export function GapGantt({
                     {undated.length > 0 ? (
                       <ManualDatesDialog
                         identity={identity}
-                        tactics={undated.map((item) => ({ tactic_id: item.tactic_id, name: item.tactic_name }))}
+                        tactics={undated.map((item) => ({ tactic_id: item.tactic_id, expansion_id: item.expansion_id, name: item.tactic_name }))}
                         label="Set dates"
                         title={`Set dates for an activity under ${group.gap_name}`}
                         small
@@ -848,6 +849,7 @@ export function GapGantt({
                 <ManualDatesDialog
                   identity={identity}
                   tacticId={row.item.tactic_id}
+                  expansionId={row.item.expansion_id}
                   label="Set dates"
                   title={`Set dates for ${row.item.tactic_name}`}
                   small

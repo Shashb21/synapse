@@ -78,7 +78,7 @@ is scored on every run: `exchanges`, `dialogue_retention`, `critic_score_gain`, 
 | S7 Consolidation | `s7-consolidation.derived` (1.0.0) | derived, no model | validated state | nothing |
 | S8 Prioritization | `s8-prioritization.axes` (2.0.0) | model scores every axis, critic ×3; the band is the quadrant, the user validates it | open gaps, axis config | `priority_placements` |
 | S9 Ideation | `s9-ideation.pcj` (2.1.0) | model compares new tactics and expansions for gaps validated High, critic ×3 → judge, per-gap cap | High open gaps + accepted active tactics | `ideation_proposals`, proposed domain `tactics` or `tactic_expansions` on accept |
-| S10 Gantt timeline | `s10-timeline.gantt` (2.0.0) | AI optional: model infers dependencies and estimates missing dates; human dates always win | validated state, placements | `timeline_activities`, `iegp_plans` |
+| S10 Gantt timeline | `s10-timeline.gantt` (2.1.0) | AI optional: model infers dependencies and estimates missing dates; human dates always win; accepted expansions retain independent scope, status and schedules | validated state, placements | `timeline_activities`, `iegp_plans` |
 
 The S4 module id keeps its historical `scored-pcj` slug; the deterministic scorer it once used (`scoreGapTacticMapping` in `src/lib/iegp/mapping.ts`) now runs only under the test stub, and every row it produces says no model was called.
 

@@ -389,6 +389,7 @@ export function TimelineBoard({
                   <ManualDatesDialog
                     identity={identity}
                     tacticId={row.tactic_id}
+                    expansionId={row.expansion_id}
                     label="Add back"
                     title={`Add ${row.tactic_name} back to the timeline`}
                     hint="Leave the dates empty to keep the ones it had, if it had any."
@@ -409,6 +410,7 @@ export function TimelineBoard({
                 <SheetDescription className="text-[12px]">
                   {tacticTypeLabel({ type: selected.tactic_type, custom_type: selected.tactic_custom_type })} ·{" "}
                   {selected.tactic_status.replaceAll("_", " ")}
+                  {selected.expansion_id ? ` · Expansion of ${selected.parent_tactic_name}` : ""}
                 </SheetDescription>
               </SheetHeader>
               {editing ? (
@@ -416,7 +418,7 @@ export function TimelineBoard({
                   <ActivitySheetEditor
                     identity={identity}
                     activity={selected}
-                    canEditDetails={canEditDetails}
+                    canEditDetails={canEditDetails && !selected.expansion_id}
                     onDone={() => setEditingId(null)}
                   />
                 </div>
@@ -434,8 +436,9 @@ export function TimelineBoard({
                     <Badge variant="secondary" className="text-[10px]">
                       counts toward addressing
                     </Badge>
-                  ) : null}
+                  ) : selected.expansion_id ? <span className="text-xs text-muted-foreground">Not counting toward addressing</span> : null}
                 </div>
+                {selected.expansion_id && selected.expansion_version && canEditDetails ? <ActionDialog endpoint="/api/plan" payload={{action: "set_expansion_status", expansion_id: selected.expansion_id, expected_version: selected.expansion_version}} label="Change expansion status" title={`Status for ${selected.tactic_name}`} description="Change only this expansion. Coverage still needs its own review." confirmLabel="Save status" identity={identity} fields={[{name: "status", label: "Status", type: "select", defaultValue: selected.tactic_status, options: ["proposed", "planned", "ongoing", "completed", "cancelled"].map(value => ({value, label: value}))}]} /> : null}
 
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Evidence gaps it answers</h3>
@@ -503,6 +506,12 @@ export function TimelineBoard({
                   <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
                     <Row label="Evidence question" value={selected.meta.evidence_question} />
                     <Row label="Population" value={selected.meta.population} />
+                    {selected.expansion_scope ? <>
+                      <Row label="Analysis" value={selected.expansion_scope.analysis} />
+                      <Row label="Data cut" value={selected.expansion_scope.data_cut} />
+                      <Row label="Geography" value={selected.expansion_scope.geography} />
+                      <Row label="Feasibility risks" value={selected.expansion_scope.feasibility_risks} />
+                    </> : null}
                     <Row label="Comparator" value={selected.meta.comparator} />
                     <Row label="Outcomes" value={selected.meta.outcomes} />
                     <Row label="Data source" value={selected.meta.data_source} />

@@ -1,6 +1,6 @@
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import type { TacticStatus, TacticType } from "@/lib/iegp/enums";
-import type { IegpState, Tactic } from "@/lib/iegp/types";
+import type { IegpState, Tactic, TacticExpansion, ExpansionScope } from "@/lib/iegp/types";
 import { countingCoverages, displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import type { PlacementRecord } from "@/modules/stages/s8-prioritization/module";
 
@@ -39,6 +39,11 @@ export type ScheduleBasis = {
 export type TimelineActivity = {
   id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
   tactic_type: TacticType;
   /** A person's own type name and colour, drawn instead of the type's family colour (KAN-51). */
@@ -85,6 +90,11 @@ export type TimelineActivity = {
 export type RemovedActivity = {
   activity_id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
   reason: string;
 };
@@ -92,6 +102,11 @@ export type RemovedActivity = {
 export type PendingActivity = {
   activity_id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
   missing: ScheduleField[];
   reason: string;
@@ -163,6 +178,8 @@ export function isRemoved(saved: SavedActivity | null | undefined): boolean {
 export type TimelineCandidate = {
   id: string;
   tactic: Tactic;
+  expansion?: TacticExpansion;
+  parent_name?: string;
   band: TimelineBand;
   gap_ids: string[];
   gap_names: string[];
@@ -172,8 +189,8 @@ export type TimelineCandidate = {
   saved: SavedActivity | null;
 };
 
-export function activityId(tacticId: string): string {
-  return `ACT-${tacticId}`;
+export function activityId(tacticId: string, expansionId?: string): string {
+  return expansionId ? `ACT-EXP-${expansionId}` : `ACT-${tacticId}`;
 }
 
 export function addMonths(iso: string, months: number): string {
@@ -218,9 +235,10 @@ export function timelineCandidates(args: {
   const gapsForTactic = new Map<string, string[]>();
   for (const coverage of args.state.coverages) {
     if (!gapById.has(coverage.gap_id)) continue;
-    const list = gapsForTactic.get(coverage.tactic_id) ?? [];
+    const scopeId = activityId(coverage.tactic_id, coverage.expansion_id ?? undefined);
+    const list = gapsForTactic.get(scopeId) ?? [];
     list.push(coverage.gap_id);
-    gapsForTactic.set(coverage.tactic_id, list);
+    gapsForTactic.set(scopeId, list);
   }
 
   const bandOf = (gapIds: string[]): TimelineBand => {
@@ -241,10 +259,17 @@ export function timelineCandidates(args: {
   };
 
   const candidates: TimelineCandidate[] = [];
-  for (const tactic of args.state.tactics) {
-    if (tactic.status === "cancelled" || tactic.review_status === "rejected") continue;
-    const gapIds = [...new Set(gapsForTactic.get(tactic.id) ?? [])];
-    const id = activityId(tactic.id);
+  const scopes = args.state.tactics.flatMap(parent => [
+    {tactic: parent, expansion: undefined as TacticExpansion | undefined, parent_name: parent.name},
+    ...(args.state.expansions ?? []).filter(child => child.tactic_id === parent.id).map(expansion => ({
+      tactic: {...parent, ...expansion.scope, status: expansion.status, budget: expansion.scope.cost_effort},
+      expansion, parent_name: parent.name,
+    })),
+  ]);
+  for (const {tactic, expansion, parent_name} of scopes) {
+    if (tactic.status === "cancelled" || (!expansion && tactic.review_status === "rejected")) continue;
+    const id = activityId(tactic.id, expansion?.id);
+    const gapIds = [...new Set(gapsForTactic.get(id) ?? [])];
     const saved = args.overrides?.find((row) => row.id === id) ?? null;
     // A user can put any tactic on the timeline by hand, mapped or not.
     if (gapIds.length === 0 && saved?.meta?.manual !== true) continue;
@@ -253,6 +278,8 @@ export function timelineCandidates(args: {
     candidates.push({
       id,
       tactic,
+      expansion,
+      parent_name,
       band: gapIds.length === 0 ? "unprioritized" : bandOf(gapIds),
       gap_ids: gapIds,
       gap_names: gapIds.map((gapId) => gapById.get(gapId)?.name ?? gapId),
@@ -262,11 +289,11 @@ export function timelineCandidates(args: {
           .find((placement) => placement?.validated)?.rationale ?? null,
       counting:
         countingCoverages(
-          args.state.coverages.filter((coverage) => coverage.tactic_id === tactic.id),
+          args.state.coverages.filter((coverage) => coverage.tactic_id === tactic.id && (coverage.expansion_id ?? null) === (expansion?.id ?? null)),
           args.state.tactics,
           args.state.expansions,
         ).length > 0,
-      design: args.designs?.get(tactic.id) ?? {},
+      design: args.designs?.get(expansion ? id : tactic.id) ?? {},
       saved,
     });
   }
@@ -356,6 +383,7 @@ export function buildTimeline(args: {
       pending.push({
         activity_id: candidate.id,
         tactic_id: tactic.id,
+        ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
         tactic_name: tactic.name,
         missing,
         reason: `No ${missing.map((field) => field.replace("_", " ")).join(", ")} yet. Date it by hand, or rebuild the timeline to have the model estimate ${missing.length === 1 ? "it" : "them"}.`,
@@ -446,6 +474,7 @@ export function buildTimeline(args: {
     const activity: TimelineActivity = {
       id,
       tactic_id: tactic.id,
+      ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
       tactic_name: tactic.name,
       tactic_type: tactic.type,
       tactic_custom_type: tactic.custom_type ?? null,
@@ -498,12 +527,14 @@ export function buildTimeline(args: {
   const tacticById = new Map(args.state.tactics.map((tactic) => [tactic.id, tactic]));
   const removed: RemovedActivity[] = [];
   for (const row of args.overrides ?? []) {
-    const tactic = tacticById.get(row.id.replace(/^ACT-/, ""));
+    const expansion = args.state.expansions?.find(child => activityId(child.tactic_id, child.id) === row.id);
+    const tactic = tacticById.get(expansion?.tactic_id ?? row.id.replace(/^ACT-/, ""));
     if (!isRemoved(row) || !tactic) continue;
     removed.push({
       activity_id: row.id,
       tactic_id: tactic.id,
-      tactic_name: tactic.name,
+      ...(expansion ? {expansion_id: expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: tactic.name} : {}),
+      tactic_name: expansion?.scope.name ?? tactic.name,
       reason: row.meta?.removed_reason ?? "Removed by hand.",
     });
   }

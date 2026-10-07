@@ -1,3 +1,4 @@
+import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -42,6 +43,11 @@ const sourceSchema = z.enum(["human", "saved", "tactic", "design", "model"]);
 const activitySchema = z.object({
   id: z.string(),
   tactic_id: z.string(),
+  expansion_id: z.string().optional(),
+  parent_activity_id: z.string().optional(),
+  parent_tactic_name: z.string().optional(),
+  expansion_version: z.string().optional(),
+  expansion_scope: expansionScopeSchema.optional(),
   tactic_name: z.string(),
   tactic_type: z.string(),
   tactic_custom_type: z.object({ label: z.string(), color: z.string() }).nullable().optional(),
@@ -84,13 +90,18 @@ const outputSchema = z.object({
     z.object({
       activity_id: z.string(),
       tactic_id: z.string(),
+      expansion_id: z.string().optional(),
+      parent_activity_id: z.string().optional(),
+      parent_tactic_name: z.string().optional(),
+      expansion_version: z.string().optional(),
+      expansion_scope: expansionScopeSchema.optional(),
       tactic_name: z.string(),
       missing: z.array(z.enum(["start", "duration", "readout_lag"])),
       reason: z.string(),
     }),
   ),
   removed: z.array(
-    z.object({ activity_id: z.string(), tactic_id: z.string(), tactic_name: z.string(), reason: z.string() }),
+    z.object({ activity_id: z.string(), tactic_id: z.string(), expansion_id: z.string().optional(), parent_activity_id: z.string().optional(), parent_tactic_name: z.string().optional(), tactic_name: z.string(), reason: z.string() }),
   ),
 });
 
@@ -129,7 +140,7 @@ export async function tacticDesigns(): Promise<Map<string, ActivityDesign>> {
     const duration = positive(design.duration_months, false);
     const lag = positive(design.readout_lag_months, true);
     const why = typeof design.timing_rationale === "string" ? design.timing_rationale.trim() : "";
-    designs.set(proposal.tactic_id, {
+    designs.set(proposal.expansion_id ? activityId(proposal.tactic_id, proposal.expansion_id) : proposal.tactic_id, {
       ...(duration !== undefined ? { duration_months: duration } : {}),
       ...(lag !== undefined ? { readout_lag_months: lag } : {}),
       ...(why ? { timing_rationale: why } : {}),
@@ -352,7 +363,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
   manifest: {
     id: "s10-timeline.gantt",
     stage: "S10",
-    version: "2.0.0",
+    version: "2.1.0",
     title: "Interactive Gantt timeline",
     summary:
       "Lays out the final IEGP as dated activities. Dates a user set and durations the tactic's design carries are kept; a model infers the dependencies between activities and estimates any start, duration or readout lag nobody supplied. Only validated bands place an activity. A user can date, add, remove, re-lane and re-sequence any activity by hand; those values are marked human and survive every rebuild. Needs a connected LLM only while something is left for it to estimate.",
@@ -807,6 +818,8 @@ export async function setTimelineDependencies(args: {
  */
 export async function addTimelineActivity(args: {
   tactic_id: string;
+  expansion_id?: string;
+  activity_id?: string;
   start_date?: string;
   end_date?: string;
   readout_date?: string | null;
@@ -819,12 +832,20 @@ export async function addTimelineActivity(args: {
   const rationale = requireRationale(args.rationale);
   if (args.lane && !TIMELINE_LANES.includes(args.lane as TimelineBand)) throw new Error(`Unknown lane ${args.lane}.`);
   const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
-  const tactic = state.tactics.find((row) => row.id === args.tactic_id);
+  const selectedExpansion = args.activity_id ? state.expansions.find(child => activityId(child.tactic_id, child.id) === args.activity_id) : undefined;
+  const selectedTactic = args.activity_id ? state.tactics.find(row => activityId(row.id) === args.activity_id) : undefined;
+  if (args.activity_id && !selectedExpansion && !selectedTactic) throw new Error("Unknown timeline activity.");
+  const tacticId = selectedExpansion?.tactic_id ?? selectedTactic?.id ?? args.tactic_id;
+  if (args.tactic_id && args.tactic_id !== tacticId) throw new Error("Activity does not belong to this tactic.");
+  const tactic = state.tactics.find((row) => row.id === tacticId);
   if (!tactic) throw new Error(`Unknown tactic ${args.tactic_id}.`);
-  if (tactic.status === "cancelled" || tactic.review_status === "rejected") {
+  const expansion = selectedExpansion ?? (args.expansion_id ? state.expansions.find(child => child.id === args.expansion_id && child.tactic_id === tactic.id) : undefined);
+  if (args.expansion_id && expansion?.id !== args.expansion_id) throw new Error("Activity does not match this expansion.");
+  if (args.expansion_id && !expansion) throw new Error("Expansion not found under this tactic.");
+  if ((expansion?.status ?? tactic.status) === "cancelled" || (!expansion && tactic.review_status === "rejected")) {
     throw new Error(`${tactic.name} is cancelled or rejected, so it cannot go on the timeline.`);
   }
-  const id = activityId(tactic.id);
+  const id = activityId(tactic.id, expansion?.id);
   const existing = await activityRow(id);
   const restoring = existing && rowMeta(existing).removed === true;
   if (existing && !restoring) {
@@ -980,7 +1001,6 @@ export async function removeTimelineActivity(args: {
   const rationale = requireRationale(args.rationale);
   const existing = await activityRow(args.id);
   if (existing && rowMeta(existing).removed === true) throw new Error(`${args.id} is already off the timeline.`);
-  const tacticId = existing?.tactic_id ?? args.id.replace(/^ACT-/, "");
   if (!existing) {
     // A pending activity has no row yet: keep an undated one that says it was removed.
     const [state, placements, overrides] = await Promise.all([loadState(), listPlacements(), storedActivities()]);
@@ -990,7 +1010,7 @@ export async function removeTimelineActivity(args: {
       .insert(t.timelineActivities)
       .values({
         id: args.id,
-        tactic_id: tacticId,
+        tactic_id: candidate.tactic.id,
         gap_ids: candidate.gap_ids,
         lane: candidate.band,
         start_date: "",

@@ -333,6 +333,8 @@ export async function POST(request: Request) {
       case "add_activity": {
         assertCan(identity.role, "validate");
         const activity = await addTimelineActivity({
+          activity_id: body.activity_id ? field(z.string().trim().min(1), body.activity_id, "activity_id") : undefined,
+          expansion_id: body.expansion_id ? field(z.string().trim().min(1), body.expansion_id, "expansion_id") : undefined,
           tactic_id: String(body.tactic_id ?? ""),
           start_date: body.start_date ? field(dateSchema, body.start_date, "start_date") : undefined,
           end_date: body.end_date ? field(dateSchema, body.end_date, "end_date") : undefined,
