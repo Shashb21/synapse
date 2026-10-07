@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { loadAxes, loadScopeAxes, parseAxesConfig, validateAxes, type StoredAxes, type ScopeAxes } from "@/modules/stages/s8-prioritization/axes";
+import { loadAxesConfiguration, parseAxesConfig, validateAxes, type StoredAxes, type ScopeAxes } from "@/modules/stages/s8-prioritization/axes";
 import { placementFromScores, manualPriorityInput, type WorkingPriority, type PriorityConsiderations, type PlanningContext } from "@/modules/stages/s8-prioritization/scoring";
 import type { MatrixBand } from "@/modules/stages/s8-prioritization/axis-math";
 import { runInWorkspace } from "@/modules/workspaces/context";
@@ -62,17 +62,18 @@ export const accuracyPlacementSchema = z.object({
 const scopeKey = (setting?: string) => setting?.trim().toLowerCase() || "all";
 const record = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
-/** First use explicitly inherits the Default S8 catalog, never a request's unrelated plan cookie.
+/** First use explicitly inherits the Default S8 catalog and every saved scope, never a request's unrelated plan cookie.
+ * The optional setting argument remains compatible with existing callers; it does not limit inheritance.
  * Thereafter the saved copy and every edit belong solely to this Accuracy workspace. */
-export async function loadAccuracyPriorityConfig(workspace_id: string, setting?: string): Promise<AccuracyPriorityConfig> {
+export async function loadAccuracyPriorityConfig(workspace_id: string, _setting?: string): Promise<AccuracyPriorityConfig> {
+  void _setting;
   await ensureAccuracySchema();
   if (!await getWorkspace(workspace_id)) throw new PriorityError("unknown_workspace", "Unknown workspace.");
   const [row] = await accuracyDb().select().from(t.accuracyPriorityConfigs).where(eq(t.accuracyPriorityConfigs.workspace_id, workspace_id));
   if (row) return row.data as AccuracyPriorityConfig;
   if (accuracyTransactionActive()) throw new PriorityError("invalid_config", "Initialize priority configuration before starting an Accuracy transaction.");
   const seed = await runInWorkspace({ workspace_id: "default", schema: "public" }, async () => {
-    const catalog = await loadAxes(), scope = await loadScopeAxes(scopeKey(setting));
-    const scopes = scope ? { [scopeKey(setting)]: scope } : {};
+    const { catalog, scopes } = await loadAxesConfiguration();
     return { catalog, scopes, revision: priorityRevision({ catalog, scopes }) };
   });
   return withAccuracyWorkspaceMutation(workspace_id, async () => {

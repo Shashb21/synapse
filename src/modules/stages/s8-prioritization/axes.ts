@@ -116,10 +116,9 @@ function withCatalogDefaults(saved: PriorityAxis[] | undefined): PriorityAxis[] 
 
 export type StoredAxes = AxesConfig & { updated_by: string; updated_at: string };
 
-export async function loadAxes(): Promise<StoredAxes> {
-  await ensurePlatformSchema();
-  const rows = await db().select().from(t.priorityAxes).where(eq(t.priorityAxes.id, ROW_ID)).limit(1);
-  const row = rows[0];
+type AxesRow = typeof t.priorityAxes.$inferSelect;
+
+function storedAxes(row: AxesRow | undefined): StoredAxes {
   if (!row) return { ...DEFAULT_AXES, updated_by: "default", updated_at: "—" };
   const config = row.config as AxesConfig;
   return {
@@ -130,6 +129,12 @@ export async function loadAxes(): Promise<StoredAxes> {
     updated_by: row.updated_by,
     updated_at: row.updated_at,
   };
+}
+
+export async function loadAxes(): Promise<StoredAxes> {
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.priorityAxes).where(eq(t.priorityAxes.id, ROW_ID)).limit(1);
+  return storedAxes(rows[0]);
 }
 
 /** Shape of a saved axis configuration. Semantic rules live in `validateAxes`. */
@@ -208,6 +213,31 @@ export const ALL_SETTINGS_SCOPE = "all";
 
 export type ScopeAxes = { x_axis: string; y_axis: string; updated_by: string; updated_at: string };
 
+function storedScopeAxes(row: AxesRow | undefined): ScopeAxes | null {
+  if (!row) return null;
+  const config = row.config as { x_axis?: string; y_axis?: string };
+  if (!config.x_axis || !config.y_axis) return null;
+  return {
+    x_axis: config.x_axis,
+    y_axis: config.y_axis,
+    updated_by: row.updated_by,
+    updated_at: row.updated_at,
+  };
+}
+
+/** Capture the catalog and every saved scope in one workspace-scoped read.
+ * Inheritance must not depend on the first setting requested by a caller. */
+export async function loadAxesConfiguration(): Promise<{ catalog: StoredAxes; scopes: Record<string, ScopeAxes> }> {
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.priorityAxes);
+  const scopes = Object.fromEntries(rows.flatMap(row => {
+    if (!row.id.startsWith("scope:")) return [];
+    const pair = storedScopeAxes(row);
+    return pair ? [[row.id.slice("scope:".length), pair]] : [];
+  }));
+  return { catalog: storedAxes(rows.find(row => row.id === ROW_ID)), scopes };
+}
+
 function scopeRowId(scope: string): string {
   return `scope:${scope.trim().toLowerCase()}`;
 }
@@ -219,16 +249,7 @@ export async function loadScopeAxes(scope: string): Promise<ScopeAxes | null> {
     .from(t.priorityAxes)
     .where(eq(t.priorityAxes.id, scopeRowId(scope)))
     .limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const config = row.config as { x_axis?: string; y_axis?: string };
-  if (!config.x_axis || !config.y_axis) return null;
-  return {
-    x_axis: config.x_axis,
-    y_axis: config.y_axis,
-    updated_by: row.updated_by,
-    updated_at: row.updated_at,
-  };
+  return storedScopeAxes(rows[0]);
 }
 
 export async function saveScopeAxes(args: {
