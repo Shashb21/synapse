@@ -60,7 +60,7 @@ import { registerAccuracyStack } from "@/accuracy";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks, readParseBlocks, persistDroppedUnits } from "@/accuracy/store/parse-store";
-import { listActiveSourceClaims, getClaim, claimMetadata } from "@/accuracy/store/claim-store";
+import { listActiveSourceClaims, getClaim, claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
 import { updateClaim } from "@/accuracy/store/claim-edit";
 import { accuracyTransactionActive } from "@/accuracy/store/db";
 import { accuracyRouteConfig, setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
@@ -554,6 +554,53 @@ it("derives all lifecycle mirrors after restoring a nested human lifecycle lock"
     const [saved] = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
     expect(saved).toMatchObject({ id: original.id, status: "planned" });
     expect(claimMetadata(saved)).toMatchObject({ tactic_status: "planned", structured: { lifecycle: { state: "known", value: "planned" } } });
+    expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
+  });
+});
+
+it("preserves a top-level human lifecycle edit without structured evidence on same-identity extraction", async () => {
+  const scope = await fixture(["Registry ongoing."]);
+  const span = { source_file_id: scope.source_file_id, block_id: `${scope.source_file_id}-B0`, quote: "Registry ongoing." };
+  await providerFixture(async request => request.system === INVENTORY_PROPOSER_SYSTEM ? JSON.stringify({ tactics: [{ name: "Registry R", external_id: "NCT00000001",
+    type: "registry", status: "ongoing", evidence_question: "Survival?", provenance: [span] }] }) : answer(request), async () => {
+    expect((await post({ ...scope, kinds: ["inventory"] })).status).toBe(200);
+    const [original] = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
+    expect(claimMetadata(original).structured).toMatchObject({ lifecycle: { state: "known", value: "ongoing" } });
+    await updateClaim({ workspace_id: scope.workspace_id, claim_id: original.id, patch: { tactic_status: "planned" },
+      rationale: "Human planned lifecycle", actor: { name: "Ada", function: "medical_affairs" } });
+    const edited = await getClaim(scope.workspace_id, original.id);
+    expect(edited).toMatchObject({ status: "planned" });
+    expect(claimMetadata(edited!)).toMatchObject({ tactic_status: "planned", human_locked: expect.arrayContaining(["tactic_status"]),
+      structured: { lifecycle: { state: "unknown", value: null, reason: "human_edit_without_field_evidence", provenance: [] } } });
+    const rerun = await post({ ...scope, kinds: ["inventory"] });
+    expect(rerun.status).toBe(200);
+    expect((await rerun.json()).claim_ids).toEqual([original.id]);
+    const [saved] = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
+    expect(saved).toMatchObject({ id: original.id, status: "planned" });
+    expect(claimMetadata(saved)).toMatchObject({ tactic_status: "planned", human_locked: expect.arrayContaining(["tactic_status"]),
+      structured: { lifecycle: { state: "unknown", value: null, reason: "human_edit_without_field_evidence", provenance: [] } } });
+    expect(claimMetadata(saved).extraction_suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_status: "ongoing",
+      structured: expect.objectContaining({ lifecycle: expect.objectContaining({ state: "known", value: "ongoing" }) }) })]));
+    expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
+  });
+});
+
+it("retains a legacy human-locked lifecycle while missing structured evidence stays explicit", async () => {
+  const scope = await fixture(["Registry ongoing."]);
+  const span = { source_file_id: scope.source_file_id, block_id: `${scope.source_file_id}-B0`, quote: "Registry ongoing." };
+  // Trusted insertion represents a persisted pre-structured-fields record.
+  const original = await insertClaim({ ...scope, claim_type: "tactic", statement: "Registry R", status: "planned",
+    metadata: { external_id: "NCT00000001", type: "registry", tactic_status: "planned", human_locked: ["tactic_status"], provenance: [span] } });
+  await providerFixture(async request => request.system === INVENTORY_PROPOSER_SYSTEM ? JSON.stringify({ tactics: [{ name: "Registry R", external_id: "NCT00000001",
+    type: "registry", status: "ongoing", evidence_question: "Survival?", provenance: [span] }] }) : answer(request), async () => {
+    const response = await post({ ...scope, kinds: ["inventory"] });
+    expect(response.status).toBe(200);
+    expect((await response.json()).claim_ids).toEqual([original.id]);
+    const [saved] = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
+    expect(saved).toMatchObject({ id: original.id, status: "planned" });
+    expect(claimMetadata(saved)).toMatchObject({ tactic_status: "planned", human_locked: ["tactic_status"],
+      structured: { lifecycle: { state: "unknown", value: null, reason: "legacy_missing", provenance: [] } } });
+    expect(claimMetadata(saved).extraction_suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_status: "ongoing" })]));
     expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
   });
 });
