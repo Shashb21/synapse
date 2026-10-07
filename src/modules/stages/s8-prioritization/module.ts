@@ -10,7 +10,7 @@ import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { eligibilityGapStatus, isLiveGap } from "@/lib/iegp/engine";
+import { eligibilityGapStatus, isLiveGap, requireOpenGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
 import { loadState, lockPriority } from "@/lib/iegp/store";
@@ -644,16 +644,6 @@ async function currentPlacement(gapId: string): Promise<PlacementRow | undefined
   return rows[0];
 }
 
-/** A hand-placed gap must be a live Open gap, the same set S8 places. */
-async function requireOpenGap(gapId: string) {
-  const state = await loadState();
-  const gap = state.gaps.find((row) => row.id === gapId);
-  if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${gapId}.`);
-  if (eligibilityGapStatus(gap, state) !== "validated_open") {
-    throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
-  }
-}
-
 /**
  * A row for a gap no model has placed. There is no suggestion yet, so the
  * suggested band mirrors the person's band and the suggested rationale stays
@@ -723,7 +713,7 @@ export async function validatePlacement(args: {
   // Rationale first: a band must not move before the reason for it is known good.
   const rationale = requireRationale(args.rationale);
   const current = await currentPlacement(args.gap_id);
-  await requireOpenGap(args.gap_id);
+  requireOpenGap(args.gap_id, await loadState());
   let row: PlacementRow;
   if (!current) {
     row = await insertManualPlacement({
@@ -804,7 +794,7 @@ export async function setPlacement(args: {
   }
 
   const current = await currentPlacement(args.gap_id);
-  await requireOpenGap(args.gap_id);
+  requireOpenGap(args.gap_id, await loadState());
   const axis_scores = { ...((current?.axis_scores as Record<string, number> | undefined) ?? {}), ...typed };
   const quadrant =
     xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
@@ -890,7 +880,7 @@ export async function movePlacement(args: {
     throw new Error("A matrix position needs two numbers.");
   }
   const current = await currentPlacement(args.gap_id);
-  await requireOpenGap(args.gap_id);
+  requireOpenGap(args.gap_id, await loadState());
   const axis_scores = {
     ...((current?.axis_scores as Record<string, number> | undefined) ?? {}),
     [xAxis.id]: scoreFromFavourability(xAxis, args.x),

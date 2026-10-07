@@ -5,7 +5,7 @@ import { AxisChooser, PrioritizeMatrix, type PrioritizeGap } from "@/components/
 import type { Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
 import {
-  displayedGapStatus,
+  eligibilityGapStatus,
   gapInSetting,
   isLiveGap,
   mappedTactics,
@@ -52,7 +52,7 @@ export async function PrioritizePlace({
   const placementByGap = new Map(placements.map((row) => [row.gap_id, row]));
 
   const openGaps = state.gaps.filter(
-    (gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open",
+    (gap) => isLiveGap(gap) && eligibilityGapStatus(gap, state) === "validated_open",
   );
   const validatedIn = (gaps: typeof openGaps) =>
     gaps.filter((gap) => placementByGap.get(gap.id)?.validated).length;

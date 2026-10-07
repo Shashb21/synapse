@@ -171,6 +171,15 @@ export function eligibilityGapStatus(gap: Pick<EvidenceGap, "id" | "status" | "h
   return gap.status_override?.status ?? computed;
 }
 
+/** Both S8 placements and the legacy residual board require a live current Open gap. */
+export function requireOpenGap(gapId: string, state: IegpState) {
+  const gap = state.gaps.find((row) => row.id === gapId);
+  if (!gap || !isLiveGap(gap)) throw new Error(`Unknown gap ${gapId}.`);
+  if (eligibilityGapStatus(gap, state) !== "validated_open") {
+    throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
+  }
+}
+
 /** Engine computes Open / Partial / Addressed. Human validation is a separate gate. */
 export function engineMaySetStatus(status: GapStatus): boolean {
   return (

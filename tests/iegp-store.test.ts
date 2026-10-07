@@ -84,15 +84,19 @@ describe("IEGP postgres store", () => {
   });
 
   it("lets a human lock priority without an engine suggestion or residual lock", async () => {
-    await persistState(buildSeed());
+    // Only current Open gaps can be prioritized; RES-OS belongs to a Partial.
+    const seed = buildSeed();
+    seed.residuals.find((row) => row.id === "RES-CAREGIVER")!.lock.locked = false;
+    seed.priorities = seed.priorities.filter((row) => row.residual_id !== "RES-CAREGIVER");
+    await persistState(seed);
     await lockPriority({
-      residual_id: "RES-OS",
+      residual_id: "RES-CAREGIVER",
       band: "medium",
       actor_name: "S. Iyer",
       actor_function: "evidence_lead",
     });
     const state = await loadState();
-    const pri = state.priorities.find((p) => p.residual_id === "RES-OS");
+    const pri = state.priorities.find((p) => p.residual_id === "RES-CAREGIVER");
     expect(pri?.band).toBe("medium");
     expect(pri?.suggested_score).toBe(0);
     expect(pri?.reasons.join(" ")).toMatch(/does not assign priority/i);

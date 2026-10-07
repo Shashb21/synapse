@@ -94,7 +94,7 @@ export function buildMappingTableView(
   options: { ai?: boolean } = {},
 ): MappingTableViewRow[] {
   const ai = options.ai !== false;
-  const gaps = state.gaps.filter((gap) => gapEligibleForMapping(gap.status) && !gap.retired);
+  const gaps = state.gaps.filter((gap) => gapEligibleForMapping(displayedGapStatus(gap, state)) && !gap.retired);
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
@@ -102,7 +102,7 @@ export function buildMappingTableView(
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);
-    const gap_status = GAP_TO_MAPPING_STATUS[displayedGapStatus(gap)] ?? "open";
+    const gap_status = GAP_TO_MAPPING_STATUS[displayedGapStatus(gap, state)] ?? "open";
     if (human) {
       // The person's row wins over the latest S4 run.
       return {

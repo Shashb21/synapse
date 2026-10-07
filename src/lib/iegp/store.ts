@@ -55,6 +55,7 @@ import {
   gapsReadyForPrioritize,
   isLiveGap,
   persistedResidualGaps,
+  requireOpenGap,
   requireOverrideReason,
   splitSourceIntoBlocks,
   tacticEligibleForMapping,
@@ -1537,6 +1538,7 @@ export async function lockPriority(args: {
   const state = await loadState();
   const residual = state.residuals.find((r) => r.id === args.residual_id);
   if (!residual) throw new Error("Residual not found");
+  requireOpenGap(residual.gap_id, state);
   const existing = state.priorities.find((p) => p.residual_id === args.residual_id);
   const row = {
     residual_id: args.residual_id,
