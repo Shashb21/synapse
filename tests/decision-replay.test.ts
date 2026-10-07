@@ -17,3 +17,37 @@ describe('decision replay scoring', () => {
         expect(scoreDecisionReplay({ ...example('edited'), kind: 'residual_split' }, {}).reason).toBeTruthy();
     });
 });
+
+const newFields = { proposal_kind: 'new', comparative_rationale: 'Existing studies lack these data; the new registry costs more but can recruit.', name: 'Registry', type: 'rwe_study', evidence_question: 'Compare outcomes', design: { population: 'Adults', comparator: 'SOC', outcomes: 'Survival', data_source: 'Registry', study_design: 'Cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual cycle' } };
+const newExample = { kind: 's9_proposal', subject_id: 'idea-new', outcome: 'accepted', ai_output: newFields } as unknown as DecisionExample;
+const replayNew = (fields: Record<string, unknown>) => ({ kind: 's9_proposal', subject_id: 'idea-new', decision: 'accept', fields });
+describe('new S9 comparison replay', () => {
+    it('scores an exact comparison and penalizes changed or absent comparison', () => {
+        expect(scoreDecisionReplay(newExample, replayNew(newFields)).metrics.every(m => m.value === 1)).toBe(true);
+        for (const comparison of ['Contradicts the human comparison', undefined]) {
+            const score = scoreDecisionReplay(newExample, replayNew({ ...newFields, comparative_rationale: comparison }));
+            expect(score.reason).toBeNull();
+            expect(score.metrics.find(m => m.name === 'comparative_rationale_literal_agreement')?.value).toBe(0);
+        }
+    });
+    it.each(['new', undefined])('excludes missing original comparison with current or legacy kind %s', kind => {
+        const incomplete = { ...newFields, proposal_kind: kind, comparative_rationale: undefined };
+        for (const outcome of ['accepted', 'edited'] as const) {
+            const score = scoreDecisionReplay({ ...newExample, outcome, ai_output: incomplete, final: newFields }, replayNew(newFields));
+            expect(score.metrics).toEqual([]);
+            expect(score.reason).toMatch(/original.*comparison/i);
+        }
+    });
+    it('excludes an incomplete edited target even with a complete original comparison', () => {
+        const score = scoreDecisionReplay({ ...newExample, outcome: 'edited', final: { ...newFields, comparative_rationale: '' } }, replayNew(newFields));
+        expect(score.metrics).toEqual([]);
+        expect(score.reason).toMatch(/target.*comparison/i);
+    });
+    it('defaults legacy absent kind to new only when the saved comparison is complete', () => {
+        const legacy = { ...newFields, proposal_kind: undefined };
+        const score = scoreDecisionReplay({ ...newExample, ai_output: legacy }, replayNew(legacy));
+        expect(score.reason).toBeNull();
+        expect(score.metrics).toHaveLength(14);
+        expect(score.metrics.every(m => m.value === 1)).toBe(true);
+    });
+});

@@ -81,8 +81,10 @@ export function proposalFields(defaults: ProposalFieldDefaults = {}): ActionFiel
       defaultValue: design.timing_rationale ?? "",
     },
   ];
+  if (defaults.proposal_kind === "expansion" || defaults.comparative_rationale?.trim()) {
+    fields.push({name:"comparative_rationale",label:"Comparison of expansion and new tactic",type:"textarea",defaultValue:defaults.comparative_rationale ?? "",required:true});
+  }
   if (defaults.proposal_kind === "expansion" && defaults.expansion_scope) {
-    fields.push({name:"comparative_rationale",label:"Why expand rather than create a new tactic?",type:"textarea",defaultValue:defaults.comparative_rationale ?? "",required:true});
     for (const [key,value] of Object.entries(defaults.expansion_scope)) {
       const label = `Added scope: ${key.replaceAll("_", " ")}`;
       fields.push(typeof value === "boolean" ? {name:`expansion_${key}`,label,type:"select",defaultValue:String(value),options:[{value:"true",label:"Yes"},{value:"false",label:"No"}]} : {name:`expansion_${key}`,label,defaultValue:value ?? "",type:"textarea"});

@@ -82,11 +82,11 @@ export function captureGapSuggestionDecision(args: Origin & {
 
 /** Accept, edit-and-accept or reject on an S9 idea the model wrote. */
 export function captureProposalDecision(args: Origin & {
-  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string };
+  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string };
   gap: GapText | null;
   decision: "accept" | "reject";
   /** The idea as accepted, when the person changed it first. */
-  final?: { name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string } | null;
+  final?: { name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string } | null;
   rationale: string;
   workspace_id?: string;
 }) {
@@ -109,7 +109,9 @@ export function captureProposalDecision(args: Origin & {
       subject_id: proposal.id,
       ai_input: { gap: args.gap, slot_id: proposal.slot_id ?? null },
       ai_output: {
-        ...(proposal.proposal_kind === "expansion" ? {proposal_kind: proposal.proposal_kind, target_tactic_id:proposal.target_tactic_id,expansion_scope:proposal.expansion_scope,comparative_rationale:proposal.comparative_rationale} : {}),
+        proposal_kind: proposal.proposal_kind ?? "new",
+        ...(proposal.comparative_rationale !== undefined ? { comparative_rationale: proposal.comparative_rationale } : {}),
+        ...(proposal.proposal_kind === "expansion" ? { target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope } : {}),
         name: proposal.name,
         type: proposal.type,
         evidence_question: proposal.evidence_question,

@@ -85,9 +85,9 @@ export function ProposalCard({
           <dl className="grid gap-2 sm:grid-cols-2">
             {Object.entries(proposal.expansion_scope).filter(([,value]) => value !== null && value !== "").map(([key,value]) => <DesignField key={key} label={`Added scope: ${key.replaceAll("_", " ")}`} value={typeof value === "boolean" ? value ? "Yes" : "No" : value ?? ""} />)}
           </dl>
-          <p className="text-[12px]">Comparison: {proposal.comparative_rationale}</p>
         </div>
       ) : null}
+      {proposal.comparative_rationale ? <p className="text-[12px]">Comparison: {proposal.comparative_rationale}</p> : null}
       <dl className="grid gap-2 border-t border-border pt-2 sm:grid-cols-2">
         <DesignField label="Population" value={proposal.design.population} />
         <DesignField label="Comparator" value={proposal.design.comparator} />

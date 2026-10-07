@@ -236,7 +236,7 @@ it('preserves future S9 pre-generation slots through human edit and full isolate
         const output = await executeFrozenStage({ module: ideationModule as SynapseModule<unknown, unknown>, snapshot: frozen, route: { ...route, stage: 'S9' }, revision: { id: 'candidate', instruction: 'Edited design' }, actor, excluded_ids: [decision.id] });
         const score = scoreDecisionReplay(decision, projectReplayDecision(decision, output));
         expect(score.reason).toBeNull();
-        expect(score.metrics).toHaveLength(13);
+        expect(score.metrics).toHaveLength(14);
         expect(score.metrics.every(m => m.value === 1)).toBe(true);
         expect(await liveContents()).toEqual(before);
         const o = output as {

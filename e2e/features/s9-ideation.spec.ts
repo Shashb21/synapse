@@ -149,6 +149,26 @@ test.describe("S9 tactics ideation", () => {
     await expect(page.getByText(/accepted/i).first()).toBeVisible();
   });
 
+  test("reviews and edits a new proposal comparison", async ({ page, request }) => {
+    const result = await runStage<IdeationOutput>(request, "S9", { per_gap: 1 });
+    const proposal = result.output.proposals[0];
+    expect(proposal).toBeTruthy();
+    await page.goto("/ideation");
+    const card = page.locator("article").filter({ has: page.getByRole("heading", { name: proposal.name, exact: true }) }).last();
+    await expect(card).toContainText("New tactic");
+    await expect(card).toContainText("Comparison: Test stub: no model comparison.");
+    await card.getByRole("button", { name: `Edit ${proposal.name}`, exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const comparison = "A new registry adds unavailable outcomes; recruitment is feasible but costs more than secondary analysis.";
+    await dialog.getByRole("textbox", { name: "Comparison of expansion and new tactic", exact: true }).fill(comparison);
+    await dialog.getByLabel(/rationale.*required/i).last().fill("Clarified the alternative and feasibility");
+    await dialog.getByRole("button", { name: "Save edit", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(card).toContainText(`Comparison: ${comparison}`);
+    await page.reload();
+    await expect(card).toContainText(`Comparison: ${comparison}`);
+  });
+
   test("a rejection is recorded with its reason and creates no tactic", async ({ request }) => {
     const state = await planState(request);
     const pending = state.proposals.find((proposal) => proposal.status === "proposed");

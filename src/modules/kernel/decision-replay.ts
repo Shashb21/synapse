@@ -108,12 +108,16 @@ export function scoreDecisionReplay(example: DecisionExample, output: unknown): 
         if (example.kind === 's9_proposal') {
             const kind = target.proposal_kind ?? 'new';
             if (!['new', 'expansion'].includes(String(kind))) return excluded('Unknown proposal kind.');
+            // Missing old comparison evidence is excluded, never filled from final values.
+            if (typeof example.ai_output.comparative_rationale !== 'string' || !example.ai_output.comparative_rationale.trim())
+                return excluded(example.ai_output.proposal_kind == null ? 'Legacy original proposal lacks a saved comparison; replay evidence is ineligible.' : 'Original proposal lacks required comparison.');
+            if (typeof target.comparative_rationale !== 'string' || !target.comparative_rationale.trim()) return excluded('Proposal target lacks required comparison.');
             metric('proposal_kind_agreement', kind === (actual.proposal_kind ?? 'new'));
+            metric('comparative_rationale_literal_agreement', evidenceHash(target.comparative_rationale) === evidenceHash(actual.comparative_rationale ?? null));
             if (kind === 'expansion') {
                 const scope = expansionScopeSchema.safeParse(target.expansion_scope);
-                if (!scope.success || typeof target.target_tactic_id !== 'string' || !target.target_tactic_id || typeof target.comparative_rationale !== 'string' || !target.comparative_rationale.trim()) return excluded('Expansion target lacks complete target, scope or comparison.');
+                if (!scope.success || typeof target.target_tactic_id !== 'string' || !target.target_tactic_id) return excluded('Expansion target lacks complete target, scope or comparison.');
                 metric('target_tactic_id_agreement', target.target_tactic_id === actual.target_tactic_id);
-                metric('comparative_rationale_literal_agreement', evidenceHash(target.comparative_rationale) === evidenceHash(actual.comparative_rationale ?? null));
                 const actualScope = record(actual.expansion_scope);
                 for (const [key,value] of Object.entries(scope.data)) metric(`expansion_${key}_literal_agreement`, evidenceHash(value) === evidenceHash(actualScope[key] ?? null));
             }

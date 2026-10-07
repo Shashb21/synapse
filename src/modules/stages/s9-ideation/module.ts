@@ -880,7 +880,7 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           evidence_question: proposal.evidence_question,
           design: { ...proposal.design, rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
             slot_id: proposal_slots?.[proposal.gap_id]?.includes(proposal.id) ? proposal.id : null,
-            original_ai: { ...(proposal.proposal_kind === "expansion" ? {proposal_kind: proposal.proposal_kind, target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope, comparative_rationale: proposal.comparative_rationale} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
+            original_ai: { proposal_kind: proposal.proposal_kind, comparative_rationale: proposal.comparative_rationale, ...(proposal.proposal_kind === "expansion" ? {target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope} : {}), name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
           },
           status: "proposed",
           critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
@@ -1029,7 +1029,7 @@ export type StoredDesign = Omit<Design, "duration_months" | "readout_lag_months"
  */
 type DesignMeta = {
   slot_id?: string | null;
-  original_ai?: { proposal_kind?: "expansion"; target_tactic_id?: string; expansion_scope?: ExpansionScope; comparative_rationale?: string; name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
+  original_ai?: { proposal_kind: "new" | "expansion"; target_tactic_id?: string; expansion_scope?: ExpansionScope; comparative_rationale: string; name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
   rank?: number | null;
   run_id?: string | null;
   origin?: "ai" | "human";
@@ -1052,8 +1052,12 @@ function originalProposal(raw: unknown): DesignMeta["original_ai"] {
   const row = raw as Record<string, unknown>;
   const design = designSchema.safeParse(row.design);
   if (!["name", "type", "rationale", "evidence_question"].every(key => typeof row[key] === "string") || !design.success) return null;
+  // Legacy absent kind is unambiguously new, but a missing historical comparison
+  // cannot be recovered from the mutable source row and is ineligible for learning.
+  const kind = row.proposal_kind ?? "new";
+  if (!["new", "expansion"].includes(String(kind)) || !text(row.comparative_rationale)) return null;
   if (row.proposal_kind === "expansion" && (!expansionScopeSchema.safeParse(row.expansion_scope).success || !text(row.target_tactic_id))) return null;
-  return { ...(row.proposal_kind === "expansion" ? {proposal_kind: "expansion" as const, target_tactic_id: text(row.target_tactic_id), expansion_scope: expansionScopeSchema.parse(row.expansion_scope), comparative_rationale: text(row.comparative_rationale)} : {}), name: row.name as string, type: row.type as string, rationale: row.rationale as string, evidence_question: row.evidence_question as string, design: design.data };
+  return { proposal_kind: kind as "new" | "expansion", comparative_rationale: text(row.comparative_rationale), ...(kind === "expansion" ? {target_tactic_id: text(row.target_tactic_id), expansion_scope: expansionScopeSchema.parse(row.expansion_scope)} : {}), name: row.name as string, type: row.type as string, rationale: row.rationale as string, evidence_question: row.evidence_question as string, design: design.data };
 }
 
 function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
@@ -1384,7 +1388,7 @@ export async function decideIdeationProposal(args: {
         if (pending.status !== "proposed")
             throw new Error(`${args.id} was already ${pending.status}.`);
         const originalMeta = splitDesign(pending.design).meta;
-        const original = originalMeta.original_ai ?? (!originalMeta.edited_at && !originalMeta.edited_by && !Object.keys(args.fields ?? {}).length ? { name: pending.name, type: pending.type, rationale: pending.rationale, evidence_question: pending.evidence_question, design: splitDesign(pending.design).design } : null);
+        const original = originalMeta.original_ai;
         const proposal = args.decision === "accept" && args.fields ? await editPending(pending, args.fields, rationale, args.actor, args.workspace_id, tx) : pending;
         let tactic_id: string | null = null, expansion_id: string | null = null;
         let state = await readState(tx);
@@ -1421,7 +1425,7 @@ export async function decideIdeationProposal(args: {
     if (result.originalMeta.origin !== "human" && !result.original)
         console.warn("[learning] S9 decision omitted: immutable original AI baseline unavailable", args.id);
     if (result.originalMeta.origin !== "human" && result.original)
-        await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, ...(result.proposal.proposal_kind === "expansion" ? { proposal_kind: "expansion" as const, target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope, comparative_rationale: result.proposal.comparative_rationale } : {}) } : null, rationale, workspace_id: args.workspace_id });
+        await captureProposalDecision({ proposal: { id: result.proposal.id, ...result.original, slot_id: result.originalMeta.slot_id }, capture_key: result.edit.id, run_id: result.originalMeta.run_id, actor: args.actor, gap: result.gap ? { name: result.gap.name, statement: result.gap.statement } : null, decision: args.decision, final: args.decision === "accept" ? { name: result.proposal.name, type: result.proposal.type, evidence_question: result.proposal.evidence_question, rationale: result.proposal.rationale, design: splitDesign(result.proposal.design).design, proposal_kind: result.proposal.proposal_kind as "new" | "expansion", comparative_rationale: result.proposal.comparative_rationale, ...(result.proposal.proposal_kind === "expansion" ? { target_tactic_id: result.proposal.target_tactic_id, expansion_scope: result.proposal.expansion_scope } : {}) } : null, rationale, workspace_id: args.workspace_id });
     return { tactic_id: result.tactic_id, expansion_id: result.expansion_id };
 }
 
