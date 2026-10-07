@@ -767,25 +767,28 @@ export async function validatePlacement(args: {
     actor: args.actor,
   });
   await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
-  // Validating a band the model suggested is a learning example (KAN-78); a band
-  // placed purely by hand has no AI output to compare against.
+  await captureValidatedBand(current, args.band, rationale, args.actor, decisionEdit.id, args.workspace_id);
+  return toRecord(row);
+}
+
+/** Both validation surfaces observe the same proven model origin and saved event. */
+async function captureValidatedBand(current: PlacementRow | null | undefined, band: Band, rationale: string, actor: Actor, eventId: string, workspace_id?: string) {
   if (current?.suggested_band && current.run_id) {
-    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === args.gap_id);
+    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === current.gap_id);
     if (gap) {
       await captureBandDecision({
         gap: { id: gap.id, name: gap.name, statement: gap.statement },
         run_id: current.run_id,
-        capture_key: decisionEdit.id,
-        actor: args.actor,
+        capture_key: eventId,
+        actor,
         suggested_band: current.suggested_band,
         suggested_rationale: current.suggested_rationale,
-        band: args.band,
+        band,
         rationale,
-        workspace_id: args.workspace_id,
+        workspace_id,
       });
     }
   }
-  return toRecord(row);
 }
 
 /**
@@ -870,7 +873,7 @@ export async function setPlacement(args: {
     Object.entries(scores)
       .map(([id, value]) => `${id}=${value}`)
       .join(", ");
-  await recordEdit({
+  const decisionEdit = await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S8",
     entity_type: "gap",
@@ -883,6 +886,7 @@ export async function setPlacement(args: {
     actor: args.actor,
   });
   if (validated) await mirrorLegacyBand(args.gap_id, band, rationale, args.actor);
+  if (args.validate) await captureValidatedBand(current, band, rationale, args.actor, decisionEdit.id, args.workspace_id);
   return toRecord(row);
 }
 

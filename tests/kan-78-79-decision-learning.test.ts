@@ -356,3 +356,82 @@ describe("distinct human decision events", () => {
     });
   });
 });
+
+
+describe("review round one real decision paths", () => {
+  it.each(["Reviewers keep ('the narrower population') separate.", "Reviewers say:'keep the population separate'.", "Reviewers keep ('a patient's population') separate."])("withholds punctuation-adjacent quotation: %s", (text) => {
+    expect(scrubLesson(text, [], [])).toBeNull();
+  });
+  it("allows ordinary contractions and possessives", () => {
+    expect(scrubLesson("Reviewers don't merge a patient's evidence needs.", [], [])).toBe("Reviewers don't merge a patient's evidence needs.");
+  });
+  it("captures combined S8 validation using the original model band", async () => {
+    const { createGap } = await import("@/lib/iegp/store");
+    const { setPlacement } = await import("@/modules/stages/s8-prioritization/module");
+    const { db } = await import("@/modules/kernel/db");
+    const ws = await createWorkspace({ name: `s8-combined-${unique()}`, owner: "test" });
+    const actor = { name: "Reviewer", function: "medical_affairs" as const };
+    await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
+      const gap = await createGap({ statement: "Unanswered population question", actor_name: actor.name, actor_function: actor.function });
+      await setPlacement({ gap_id: gap, band: "high", actor, rationale: "Initial placement" });
+      const recorder = new RunRecorder({ workspace_id: ws.id, stage: "S8", module_id: "s8.test", module_version: "test", actor, input: {} });
+      await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
+      await db().execute(sql`update priority_placements set run_id = ${recorder.id}, suggested_band = 'high' where gap_id = ${gap}`);
+      const { POST } = await import("@/app/api/plan/route");
+      for (const band of ["high", "low"]) {
+        const response = await POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "set_placement", gap_id: gap, band, validate: true, actor_name: actor.name, actor_function: actor.function, rationale: "Review model band" }) }));
+        expect(response.status).toBe(200);
+      }
+      const rows = await sharedDb().execute(sql`select outcome, run_id, actor, capture_key from decision_examples where workspace_id = ${ws.id}`);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => r.outcome).sort()).toEqual(["accepted", "edited"]);
+      expect(rows.every((r) => r.run_id === recorder.id && r.capture_key && (r.actor as typeof actor).name === actor.name)).toBe(true);
+    });
+  });
+  it.each([false, true])("compares S9 terminal acceptance against immutable AI values after saved edit=%s", async (edited) => {
+    const { createGap } = await import("@/lib/iegp/store");
+    const { editIdeationProposal, decideIdeationProposal } = await import("@/modules/stages/s9-ideation/module");
+    const { db, ensurePlatformSchema } = await import("@/modules/kernel/db");
+    const { ideationProposals } = await import("@/modules/kernel/schema");
+    const ws = await createWorkspace({ name: `s9-baseline-${unique()}`, owner: "test" });
+    const actor = { name: "Reviewer", function: "medical_affairs" as const };
+    await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
+      await ensurePlatformSchema();
+      const gap = await createGap({ statement: "Unanswered evidence question", actor_name: actor.name, actor_function: actor.function });
+      const recorder = new RunRecorder({ workspace_id: ws.id, stage: "S9", module_id: "s9.test", module_version: "test", actor, input: {} });
+      await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
+      const id = `IDEA-${unique()}`;
+      const design = { population: "Original population", comparator: "Care", outcomes: "Survival", data_source: "Registry", study_design: "Cohort", duration_months: 12, readout_lag_months: 2, timing_rationale: "Follow-up" };
+      const original = { name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "AI question", design };
+      await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original }, created_at: new Date().toISOString() });
+      if (edited) await editIdeationProposal({ id, fields: { name: "Human idea", population: "Human population" }, rationale: "Narrow population", actor });
+      await decideIdeationProposal({ id, decision: "accept", rationale: "Adopt this idea", actor });
+      const rows = await sharedDb().execute(sql`select ai_output, final, outcome, run_id, actor from decision_examples where workspace_id = ${ws.id}`);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].ai_output).toEqual(original);
+      expect(rows[0].outcome).toBe(edited ? "edited" : "accepted");
+      expect(rows[0].run_id).toBe(recorder.id);
+      expect(rows[0].actor).toEqual(actor);
+      if (edited) expect(rows[0].final).toMatchObject({ name: "Human idea", design: { population: "Human population" } });
+      else expect(rows[0].final).toBeNull();
+    });
+  });
+  it("withholds edited legacy S9 proposals whose original AI baseline is unavailable", async () => {
+    const { decideIdeationProposal } = await import("@/modules/stages/s9-ideation/module");
+    const { db, ensurePlatformSchema } = await import("@/modules/kernel/db");
+    const { ideationProposals } = await import("@/modules/kernel/schema");
+    const ws = await createWorkspace({ name: `s9-legacy-${unique()}`, owner: "test" });
+    const actor = { name: "Reviewer", function: "medical_affairs" as const };
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
+        await ensurePlatformSchema(); const id = `IDEA-${unique()}`;
+        await db().insert(ideationProposals).values({ id, gap_id: "legacy-gap", name: "Previously edited human values", type: "rwe_study", rationale: "Edited rationale", evidence_question: "Edited question", design: { origin: "ai", edited_by: actor.name, edited_at: new Date().toISOString() }, created_at: new Date().toISOString() });
+        await decideIdeationProposal({ id, decision: "reject", rationale: "Reject legacy idea", actor });
+        expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = ${ws.id}`)).toHaveLength(0);
+        expect(warning).toHaveBeenCalledWith("[learning] S9 decision omitted: immutable original AI baseline unavailable", id);
+      });
+    } finally { warning.mockRestore(); }
+  });
+
+});

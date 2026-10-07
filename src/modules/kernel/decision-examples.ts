@@ -286,7 +286,7 @@ export function scrubLesson(lesson: string, rawTexts: string[], entityNames: str
   if (!text || text.length > 400) return null;
   if (/\d/.test(text)) return null;
   if (/["“”«»„‘’]/.test(text)) return null;
-  if (/(?:^|\s)'[^']+'(?:$|[\s.,;:])/.test(text)) return null;
+  if (/(?<![\p{L}\p{N}])'.*?'(?![\p{L}\p{N}])/u.test(text)) return null;
   if (INN_STEM.test(text)) return null;
   const { words, phrases } = riskyTerms(rawTexts, entityNames);
   const lower = text.toLowerCase();

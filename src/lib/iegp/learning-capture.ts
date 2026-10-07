@@ -177,8 +177,8 @@ export function captureBandDecision(args: Origin & {
 /** Capture a residual decision only when its originating AI run can be verified. */
 export function captureResidualDecision(args: Origin & {
   parent_gap_id: string;
-  proposed: string;
-  final: string | null;
+  proposed: string | Record<string, unknown>;
+  final: string | Record<string, unknown> | null;
   decision: "accept" | "edit" | "reject";
   rationale: string;
   workspace_id?: string;
@@ -186,8 +186,8 @@ export function captureResidualDecision(args: Origin & {
   return safely(() => recordDecisionExample({
     ...origin(args), require_originating_run: true, workspace_id: args.workspace_id, stage: "S6", kind: "residual_split",
     subject_id: args.parent_gap_id, ai_input: { parent_gap_id: args.parent_gap_id },
-    ai_output: { statement: args.proposed },
-    outcome: args.decision === "reject" ? "rejected" : args.decision === "edit" || !same(args.proposed, args.final) ? "edited" : "accepted",
-    final: args.final == null ? null : { statement: args.final }, rationale: args.rationale,
+    ai_output: typeof args.proposed === "string" ? { statement: args.proposed } : args.proposed,
+    outcome: args.decision === "reject" ? "rejected" : args.decision === "edit" || (typeof args.proposed === "string" && !same(args.proposed, typeof args.final === "string" ? args.final : null)) ? "edited" : "accepted",
+    final: args.final == null ? null : typeof args.final === "string" ? { statement: args.final } : args.final, rationale: args.rationale,
   }));
 }

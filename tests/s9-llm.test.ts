@@ -320,4 +320,31 @@ describe("S9 on the model path", () => {
     expect(calls.filter((call) => call.purpose === "ideation-critic").length).toBe(4);
     expect(output.proposals).toHaveLength(2);
   });
+  it.each(["unchanged", "saved-edit", "inline-edit"])("retains creation-time AI baseline through the real S9 API flow: %s", async (flow) => {
+    const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
+    const { db, sharedDb } = await import("@/modules/kernel/db");
+    const { ideationProposals } = await import("@/modules/kernel/schema");
+    const { POST } = await import("@/app/api/plan/route");
+    const { sql } = await import("drizzle-orm");
+    const recorder = new RunRecorder({ workspace_id: "default", stage: "S9", module_id: ideationModule.manifest.id, module_version: ideationModule.manifest.version, actor: ACTOR, input: { gap_ids: ids } });
+    await openRun(recorder);
+    const { ctx } = context((call) => call.purpose === "ideation-proposer" ? { tactics: ids.map(id => tactic(id, `Original ${id}`)) } : call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call, 1));
+    ctx.run = recorder;
+    const result = await ideationModule.run({ ...input(), dry_run: false }, ctx);
+    await closeRun({ recorder, status: "ok", output: result.output, route: ctx.route });
+    const rows = await db().select().from(ideationProposals);
+    const row = rows.find(row => (row.design as { run_id?: string }).run_id === recorder.id)!;
+    const original = { name: row.name, type: row.type, evidence_question: row.evidence_question, rationale: row.rationale, design: (row.design as { original_ai: { design: unknown } }).original_ai.design };
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    const post = (body: Record<string, unknown>) => POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor_name: ACTOR.name, actor_function: ACTOR.function, id: row.id, rationale: "Review rationale", ...body }) }));
+    if (flow === "saved-edit") expect((await post({ action: "edit_proposal", name: "Human idea", population: "Human population" })).status).toBe(200);
+    expect((await post({ action: "decide_proposal", decision: "accept", ...(flow === "inline-edit" ? { name: "Human idea", population: "Human population" } : {}) })).status).toBe(200);
+    const examples = await sharedDb().execute(sql`select ai_output, final, outcome, run_id, actor from decision_examples where run_id = ${recorder.id}`);
+    expect(examples).toHaveLength(1); expect(examples[0].ai_output).toEqual(original);
+    expect(examples[0].outcome).toBe(flow === "unchanged" ? "accepted" : "edited");
+    expect(examples[0].run_id).toBe(recorder.id); expect(examples[0].actor).toEqual(ACTOR);
+    if (flow !== "unchanged") expect(examples[0].final).toMatchObject({ name: "Human idea", design: { population: "Human population" } });
+    else expect(examples[0].final).toBeNull();
+  });
+
 });

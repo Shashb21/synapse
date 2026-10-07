@@ -1,3 +1,7 @@
+import { getRun } from "@/modules/kernel/observability";
+import { scopedWorkspaceId } from "@/modules/workspaces/context";
+import { captureResidualDecision } from "@/lib/iegp/learning-capture";
+import type { Actor } from "@/modules/kernel/contracts";
 import { z } from "zod";
 import { registerModule } from "@/modules/kernel/registry";
 import { recordEdit } from "@/modules/kernel/edit-records";
@@ -14,6 +18,7 @@ const inputSchema = z.object({
   /** Present when the user has validated a split and wants it applied. */
   apply: z
     .object({
+      originating_run_id: z.string().min(1).optional(),
       addressed_name: z.string().min(3),
       addressed_statement: z.string().optional(),
       open_name: z.string().min(3),
@@ -422,42 +427,86 @@ async function applySplit(
   apply: NonNullable<SplitInput["apply"]>,
   ctx: ModuleContext,
 ): Promise<{ output: SplitOutput; summary: string }> {
-  const state = await loadState();
-  const gap = state.gaps.find((row) => row.id === gapId);
-  if (!gap) throw new Error(`Unknown gap ${gapId}`);
-  await splitPartialGap({
-    parent_gap_id: gap.id,
-    addressed_name: apply.addressed_name,
-    addressed_statement: apply.addressed_statement,
-    open_name: apply.open_name,
-    open_statement: apply.open_statement,
-    tactic_ids: apply.addressed_tactic_ids,
-    open_tactic_ids: apply.open_tactic_ids,
-    actor_name: ctx.actor.name,
-    actor_function: ctx.actor.function,
-    note: apply.rationale,
-  });
-  const edit = await recordEdit({
-    workspace_id: ctx.workspace_id,
-    stage: "S6",
-    entity_type: "gap",
-    entity_id: gap.id,
-    field: "split",
-    action: "split",
-    before: gap.statement,
-    after: `${apply.addressed_name} | ${apply.open_name}`,
-    rationale: apply.rationale,
-    actor: ctx.actor,
-  });
+  const edit = await decidePartialSplit({ gap_id: gapId, apply, originating_run_id: apply.originating_run_id, decision: "accept", actor: ctx.actor, workspace_id: ctx.workspace_id });
   return {
     output: {
       mode: isTestStub() ? "deterministic" : "llm",
       proposal: null,
       applied: true,
-      edit_id: edit.id,
+      edit_id: edit.edit_id,
     },
-    summary: `Split ${gap.id} into an addressed slice and an open leftover — "${apply.rationale}"`,
+    summary: `Split ${gapId} into an addressed slice and an open leftover — "${apply.rationale}"`,
   };
+}
+
+/**
+ * Applies or rejects a reviewed split. The client supplies only the original run
+ * ID; the saved successful S6 output is the authority for its AI baseline.
+ * Manual splits omit the reference and never generate AI learning examples.
+ */
+export async function decidePartialSplit(args: {
+  gap_id: string;
+  originating_run_id?: string;
+  decision: "accept" | "reject";
+  apply?: NonNullable<SplitInput["apply"]>;
+  rationale?: string;
+  actor: Actor;
+  workspace_id?: string;
+}): Promise<{ edit_id: string }> {
+  const workspace_id = args.workspace_id ?? (await scopedWorkspaceId()) ?? "default";
+  let original: Proposal | null = null;
+  if (args.originating_run_id) {
+    const run = await getRun(args.originating_run_id);
+    const output = outputSchema.safeParse(run?.output);
+    const input = inputSchema.safeParse(run?.input);
+    if (!run || run.workspace_id !== workspace_id || run.stage !== "S6" || run.status !== "ok" || run.module_id !== partialSplitModule.manifest.id || !output.success || output.data.mode !== "llm" || output.data.applied || !output.data.proposal || output.data.proposal.parent_gap_id !== args.gap_id || !input.success || input.data.gap_id !== args.gap_id || input.data.apply) {
+      throw new Error("The originating S6 proposal is unavailable or does not belong to this gap and workspace. Request a new proposal.");
+    }
+    original = output.data.proposal;
+  }
+  if (args.decision === "reject" && !original) throw new Error("Rejecting an AI split requires its original proposal run.");
+  const state = await loadState();
+  const gap = state.gaps.find(row => row.id === args.gap_id);
+  if (!gap) throw new Error(`Unknown gap ${args.gap_id}`);
+  const apply = args.apply;
+  if (args.decision === "accept" && !apply) throw new Error("A split decision requires the reviewed fields.");
+  const final = apply ? {
+    addressed_name: apply.addressed_name.trim(),
+    addressed_statement: apply.addressed_statement?.trim() || apply.addressed_name.trim(),
+    open_name: apply.open_name.trim(),
+    open_statement: apply.open_statement?.trim() || apply.open_name.trim(),
+    addressed_tactic_ids: [...new Set(apply.addressed_tactic_ids)].sort(),
+    open_tactic_ids: [...new Set(apply.open_tactic_ids)].sort(),
+  } : null;
+  const proposedFields = original ? {
+    addressed_name: original.addressed_name.trim(),
+    addressed_statement: original.addressed_statement.trim(),
+    open_name: original.open_name.trim(),
+    open_statement: original.open_statement.trim(),
+    addressed_tactic_ids: [...new Set(original.addressed_tactic_ids)].sort(),
+    open_tactic_ids: [],
+  } : null;
+  const edited = original && JSON.stringify(proposedFields) !== JSON.stringify(final);
+  const suppliedRationale = (args.rationale ?? apply?.rationale ?? "").trim();
+  if (original && (edited || args.decision === "reject") && suppliedRationale.length < 3) throw new Error("Give a short reason for editing or rejecting the proposed split.");
+  const rationale = suppliedRationale || (original ? "Accepted split as proposed." : "Manual split saved.");
+  if (args.decision === "accept" && apply) {
+    await splitPartialGap({
+      parent_gap_id: gap.id,
+      addressed_name: apply.addressed_name,
+      addressed_statement: apply.addressed_statement,
+      open_name: apply.open_name,
+      open_statement: apply.open_statement,
+      tactic_ids: apply.addressed_tactic_ids,
+      open_tactic_ids: apply.open_tactic_ids,
+      actor_name: args.actor.name,
+      actor_function: args.actor.function,
+      note: rationale,
+    });
+  }
+  const edit = await recordEdit({ workspace_id, stage: "S6", entity_type: "gap", entity_id: gap.id, field: "split", action: args.decision === "reject" ? "reject" : "split", before: original ? JSON.stringify(original) : gap.statement, after: args.decision === "reject" ? null : JSON.stringify(final), rationale, actor: args.actor });
+  if (original) await captureResidualDecision({ workspace_id, run_id: args.originating_run_id, capture_key: edit.id, actor: args.actor, parent_gap_id: gap.id, proposed: original, final: args.decision === "reject" ? null : final, decision: args.decision === "reject" ? "reject" : edited ? "edit" : "accept", rationale });
+  return { edit_id: edit.id };
 }
 
 partialSplitModule.evals = {

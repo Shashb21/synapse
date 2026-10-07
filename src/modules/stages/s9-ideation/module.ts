@@ -849,7 +849,9 @@ export const ideationModule: SynapseModule<IdeationInput, IdeationOutput> = {
           type: proposal.type,
           rationale: proposal.rationale,
           evidence_question: proposal.evidence_question,
-          design: { ...proposal.design, rank: proposal.rank, origin: "ai", run_id: ctx.run.id },
+          design: { ...proposal.design, rank: proposal.rank, origin: "ai", run_id: ctx.run.id,
+            original_ai: { name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: proposal.design },
+          },
           status: "proposed",
           critic_note: [proposal.critic_note, proposal.judge_note && `Judge: ${proposal.judge_note}`]
             .filter(Boolean)
@@ -971,6 +973,7 @@ export type StoredDesign = Omit<Design, "duration_months" | "readout_lag_months"
  * so it never replaces or rewrites it.
  */
 type DesignMeta = {
+  original_ai?: { name: string; type: string; rationale: string; evidence_question: string; design: StoredDesign } | null;
   rank?: number | null;
   run_id?: string | null;
   origin?: "ai" | "human";
@@ -986,6 +989,15 @@ const DESIGN_TEXT_FIELDS = [
   "study_design",
   "timing_rationale",
 ] as const;
+
+/** Read a saved immutable AI baseline; malformed or missing history stays absent. */
+function originalProposal(raw: unknown): DesignMeta["original_ai"] {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const design = designSchema.safeParse(row.design);
+  if (!["name", "type", "rationale", "evidence_question"].every(key => typeof row[key] === "string") || !design.success) return null;
+  return { name: row.name as string, type: row.type as string, rationale: row.rationale as string, evidence_question: row.evidence_question as string, design: design.data };
+}
 
 function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
   const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -1003,6 +1015,7 @@ function splitDesign(raw: unknown): { design: StoredDesign; meta: DesignMeta } {
       timing_rationale: str(row.timing_rationale),
     },
     meta: {
+      original_ai: originalProposal(row.original_ai),
       rank: num(row.rank),
       run_id: typeof row.run_id === "string" ? row.run_id : null,
       origin: row.origin === "human" ? "human" : "ai",
@@ -1283,7 +1296,13 @@ export async function decideIdeationProposal(args: {
   let proposal = await proposalRow(args.id);
   if (proposal.status !== "proposed") throw new Error(`${args.id} was already ${proposal.status}.`);
   // The idea as the model left it, before this decision's edits (KAN-78 learning).
-  const asProposed = proposal;
+  const originalMeta = splitDesign(proposal.design).meta;
+  // Legacy rows are usable only while untouched. Edited rows without a saved
+  // baseline cannot prove what the model originally wrote and are excluded.
+  const original = originalMeta.original_ai ?? (!originalMeta.edited_at && !originalMeta.edited_by && Object.keys(args.fields ?? {}).length === 0
+    ? { name: proposal.name, type: proposal.type, rationale: proposal.rationale, evidence_question: proposal.evidence_question, design: splitDesign(proposal.design).design }
+    : null);
+  const asProposed = original ? { ...proposal, ...original } : null;
   if (args.decision === "accept" && args.fields && Object.keys(args.fields).length > 0) {
     try {
       await editIdeationProposal({
@@ -1355,18 +1374,19 @@ export async function decideIdeationProposal(args: {
   });
 
   // A model-written idea teaches the next runs; a hand-written one has no AI output to learn from.
-  if (splitDesign(asProposed.design).meta.origin !== "human") {
+  if (originalMeta.origin !== "human" && !asProposed) console.warn("[learning] S9 decision omitted: immutable original AI baseline unavailable", args.id);
+  if (originalMeta.origin !== "human" && asProposed) {
     const gap = (await loadState().catch(() => null))?.gaps.find((row) => row.id === asProposed.gap_id);
     await captureProposalDecision({
       proposal: asProposed,
       capture_key: decisionEdit.id,
-      run_id: typeof (asProposed.design as Record<string, unknown> | null)?.run_id === "string" ? (asProposed.design as Record<string, unknown>).run_id as string : null,
+      run_id: originalMeta.run_id,
       actor: args.actor,
       gap: gap ? { name: gap.name, statement: gap.statement } : null,
       decision: args.decision,
       final:
         args.decision === "accept"
-          ? { name: proposal.name, type: proposal.type, evidence_question: proposal.evidence_question, rationale: proposal.rationale, design: proposal.design }
+          ? { name: proposal.name, type: proposal.type, evidence_question: proposal.evidence_question, rationale: proposal.rationale, design: splitDesign(proposal.design).design }
           : null,
       rationale,
       workspace_id: args.workspace_id,

@@ -1,3 +1,4 @@
+import { decidePartialSplit } from "@/modules/stages/s6-partial-split/module";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
 import { NextResponse } from "next/server";
@@ -44,7 +45,6 @@ import {
   loadState,
   overrideGapStatus,
   rewritePartialGap,
-  splitPartialGap,
   unassignGapFromBreakoutGroup,
   updateBreakoutGroup,
   assignGapsToBreakoutGroup,
@@ -159,7 +159,6 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
   lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
-  split_partial_gap: { stage: "S6", entity: "gap", field: "split", action: "split" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
   lock_gap: { stage: "S5", entity: "gap", field: "status", action: "edit" },
   park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
@@ -717,19 +716,24 @@ export async function POST(request: Request) {
           note: body.note,
         });
         break;
+      case "reject_split_proposal":
+        await decidePartialSplit({ gap_id: body.parent_gap_id || body.gap_id, originating_run_id: body.originating_run_id, decision: "reject", rationale: body.note, actor: identity.actor });
+        break;
       case "split_partial_gap":
-        await splitPartialGap({
-          parent_gap_id: body.parent_gap_id || body.gap_id,
-          addressed_name: body.addressed_name,
-          addressed_statement: body.addressed_statement || undefined,
-          open_name: body.open_name,
-          open_statement: body.open_statement || undefined,
-          tactic_id: body.tactic_id || undefined,
-          tactic_ids: idList(body.tactic_ids, body.tactic_id),
-          open_tactic_ids: idList(body.open_tactic_ids),
-          actor_name,
-          actor_function,
-          note: body.note,
+        await decidePartialSplit({
+          gap_id: body.parent_gap_id || body.gap_id,
+          originating_run_id: body.originating_run_id || undefined,
+          decision: "accept",
+          actor: identity.actor,
+          apply: {
+            addressed_name: body.addressed_name,
+            addressed_statement: body.addressed_statement || undefined,
+            open_name: body.open_name,
+            open_statement: body.open_statement || undefined,
+            addressed_tactic_ids: idList(body.tactic_ids, body.tactic_id),
+            open_tactic_ids: idList(body.open_tactic_ids),
+            rationale: body.note || "",
+          },
         });
         break;
       case "rewrite_partial_gap":

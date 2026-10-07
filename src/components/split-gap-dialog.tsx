@@ -75,9 +75,11 @@ export function splitPayload(args: {
   openStatement: string;
   addressedTacticIds: string[];
   openTacticIds: string[];
+  originatingRunId?: string | null;
 }) {
   return {
     action: "split_partial_gap",
+    ...(args.originatingRunId ? { originating_run_id: args.originatingRunId } : {}),
     parent_gap_id: args.gapId,
     addressed_name: args.addressedName,
     open_name: args.openName,
@@ -139,6 +141,7 @@ export function SplitGapDialog({
   const [rationale, setRationale] = useState("");
   const [proposing, setProposing] = useState(false);
   const ai = useAiEnabled("partial_split");
+  const [originatingRunId, setOriginatingRunId] = useState<string | null>(null);
   const [proposalNote, setProposalNote] = useState<string | null>(null);
   /** A residual or an S6 proposal filled the split in; without one the person writes it. */
   const [suggested, setSuggested] = useState(() => hasSuggestedSplit(gapName, residualName));
@@ -155,6 +158,7 @@ export function SplitGapDialog({
   const rationaleRequired = mode === "rewrite" || touched;
 
   function reset() {
+    setOriginatingRunId(null);
     setError(null);
     setPending(false);
     setMode("split");
@@ -175,6 +179,25 @@ export function SplitGapDialog({
   }
 
   /** S6 proposes the split; the user still validates every field before it applies. */
+  /** Explicit rejection observes the AI proposal and leaves the parent gap intact. */
+  async function rejectProposal() {
+    if (!originatingRunId) return;
+    if (rationale.trim().length < 3) { setError("Give a short reason for rejecting the proposal."); return; }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reject_split_proposal", parent_gap_id: gapId, originating_run_id: originatingRunId, note: rationale.trim() }) });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Could not reject the proposal."); return; }
+      reset();
+      setProposalNote("Proposal rejected. Fill the split in yourself or request another suggestion.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not reject the proposal.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function proposeSplit() {
     setProposing(true);
     setError(null);
@@ -189,6 +212,7 @@ export function SplitGapDialog({
     });
     const json = (await res.json()) as {
       error?: string;
+      run_id?: string;
       summary?: string;
       output?: {
         proposal: {
@@ -214,6 +238,7 @@ export function SplitGapDialog({
       setProposalNote(json.summary ?? "The model proposed no split. Fill the split in yourself.");
       return;
     }
+    setOriginatingRunId(json.run_id ?? null);
     setMode("split");
     setAddressedName(proposal.addressed_name);
     setOpenName(proposal.open_name);
@@ -267,6 +292,7 @@ export function SplitGapDialog({
         ? {
             ...splitPayload({
               gapId,
+              originatingRunId,
               addressedName,
               addressedStatement,
               openName,
@@ -361,6 +387,9 @@ export function SplitGapDialog({
             </span>
           )}
         </div>
+        {originatingRunId ? (
+          <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => void rejectProposal()}>Reject suggestion</Button>
+        ) : null}
         {proposalNote ? (
           <p className="text-[11px] text-muted-foreground">{proposalNote}</p>
         ) : null}
