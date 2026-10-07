@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { GET } from "@/app/api/accuracy/assemblies/route";
+import { GET, POST } from "@/app/api/accuracy/assemblies/route";
+import { AssemblyFeedbackError } from "@/accuracy/domain/assembly-feedback";
+import * as feedbackStore from "@/accuracy/store/assembly-feedback-store";
 import { createAssembly } from "@/accuracy/store/assembly-store";
 import { publishGeneratedItemHistory } from "@/accuracy/store/item-history-store";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
@@ -15,7 +17,7 @@ vi.mock("@/modules/auth/session", () => ({ sessionContext }));
 
 const actor = { name: "Assembly reader", function: "medical_affairs" as const };
 const session = { signed_in: true, demo: false, role: "viewer" as const, actor,
-  session: { subject: "assembly-reader" } };
+  session: { subject: "assembly-reader", provider_id: "test-provider", actor } };
 const workspaces: string[] = [];
 
 afterEach(async () => {
@@ -46,12 +48,26 @@ async function fixture() {
     final_claims: [{ id: gap.id, workspace_id, source_file_id: source.id, claim_type: "gap", statement: gap.statement }] });
   const [version] = await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, workspace_id));
   const assembly = await createAssembly({ workspace_id, actor, source_file_ids: [source.id],
-    selections: [{ item_version_id: version!.id, reason: "readable" }], mappings: [], coverage_run_ids: [], linking_complete: true });
+    selections: [{ item_version_id: version!.id, reason: "readable" }], mappings: [], coverage_run_ids: [], linking_complete: true,
+    extraction_runs: [{ call_kind: "need_extract", run_id, source_file_id: source.id, item_count: 1,
+      outcome: "items", evaluation_context: "production" }] });
   return { org_id, workspace_id, assembly };
 }
 
 function get(query: string) {
   return GET(new Request(`http://localhost/api/accuracy/assemblies?${query}`));
+}
+
+function post(body: unknown) {
+  return POST(new Request("http://localhost/api/accuracy/assemblies", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }));
+}
+
+function feedbackBody(scope: Awaited<ReturnType<typeof fixture>>) {
+  return { action: "feedback", workspace_id: scope.workspace_id, assembly_id: scope.assembly.id,
+    expected_fingerprint: scope.assembly.fingerprint, approval_review_id: "review-1",
+    consumer_run_id: "consumer-1", selected_item_version_ids: [], category: "edited", rationale: "Adjusted wording." };
 }
 
 describe("authorized assembly API", () => {
@@ -66,6 +82,9 @@ describe("authorized assembly API", () => {
     expect(await read.json()).toMatchObject({
       assembly: scope.assembly,
       can_review: false,
+      can_feedback: false,
+      feedback: [],
+      feedback_runs: [],
       review_state: { assembly_id: scope.assembly.id, status: "stale", expected_review_id: null, latest_decision: null },
     });
 
@@ -75,6 +94,82 @@ describe("authorized assembly API", () => {
     sessionContext.mockResolvedValue({ ...session, session: { subject: "foreign" } });
     expect((await get(`workspace_id=${scope.workspace_id}`)).status).toBe(404);
     expect((await get(`workspace_id=${scope.workspace_id}&assembly_id=missing`)).status).toBe(404);
+  });
+
+  it("keeps list lightweight and exposes exact feedback history and eligible runs to authorized readers", async () => {
+    const scope = await fixture();
+    const feedback = [{ id: "feedback-1", assembly_id: scope.assembly.id, rationale: "Edited" }];
+    const runs = [{ run_id: "consumer-1", approval_review_id: "review-1", consumed_item_version_ids: ["item-1"] }];
+    const history = vi.spyOn(feedbackStore, "listAssemblyFeedback").mockResolvedValue(feedback as never);
+    const eligible = vi.spyOn(feedbackStore, "listAssemblyFeedbackRuns").mockResolvedValue(runs as never);
+    const listBody = await (await get(`workspace_id=${scope.workspace_id}`)).json();
+    expect(listBody).not.toHaveProperty("feedback");
+    expect(listBody).not.toHaveProperty("feedback_runs");
+    expect(history).not.toHaveBeenCalled();
+    expect(eligible).not.toHaveBeenCalled();
+    const detail = await get(`workspace_id=${scope.workspace_id}&assembly_id=${scope.assembly.id}`);
+    expect(await detail.json()).toMatchObject({ feedback, feedback_runs: runs, can_feedback: false });
+    expect(history).toHaveBeenCalledWith(scope.workspace_id, scope.assembly.id);
+    expect(eligible).toHaveBeenCalledWith(scope.workspace_id, scope.assembly.id);
+    sessionContext.mockResolvedValue({ ...session, role: "contributor" });
+    const contributorDetail = await get(`workspace_id=${scope.workspace_id}&assembly_id=${scope.assembly.id}`);
+    expect(await contributorDetail.json()).toMatchObject({ can_feedback: true });
+  });
+
+  it("requires a signed-in authorized contributor for feedback", async () => {
+    const scope = await fixture();
+    const body = feedbackBody(scope);
+    sessionContext.mockResolvedValue({ ...session, signed_in: false, session: null });
+    expect((await post(body)).status).toBe(401);
+    sessionContext.mockResolvedValue(session);
+    expect((await post(body)).status).toBe(403);
+    sessionContext.mockResolvedValue({ ...session, role: "medical_affairs" });
+    expect((await post(body)).status).toBe(403);
+    sessionContext.mockResolvedValue({ ...session, role: "contributor", session: { ...session.session, subject: "foreign" } });
+    expect((await post(body)).status).toBe(404);
+  });
+
+  it("rejects forged identity and unknown feedback fields before persistence", async () => {
+    const scope = await fixture();
+    sessionContext.mockResolvedValue({ ...session, role: "contributor" });
+    const create = vi.spyOn(feedbackStore, "createAssemblyFeedback");
+    for (const extra of [{ contributor: { subject: "forged" } }, { actor: actor }, { unexpected: true }]) {
+      const response = await post({ ...feedbackBody(scope), ...extra });
+      expect(response.status).toBe(400);
+    }
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("saves feedback for an exact assembly with server session identity", async () => {
+    const scope = await fixture();
+    sessionContext.mockResolvedValue({ ...session, role: "contributor" });
+    const created = { id: "feedback-1", actor_subject: session.session.subject, actor_provider: session.session.provider_id };
+    const create = vi.spyOn(feedbackStore, "createAssemblyFeedback").mockResolvedValue(created as never);
+    const body = { ...feedbackBody(scope), selected_item_version_ids: ["item-1"] };
+    const response = await post(body);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, feedback: created });
+    expect(create).toHaveBeenCalledWith({
+      workspace_id: scope.workspace_id, assembly_id: scope.assembly.id,
+      expected_fingerprint: scope.assembly.fingerprint, approval_review_id: "review-1",
+      consumer_run_id: "consumer-1", selected_item_version_ids: ["item-1"],
+      category: "edited", rationale: "Adjusted wording.",
+      contributor: { subject: session.session.subject, provider: "test-provider", actor },
+    });
+  });
+
+  it("maps invalid consumer and subset proofs to a useful validation response", async () => {
+    const scope = await fixture();
+    sessionContext.mockResolvedValue({ ...session, role: "contributor" });
+    const invalidConsumer = await post(feedbackBody(scope));
+    expect(invalidConsumer.status).toBe(400);
+    expect(await invalidConsumer.json()).toMatchObject({ code: "invalid_input" });
+    const create = vi.spyOn(feedbackStore, "createAssemblyFeedback")
+      .mockRejectedValue(new AssemblyFeedbackError("invalid_input", "Selected item version was not consumed from this assembly."));
+    const invalidSubset = await post({ ...feedbackBody(scope), selected_item_version_ids: ["foreign-item"] });
+    expect(invalidSubset.status).toBe(400);
+    expect(await invalidSubset.json()).toEqual({ error: "Selected item version was not consumed from this assembly.", code: "invalid_input" });
+    expect(create).toHaveBeenCalledOnce();
   });
 
   it.each(["", "workspace_id=", "workspace_id=w&workspace_id=w", "workspace_id=w&assembly_id=", "workspace_id=w&assembly_id=a&assembly_id=a", "workspace_id=w&extra=1"])

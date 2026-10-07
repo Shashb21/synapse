@@ -124,7 +124,7 @@ const APPROVED_METADATA_OVERLAY_KEYS = new Set([
   "priority",
   "priority_band",
   "priority_rationale",
-  "priority_origin",
+  "priority_origin", "priority_scoring",
 ]);
 
 const APPROVED_PATCH_STATUS_VALUES = new Set(["validated", "rejected"]);
@@ -323,6 +323,8 @@ export async function updateClaimMetadata(args: {
   workspace_id: string;
   claim_id: string;
   metadata: AccuracyClaimMetadata;
+  /** Merge a sparse patch under the workspace lock; replacement remains the default. */
+  merge?: boolean;
 }): Promise<AccuracyClaimRow> {
   return withAssemblyWorkspaceLock(args.workspace_id, async () => {
     await ensureAccuracySchema();
@@ -335,7 +337,8 @@ export async function updateClaimMetadata(args: {
     const existingMeta = claimMetadata(existing);
     const metadata = managed
       ? approvedOverlayMetadata(existingMeta, args.metadata)
-      : existingMeta.history_only === true ? { ...args.metadata, history_only: true } : args.metadata;
+      : { ...(args.merge ? existingMeta : {}), ...args.metadata,
+        ...(existingMeta.history_only === true ? { history_only: true } : {}) };
     const now = nowIso();
     await accuracyDb()
       .update(t.accuracyClaims)

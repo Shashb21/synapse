@@ -9,6 +9,9 @@ import { createAssembly } from "@/accuracy/store/assembly-store";
 import { applyExtractionBatch, createExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import { approvedLiveInventory, assemblyReviewState, reviewAssembly } from "@/accuracy/store/assembly-review-store";
 import { newId, nowIso } from "@/modules/kernel/ids";
+import { prioritizeModule } from "@/accuracy/modules/partial-split/module";
+import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
+import { getClaim, insertClaim } from "@/accuracy/store/claim-store";
 
 const { closePool } = vi.hoisted(() => ({ closePool: vi.fn() }));
 vi.mock("@/lib/iegp/db", async () => {
@@ -228,7 +231,7 @@ describe("assembly review store", () => {
         priority: "high",
         priority_band: "high",
         priority_rationale: "Workflow reprioritization.",
-        priority_origin: "review",
+        priority_origin: "review", priority_scoring: { mode: "deterministic", validated: false, score: 75 },
       },
     }).where(eq(t.accuracyClaims.id, gapPub.version.claim_id));
     await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: assembly.id,
@@ -242,11 +245,42 @@ describe("assembly review store", () => {
       true,
     ]);
     const projectedGap = live?.claims.find((claim) => claim.id === gapPub.version.claim_id);
-    expect(projectedGap?.metadata).toMatchObject({ priority: "high", priority_band: "high", priority_rationale: "Workflow reprioritization.", priority_origin: "review" });
+    expect(projectedGap?.metadata).toMatchObject({ priority: "high", priority_band: "high", priority_rationale: "Workflow reprioritization.", priority_origin: "review", priority_scoring: { mode: "deterministic", validated: false, score: 75 } });
     expect(projectedGap?.metadata).not.toHaveProperty("gap_ids");
     expect(projectedGap?.metadata).not.toHaveProperty("parent_gap_id");
     expect(live?.coverage).toHaveLength(1);
     expect(live?.bindings.every((binding) => binding.review_id)).toBe(true);
+  });
+
+  it("native production priority retains approved payload and accepted band after raw metadata drift", async () => {
+    const scope = await fixture();
+    const { gapPub } = await approveCurrentAssembly(scope);
+    const rawMetadata = { statement: "Raw drifted statement", parent_gap_id: "raw-parent", provenance: [], priority: "low", priority_band: "low", priority_origin: "review" };
+    await accuracyDb().update(t.accuracyClaims).set({ statement: rawMetadata.statement, metadata: rawMetadata }).where(eq(t.accuracyClaims.id, gapPub.version.claim_id));
+    const before = (await approvedLiveInventory(scope.workspace_id))!.claims.find(row => row.id === gapPub.version.claim_id)!;
+    const ctx = { workspace_id: scope.workspace_id, route: { connected: false, auth: "none" } } as unknown as AccuracyModuleContext;
+
+    const result = await prioritizeModule.run({ workspace_id: scope.workspace_id, gap_ids: [gapPub.version.claim_id] }, ctx);
+
+    expect(result.output.placements).toHaveLength(1);
+    const raw = await getClaim(scope.workspace_id, gapPub.version.claim_id);
+    expect(raw?.statement).toBe(rawMetadata.statement);
+    expect(raw?.metadata).toMatchObject({ ...rawMetadata, priority_scoring: { validated: false, gap_id: gapPub.version.claim_id } });
+    const after = (await approvedLiveInventory(scope.workspace_id))!.claims.find(row => row.id === gapPub.version.claim_id)!;
+    expect(after.statement).toBe(before.statement);
+    expect(after.metadata).toMatchObject({ ...before.metadata!, priority_scoring: { validated: false } });
+    expect(after.metadata).not.toHaveProperty("parent_gap_id");
+  });
+
+  it("native production priority preserves legacy metadata while retaining a scoring suggestion", async () => {
+    const scope = await fixture();
+    const payload = { statement: "Legacy source need", provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "supports the selected item" }], priority: "low", priority_band: "low", priority_origin: "review" };
+    const claim = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: payload.statement, validated: true, metadata: payload });
+    const ctx = { workspace_id: scope.workspace_id, route: { connected: false, auth: "none" } } as unknown as AccuracyModuleContext;
+
+    await prioritizeModule.run({ workspace_id: scope.workspace_id, gap_ids: [claim.id] }, ctx);
+
+    expect((await getClaim(scope.workspace_id, claim.id))?.metadata).toMatchObject({ ...payload, priority_scoring: { validated: false, gap_id: claim.id } });
   });
 
   it("approves empty production assemblies and keeps manual approvals out of implicit head resolution", async () => {

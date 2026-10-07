@@ -10,6 +10,7 @@ import {
   ChartGantt,
   FileStack,
   Flag,
+  FlaskConical,
   GitCompareArrows,
   Menu,
   Presentation,
@@ -44,7 +45,8 @@ export type AccuracyShellId =
   | "timeline"
   | "audit"
   | "control"
-  | "runs";
+  | "runs"
+  | "experiments";
 
 type NavItem = {
   id: AccuracyShellId;
@@ -65,6 +67,7 @@ const NAV: NavItem[] = [
   { id: "audit", href: "/accuracy/audit", label: "Audit", icon: ScrollText },
   { id: "control", href: "/accuracy/control", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/accuracy/runs", label: "Runs", icon: Activity },
+  { id: "experiments", href: "/accuracy/experiments", label: "Experiments", icon: FlaskConical },
 ];
 
 function withWorkspace(href: string, workspaceId: string | null): string {
@@ -119,13 +122,12 @@ function AccuracyChromeInner({
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
   const current = NAV.find((item) => item.id === active)?.label ?? "Accuracy";
-  const [fetchedLabel, setFetchedLabel] = useState<PlanLabel | null>(null);
-  const planLabel = planLabelProp ?? fetchedLabel;
+  const [fetchedLabel, setFetchedLabel] = useState<{ workspaceId: string; label: PlanLabel | null } | null>(null);
+  const planLabel = active === "experiments" ? null : planLabelProp ?? (fetchedLabel?.workspaceId === workspaceId ? fetchedLabel.label : null);
   const planStatus = chromePlanLabelStatus(planLabel);
 
   useEffect(() => {
-    if (planLabelProp || !workspaceId) {
-      setFetchedLabel(null);
+    if (active === "experiments" || planLabelProp || !workspaceId) {
       return;
     }
     let cancelled = false;
@@ -133,15 +135,15 @@ function AccuracyChromeInner({
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { workspace?: { plan_label?: unknown } } | null) => {
         if (cancelled) return;
-        setFetchedLabel(normalizePlanLabel(body?.workspace?.plan_label));
+        setFetchedLabel({ workspaceId, label: normalizePlanLabel(body?.workspace?.plan_label) });
       })
       .catch(() => {
-        if (!cancelled) setFetchedLabel(null);
+        if (!cancelled) setFetchedLabel({ workspaceId, label: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, planLabelProp]);
+  }, [active, workspaceId, planLabelProp]);
 
   return (
     <div className="flex min-h-full bg-background">

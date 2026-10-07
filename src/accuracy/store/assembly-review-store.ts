@@ -451,7 +451,7 @@ function metadataWithApprovedOverlay(existing: AccuracyClaimMetadata, item: Reso
   const safeKeys = [
     "start", "end", "readout", "readout_date", "evidence_available", "validation",
     "computed_status", "derived_at", "status_override", "priority", "priority_band",
-    "priority_rationale", "priority_origin",
+    "priority_rationale", "priority_origin", "priority_scoring",
   ];
   const metadata: AccuracyClaimMetadata = {};
   for (const key of safeKeys) {

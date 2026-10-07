@@ -86,7 +86,8 @@ export const coverageCriticModule = agenticModule({
   call_kind: "coverage_critic",
   title: "Coverage critic",
   summary: "Second pass on low-confidence pairs.",
-  inputSchema: coverageDecisionSchema,
+  // Kernel ownership checks require the trusted workspace for retained critic calls.
+  inputSchema: coverageDecisionSchema.extend({ workspace_id: z.string().optional() }),
   outputSchema: coverageCriticOutputSchema,
   run: async (decision, ctx) => {
     const result = await runCoverageCritic(decision, ctx);

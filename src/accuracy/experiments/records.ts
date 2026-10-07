@@ -107,6 +107,12 @@ export async function exportExperiments(args: { workspace_id: string; format: "j
 
 /** Export all complete records tied to one original workspace in stable order. */
 export async function exportExperimentsForSourceWorkspace(args: { source_workspace_id: string; format: "json" | "jsonl" }): Promise<string> {
+  const records = await listExperimentsForSourceWorkspace({ source_workspace_id: args.source_workspace_id });
+  return args.format === "json" ? JSON.stringify(records) : records.map((row) => JSON.stringify(row)).join("\n") + (records.length ? "\n" : "");
+}
+
+/** List retained attempts and children by original source, in stable newest-first order. */
+export async function listExperimentsForSourceWorkspace(args: { source_workspace_id: string }): Promise<ExperimentRecord[]> {
   await ensureAccuracySchema();
   const rows = await accuracyDb().select({ id: t.accuracyExperiments.id, workspace_id: t.accuracyExperiments.workspace_id })
     .from(t.accuracyExperiments)
@@ -114,5 +120,5 @@ export async function exportExperimentsForSourceWorkspace(args: { source_workspa
     .orderBy(desc(t.accuracyExperiments.created_at), asc(t.accuracyExperiments.id));
   const records = (await Promise.all(rows.map((row) => getExperiment({ workspace_id: row.workspace_id, experiment_id: row.id }))))
     .filter((row): row is ExperimentRecord => row !== null);
-  return args.format === "json" ? JSON.stringify(records) : records.map((row) => JSON.stringify(row)).join("\n") + (records.length ? "\n" : "");
+  return records;
 }
