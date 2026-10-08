@@ -1,7 +1,7 @@
 import { SOURCE_FILES_DDL } from "@/modules/stages/s0-upload/schema";
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { GAP_CANDIDATES_DDL } from "@/modules/stages/s2-gap-extract/schema";
-import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL } from "@/modules/stages/s3-tactic-extract/schema";
+import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL } from "@/modules/stages/s3-tactic-extract/schema";
 import { MAPPING_CANDIDATES_DDL } from "@/modules/stages/s4-kg-mapping/schema";
 
 /**
@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS ideation_proposals (
   judge_score integer NOT NULL DEFAULT 0, created_at text NOT NULL,
   decided_by text, decided_at text, decision_rationale text, tactic_id text
 );
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS proposal_kind text NOT NULL DEFAULT 'new';
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS target_tactic_id text;
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS expansion_id text;
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS expansion_scope jsonb;
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS reviewed_parent jsonb;
+ALTER TABLE ideation_proposals ADD COLUMN IF NOT EXISTS comparative_rationale text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS timeline_activities (
   id text PRIMARY KEY, tactic_id text NOT NULL, gap_ids jsonb NOT NULL,
   lane text NOT NULL, start_date text NOT NULL, end_date text NOT NULL,
@@ -119,6 +125,7 @@ export const STAGE_MODULE_DDL = [
   GAP_CANDIDATES_DDL,
   TACTIC_CANDIDATES_DDL,
   TACTIC_CANDIDATES_DUPLICATE_DDL,
+  TACTIC_MATCHING_DDL,
   MAPPING_CANDIDATES_DDL,
 ];
 

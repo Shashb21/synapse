@@ -344,7 +344,7 @@ function GapTacticsBlock({
       ) : (
         <ul className="mt-1 grid gap-1.5">
           {tactics.map((tactic) => (
-            <li key={tactic.id}>
+            <li key={tactic.expansion_id ?? tactic.id}>
               <Link
                 href={`/tactics/${tactic.id}`}
                 className="flex flex-wrap items-center gap-1.5 text-[12px] text-foreground no-underline hover:underline"

@@ -37,7 +37,6 @@ import {
 import {
   LANE_LABELS,
   type ScheduleSource,
-  type TimelineActivity,
   type TimelineModel,
 } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
@@ -141,11 +140,12 @@ export function TimelineBoard({
   const ai = useAiEnabled();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Read from the live model, so an edit shows as soon as the page refreshes.
-  const selected = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
+  const datedSelection = selectedId ? (model.activities.find((row) => row.id === selectedId) ?? null) : null;
+  const pendingSelection = selectedId ? (model.pending.find((row) => row.activity_id === selectedId) ?? null) : null;
+  const selected = datedSelection ?? (pendingSelection ? {...pendingSelection, id: pendingSelection.activity_id} : null);
   // Editing happens inside the side panel (KAN-56); choosing another bar leaves edit mode.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const editing = selected !== null && editingId === selected.id;
-  const setSelected = (activity: TimelineActivity | null) => setSelectedId(activity?.id ?? null);
+  const editing = datedSelection !== null && editingId === datedSelection.id;
   const nameOf = new Map(model.activities.map((row) => [row.id, row.tactic_name]));
   const stale = plan ? plan.activities !== model.activities.length : false;
   const [dragChange, setDragChange] = useState<DragChange | null>(null);
@@ -389,6 +389,7 @@ export function TimelineBoard({
                   <ManualDatesDialog
                     identity={identity}
                     tacticId={row.tactic_id}
+                    expansionId={row.expansion_id}
                     label="Add back"
                     title={`Add ${row.tactic_name} back to the timeline`}
                     hint="Leave the dates empty to keep the ones it had, if it had any."
@@ -400,7 +401,7 @@ export function TimelineBoard({
         </section>
       ) : null}
 
-      <Sheet open={selected !== null} onOpenChange={(open) => (open ? null : setSelected(null))}>
+      <Sheet open={selected !== null} onOpenChange={(open) => (open ? null : setSelectedId(null))}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
           {selected ? (
             <>
@@ -409,14 +410,15 @@ export function TimelineBoard({
                 <SheetDescription className="text-[12px]">
                   {tacticTypeLabel({ type: selected.tactic_type, custom_type: selected.tactic_custom_type })} ·{" "}
                   {selected.tactic_status.replaceAll("_", " ")}
+                  {selected.expansion_id ? ` · Expansion of ${selected.parent_tactic_name}` : ""}
                 </SheetDescription>
               </SheetHeader>
-              {editing ? (
+              {editing && datedSelection ? (
                 <div className="px-4 pb-6">
                   <ActivitySheetEditor
                     identity={identity}
-                    activity={selected}
-                    canEditDetails={canEditDetails}
+                    activity={datedSelection}
+                    canEditDetails={canEditDetails && !selected.expansion_id}
                     onDone={() => setEditingId(null)}
                   />
                 </div>
@@ -434,8 +436,9 @@ export function TimelineBoard({
                     <Badge variant="secondary" className="text-[10px]">
                       counts toward addressing
                     </Badge>
-                  ) : null}
+                  ) : selected.expansion_id ? <span className="text-xs text-muted-foreground">Not counting toward addressing</span> : null}
                 </div>
+                {selected.expansion_id && selected.expansion_version && canEditDetails ? <ActionDialog endpoint="/api/plan" payload={{action: "set_expansion_status", expansion_id: selected.expansion_id, expected_version: selected.expansion_version}} label="Change expansion status" title={`Status for ${selected.tactic_name}`} description="Change only this expansion. Coverage still needs its own review." confirmLabel="Save status" identity={identity} fields={[{name: "status", label: "Status", type: "select", defaultValue: selected.tactic_status, options: ["proposed", "planned", "ongoing", "completed", "cancelled"].map(value => ({value, label: value}))}]} /> : null}
 
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Evidence gaps it answers</h3>
@@ -452,32 +455,33 @@ export function TimelineBoard({
                   </ul>
                 </section>
 
+                {datedSelection ? (
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Timing</h3>
                   <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
-                    <Row label="Start" value={`${selected.start_date} · ${BASIS_LABELS[selected.meta.schedule_basis.start]}`} />
-                    <Row label="End" value={`${selected.end_date} · ${BASIS_LABELS[selected.meta.schedule_basis.end]}`} />
+                    <Row label="Start" value={`${datedSelection.start_date} · ${BASIS_LABELS[datedSelection.meta.schedule_basis.start]}`} />
+                    <Row label="End" value={`${datedSelection.end_date} · ${BASIS_LABELS[datedSelection.meta.schedule_basis.end]}`} />
                     <Row
                       label="Readout"
                       value={
-                        selected.readout_date
-                          ? `${selected.readout_date} · ${BASIS_LABELS[selected.meta.schedule_basis.readout ?? "saved"]}`
+                        datedSelection.readout_date
+                          ? `${datedSelection.readout_date} · ${BASIS_LABELS[datedSelection.meta.schedule_basis.readout ?? "saved"]}`
                           : "—"
                       }
                     />
                     <Row
                       label="Lane"
-                      value={`${LANE_LABELS[selected.lane]} · ${selected.meta.lane_locked ? "set by hand" : "follows the validated band"}`}
+                      value={`${LANE_LABELS[datedSelection.lane]} · ${datedSelection.meta.lane_locked ? "set by hand" : "follows the validated band"}`}
                     />
                     <Row
                       label="Depends on"
                       value={`${
-                        selected.depends_on.length > 0
-                          ? selected.depends_on.map((id) => nameOf.get(id) ?? id).join(", ")
+                        datedSelection.depends_on.length > 0
+                          ? datedSelection.depends_on.map((id) => nameOf.get(id) ?? id).join(", ")
                           : "nothing"
-                      } · ${selected.meta.depends_locked ? "set by hand" : "model"}`}
+                      } · ${datedSelection.meta.depends_locked ? "set by hand" : "model"}`}
                     />
-                    {selected.meta.manual ? <Row label="Added" value="by hand" /> : null}
+                    {datedSelection.meta.manual ? <Row label="Added" value="by hand" /> : null}
                   </dl>
                   {selectedConflicts.length > 0 ? (
                     <div role="alert" className="mt-2 grid gap-1 border border-destructive/50 bg-destructive/10 p-2">
@@ -487,22 +491,30 @@ export function TimelineBoard({
                       <ConflictList conflicts={selectedConflicts} />
                     </div>
                   ) : null}
-                  {selected.meta.dependency_note ? (
-                    <p className="mt-1 text-[11px] text-[var(--opportunity)]">{selected.meta.dependency_note}</p>
+                  {datedSelection.meta.dependency_note ? (
+                    <p className="mt-1 text-[11px] text-[var(--opportunity)]">{datedSelection.meta.dependency_note}</p>
                   ) : null}
-                  {selected.meta.schedule_rationale ? (
+                  {datedSelection.meta.schedule_rationale ? (
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Why these dates ({selected.meta.rationale_locked ? "written by hand" : "model or design"}):{" "}
-                      {selected.meta.schedule_rationale}
+                      Why these dates ({datedSelection.meta.rationale_locked ? "written by hand" : "model or design"}):{" "}
+                      {datedSelection.meta.schedule_rationale}
                     </p>
                   ) : null}
                 </section>
+
+                ) : <p className="text-[12px] text-muted-foreground">Unscheduled. {pendingReason(pendingSelection!.reason, ai)}</p>}
 
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Design</h3>
                   <dl className="mt-1 grid gap-1 text-[12px] text-muted-foreground">
                     <Row label="Evidence question" value={selected.meta.evidence_question} />
                     <Row label="Population" value={selected.meta.population} />
+                    {selected.expansion_scope ? <>
+                      <Row label="Analysis" value={selected.expansion_scope.analysis} />
+                      <Row label="Data cut" value={selected.expansion_scope.data_cut} />
+                      <Row label="Geography" value={selected.expansion_scope.geography} />
+                      <Row label="Feasibility risks" value={selected.expansion_scope.feasibility_risks} />
+                    </> : null}
                     <Row label="Comparator" value={selected.meta.comparator} />
                     <Row label="Outcomes" value={selected.meta.outcomes} />
                     <Row label="Data source" value={selected.meta.data_source} />
@@ -526,10 +538,10 @@ export function TimelineBoard({
 
                 {canReschedule ? (
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => setEditingId(selected.id)}>
-                      Edit
-                    </Button>
-                    <DependencyDialog activity={selected} activities={model.activities} identity={identity} />
+                    {datedSelection ? <>
+                      <Button size="sm" onClick={() => setEditingId(selected.id)}>Edit</Button>
+                      <DependencyDialog activity={datedSelection} activities={model.activities} identity={identity} />
+                    </> : <ManualDatesDialog identity={identity} tacticId={selected.tactic_id} expansionId={selected.expansion_id} label="Set dates" title={`Set dates for ${selected.tactic_name}`} /> }
                     <ActionDialog
                       endpoint="/api/plan"
                       payload={{ action: "remove_activity", id: selected.id }}

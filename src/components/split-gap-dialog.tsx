@@ -40,13 +40,13 @@ function TacticChecklist({
   return (
     <ul className="mt-2 grid gap-1.5">
       {tactics.map((tactic) => (
-        <li key={tactic.id}>
+        <li key={tactic.expansion_id ?? tactic.id}>
           <label className="flex items-start gap-2 text-[12px] text-foreground">
             <input
               type="checkbox"
               className="mt-0.5"
-              checked={selected.includes(tactic.id)}
-              onChange={() => onToggle(tactic.id)}
+              checked={selected.includes(tactic.expansion_id ?? tactic.id)}
+              onChange={() => onToggle(tactic.expansion_id ?? tactic.id)}
             />
             <span className="min-w-0 whitespace-normal">
               {tactic.name}{" "}
@@ -75,9 +75,11 @@ export function splitPayload(args: {
   openStatement: string;
   addressedTacticIds: string[];
   openTacticIds: string[];
+  originatingRunId?: string | null;
 }) {
   return {
     action: "split_partial_gap",
+    ...(args.originatingRunId ? { originating_run_id: args.originatingRunId } : {}),
     parent_gap_id: args.gapId,
     addressed_name: args.addressedName,
     open_name: args.openName,
@@ -132,13 +134,14 @@ export function SplitGapDialog({
   const [rewriteStatus, setRewriteStatus] = useState<"validated_open" | "validated_addressed">(
     "validated_open",
   );
-  const countingIds = tactics.filter((t) => t.counts_toward_addressing).map((t) => t.id);
-  const defaultAddressed = countingIds.length > 0 ? countingIds : tactics.slice(0, 1).map((t) => t.id);
+  const countingIds = tactics.filter((t) => t.counts_toward_addressing).map((t) => t.expansion_id ?? t.id);
+  const defaultAddressed = countingIds;
   const [addressedTacticIds, setAddressedTacticIds] = useState<string[]>(defaultAddressed);
   const [openTacticIds, setOpenTacticIds] = useState<string[]>([]);
   const [rationale, setRationale] = useState("");
   const [proposing, setProposing] = useState(false);
   const ai = useAiEnabled("partial_split");
+  const [originatingRunId, setOriginatingRunId] = useState<string | null>(null);
   const [proposalNote, setProposalNote] = useState<string | null>(null);
   /** A residual or an S6 proposal filled the split in; without one the person writes it. */
   const [suggested, setSuggested] = useState(() => hasSuggestedSplit(gapName, residualName));
@@ -149,12 +152,13 @@ export function SplitGapDialog({
    */
   const [touched, setTouched] = useState(false);
   const leftoverTactics = useMemo(
-    () => tactics.filter((t) => !addressedTacticIds.includes(t.id)),
+    () => tactics.filter((t) => !addressedTacticIds.includes(t.expansion_id ?? t.id)),
     [tactics, addressedTacticIds],
   );
   const rationaleRequired = mode === "rewrite" || touched;
 
   function reset() {
+    setOriginatingRunId(null);
     setError(null);
     setPending(false);
     setMode("split");
@@ -175,6 +179,25 @@ export function SplitGapDialog({
   }
 
   /** S6 proposes the split; the user still validates every field before it applies. */
+  /** Explicit rejection observes the AI proposal and leaves the parent gap intact. */
+  async function rejectProposal() {
+    if (!originatingRunId) return;
+    if (rationale.trim().length < 3) { setError("Give a short reason for rejecting the proposal."); return; }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reject_split_proposal", parent_gap_id: gapId, originating_run_id: originatingRunId, note: rationale.trim() }) });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Could not reject the proposal."); return; }
+      reset();
+      setProposalNote("Proposal rejected. Fill the split in yourself or request another suggestion.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not reject the proposal.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function proposeSplit() {
     setProposing(true);
     setError(null);
@@ -189,8 +212,10 @@ export function SplitGapDialog({
     });
     const json = (await res.json()) as {
       error?: string;
+      run_id?: string;
       summary?: string;
       output?: {
+        mode: "llm" | "deterministic";
         proposal: {
           addressed_name: string;
           addressed_statement?: string;
@@ -214,6 +239,8 @@ export function SplitGapDialog({
       setProposalNote(json.summary ?? "The model proposed no split. Fill the split in yourself.");
       return;
     }
+    // Only model runs are learning evidence; deterministic suggestions remain manual splits.
+    setOriginatingRunId(json.output?.mode === "llm" ? json.run_id ?? null : null);
     setMode("split");
     setAddressedName(proposal.addressed_name);
     setOpenName(proposal.open_name);
@@ -267,12 +294,13 @@ export function SplitGapDialog({
         ? {
             ...splitPayload({
               gapId,
+              originatingRunId,
               addressedName,
               addressedStatement,
               openName,
               openStatement,
               addressedTacticIds,
-              openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => t.id === id)),
+              openTacticIds: openTacticIds.filter((id) => leftoverTactics.some((t) => (t.expansion_id ?? t.id) === id)),
             }),
             note: rationale.trim(),
           }
@@ -361,6 +389,9 @@ export function SplitGapDialog({
             </span>
           )}
         </div>
+        {originatingRunId ? (
+          <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => void rejectProposal()}>Reject suggestion</Button>
+        ) : null}
         {proposalNote ? (
           <p className="text-[11px] text-muted-foreground">{proposalNote}</p>
         ) : null}
@@ -398,7 +429,7 @@ export function SplitGapDialog({
               </label>
               <p className="mt-3 text-[12px] text-muted-foreground">Mapped tactics</p>
               <TacticChecklist
-                tactics={tactics}
+                tactics={tactics.filter(t => t.counts_toward_addressing)}
                 selected={addressedTacticIds}
                 onToggle={(id) => {
                   setAddressedTacticIds((prev) => toggleId(prev, id));
@@ -488,7 +519,7 @@ export function SplitGapDialog({
                   Accompanying tactics (at least one)
                 </p>
                 <TacticChecklist
-                  tactics={tactics}
+                  tactics={tactics.filter(t => t.counts_toward_addressing)}
                   selected={addressedTacticIds}
                   onToggle={(id) => setAddressedTacticIds((prev) => toggleId(prev, id))}
                   empty="Map an existing tactic or record a missed one on Gaps first."

@@ -163,6 +163,12 @@ export const ideationProposals = pgTable("ideation_proposals", {
   decided_at: text("decided_at"),
   decision_rationale: text("decision_rationale"),
   tactic_id: text("tactic_id"),
+  proposal_kind: text("proposal_kind").notNull().default("new"),
+  target_tactic_id: text("target_tactic_id"),
+  expansion_id: text("expansion_id"),
+  expansion_scope: jsonb("expansion_scope"),
+  reviewed_parent: jsonb("reviewed_parent"),
+  comparative_rationale: text("comparative_rationale").notNull().default(""),
 });
 
 export const timelineActivities = pgTable("timeline_activities", {
@@ -190,3 +196,61 @@ export const iegpPlans = pgTable("iegp_plans", {
   saved_function: text("saved_function").notNull(),
   saved_at: text("saved_at").notNull(),
 });
+
+/** Frozen evidence remains available even when model generation fails. */
+export const promptRevisionCohorts = pgTable("prompt_revision_cohorts", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(), stage: text("stage").notNull(),
+  created_at: text("created_at").notNull(), training_ids: jsonb("training_ids").notNull(),
+  heldout_ids: jsonb("heldout_ids").notNull(), excluded_ids: jsonb("excluded_ids").notNull(),
+  examples: jsonb("examples").notNull(), replay_exclusions: jsonb("replay_exclusions").notNull(),
+  gold_reservation: jsonb("gold_reservation"),
+});
+
+/** Instruction/evidence columns are immutable; only lifecycle state may change. */
+export const promptRevisions = pgTable("prompt_revisions", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(), stage: text("stage").notNull(),
+  parent_revision: text("parent_revision").notNull(), instruction_text: text("instruction_text").notNull(),
+  creator: jsonb("creator").notNull(), created_at: text("created_at").notNull(), state: text("state").notNull(),
+  cohort_id: text("cohort_id").notNull(), training_ids: jsonb("training_ids").notNull(), heldout_ids: jsonb("heldout_ids").notNull(),
+  excluded_ids: jsonb("excluded_ids").notNull(), generation_run_id: text("generation_run_id").notNull(),
+  model: text("model"), provider_id: text("provider_id"),
+});
+
+/** Apply whole statements: trigger bodies contain internal semicolons. */
+export const PROMPT_REVISION_DDL = [
+  `CREATE TABLE IF NOT EXISTS prompt_revision_cohorts (
+    id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, created_at text NOT NULL,
+    training_ids jsonb NOT NULL, heldout_ids jsonb NOT NULL, excluded_ids jsonb NOT NULL,
+    examples jsonb NOT NULL, replay_exclusions jsonb NOT NULL
+  )`,
+  `ALTER TABLE prompt_revision_cohorts ADD COLUMN IF NOT EXISTS gold_reservation jsonb`,
+  `CREATE TABLE IF NOT EXISTS prompt_revisions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, parent_revision text NOT NULL,
+    instruction_text text NOT NULL, creator jsonb NOT NULL, created_at text NOT NULL,
+    state text NOT NULL CHECK (state IN ('candidate', 'evaluated', 'active', 'superseded')),
+    cohort_id text NOT NULL REFERENCES prompt_revision_cohorts(id), training_ids jsonb NOT NULL,
+    heldout_ids jsonb NOT NULL, excluded_ids jsonb NOT NULL, generation_run_id text NOT NULL,
+    model text, provider_id text
+  )`,
+  `CREATE INDEX IF NOT EXISTS prompt_revisions_workspace_stage ON prompt_revisions(workspace_id, stage)`,
+  `CREATE OR REPLACE FUNCTION public.protect_prompt_revision_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Prompt revision evidence is immutable'; END IF;
+    IF TG_TABLE_NAME = 'prompt_revision_cohorts' OR (to_jsonb(OLD) - 'state') IS DISTINCT FROM (to_jsonb(NEW) - 'state') THEN
+      RAISE EXCEPTION 'Prompt revision evidence is immutable';
+    END IF;
+    RETURN NEW;
+  END; $$`,
+  `CREATE OR REPLACE TRIGGER prompt_revisions_immutable BEFORE UPDATE OR DELETE ON prompt_revisions FOR EACH ROW EXECUTE FUNCTION public.protect_prompt_revision_evidence()`,
+  `CREATE OR REPLACE TRIGGER prompt_revision_cohorts_immutable BEFORE UPDATE OR DELETE ON prompt_revision_cohorts FOR EACH ROW EXECUTE FUNCTION public.protect_prompt_revision_evidence()`,
+];
+
+/** Immutable full replay/evaluation evidence and a workspace/stage active pointer. */
+export const PROMPT_EVALUATION_DDL = [
+ `CREATE TABLE IF NOT EXISTS prompt_replay_snapshots (run_id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, snapshot jsonb NOT NULL)`,
+ `CREATE TABLE IF NOT EXISTS prompt_revision_evaluations (id text PRIMARY KEY, workspace_id text NOT NULL, revision_id text NOT NULL, created_at text NOT NULL, evidence jsonb NOT NULL)`,
+ `CREATE TABLE IF NOT EXISTS prompt_active_revisions (workspace_id text NOT NULL, stage text NOT NULL, revision_id text, generation integer NOT NULL DEFAULT 0, PRIMARY KEY(workspace_id,stage))`,
+ `CREATE TABLE IF NOT EXISTS prompt_revision_history (id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, before_id text, after_id text, evaluation_id text, actor jsonb NOT NULL, action text NOT NULL, created_at text NOT NULL, generation integer NOT NULL)`,
+ `CREATE OR REPLACE FUNCTION immutable_prompt_evidence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Prompt evidence is immutable'; END $$`,
+ ...['prompt_replay_snapshots','prompt_revision_evaluations','prompt_revision_history'].map(table=>`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '${table}_immutable') THEN CREATE TRIGGER ${table}_immutable BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION immutable_prompt_evidence(); END IF; END $$`),
+];

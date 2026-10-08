@@ -25,6 +25,7 @@ const SMALL_TRIGGER = <Button size="xs" variant="outline" />;
 export function ManualDatesDialog({
   identity,
   tacticId,
+  expansionId,
   label,
   title,
   hint,
@@ -34,17 +35,18 @@ export function ManualDatesDialog({
   identity: ActionIdentity;
   /** Fixed tactic; omit and pass `tactics` to let the user choose one. */
   tacticId?: string;
+  expansionId?: string;
   label: string;
   title: string;
   hint?: string;
-  tactics?: { tactic_id: string; name: string }[];
+  tactics?: { tactic_id: string; expansion_id?: string; name: string }[];
   /** A compact trigger for rows on the chart. */
   small?: boolean;
 }) {
   return (
     <ActionDialog
       endpoint="/api/plan"
-      payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}) }}
+      payload={{ action: "add_activity", ...(tacticId ? { tactic_id: tacticId } : {}), ...(expansionId ? {expansion_id: expansionId} : {}) }}
       label={label}
       title={title}
       description="Your dates are marked as yours and survive every rebuild. The change is recorded with its rationale."
@@ -55,11 +57,11 @@ export function ManualDatesDialog({
         ...(tactics
           ? [
               {
-                name: "tactic_id",
+                name: "activity_id",
                 label: "Tactic",
                 type: "select" as const,
                 placeholder: "Choose a tactic",
-                options: tactics.map((row) => ({ value: row.tactic_id, label: row.name })),
+                options: tactics.map((row) => ({ value: row.expansion_id ? `ACT-EXP-${row.expansion_id}` : `ACT-${row.tactic_id}`, label: row.name })),
                 required: true,
               },
             ]

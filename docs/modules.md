@@ -71,14 +71,14 @@ is scored on every run: `exchanges`, `dialogue_retention`, `critic_score_gain`, 
 | S0 Upload | `s0-upload.local-store` (1.0.0) | records files; AI section *ingestion* | user files, demo pack | `source_files` |
 | S1 Parse | `s1-parse.llm` (2.0.0) | LLM decides blocks, kinds and headings for PDF, PPTX, DOCX, XLSX and text; LlamaParse is disabled | `source_files` | `parsed_documents`, domain `sources` + `source_blocks` |
 | S2 Gap extraction | `s2-gap-extract.pcj` (1.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `gap_candidates`, domain `gaps` + `needs` + links |
-| S3 Tactic extraction | `s3-tactic-extract.pcj` (2.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `tactic_candidates`, domain `tactics` |
-| S4 Mapping | `s4-kg-mapping.scored-pcj` (3.0.0) | LLM mapping table: one row per gap with a coverage verdict, confidence and rationale per tactic; critic ×3 → judge | domain gaps + tactics | `mapping_candidates`, domain `coverages` |
+| S3 Tactic extraction | `s3-tactic-extract.pcj` (3.0.0) | model proposer → critic ×3 → judge | `parsed_documents` | `tactic_candidates`, source references, overlap review suggestions, domain `tactics` |
+| S4 Mapping | `s4-kg-mapping.scored-pcj` (3.1.0) | LLM mapping table: one row per gap with a coverage verdict, confidence and rationale per tactic; critic ×3 → judge | domain gaps + tactics | `mapping_candidates`, domain `coverages` |
 | S5 Validation gate | `s5-validation.human-gate` (1.0.0) | human gate, no model | domain state | domain state, `edit_records`, `hillclimb_signals` |
-| S6 Partial split | `s6-partial-split.pcj` (2.0.0) | model proposes the split, critic ×3 → judge; applies only what the user validates | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
+| S6 Partial split | `s6-partial-split.pcj` (2.1.0) | model proposes the split, critic ×3 → judge; applies only what the user validates | partial gaps + coverages | child gaps, `gap_versions`, `edit_records` |
 | S7 Consolidation | `s7-consolidation.derived` (1.0.0) | derived, no model | validated state | nothing |
 | S8 Prioritization | `s8-prioritization.axes` (2.0.0) | model scores every axis, critic ×3; the band is the quadrant, the user validates it | open gaps, axis config | `priority_placements` |
-| S9 Ideation | `s9-ideation.pcj` (2.0.0) | model designs tactics for gaps validated High, critic ×3 → judge, per-gap cap | High open gaps | `ideation_proposals`, domain `tactics` (status `proposed`) on accept |
-| S10 Gantt timeline | `s10-timeline.gantt` (2.0.0) | AI optional: model infers dependencies and estimates missing dates; human dates always win | validated state, placements | `timeline_activities`, `iegp_plans` |
+| S9 Ideation | `s9-ideation.pcj` (2.1.0) | model compares new tactics and expansions for gaps validated High, critic ×3 → judge, per-gap cap | High open gaps + accepted active tactics | `ideation_proposals`, proposed domain `tactics` or `tactic_expansions` on accept |
+| S10 Gantt timeline | `s10-timeline.gantt` (2.1.0) | AI optional: model infers dependencies and estimates missing dates; human dates always win; accepted expansions retain independent scope, status and schedules | validated state, placements | `timeline_activities`, `iegp_plans` |
 
 The S4 module id keeps its historical `scored-pcj` slug; the deterministic scorer it once used (`scoreGapTacticMapping` in `src/lib/iegp/mapping.ts`) now runs only under the test stub, and every row it produces says no model was called.
 

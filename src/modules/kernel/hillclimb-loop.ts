@@ -12,7 +12,9 @@ export type VariantScore = {
   cases: number;
   baseline: PromptBaseline | null;
   delta_vs_baseline: number | null;
+  /** Legacy field: sweeps never activate a prompt. */
   promoted: boolean;
+  sweep_champion: boolean;
 };
 
 export type HillclimbSweepResult = {
@@ -48,6 +50,7 @@ export async function runHillclimbSweep<I, O>(
       baseline,
       delta_vs_baseline: delta,
       promoted: false,
+      sweep_champion: false,
     });
     if (cases > 0) {
       await recordPromptBaseline({
@@ -66,13 +69,13 @@ export async function runHillclimbSweep<I, O>(
     scored.sort((a, b) => b.composite - a.composite)[0]?.prompt_version ?? "v1.0-baseline";
 
   for (const variant of variants) {
-    variant.promoted = variant.prompt_version === champion && variant.cases > 0;
-    if (variant.promoted && variant.delta_vs_baseline !== null && variant.delta_vs_baseline > 0.02) {
+    variant.sweep_champion = variant.prompt_version === champion && variant.cases > 0;
+    if (variant.sweep_champion && variant.delta_vs_baseline !== null && variant.delta_vs_baseline > 0.02) {
       await recordSignal({
         stage,
         kind: "hillclimb_promotion",
         subject: `prompt:${variant.prompt_version}`,
-        rationale: `Hillclimb sweep promoted ${variant.prompt_version} (composite ${variant.composite}, Δ ${variant.delta_vs_baseline} vs baseline).`,
+        rationale: `Hillclimb sweep selected champion ${variant.prompt_version} (composite ${variant.composite}, Δ ${variant.delta_vs_baseline} vs baseline).`,
         weight: 2,
         payload: { metrics: variant.metrics, champion },
       });

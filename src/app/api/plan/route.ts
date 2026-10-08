@@ -1,3 +1,4 @@
+import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import "@/modules";
@@ -22,7 +23,9 @@ import {
 } from "@/modules/stages/s9-ideation/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { loadState } from "@/lib/iegp/store";
-import { TACTIC_TYPES } from "@/lib/iegp/enums";
+import {decideTacticSuggestion, editTacticSuggestion, listTacticSuggestions} from "@/modules/stages/s3-tactic-extract/suggestions";
+import { setExpansionStatus } from "@/lib/iegp/tactic-expansions";
+import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
 import {
   addTimelineActivity,
@@ -45,7 +48,7 @@ export async function GET() {
   } catch (error) {
     return apiErrorResponse(error);
   }
-  const [placements, axes, proposals, timeline, plan, history, state] = await Promise.all([
+  const [placements, axes, proposals, timeline, plan, history, state, tactic_suggestions] = await Promise.all([
     listPlacements(),
     loadAxes(),
     listIdeationProposals(),
@@ -53,10 +56,11 @@ export async function GET() {
     latestPlan(),
     planHistory(5),
     loadState(),
+    listTacticSuggestions(),
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history });
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -90,8 +94,20 @@ const PROPOSAL_TEXT_FIELDS = [
 /** The idea fields present on the request; absent ones are left as they are. */
 function proposalFieldsOf(body: Record<string, unknown>): ProposalFields {
   const fields: ProposalFields = {};
+  if (body.proposal_kind !== undefined) fields.proposal_kind = field(z.enum(["new", "expansion"]), body.proposal_kind, "proposal_kind");
+  if (body.target_tactic_id !== undefined) fields.target_tactic_id = field(z.string().trim().min(1).nullable(), body.target_tactic_id, "target_tactic_id");
+  if (body.expansion_scope !== undefined) fields.expansion_scope = field(expansionScopeSchema, body.expansion_scope, "expansion_scope");
+  if (body.comparative_rationale !== undefined) fields.comparative_rationale = field(z.string(), body.comparative_rationale, "comparative_rationale");
   for (const key of PROPOSAL_TEXT_FIELDS) {
     if (body[key] !== undefined && body[key] !== null) fields[key] = String(body[key]);
+  }
+  if (Object.keys(body).some(key => key.startsWith("expansion_")) && body.expansion_scope === undefined) {
+    const raw = Object.fromEntries(["name","evidence_question","population","outcomes","geography","data_cut","analysis","instrument","study_design","gap_coverage","cost_effort","timing","feasibility_risks","post_hoc","prospective_enrolment","protocol_amendment","start_date","evidence_available"].map(key => {
+      const value = body[`expansion_${key}`];
+      if (["post_hoc","prospective_enrolment","protocol_amendment"].includes(key)) return [key,field(z.enum(["true","false"]),value,`expansion_${key}`) === "true"];
+      return [key,["start_date","evidence_available"].includes(key) && value === "" ? null : value];
+    }));
+    fields.expansion_scope = field(expansionScopeSchema,raw,"expansion_scope");
   }
   const duration = optionalMonths(body.duration_months, "duration_months");
   if (duration !== undefined) fields.duration_months = duration;
@@ -108,6 +124,43 @@ export async function POST(request: Request) {
     const identity = await requireCustomerContext({ body });
     const rationale = String(body.rationale ?? body.note ?? "").trim();
     switch (action) {
+      case "decide_tactic_suggestion": {
+        assertCan(identity.role, "validate");
+        const suggestion = await decideTacticSuggestion({id: field(z.string().trim().min(1), body.suggestion_id, "suggestion_id"), decision: field(z.enum(["expand", "separate", "reject"]), body.decision, "decision"), expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"), rationale, actor: identity.actor});
+        return NextResponse.json({ok: true, suggestion});
+      }
+      case "edit_tactic_suggestion": {
+        assertCan(identity.role, "validate");
+        const id = field(z.string().trim().min(1), body.suggestion_id, "suggestion_id");
+        const row = (await listTacticSuggestions()).find(r => r.id === id);
+        if (!row) throw new Error("Tactic suggestion not found in this workspace.");
+        const option = field(z.enum(["expansion", "separate"]), body.option, "option");
+        const expansion = {...row.expansion};
+        const separate = {...row.separate};
+        if (option === "expansion") {
+          for (const key of ["name", "evidence_question", "population", "outcomes", "geography", "data_cut", "analysis", "instrument", "study_design", "gap_coverage", "cost_effort", "timing", "feasibility_risks"] as const) {
+            if (body[key] !== undefined) expansion[key] = field(z.string(), body[key], key);
+          }
+          for (const key of ["start_date", "evidence_available"] as const) if (body[key] !== undefined) expansion[key] = body[key] === null ? null : field(z.string(), body[key], key).trim() || null;
+          for (const key of ["post_hoc", "prospective_enrolment", "protocol_amendment"] as const) if (body[key] !== undefined) expansion[key] = field(z.enum(["yes", "no"]), body[key], key) === "yes";
+        } else {
+          for (const key of ["name", "evidence_question"] as const) if (body[key] !== undefined) separate[key] = field(z.string(), body[key], key);
+        }
+        const suggestion = await editTacticSuggestion({id, expansion: option === "expansion" ? expansion : undefined, separate: option === "separate" ? separate : undefined,
+          gap_id: body.gap_id === undefined ? undefined : field(z.string(), body.gap_id, "gap_id"), expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"), rationale, actor: identity.actor});
+        return NextResponse.json({ok: true, suggestion});
+      }
+
+      case "set_expansion_status": {
+        assertCan(identity.role, "validate");
+        const expansion = await setExpansionStatus({
+          expansion_id: field(z.string().trim().min(1), body.expansion_id, "expansion_id"),
+          status: field(z.enum(TACTIC_STATUSES), body.status, "status"),
+          expected_version: field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          rationale, actor: identity.actor,
+        });
+        return NextResponse.json({ok: true, expansion});
+      }
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
@@ -280,6 +333,8 @@ export async function POST(request: Request) {
       case "add_activity": {
         assertCan(identity.role, "validate");
         const activity = await addTimelineActivity({
+          activity_id: body.activity_id ? field(z.string().trim().min(1), body.activity_id, "activity_id") : undefined,
+          expansion_id: body.expansion_id ? field(z.string().trim().min(1), body.expansion_id, "expansion_id") : undefined,
           tactic_id: String(body.tactic_id ?? ""),
           start_date: body.start_date ? field(dateSchema, body.start_date, "start_date") : undefined,
           end_date: body.end_date ? field(dateSchema, body.end_date, "end_date") : undefined,

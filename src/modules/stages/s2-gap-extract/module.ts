@@ -1,3 +1,4 @@
+import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -556,9 +557,13 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
   inputSchema,
   outputSchema,
   migrations: [GAP_CANDIDATES_DDL],
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Gap extraction");
-    const documents = await listParsedDocuments(input.document_ids);
+    const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
+    const sourceFacts = frozen ?? await freezeFacts(input);
+    const state = sourceFacts.state;
+    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
     if (documents.length === 0) {
       return {
         output: {
@@ -574,7 +579,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         summary: "No parsed documents to extract from; no model was called",
       };
     }
-    const state = await loadState();
+
     // Excluded and parked gaps are listed too (marked set_aside) so the judge maps
     // a repeat onto them; commit then leaves them excluded or parked.
     const planGaps: PlanGap[] = state.gaps
@@ -739,13 +744,13 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       committed_gap_id: null as string | null,
       created_at: nowIso(),
     }));
-    if (rows.length > 0) await db().insert(gapCandidates).values(rows);
+    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(gapCandidates).values(rows);
 
     const committed_gap_ids: string[] = [];
     const committed_need_ids: string[] = [];
     const joined_gap_ids: string[] = [];
     const suggestion_ids: string[] = [];
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       const accepted = new Map(outcome.accepted.map((candidate) => [candidate.id, candidate]));
       // A candidate that repeats another follows the one it repeats (KAN-74); one whose
       // chain cannot be followed (a cycle, or a candidate the judge rejected) stands on
@@ -889,7 +894,11 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
     };
   },
   evals: {
-    async cases() {
+    async cases(facts) {
+      if (facts) {
+        const documents = facts.documents as ParsedDocumentRecord[];
+        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S2").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S2").find(source => source.source_id === document.source_id)!) : undefined }));
+      }
       const curated = await curatedS2Cases();
       if (curated.length > 0) return curated;
       const documents = await listParsedDocuments();
@@ -944,4 +953,9 @@ export async function listGapCandidates(limit = 200) {
 export async function gapCandidatesForRun(run_id: string) {
   await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
   return db().select().from(gapCandidates).where(eq(gapCandidates.run_id, run_id));
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
 }

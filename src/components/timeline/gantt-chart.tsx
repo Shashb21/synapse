@@ -335,7 +335,8 @@ export function GanttChart({
             key={activity.id}
             role="button"
             tabIndex={0}
-            aria-label={`${activity.tactic_name}, ${activity.start_date} to ${activity.end_date}`}
+            aria-label={`${activity.tactic_name}, ${activity.start_date} to ${activity.end_date}${activity.expansion_id ? `, expansion of ${activity.parent_tactic_name}, ${activity.tactic_status}` : ""}`}
+            data-parent-activity-id={activity.parent_activity_id}
             className="cursor-pointer focus:outline-none"
             onClick={() => onSelect(activity)}
             onKeyDown={(event) => {
@@ -356,8 +357,8 @@ export function GanttChart({
               fill={selected ? bandColour(row.lane) : palette.background}
               opacity={selected ? 0.09 : index % 2 === 0 ? 0.35 : 0}
             />
-            <text x={12} y={row.y + 13} fill={palette.foreground} fontSize={11}>
-              {truncate(activity.tactic_name, 27)}
+            <text x={activity.expansion_id ? 26 : 12} y={row.y + 13} fill={palette.foreground} fontSize={11}>
+              {truncate(`${activity.expansion_id ? "↳ " : ""}${activity.tactic_name}`, 27)}
             </text>
             <text x={12} y={row.y + 25} fill={palette.muted} fontSize={9.5}>
               {truncate(

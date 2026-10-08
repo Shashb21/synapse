@@ -112,7 +112,7 @@ export default async function IdeationPage() {
     <AppShell active="ideation">
       <PageIntro kicker="Tactics ideation" title="Tactics ideation review">
         {ai
-          ? "The model designs candidate tactics for open gaps you validated as High priority only, critiques them against the tactic library and keeps the best per gap. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting a proposal creates a proposed tactic mapped to the gap; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
+          ? "The model designs candidate tactics for open gaps you validated as High priority only, compares new tactics and expansions against the tactic library and keeps the best per gap. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting a new proposal creates a proposed tactic; accepting an expansion adds a proposed child to its existing target; both decisions need a rationale. You can edit any idea before deciding it, or write your own — generating again adds ideas and never rewrites yours."
           : "Write ideas for open gaps validated as High priority. Medium and Low gaps get their tactics from the tactic library or by hand on the gap. Accepting an idea creates a proposed tactic mapped to the gap; both decisions need a rationale."}
       </PageIntro>
 
@@ -222,7 +222,7 @@ export default async function IdeationPage() {
                 key={group.gap_id}
                 group={group}
                 identity={identity}
-                mayIdeate={mayIdeate}
+                mayIdeate={mayIdeate && bandOrder.has(group.gap_id) && openIds.has(group.gap_id)}
               />
             ))}
           </div>

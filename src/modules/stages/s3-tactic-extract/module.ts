@@ -1,3 +1,4 @@
+import { sourcesForStage, goldMetaForSource } from "@/modules/eval-gold/velmara-curated";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -21,10 +22,13 @@ import {
   type TacticStatus,
   type TacticType,
 } from "@/lib/iegp/enums";
+import { tacticVersion, expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
+import { createTacticSuggestion, separateTacticOptionSchema } from "./suggestions";
+import type { ExpansionScope, SeparateTacticOption, Tactic } from "@/lib/iegp/types";
 import { commitExtractedRecords, loadState } from "@/lib/iegp/store";
 import { extractCandidateTactics } from "@/lib/iegp/engine";
 import { listParsedDocuments, type ParsedDocumentRecord } from "@/modules/stages/s1-parse/module";
-import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, tacticCandidates } from "./schema";
+import { TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, TACTIC_MATCHING_DDL, tacticCandidates } from "./schema";
 import { plural } from "@/lib/plural";
 
 const inputSchema = z.object({
@@ -46,6 +50,10 @@ const candidateSchema = z.object({
   critic_note: z.string(),
   /** The library tactic the model judge said this candidate is the same as. */
   duplicate_of: z.string().nullable(),
+  match: z.enum(["same", "overlaps", "new"]),
+  target_tactic_id: z.string().nullable(),
+  shared_scope: z.string().nullable(), new_scope: z.string().nullable(),
+  expansion: expansionScopeSchema.nullable(), separate: separateTacticOptionSchema.nullable(),
 });
 
 const outputSchema = z.object({
@@ -70,21 +78,18 @@ type TacticCandidate = {
   source_quote: string;
   /** Set by the judge only; null until then and for a new tactic. */
   duplicate_of: string | null;
+  match: "same" | "overlaps" | "new"; target_tactic_id: string | null;
+  shared_scope: string | null; new_scope: string | null;
+  expansion: ExpansionScope | null; separate: SeparateTacticOption | null;
 };
 
-type LibraryTactic = {
-  id: string;
-  name: string;
-  type: string;
-  status: string;
-  evidence_question: string;
-};
+type LibraryTactic = Tactic;
 
 /** A proposer answer for one row: a complete tactic, or the model withdrawing it. */
 type ProposerAnswer = { kind: "tactic"; tactic: TacticCandidate } | { kind: "withdrawn"; reason: string };
 
 type Review = { verdict: Critique["verdict"]; confidence: number; note: string };
-type Decision = { verdict: "accept" | "reject"; confidence: number; reason: string; duplicate_of: string | null };
+type Decision = Pick<TacticCandidate, "duplicate_of" | "match" | "target_tactic_id" | "shared_scope" | "new_scope" | "expansion" | "separate"> & { verdict: "accept" | "reject"; confidence: number; reason: string };
 
 const REMEDY = "run tactic extraction again or switch the S3 route in /admin/control.";
 
@@ -121,7 +126,8 @@ For each candidate, check that:
 - its type and status match what the source quote says;
 - its evidence question is a clear, specific question the tactic answers;
 - its source quote actually describes it;
-- it is not the same activity as a tactic already in the library or as another candidate.
+- it distinguishes identical library scope from added scope that needs human review; library repeats may attach provenance and must not overwrite a locked parent;
+- it does not repeat another batch candidate.
 
 verdict is "keep" when the candidate is right as it stands, "revise" when a field should change, and "drop" when it should not enter the library at all. confidence is 0–100 that the candidate belongs in the library as written. note must be actionable: name the field and what it should become, or name the library tactic id or candidate id it duplicates; for "keep" say briefly why it holds.
 
@@ -133,13 +139,18 @@ const TACTIC_JUDGE_SYSTEM = `You are the judge deciding which tactic candidates 
 
 For each candidate decide:
 - verdict: "accept" when it is a real tactic the source describes, with a defensible type, status, evidence question and quote; otherwise "reject".
-- duplicate_of: the id of the existing library tactic it is the same activity as, or the id of another candidate in this batch it repeats; null when it is new. A candidate that repeats another candidate must be rejected — accept the better of the two. A candidate that is the same as a library tactic may be accepted; it is recorded against that tactic instead of being added again.
+- match: exactly "same", "overlaps" or "new". Same is the same activity and scope; overlaps shares an existing activity but adds distinct scope; new is an independent activity.
+- target_tactic_id: an existing library id for same/overlaps, null for new. Never target a batch candidate.
+- shared_scope and new_scope: nonblank descriptions for overlaps, null otherwise.
+- expansion: for overlaps a complete added scope with name, evidence_question, population, outcomes, geography, data_cut, analysis, instrument, study_design, gap_coverage, cost_effort, timing, feasibility_risks, post_hoc, prospective_enrolment, protocol_amendment, start_date, evidence_available. Optional type, comparator and data_source may be included only when the source explicitly supports that child design; omit them when not recorded, never copy the parent or separate alternative. All required fields must be explicit; unused dimensions may be empty strings and dates may be null. Specify at least one added dimension; describe unknown costs/timing/risks honestly, never invent commitments. Completed studies cannot acquire prospective enrolment; identify post-hoc work and protocol amendment needs. Null otherwise.
+- separate: for overlaps a separate linked activity option with name, type, status and evidence_question supported by the source; preserve the candidate's documented type and status. Null otherwise.
+- duplicate_of: optional batch-repeat id only for rejecting repeats of another candidate; keep the better one. Same library references are recorded through target_tactic_id.
 - confidence: 0–100 in your verdict.
 - reason: one or two sentences naming what decided it.
 
 Decide every candidate you are given. The full batch is listed under "batch" so you can spot repeats.
 
-Return JSON only: {"decisions":[{"id":"","verdict":"accept","duplicate_of":null,"confidence":0,"reason":""}]}`;
+Return JSON only: {"decisions":[{"id":"","verdict":"accept","match":"new","target_tactic_id":null,"shared_scope":null,"new_scope":null,"expansion":null,"separate":null,"duplicate_of":null,"confidence":0,"reason":""}]}`;
 
 function documentText(document: ParsedDocumentRecord): string {
   return document.blocks.map((block) => `## ${block.heading}\n${block.text}`).join("\n\n").slice(0, 40_000);
@@ -184,6 +195,7 @@ function toCandidate(document: ParsedDocumentRecord, id: string, raw: RawTactic)
     evidence_question: text(raw.evidence_question),
     source_quote: text(raw.source_quote),
     duplicate_of: null,
+    match: "new", target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
   };
 }
 
@@ -398,7 +410,7 @@ async function llmDecisions(
     user: JSON.stringify({
       worked_examples: args.hints || undefined,
       note: args.retry
-        ? "An earlier answer left these candidates undecided or invalid. Decide each; duplicate_of must be null, a library id, or another candidate's id (and a candidate that repeats another candidate is rejected)."
+        ? "An earlier answer left these candidates undecided or invalid. Decide each with valid match/target combination and complete overlap options; only reject may reference a batch duplicate."
         : undefined,
       library: args.library,
       batch: args.batch.map((candidate) => ({ id: candidate.id, name: candidate.name, evidence_question: candidate.evidence_question })),
@@ -418,7 +430,7 @@ async function llmDecisions(
     }),
     purpose: "tactic-judge",
   })) as {
-    decisions?: { id?: unknown; verdict?: unknown; duplicate_of?: unknown; confidence?: unknown; reason?: unknown }[];
+    decisions?: { id?: unknown; verdict?: unknown; duplicate_of?: unknown; confidence?: unknown; reason?: unknown; match?: unknown; target_tactic_id?: unknown; shared_scope?: unknown; new_scope?: unknown; expansion?: unknown; separate?: unknown }[];
   } | null;
   const libraryIds = new Set(args.library.map((tactic) => tactic.id));
   const batchIds = new Set(args.batch.map((candidate) => candidate.id));
@@ -430,21 +442,32 @@ async function llmDecisions(
     if (typeof row.confidence !== "number" || !Number.isFinite(row.confidence)) continue;
     const reason = text(row.reason);
     if (!reason) continue;
-    // duplicate_of must be answered: null for new, or an id the judge was shown.
-    if (!("duplicate_of" in row)) continue;
-    let duplicate_of: string | null = null;
-    if (row.duplicate_of !== null) {
-      const target = text(row.duplicate_of);
-      const sibling = batchIds.has(target) && target !== id;
-      if (!libraryIds.has(target) && !sibling) continue;
-      // A repeat of another candidate never enters the library.
-      if (sibling && row.verdict !== "reject") continue;
-      duplicate_of = target;
+    if (row.match !== "same" && row.match !== "overlaps" && row.match !== "new") continue;
+    if (!("target_tactic_id" in row)) continue;
+    const target_tactic_id = row.target_tactic_id === null ? null : text(row.target_tactic_id);
+    if (row.match === "new" ? target_tactic_id !== null : !target_tactic_id || !libraryIds.has(target_tactic_id)) continue;
+    let expansion: ExpansionScope | null = null, separate: SeparateTacticOption | null = null;
+    const shared_scope = row.match === "overlaps" ? text(row.shared_scope) : null;
+    const new_scope = row.match === "overlaps" ? text(row.new_scope) : null;
+    if (row.match === "overlaps") {
+      const parsedExpansion = expansionScopeSchema.safeParse(row.expansion), parsedSeparate = separateTacticOptionSchema.safeParse(row.separate);
+      const candidate = args.batch.find(c => c.id === id);
+      if (!shared_scope || !new_scope || !parsedExpansion.success || !parsedSeparate.success || parsedSeparate.data.status !== candidate?.status || parsedSeparate.data.type !== candidate?.type) continue;
+      const target = args.library.find(t => t.id === target_tactic_id);
+      if (target?.status === "completed" && parsedExpansion.data.prospective_enrolment) continue;
+      if (/post[- ]?hoc/i.test(parsedExpansion.data.analysis) && !parsedExpansion.data.post_hoc) continue;
+      expansion = parsedExpansion.data; separate = parsedSeparate.data;
+    }
+    let duplicate_of = row.match === "same" ? target_tactic_id : null;
+    if (row.duplicate_of != null) {
+      const duplicate = text(row.duplicate_of);
+      if (batchIds.has(duplicate) && duplicate !== id && row.verdict === "reject") duplicate_of = duplicate;
+      else if (duplicate !== target_tactic_id || row.match !== "same") continue;
     }
     map.set(id, {
       verdict: row.verdict,
       confidence: Math.max(0, Math.min(100, Math.round(row.confidence))),
-      reason,
+      reason, match: row.match, target_tactic_id, shared_scope, new_scope, expansion, separate,
       duplicate_of,
     });
   }
@@ -468,6 +491,8 @@ function stubDecisions(candidates: TacticCandidate[], library: LibraryTactic[]):
       confidence: 50,
       reason: "Test stub: exact-name match only; no model judge was called.",
       duplicate_of: inLibrary?.id ?? sibling ?? null,
+      match: inLibrary ? "same" : "new", target_tactic_id: inLibrary?.id ?? null,
+      shared_scope: null, new_scope: null, expansion: null, separate: null,
     });
   }
   return map;
@@ -490,20 +515,24 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
   manifest: {
     id: "s3-tactic-extract.pcj",
     stage: "S3",
-    version: "2.0.0",
+    version: "3.1.0",
     title: "Tactic extraction (proposer → critic → judge)",
     summary:
-      "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge decides what enters the library and what duplicates it. Needs a connected LLM.",
+      "A model proposes the tactics the source material describes, a model critic challenges each over three exchanges, and a model judge classifies same, overlapping and new scope. Overlaps await human source review. Needs a connected LLM.",
     contract: 1,
     agentic: true,
     capabilities: ["llm-proposer", "llm-critic", "llm-judge", "worked-examples"],
   },
   inputSchema,
   outputSchema,
-  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL],
+  migrations: [TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL, ...TACTIC_MATCHING_DDL.split(";").filter(s => s.trim())],
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Tactic extraction");
-    const documents = await listParsedDocuments(input.document_ids);
+    const frozen = ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined;
+    const sourceFacts = frozen ?? await freezeFacts(input);
+    const state = sourceFacts.state;
+    const documents = input.document_ids?.length ? sourceFacts.documents.filter(document => input.document_ids!.includes(document.id)) : sourceFacts.documents;
     if (documents.length === 0) {
       return {
         output: {
@@ -516,14 +545,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
         summary: "No parsed documents to extract from",
       };
     }
-    const state = await loadState();
-    const library: LibraryTactic[] = state.tactics.map((tactic) => ({
-      id: tactic.id,
-      name: tactic.name,
-      type: tactic.type,
-      status: tactic.status,
-      evidence_question: tactic.evidence_question,
-    }));
+
+    const library: LibraryTactic[] = state.tactics;
     // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
 
@@ -549,6 +572,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
               evidence_question: tactic.evidence_question,
               source_quote: tactic.source_quote,
               duplicate_of: null,
+              match: "new" as const, target_tactic_id: null, shared_scope: null, new_scope: null, expansion: null, separate: null,
             })),
           );
         },
@@ -601,7 +625,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
             note: critique?.note ?? "not reviewed",
           };
         }),
-    }, { kinds: [], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
+    }, { kinds: ["tactic_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     const survivors = outcome.judged.map((item) => item.candidate);
     const decisions = await ctx.run.step(
@@ -629,7 +653,7 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     const judged: JudgedCandidate<TacticCandidate>[] = survivors.map((candidate) => {
       const decision = decisions.get(candidate.id)!;
       return {
-        candidate: { ...candidate, duplicate_of: decision.duplicate_of },
+        candidate: { ...candidate, duplicate_of: decision.duplicate_of, match: decision.match, target_tactic_id: decision.target_tactic_id, shared_scope: decision.shared_scope, new_scope: decision.new_scope, expansion: decision.expansion, separate: decision.separate },
         subject: candidate.id,
         verdict: decision.verdict,
         score: decision.confidence,
@@ -653,15 +677,17 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       verdict: item.verdict,
       critic_note: item.note,
       duplicate_of: item.candidate.duplicate_of,
+      match: item.candidate.match, target_tactic_id: item.candidate.target_tactic_id,
+      matching: {shared_scope: item.candidate.shared_scope, new_scope: item.candidate.new_scope, expansion: item.candidate.expansion, separate: item.candidate.separate},
       proposer: outcome.mode,
       created_at: nowIso(),
     }));
-    if (rows.length > 0) await db().insert(tacticCandidates).values(rows);
+    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(tacticCandidates).values(rows);
 
     const committed_tactic_ids: string[] = [];
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const document of documents) {
-        const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id);
+        const fromDocument = accepted.filter((candidate) => candidate.document_id === document.id && candidate.match !== "overlaps");
         if (fromDocument.length === 0) continue;
         const source = state.sources.find((row) => row.id === document.source_id);
         const result = await ctx.run.step(`commit:${document.id}`, () =>
@@ -690,6 +716,14 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       }
     }
 
+    if (!ctx.replay?.evaluation && !input.dry_run) {
+      for (const candidate of accepted.filter(c => c.match === "overlaps")) {
+        const parent = state.tactics.find(t => t.id === candidate.target_tactic_id)!;
+        await createTacticSuggestion({run_id: ctx.run.id, document_id: candidate.document_id, source_id: candidate.source_id, source_quote: candidate.source_quote,
+          target_tactic_id: parent.id, expected_tactic_version: tacticVersion(parent), shared_scope: candidate.shared_scope!, new_scope: candidate.new_scope!, expansion: candidate.expansion!, separate: candidate.separate!});
+      }
+    }
+
     const toOut = (item: JudgedCandidate<TacticCandidate>) => ({
       id: item.candidate.id,
       document_id: item.candidate.document_id,
@@ -703,6 +737,8 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
       verdict: item.verdict,
       critic_note: item.note,
       duplicate_of: item.candidate.duplicate_of,
+      match: item.candidate.match, target_tactic_id: item.candidate.target_tactic_id,
+      shared_scope: item.candidate.shared_scope, new_scope: item.candidate.new_scope, expansion: item.candidate.expansion, separate: item.candidate.separate,
     });
 
     return {
@@ -720,7 +756,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
     };
   },
   evals: {
-    async cases() {
+    async cases(facts) {
+      if (facts) {
+        const documents = facts.documents as ParsedDocumentRecord[];
+        return documents.slice(0, 3).map(document => ({ name: document.source_id, input: { document_ids: [document.id], dry_run: true }, gold: sourcesForStage("S3").find(source => source.source_id === document.source_id) ? goldMetaForSource(sourcesForStage("S3").find(source => source.source_id === document.source_id)!) : undefined }));
+      }
       const curated = await curatedS3Cases();
       if (curated.length > 0) return curated;
       const documents = await listParsedDocuments();
@@ -772,6 +812,11 @@ export const tacticExtractModule: SynapseModule<TacticExtractInput, TacticExtrac
 registerModule(tacticExtractModule);
 
 export async function listTacticCandidates(limit = 200) {
-  await ensurePlatformSchema([TACTIC_CANDIDATES_DDL, TACTIC_CANDIDATES_DUPLICATE_DDL]);
+  await ensurePlatformSchema(tacticExtractModule.migrations);
   return db().select().from(tacticCandidates).orderBy(desc(tacticCandidates.created_at)).limit(limit);
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  return { documents: await listParsedDocuments(input.document_ids), state: await loadState() };
 }

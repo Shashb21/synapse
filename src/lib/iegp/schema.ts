@@ -193,7 +193,22 @@ export const tactics = pgTable("tactics", {
   custom_type: jsonb("custom_type"),
 });
 
+export const tacticExpansions = pgTable("tactic_expansions", {
+  id: text("id").primaryKey(),
+  tactic_id: text("tactic_id").notNull(),
+  proposal_id: text("proposal_id").notNull().unique(),
+  gap_ids: jsonb("gap_ids").notNull(),
+  scope: jsonb("scope").notNull(),
+  status: text("status").notNull(),
+  version: text("version").notNull(),
+  history: jsonb("history").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+  actor: jsonb("actor").notNull(),
+});
+
 export const coverages = pgTable("coverages", {
+  expansion_id: text("expansion_id"),
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),
   tactic_id: text("tactic_id").notNull(),

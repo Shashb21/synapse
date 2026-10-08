@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
@@ -35,6 +35,7 @@ import { captureBandDecision } from "@/lib/iegp/learning-capture";
  */
 const placementsTable = pgTable("priority_placements", {
   gap_id: text("gap_id").primaryKey(),
+  run_id: text("run_id"),
   axis_scores: jsonb("axis_scores").notNull(),
   suggested_band: text("suggested_band").notNull(),
   suggested_rationale: text("suggested_rationale").notNull(),
@@ -55,6 +56,7 @@ const placementsTable = pgTable("priority_placements", {
 async function ensurePlacementSchema() {
   await ensurePlatformSchema();
   await ensureCurrentSchemaTables();
+  await db().execute(sql.raw("ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS run_id text"));
 }
 
 const humanAxesOf = (row: { human_axes: unknown } | undefined): string[] =>
@@ -258,9 +260,10 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
   },
   inputSchema,
   outputSchema,
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Prioritization");
-    const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]);
+    const { state, axesConfig } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
     const axisById = (id: string | undefined) => axesConfig.axes.find((axis) => axis.id === id);
     const xAxis = axisById(input.x_axis) ?? axisById(axesConfig.x_axis) ?? axesConfig.axes[0]!;
     const yAxis =
@@ -435,7 +438,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         }),
     }, { kinds: ["s8_band"], text: openGaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
       const existing = await db().select().from(placementsTable);
       for (const placement of outcome.accepted) {
@@ -463,6 +466,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
         const values = locked
           ? {
               gap_id: placement.gap_id,
+              run_id: current?.run_id ?? null,
               axis_scores: { ...placement.axis_scores, ...currentScores },
               suggested_band: current!.suggested_band,
               suggested_rationale: current!.suggested_rationale,
@@ -477,6 +481,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
             }
           : {
               gap_id: placement.gap_id,
+              run_id: ctx.run.id,
               axis_scores: { ...currentScores, ...placement.axis_scores, ...humanScores },
               suggested_band: placement.suggested_band,
               suggested_rationale: placement.rationale,
@@ -533,6 +538,22 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
     };
   },
   evals: {
+    async reserveGold(facts, subject_ids) {
+      const source = facts as Awaited<ReturnType<typeof freezeFacts>>;
+      const gaps = source.state.gaps.filter(gap => subject_ids.includes(gap.id) && isLiveGap(gap) && displayedGapStatus(gap) === "validated_open");
+      // S8 consumes asset/objective planning context and gap text only. Remove all
+      // other subject collections so unrelated human answers cannot enter gold facts.
+      const state = Object.fromEntries(Object.entries(source.state).map(([key, value]) =>
+        [key, key === "gaps" ? gaps : key === "asset" || key === "objectives" ? value : Array.isArray(value) ? [] : value],
+      )) as typeof source.state;
+      const ids = gaps.map(gap => gap.id);
+      return {
+        facts: { state, axesConfig: structuredClone(source.axesConfig) }, subject_ids: ids,
+        // Completeness/explanation ratios and band spread retain their definitions,
+        // now measured only on the explicitly reserved open-gap subset.
+        cases: ids.length ? [{ name: "heldout-open-list", input: { gap_ids: ids, dry_run: true } }] : [],
+      };
+    },
     async cases() {
       return [{ name: "open-list", input: { dry_run: true } }];
     },
@@ -671,6 +692,7 @@ async function insertManualPlacement(values: {
 }): Promise<PlacementRow> {
   const row = {
     gap_id: values.gap_id,
+    run_id: null,
     axis_scores: values.axis_scores,
     suggested_band: values.band,
     suggested_rationale: "",
@@ -749,7 +771,7 @@ export async function validatePlacement(args: {
     await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
     row = { ...current, ...values };
   }
-  await recordEdit({
+  const decisionEdit = await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S8",
     entity_type: "gap",
@@ -762,22 +784,28 @@ export async function validatePlacement(args: {
     actor: args.actor,
   });
   await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
-  // Validating a band the model suggested is a learning example (KAN-78); a band
-  // placed purely by hand has no AI output to compare against.
-  if (current?.suggested_band) {
-    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === args.gap_id);
+  await captureValidatedBand(current, args.band, rationale, args.actor, decisionEdit.id, args.workspace_id);
+  return toRecord(row);
+}
+
+/** Both validation surfaces observe the same proven model origin and saved event. */
+async function captureValidatedBand(current: PlacementRow | null | undefined, band: Band, rationale: string, actor: Actor, eventId: string, workspace_id?: string) {
+  if (current?.suggested_band && current.run_id) {
+    const gap = (await loadState().catch(() => null))?.gaps.find((candidate) => candidate.id === current.gap_id);
     if (gap) {
       await captureBandDecision({
         gap: { id: gap.id, name: gap.name, statement: gap.statement },
+        run_id: current.run_id,
+        capture_key: eventId,
+        actor,
         suggested_band: current.suggested_band,
         suggested_rationale: current.suggested_rationale,
-        band: args.band,
+        band,
         rationale,
-        workspace_id: args.workspace_id,
+        workspace_id,
       });
     }
   }
-  return toRecord(row);
 }
 
 /**
@@ -862,7 +890,7 @@ export async function setPlacement(args: {
     Object.entries(scores)
       .map(([id, value]) => `${id}=${value}`)
       .join(", ");
-  await recordEdit({
+  const decisionEdit = await recordEdit({
     workspace_id: args.workspace_id,
     stage: "S8",
     entity_type: "gap",
@@ -875,6 +903,7 @@ export async function setPlacement(args: {
     actor: args.actor,
   });
   if (validated) await mirrorLegacyBand(args.gap_id, band, rationale, args.actor);
+  if (args.validate) await captureValidatedBand(current, band, rationale, args.actor, decisionEdit.id, args.workspace_id);
   return toRecord(row);
 }
 
@@ -960,3 +989,8 @@ export async function movePlacement(args: {
 }
 
 export type { StoredAxes };
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  const [state, axesConfig] = await Promise.all([loadState(), loadAxes()]); return { state, axesConfig };
+}

@@ -37,16 +37,16 @@ export default async function TimelinePage() {
   const today = new Date().toISOString().slice(0, 10);
   const view = gapTimelineView({ model, state, placements, today });
 
-  // Tactics not on the timeline in any form: a user can add any of them by hand.
+  // Each scope owns an activity: a child never hides its parent from this chooser.
   const onTimeline = new Set([
-    ...model.activities.map((row) => row.tactic_id),
-    ...model.pending.map((row) => row.tactic_id),
-    ...model.removed.map((row) => row.tactic_id),
+    ...model.activities.map((row) => row.id),
+    ...model.pending.map((row) => row.activity_id),
+    ...model.removed.map((row) => row.activity_id),
   ]);
   const addable = state.tactics
     .filter(
       (tactic) =>
-        !onTimeline.has(tactic.id) && tactic.status !== "cancelled" && tactic.review_status !== "rejected",
+        !onTimeline.has(`ACT-${tactic.id}`) && tactic.status !== "cancelled" && tactic.review_status !== "rejected",
     )
     .map((tactic) => ({ tactic_id: tactic.id, name: tactic.name }));
 

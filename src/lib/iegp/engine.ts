@@ -14,6 +14,7 @@ import {
 import type {
   DimensionAssessment,
   GapTacticCoverage,
+  TacticExpansion,
   GapStatusOverride,
   EvidenceGap,
   IegpState,
@@ -110,10 +111,17 @@ export function tacticCountsTowardAddressing(
 export function countingCoverages(
   coverages: GapTacticCoverage[],
   tactics: AddressingTactic[],
+  expansions: TacticExpansion[] = [],
 ): GapTacticCoverage[] {
   const byId = new Map(tactics.map((t) => [t.id, t]));
   return coverages.filter((c) => {
     const tactic = byId.get(c.tactic_id);
+    if (c.expansion_id) {
+      const child = expansions.find((e) => e.id === c.expansion_id);
+      return Boolean(tactic && child && child.tactic_id === c.tactic_id &&
+        child.gap_ids.includes(c.gap_id) &&
+        ["planned", "ongoing", "completed"].includes(child.status));
+    }
     return Boolean(tactic && tacticCountsTowardAddressing(tactic));
   });
 }
@@ -132,10 +140,10 @@ export function countingCoverages(
 export function computeGapStatus(
   coverages: GapTacticCoverage[],
   tactics?: AddressingTactic[],
-  extras?: { hasAcceptedChild?: boolean },
+  extras?: { hasAcceptedChild?: boolean; expansions?: TacticExpansion[] },
 ): MappedGapStatus {
   if (extras?.hasAcceptedChild) return "validated_addressed";
-  const pool = tactics ? countingCoverages(coverages, tactics) : coverages;
+  const pool = tactics ? countingCoverages(coverages, tactics, extras?.expansions) : coverages.filter((c) => !c.expansion_id);
   const relevant = pool.filter((c) => c.overall !== "not_relevant");
   if (relevant.length === 0) return "validated_open";
   if (relevant.some((c) => c.overall === "full" && c.overall_lock.locked)) {
@@ -148,7 +156,7 @@ export function computeGapStatus(
 export function suggestGapStatus(
   coverages: GapTacticCoverage[],
   tactics?: AddressingTactic[],
-  extras?: { hasAcceptedChild?: boolean },
+  extras?: { hasAcceptedChild?: boolean; expansions?: TacticExpansion[] },
 ): MappedGapStatus {
   return computeGapStatus(coverages, tactics, extras);
 }
@@ -869,6 +877,7 @@ export function planColumn(band: PriorityBand): PlanColumn {
 
 export type PlanTactic = {
   id: string;
+  expansion_id?: string;
   name: string;
   type: Tactic["type"];
   custom_type: Tactic["custom_type"];
@@ -1028,7 +1037,7 @@ function computedForGap(state: IegpState, gap: EvidenceGap, children: Set<string
   return computeGapStatus(
     state.coverages.filter((c) => c.gap_id === gap.id),
     state.tactics,
-    { hasAcceptedChild: children.has(gap.id) },
+    { hasAcceptedChild: children.has(gap.id), expansions: state.expansions },
   );
 }
 
@@ -1037,15 +1046,22 @@ export function mappedTactics(state: IegpState, gapId: string, residualId?: stri
   for (const coverage of state.coverages.filter((c) => c.gap_id === gapId)) {
     const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
     if (!tactic) continue;
-    mapped.push(
-      asPlanTactic(
+    const child = coverage.expansion_id ? state.expansions?.find(e => e.id === coverage.expansion_id) : undefined;
+    if (coverage.expansion_id && !child) continue;
+    const row = asPlanTactic(
         tactic,
         coverage.overall,
         coverage.stale,
         coverage.needs_review,
         coverageDimensionValues(coverage.dimensions),
-      ),
-    );
+      );
+    if (child) {
+      row.expansion_id = child.id;
+      row.name = child.scope.name;
+      row.status = child.status;
+      row.counts_toward_addressing = countingCoverages([coverage], state.tactics, state.expansions).length > 0;
+    }
+    mapped.push(row);
   }
   if (residualId) {
     for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residualId))) {
@@ -1190,7 +1206,7 @@ export function buildPlanWorkspace(state: IegpState): {
       computed_status: computed,
       suggested_status: computed,
       status_override: gap.status_override ?? null,
-      counting_join_count: countingCoverages(coverages, state.tactics).length,
+      counting_join_count: countingCoverages(coverages, state.tactics, state.expansions).length,
       tactics: mappedTactics(state, gap.id, residual?.id),
       parent_gap_id: gap.parent_gap_id,
       residual: residualByParent.get(gap.id) ?? null,

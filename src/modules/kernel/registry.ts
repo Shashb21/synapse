@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "./db";
 import { onWorkspaceBootstrap } from "@/lib/iegp/db";
 import * as t from "./schema";
@@ -99,10 +100,10 @@ export async function activateModule(args: {
     activated_by: args.actor_name,
     activated_at: nowIso(),
   };
-  await sharedDb()
-    .insert(t.stageModules)
-    .values(values)
-    .onConflictDoUpdate({ target: t.stageModules.stage, set: values });
+  await sharedDb().transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-module:${args.stage}`}))`);
+    await tx.insert(t.stageModules).values(values).onConflictDoUpdate({ target: t.stageModules.stage, set: values });
+  });
 }
 
 export type StageWiring = {

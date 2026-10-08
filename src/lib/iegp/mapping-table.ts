@@ -57,7 +57,7 @@ const storedRows = z.array(mappingTableRowSchema);
  * verdict contract (per-tactic coverage, confidence and rationale) is ignored,
  * so older rule-derived statuses are never shown as proposals.
  */
-export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
+export async function latestS4MappingRows(): Promise<(MappingTableRow & { origin_run_id?: string })[] | null> {
   try {
     const runs = await listRuns({ stage: "S4", limit: 20 });
     // The newest successful run whose rows were stored whole: an output cut to a
@@ -67,7 +67,7 @@ export async function latestS4MappingRows(): Promise<MappingTableRow[] | null> {
       const output = run.output as { rows?: unknown; accepted?: unknown };
       for (const candidate of [output.rows, output.accepted]) {
         const parsed = storedRows.safeParse(candidate);
-        if (parsed.success && parsed.data.length > 0) return parsed.data;
+        if (parsed.success && parsed.data.length > 0) return parsed.data.map(row => ({ ...row, origin_run_id: run.id }));
       }
     }
     return null;
@@ -98,7 +98,7 @@ export function buildMappingTableView(
   const proposedByGap = new Map((proposed ?? []).map((row) => [row.gap_id, row]));
   const tacticName = (id: string) => state.tactics.find((t) => t.id === id)?.name ?? id;
   return gaps.map((gap) => {
-    const locked = state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.tactic_id);
+    const locked = state.coverages.filter((c) => !c.expansion_id && c.gap_id === gap.id).map((c) => c.tactic_id);
     const decisions = decisionsFor(state, gap.id);
     const unreviewed = locked.filter((id) => decisions[id]?.status !== "accepted");
     const human = humanMappingRow(state, gap.id);

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "./db";
 import { AI_OFF_MESSAGE, aiEnabled } from "./ai-switch";
 import * as t from "./schema";
@@ -176,10 +177,10 @@ async function writeRouteConfig(args: RouteInput): Promise<RouteConfig> {
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
-  await sharedDb()
-    .insert(t.routingConfig)
-    .values(values)
-    .onConflictDoUpdate({ target: t.routingConfig.stage, set: values });
+  await sharedDb().transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-route:${args.stage}`}))`);
+    await tx.insert(t.routingConfig).values(values).onConflictDoUpdate({ target: t.routingConfig.stage, set: values });
+  });
   return { ...values, stage: args.stage, params: values.params as RouteConfig["params"] };
 }
 
@@ -190,8 +191,8 @@ const KEY_PROMPT =
  * Turns the control-panel configuration into the route a run will actually use.
  * Every resolved route is an LLM whose API key is set; there is no offline fallback.
  */
-export async function resolveRoute(stage: StageId): Promise<ResolvedRoute> {
-  const config = await routeConfig(stage);
+export async function resolveRoute(stage: StageId, frozenConfig?: RouteConfig): Promise<ResolvedRoute> {
+  const config = frozenConfig ?? await routeConfig(stage);
   const candidates = scrubFallbacks([config.provider_id, ...config.fallbacks]);
   const reasons: string[] = [];
   for (const [index, id] of candidates.entries()) {

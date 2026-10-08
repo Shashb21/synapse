@@ -7,7 +7,7 @@ import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle, type Critique } from "@/mod
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
 import type { ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
-import { assignTacticToGap, humanRejectedPairs, loadState } from "@/lib/iegp/store";
+import { assignTacticToGap, humanAcceptedExpansionScope, humanRejectedPairs, loadState } from "@/lib/iegp/store";
 import { gapEligibleForMapping, tacticEligibleForMapping } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS, DIMENSION_VALUES, OVERALL_COVERAGE } from "@/lib/iegp/enums";
 import { MAPPING_SCORE_FLOOR, scoreGapTacticMapping } from "@/lib/iegp/mapping";
@@ -21,6 +21,8 @@ export type MappingStatus = z.infer<typeof mappingStatusSchema>;
 const inputSchema = z.object({
   gap_ids: z.array(z.string()).optional(),
   tactic_ids: z.array(z.string()).optional(),
+  /** Optional subset of child scopes; omitted runs include all active children. */
+  expansion_ids: z.array(z.string()).optional(),
   /** Maximum tactics assigned per gap row. */
   max_per_gap: z.number().int().min(1).max(20).default(6),
   dry_run: z.boolean().default(false),
@@ -37,7 +39,10 @@ const dimensionsSchema = z.object(
 
 /** The model's verdict on one gap ↔ tactic pair. */
 const tacticMappingSchema = z.object({
+  /** Explicit target ID: parent tactic ID or child expansion ID. */
   tactic_id: z.string(),
+  parent_tactic_id: z.string().optional(),
+  expansion_id: z.string().optional(),
   tactic_name: z.string(),
   /** How much of the gap this tactic covers, in the workspace coverage vocabulary. */
   coverage: coverageSchema,
@@ -105,6 +110,8 @@ const REMEDY = "run S4 again or switch the S4 route in /admin/control.";
 
 const MAPPING_TABLE_PROPOSER_SYSTEM = `You produce a gap ↔ tactic mapping TABLE for a pharma Integrated Evidence Generation Plan.
 
+Each target has its own id. A target with expansion_id is added scope under parent_tactic_id, not the parent's design. Assess only its supplied question and scope, use its exact target id as tactic_id, and never merge it into the parent question. Proposed expansions may be assessed but do not count toward gap closure until a human plans them.
+
 Each TABLE ROW is one evidence gap. For each gap you are given, decide which tactics bear on it and how much of it they cover:
 - mappings: one entry per tactic you assessed for the gap. coverage is "full" (the tactic fully covers the gap), "partial" (covers some of it), "limited" (bears on it but thinly, e.g. population or endpoints too narrow) or "not_relevant" (you considered it and it does not apply). Each mapping needs a confidence (0-100), a one-sentence rationale naming what overlaps or is missing (population, comparator, outcome, timing), and, unless coverage is "not_relevant", a value for every dimension (${DIMENSION_KEYS}) of "yes", "partial", "no" or "unknown". For "not_relevant" set dimensions to null.
 - mapping_status: "open" (no tactic bears on the gap), "addressed" (the tactics together fully close it) or "partially_addressed" (they cover part of it).
@@ -150,11 +157,21 @@ function candidateSets(state: IegpState, input: MappingInput) {
       !gap.retired &&
       (!input.gap_ids?.length || input.gap_ids.includes(gap.id)),
   );
-  const tactics = state.tactics.filter(
+  const parents = state.tactics.filter(
     (tactic) =>
       tacticEligibleForMapping(tactic) &&
       (!input.tactic_ids?.length || input.tactic_ids.includes(tactic.id)),
   );
+  const children = (state.expansions ?? []).flatMap((child) => {
+    const parent = state.tactics.find((t) => t.id === child.tactic_id);
+    if (!parent || !tacticEligibleForMapping(parent) || child.status === "cancelled" ||
+      (input.tactic_ids?.length && !input.tactic_ids.includes(parent.id)) ||
+      (input.expansion_ids?.length && !input.expansion_ids.includes(child.id))) return [];
+    return [{...parent, ...child.scope, type: child.scope.type ?? "not_recorded" as const, custom_type: null, comparator: child.scope.comparator ?? "", data_source: child.scope.data_source ?? "", id: child.id, parent_tactic_id: parent.id,
+      expansion_id: child.id, gap_ids: child.gap_ids, status: child.status}];
+  });
+  const tactics: (Omit<IegpState["tactics"][number], "type"> & {type: IegpState["tactics"][number]["type"] | "not_recorded"; parent_tactic_id?: string; expansion_id?: string; gap_ids?: string[]})[] =
+    [...(input.expansion_ids?.length ? [] : parents), ...children];
   return { gaps, tactics };
 }
 
@@ -177,7 +194,11 @@ function finiteNumber(value: unknown): value is number {
  * never rewritten: assignTacticToGap refuses an existing pair.)
  */
 function blockedPairs(state: IegpState): Set<string> {
-  return humanRejectedPairs(state);
+  const pairs = humanRejectedPairs(state);
+  for (const child of state.expansions ?? []) {
+    for (const gapId of child.gap_ids) if (pairs.has(`${gapId}::${child.tactic_id}`) && !humanAcceptedExpansionScope(state, gapId, child.tactic_id, child.id)) pairs.add(`${gapId}::${child.id}`);
+  }
+  return pairs;
 }
 
 const pairKey = (gap_id: string, tactic_id: string) => `${gap_id}::${tactic_id}`;
@@ -189,17 +210,19 @@ const pairKey = (gap_id: string, tactic_id: string) => `${gap_id}::${tactic_id}`
 function localTableRows(state: IegpState, input: MappingInput): Row[] {
   if (!isTestStub()) throw new NoRouteError("Mapping has no rule-based fallback.");
   const { gaps, tactics } = candidateSets(state, input);
-  const covered = new Set(state.coverages.map((c) => pairKey(c.gap_id, c.tactic_id)));
+  const covered = new Set(state.coverages.filter((c) => !c.expansion_id || c.overall !== "unassessed").map((c) => pairKey(c.gap_id, c.expansion_id ?? c.tactic_id)));
   const blocked = blockedPairs(state);
   return gaps.map((gap) => {
     const scored = tactics
-      .filter((tactic) => !covered.has(pairKey(gap.id, tactic.id)) && !blocked.has(pairKey(gap.id, tactic.id)))
+      .filter((tactic) => (!tactic.gap_ids || tactic.gap_ids.includes(gap.id)) && !covered.has(pairKey(gap.id, tactic.id)) && !blocked.has(pairKey(gap.id, tactic.id)))
       .map((tactic) => ({ tactic, result: scoreGapTacticMapping(gap, tactic, {}) }))
       .filter((item) => item.result.score >= MAPPING_SCORE_FLOOR)
       .sort((a, b) => b.result.score - a.result.score)
       .slice(0, input.max_per_gap);
     const mappings: TacticMapping[] = scored.map(({ tactic, result }) => ({
       tactic_id: tactic.id,
+      parent_tactic_id: tactic.parent_tactic_id,
+      expansion_id: tactic.expansion_id,
       tactic_name: tactic.name,
       coverage: "partial",
       confidence: 50,
@@ -263,6 +286,7 @@ function parseProposedRow(
   for (const item of raw.mappings as RawMapping[]) {
     const tactic = tactics.find((candidate) => candidate.id === item?.tactic_id);
     if (!tactic) return reject(`tactic ${String(item?.tactic_id)} is not in the tactic library.`);
+    if (tactic.gap_ids && !tactic.gap_ids.includes(gap.id)) return reject(`expansion ${tactic.id} does not target this gap.`);
     if (mappings.some((mapping) => mapping.tactic_id === tactic.id)) return reject(`tactic ${tactic.id} is listed twice.`);
     // A person rejected or removed this pair: it is left out, never proposed again.
     if (blocked.has(pairKey(gap.id, tactic.id))) continue;
@@ -279,6 +303,8 @@ function parseProposedRow(
     }
     mappings.push({
       tactic_id: tactic.id,
+      parent_tactic_id: tactic.parent_tactic_id,
+      expansion_id: tactic.expansion_id,
       tactic_name: tactic.name,
       coverage: coverage.data,
       confidence: clampScore(item.confidence),
@@ -319,7 +345,12 @@ function promptTactics(tactics: TacticRow[]) {
     evidence_question: tactic.evidence_question,
     population: tactic.population,
     comparator: tactic.comparator,
+    data_source: tactic.data_source,
     outcomes: tactic.outcomes,
+    parent_tactic_id: tactic.parent_tactic_id,
+    expansion_id: tactic.expansion_id,
+    scope: tactic.expansion_id ? Object.fromEntries(Object.entries(tactic).filter(([key]) =>
+      ["study_design", "geography", "data_cut", "analysis", "instrument", "gap_coverage", "cost_effort", "timing", "feasibility_risks", "post_hoc", "protocol_amendment"].includes(key))) : undefined,
   }));
 }
 
@@ -370,7 +401,7 @@ function promptGap(shared: Shared, gapId: string) {
     name: gap.name,
     statement: gap.statement,
     domain: gap.domain,
-    assigned_tactic_ids: shared.state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.tactic_id),
+    assigned_tactic_ids: shared.state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.expansion_id ?? c.tactic_id),
     human_rejected_tactic_ids: rejectedFor(shared, gap.id),
   };
 }
@@ -508,7 +539,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
     stage: "S4",
-    version: "3.0.0",
+    version: "3.2.0",
     title: "LLM mapping table (proposer ↔ critic ×3 → judge)",
     summary:
       "A model proposes one row per gap with a coverage verdict, confidence and rationale for each tactic; a model critic challenges each row over three exchanges and a model judge accepts or rejects it. Needs a connected LLM.",
@@ -519,9 +550,10 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   inputSchema,
   outputSchema,
   migrations: [MAPPING_CANDIDATES_DDL],
+  freeze: freezeFacts,
   async run(input, ctx) {
     requireLlm(ctx, "Mapping");
-    const state = await loadState();
+    const { state } = (ctx.replay?.facts as Awaited<ReturnType<typeof freezeFacts>> | undefined) ?? await freezeFacts(input);
     const { gaps, tactics } = candidateSets(state, input);
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
@@ -674,10 +706,10 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
         rationale: [mapping.rationale, `coverage:${mapping.coverage}`, ...rowNote],
       }));
     });
-    if (rows.length > 0) await db().insert(mappingCandidates).values(rows);
+    if (!ctx.replay?.evaluation && rows.length > 0) await db().insert(mappingCandidates).values(rows);
 
     const committed: { gap_id: string; tactic_ids: string[] }[] = [];
-    if (!input.dry_run) {
+    if (!ctx.replay?.evaluation && !input.dry_run) {
       for (const row of outcome.accepted) {
         const joined: string[] = [];
         for (const mapping of row.mappings.filter(bearsOnGap)) {
@@ -685,7 +717,8 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
           try {
             await assignTacticToGap({
               gap_id: row.gap_id,
-              tactic_id: mapping.tactic_id,
+              tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id,
+              expansion_id: mapping.expansion_id,
               actor_name: ctx.actor.name,
               actor_function: ctx.actor.function,
               note: `S4 mapping table · ${row.mapping_status} · ${mapping.coverage} · ${mapping.rationale}`,
@@ -762,6 +795,23 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     };
   },
   evals: {
+    async reserveGold(facts, subject_ids) {
+      const source = facts as Awaited<ReturnType<typeof freezeFacts>>;
+      const { gaps } = candidateSets(source.state, inputSchema.parse({ gap_ids: subject_ids }));
+      const ids = gaps.filter(gap => subject_ids.includes(gap.id)).map(gap => gap.id);
+      const state = Object.fromEntries(Object.entries(source.state).map(([key, value]) =>
+        [key, key === "gaps" ? gaps.filter(gap => ids.includes(gap.id))
+          : key === "coverages" ? source.state.coverages.filter(row => ids.includes(row.gap_id))
+          : key === "mapping_suggestions" ? source.state.mapping_suggestions.filter(row => ids.includes(row.gap_id))
+          : key === "tactics" || key === "asset" ? value : Array.isArray(value) ? [] : value],
+      )) as typeof source.state;
+      return {
+        facts: { state }, subject_ids: ids,
+        // Rationale/selectivity ratios and unmapped counts keep the existing
+        // definitions; their population is precisely these withheld gaps.
+        cases: ids.length ? [{ name: "heldout-mapping-gaps", input: { gap_ids: ids, max_per_gap: 6, dry_run: true } }] : [],
+      };
+    },
     async cases() {
       return [{ name: "workspace", input: { max_per_gap: 6, dry_run: true } }];
     },
@@ -802,4 +852,9 @@ registerModule(kgMappingModule);
 export async function listMappingCandidates(limit = 300) {
   await ensurePlatformSchema([MAPPING_CANDIDATES_DDL]);
   return db().select().from(mappingCandidates).orderBy(desc(mappingCandidates.created_at)).limit(limit);
+}
+
+/** Freeze the source facts this stage consumes, before any proposal or human decision. */
+async function freezeFacts(input: z.infer<typeof inputSchema>) {
+  return { state: await loadState() };
 }

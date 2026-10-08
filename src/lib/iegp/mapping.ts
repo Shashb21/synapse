@@ -139,7 +139,6 @@ export type MappingGap = Pick<EvidenceGap, "name" | "statement" | "domain">;
 export type MappingTactic = Pick<
   Tactic,
   | "name"
-  | "type"
   | "description"
   | "evidence_question"
   | "population"
@@ -147,7 +146,7 @@ export type MappingTactic = Pick<
   | "comparator"
   | "outcomes"
   | "study_design"
->;
+> & {type: Tactic["type"] | "not_recorded"};
 export type MappingNeed = Pick<EvidenceNeed, "statement" | "population" | "comparator" | "outcome">;
 
 export type MappingScoreExtras = {
@@ -173,7 +172,7 @@ function joinHay(parts: Array<string | undefined>): string {
 
 /** Dissemination is a tactic type, recorded by S3 or a human — never read off its wording. */
 export function isDisseminationTactic(tactic: Pick<MappingTactic, "type">): boolean {
-  return DISSEMINATION_TACTIC_TYPES.includes(tactic.type);
+  return DISSEMINATION_TACTIC_TYPES.some(type => type === tactic.type);
 }
 
 function textSimilarity(gap: MappingGap, tactic: MappingTactic): number {
@@ -243,7 +242,7 @@ export function scoreGapTacticMapping(
     tacticPrimary,
     tactic.description,
     tactic.study_design,
-    TACTIC_TYPE_LABELS[tactic.type],
+    (tactic.type === "not_recorded" ? "Type not recorded" : TACTIC_TYPE_LABELS[tactic.type]),
   ]);
 
   const reasons: string[] = [];
@@ -258,17 +257,17 @@ export function scoreGapTacticMapping(
   }
 
   const affinity = DOMAIN_TYPE_AFFINITY[gap.domain] ?? [];
-  const typeFits = affinity.includes(tactic.type);
+  const typeFits = affinity.some(type => type === tactic.type);
   const dissemination = isDisseminationTactic(tactic);
   if (typeFits && !dissemination) {
     score += 22;
     reasons.push(
-      `${TACTIC_TYPE_LABELS[tactic.type]} is a generation method that fits ${DOMAIN_LABELS[gap.domain]}.`,
+      `${(tactic.type === "not_recorded" ? "Type not recorded" : TACTIC_TYPE_LABELS[tactic.type])} is a generation method that fits ${DOMAIN_LABELS[gap.domain]}.`,
     );
   } else if (typeFits && dissemination && gap.domain === "implementation") {
     score += 14;
     reasons.push(
-      `${TACTIC_TYPE_LABELS[tactic.type]} matches this ${DOMAIN_LABELS[gap.domain]} communication gap.`,
+      `${(tactic.type === "not_recorded" ? "Type not recorded" : TACTIC_TYPE_LABELS[tactic.type])} matches this ${DOMAIN_LABELS[gap.domain]} communication gap.`,
     );
   }
 

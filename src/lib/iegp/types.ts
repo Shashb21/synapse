@@ -269,8 +269,63 @@ export type Tactic = {
   custom_type?: CustomTacticType | null;
 };
 
+/** Added study scope, kept separate from the parent's locked evidence question. */
+export type ExpansionScope = {
+  /** Recorded child design; absent on historical/source scopes that never supplied it. */
+  type?: TacticType;
+  comparator?: string;
+  data_source?: string;
+  name: string;
+  evidence_question: string;
+  population: string;
+  outcomes: string;
+  geography: string;
+  data_cut: string;
+  analysis: string;
+  instrument: string;
+  study_design: string;
+  gap_coverage: string;
+  cost_effort: string;
+  timing: string;
+  feasibility_risks: string;
+  post_hoc: boolean;
+  prospective_enrolment: boolean;
+  protocol_amendment: boolean;
+  start_date: string | null;
+  evidence_available: string | null;
+};
+
+export type ExpansionHistoryEntry = {
+  action: "accept" | "status" | "inherit";
+  source_gap_id?: string;
+  target_gap_id?: string;
+  source_coverage_id?: string;
+  at: string;
+  actor: Actor;
+  rationale: string;
+  status: TacticStatus;
+  version: string;
+};
+
+/** An accepted added scope with an independent lifecycle and append-only history. */
+export type TacticExpansion = {
+  id: string;
+  tactic_id: string;
+  gap_ids: string[];
+  scope: ExpansionScope;
+  status: TacticStatus;
+  proposal_id: string;
+  version: string;
+  history: ExpansionHistoryEntry[];
+  created_at: string;
+  updated_at: string;
+  actor: Actor;
+};
+
 export type GapTacticCoverage = {
   id: string;
+  /** Null/absent means original parent scope; otherwise this assessment is child-only. */
+  expansion_id?: string | null;
   gap_id: string;
   tactic_id: string;
   dimensions: Record<CoverageDimension, DimensionAssessment>;
@@ -365,6 +420,7 @@ export type IegpState = {
   gaps: EvidenceGap[];
   need_gap_links: NeedGapLink[];
   tactics: Tactic[];
+  expansions: TacticExpansion[];
   coverages: GapTacticCoverage[];
   mapping_suggestions: MappingSuggestionRecord[];
   residual_gap_suggestions: ResidualGapSuggestionRecord[];
@@ -379,3 +435,17 @@ export type IegpState = {
   breakout_group_gaps: BreakoutGroupGap[];
   gap_suggestions: GapSuggestion[];
 };
+
+/** Source-owned overlap proposal; model baseline and human edits are retained separately. */
+export type TacticSuggestion = {
+  id: string; version: string; run_id: string; document_id: string; source_id: string; source_quote: string;
+  target_tactic_id: string; expected_tactic_version: string; reviewed_parent: Tactic;
+  shared_scope: string; new_scope: string; expansion: ExpansionScope; original_expansion: ExpansionScope;
+  separate: SeparateTacticOption; original_separate: SeparateTacticOption; gap_id: string | null;
+  status: "pending" | "expanded" | "separate" | "rejected";
+  result_expansion_id: string | null; result_tactic_id: string | null;
+  history: {action: "edit" | "expand" | "separate" | "reject"; actor: Actor; rationale: string; at: string; expansion: ExpansionScope; separate: SeparateTacticOption; gap_id: string | null}[];
+  created_at: string; updated_at: string;
+};
+/** The source, rather than the model's preference, supplies the activity lifecycle. */
+export type SeparateTacticOption = {name: string; type: TacticType; status: TacticStatus; evidence_question: string};

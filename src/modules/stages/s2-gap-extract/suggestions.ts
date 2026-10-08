@@ -48,6 +48,7 @@ export async function acceptGapMergeSuggestion(
   if (before) {
     await captureGapSuggestionDecision({
       ...before,
+      actor: { name: args.actor_name, function: args.actor_function },
       decision: "merge",
       name: args.name,
       statement: args.statement,
@@ -64,6 +65,7 @@ export async function acceptGapSplitSuggestion(args: Decision & { name?: string;
   if (before) {
     await captureGapSuggestionDecision({
       ...before,
+      actor: { name: args.actor_name, function: args.actor_function },
       decision: "split",
       name: args.name,
       statement: args.statement,
@@ -81,7 +83,7 @@ export async function acceptGapSplitSuggestion(args: Decision & { name?: string;
 export async function rejectGapSuggestionKeepingCandidate(args: Decision): Promise<void> {
   const before = await beforeDecision(args.suggestion_id);
   const suggestion = await rejectGapSuggestion(args);
-  if (before) await captureGapSuggestionDecision({ ...before, decision: "reject", rationale: args.rationale });
+  if (before) await captureGapSuggestionDecision({ ...before, actor: { name: args.actor_name, function: args.actor_function }, decision: "reject", rationale: args.rationale });
   if (!suggestion.candidate_row_id) return;
   await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
   await db()

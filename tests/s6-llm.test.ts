@@ -11,6 +11,7 @@ import {
   lockTactic,
   resetDemoSetup,
   syncComputedGapStatuses,
+  persistState,
 } from "@/lib/iegp/store";
 import { partialSplitModule } from "@/modules/stages/s6-partial-split/module";
 
@@ -124,6 +125,34 @@ describe("S6 on the model path", () => {
   const keep = { verdict: "keep", confidence: 80, note: "holds" };
   const accept = { verdict: "accept", confidence: 77, note: "a reviewer can adopt this" };
 
+  it("uses independent child scope IDs and lifecycle in every model prompt", async () => {
+    const state = await loadState();
+    const parent = state.tactics.find(t => t.id === tacticId)!;
+    const base = state.coverages.find(c => c.gap_id === gapId)!;
+    const actor = ACTOR, at = new Date().toISOString();
+    const scope = {name: "Added community analysis", evidence_question: "Added community question", population: "Community", outcomes: "ILD", geography: "US", data_cut: "2026", analysis: "Post-hoc", instrument: "", study_design: "Retrospective", gap_coverage: "Community", cost_effort: "Two weeks", timing: "Q4", feasibility_risks: "Small subgroup", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+    state.expansions = ["planned", "proposed", "cancelled"].map(status => ({id: `EXP-${status}`, tactic_id: parent.id, gap_ids: [gapId], proposal_id: `s9:${status}`, scope, status: status as "planned" | "proposed" | "cancelled", version: status, created_at: at, updated_at: at, actor, history: []}));
+    state.coverages = state.expansions.map(e => ({...base, id: `COV-${e.id}`, expansion_id: e.id}));
+    await persistState(state);
+    const {ctx, calls} = context(call => role(call) === "split-proposer" ? split({addressed_tactic_ids: ["EXP-planned"]}) : role(call) === "split-critic" ? keep : accept);
+    const {output} = await partialSplitModule.run(input(), ctx);
+    expect(output.proposal!.addressed_tactic_ids).toEqual(["EXP-planned"]);
+    for (const call of calls) {
+      expect(call.body.mapped_tactics).toEqual(expect.arrayContaining([
+        expect.objectContaining({id: "EXP-planned", parent_tactic_id: parent.id, expansion_id: "EXP-planned", evidence_question: scope.evidence_question, status: "planned", counts_toward_addressing: true}),
+        expect.objectContaining({id: "EXP-proposed", counts_toward_addressing: false}),
+        expect.objectContaining({id: "EXP-cancelled", counts_toward_addressing: false}),
+      ]));
+    }
+  });
+  it("refuses missing child evidence under a planned parent before model calls", async () => {
+    const state = await loadState();
+    state.coverages = state.coverages.map(c => ({...c, expansion_id: "EXP-MISSING"}));
+    await persistState(state);
+    const {ctx, calls} = context(() => split());
+    await expect(partialSplitModule.run(input(), ctx)).rejects.toThrow(/no .*mapped/);
+    expect(calls).toHaveLength(0);
+  });
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);
     await expect(partialSplitModule.run(input(), ctx)).rejects.toBeInstanceOf(NoRouteError);
@@ -253,4 +282,65 @@ describe("S6 on the model path", () => {
     const state = await loadState();
     expect(state.gaps.filter((row) => row.parent_gap_id === gapId)).toHaveLength(2);
   });
+  it.each(["accept", "edit", "reject"])("captures a real S6 proposal %s through the dialog payload and API", async (decision) => {
+    const { POST } = await import("@/app/api/iegp/route");
+    const { splitPayload } = await import("@/components/split-gap-dialog");
+    const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
+    const { sharedDb } = await import("@/modules/kernel/db");
+    const { sql } = await import("drizzle-orm");
+    const recorder = new RunRecorder({ workspace_id: "default", stage: "S6", module_id: partialSplitModule.manifest.id, module_version: partialSplitModule.manifest.version, actor: ACTOR, input: { gap_id: gapId } });
+    await openRun(recorder);
+    const { ctx } = context((call) => role(call) === "split-proposer" ? split() : role(call) === "split-critic" ? keep : accept);
+    ctx.run = recorder;
+    const result = await partialSplitModule.run(input(), ctx);
+    await closeRun({ recorder, status: "ok", output: result.output, route: ctx.route });
+    const proposal = result.output.proposal!;
+    const payload = splitPayload({ gapId, addressedName: proposal.addressed_name, addressedStatement: proposal.addressed_statement, openName: proposal.open_name, openStatement: decision === "edit" ? "A narrower unanswered comparison question." : proposal.open_statement, addressedTacticIds: proposal.addressed_tactic_ids, openTacticIds: [], originatingRunId: recorder.id });
+    process.env.SYNAPSE_TEST_STUB_LLM = "1"; // API-only anonymous test identity; proposal above used the model path.
+    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...payload, ...(decision === "reject" ? { action: "reject_split_proposal" } : {}), note: "Reviewer decision rationale", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    expect(res.status).toBe(200);
+    const rows = await sharedDb().execute(sql`select ai_output, final, outcome, run_id, actor, capture_key from decision_examples where run_id = ${recorder.id}`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ai_output).toEqual(proposal);
+    expect(rows[0].outcome).toBe(decision === "reject" ? "rejected" : decision === "edit" ? "edited" : "accepted");
+    expect(rows[0].run_id).toBe(recorder.id); expect(rows[0].actor).toEqual(ACTOR); expect(rows[0].capture_key).toBeTruthy();
+    if (decision === "edit") expect(rows[0].final).toMatchObject({ open_statement: "A narrower unanswered comparison question." });
+    const parent = (await loadState()).gaps.find((row) => row.id === gapId)!;
+    expect(Boolean(parent.retired)).toBe(decision !== "reject");
+  });
+
+  it("refuses an unproven S6 reference before changing the parent", async () => {
+    const { POST } = await import("@/app/api/iegp/route");
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, originating_run_id: "missing-run", addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Reviewer reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(Boolean((await loadState()).gaps.find((row) => row.id === gapId)!.retired)).toBe(false);
+  });
+
+  it("keeps an ordinary manual API split unaffiliated with AI learning", async () => {
+    const { POST } = await import("@/app/api/iegp/route");
+    const { sharedDb } = await import("@/modules/kernel/db");
+    const { sql } = await import("drizzle-orm");
+    const before = await sharedDb().execute(sql`select id from decision_examples where workspace_id = 'default' and stage = 'S6' and subject_id = ${gapId}`);
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, addressed_name: "Manual addressed population", open_name: "Manual unanswered question", tactic_ids: tacticId, actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    expect(res.status).toBe(200);
+    expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = 'default' and stage = 'S6' and subject_id = ${gapId}`)).toEqual(before);
+    expect(Boolean((await loadState()).gaps.find(row => row.id === gapId)!.retired)).toBe(true);
+  });
+  it("rejects mismatched workspace, gap, failed, stale-version and non-model S6 provenance before mutation", async () => {
+    const { POST } = await import("@/app/api/iegp/route");
+    const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
+    const { ctx } = context((call) => role(call) === "split-proposer" ? split() : role(call) === "split-critic" ? keep : accept);
+    const result = await partialSplitModule.run(input(), ctx);
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    for (const mismatch of ["workspace", "gap", "failed", "stub", "stage", "version"]) {
+      const recorder = new RunRecorder({ workspace_id: mismatch === "workspace" ? "another-workspace" : "default", stage: mismatch === "stage" ? "S9" : "S6", module_id: partialSplitModule.manifest.id, module_version: mismatch === "version" ? "2.0.0" : partialSplitModule.manifest.version, actor: ACTOR, input: { gap_id: mismatch === "gap" ? "another-gap" : gapId } });
+      await openRun(recorder); await closeRun({ recorder, status: mismatch === "failed" ? "error" : "ok", output: { ...result.output, mode: mismatch === "stub" ? "deterministic" : "llm" } });
+      const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, originating_run_id: recorder.id, addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Review reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+      expect(res.status, mismatch).toBeGreaterThanOrEqual(400);
+      expect(Boolean((await loadState()).gaps.find(row => row.id === gapId)!.retired), mismatch).toBe(false);
+    }
+  });
+
 });

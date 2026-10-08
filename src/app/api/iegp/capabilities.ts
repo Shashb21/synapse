@@ -61,6 +61,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "save_product_setup",
       "validate_gap",
       "split_partial_gap",
+      "reject_split_proposal",
       "rewrite_partial_gap",
       "create_addressed_gap",
       "lock_roadmap",

@@ -1,6 +1,6 @@
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import type { TacticStatus, TacticType } from "@/lib/iegp/enums";
-import type { IegpState, Tactic } from "@/lib/iegp/types";
+import type { IegpState, Tactic, TacticExpansion, ExpansionScope } from "@/lib/iegp/types";
 import { countingCoverages, displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import type { PlacementRecord } from "@/modules/stages/s8-prioritization/module";
 
@@ -39,8 +39,13 @@ export type ScheduleBasis = {
 export type TimelineActivity = {
   id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
-  tactic_type: TacticType;
+  tactic_type: TacticType | "not_recorded";
   /** A person's own type name and colour, drawn instead of the type's family colour (KAN-51). */
   tactic_custom_type?: CustomTacticType | null;
   tactic_status: TacticStatus;
@@ -85,13 +90,31 @@ export type TimelineActivity = {
 export type RemovedActivity = {
   activity_id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
   reason: string;
 };
 
-export type PendingActivity = {
+/** Details shared by dated and pending activities; contains no fabricated schedule. */
+export type ActivityDetails = Pick<TimelineActivity,
+  "tactic_type" | "tactic_custom_type" | "tactic_status" | "band" | "gap_ids" | "gap_names"
+> & {meta: Pick<TimelineActivity["meta"],
+  "evidence_question" | "population" | "comparator" | "outcomes" | "data_source" |
+  "study_design" | "owner" | "budget" | "function" | "priority_rationale" | "counts_toward_addressing"
+>};
+
+export type PendingActivity = ActivityDetails & {
   activity_id: string;
   tactic_id: string;
+  expansion_id?: string;
+  parent_activity_id?: string;
+  parent_tactic_name?: string;
+  expansion_version?: string;
+  expansion_scope?: ExpansionScope;
   tactic_name: string;
   missing: ScheduleField[];
   reason: string;
@@ -162,7 +185,9 @@ export function isRemoved(saved: SavedActivity | null | undefined): boolean {
 
 export type TimelineCandidate = {
   id: string;
-  tactic: Tactic;
+  tactic: Omit<Tactic, "type"> & {type: TacticType | "not_recorded"};
+  expansion?: TacticExpansion;
+  parent_name?: string;
   band: TimelineBand;
   gap_ids: string[];
   gap_names: string[];
@@ -172,8 +197,8 @@ export type TimelineCandidate = {
   saved: SavedActivity | null;
 };
 
-export function activityId(tacticId: string): string {
-  return `ACT-${tacticId}`;
+export function activityId(tacticId: string, expansionId?: string): string {
+  return expansionId ? `ACT-EXP-${expansionId}` : `ACT-${tacticId}`;
 }
 
 export function addMonths(iso: string, months: number): string {
@@ -218,9 +243,10 @@ export function timelineCandidates(args: {
   const gapsForTactic = new Map<string, string[]>();
   for (const coverage of args.state.coverages) {
     if (!gapById.has(coverage.gap_id)) continue;
-    const list = gapsForTactic.get(coverage.tactic_id) ?? [];
+    const scopeId = activityId(coverage.tactic_id, coverage.expansion_id ?? undefined);
+    const list = gapsForTactic.get(scopeId) ?? [];
     list.push(coverage.gap_id);
-    gapsForTactic.set(coverage.tactic_id, list);
+    gapsForTactic.set(scopeId, list);
   }
 
   const bandOf = (gapIds: string[]): TimelineBand => {
@@ -241,10 +267,17 @@ export function timelineCandidates(args: {
   };
 
   const candidates: TimelineCandidate[] = [];
-  for (const tactic of args.state.tactics) {
-    if (tactic.status === "cancelled" || tactic.review_status === "rejected") continue;
-    const gapIds = [...new Set(gapsForTactic.get(tactic.id) ?? [])];
-    const id = activityId(tactic.id);
+  const scopes = args.state.tactics.flatMap(parent => [
+    {tactic: parent, expansion: undefined as TacticExpansion | undefined, parent_name: parent.name},
+    ...(args.state.expansions ?? []).filter(child => child.tactic_id === parent.id).map(expansion => ({
+      tactic: {...parent, ...expansion.scope, type: expansion.scope.type ?? "not_recorded" as const, custom_type: null, comparator: expansion.scope.comparator ?? "", data_source: expansion.scope.data_source ?? "", status: expansion.status, budget: expansion.scope.cost_effort},
+      expansion, parent_name: parent.name,
+    })),
+  ]);
+  for (const {tactic, expansion, parent_name} of scopes) {
+    if (tactic.status === "cancelled" || (!expansion && tactic.review_status === "rejected")) continue;
+    const id = activityId(tactic.id, expansion?.id);
+    const gapIds = [...new Set(gapsForTactic.get(id) ?? [])];
     const saved = args.overrides?.find((row) => row.id === id) ?? null;
     // A user can put any tactic on the timeline by hand, mapped or not.
     if (gapIds.length === 0 && saved?.meta?.manual !== true) continue;
@@ -253,6 +286,8 @@ export function timelineCandidates(args: {
     candidates.push({
       id,
       tactic,
+      expansion,
+      parent_name,
       band: gapIds.length === 0 ? "unprioritized" : bandOf(gapIds),
       gap_ids: gapIds,
       gap_names: gapIds.map((gapId) => gapById.get(gapId)?.name ?? gapId),
@@ -262,14 +297,41 @@ export function timelineCandidates(args: {
           .find((placement) => placement?.validated)?.rationale ?? null,
       counting:
         countingCoverages(
-          args.state.coverages.filter((coverage) => coverage.tactic_id === tactic.id),
+          args.state.coverages.filter((coverage) => coverage.tactic_id === tactic.id && (coverage.expansion_id ?? null) === (expansion?.id ?? null)),
           args.state.tactics,
+          args.state.expansions,
         ).length > 0,
-      design: args.designs?.get(tactic.id) ?? {},
+      design: args.designs?.get(expansion ? id : tactic.id) ?? {},
       saved,
     });
   }
   return candidates;
+}
+
+/** Read details from this scope and the shared coverage engine, independent of dates. */
+function activityDetails(candidate: TimelineCandidate): ActivityDetails {
+  const tactic = candidate.tactic;
+  return {
+    tactic_type: tactic.type,
+    tactic_custom_type: tactic.custom_type ?? null,
+    tactic_status: tactic.status,
+    band: candidate.band,
+    gap_ids: candidate.gap_ids,
+    gap_names: candidate.gap_names,
+    meta: {
+      evidence_question: tactic.evidence_question,
+      population: tactic.population,
+      comparator: tactic.comparator,
+      outcomes: tactic.outcomes,
+      data_source: tactic.data_source,
+      study_design: tactic.study_design,
+      owner: tactic.owner,
+      budget: tactic.budget ?? null,
+      function: tactic.function,
+      priority_rationale: candidate.priority_rationale,
+      counts_toward_addressing: candidate.counting,
+    },
+  };
 }
 
 /** Which schedule fields no human, saved row or design supplies, so a model must estimate them. */
@@ -353,8 +415,10 @@ export function buildTimeline(args: {
 
     if (!start || duration === null || missing.length > 0) {
       pending.push({
+        ...activityDetails(candidate),
         activity_id: candidate.id,
         tactic_id: tactic.id,
+        ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
         tactic_name: tactic.name,
         missing,
         reason: `No ${missing.map((field) => field.replace("_", " ")).join(", ")} yet. Date it by hand, or rebuild the timeline to have the model estimate ${missing.length === 1 ? "it" : "them"}.`,
@@ -442,39 +506,26 @@ export function buildTimeline(args: {
     const tactic = candidate.tactic;
     const laneLocked = candidate.saved?.meta?.lane_locked === true;
     const savedLane = candidate.saved?.lane as TimelineBand | undefined;
+    const details = activityDetails(candidate);
     const activity: TimelineActivity = {
+      ...details,
       id,
       tactic_id: tactic.id,
+      ...(candidate.expansion ? {expansion_id: candidate.expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: candidate.parent_name, expansion_version: candidate.expansion.version, expansion_scope: candidate.expansion.scope} : {}),
       tactic_name: tactic.name,
-      tactic_type: tactic.type,
-      tactic_custom_type: tactic.custom_type ?? null,
-      tactic_status: tactic.status,
       lane: laneLocked && savedLane && TIMELINE_LANES.includes(savedLane) ? savedLane : candidate.band,
-      band: candidate.band,
       start_date: start,
       end_date: end,
       readout_date: readout,
       depends_on: upstream.map((dependency) => dependency.id),
-      gap_ids: candidate.gap_ids,
-      gap_names: candidate.gap_names,
       meta: {
-        evidence_question: tactic.evidence_question,
-        population: tactic.population,
-        comparator: tactic.comparator,
-        outcomes: tactic.outcomes,
-        data_source: tactic.data_source,
-        study_design: tactic.study_design,
-        owner: tactic.owner,
-        budget: tactic.budget ?? null,
-        function: tactic.function,
-        priority_rationale: candidate.priority_rationale,
+        ...details.meta,
         dependency_note:
           reasons.length > 0
             ? reasons.map((dependency) => `${placed.get(dependency.id)?.tactic_name ?? dependency.id}: ${dependency.reason}`).join(" ")
             : upstream.length > 0
               ? (candidate.saved?.meta?.dependency_note ?? null)
               : null,
-        counts_toward_addressing: candidate.counting,
         schedule_rationale: row.rationale,
         schedule_basis: { start: row.startSource, end: row.endSource, readout: readout ? row.readoutSource : null },
         lane_locked: laneLocked,
@@ -497,12 +548,14 @@ export function buildTimeline(args: {
   const tacticById = new Map(args.state.tactics.map((tactic) => [tactic.id, tactic]));
   const removed: RemovedActivity[] = [];
   for (const row of args.overrides ?? []) {
-    const tactic = tacticById.get(row.id.replace(/^ACT-/, ""));
+    const expansion = args.state.expansions?.find(child => activityId(child.tactic_id, child.id) === row.id);
+    const tactic = tacticById.get(expansion?.tactic_id ?? row.id.replace(/^ACT-/, ""));
     if (!isRemoved(row) || !tactic) continue;
     removed.push({
       activity_id: row.id,
       tactic_id: tactic.id,
-      tactic_name: tactic.name,
+      ...(expansion ? {expansion_id: expansion.id, parent_activity_id: activityId(tactic.id), parent_tactic_name: tactic.name} : {}),
+      tactic_name: expansion?.scope.name ?? tactic.name,
       reason: row.meta?.removed_reason ?? "Removed by hand.",
     });
   }

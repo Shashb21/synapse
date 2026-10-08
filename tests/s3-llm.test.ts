@@ -82,7 +82,7 @@ const acceptAll = (call: Call) => ({
   decisions: idsOf(call, "decide").map((id) => ({
     id,
     verdict: "accept",
-    duplicate_of: null,
+    match: "new", target_tactic_id: null, duplicate_of: null,
     confidence: 75,
     reason: `model accepts ${id}`,
   })),
@@ -159,7 +159,7 @@ describe("S3 on the model path", () => {
           decisions: idsOf(call, "decide").map((id, index) => ({
             id,
             verdict: index === 0 ? "accept" : "reject",
-            duplicate_of: null,
+            match: "new", target_tactic_id: null, duplicate_of: null,
             confidence: index === 0 ? 90 : 30,
             reason: index === 0 ? "model: real registry" : "model: not described as a tactic",
           })),
@@ -174,6 +174,7 @@ describe("S3 on the model path", () => {
     for (const call of critic) {
       expect(idsOf(call, "candidates")).toHaveLength(2);
       expect((call.body!.library as { id: string }[]).map((row) => row.id)).toContain(libraryId);
+      expect((call.body!.library as Record<string, unknown>[]).find(row => row.id === libraryId)).toMatchObject({population: "", outcomes: "", study_design: "", lock: {locked: false}});
     }
     // No objections, so no revision calls.
     expect(calls.some((call) => call.purpose.startsWith("tactic-proposer-revise"))).toBe(false);
@@ -306,15 +307,15 @@ describe("S3 on the model path", () => {
         if (judgeCalls === 1) {
           return {
             decisions: [
-              { id: a, verdict: "accept", duplicate_of: libraryId, confidence: 85, reason: "same SLR as the library" },
-              { id: b, verdict: "accept", duplicate_of: null, confidence: 80, reason: "new registry" },
+              { id: a, verdict: "accept", match: "same", target_tactic_id: libraryId, duplicate_of: libraryId, confidence: 85, reason: "same SLR as the library" },
+              { id: b, verdict: "accept", match: "new", target_tactic_id: null, duplicate_of: null, confidence: 80, reason: "new registry" },
               // Invalid: accepting a repeat of a sibling. Asked again.
-              { id: c, verdict: "accept", duplicate_of: b, confidence: 70, reason: "repeat" },
+              { id: c, verdict: "accept", match: "new", target_tactic_id: null, duplicate_of: b, confidence: 70, reason: "repeat" },
             ],
           };
         }
         expect(idsOf(call, "decide")).toEqual([c]);
-        return { decisions: [{ id: c, verdict: "reject", duplicate_of: b, confidence: 70, reason: "repeats LT002" }] };
+        return { decisions: [{ id: c, verdict: "reject", match: "new", target_tactic_id: null, duplicate_of: b, confidence: 70, reason: "repeats LT002" }] };
       }
       throw new Error(`unexpected call ${call.purpose}`);
     });
@@ -334,4 +335,46 @@ describe("S3 on the model path", () => {
       ["VELA registry", null],
     ]);
   });
+  it("returns explicit same/new classifications and publishes a changed manifest", async () => {
+    const {ctx} = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good()]};
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return acceptAll(call);
+    });
+    const {output} = await tacticExtractModule.run(input(), ctx);
+    expect(output.accepted[0]).toMatchObject({match: "new", target_tactic_id: null});
+    expect(tacticExtractModule.manifest.version).toBe("3.1.0");
+  });
+  it.each([
+    {match: "same", target_tactic_id: null},
+    {match: "overlaps", target_tactic_id: "unknown"},
+    {match: "new", target_tactic_id: "known"},
+    {match: "invented", target_tactic_id: null},
+  ])("rejects invalid matching payload %j through existing repair retries", async match => {
+    const {ctx} = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good()]};
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return {decisions: idsOf(call, "decide").map(id => ({id, verdict: "accept", duplicate_of: null, confidence: 80, reason: "Attempted match", ...match}))};
+    });
+    await expect(tacticExtractModule.run(input(), ctx)).rejects.toThrow(/complete judge decision/);
+  });
+
+  it("persists valid overlaps as source review only and retains edited review on rerun", async () => {
+    const {listTacticSuggestions, editTacticSuggestion} = await import("@/modules/stages/s3-tactic-extract/suggestions");
+    const scope = {name: "SLR subgroup", evidence_question: "What safety evidence exists in subgroup?", population: "Subgroup", outcomes: "", geography: "", data_cut: "", analysis: "Post-hoc subgroup", instrument: "", study_design: "Retrospective analysis", gap_coverage: "Subgroup evidence", cost_effort: "Source does not specify", timing: "Source does not specify", feasibility_risks: "Requires source review", post_hoc: true, prospective_enrolment: false, protocol_amendment: false, start_date: null, evidence_available: null};
+    const {ctx} = context(call => {
+      if (call.purpose.startsWith("tactic-proposer:")) return {tactics: [good({type: "slr", status: "planned"})]};
+      if (call.purpose === "tactic-critic") return keepAll(call);
+      return {decisions: idsOf(call, "decide").map(id => ({id, verdict: "accept", match: "overlaps", target_tactic_id: libraryId, shared_scope: "Existing SLR", new_scope: "Subgroup evidence", expansion: scope, separate: {name: "Independent subgroup SLR", type: "slr", status: "planned", evidence_question: scope.evidence_question}, confidence: 80, reason: "Shared SLR and added subgroup"}))};
+    });
+    const before = await loadState();
+    const {output} = await tacticExtractModule.run(input(false), ctx);
+    expect(output.accepted[0]).toMatchObject({match: "overlaps", target_tactic_id: libraryId, expansion: scope});
+    expect(output.committed_tactic_ids).toEqual([]); expect(await loadState()).toEqual(before);
+    const suggestion = (await listTacticSuggestions()).find(r => r.target_tactic_id === libraryId)!;
+    const edited = await editTacticSuggestion({id: suggestion.id, expansion: {...scope, name: "Human subgroup review"}, rationale: "Source reviewed", actor: ACTOR});
+    await tacticExtractModule.run(input(false), ctx);
+    expect((await listTacticSuggestions()).find(r => r.id === suggestion.id)).toEqual(edited);
+  });
+
 });

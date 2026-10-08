@@ -46,8 +46,8 @@ export async function recordEdit(args: {
   rationale: string;
   actor: Actor;
   signal_kind?: "user_edit" | "user_rejected_proposal" | "user_accepted_proposal";
-}): Promise<EditRecord> {
-  await ensurePlatformSchema();
+}, transaction?: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0]): Promise<EditRecord> {
+  if (!transaction) await ensurePlatformSchema();
   const rationale = requireRationale(args.rationale);
   const record: EditRecord = {
     id: newId("edit"),
@@ -63,7 +63,7 @@ export async function recordEdit(args: {
     rationale,
     actor: args.actor,
   };
-  await db().insert(t.editRecords).values({
+  await (transaction ?? db()).insert(t.editRecords).values({
     id: record.id,
     at: record.at,
     workspace_id: record.workspace_id,
@@ -96,7 +96,7 @@ export async function recordEdit(args: {
       after: record.after,
       actor_function: record.actor.function,
     },
-  });
+  }, transaction);
   return record;
 }
 

@@ -26,6 +26,7 @@ const DDL = [
     added_at text NOT NULL,
     PRIMARY KEY (workspace_id, principal)
   )`,
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS learning_sharing_eligible boolean NOT NULL DEFAULT false`,
   // KAN-26: a workspace holding the Velmara demo is flagged, so it is badged everywhere.
   `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo boolean NOT NULL DEFAULT false`,
   // AI assistance for this workspace, set by its owner. The platform switch
@@ -251,4 +252,15 @@ export async function withWorkspace<T>(workspaceId: string, fn: () => Promise<T>
   const workspace = await getWorkspace(workspaceId);
   if (!workspace) throw new Error(`Unknown workspace ${workspaceId}`);
   return runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, fn);
+}
+
+/** Whether customer terms explicitly permit de-identified lesson sharing; defaults off. */
+export async function learningSharingEligible(workspaceId: string): Promise<boolean> {
+  const found = await rows(sql`select learning_sharing_eligible from workspaces where id = ${workspaceId} limit 1`);
+  return found[0]?.learning_sharing_eligible === true;
+}
+/** Persist explicit eligibility through workspace settings. No production caller enables it. */
+export async function setLearningSharingEligible(workspaceId: string, eligible: boolean): Promise<void> {
+  const changed = await rows(sql`update workspaces set learning_sharing_eligible = ${eligible} where id = ${workspaceId} returning id`);
+  if (!changed.length) throw new Error("Learning workspace no longer exists.");
 }

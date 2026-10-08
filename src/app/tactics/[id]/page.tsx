@@ -5,8 +5,9 @@ import { CoverageBadge, LockMeta, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { isLiveGap } from "@/lib/iegp/engine";
-import { TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/lib/iegp/enums";
+import { ASSESSED_COVERAGE, COVERAGE_DIMENSIONS, DIMENSION_LABELS, DIMENSION_VALUES, OVERALL_COVERAGE_LABELS, TACTIC_STATUSES, TACTIC_TYPE_LABELS, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
+import { listTacticSourceReferences } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { sessionContext } from "@/modules/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export default async function TacticDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [state, session] = await Promise.all([loadState(), sessionContext()]);
+  const [state, session, sourceReferences] = await Promise.all([loadState(), sessionContext(), listTacticSourceReferences(id)]);
   const tactic = state.tactics.find((x) => x.id === id);
   if (!tactic) notFound();
   // Only live gaps: a split or rewritten parent is retired into version history.
@@ -25,6 +26,7 @@ export default async function TacticDetailPage({
     const gap = state.gaps.find((g) => g.id === c.gap_id);
     return c.tactic_id === tactic.id && gap !== undefined && isLiveGap(gap);
   });
+  const expansions = state.expansions.filter((e) => e.tactic_id === tactic.id);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
     actor_name: session.actor.name,
@@ -117,6 +119,7 @@ export default async function TacticDetailPage({
         <Item k="Owner" v={`${tactic.owner} · ${tactic.function.replaceAll("_", " ")}`} />
         <Item k="Budget" v={tactic.budget ?? "—"} />
       </dl>
+      {sourceReferences.length ? <section aria-label="Tactic source references" className="my-6 space-y-2"><h2 className="text-base font-semibold">Source references</h2>{sourceReferences.map(ref => <blockquote key={ref.id} className="text-sm break-words">“{ref.source_quote}” · {state.sources.find(s => s.id === ref.source_id)?.title ?? ref.source_id}</blockquote>)}</section> : null}
       <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Gaps this tactic is mapped to</h2>
       <div className="mb-6 grid gap-2">
         {maps.length === 0 ? (
@@ -126,13 +129,68 @@ export default async function TacticDetailPage({
             const gap = state.gaps.find((g) => g.id === c.gap_id);
             return (
               <Link key={c.id} href={`/gaps/${c.gap_id}`} className="flex justify-between border border-border bg-card p-3 no-underline rounded-lg">
-                <span>{gap?.name}</span>
+                <span>{gap?.name}{c.expansion_id ? ` · ${expansions.find(e => e.id === c.expansion_id)?.scope.name ?? "Expansion"}` : ""}</span>
                 <CoverageBadge overall={c.overall} />
               </Link>
             );
           })
         )}
       </div>
+      {expansions.length > 0 ? <section className="mb-6" aria-label="Tactic expansions">
+        <h2 className="mb-2 text-sm font-semibold">Expansions</h2>
+        {expansions.map((child) => <div id={child.id} key={child.id} className="mb-4 border-t border-border pt-3">
+          <h3 className="text-sm font-medium">{child.scope.name}</h3>
+          <p className="mb-2 text-[13px]">{child.status} · {["planned", "ongoing", "completed"].includes(child.status) ? "Eligible for coverage review" : "Does not count toward coverage"}</p>
+          <dl className="mb-3 grid gap-2 text-[13px] sm:grid-cols-2">
+            <Item k="Added question" v={child.scope.evidence_question} />
+            <Item k="Gap coverage" v={child.scope.gap_coverage} />
+            <Item k="Population" v={child.scope.population} />
+            <Item k="Outcomes" v={child.scope.outcomes} />
+            <Item k="Geography" v={child.scope.geography} />
+            <Item k="Data cut" v={child.scope.data_cut} />
+            <Item k="Analysis" v={child.scope.analysis} />
+            <Item k="Instrument" v={child.scope.instrument} />
+            <Item k="Design" v={child.scope.study_design} />
+            <Item k="Cost / effort" v={child.scope.cost_effort} />
+            <Item k="Timing" v={child.scope.timing} />
+            <Item k="Feasibility risks" v={child.scope.feasibility_risks} />
+            <Item k="Start date" v={child.scope.start_date} />
+            <Item k="Evidence available" v={child.scope.evidence_available} />
+            <Item k="Post-hoc analysis" v={child.scope.post_hoc ? "Yes" : "No"} />
+            <Item k="Protocol amendment" v={child.scope.protocol_amendment ? "Required" : "Not required"} />
+          </dl>
+          {state.coverages.filter(c => c.expansion_id === child.id && c.tactic_id === child.tactic_id && child.gap_ids.includes(c.gap_id)).map(coverage => <div key={coverage.id} className="mb-3 text-[13px]">
+            <p className="mb-2">Coverage for {state.gaps.find(g => g.id === coverage.gap_id)?.name ?? coverage.gap_id}</p>
+            <div className="mb-2 flex flex-wrap items-center gap-2"><CoverageBadge overall={coverage.overall} /><LockMeta lock={coverage.overall_lock} /></div>
+            <ActionDialog endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id}}
+              identity={identity} label="Review expansion coverage" title={`Review expansion coverage: ${child.scope.name}`}
+              description="Validate the added scope's coverage for this gap. Proposed and cancelled expansions still do not count."
+              confirmLabel="Validate coverage" fields={[{name: "overall", label: "Overall", type: "select", required: true,
+                defaultValue: coverage.overall === "unassessed" ? "" : coverage.overall,
+                options: [{value: "", label: "Choose coverage"}, ...ASSESSED_COVERAGE.map(value => ({value, label: OVERALL_COVERAGE_LABELS[value]}))]}]} />
+            <details className="mt-2"><summary>Coverage dimensions</summary>
+              <dl className="mt-2 grid gap-2 sm:grid-cols-2">{COVERAGE_DIMENSIONS.map(dimension => <div key={dimension}>
+                <dt>{DIMENSION_LABELS[dimension]}</dt><dd className="mb-1">{coverage.dimensions[dimension].value}</dd>
+                <ActionDialog endpoint="/api/iegp" payload={{action: "lock_dimension", coverage_id: coverage.id, dimension}}
+                  identity={identity} label={`Review ${DIMENSION_LABELS[dimension]}`} title={`Review ${DIMENSION_LABELS[dimension]}: ${child.scope.name}`}
+                  confirmLabel="Validate dimension" fields={[{name: "value", label: "Assessment", type: "select", defaultValue: coverage.dimensions[dimension].value,
+                    options: DIMENSION_VALUES.map(value => ({value, label: value}))}]} />
+              </div>)}</dl>
+            </details>
+          </div>)}
+          <ActionDialog endpoint="/api/plan" payload={{action: "set_expansion_status", expansion_id: child.id, expected_version: child.version}}
+            identity={identity} label="Change expansion status" title={`Status: ${child.scope.name}`}
+            description="Planned, ongoing and completed scope is eligible for coverage review. Full coverage still requires human validation."
+            confirmLabel="Save status" fields={[{name: "status", label: "Status", type: "select", defaultValue: child.status,
+              options: TACTIC_STATUSES.map(status => ({value: status, label: status}))}]} />
+          <details className="mt-3 text-[13px]"><summary>Scope history</summary>
+            <p>Origin: {child.proposal_id}</p>
+            <ul className="mt-2 grid gap-1">{child.history.map(event => <li key={event.version}>
+              {event.at} · {event.actor.name} · {event.status}: {event.rationale}
+            </li>)}</ul>
+          </details>
+        </div>)}
+      </section> : null}
       <LockForm label="Lock tactic status" action="lock_tactic" extra={{ tactic_id: tactic.id }}>
         <p className="text-[12px] text-muted-foreground">
           Changing status recomputes related gap status. Residuals stay open for a human to

@@ -16,8 +16,8 @@ export type HillclimbSignal = {
   payload: unknown;
 };
 
-export async function recordSignal(draft: HillclimbSignalDraft): Promise<HillclimbSignal> {
-  await ensurePlatformSchema();
+export async function recordSignal(draft: HillclimbSignalDraft, transaction?: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0]): Promise<HillclimbSignal> {
+  if (!transaction) await ensurePlatformSchema();
   const signal: HillclimbSignal = {
     id: newId("hc"),
     at: nowIso(),
@@ -29,7 +29,7 @@ export async function recordSignal(draft: HillclimbSignalDraft): Promise<Hillcli
     status: "open",
     payload: draft.payload ?? null,
   };
-  await db().insert(t.hillclimbSignals).values({
+  await (transaction ?? db()).insert(t.hillclimbSignals).values({
     id: signal.id,
     at: signal.at,
     stage: signal.stage,

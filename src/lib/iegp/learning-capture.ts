@@ -1,11 +1,19 @@
-import { recordDecisionExample, type DecisionOutcome } from "@/modules/kernel/decision-examples";
-import type { GapSuggestion } from "./types";
+import { recordDecisionExample, type DecisionExampleDraft, type DecisionOutcome } from "@/modules/kernel/decision-examples";
+import type { GapSuggestion, TacticSuggestion } from "./types";
 
 /**
  * Turns people's decisions on AI output into learning examples (KAN-78). Each
  * helper keeps the case compact — what the AI saw, what it proposed, what the
  * person did — and is best-effort: it never throws into the action it observes.
  */
+
+/** Explicit originating metadata; missing history is retained as missing. */
+type Origin = Pick<DecisionExampleDraft, "run_id" | "prompt_version" | "actor" | "replay_input" | "replay_exclusion_reason" | "capture_key">;
+
+/** Copy only supplied lineage; never infer it from the current route. */
+function origin(args: Origin): Origin {
+  return { run_id: args.run_id, prompt_version: args.prompt_version, actor: args.actor, replay_input: args.replay_input, replay_exclusion_reason: args.replay_exclusion_reason, capture_key: args.capture_key };
+}
 
 type GapText = { name: string; statement: string };
 
@@ -21,7 +29,7 @@ async function safely(work: () => Promise<unknown>) {
 }
 
 /** Merge, split or reject on an S2 overlap suggestion (KAN-75). */
-export function captureGapSuggestionDecision(args: {
+export function captureGapSuggestionDecision(args: Origin & {
   suggestion: GapSuggestion;
   gap: GapText | null;
   decision: "merge" | "split" | "reject";
@@ -44,7 +52,10 @@ export function captureGapSuggestionDecision(args: {
     const edited = proposed !== null && (!same(finalName, proposed.name) || !same(finalStatement, proposed.statement));
     const outcome: DecisionOutcome = args.decision === "reject" ? "rejected" : edited ? "edited" : "accepted";
     await recordDecisionExample({
+      ...origin(args),
       workspace_id: args.workspace_id,
+      run_id: args.run_id ?? suggestion.run_id,
+      capture_key: args.capture_key ?? `gap-suggestion:${suggestion.id}`,
       stage: "S2",
       kind: "gap_suggestion",
       subject_id: suggestion.id,
@@ -70,12 +81,12 @@ export function captureGapSuggestionDecision(args: {
 }
 
 /** Accept, edit-and-accept or reject on an S9 idea the model wrote. */
-export function captureProposalDecision(args: {
-  proposal: { id: string; name: string; type: string; evidence_question: string; rationale: string };
+export function captureProposalDecision(args: Origin & {
+  proposal: { id: string; slot_id?: string | null; name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string };
   gap: GapText | null;
   decision: "accept" | "reject";
   /** The idea as accepted, when the person changed it first. */
-  final?: { name: string; type: string; evidence_question: string; rationale: string } | null;
+  final?: { name: string; type: string; evidence_question: string; rationale: string; design?: unknown; proposal_kind?: "new" | "expansion"; target_tactic_id?: string | null; expansion_scope?: unknown; comparative_rationale?: string } | null;
   rationale: string;
   workspace_id?: string;
 }) {
@@ -86,18 +97,26 @@ export function captureProposalDecision(args: {
       (!same(args.final.name, proposal.name) ||
         !same(args.final.type, proposal.type) ||
         !same(args.final.evidence_question, proposal.evidence_question) ||
-        !same(args.final.rationale, proposal.rationale));
+        !same(args.final.rationale, proposal.rationale) ||
+        JSON.stringify(args.final.design ?? null) !== JSON.stringify(proposal.design ?? null) ||
+        JSON.stringify(args.final.expansion_scope ?? null) !== JSON.stringify(proposal.expansion_scope ?? null) ||
+        args.final.comparative_rationale !== proposal.comparative_rationale);
     await recordDecisionExample({
+      ...origin(args),
       workspace_id: args.workspace_id,
       stage: "S9",
       kind: "s9_proposal",
       subject_id: proposal.id,
-      ai_input: { gap: args.gap },
+      ai_input: { gap: args.gap, slot_id: proposal.slot_id ?? null },
       ai_output: {
+        proposal_kind: proposal.proposal_kind ?? "new",
+        ...(proposal.comparative_rationale !== undefined ? { comparative_rationale: proposal.comparative_rationale } : {}),
+        ...(proposal.proposal_kind === "expansion" ? { target_tactic_id: proposal.target_tactic_id, expansion_scope: proposal.expansion_scope } : {}),
         name: proposal.name,
         type: proposal.type,
         evidence_question: proposal.evidence_question,
         rationale: proposal.rationale,
+        design: proposal.design ?? null,
       },
       outcome: args.decision === "reject" ? "rejected" : edited ? "edited" : "accepted",
       final: args.decision === "accept" && edited ? args.final ?? null : null,
@@ -107,24 +126,27 @@ export function captureProposalDecision(args: {
 }
 
 /** A person saving a mapping-table row the S4 model had proposed. */
-export function captureMappingRowDecision(args: {
+export function captureMappingRowDecision(args: Origin & {
   gap: GapText & { id: string };
   ai: { mapping_status: string; tactic_ids: string[] };
   saved: { mapping_status: string; tactic_ids: string[] };
+  /** Authoritative parent inventory from the parent-only save owner. */
+  parent_tactic_ids?: string[];
   rationale: string;
   workspace_id?: string;
 }) {
   return safely(async () => {
-    const sort = (ids: string[]) => [...new Set(ids)].sort();
+    const sort = (ids: string[]) => [...new Set(ids.filter(id => !args.parent_tactic_ids || args.parent_tactic_ids.includes(id)))].sort();
     const unchanged =
       args.ai.mapping_status === args.saved.mapping_status &&
       sort(args.ai.tactic_ids).join(",") === sort(args.saved.tactic_ids).join(",");
     await recordDecisionExample({
+      ...origin(args),
       workspace_id: args.workspace_id,
       stage: "S4",
       kind: "s4_mapping",
       subject_id: args.gap.id,
-      ai_input: { gap: { name: args.gap.name, statement: args.gap.statement } },
+      ai_input: { gap: { name: args.gap.name, statement: args.gap.statement }, ...(args.parent_tactic_ids ? {mapping_scope: "parents", parent_tactic_ids: args.parent_tactic_ids} : {}) },
       ai_output: { mapping_status: args.ai.mapping_status, tactic_ids: sort(args.ai.tactic_ids) },
       outcome: unchanged ? "accepted" : "edited",
       final: unchanged ? null : { mapping_status: args.saved.mapping_status, tactic_ids: sort(args.saved.tactic_ids) },
@@ -134,7 +156,7 @@ export function captureMappingRowDecision(args: {
 }
 
 /** A person validating a priority band the S8 model had suggested. */
-export function captureBandDecision(args: {
+export function captureBandDecision(args: Origin & {
   gap: GapText & { id: string };
   suggested_band: string;
   suggested_rationale?: string | null;
@@ -144,6 +166,8 @@ export function captureBandDecision(args: {
 }) {
   return safely(async () => {
     await recordDecisionExample({
+      ...origin(args),
+      require_originating_run: true,
       workspace_id: args.workspace_id,
       stage: "S8",
       kind: "s8_band",
@@ -155,4 +179,35 @@ export function captureBandDecision(args: {
       rationale: args.rationale,
     });
   });
+}
+
+/** Capture a residual decision only when its originating AI run can be verified. */
+export function captureResidualDecision(args: Origin & {
+  parent_gap_id: string;
+  proposed: string | Record<string, unknown>;
+  final: string | Record<string, unknown> | null;
+  decision: "accept" | "edit" | "reject";
+  rationale: string;
+  workspace_id?: string;
+}) {
+  return safely(() => recordDecisionExample({
+    ...origin(args), require_originating_run: true, workspace_id: args.workspace_id, stage: "S6", kind: "residual_split",
+    subject_id: args.parent_gap_id, ai_input: { parent_gap_id: args.parent_gap_id },
+    ai_output: typeof args.proposed === "string" ? { statement: args.proposed } : args.proposed,
+    outcome: args.decision === "reject" ? "rejected" : args.decision === "edit" || (typeof args.proposed === "string" && !same(args.proposed, typeof args.final === "string" ? args.final : null)) ? "edited" : "accepted",
+    final: args.final == null ? null : typeof args.final === "string" ? { statement: args.final } : args.final, rationale: args.rationale,
+  }));
+}
+
+/** Source overlap review keeps original model options separate from the final human decision. */
+export function captureTacticSuggestionDecision(args: Origin & {suggestion: TacticSuggestion; decision: "expand" | "separate" | "reject"; rationale: string}) {
+  const row = args.suggestion;
+  const edited = JSON.stringify(row.expansion) !== JSON.stringify(row.original_expansion) || JSON.stringify(row.separate) !== JSON.stringify(row.original_separate);
+  return safely(() => recordDecisionExample({
+    ...origin(args), run_id: row.run_id, capture_key: `tactic-suggestion:${row.id}`, stage: "S3", kind: "tactic_suggestion", subject_id: row.id,
+    ai_input: {existing_tactic: row.reviewed_parent, source_id: row.source_id, source_quote: row.source_quote},
+    ai_output: {match: "overlaps", shared_scope: row.shared_scope, new_scope: row.new_scope, expansion: row.original_expansion, separate: row.original_separate},
+    outcome: args.decision === "reject" ? "rejected" : edited ? "edited" : "accepted",
+    final: {decision: args.decision, expansion: row.expansion, separate: row.separate, gap_id: row.gap_id}, rationale: args.rationale,
+  }));
 }
