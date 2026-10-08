@@ -64,7 +64,7 @@ export default async function AccuracyCoveragePage({
       <PageIntro kicker="Pairwise · one decision at a time" title="Coverage">
         {aiOn
           ? "Work one undecided gap↔tactic pair at a time. Optional LLM assist suggests an overall and rationale — you still confirm with a decide button. Every eligible inventory pair is available across the pages."
-          : "Work one undecided gap↔tactic pair at a time: pick an overall and write the rationale yourself (AI is off, so there are no suggestions). Use the pair picker for any gap↔tactic pair."}
+          : "Work one undecided gap↔tactic pair at a time: pick an overall and write the rationale yourself (AI is off; saved suggestions remain available for review). Use the pair picker for any gap↔tactic pair."}
       </PageIntro>
 
       {loadError ? (
@@ -124,7 +124,7 @@ export default async function AccuracyCoveragePage({
                 validated: pair.validated, gap_revision: pair.gap_revision, tactic_revision: pair.tactic_revision,
                 freshness: pair.freshness, validation_freshness: pair.validation_freshness,
                 assessment_state: pair.assessment_state, failure_reason: pair.failure_reason, pending_reason: pair.pending_reason,
-                evidence: pair.evidence, protected: pair.protected,
+                evidence: pair.evidence, protected: pair.protected, suggestion: pair.suggestion,
               }))}
             />
           )}
