@@ -19,6 +19,7 @@ import { listEdits } from "@/modules/kernel/edit-records";
 import { buildPlanWorkspace, isLiveGap } from "@/lib/iegp/engine";
 import { createGap, createNeed, humanRejectedPairs, loadState, resetBlank } from "@/lib/iegp/store";
 import { listRejectedMappings } from "@/lib/iegp/restore";
+import { validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { addIdeationProposal, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { RejectedMappings, RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
 
@@ -197,6 +198,7 @@ describe("rejected mappings", () => {
 
 describe("rejected S9 proposals", () => {
   it("puts a rejected idea back to Proposed with a rationale", async () => {
+    await validatePlacement({ gap_id: gapB, band: "high", rationale: "Long-term safety blocks the dossier", actor: ACTOR });
     const proposal = await addIdeationProposal({
       gap_id: gapB,
       fields: { name: "Linked registry follow-up", type: "long_term_followup", evidence_question: "Five-year AESI rate?" },

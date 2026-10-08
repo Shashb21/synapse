@@ -55,10 +55,10 @@ test("schedules nested children, changes only child status, preserves scope and 
     await expect(first).toHaveAttribute("aria-label", /unscheduled/);
     await first.focus();
     await page.keyboard.press("Enter");
-    const panel = page.getByRole("dialog");
+    const panel = page.getByRole("dialog", { name: "Community expansion", exact: true });
     await expect(panel.getByText("Not counting toward addressing", {exact: true})).toBeVisible();
     await panel.getByRole("button", {name: "Change expansion status"}).click();
-    const status = page.getByRole("dialog").last();
+    const status = page.getByRole("dialog", { name: "Status for Community expansion", exact: true });
     await status.getByRole("combobox", {name: "Status", exact: true}).selectOption("planned");
     await status.getByLabel("Rationale (required)").fill("Funding approved for this added analysis");
     await status.getByRole("button", {name: "Save status", exact: true}).click();

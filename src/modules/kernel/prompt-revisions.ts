@@ -64,14 +64,14 @@ async function reserveGold(examples: DecisionExample[], heldout: Set<string>): P
     return snapshot ? [snapshot] : [];
   });
   const source = sources.find(snapshot => {
-    const module = moduleById(snapshot.module_id);
-    return module?.manifest.version === snapshot.module_version && !!module.evals;
+    const stageModule = moduleById(snapshot.module_id);
+    return stageModule?.manifest.version === snapshot.module_version && !!stageModule.evals;
   });
   if (!source) return { ...result, reason: "No held-out originating snapshot supports a gold reservation." };
-  const module = moduleById(source.module_id)!;
+  const stageModule = moduleById(source.module_id)!;
   const heldSubjects = examples.filter(example => heldout.has(example.id)).flatMap(decisionSubjects);
-  if (!module.evals!.reserveGold) return { ...result, reason: "Stage has no complete gold subject-lineage reservation contract." };
-  const restricted = await module.evals!.reserveGold(structuredClone(source.facts), heldSubjects);
+  if (!stageModule.evals!.reserveGold) return { ...result, reason: "Stage has no complete gold subject-lineage reservation contract." };
+  const restricted = await stageModule.evals!.reserveGold(structuredClone(source.facts), heldSubjects);
   const facts = restricted.facts;
   const cases = restricted.cases;
   result.reason = restricted.reason ?? null;
@@ -79,7 +79,7 @@ async function reserveGold(examples: DecisionExample[], heldout: Set<string>): P
   const runs = new Set([source.run_id, ...(restricted.lineage_run_ids ?? [])]);
   result.excluded_ids = examples.filter(example => heldout.has(example.id) || decisionSubjects(example).some(id => result.subject_ids.includes(id)) || !!example.run_id && runs.has(example.run_id)).map(example => example.id);
   result.run_ids = [...new Set([...runs, ...examples.filter(example => result.excluded_ids.includes(example.id)).flatMap(example => example.run_id ? [example.run_id] : [])])];
-  result.cases = cases.map(testCase => ({ testCase: structuredClone(testCase), snapshot: { ...structuredClone(source), input: module.inputSchema.parse(testCase.input), facts: structuredClone(facts), examples: [] } }));
+  result.cases = cases.map(testCase => ({ testCase: structuredClone(testCase), snapshot: { ...structuredClone(source), input: stageModule.inputSchema.parse(testCase.input), facts: structuredClone(facts), examples: [] } }));
   if (!result.cases.length && !result.reason) result.reason = "No eligible held-out subjects remain for the stage gold harness.";
   return result;
 }
@@ -240,8 +240,8 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
  const configuredRoute=await routeConfig(revision.stage);
  const route=await resolveRoute(revision.stage,configuredRoute);
  if(routeIdentity(route)!==evaluation.route_hash) throw new Error('Routing changed since evaluation. Evaluate again.');
- const {activeModule}=await import('./registry');const module=await activeModule(revision.stage);
- if(module.manifest.id!==evaluation.module_id||module.manifest.version!==evaluation.module_version) throw new Error('Stage implementation changed since evaluation.');
+ const {activeModule}=await import('./registry');const stageModule=await activeModule(revision.stage);
+ if(stageModule.manifest.id!==evaluation.module_id||stageModule.manifest.version!==evaluation.module_version) throw new Error('Stage implementation changed since evaluation.');
  await sharedDb().transaction(async tx=>{
   await tx.execute(sql`insert into prompt_active_revisions(workspace_id,stage) values(${workspace_id},${revision.stage}) on conflict do nothing`);
   const rows=await tx.execute(sql`select * from prompt_active_revisions where workspace_id=${workspace_id} and stage=${revision.stage} for update`);
@@ -255,7 +255,7 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
   if(revision.parent_revision!==(pointer.revision_id??'v1.0-baseline')) throw new Error('Candidate was generated from a stale baseline.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-module:${revision.stage}`}))`);
   const moduleRows=await tx.execute(sql`select module_id from stage_modules where stage=${revision.stage}`);
-  if((moduleRows[0]?.module_id??module.manifest.id)!==evaluation.module_id) throw new Error('Stage implementation changed since evaluation.');
+  if((moduleRows[0]?.module_id??stageModule.manifest.id)!==evaluation.module_id) throw new Error('Stage implementation changed since evaluation.');
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prompt-evaluation:${revision.id}`}))`);
   const latest=await tx.execute(sql`select id from prompt_revision_evaluations where workspace_id=${workspace_id} and revision_id=${revision.id} order by created_at desc,id desc limit 1`);
   if(latest[0]?.id!==evaluation.id) throw new Error('A newer evaluation exists. Review the latest evaluation.');

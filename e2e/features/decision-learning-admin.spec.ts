@@ -17,7 +17,7 @@ test.afterAll(async () => {
   } finally { await db.end(); }
 });
 
-test("supported S8 candidate earns owner approval and rollback restores baseline instructions", async ({ browser, baseURL }) => {
+test("supported S8 candidate earns owner approval and rollback restores baseline instructions", async ({ browser, baseURL }, testInfo) => {
   test.setTimeout(180_000);
   const owner = await browser.newContext();
   const db = postgres(process.env.DATABASE_URL!, { max: 1 });
@@ -154,7 +154,7 @@ test("supported S8 candidate earns owner approval and rollback restores baseline
     expect(fixture.calls.every(call => !call.system.includes(CANDIDATE_INSTRUCTION))).toBe(true);
     const [baselineRun] = await db`select steps from ${db(workspace.schema_name)}.module_runs where id=${baseline.run_id}`;
     expect(baselineRun.steps.find((step: { name: string }) => step.name === "prompt:variant").data.version).toBe("v1.0-baseline");
-    await page.screenshot({ path: "/private/tmp/kan80-supported-approval-rollback.png", fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("kan80-supported-approval-rollback.png"), fullPage: true });
   } finally {
     try {
       if (workspaceId) await db`update workspaces set learning_sharing_eligible=false where id=${workspaceId}`;
@@ -231,7 +231,7 @@ test("owner sees counts and creates a candidate; customers are refused", async (
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "Create S2 candidate" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: "/private/tmp/task3-learning-mobile.png", fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("task3-learning-mobile.png"), fullPage: true });
 
   const customer = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   await customer.addCookies([{ name: "synapse_test_as", value: "customer", url: new URL(page.url()).origin }]);

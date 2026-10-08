@@ -215,6 +215,7 @@ export function SplitGapDialog({
       run_id?: string;
       summary?: string;
       output?: {
+        mode: "llm" | "deterministic";
         proposal: {
           addressed_name: string;
           addressed_statement?: string;
@@ -238,7 +239,8 @@ export function SplitGapDialog({
       setProposalNote(json.summary ?? "The model proposed no split. Fill the split in yourself.");
       return;
     }
-    setOriginatingRunId(json.run_id ?? null);
+    // Only model runs are learning evidence; deterministic suggestions remain manual splits.
+    setOriginatingRunId(json.output?.mode === "llm" ? json.run_id ?? null : null);
     setMode("split");
     setAddressedName(proposal.addressed_name);
     setOpenName(proposal.open_name);

@@ -6,7 +6,7 @@ import { ensurePlatformSchema, sharedDb } from './db';
 import { activeRevisionPointer, getPromptRevision, getRevisionCohort } from './prompt-revisions';
 import { frozenReplayCase, evidenceHash, projectReplayDecision, scoreDecisionReplay, type FrozenReplayCase } from './decision-replay';
 import { activeModule } from './registry';
-import { completionFor, resolveRoute } from './routing';
+import { completionFor } from './routing';
 import { RunRecorder } from './observability';
 import { revisionCompletion, withPromptRevision } from './prompt-variant';
 import { withLearningExclusions } from './decision-examples';
@@ -157,8 +157,8 @@ export async function evaluatePromptRevision(args: {
             throw new Error('Frozen candidate cohort is missing.');
         const pointer = await activeRevisionPointer(args.workspace_id, revision.stage);
         const active = pointer.revision_id ? await getPromptRevision(pointer.revision_id, args.workspace_id) : null;
-        const module = await activeModule(revision.stage);
-        if (!module.freeze)
+        const stageModule = await activeModule(revision.stage);
+        if (!stageModule.freeze)
             throw new Error('Stage has no isolated facts contract.');
         const route = await resolveRouteForRun(revision.stage);
         const failures: string[] = [];
@@ -175,7 +175,7 @@ export async function evaluatePromptRevision(args: {
             let reason: string | null = cohort.replay_exclusions[example.id] ?? example.replay_exclusion_reason;
             if (!snapshot)
                 reason = reason ?? 'No complete frozen originating facts.';
-            else if (snapshot.module_id !== module.manifest.id || snapshot.module_version !== module.manifest.version)
+            else if (snapshot.module_id !== stageModule.manifest.id || snapshot.module_version !== stageModule.manifest.version)
                 reason = 'Originating stage version differs.';
             else if (!['s4_mapping', 's8_band', 's9_proposal'].includes(example.kind))
                 reason = 'This originating decision lacks a stable supported replay subject/target.';
@@ -201,8 +201,8 @@ export async function evaluatePromptRevision(args: {
             const goldScores: EvalScore[][] = [], replayScores: EvalScore[][] = [];
             for (const item of gold)
                 try {
-                    const output = await executeFrozenStage({ module, snapshot: item.snapshot, route, revision: instruction, actor: args.actor, excluded_ids: cohort.excluded_ids, record_call: call => calls.push({ ...call, arm: instruction.id ?? "baseline", case_id: item.testCase.name }) });
-                    const scores = module.evals!.score({ case: item.testCase, output });
+                    const output = await executeFrozenStage({ module: stageModule, snapshot: item.snapshot, route, revision: instruction, actor: args.actor, excluded_ids: cohort.excluded_ids, record_call: call => calls.push({ ...call, arm: instruction.id ?? "baseline", case_id: item.testCase.name }) });
+                    const scores = stageModule.evals!.score({ case: item.testCase, output });
                     if (!scores.length)
                         throw new Error('No gold scores');
                     goldScores.push(scores);
@@ -212,7 +212,7 @@ export async function evaluatePromptRevision(args: {
                 }
             for (const item of replay)
                 try {
-                    const output = await executeFrozenStage({ module, snapshot: item.snapshot, route, revision: instruction, actor: args.actor, excluded_ids: cohort.excluded_ids, record_call: call => calls.push({ ...call, arm: instruction.id ?? "baseline", case_id: item.example.id }) });
+                    const output = await executeFrozenStage({ module: stageModule, snapshot: item.snapshot, route, revision: instruction, actor: args.actor, excluded_ids: cohort.excluded_ids, record_call: call => calls.push({ ...call, arm: instruction.id ?? "baseline", case_id: item.example.id }) });
                     const scored = scoreDecisionReplay(item.example, projectReplayDecision(item.example, output));
                     if (scored.reason)
                         throw new Error(scored.reason);
@@ -227,7 +227,7 @@ export async function evaluatePromptRevision(args: {
         };
         const baseline = await runArm({ id: active?.id ?? null, instruction: active?.instruction_text ?? '' });
         const candidate = await runArm({ id: revision.id, instruction: revision.instruction_text });
-        const evidence: RevisionEvaluation = { id: newId('pre'), workspace_id: args.workspace_id, revision_id: revision.id, stage: revision.stage, created_at: nowIso(), actor: args.actor, baseline_revision_id: pointer.revision_id, pointer_generation: pointer.generation, module_id: module.manifest.id, module_version: module.manifest.version, route, route_hash: routeIdentity(route), cohort_id: cohort.id, case_hash: evidenceHash({ gold, replay, excluded: cohort.excluded_ids }), calls, gold_cases: gold, replay_ids: replay.map(x => x.example.id), excluded, allowed_example_ids: [...new Set(replay.flatMap(x => x.snapshot.examples.map(e => e.id)))], baseline, candidate, failures, comparable: revision.parent_revision === (pointer.revision_id ?? 'v1.0-baseline') && !isTestStub() && routeIdentity(await resolveRouteForRun(revision.stage)) === routeIdentity(route), eligible: false, reasons: [] };
+        const evidence: RevisionEvaluation = { id: newId('pre'), workspace_id: args.workspace_id, revision_id: revision.id, stage: revision.stage, created_at: nowIso(), actor: args.actor, baseline_revision_id: pointer.revision_id, pointer_generation: pointer.generation, module_id: stageModule.manifest.id, module_version: stageModule.manifest.version, route, route_hash: routeIdentity(route), cohort_id: cohort.id, case_hash: evidenceHash({ gold, replay, excluded: cohort.excluded_ids }), calls, gold_cases: gold, replay_ids: replay.map(x => x.example.id), excluded, allowed_example_ids: [...new Set(replay.flatMap(x => x.snapshot.examples.map(e => e.id)))], baseline, candidate, failures, comparable: revision.parent_revision === (pointer.revision_id ?? 'v1.0-baseline') && !isTestStub() && routeIdentity(await resolveRouteForRun(revision.stage)) === routeIdentity(route), eligible: false, reasons: [] };
         Object.assign(evidence, promotionEligibility(evidence));
         await sharedDb().transaction(async (tx) => {
             await tx.execute(sql `select pg_advisory_xact_lock(hashtext(${`prompt-evaluation:${revision.id}`}))`);
