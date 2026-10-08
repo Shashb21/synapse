@@ -72,6 +72,7 @@ export type ApprovedAssemblyBinding = {
 };
 
 export type ApprovedLiveItem = {
+  binding: ApprovedAssemblyBinding;
   claim_id: string;
   item_version_id: string;
   claim_type: "gap" | "tactic";
@@ -93,6 +94,15 @@ export type ApprovedLiveInventory = {
   selected_items: ApprovedLiveItem[];
   mappings: ApprovedLiveMapping[];
 };
+
+/** Ownership comes from the exact projection, including human opposite-kind additions. */
+export function requireApprovedItemBinding(live: ApprovedLiveInventory, claim_id: string): ApprovedAssemblyBinding {
+  const item = live.selected_items.find(item => item.claim_id === claim_id);
+  if (!item?.binding || item.binding.source_file_id !== item.source_file_id || !live.bindings.some(binding => sameJson(binding, item.binding))) {
+    throw new AssemblyReviewError("approval_required", "Selected item has no current approved assembly owner.");
+  }
+  return item.binding;
+}
 
 function reviewFromRow(row: ReviewRow): AssemblyReview {
   return {
@@ -572,8 +582,9 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
     for (const head of heads) {
       const { assembly, review } = await assemblyForHead(workspace_id, head);
       selectedHeadAssemblies.push({ head, assembly, review });
-      bindings.push({ source_file_id: head.source_file_id, call_kind: head.call_kind, batch_id: head.batch_id,
-        run_id: head.run_id, assembly_id: assembly.id, assembly_fingerprint: assembly.fingerprint, review_id: review.id });
+      const binding: ApprovedAssemblyBinding = { source_file_id: head.source_file_id, call_kind: head.call_kind, batch_id: head.batch_id,
+        run_id: head.run_id, assembly_id: assembly.id, assembly_fingerprint: assembly.fingerprint, review_id: review.id };
+      bindings.push(binding);
       const selectedType: "gap" | "tactic" = head.call_kind === "need_extract" ? "gap" : "tactic";
       const projectedItems = assembly.items.filter(entry => entry.source_file_id === head.source_file_id
         && (entry.claim_type === selectedType || (Boolean(entry.human_origin) && !heads.some(candidate =>
@@ -593,6 +604,7 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
         selectedVersionsByCanonical.set(projected.id, item.id);
         claimsByCanonical.set(projected.id, projected);
         selectedItems.push({
+          binding,
           claim_id: projected.id,
           item_version_id: item.id,
           claim_type: item.claim_type,

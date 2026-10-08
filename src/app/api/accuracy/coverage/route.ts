@@ -64,7 +64,7 @@ function coveragePagePayload(page: CoveragePage) {
       validated: p.validated, gap_revision: p.gap_revision, tactic_revision: p.tactic_revision,
       freshness: p.freshness, validation_freshness: p.validation_freshness,
       assessment_state: p.assessment_state, failure_reason: p.failure_reason, pending_reason: p.pending_reason,
-      protected: p.protected, evidence: p.evidence,
+      protected: p.protected, evidence: p.evidence, suggestion: p.suggestion,
     })),
   };
 }

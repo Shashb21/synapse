@@ -101,6 +101,16 @@ export async function collectBaselineHistory(workspace_id: string, sourceIds: Se
   const coverageAudit = (prior?.coverage_audit ?? []).filter(row => claimIds.has(row.gap_id) && claimIds.has(row.tactic_id));
   for (const row of coverage) if ((hasManagedAuthority(row.dimensions) || !coverageAudit.some(previous => previous.id === row.id))
     && !coverageAudit.some(previous => JSON.stringify(previous) === JSON.stringify(row))) coverageAudit.push(row);
+  // Queue suggestions are coverage-owned attempts, not assembly selections. Retain
+  // their real runs (including older successful retries) in the same typed archive.
+  const collectAssessmentRuns = (row: unknown): void => {
+    const dimensions = object(object(row).dimensions);
+    if (dimensions.managed_assessment === true && typeof dimensions.run_id === "string") runIds.add(dimensions.run_id);
+    for (const key of ["decision_history", "merge_history", "legacy_duplicates"]) {
+      if (Array.isArray(dimensions[key])) dimensions[key].forEach(collectAssessmentRuns);
+    }
+  };
+  coverageAudit.forEach(collectAssessmentRuns);
   const splitAudit = new Map((prior?.split_operations ?? []).filter(row => claimIds.has(row.parent_gap_id)).map(row => [row.id, row]));
   for (const row of splits) if (row.state !== "archived" || !splitAudit.has(row.id)) splitAudit.set(row.id, row);
   return { version: 1, authority: "audit_only", item_versions: versions, assemblies,

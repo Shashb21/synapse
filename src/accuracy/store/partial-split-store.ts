@@ -1,5 +1,5 @@
 import { assemblyExecutionScope } from "@/accuracy/kernel/assembly-context";
-import { approvedLiveInventory } from "./assembly-review-store";
+import { approvedLiveInventory, requireApprovedItemBinding } from "./assembly-review-store";
 import type { AssemblyRevisionAuthor } from "@/accuracy/domain/assembly-revision";
 import type { Assembly } from "@/accuracy/domain/assembly";
 import type { AssemblyReview } from "@/accuracy/domain/assembly-review";
@@ -282,7 +282,7 @@ async function saveManagedSplit(args: { workspace_id: string; actor: Actor; auth
   if (!args.author || splitFingerprint(args.author.actor) !== splitFingerprint(args.actor)) throw new SplitError("invalid_split", "Authenticated contributor identity is required for a managed split.");
   const bindingIds = [...new Set(live.bindings.map(binding => binding.assembly_id))];
   const { readAssembly } = await import("./assembly-store");
-  const parentBinding = live.bindings.find(binding => binding.source_file_id === state.parent.source_file_id && binding.call_kind === "need_extract")!;
+  const parentBinding = requireApprovedItemBinding(live, state.parent.id);
   const parent = (await readAssembly(args.workspace_id, parentBinding.assembly_id))!;
   const operation_id = newId("split"), at = nowIso();
   const children = (["addressed", "open"] as const).map(kind => {

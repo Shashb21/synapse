@@ -24,6 +24,7 @@ export type CoveragePair = {
   assessment_state?: "pending" | "successful" | "failed" | "rejected";
   failure_reason?: string | null; pending_reason?: "missing_provenance" | null; protected?: boolean;
   evidence?: string[];
+  suggestion?: { overall: string; rationale: string | null; evidence: string[]; run_id: string | null; freshness: CoverageFreshness };
 };
 
 async function approvedInventory(workspace_id: string) {
@@ -145,6 +146,19 @@ function pairFrom(gap: AccuracyClaimRow, tactic: AccuracyClaimRow, join?: Covera
     protected: Boolean(rejected || d.actor || join?.validated || d.prior_validated),
     evidence: !rejected && Array.isArray(d.evidence) ? d.evidence.filter((id): id is string => typeof id === "string") : [] };
 }
+/** Queue-only overlay. Suggestions never enter approved coverage or status inputs. */
+function pairWithAssessment(pair: CoveragePair, saved: CoverageJoinRow | undefined, snapshot: string): CoveragePair {
+  if (!saved || dimensions(saved).managed_assessment !== true || pair.protected) return pair;
+  const d = dimensions(saved);
+  const current = d.assessment_snapshot === snapshot && coverageFreshness(saved, pair.gap, pair.tactic) === "current";
+  const failed = d.assessment_state === "failed";
+  return { ...pair, assessment_state: current ? failed ? "failed" : "successful" : "pending",
+    failure_reason: failed ? saved.rationale : null,
+    ...(failed ? {} : { suggestion: { overall: saved.overall, rationale: saved.rationale,
+      evidence: Array.isArray(d.evidence) ? d.evidence.filter((id): id is string => typeof id === "string") : [],
+      run_id: typeof d.run_id === "string" ? d.run_id : null, freshness: current ? "current" : "stale" } }) };
+}
+
 /** Include the input tokens in module inputs as well as persistence, so cached runs cannot cross factual revisions. */
 export function coverageFactsForPair(pair: Pick<CoveragePair, "gap" | "tactic">) {
   function facts(claim: AccuracyClaimRow) {
@@ -186,7 +200,8 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
   const page_size = args.page_size ?? 100;
   if (!Number.isSafeInteger(page_size) || page_size < 1 || page_size > 500) throw new Error("page_size must be an integer between 1 and 500.");
   return withAccuracyTransaction(async () => {
-    const claims = (await approvedInventory(args.workspace_id))?.claims ?? await accuracyDb().select().from(t.accuracyClaims)
+    const live = await approvedInventory(args.workspace_id);
+    const claims = live?.claims ?? await accuracyDb().select().from(t.accuracyClaims)
       .where(eq(t.accuracyClaims.workspace_id, args.workspace_id)).orderBy(t.accuracyClaims.id);
     const entities = claims.filter((c) => c.claim_type === "gap" || c.claim_type === "tactic");
     const exclusions = entities.flatMap((c) => { const reason = coverageExclusionReason(c); return reason ? [{ claim_id: c.id, reason }] : []; });
@@ -194,7 +209,8 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
     const gaps = eligible.filter((c) => c.claim_type === "gap");
     const tactics = eligible.filter((c) => c.claim_type === "tactic");
     const snapshot = createHash("sha256").update(JSON.stringify([1, args.workspace_id,
-      entities.map((c) => [c.id, claimFactualRevision(c), coverageExclusionReason(c)])])).digest("hex");
+      entities.map((c) => [c.id, claimFactualRevision(c), coverageExclusionReason(c)]),
+      ...(live ? [live.bindings, live.selected_items.map(item => [item.claim_id, item.item_version_id])] : [])])).digest("hex");
     const total = gaps.length * tactics.length;
     let offset = 0;
     if (args.cursor) {
@@ -208,7 +224,10 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
       if (cursor.offset > total) throw new CoverageError("invalid_cursor", "Invalid coverage cursor offset; restart without cursor.");
       offset = cursor.offset;
     }
-    const joins = await listCoverageJoins(args.workspace_id);
+    const joins = live?.coverage ?? await listCoverageJoins(args.workspace_id);
+    const assessments = live ? await accuracyDb().select().from(t.accuracyCoverageJoins)
+      .where(eq(t.accuracyCoverageJoins.workspace_id, args.workspace_id)) : [];
+    const assessmentByKey = new Map(assessments.map(row => [`${row.gap_id}::${row.tactic_id}`, row]));
     const provenance = await coverageProvenanceStates(eligible);
     const hasProvenance = (gap: AccuracyClaimRow, tactic: AccuracyClaimRow) => pairHasProvenance(provenance.get(gap.id)!, provenance.get(tactic.id)!);
     const byKey = new Map(joins.map((j) => [`${j.gap_id}::${j.tactic_id}`, j]));
@@ -219,12 +238,15 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
     const empty = (claim: AccuracyClaimRow) => valid(claim) && !provenance.get(claim.id)!.supported;
     let missing_provenance = total - (gaps.filter(valid).length * tactics.filter(valid).length
       - gaps.filter(empty).length * tactics.filter(empty).length);
-    for (const j of joins) {
-      const g = gapById.get(j.gap_id), tac = tacticById.get(j.tactic_id);
+    const pairKeys = new Set([...byKey.keys(), ...assessmentByKey.keys()]);
+    for (const key of pairKeys) {
+      const j = byKey.get(key), saved = assessmentByKey.get(key);
+      const identity = j ?? saved!;
+      const g = gapById.get(identity.gap_id), tac = tacticById.get(identity.tactic_id);
       if (!g || !tac) continue;
       const supported = hasProvenance(g, tac);
-      const p = pairFrom(g, tac, j, supported);
-      if (!supported && (dimensions(j).human_rejected === true || canonicalCoverageOverall(j.overall) === "not_relevant")) missing_provenance--;
+      const p = pairWithAssessment(pairFrom(g, tac, j, supported), saved, snapshot);
+      if (!supported && (dimensions(j).human_rejected === true || canonicalCoverageOverall(j?.overall) === "not_relevant")) missing_provenance--;
       if (p.assessment_state === "successful") assessed++;
       if (p.validated) validated++;
       if (p.freshness === "stale") stale++;
@@ -236,7 +258,8 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
     const end = Math.min(total, offset + page_size);
     for (let n = offset; n < end; n++) {
       const gap = gaps[Math.floor(n / tactics.length)], tactic = tactics[n % tactics.length];
-      pairs.push(pairFrom(gap, tactic, byKey.get(`${gap.id}::${tactic.id}`), hasProvenance(gap, tactic)));
+      const key = `${gap.id}::${tactic.id}`;
+      pairs.push(pairWithAssessment(pairFrom(gap, tactic, byKey.get(key), hasProvenance(gap, tactic)), assessmentByKey.get(key), snapshot));
     }
     return { pairs, snapshot, next_cursor: end < total ? Buffer.from(JSON.stringify({ v: 1,
       workspace_id: args.workspace_id, snapshot, offset: end })).toString("base64url") : null,
@@ -313,13 +336,13 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
   return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
     const claims = await checkedClaims(args);
     const live = await approvedInventory(args.workspace_id);
-    if (live) {
-      if (kind === "model" || kind === "failure") throw new AssemblyReviewError("conflict", "Assessment is a suggestion; change approved coverage through an explicit human successor.");
+    if (live && (kind === "human" || kind === "rejection")) {
       if (!args.author || !args.actor || JSON.stringify(args.author.actor) !== JSON.stringify(args.actor)) throw new AssemblyReviewError("forbidden", "An authenticated contributor identity is required.");
       if (kind === "human") await requireCoverageEvidence(args, claims);
       const gap = live.selected_items.find(item => item.claim_id === args.gap_id)!;
       const tactic = live.selected_items.find(item => item.claim_id === args.tactic_id)!;
-      const binding = live.bindings.find(binding => binding.source_file_id === gap.source_file_id && binding.call_kind === "need_extract")!;
+      const { requireApprovedItemBinding } = await import("./assembly-review-store");
+      const binding = requireApprovedItemBinding(live, args.gap_id);
       const { getWorkspace } = await import("./tenant");
       const { createCoverageAssemblyRevision } = await import("@/accuracy/kernel/assembly-revision");
       const candidate = await createCoverageAssemblyRevision({ workspace_id: args.workspace_id, org_id: (await getWorkspace(args.workspace_id))!.org_id,
@@ -333,7 +356,12 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
     const [existing] = await accuracyDb().select().from(t.accuracyCoverageJoins).where(pairWhere(args)).for("update");
     if (kind === "model" || kind === "failure") {
       if (!args.run_id?.trim()) throw new Error("Assessment run_id is required.");
-      if (existing) {
+      if (live) {
+        if (!args.expected_snapshot) throw new CoverageError("stale_snapshot", "Managed assessment requires its exact approved input snapshot.");
+        const approved = live.coverage.find(row => row.gap_id === args.gap_id && row.tactic_id === args.tactic_id);
+        const pair = pairWithAssessment(pairFrom(claims.gap, claims.tactic, approved), existing, args.expected_snapshot);
+        if (pair.protected || pair.assessment_state === "successful") return approved ?? existing!;
+      } else if (existing) {
         const pair = pairFrom(claims.gap, claims.tactic, existing);
         if (pair.protected || pair.assessment_state === "successful") return existing;
       }
@@ -343,10 +371,11 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
     if (kind === "rejection" && args.evidence?.length) throw new CoverageError("invalid_evidence", "A pair rejection does not accept supporting coverage evidence.");
     if (kind === "human" || kind === "model") await requireCoverageEvidence(args, claims);
     const at = new Date().toISOString();
-    const nextDimensions = { ...dimensions(existing), decision_history: historyOf(existing),
+    const nextDimensions = { ...(live ? {} : dimensions(existing)), decision_history: historyOf(existing),
+      ...(live ? { managed_assessment: true, assessment_snapshot: args.expected_snapshot } : {}),
       gap_revision: args.expected_gap_revision, tactic_revision: args.expected_tactic_revision,
       actor: kind === "human" || kind === "rejection" ? args.actor : null,
-      run_id: args.run_id ?? null, decided_at: at, evidence: kind === "rejection" || kind === "failure" ? [] : args.evidence ?? [],
+      run_id: live && kind === "failure" ? null : args.run_id ?? null, decided_at: at, evidence: kind === "rejection" || kind === "failure" ? [] : args.evidence ?? [],
       human_rejected: kind === "rejection", assessment_state: kind === "failure" ? "failed" : kind === "rejection" ? "rejected" : overall === "pending" ? "pending" : "successful",
       failure_reason: kind === "failure" ? args.rationale : null,
       validation_stale: false, prior_validated: false };

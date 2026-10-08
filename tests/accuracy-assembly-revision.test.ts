@@ -10,10 +10,11 @@ import { insertSourceFile } from "@/accuracy/store/source-store";
 import { createOrganization, createWorkspace, deleteWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Role } from "@/modules/auth/roles";
+import { GET as coverageGet, POST as coveragePost } from "@/app/api/accuracy/coverage/route";
 import { POST as assembliesPost } from "@/app/api/accuracy/assemblies/route";
 import { runAccuracyModule, registerAccuracyStack } from "@/accuracy";
 import { activateAccuracyModule, activeAccuracyModuleId, registerAccuracyModule } from "@/accuracy/kernel/registry";
-import { mechanicalModule } from "@/accuracy/modules/_factory";
+import { agenticModule, mechanicalModule } from "@/accuracy/modules/_factory";
 import { accuracyTransactionActive } from "@/accuracy/store/db";
 import { revalidateApprovedLiveBindings } from "@/accuracy/store/assembly-review-store";
 import { assemblyRevisionState } from "@/accuracy/store/assembly-revision-store";
@@ -184,19 +185,20 @@ async function reviewPost(body: Record<string, unknown>) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind: call_kind as never, module_id, activated_by: "restore" });
   originals.clear();
   for (const id of workspaces.splice(0)) await deleteWorkspace(id);
 });
 
 
-function installCoverage(overall: "partial" | "not_relevant" = "partial", options?: { failFirst?: boolean; failAttempt?: number; before?: () => Promise<void> }) {
+function installCoverage(overall: "partial" | "not_relevant" = "partial", options?: { agentic?: boolean; failFirst?: boolean; failAttempt?: number; before?: () => Promise<void> }) {
   const call_kind = "coverage_decide";
   const original = activeAccuracyModuleId(call_kind);
   if (original) originals.set(call_kind, original);
   const id = newId("coverage-module");
   let attempts = 0;
-  registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Generated coverage", summary: "Generated coverage",
+  registerAccuracyModule((options?.agentic ? agenticModule : mechanicalModule)({ id, call_kind, title: "Generated coverage", summary: "Generated coverage",
     inputSchema: z.object({ workspace_id: z.string(), gap_id: z.string(), tactic_id: z.string(), block_bundle_ids: z.array(z.string()),
       selected_versions: z.object({ gap_version_id: z.string(), tactic_version_id: z.string(),
         gap_payload: z.record(z.string(), z.unknown()), tactic_payload: z.record(z.string(), z.unknown()) }).optional() }),
@@ -314,6 +316,151 @@ describe("KAN-39 immutable human revisions", () => {
     await approve(scope, result.assembly);
     expect((await listDownstreamClaims(scope.workspace_id, { limit: null })).map(item => item.statement)).toContain("Human gap for tactic-only proposal");
     expect((await approvedLiveInventory(scope.workspace_id))?.coverage).toHaveLength(1);
+  });
+
+  it.each(["update", "reject", "split"])("uses the approved inventory-only owner for a human gap: %s", async action => {
+    const scope = await fixture();
+    const { assembly } = await publishInventoryOnlyAssembly(scope);
+    installCoverage();
+    const added = await createAssemblyRevision({ ...revisionArgs(scope, assembly), change: { action: "add", reason: "Missing source-backed need",
+      content: { claim_type: "gap", source_file_id: scope.source_file_id, payload: humanGap(scope, "Human gap owned by inventory") } } });
+    await approve(scope, added.assembly);
+    const live = (await approvedLiveInventory(scope.workspace_id))!;
+    expect(live.bindings.map(binding => binding.call_kind)).toEqual(["inventory_extract"]);
+    const gap_id = live.claims.find(claim => claim.claim_type === "gap")!.id;
+    const tactic_id = live.claims.find(claim => claim.claim_type === "tactic")!.id;
+    const { coveragePairRevisions, upsertCoverageDecision, rejectCoveragePair } = await import("@/accuracy/store/coverage-store");
+    const { getClaim } = await import("@/accuracy/store/claim-store");
+    const before = await getClaim(scope.workspace_id, gap_id);
+    let candidateId: string;
+    if (action === "split") {
+      const { readAccuracySplitInputs, applyAccuracySplit, listAccuracySplitOperations } = await import("@/accuracy/store/partial-split-store");
+      const state = await readAccuracySplitInputs({ workspace_id: scope.workspace_id, gap_id });
+      const request = { workspace_id: scope.workspace_id, operation_key: newId("split-key"), actor: author.actor, author,
+        rationale: "Confirmed source-backed split", proposal: { workspace_id: scope.workspace_id, parent_gap_id: gap_id,
+          ...state.revisions, confirmed: true, addressed_name: "Addressed portion", addressed_statement: "Supported source portion",
+          open_name: "Residual need", open_statement: "Remaining source question", addressed_tactic_ids: [tactic_id],
+          uncovered_dimensions: ["population" as const], addressed_evidence: state.evidence, open_evidence: [], confidence: 100,
+          rationale: ["Human confirmed exact portions"] } };
+      const candidate = await applyAccuracySplit(request);
+      expect(candidate).toMatchObject({ state: "awaiting_approval" });
+      expect(await applyAccuracySplit(request)).toEqual(candidate);
+      expect(await listAccuracySplitOperations(scope.workspace_id)).toHaveLength(1);
+      expect(await getClaim(scope.workspace_id, gap_id)).toEqual(before);
+      await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+      candidateId = candidate.assembly_id!;
+      const detail = await assemblyReviewState(scope.workspace_id, candidateId);
+      await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: candidateId, expected_fingerprint: detail.fingerprint,
+        decision: "approve", rationale: "Reviewed split and pending residual", reviewer,
+        advisory_overrides: detail.advisories.map(f => ({ code: f.code, item_version_ids: f.item_version_ids, reason: "Residual remains pending" })) });
+      const after = (await approvedLiveInventory(scope.workspace_id))!;
+      expect(after.claims.map(claim => claim.id)).toEqual(expect.arrayContaining([candidate.addressed_gap_id, candidate.open_residual_gap_id]));
+      expect(after.claims.map(claim => claim.id)).not.toContain(gap_id);
+      expect(after.coverage.find(pair => pair.gap_id === candidate.open_residual_gap_id)).toMatchObject({ overall: "pending", validated: false });
+      expect((await listAccuracySplitOperations(scope.workspace_id))[0].state).toBe("applied");
+    } else {
+      const args = { workspace_id: scope.workspace_id, gap_id, tactic_id, actor: author.actor, author,
+        ...await coveragePairRevisions({ workspace_id: scope.workspace_id, gap_id, tactic_id }), rationale: "Human reviewed coverage" };
+      const candidate = action === "reject" ? await rejectCoveragePair(args)
+        : await upsertCoverageDecision({ ...args, overall: "limited", evidence: [scope.block_id] });
+      expect(candidate).toMatchObject({ awaiting_approval: true, validated: false });
+      candidateId = candidate.assembly_id!;
+      expect(await getClaim(scope.workspace_id, gap_id)).toEqual(before);
+      await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+      const detail = await assemblyReviewState(scope.workspace_id, candidateId);
+      await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: candidateId, expected_fingerprint: detail.fingerprint,
+        decision: "approve", rationale: "Reviewed exact coverage successor", reviewer,
+        advisory_overrides: detail.advisories.map(f => ({ code: f.code, item_version_ids: f.item_version_ids, reason: "Pending remains pending" })) });
+      expect((await approvedLiveInventory(scope.workspace_id))!.coverage[0]).toMatchObject({ overall: action === "reject" ? "pending" : "limited", validated: action !== "reject" });
+    }
+    expect((await readAssembly(scope.workspace_id, candidateId))!.items.length).toBe(action === "split" ? 3 : 2);
+    expect(await readAssembly(scope.workspace_id, added.assembly.id)).toEqual(added.assembly);
+  });
+
+  it("retains managed cross-source assessments and failures without publishing and resumes pages", async () => {
+    const scope = await fixture();
+    const first = await publishAssembly(scope);
+    await approve(scope, first.assembly);
+    const source = await insertSourceFile({ workspace_id: scope.workspace_id, filename: "second.txt", mime: "text/plain", checksum: newId("sum") });
+    const block_id = newId("block");
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: block_id, workspace_id: scope.workspace_id, source_file_id: source.id,
+      index: 0, kind: "paragraph", heading: null, text: "Second source supports the selected item.", parser: "test", created_at: nowIso() });
+    const other = { ...scope, source_file_id: source.id, block_id };
+    const second = await publishAssembly(other, gap(other, "Independent source need"), tactic(other, "Independent inventory tactic"));
+    await approve(scope, second.assembly);
+    const { assessCoveragePage, listCoveragePage, listCoverageJoins, upsertCoverageDecision } = await import("@/accuracy/store/coverage-store");
+    const { coverageFactsForPair } = await import("@/accuracy/store/coverage-store");
+    const { blockBundleIdsForPair } = await import("@/accuracy/store/coverage-queue");
+    const before = await approvedLiveInventory(scope.workspace_id);
+    const attempts = installCoverage("partial", { failFirst: true, agentic: true });
+    const assess = async (pair: import("@/accuracy/store/coverage-store").CoveragePair) => {
+      const result = await runAccuracyModule<import("@/accuracy/modules/coverage-decide/schema").CoverageDecision>({
+        call_kind: "coverage_decide", agent_role: "judge", workspace_id: scope.workspace_id, org_id: scope.org_id, actor,
+        input: { workspace_id: scope.workspace_id, gap_id: pair.gap.id, tactic_id: pair.tactic.id,
+          block_bundle_ids: blockBundleIdsForPair(pair.gap, pair.tactic), facts: coverageFactsForPair(pair) } });
+      return { overall: result.output.overall, rationale: result.output.rationale, evidence: result.output.quote_block_ids, run_id: result.run_id };
+    };
+    vi.stubEnv("OWNER_EMAILS", "reviewer@example.test");
+    sessionContext.mockResolvedValue({ signed_in: true, demo: false, role: "contributor", actor: author.actor,
+      session: { subject: author.subject, provider_id: author.provider, email: "reviewer@example.test", actor: author.actor, role: "contributor" } });
+    const response = await coveragePost(new Request("http://localhost/api/accuracy/coverage", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "assess", workspace_id: scope.workspace_id }) }));
+    expect(response.status).toBe(200);
+    const apiPage = await response.json();
+    const page = { ...await listCoveragePage({ workspace_id: scope.workspace_id }), attempts: apiPage.attempts };
+    const readResponse = await coverageGet(new Request(`http://localhost/api/accuracy/coverage?workspace_id=${scope.workspace_id}`));
+    expect(readResponse.status).toBe(200);
+    expect((await readResponse.json()).pairs.find((pair: { suggestion?: unknown }) => pair.suggestion)).toMatchObject({ overall: "pending", validated: false, suggestion: { overall: "partial" } });
+    expect(page.attempts).toHaveLength(2);
+    expect(page.attempts[0].error).toContain("transient coverage failure");
+    expect(page.attempts[1].error).toBeUndefined();
+    expect(attempts()).toBe(2);
+    expect(page.progress).toMatchObject({ eligible_total: 4, assessed: 3, validated: 2, failed: 1, pending: 1 });
+    const suggested = page.pairs.find(pair => pair.assessment_state === "successful" && !pair.validated)!;
+    expect(suggested).toMatchObject({ overall: "pending", validated: false,
+      suggestion: { overall: "partial", rationale: "Generated pairwise decision", freshness: "current" } });
+    expect(page.pairs.find(pair => pair.assessment_state === "failed")).toMatchObject({ overall: "pending", validated: false });
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(before);
+    expect(await listCoverageJoins(scope.workspace_id)).toEqual(before!.coverage);
+    let cursor: string | undefined;
+    do {
+      const resumed = await assessCoveragePage({ workspace_id: scope.workspace_id, page_size: 1, cursor, assess });
+      cursor = resumed.next_cursor ?? undefined;
+    } while (cursor);
+    expect(attempts()).toBe(3);
+    expect((await listCoveragePage({ workspace_id: scope.workspace_id })).progress).toMatchObject({ assessed: 4, validated: 2, failed: 0, assessment_complete: true, validation_complete: false });
+    expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess })).attempts).toEqual([]);
+    expect(attempts()).toBe(3);
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(before);
+    const { copyExperimentWorkspace } = await import("@/accuracy/experiments/copy-workspace");
+    const copy = await copyExperimentWorkspace({ source_workspace_id: scope.workspace_id, source_file_ids: [scope.source_file_id, other.source_file_id] });
+    workspaces.unshift(copy.workspace_id);
+    const archive = (copy.baseline_snapshot as unknown as { managed_history: import("@/accuracy/experiments/baseline-history").ManagedBaselineHistory }).managed_history;
+    expect(archive.authority).toBe("audit_only");
+    const suggestions = archive.coverage_audit.filter(row => (row.dimensions as Record<string, unknown>).managed_assessment === true);
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions.every(row => !row.validated)).toBe(true);
+    for (const row of suggestions) {
+      expect(archive.runs.map(run => run.id)).toContain((row.dimensions as Record<string, unknown>).run_id);
+      expect(row.workspace_id).toBe(copy.workspace_id);
+    }
+    expect(JSON.stringify(suggestions)).toContain("transient coverage failure");
+    expect(await approvedLiveInventory(copy.workspace_id)).toBeNull();
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(before);
+    // A reasoned human successor and its exact fresh approval are still required.
+    const candidate = await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: suggested.gap.id, tactic_id: suggested.tactic.id,
+      expected_gap_revision: suggested.gap_revision, expected_tactic_revision: suggested.tactic_revision,
+      overall: "limited", rationale: "Human reviewed the suggestion conservatively", evidence: blockBundleIdsForPair(suggested.gap, suggested.tactic), actor: author.actor, author });
+    expect(candidate).toMatchObject({ awaiting_approval: true, validated: false });
+    await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+    const detail = await assemblyReviewState(scope.workspace_id, candidate.assembly_id!);
+    await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: candidate.assembly_id!, expected_fingerprint: detail.fingerprint,
+      decision: "approve", rationale: "Reviewed successor with pending cross-source work", reviewer,
+      advisory_overrides: detail.advisories.map(f => ({ code: f.code, item_version_ids: f.item_version_ids, reason: "Unreviewed pair stays pending" })) });
+    const after = (await approvedLiveInventory(scope.workspace_id))!;
+    expect(after.coverage.find(pair => pair.gap_id === suggested.gap.id && pair.tactic_id === suggested.tactic.id)).toMatchObject({ overall: "limited", validated: true });
+    expect(after.coverage.filter(pair => pair.overall === "pending")).toHaveLength(1);
+    expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess })).attempts).toEqual([]);
   });
 
   it("invalidates in-flight linking when a newer extraction publishes", async () => {

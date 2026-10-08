@@ -767,3 +767,26 @@ it.each(["current", "stale"])("archives managed approval history and repeats cop
   }
   expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, scope.workspace_id))).toEqual(original);
 });
+
+
+it.each(["success", "failure"])("refuses a managed assessment after exact approval changes during %s", async outcome => {
+  const scope = await fixture();
+  const first = await approveCurrentAssembly(scope);
+  const other = await addSource(scope);
+  const second = await completeAssembly(other, gap(other, "Independent need"), tactic(other, "Independent tactic"));
+  await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: second.assembly.id, expected_fingerprint: second.assembly.fingerprint,
+    decision: "approve", rationale: "Reviewed independent source", advisory_overrides: [], reviewer });
+  const { assessCoveragePage, listCoveragePage } = await import("@/accuracy/store/coverage-store");
+  const original = await listCoveragePage({ workspace_id: scope.workspace_id });
+  await expect(assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => {
+    const state = await assemblyReviewState(scope.workspace_id, first.assembly.id);
+    await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: first.assembly.id, expected_fingerprint: state.fingerprint,
+      expected_review_id: state.expected_review_id, decision: "approve", rationale: "A later exact human review", advisory_overrides: [], reviewer });
+    if (outcome === "failure") throw new Error("Provider failed during approval change");
+    return { overall: "partial", rationale: "Source-backed suggestion", evidence: [scope.block_id], run_id: "stale-provider-result" };
+  } })).rejects.toMatchObject({ code: "stale_snapshot" });
+  const after = await listCoveragePage({ workspace_id: scope.workspace_id });
+  expect(after.snapshot).not.toBe(original.snapshot);
+  expect(after.progress).toMatchObject({ assessed: 2, validated: 2, pending: 2, failed: 0 });
+  expect(after.pairs.filter(pair => !pair.validated).every(pair => pair.overall === "pending" && !pair.suggestion)).toBe(true);
+});
