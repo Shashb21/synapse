@@ -39,6 +39,15 @@ export type PreparedAccuracyMerge = {
   workspace_id: string; org_id: string; run_id: string; module_id: string; module_version: string;
   judgment: MergeJudgment; route: ResolvedAccuracyRoute | null; steps: RunStep[]; costs: CostEstimate[]; started_at: string;
 };
+import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "./assembly-context";
+import {
+  approvedLiveInventory,
+  revalidateApprovedLiveBindings,
+  type ApprovedAssemblyBinding,
+  type ApprovedLiveInventory,
+} from "../store/assembly-review-store";
+import { AssemblyReviewError } from "../domain/assembly-review";
+import { resolveApprovedRunInput } from "./approved-input";
 
 export type AccuracyRunResult<O> = {
   run_id: string;
@@ -107,14 +116,27 @@ export async function runAccuracyModule<O = unknown>(args: {
     throw new Error("Workspace does not belong to the trusted organization.");
   }
   await assertAccuracyCanProgress(args.workspace_id, args.call_kind);
+  const consumption = await assemblyConsumptionForRun(args.workspace_id, args.call_kind, evaluation_context);
+  const consumedLiveInventory = consumption.kind === "managed" ? consumption.live : null;
+  const consumedAssemblyBindings = consumedLiveInventory?.bindings ?? null;
+  const runInput = await resolveApprovedRunInput({
+    workspace_id: args.workspace_id,
+    call_kind: args.call_kind,
+    input: parsedInput.data,
+    live: consumedLiveInventory,
+  });
 
   if (args.reserved_run_id) {
     const existing = await reservedAccuracyRun(args.workspace_id, args.reserved_run_id);
     if (existing) {
       if (existing.call_kind !== args.call_kind || existing.org_id !== args.org_id
-        || !isDeepStrictEqual(existing.input, args.input) || existing.status !== "ok") {
+        || !isDeepStrictEqual(existing.input, runInput) || existing.status !== "ok") {
         throw new Error("Reserved run identity conflicts with this operation.");
       }
+      if (consumedAssemblyBindings && !isDeepStrictEqual(existingAssemblyBindings(existing.steps), consumedAssemblyBindings)) {
+        throw new AssemblyReviewError("conflict", "Reserved run was produced from a different approved assembly binding.");
+      }
+      await withAssemblyWorkspaceLock(args.workspace_id, () => revalidateConsumption(args.workspace_id, consumption));
       return { run_id: existing.id, call_kind: args.call_kind, module_id: existing.module_id,
         module_version: existing.module_version, summary: existing.summary ?? "", output: existing.output as O,
         evals: (existing.evals ?? []) as EvalScore[], cost_usd: Number(existing.cost_usd ?? 0),
@@ -130,14 +152,15 @@ export async function runAccuracyModule<O = unknown>(args: {
     module_id: implementation.manifest.id,
     module_version: implementation.manifest.version,
     actor: args.actor,
-    input: args.input,
+    input: runInput,
     evaluation_context,
     experiment_cycle_control,
   }, args.reserved_run_id, args.prepared_merge?.started_at);
   if (!args.merge_preparation) await openAccuracyRun(recorder);
   if (args.prepared_merge) recorder.restorePreparation(args.prepared_merge.steps, args.prepared_merge.costs);
 
-  if (!args.prepared_merge) recorder.note("input:accepted", parsedInput.data);
+  if (!args.prepared_merge) recorder.note("input:accepted", runInput);
+  if (consumedAssemblyBindings) recorder.note("assembly:approved-live-bindings", consumedAssemblyBindings);
 
   let route = null;
   try {
@@ -246,23 +269,42 @@ export async function runAccuracyModule<O = unknown>(args: {
         module_version: implementation.manifest.version, output: prepared as O, summary: "Merge judgment prepared",
         evals: [], ...summary, route };
     }
-    const result = args.prepared_merge
-      ? await applyMergeJudgment(await captureMergeInputs(args.workspace_id), args.prepared_merge.judgment, ctx)
-      : await implementation.run(parsedInput.data, ctx);
-    const parsedOutput = implementation.outputSchema.safeParse(result.output);
-    if (!parsedOutput.success) {
-      const message = parsedOutput.error.issues.map((i) => i.message).join("; ");
-      await closeAccuracyRun({ recorder, status: "error", error: message, route });
-      throw new Error(message);
+    const execute = async () => {
+      const result = args.prepared_merge
+        ? await applyMergeJudgment(await captureMergeInputs(args.workspace_id), args.prepared_merge.judgment, ctx)
+        : await implementation.run(runInput, ctx);
+      const parsedOutput = implementation.outputSchema.safeParse(result.output);
+      if (!parsedOutput.success) {
+        const message = parsedOutput.error.issues.map((i) => i.message).join("; ");
+        await closeAccuracyRun({ recorder, status: "error", error: message, route });
+        throw new Error(message);
+      }
+      return { result, parsedOutput };
+    };
+    const publish = async (summary: string, output: unknown, evals: EvalScore[] | undefined) => {
+      await revalidateConsumption(args.workspace_id, consumption);
+      await closeAccuracyRun({
+        recorder,
+        status: "ok",
+        summary,
+        output,
+        route,
+        evals,
+      });
+    };
+    const { result, parsedOutput } = consumption.kind !== "exempt" && !implementation.manifest.agentic
+      ? await withAssemblyWorkspaceLock(args.workspace_id, async () => {
+          await revalidateConsumption(args.workspace_id, consumption);
+          const executed = await execute();
+          await publish(executed.result.summary, executed.parsedOutput.data, executed.result.evals);
+          return executed;
+        })
+      : await execute();
+    if (consumption.kind === "exempt" || implementation.manifest.agentic) {
+      await withAssemblyWorkspaceLock(args.workspace_id, async () => {
+        await publish(result.summary, parsedOutput.data, result.evals);
+      });
     }
-    await closeAccuracyRun({
-      recorder,
-      status: "ok",
-      summary: result.summary,
-      output: parsedOutput.data,
-      route,
-      evals: result.evals,
-    });
     const summary = recorder.usageSummary();
     return {
       run_id: recorder.id,
@@ -300,4 +342,46 @@ export async function prepareAccuracyMerge(args: { workspace_id: string; org_id:
     prepared.started_at = prior.started_at ?? prepared.started_at;
   }
   return prepared;
+}
+
+function existingAssemblyBindings(steps: unknown): ApprovedAssemblyBinding[] | null {
+  if (!Array.isArray(steps)) return null;
+  const entry = steps.find((step) => step && typeof step === "object"
+    && (step as { name?: unknown }).name === "assembly:approved-live-bindings");
+  const data = entry && typeof entry === "object" ? (entry as { data?: unknown }).data : null;
+  return Array.isArray(data) ? data as ApprovedAssemblyBinding[] : null;
+}
+
+const PRE_APPROVAL_CALL_KINDS = new Set<CallKind>([
+  "upload",
+  "parse",
+  "inventory_extract",
+  "need_extract",
+  "completeness_audit",
+]);
+
+type AssemblyConsumption =
+  | { kind: "exempt" }
+  | { kind: "legacy" }
+  | { kind: "managed"; live: ApprovedLiveInventory };
+
+async function revalidateConsumption(workspace_id: string, consumption: AssemblyConsumption): Promise<void> {
+  if (consumption.kind === "exempt") return;
+  if (consumption.kind === "managed") return revalidateApprovedLiveBindings(workspace_id, consumption.live.bindings);
+  // Legacy permission expires at the first applied production batch, including an unapproved head.
+  if (await approvedLiveInventory(workspace_id)) {
+    throw new AssemblyReviewError("conflict", "Legacy workspace entered managed mode before publication.");
+  }
+}
+
+async function assemblyConsumptionForRun(
+  workspace_id: string,
+  call_kind: CallKind,
+  evaluation_context: "production" | "experiment",
+): Promise<AssemblyConsumption> {
+  const scope = assemblyExecutionScope();
+  if (evaluation_context === "experiment" || scope.kind === "experiment" || scope.kind === "preparation") return { kind: "exempt" };
+  if (PRE_APPROVAL_CALL_KINDS.has(call_kind)) return { kind: "exempt" };
+  const live = await approvedLiveInventory(workspace_id);
+  return live ? { kind: "managed", live } : { kind: "legacy" };
 }

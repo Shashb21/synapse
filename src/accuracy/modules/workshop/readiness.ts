@@ -100,6 +100,7 @@ export type WorkshopActionLog = {
 
 export type WorkshopSnapshotPayload = {
   inventory: WorkshopInventory;
+  assembly_bindings?: unknown[];
   facilitator_tags: FacilitatorTagState;
   overlays: Record<string, WorkshopGapOverlay>;
   actions: WorkshopActionLog[];

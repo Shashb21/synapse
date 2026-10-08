@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as session from "@/modules/auth/session";
 import { registerAccuracyStack } from "@/accuracy";
 import { POST as extractPost } from "@/app/api/accuracy/extract/route";
 import { GET as reviewGet } from "@/app/api/accuracy/review/route";
@@ -9,7 +10,7 @@ import { insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { listCompletenessVerdicts } from "@/accuracy/store/completeness-verdict-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import { sql } from "drizzle-orm";
 import { listAccuracyRuns } from "@/accuracy/kernel/observability";
@@ -27,6 +28,7 @@ async function workspaceWithBlocks(label: string) {
     name: `WS ${label}`,
     slug: `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
   });
+  await grantOrganizationAccess({ org_id, subject: "ai-off-reviewer" });
   const source = await insertSourceFile({
     workspace_id,
     org_id,
@@ -101,10 +103,16 @@ describe("accuracy AI routes with AI off", () => {
   let ws: Awaited<ReturnType<typeof workspaceWithBlocks>>;
 
   beforeAll(async () => {
+    vi.stubEnv("OWNER_EMAILS", "ai-off-reviewer@example.test");
+    const actor = { name: ADMIN, function: "medical_affairs" as const };
+    vi.spyOn(session, "sessionContext").mockResolvedValue({ signed_in: true, demo: false, role: "contributor", actor,
+      session: { id: "ai-off-review-session", subject: "ai-off-reviewer", provider_id: "fixture-idp", email: "ai-off-reviewer@example.test",
+        actor, role: "contributor", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() } });
     ws = await workspaceWithBlocks("ai-off-routes");
     await setAiEnabled({ enabled: false, actor_name: ADMIN, rationale: "AI off for accuracy route tests" });
   });
   afterAll(async () => {
+    vi.restoreAllMocks(); vi.unstubAllEnvs();
     await setAiEnabled({ enabled: true, actor_name: ADMIN, rationale: "restore after accuracy route tests" });
   });
 

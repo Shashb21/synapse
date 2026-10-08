@@ -16,8 +16,8 @@ import { judgeEquivalence } from "./judge";
 import { isTestStub } from "@/modules/kernel/llm";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
-  listClaims,
+  isDownstreamClaim,
+  listDownstreamClaims,
   persistClaimPatch,
   type AccuracyClaimMetadata,
   type AccuracyClaimRow,
@@ -29,6 +29,7 @@ import {
 } from "@/accuracy/store/claim-edit";
 import { reassignCoverageClaimId } from "@/accuracy/store/coverage-store";
 import { nowIso } from "@/modules/kernel/ids";
+import { listVersionedClaimIds } from "@/accuracy/store/item-history-store";
 import { listSourceFiles } from "@/accuracy/store/source-store";
 import { mergeStructuredFields, readStructuredFields } from "@/accuracy/domain/structured-fields";
 
@@ -149,15 +150,16 @@ export type MergeDedupeOutput = z.infer<typeof mergeDedupeOutputSchema>;
 
 /** Exact server-captured inputs, including human locks, rejections and pack identity. */
 export async function captureMergeInputs(workspace_id: string) {
-  const [claims, sources] = await Promise.all([
-    listClaims(workspace_id, { limit: 1000 }),
+  const [claims, sources, versionedIds] = await Promise.all([
+    listDownstreamClaims(workspace_id, { limit: null }),
     listSourceFiles(workspace_id),
+    listVersionedClaimIds(workspace_id),
   ]);
   const packBySource = new Map(
     sources.map((row) => [row.id, row.reference_pack_id ?? null]),
   );
-  const active = claims.filter(isActiveLedgerClaim).sort((a, b) => a.id.localeCompare(b.id));
-  const candidates = active.map((row) => claimToMergeCandidate(row, packBySource));
+  const active = claims.filter(isDownstreamClaim).sort((a, b) => a.id.localeCompare(b.id));
+  const candidates = active.filter(row => !versionedIds.has(row.id)).map((row) => claimToMergeCandidate(row, packBySource));
   const blocked = mergeRejectedPairs(active);
   const questions = equivalenceQuestions(candidates, blocked);
   const revision = createHash("sha256").update(JSON.stringify({ active,
@@ -253,7 +255,7 @@ export async function applyMergeJudgment(inputs: MergeInputs, judgment: MergeJud
   // Proposals: persist on the protected duplicate; a human confirms or dismisses.
   const proposalByDuplicate = new Map(result.proposals.map((row) => [row.duplicate_id, row]));
   const proposedAt = nowIso();
-  const fresh = (await listClaims(input.workspace_id, { limit: 1000 })).filter(isActiveLedgerClaim);
+  const fresh = (await listDownstreamClaims(input.workspace_id, { limit: null })).filter(isDownstreamClaim);
   for (const row of fresh) {
     const meta = claimMetadata(row);
     const proposal = proposalByDuplicate.get(row.id);
@@ -288,7 +290,7 @@ export async function applyMergeJudgment(inputs: MergeInputs, judgment: MergeJud
     mode: stub ? "stub" : "llm",
     judged_pairs: questions.length,
     merged: Object.keys(result.absorbed).length,
-    survivors: result.survivors.length,
+    survivors: active.length - result.merges.filter(merge => !isHumanProtectedClaim(byId.get(merge.duplicate_id)!)).length,
     contradictions: result.contradictions.length,
     merges: result.merges,
     proposed: result.proposals.length,

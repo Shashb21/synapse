@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as session from "@/modules/auth/session";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { PATCH as claimsPatch, POST as claimsPost } from "@/app/api/accuracy/claims/route";
 import { POST as mergePost } from "@/app/api/accuracy/claims/merge/route";
@@ -28,7 +29,7 @@ import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { insertSourceFile } from "@/accuracy/store/source-store";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { ensureAccuracySchema } from "@/accuracy/store/db";
 import { ownerAccess } from "@/modules/auth/owner";
 import { coverageProvenance } from "./support/coverage-provenance";
@@ -36,6 +37,13 @@ import { coverageProvenance } from "./support/coverage-provenance";
 registerAccuracyStack();
 
 const actor = { name: "Ada", function: "medical_affairs" as const };
+function reviewSession() {
+  vi.stubEnv("OWNER_EMAILS", "manual-reviewer@example.test");
+  vi.spyOn(session, "sessionContext").mockResolvedValue({ signed_in: true, demo: false, role: "contributor", actor,
+    session: { id: "manual-edit-review-session", subject: "manual-edit-reviewer", provider_id: "fixture-idp", email: "manual-reviewer@example.test",
+      actor, role: "contributor", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() } });
+}
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 async function freshWorkspace(label: string) {
   await ensureAccuracySchema();
@@ -624,6 +632,7 @@ describe("gantt: human dates survive re-projection", () => {
 
 describe("coverage: decide any pair", () => {
   it("accepts an unlinked inventory pair, lists it, and rejects unknown claims", async () => {
+    reviewSession();
     const { workspace_id } = await freshWorkspace("coverage-any");
     const provenance = await coverageProvenance(workspace_id, "Need OS; inventory provides partial OS evidence.");
     const gap = await insertClaim({ workspace_id, claim_type: "gap", statement: "Need OS", metadata: { provenance } });
@@ -668,7 +677,9 @@ describe("coverage: decide any pair", () => {
 
 describe("miss-flag promote with an edited statement", () => {
   it("uses the reviewer's wording, keeps the block quote, and locks it", async () => {
+    reviewSession();
     const { org_id, workspace_id } = await freshWorkspace("promote-edit");
+    await grantOrganizationAccess({ org_id, subject: "manual-edit-reviewer" });
     const source = await insertSourceFile({
       workspace_id,
       org_id,

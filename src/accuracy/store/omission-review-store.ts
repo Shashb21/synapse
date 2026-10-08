@@ -4,8 +4,9 @@ import { z } from "zod";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
 import { newId } from "@/modules/kernel/ids";
-import { isActiveLedgerClaim, invalidateClaimFacts, invalidateDependentClaimValidation, syncClaimProvenance } from "./claim-store";
+import { invalidateClaimFacts, invalidateDependentClaimValidation, syncClaimProvenance } from "./claim-store";
 import { withHumanEdit } from "./claim-edit";
+import { isDownstreamClaim } from "./claim-store";
 import { claimToMergeCandidate } from "@/accuracy/modules/merge-dedupe/module";
 import { emptyGapStructuredFields, emptyTacticStructuredFields } from "@/accuracy/domain/structured-fields";
 import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
@@ -272,7 +273,7 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
       const sourceRows = await tx.select().from(t.accuracySourceFiles).where(eq(t.accuracySourceFiles.workspace_id, input.workspace_id));
       const packBySource = new Map(sourceRows.map((source) => [source.id, source.reference_pack_id]));
       const rows = await tx.select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, input.workspace_id)).for("update");
-      const active = rows.filter(isActiveLedgerClaim).filter((row) => row.claim_type === issue.item_kind);
+      const active = rows.filter(isDownstreamClaim).filter((row) => row.claim_type === issue.item_kind);
       const candidate: MergeCandidate = { id: actionId, claim_type: issue.item_kind, statement: issue.summary,
         validated: false, status: "draft", source_file_id: run.source_file_id, reference_pack_id: sources[0].reference_pack_id,
         external_id: null, tactic_status: null, provenance: [span] };
@@ -301,7 +302,7 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
       } else {
         const target = rows.find((row) => row.id === input.claim_id);
         if (!target) throw new OmissionActionError(404, "Unknown claim in workspace.");
-        if (!isActiveLedgerClaim(target) || target.claim_type !== issue.item_kind) throw new OmissionActionError(409, "Linked claim must be active and have the same item kind.");
+        if (!isDownstreamClaim(target) || target.claim_type !== issue.item_kind) throw new OmissionActionError(409, "Linked claim must be active and have the same item kind.");
         const existing = claimToMergeCandidate(target, packBySource);
         if (!packsMayMerge(candidate, existing)) throw new OmissionActionError(409, "Linked claim belongs to an incompatible reference pack.");
         if (tacticStatusesConflict(candidate, existing)) throw new OmissionActionError(409, "Linked tactic has conflicting lifecycle.");

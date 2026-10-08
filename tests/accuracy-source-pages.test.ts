@@ -61,7 +61,7 @@ import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks, readParseBlocks, persistDroppedUnits } from "@/accuracy/store/parse-store";
 import { listActiveSourceClaims, getClaim, claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
-import { updateClaim } from "@/accuracy/store/claim-edit";
+import { reviseSourceClaim as updateClaim, approveSourceAssembly } from "./support/accuracy-reviewed-edit";
 import { accuracyTransactionActive } from "@/accuracy/store/db";
 import { accuracyRouteConfig, setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
 import { openAi } from "@/modules/llm/provider";
@@ -87,7 +87,7 @@ async function providerFixture<T>(provider: typeof openAi.complete, action: () =
   await setAccuracyRouteConfig({ call_kind: "need_extract", agent_role: "proposer", provider_id: "openai", model: "gpt-5.1", actor_name: "test", fallbacks: [] });
   await setAccuracyRouteConfig({ call_kind: "merge_dedupe", agent_role: "judge", provider_id: "openai", model: "gpt-5.1", actor_name: "test", fallbacks: [] });
   await setAccuracyRouteConfig({ call_kind: "inventory_extract", agent_role: "proposer", provider_id: "openai", model: "gpt-5.1", actor_name: "test", fallbacks: [] });
-  const auth = vi.spyOn(session, "sessionContext").mockResolvedValue({ session: null, actor: { name: "Owner", function: "medical_affairs" }, role: "operator", demo: false, signed_in: true });
+  const auth = vi.spyOn(session, "sessionContext").mockResolvedValue({ session: { id: "test-session", subject: "source-page-owner", provider_id: "test", email: null, actor: { name: "Owner", function: "medical_affairs" }, role: "operator", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() }, actor: { name: "Owner", function: "medical_affairs" }, role: "operator", demo: false, signed_in: true });
   const spy = vi.spyOn(openAi, "complete").mockImplementation(provider);
   try { return await action(); } finally {
     spy.mockRestore(); auth.mockRestore();
@@ -117,7 +117,7 @@ it("extracts every declared block beyond the old caps through the real API and r
   const scope = await fixture(Array.from({ length: 90 }, (_, i) => `Need entity ${i}. ` + "padding ".repeat(80)));
   await providerFixture(answer, async () => {
     const first = await post({ ...scope, kinds: ["need"] });
-    expect(first.status).toBe(200);
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(200);
     const output = await first.json();
     expect(output.source_progress).toMatchObject({ complete: true, selection_scope: "all", expected_blocks: 90 });
     const claims = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
@@ -125,7 +125,7 @@ it("extracts every declared block beyond the old caps through the real API and r
     const edited = claims.find(c => c.statement === "Need entity 0.")!;
     await updateClaim({ workspace_id: scope.workspace_id, claim_id: edited.id, patch: { statement: "Human wording" }, rationale: "Reviewed", actor: { name: "Ada", function: "medical_affairs" } });
     const second = await post({ ...scope, kinds: ["need"] });
-    expect(second.status).toBe(200);
+    expect(second.status, JSON.stringify(await second.clone().json())).toBe(200);
     expect((await second.json()).claim_ids.sort()).toEqual(claims.map(c => c.id).sort());
     expect((await getClaim(scope.workspace_id, edited.id))!.statement).toBe("Human wording");
     expect(await listActiveSourceClaims(scope.workspace_id, scope.source_file_id)).toHaveLength(90);
@@ -225,10 +225,14 @@ it("validates source prompt configuration before starting extraction", async () 
   const scope = await fixture(["Need entity 0."]);
   const previous = process.env.SYNAPSE_EXTRACT_PROMPT_CHARS;
   try {
-    for (const value of ["abc", "9999", "200001", "10000.5"]) {
-      process.env.SYNAPSE_EXTRACT_PROMPT_CHARS = value;
-      expect((await post({ ...scope, kinds: ["need"] })).status).toBe(400);
-    }
+    await providerFixture(async () => { throw new Error("Invalid budget must not call a provider"); }, async () => {
+      for (const value of ["abc", "9999", "200001", "10000.5"]) {
+        process.env.SYNAPSE_EXTRACT_PROMPT_CHARS = value;
+        const response = await post({ ...scope, kinds: ["need"] });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ error: expect.stringContaining("SYNAPSE_EXTRACT_PROMPT_CHARS") });
+      }
+    });
   } finally {
     if (previous === undefined) delete process.env.SYNAPSE_EXTRACT_PROMPT_CHARS; else process.env.SYNAPSE_EXTRACT_PROMPT_CHARS = previous;
   }
@@ -345,7 +349,7 @@ it("uses the same complete pages in the isolated experiment pipeline", async () 
 
 import { listClaims } from "@/accuracy/store/claim-store";
 
-it("retains original offsets and stable source identities after downstream merges", async () => {
+it("retains original offsets and stable source identities without automatically merging versioned source questions", async () => {
   const scope = await fixture(["Need entity 0. Need entity 1."]);
   const block_id = `${scope.source_file_id}-B0`;
   await providerFixture(async request => {
@@ -357,17 +361,19 @@ it("retains original offsets and stable source identities after downstream merge
   }, async () => {
     const first = await (await post({ ...scope, kinds: ["need"] })).json();
     const active = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
-    expect(active).toHaveLength(1);
-    expect((claimMetadata(active[0]).provenance as { char_start: number }[]).map(p => p.char_start).sort((a, b) => a - b)).toEqual([0, 15]);
-    expect(first.claim_ids).toEqual([active[0].id]);
+    expect(active).toHaveLength(2);
+    expect(first.merge.merged).toBe(0);
+    expect(active.flatMap(row => claimMetadata(row).provenance as { char_start: number }[]).map(p => p.char_start).sort((a, b) => a - b)).toEqual([0, 15]);
+    expect(first.claim_ids.sort()).toEqual(active.map(row => row.id).sort());
     const before = await listClaims(scope.workspace_id);
     await updateClaim({ workspace_id: scope.workspace_id, claim_id: active[0].id, patch: { statement: "Human survival wording" }, rationale: "Reviewed", actor: { name: "Ada", function: "medical_affairs" } });
     const rerun = await post({ ...scope, kinds: ["need"] });
     expect(rerun.status).toBe(200);
     const output = await rerun.json();
-    expect(output.claim_ids).toEqual(first.claim_ids);
+    expect(output.claim_ids.sort()).toEqual(first.claim_ids);
     expect(output.merge.merged).toBe(0);
-    expect(await listClaims(scope.workspace_id)).toHaveLength(before.length);
+    expect(await listActiveSourceClaims(scope.workspace_id, scope.source_file_id)).toHaveLength(active.length);
+    expect((await listClaims(scope.workspace_id)).length).toBeGreaterThanOrEqual(before.length);
     expect((await getClaim(scope.workspace_id, active[0].id))!.statement).toBe("Human survival wording");
   });
 });
@@ -414,8 +420,9 @@ it.each(["unknown", "completed"])("keeps accepted lifecycle mirrors consistent w
     expect(claimMetadata(saved).tactic_status).toBe("ongoing");
     expect(saved.status).toBe("ongoing");
     expect(claimMetadata(saved).extraction_suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_status: laterStatus })]));
+    await approveSourceAssembly(scope.workspace_id);
     const downstream = await captureMergeInputs(scope.workspace_id);
-    expect(downstream.candidates.find(c => c.id === saved.id)?.tactic_status).toBe("ongoing");
+    expect(claimMetadata(downstream.active.find(c => c.id === saved.id)!).tactic_status).toBe("ongoing");
   });
 });
 
@@ -554,7 +561,7 @@ it("derives all lifecycle mirrors after restoring a nested human lifecycle lock"
     const [saved] = await listActiveSourceClaims(scope.workspace_id, scope.source_file_id);
     expect(saved).toMatchObject({ id: original.id, status: "planned" });
     expect(claimMetadata(saved)).toMatchObject({ tactic_status: "planned", structured: { lifecycle: { state: "known", value: "planned" } } });
-    expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
+    expect((await approveSourceAssembly(scope.workspace_id)).items.find(item => item.canonical_claim_id === saved.id)?.payload.status).toBe("planned");
   });
 });
 
@@ -581,7 +588,7 @@ it("preserves a top-level human lifecycle edit without structured evidence on sa
       structured: { lifecycle: { state: "unknown", value: null, reason: "human_edit_without_field_evidence", provenance: [] } } });
     expect(claimMetadata(saved).extraction_suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_status: "ongoing",
       structured: expect.objectContaining({ lifecycle: expect.objectContaining({ state: "known", value: "ongoing" }) }) })]));
-    expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
+    expect((await approveSourceAssembly(scope.workspace_id)).items.find(item => item.canonical_claim_id === saved.id)?.payload.status).toBe("planned");
   });
 });
 
@@ -601,7 +608,7 @@ it("retains a legacy human-locked lifecycle while missing structured evidence st
     expect(claimMetadata(saved)).toMatchObject({ tactic_status: "planned", human_locked: ["tactic_status"],
       structured: { lifecycle: { state: "unknown", value: null, reason: "legacy_missing", provenance: [] } } });
     expect(claimMetadata(saved).extraction_suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ tactic_status: "ongoing" })]));
-    expect((await captureMergeInputs(scope.workspace_id)).candidates.find(c => c.id === saved.id)?.tactic_status).toBe("planned");
+    expect((await approveSourceAssembly(scope.workspace_id)).items.find(item => item.canonical_claim_id === saved.id)?.payload.status).toBe("planned");
   });
 });
 

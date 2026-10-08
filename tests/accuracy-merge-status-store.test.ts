@@ -4,7 +4,9 @@ import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
 import { claimMetadata, insertClaim, listClaims } from "@/accuracy/store/claim-store";
 import { coveragePairRevisions, upsertCoverageDecision, listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
-import { ensureAccuracySchema } from "@/accuracy/store/db";
+import { eq } from "drizzle-orm";
+import * as t from "@/accuracy/store/schema";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
 
@@ -58,6 +60,10 @@ describe("merge-dedupe + status-derive persistence", () => {
         reference_pack_id: TISLE,
       },
     });
+
+    // The intended survivor is older; same-millisecond inserts otherwise prefer richer provenance.
+    await accuracyDb().update(t.accuracyClaims).set({ created_at: "2026-01-01T00:00:00.000Z" }).where(eq(t.accuracyClaims.id, keep.id));
+    await accuracyDb().update(t.accuracyClaims).set({ created_at: "2026-01-02T00:00:00.000Z" }).where(eq(t.accuracyClaims.id, dup.id));
 
     const result = await runAccuracyModule<MergeDedupeOutput>({
       call_kind: "merge_dedupe",

@@ -129,13 +129,13 @@ function RollbackOperation({ workspaceId, operation }: { workspaceId: string; op
     router.refresh();
   }
   return <article data-testid={`split-operation-${operation.id}`} className="grid gap-2 border border-border p-3 text-[12px]">
-    <p>{operation.state} · {operation.created_at} · {operation.actor.name} · {operation.rationale}</p>
+    <p>{operation.state === "awaiting_approval" ? "Awaiting assembly approval" : operation.state === "awaiting_inverse_approval" ? "Inverse awaiting assembly approval" : operation.state === "archived" ? "Copied history — read only" : operation.state} · {operation.created_at} · {operation.actor.name} · {operation.rationale}</p>
     <p>Parent {operation.parent_gap_id} → addressed {operation.addressed_gap_id} + residual {operation.open_residual_gap_id}</p>
     {operation.state === "applied" ? <>
       <label className="grid gap-1">Rollback rationale (required)<textarea className={inputClass} value={rationale} onChange={e => setRationale(e.target.value)} /></label>
       <label className="flex gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />Restore the original parent and retire these children if no later decisions exist.</label>
       <button className={buttonClass} type="button" disabled={pending || !confirmed || rationale.trim().length < 3} onClick={() => void rollback()}>{pending ? "Checking…" : "Rollback split"}</button>
-    </> : <p>Rolled back at {operation.rolled_back_at}; original parent restored.</p>}
+    </> : operation.state === "archived" ? <p>Source approvals do not authorize this copy. This historical operation cannot be rolled back here.</p> : operation.state === "rolled_back" ? <p>Rolled back at {operation.rolled_back_at}; original parent restored.</p> : <p>Review the exact successor in Complete proposals before this operation becomes live.</p>}
     {error ? <p role="alert" className="text-destructive">{error}</p> : null}
   </article>;
 }

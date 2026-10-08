@@ -270,13 +270,13 @@ describe("source-backed structured extraction", () => {
 
   it.each(["production", "experiment", "production_rejected"] as const)("persists structured evidence through the %s extraction pipeline", async mode => {
     const fixture = await sourceFixture("Registry R is owned by Ada. HRQoL evidence is missing.");
-    const previousRoutes = await Promise.all((["need_extract", "inventory_extract", "merge_dedupe"] as const)
-      .map(kind => accuracyRouteConfig(kind, kind === "merge_dedupe" ? "judge" : "proposer")));
+    const previousRoutes = await Promise.all((["need_extract", "inventory_extract", "merge_dedupe", "coverage_decide"] as const)
+      .map(kind => accuracyRouteConfig(kind, ["merge_dedupe", "coverage_decide"].includes(kind) ? "judge" : "proposer")));
     const previousStub = process.env.SYNAPSE_TEST_STUB_LLM;
     const previousKey = process.env.OPENAI_API_KEY;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     process.env.OPENAI_API_KEY = "scripted-structured-provider";
-    const owner = vi.spyOn(session, "sessionContext").mockResolvedValue({ session: null,
+    const owner = vi.spyOn(session, "sessionContext").mockResolvedValue({ session: { id: "test-session", subject: "structured-owner", provider_id: "test", email: null, actor: { name: "Owner", function: "medical_affairs" }, role: "operator", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() },
       actor: { name: "Owner", function: "medical_affairs" }, role: "operator", demo: false, signed_in: true });
     const provider = vi.spyOn(openAi, "complete").mockImplementation(async request => {
       expect(accuracyTransactionActive()).toBe(false);
@@ -284,6 +284,7 @@ describe("source-backed structured extraction", () => {
         const input = JSON.parse(request.user);
         return JSON.stringify({ checked_block_ids: input.blocks.map((block: { id: string }) => block.id), suspected_omissions: [], prior_issue_resolutions: [] });
       }
+      if (request.system.startsWith("You decide whether a tactic")) return JSON.stringify({ overall: "not_relevant", quote_block_ids: [], confidence: 0.8, rationale: "Different evidence question in this controlled fixture" });
       const source_file_id = request.user.match(/source_file_id=(\S+)/)?.[1];
       const block_id = request.user.match(/### block_id=(\S+)/)?.[1];
       const span = { source_file_id, block_id, quote: "Registry R is owned by Ada" };
@@ -301,7 +302,7 @@ describe("source-backed structured extraction", () => {
       let workspace_id = fixture.workspace_id;
       if (mode !== "experiment") {
         const response = await extractPost(new Request("http://localhost/api/accuracy/extract", { method: "POST",
-          headers: { "content-type": "application/json" }, body: JSON.stringify(fixture) }));
+          headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace_id: fixture.workspace_id, source_file_id: fixture.source_file_id }) }));
         const body = await response.json();
         expect(body).toMatchObject({ ok: mode !== "production_rejected", gaps_inserted: 1, tactics_inserted: mode === "production_rejected" ? 0 : 1 });
         expect(response.status).toBe(mode === "production_rejected" ? 409 : 200);
@@ -309,7 +310,7 @@ describe("source-backed structured extraction", () => {
         if (mode === "production_rejected") {
           expect(body.runs.find((run: { call_kind: string }) => run.call_kind === "inventory_extract")).toMatchObject({
             count: 0, rejected_candidates: [{ index: 0, field: "structured.owner", reason: "quote_not_substring" }] });
-          expect(await listClaims(workspace_id)).toHaveLength(1);
+          expect((await listClaims(workspace_id)).filter(claim => !claimMetadata(claim).history_only)).toHaveLength(1);
           return;
         }
       } else {
@@ -319,7 +320,7 @@ describe("source-backed structured extraction", () => {
         workspace_id = experiment.workspace_id;
         expect(await listClaims(fixture.workspace_id)).toEqual([]);
       }
-      const claims = await listClaims(workspace_id);
+      const claims = (await listClaims(workspace_id)).filter(claim => !claimMetadata(claim).history_only);
       expect(claims).toHaveLength(2);
       expect(claims.find(claim => claim.claim_type === "tactic")).toMatchObject({ validated: false, status: "unknown",
         metadata: { structured: { version: 1, owner: { state: "known", value: "Ada", provenance: [expect.objectContaining({ quote: "Registry R is owned by Ada" })] } } } });

@@ -1,9 +1,11 @@
+import { withAssemblyExperiment } from "@/accuracy/kernel/assembly-context";
 /** Execute the existing extraction batch workflow inside an isolated experiment copy. */
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { Actor, CallKind, ExperimentCycleControl } from "@/accuracy/kernel/contracts";
 import { activeAccuracyModule } from "@/accuracy/kernel/registry";
 import { runAccuracyModule, type AccuracyRunResult, type PreparedAccuracyMerge } from "@/accuracy/kernel/run";
+import { generateExtractionAssembly } from "@/accuracy/kernel/assembly-generation";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
 import type { MergeDedupeOutput } from "@/accuracy/modules/merge-dedupe/module";
 import type { StatusDeriveOutput } from "@/accuracy/modules/status-derive/module";
@@ -116,10 +118,14 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
       downstream.merge = await runAndRetain<MergeDedupeOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false, prepared);
       downstream.current = { call_kind: "status_derive", input: { workspace_id: context.workspace_id }, call_id: journal.status_operation_id };
       downstream.status = await runAndRetain<StatusDeriveOutput>(context, downstream.current.call_kind, downstream.current.input, downstream.current.call_id, false);
+      downstream.current = null;
       return { source_file_id, batch_id: batch.id };
     } });
     if (downstream.merge) await retainResult({ ...context, call_kind: "merge_dedupe", input: { workspace_id: context.workspace_id }, result: downstream.merge });
     if (downstream.status) await retainResult({ ...context, call_kind: "status_derive", input: { workspace_id: context.workspace_id }, result: downstream.status });
+    await generateExtractionAssembly({ workspace_id: context.workspace_id, org_id: context.org_id, actor: context.actor,
+      source_file_ids: [source_file_id], extraction_run_ids: batch.run_ids, generation_key: batch.id,
+      requested_kinds: ["inventory_extract", "need_extract"], evaluation_context: "experiment" });
   } catch (error) {
     // resumeExtractionBatch rolls back its callback as one downstream unit. Keep
     // successfully computed stage evidence after that rollback, before returning
@@ -134,5 +140,7 @@ export async function runExtractionPipelineForSource(context: PipelineExperiment
 
 /** Run the selected copied sources in deterministic caller order. */
 export async function runExtractionPipeline(context: PipelineExperimentContext, source_file_ids: string[]): Promise<void> {
-  for (const source_file_id of source_file_ids) await runExtractionPipelineForSource(context, source_file_id);
+  await withAssemblyExperiment(async () => {
+    for (const source_file_id of source_file_ids) await runExtractionPipelineForSource(context, source_file_id);
+  });
 }

@@ -11,6 +11,7 @@ import { deleteWorkspace } from "@/accuracy/store/tenant";
 import { copyExperimentWorkspace } from "./copy-workspace";
 import { createExperiment, finishExperiment, getExperiment, recordExperimentCall, recordVersionEvaluation, type ExperimentRecord } from "./records";
 import { runExtractionPipeline } from "./extraction-pipeline";
+import { withAssemblyExperiment } from "@/accuracy/kernel/assembly-context";
 
 export type AccuracyExperimentRequest = {
   mode: "single_call" | "pipeline";
@@ -93,7 +94,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
         pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
         baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
       const copiedSourceIds = request.source_file_ids.map(source_file_id => copy.source_id_map[source_file_id] ?? unresolved("source_file_id", source_file_id));
-      await runExtractionPipeline({ workspace_id: copy.workspace_id, org_id: copy.org_id, experiment_id: experiment.id, pack_id: request.pack_id, actor: request.actor, experiment_cycle_control }, copiedSourceIds);
+      await withAssemblyExperiment(() => runExtractionPipeline({ workspace_id: copy.workspace_id, org_id: copy.org_id, experiment_id: experiment.id, pack_id: request.pack_id, actor: request.actor, experiment_cycle_control }, copiedSourceIds));
       await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
     } catch (error) {
       if (!experiment!) {
@@ -107,10 +108,11 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
     return record;
   }
   if (!request.call) throw new Error("A single_call experiment requires a call.");
+  const call = request.call;
   const copy = await copyExperimentWorkspace({ source_workspace_id: request.source_workspace_id, source_file_ids: request.source_file_ids });
   let input: Record<string, unknown>;
   try {
-    input = remapExperimentInput(request.call.call_kind, request.call.input, copy.workspace_id, copy.org_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
+    input = remapExperimentInput(call.call_kind, call.input, copy.workspace_id, copy.org_id, { source: copy.source_id_map, block: copy.block_id_map, claim: copy.claim_id_map });
   } catch (error) {
     await deleteWorkspace(copy.workspace_id);
     throw error;
@@ -121,7 +123,7 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
     experiment = await createExperiment({ workspace_id: copy.workspace_id, org_id: copy.org_id, source_workspace_id: request.source_workspace_id,
       pack_id: request.pack_id, source_fingerprint: copy.source_fingerprint, baseline_fingerprint: copy.baseline_fingerprint,
       baseline_snapshot: copy.baseline_snapshot, condition: request.condition });
-    implementation = await activeAccuracyModule(request.call.call_kind);
+    implementation = await activeAccuracyModule(call.call_kind);
   } catch (error) {
     await deleteWorkspace(copy.workspace_id);
     throw error;
@@ -129,8 +131,8 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
   const call_id = newId("arun");
   let result: Awaited<ReturnType<typeof runAccuracyModule>>;
   try {
-    result = await runAccuracyModule({ call_kind: request.call.call_kind, reserved_run_id: call_id, input, actor: request.actor,
-      org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment", experiment_cycle_control });
+    result = await withAssemblyExperiment(() => runAccuracyModule({ call_kind: call.call_kind, reserved_run_id: call_id, input, actor: request.actor,
+      org_id: copy.org_id, workspace_id: copy.workspace_id, evaluation_context: "experiment", experiment_cycle_control }));
   } catch (error) {
     const moduleError = error;
     try {
@@ -139,17 +141,17 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
       const progression = failedRun ? await readAgentProgression({ workspace_id: copy.workspace_id, run_id: call_id }) : null;
       const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
       for (const [version_index, output] of snapshots.entries()) {
-        await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
+        await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: call.call_kind,
           version_index, input, output, module_version: failedRun?.module_version ?? implementation.manifest.version, route: failedRun?.route ?? { status: "unavailable" } });
         await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index,
-          evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+          evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: call.call_kind, output }) });
       }
       const errorVersion = snapshots.length;
-      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: request.call.call_kind,
+      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, call_kind: call.call_kind,
         version_index: errorVersion, input, output_error, module_version: failedRun?.module_version ?? implementation.manifest.version,
         route: failedRun?.route ?? { status: "unavailable", reason: "Module did not open a run." } });
       await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id, version_index: errorVersion,
-        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output: null, output_error }) });
+        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: call.call_kind, output: null, output_error }) });
       await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "failed" });
       const failed = await getExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id });
       if (!failed) throw new Error("Failed experiment record disappeared before it could be returned.");
@@ -163,10 +165,10 @@ export async function runAccuracyExperiment(request: AccuracyExperimentRequest):
     const snapshots = progression?.events.flatMap((event) => event.event.event_type === "snapshot" ? [event.event.output] : []) ?? [];
     const outputs = snapshots.length ? snapshots : [result.output];
     for (const [version_index, output] of outputs.entries()) {
-      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, call_kind: request.call.call_kind,
+      await recordExperimentCall({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, call_kind: call.call_kind,
         version_index, input, output, module_version: result.module_version, route: result.route });
       await recordVersionEvaluation({ workspace_id: copy.workspace_id, experiment_id: experiment.id, call_id: result.run_id, version_index,
-        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: request.call.call_kind, output }) });
+        evaluation: evaluateExperimentVersion({ pack_id: request.pack_id, call_kind: call.call_kind, output }) });
     }
     await finishExperiment({ workspace_id: copy.workspace_id, experiment_id: experiment.id, status: "completed" });
   } catch (error) {

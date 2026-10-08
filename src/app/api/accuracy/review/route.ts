@@ -2,6 +2,7 @@ import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { registerAccuracyStack, runAccuracyModule } from "@/accuracy";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 import type { CompletenessAuditOutput } from "@/accuracy/modules/completeness-audit/module";
 import { missFlagSuggestedSchema } from "@/accuracy/modules/completeness-audit/engine";
 import { createManualClaim } from "@/accuracy/store/claim-edit";
@@ -11,16 +12,29 @@ import { listSourceFiles } from "@/accuracy/store/source-store";
 import { aiOffFromError, refuseWhenAiOff } from "@/app/api/accuracy/_lib/ai-off";
 import {
   labActor,
-  labErrorMessage,
   labRequestErrorResponse,
   parseLabBody,
   requireLabWorkspace,
 } from "@/app/api/accuracy/_lib/request";
+import { getAuthorizedWorkspace } from "@/accuracy/store/tenant";
+import { sessionContext } from "@/modules/auth/session";
+import type { Role } from "@/modules/auth/roles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 registerAccuracyStack();
+
+function canReview(role: Role): boolean {
+  return role === "medical_affairs" || role === "contributor";
+}
+
+function assemblyReviewStatus(error: AssemblyReviewError): number {
+  if (error.code === "invalid_input") return 400;
+  if (error.code === "not_found") return 404;
+  if (error.code === "forbidden") return 403;
+  return 409;
+}
 
 /**
  * GET /api/accuracy/review?workspace_id=…
@@ -32,6 +46,10 @@ export async function GET(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
+    const session = await sessionContext();
+    if (!session.signed_in || !session.session) {
+      return NextResponse.json({ ok: false, error: "Sign in to access review." }, { status: 401 });
+    }
     const url = new URL(req.url);
     const workspace_id = url.searchParams.get("workspace_id")?.trim() ?? "";
     if (!workspace_id) {
@@ -39,14 +57,18 @@ export async function GET(req: Request) {
     }
     const aiOff = await refuseWhenAiOff();
     if (aiOff) return aiOff;
-    const { org_id } = await requireLabWorkspace(workspace_id);
+    await requireLabWorkspace(workspace_id);
+    const workspace = await getAuthorizedWorkspace({ workspace_id, subject: session.session.subject, role: session.role });
+    if (!workspace) {
+      return NextResponse.json({ ok: false, error: "Workspace not found" }, { status: 404 });
+    }
 
     const result = await runAccuracyModule<CompletenessAuditOutput>({
       call_kind: "completeness_audit",
       agent_role: "critic",
       input: { workspace_id },
-      actor: await labActor(),
-      org_id,
+      actor: session.actor,
+      org_id: workspace.org_id,
       workspace_id,
     });
 
@@ -73,10 +95,12 @@ export async function GET(req: Request) {
   } catch (error) {
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
-    const known = labRequestErrorResponse(error);
-    if (known) return known;
-    const message = labErrorMessage(error, "Review load failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    if (error instanceof AssemblyReviewError) {
+      const status = assemblyReviewStatus(error);
+      return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status });
+    }
+    console.error("Review load failed", error);
+    return NextResponse.json({ ok: false, error: "Review load failed" }, { status: 500 });
   }
 }
 
@@ -88,10 +112,7 @@ const postSchema = z.object({
   /** Promote only: the reviewer's wording of the claim (defaults to the block excerpt). */
   statement: z.string().max(2000).optional(),
   rationale: z.string().min(1),
-  /** Ignored: the decision is credited to the signed-in owner. */
-  actor_name: z.string().optional(),
-  actor_function: z.string().optional(),
-});
+}).strict();
 
 /**
  * POST /api/accuracy/review — promote a miss flag to a draft claim, or dismiss with rationale.
@@ -100,8 +121,17 @@ export async function POST(req: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
+    const session = await sessionContext();
+    if (!session.signed_in || !session.session) {
+      return NextResponse.json({ ok: false, error: "Sign in to review miss flags." }, { status: 401 });
+    }
+    if (!canReview(session.role)) {
+      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
     const body = await parseLabBody(req, postSchema);
-    await requireLabWorkspace(body.workspace_id);
+    if (!await getAuthorizedWorkspace({ workspace_id: body.workspace_id, subject: session.session.subject, role: session.role })) {
+      return NextResponse.json({ ok: false, error: "Workspace not found" }, { status: 404 });
+    }
 
     const blocks = await readParseBlocksByIds(body.workspace_id, [body.block_id]);
     const block = blocks[0];
@@ -151,7 +181,7 @@ export async function POST(req: Request) {
       suggested,
       claim_id,
       rationale: body.rationale,
-      actor,
+      actor: session.actor,
     });
 
     return NextResponse.json({
@@ -164,7 +194,13 @@ export async function POST(req: Request) {
   } catch (error) {
     const known = labRequestErrorResponse(error);
     if (known) return known;
-    const message = labErrorMessage(error, "Review action failed");
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    if (error instanceof SyntaxError) return NextResponse.json({ ok: false, error: "Invalid JSON request." }, { status: 400 });
+    if (error instanceof z.ZodError) return NextResponse.json({ ok: false, error: error.issues.map(issue => issue.message).join("; ") }, { status: 400 });
+    if (error instanceof AssemblyReviewError) {
+      const status = assemblyReviewStatus(error);
+      return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status });
+    }
+    console.error("Review action failed", error);
+    return NextResponse.json({ ok: false, error: "Review action failed" }, { status: 500 });
   }
 }

@@ -185,6 +185,147 @@ export const accuracyAgentEvents = pgTable(
   }),
 );
 
+/** Immutable generated alternatives, retaining the claim that first owned each origin. */
+export const accuracyItemVersions = pgTable("accuracy_item_versions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  claim_id: text("claim_id").notNull().references(() => accuracyClaims.id),
+  run_id: text("run_id").references(() => accuracyModuleRuns.id),
+  human_origin: jsonb("human_origin").$type<import("@/accuracy/domain/item-history").HumanItemOrigin>(),
+  snapshot_id: text("snapshot_id").references(() => accuracyAgentEvents.id),
+  iteration: integer("iteration"),
+  item_index: integer("item_index").notNull(),
+  origin_key: text("origin_key").notNull(),
+  claim_type: text("claim_type").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  source_file_id: text("source_file_id").notNull().references(() => accuracySourceFiles.id),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  origin: unique("accuracy_item_versions_origin_key").on(table.workspace_id, table.origin_key),
+  claim: index("accuracy_item_versions_claim_idx").on(table.workspace_id, table.claim_id),
+  exact: index("accuracy_item_versions_exact_idx").on(table.workspace_id, table.claim_type, table.source_file_id, table.fingerprint),
+}));
+
+/** Immutable whole-set extraction assemblies. */
+export const accuracyAssemblies = pgTable("accuracy_assemblies", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  created_at: text("created_at").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  source_file_ids: jsonb("source_file_ids").$type<string[]>().notNull(),
+  mappings: jsonb("mappings").$type<Array<{ gap_version_id: string; tactic_version_id: string }>>().notNull(),
+  coverage: jsonb("coverage").notNull(),
+  extraction_runs: jsonb("extraction_runs"),
+  linking_complete: boolean("linking_complete").notNull(),
+  output: jsonb("output").notNull(),
+  checks: jsonb("checks").notNull(),
+  generation_key: text("generation_key"),
+}, (table) => ({
+  workspace: index("accuracy_assemblies_workspace_idx").on(table.workspace_id, table.created_at),
+  generation: unique("accuracy_assemblies_workspace_generation_key").on(table.workspace_id, table.generation_key),
+}));
+
+/** Ordered selected version references and resolved immutable lineage. */
+export const accuracyAssemblyItems = pgTable("accuracy_assembly_items", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  item_version_id: text("item_version_id").notNull().references(() => accuracyItemVersions.id),
+  position: integer("position").notNull(),
+  reason: text("reason").notNull(),
+  resolved_item: jsonb("resolved_item").notNull(),
+}, (table) => ({
+  assemblyPosition: unique("accuracy_assembly_items_position_key").on(table.assembly_id, table.position),
+  workspace: index("accuracy_assembly_items_workspace_idx").on(table.workspace_id, table.assembly_id),
+}));
+
+/** Append-only human approval/rejection decisions for exact assemblies. */
+export const accuracyAssemblyReviews = pgTable("accuracy_assembly_reviews", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  fingerprint: text("fingerprint").notNull(),
+  checks_fingerprint: text("checks_fingerprint").notNull(),
+  decision: text("decision").notNull(),
+  rationale: text("rationale").notNull(),
+  advisory_overrides: jsonb("advisory_overrides").$type<Array<{ code: string; item_version_ids: string[]; reason: string }>>().notNull(),
+  reviewer_subject: text("reviewer_subject").notNull(),
+  reviewer_provider: text("reviewer_provider").notNull(),
+  reviewer_actor_name: text("reviewer_actor_name").notNull(),
+  reviewer_actor_function: text("reviewer_actor_function").notNull(),
+  reviewer_role: text("reviewer_role").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  assembly: index("accuracy_assembly_reviews_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
+}));
+
+/** Append-only observations about exact approved output consumed by a production run. */
+export const accuracyAssemblyFeedback = pgTable("accuracy_assembly_feedback", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  assembly_fingerprint: text("assembly_fingerprint").notNull(),
+  approval_review_id: text("approval_review_id").notNull().references(() => accuracyAssemblyReviews.id),
+  consumer_run_id: text("consumer_run_id").notNull().references(() => accuracyModuleRuns.id),
+  selected_item_version_ids: jsonb("selected_item_version_ids").$type<string[]>().notNull(),
+  category: text("category").notNull(),
+  rationale: text("rationale").notNull(),
+  actor_subject: text("actor_subject").notNull(),
+  actor_provider: text("actor_provider").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({
+  assembly: index("accuracy_assembly_feedback_assembly_idx").on(table.workspace_id, table.assembly_id, table.created_at),
+}));
+
+/** Immutable reasoned human change; linking completions publish new assembly heads. */
+export const accuracyAssemblyRevisions = pgTable("accuracy_assembly_revisions", {
+  id: text("id").primaryKey(),
+  workspace_id: text("workspace_id").notNull(),
+  baseline_assembly_id: text("baseline_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  parent_assembly_id: text("parent_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  initial_assembly_id: text("initial_assembly_id").notNull().references(() => accuracyAssemblies.id),
+  change: jsonb("change").$type<import("@/accuracy/domain/assembly-revision").AssemblyRevision>().notNull(),
+});
+/** Mutable pointer only; all assemblies and changes remain immutable. */
+export const accuracyAssemblyRevisionHeads = pgTable("accuracy_assembly_revision_heads", {
+  baseline_assembly_id: text("baseline_assembly_id").primaryKey().references(() => accuracyAssemblies.id),
+  workspace_id: text("workspace_id").notNull(),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  revision_id: text("revision_id").notNull().references(() => accuracyAssemblyRevisions.id),
+});
+/** Append-only linking attempts record incomplete recovery and final checked assemblies. */
+export const accuracyAssemblyRevisionAttempts = pgTable("accuracy_assembly_revision_attempts", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  revision_id: text("revision_id").notNull().references(() => accuracyAssemblyRevisions.id),
+  assembly_id: text("assembly_id").notNull().references(() => accuracyAssemblies.id),
+  error: text("error"), created_at: text("created_at").notNull(),
+});
+
+/** Uncertain identity or ancestry proposal; decisions are separate immutable records. */
+export const accuracyItemRelationshipProposals = pgTable("accuracy_item_relationship_proposals", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  kind: text("kind").notNull(), predecessor_ids: jsonb("predecessor_ids").$type<string[]>().notNull(),
+  successor_ids: jsonb("successor_ids").$type<string[]>().notNull(),
+  basis_version_ids: jsonb("basis_version_ids").$type<string[]>().notNull(),
+  rationale: text("rationale").notNull(), actor_name: text("actor_name").notNull(),
+  actor_function: text("actor_function").notNull(), created_at: text("created_at").notNull(),
+}, (table) => ({ workspace: index("accuracy_item_relationship_proposals_workspace_idx").on(table.workspace_id, table.created_at) }));
+
+/** One final contributor decision per proposal. */
+export const accuracyItemRelationshipDecisions = pgTable("accuracy_item_relationship_decisions", {
+  id: text("id").primaryKey(), workspace_id: text("workspace_id").notNull(),
+  proposal_id: text("proposal_id").notNull().references(() => accuracyItemRelationshipProposals.id),
+  action: text("action").notNull(), rationale: text("rationale").notNull(),
+  actor_name: text("actor_name").notNull(), actor_function: text("actor_function").notNull(),
+  created_at: text("created_at").notNull(),
+}, (table) => ({ proposal: unique("accuracy_item_relationship_decisions_proposal_key").on(table.proposal_id),
+  workspace: index("accuracy_item_relationship_decisions_workspace_idx").on(table.workspace_id, table.proposal_id) }));
+
 /** Append-only contributor decisions for individual source-linked omissions. */
 export const accuracyOmissionActions = pgTable("accuracy_omission_actions", {
   id: text("id").primaryKey(),
@@ -311,6 +452,50 @@ export const accuracyExperimentEvaluations = pgTable("accuracy_experiment_evalua
   id: text("id").primaryKey(), experiment_id: text("experiment_id").notNull(), workspace_id: text("workspace_id").notNull(), call_id: text("call_id").notNull(),
   version_index: integer("version_index").notNull(), evaluator_version: text("evaluator_version").notNull(), evaluation: jsonb("evaluation").notNull(), recorded_at: text("recorded_at").notNull(),
 }, (table) => ({ version: unique("accuracy_experiment_evaluations_version_key").on(table.experiment_id, table.call_id, table.version_index) }));
+
+/** Immutable request and original assembly snapshots; status is derived from the result. */
+export const accuracyMixedComparisons = pgTable("accuracy_mixed_comparisons", {
+  id: text("id").primaryKey(), source_workspace_id: text("source_workspace_id").notNull(), source_org_id: text("source_org_id").notNull(),
+  request: jsonb("request").$type<import("../experiments/mixed-types").MixedComparisonRequest>().notNull(),
+  original_assemblies: jsonb("original_assemblies").$type<import("../experiments/mixed-types").MixedOriginalAssemblies>().notNull(),
+  pack_fingerprint: text("pack_fingerprint").notNull(), evaluator_version: text("evaluator_version").notNull(),
+  gate_policy: text("gate_policy").notNull(), gate_policy_fingerprint: text("gate_policy_fingerprint").notNull(), created_at: text("created_at").notNull(),
+}, (table) => ({ workspace: index("accuracy_mixed_comparisons_workspace_idx").on(table.source_workspace_id, table.created_at) }));
+
+/** Both newly created attempts are bound atomically once, before any replay call. */
+export const accuracyMixedCandidateLinks = pgTable("accuracy_mixed_candidate_links", {
+  comparison_id: text("comparison_id").primaryKey().references(() => accuracyMixedComparisons.id, { onDelete: "cascade" }),
+  mixed_experiment_id: text("mixed_experiment_id").notNull().unique().references(() => accuracyExperiments.id),
+  baseline_experiment_id: text("baseline_experiment_id").notNull().unique().references(() => accuracyExperiments.id),
+  linked_at: text("linked_at").notNull(),
+});
+
+/** Exactly one append-only terminal evidence row for each comparison. */
+export const accuracyMixedComparisonResults = pgTable("accuracy_mixed_comparison_results", {
+  comparison_id: text("comparison_id").primaryKey().references(() => accuracyMixedComparisons.id, { onDelete: "cascade" }),
+  evidence: jsonb("evidence").$type<import("../experiments/mixed-types").MixedComparisonResult>().notNull(),
+  finished_at: text("finished_at").notNull(),
+});
+
+/** Additive bootstrap DDL, safe for new and existing accuracy databases. */
+export const ACCURACY_MIXED_COMPARISON_DDL = [
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_comparisons (
+    id text PRIMARY KEY, source_workspace_id text NOT NULL, source_org_id text NOT NULL, request jsonb NOT NULL,
+    original_assemblies jsonb NOT NULL, pack_fingerprint text NOT NULL, evaluator_version text NOT NULL,
+    gate_policy text NOT NULL, gate_policy_fingerprint text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_mixed_comparisons_workspace_idx ON accuracy_mixed_comparisons (source_workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_candidate_links (
+    comparison_id text PRIMARY KEY REFERENCES accuracy_mixed_comparisons(id) ON DELETE CASCADE,
+    mixed_experiment_id text NOT NULL UNIQUE REFERENCES accuracy_experiments(id),
+    baseline_experiment_id text NOT NULL UNIQUE REFERENCES accuracy_experiments(id),
+    linked_at text NOT NULL, CHECK (mixed_experiment_id <> baseline_experiment_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_mixed_comparison_results (
+    comparison_id text PRIMARY KEY REFERENCES accuracy_mixed_comparisons(id) ON DELETE CASCADE,
+    evidence jsonb NOT NULL, finished_at text NOT NULL
+  )`,
+];
 
 export const ACCURACY_DDL = [
   `CREATE TABLE IF NOT EXISTS accuracy_priority_placements (workspace_id text NOT NULL, gap_id text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(workspace_id,gap_id))`,
@@ -443,6 +628,63 @@ export const ACCURACY_DDL = [
     CONSTRAINT accuracy_agent_events_run_type_iteration_key UNIQUE (run_id, event_type, iteration)
   )`,
   `CREATE INDEX IF NOT EXISTS accuracy_agent_events_run_workspace_idx ON accuracy_agent_events (run_id, workspace_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_versions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, claim_id text NOT NULL REFERENCES accuracy_claims(id),
+    run_id text NOT NULL REFERENCES accuracy_module_runs(id), snapshot_id text REFERENCES accuracy_agent_events(id),
+    iteration integer, item_index integer NOT NULL, origin_key text NOT NULL, claim_type text NOT NULL,
+    fingerprint text NOT NULL, payload jsonb NOT NULL, source_file_id text NOT NULL REFERENCES accuracy_source_files(id),
+    created_at text NOT NULL, CONSTRAINT accuracy_item_versions_origin_key UNIQUE (workspace_id, origin_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_versions_claim_idx ON accuracy_item_versions (workspace_id, claim_id)`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_versions_exact_idx ON accuracy_item_versions (workspace_id, claim_type, source_file_id, fingerprint)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assemblies (
+    id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
+    source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
+    extraction_runs jsonb, linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_items (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    item_version_id text NOT NULL REFERENCES accuracy_item_versions(id), position integer NOT NULL,
+    reason text NOT NULL, resolved_item jsonb NOT NULL,
+    CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_reviews (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    fingerprint text NOT NULL, checks_fingerprint text NOT NULL, decision text NOT NULL,
+    rationale text NOT NULL, advisory_overrides jsonb NOT NULL,
+    reviewer_subject text NOT NULL, reviewer_provider text NOT NULL,
+    reviewer_actor_name text NOT NULL, reviewer_actor_function text NOT NULL, reviewer_role text NOT NULL,
+    created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_feedback (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    assembly_fingerprint text NOT NULL,
+    approval_review_id text NOT NULL REFERENCES accuracy_assembly_reviews(id),
+    consumer_run_id text NOT NULL REFERENCES accuracy_module_runs(id),
+    selected_item_version_ids jsonb NOT NULL,
+    category text NOT NULL, rationale text NOT NULL,
+    actor_subject text NOT NULL, actor_provider text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_feedback_assembly_idx ON accuracy_assembly_feedback (workspace_id, assembly_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_proposals (
+    id text PRIMARY KEY, workspace_id text NOT NULL, kind text NOT NULL, predecessor_ids jsonb NOT NULL,
+    successor_ids jsonb NOT NULL, basis_version_ids jsonb NOT NULL, rationale text NOT NULL, actor_name text NOT NULL,
+    actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_relationship_proposals_workspace_idx ON accuracy_item_relationship_proposals (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_item_relationship_decisions (
+    id text PRIMARY KEY, workspace_id text NOT NULL, proposal_id text NOT NULL REFERENCES accuracy_item_relationship_proposals(id),
+    action text NOT NULL, rationale text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL,
+    created_at text NOT NULL, CONSTRAINT accuracy_item_relationship_decisions_proposal_key UNIQUE (proposal_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_item_relationship_decisions_workspace_idx ON accuracy_item_relationship_decisions (workspace_id, proposal_id)`,
   `CREATE TABLE IF NOT EXISTS accuracy_omission_actions (
     id text PRIMARY KEY, workspace_id text NOT NULL, source_file_id text NOT NULL,
     run_id text NOT NULL, issue_id text NOT NULL, action text NOT NULL,
@@ -532,6 +774,7 @@ export const ACCURACY_DDL = [
     run_id text NOT NULL,
     judged_at text NOT NULL
   )`,
+  ...ACCURACY_MIXED_COMPARISON_DDL,
 ];
 
 /** Reconcile before uniqueness in one locked transaction. Whole historical rows retain all human decisions. */
@@ -569,6 +812,7 @@ END $$`;
 
 /** Additive ALTERs for already-created tables. Safe to re-run. */
 export const ACCURACY_MIGRATIONS = [
+  `ALTER TABLE accuracy_item_relationship_proposals ADD COLUMN IF NOT EXISTS basis_version_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
   `ALTER TABLE accuracy_module_runs ADD COLUMN IF NOT EXISTS evaluation_context text NOT NULL DEFAULT 'production'`,
   `ALTER TABLE accuracy_experiments ADD COLUMN IF NOT EXISTS source_org_id text`,
   `UPDATE accuracy_experiments AS experiment
@@ -582,6 +826,61 @@ export const ACCURACY_MIGRATIONS = [
   `ALTER TABLE accuracy_experiments ALTER COLUMN source_org_id SET NOT NULL`,
   `ALTER TABLE accuracy_omission_actions ADD COLUMN IF NOT EXISTS contributor_statement text`,
   `ALTER TABLE accuracy_workspaces ADD COLUMN IF NOT EXISTS archived_at text`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assemblies (
+    id text PRIMARY KEY, workspace_id text NOT NULL, created_at text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, fingerprint text NOT NULL,
+    source_file_ids jsonb NOT NULL, mappings jsonb NOT NULL, coverage jsonb NOT NULL,
+    extraction_runs jsonb, linking_complete boolean NOT NULL, output jsonb NOT NULL, checks jsonb NOT NULL,
+    generation_key text, CONSTRAINT accuracy_assemblies_workspace_generation_key UNIQUE (workspace_id, generation_key)
+  )`,
+  `ALTER TABLE accuracy_assemblies ADD COLUMN IF NOT EXISTS extraction_runs jsonb`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assemblies_workspace_idx ON accuracy_assemblies (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_items (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    item_version_id text NOT NULL REFERENCES accuracy_item_versions(id), position integer NOT NULL,
+    reason text NOT NULL, resolved_item jsonb NOT NULL,
+    CONSTRAINT accuracy_assembly_items_position_key UNIQUE (assembly_id, position)
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_items_workspace_idx ON accuracy_assembly_items (workspace_id, assembly_id)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_reviews (
+    id text PRIMARY KEY, workspace_id text NOT NULL, assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    fingerprint text NOT NULL, checks_fingerprint text NOT NULL, decision text NOT NULL,
+    rationale text NOT NULL, advisory_overrides jsonb NOT NULL,
+    reviewer_subject text NOT NULL, reviewer_provider text NOT NULL,
+    reviewer_actor_name text NOT NULL, reviewer_actor_function text NOT NULL, reviewer_role text NOT NULL,
+    created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_reviews_assembly_idx ON accuracy_assembly_reviews (workspace_id, assembly_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_feedback (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    assembly_fingerprint text NOT NULL,
+    approval_review_id text NOT NULL REFERENCES accuracy_assembly_reviews(id),
+    consumer_run_id text NOT NULL REFERENCES accuracy_module_runs(id),
+    selected_item_version_ids jsonb NOT NULL,
+    category text NOT NULL, rationale text NOT NULL,
+    actor_subject text NOT NULL, actor_provider text NOT NULL,
+    actor_name text NOT NULL, actor_function text NOT NULL, created_at text NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS accuracy_assembly_feedback_assembly_idx ON accuracy_assembly_feedback (workspace_id, assembly_id, created_at)`,
+  `ALTER TABLE accuracy_item_versions ALTER COLUMN run_id DROP NOT NULL`,
+  `ALTER TABLE accuracy_item_versions ADD COLUMN IF NOT EXISTS human_origin jsonb`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revisions (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    baseline_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    parent_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    initial_assembly_id text NOT NULL REFERENCES accuracy_assemblies(id), change jsonb NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revision_heads (
+    baseline_assembly_id text PRIMARY KEY REFERENCES accuracy_assemblies(id), workspace_id text NOT NULL,
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id),
+    revision_id text NOT NULL REFERENCES accuracy_assembly_revisions(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accuracy_assembly_revision_attempts (
+    id text PRIMARY KEY, workspace_id text NOT NULL,
+    revision_id text NOT NULL REFERENCES accuracy_assembly_revisions(id),
+    assembly_id text NOT NULL REFERENCES accuracy_assemblies(id), error text, created_at text NOT NULL
+  )`,
   `DO $$ BEGIN
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint

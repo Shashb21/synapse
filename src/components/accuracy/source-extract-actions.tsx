@@ -56,27 +56,25 @@ export function SourceExtractActions({
   const [summary, setSummary] = useState<string | null>(null);
   const [reviewRuns, setReviewRuns] = useState<Array<{ run_id: string; call_kind: string }>>([]);
   const [retry, setRetry] = useState<{ cursor: string; kinds: Array<"need" | "inventory"> } | null>(null);
+  const [resumeBatchId, setResumeBatchId] = useState<string | null>(null);
   const extractReady = gate.ready;
   const savedRetry = checkpoint && !checkpoint.stale && checkpoint.progress.next_cursor && checkpoint.kinds.length
     ? { cursor: checkpoint.progress.next_cursor, kinds: checkpoint.kinds } : null;
   const activeRetry = retry ?? savedRetry;
 
-  function runExtract(kinds: Array<"need" | "inventory">, cursor?: string) {
+  function submitExtract(body: Record<string, unknown>) {
     setRetry(null);
     setError(null);
     setConnectPath(null);
     setSummary(null);
     setReviewRuns([]);
+    setResumeBatchId(null);
     startTransition(async () => {
       try {
       const res = await fetch("/api/accuracy/extract", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          source_file_id: sourceFileId,
-          kinds, cursor,
-        }),
+        body: JSON.stringify(body),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -88,6 +86,8 @@ export function SourceExtractActions({
         gate?: string;
         connect_path?: string;
         paused?: boolean;
+        assembly_incomplete?: boolean;
+        extraction_batch_id?: string;
         incomplete?: boolean;
         source_progress?: SourceProgress;
         runs?: Array<{ summary: string; run_id: string; call_kind: string }>;
@@ -96,7 +96,14 @@ export function SourceExtractActions({
         const progress = json.source_progress;
         setSummary(`Drafts saved: ${json.gaps_inserted ?? 0} gap(s) · ${json.tactics_inserted ?? 0} tactic(s). Source extraction incomplete: ${progress.processed_units}/${progress.expected_units} units complete.${progress.upstream_dropped_units?.length ? ` ${progress.upstream_dropped_units.length} excluded parse unit(s) need review.` : ""}`);
         setReviewRuns((json.runs ?? []).filter(run => run.call_kind === "need_extract" || run.call_kind === "inventory_extract"));
-        if (progress.next_cursor) setRetry({ cursor: progress.next_cursor, kinds });
+        if (progress.next_cursor) setRetry({ cursor: progress.next_cursor, kinds: body.kinds as Array<"need" | "inventory"> });
+        router.refresh();
+        return;
+      }
+      if (json.assembly_incomplete) {
+        setSummary(`Drafts saved: ${json.gaps_inserted ?? 0} gap(s) · ${json.tactics_inserted ?? 0} tactic(s). Complete proposal linking is incomplete.`);
+        setReviewRuns((json.runs ?? []).filter(run => run.call_kind === "need_extract" || run.call_kind === "inventory_extract"));
+        setResumeBatchId(json.extraction_batch_id ?? null);
         router.refresh();
         return;
       }
@@ -122,6 +129,24 @@ export function SourceExtractActions({
       setSummary(`Extracted ${parts.join(" · ")}${note}`);
       router.refresh();
       } catch { setError("Extract request failed; retry extraction or continue manual work on the Ledger."); }
+    });
+  }
+
+  function runExtract(kinds: Array<"need" | "inventory">, cursor?: string) {
+    submitExtract({
+      workspace_id: workspaceId,
+      source_file_id: sourceFileId,
+      kinds, cursor,
+    });
+  }
+
+  function resumeProposal(batchId: string) {
+    submitExtract({
+      action: "resume",
+      workspace_id: workspaceId,
+      source_file_id: sourceFileId,
+      extraction_batch_id: batchId,
+      idempotency_key: `resume:${batchId}`,
     });
   }
 
@@ -197,6 +222,16 @@ export function SourceExtractActions({
           Review {run.call_kind === "need_extract" ? "needs" : "inventory"} omissions →
         </Link>
       ))}
+      {resumeBatchId ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => resumeProposal(resumeBatchId)}
+          className="w-fit border border-border px-2 py-1 text-[11px] text-foreground disabled:opacity-50 hover:bg-muted/40"
+        >
+          Resume proposal linking
+        </button>
+      ) : null}
       {summary ? (
         <p className="text-[11px] text-muted-foreground" data-testid="extract-outcome">
           {summary}

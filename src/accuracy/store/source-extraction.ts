@@ -1,3 +1,6 @@
+export class SourceExtractionInputError extends Error {}
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
+import { publishGeneratedItemHistory } from "./item-history-store";
 /** Shared production/experiment paging. Only the inference callback runs outside transactions. */
 import { and, eq, inArray } from "drizzle-orm";
 import { newId } from "@/modules/kernel/ids";
@@ -10,7 +13,7 @@ import type { AccuracyRunResult } from "../kernel/run";
 import { siThemeFromGapId } from "../domain/ledger-filters";
 import { identityKeys, normalizeStatement, packsMayMerge } from "../modules/merge-dedupe/engine";
 import { claimToMergeCandidate } from "../modules/merge-dedupe/module";
-import { claimMetadata, insertClaim, listActiveSourceClaims, persistClaimPatch, type AccuracyClaimMetadata } from "./claim-store";
+import { claimMetadata, getClaim, insertClaim, listActiveSourceClaims, persistClaimPatch, type AccuracyClaimMetadata } from "./claim-store";
 import { humanLockedFields, preserveHumanLocks } from "./claim-edit";
 import { accuracyDb, accuracyTransactionActive } from "./db";
 import * as t from "./schema";
@@ -80,10 +83,10 @@ export async function extractSourcePages(args: {
 }): Promise<{ batch: ExtractionBatch; runs: SourceExtractionRun[]; failure?: unknown }> {
   if (accuracyTransactionActive()) throw new Error("Source extraction must start outside every Accuracy transaction.");
   const snapshot = await currentSourceRevision(args.workspace_id, args.source_file_id);
-  if (!snapshot.blocks.length) throw new Error("No parse blocks for this source — upload/re-parse before extracting.");
+  if (!snapshot.blocks.length) throw new SourceExtractionInputError("No parse blocks for this source — upload/re-parse before extracting.");
   const kinds = [...new Set(args.kinds)];
-  if (!kinds.length || kinds.some(k => k !== "need_extract" && k !== "inventory_extract")) throw new Error("Invalid extraction kinds.");
-  if (args.block_ids && (!args.block_ids.length || new Set(args.block_ids).size !== args.block_ids.length || args.block_ids.some(id => !snapshot.blocks.some(b => b.id === id)))) throw new Error("block_ids must be unique original blocks from this workspace/source.");
+  if (!kinds.length || kinds.some(k => k !== "need_extract" && k !== "inventory_extract")) throw new SourceExtractionInputError("Invalid extraction kinds.");
+  if (args.block_ids && (!args.block_ids.length || new Set(args.block_ids).size !== args.block_ids.length || args.block_ids.some(id => !snapshot.blocks.some(b => b.id === id)))) throw new SourceExtractionInputError("block_ids must be unique original blocks from this workspace/source.");
   let batch: ExtractionBatch;
   if (args.cursor) {
     const [batch_id, page_id] = parseSourceCursor(args.cursor);
@@ -94,7 +97,9 @@ export async function extractSourcePages(args: {
       || (args.block_ids && sourceHash([...args.block_ids].sort()) !== sourceHash([...progress.block_ids].sort()))) throw new ExtractionBatchError("stale_batch", "Cursor does not match the source revision or declared selection.");
   } else {
     const selected = args.block_ids ? snapshot.blocks.filter(b => args.block_ids!.includes(b.id)) : snapshot.blocks;
-    const budget = sourcePromptBudget();
+    let budget: number;
+    try { budget = sourcePromptBudget(); }
+    catch (error) { throw new SourceExtractionInputError(error instanceof Error ? error.message : "Invalid source prompt configuration."); }
     const pages = buildSourcePages(selected as ParseBlock[], budget);
     const progress: SourceProgress = { version: 1, source_revision: snapshot.revision, selection_scope: args.block_ids ? "selected" : "all",
       block_ids: selected.map(b => b.id), expected_blocks: selected.length, expected_units: pages.reduce((sum, p) => sum + p.units.length * kinds.length, 0),
@@ -140,14 +145,23 @@ export async function extractSourcePages(args: {
         });
         const complete = output.source_complete !== false && rejected.length === 0;
         batch = await applyExtractionPage({ ...args, batch_id: batch.id, page_id: page.id, kind, token, run_id: result.run_id, complete, rejected_candidates: rejected,
-          persist: async () => {
+          persist: async () => withAssemblyPreparation(async () => {
             const ids: string[] = [];
             for (const item of accepted) ids.push(await upsertSourceDraft(item.draft, snapshot.revision, item.identity));
-            const persistedOutput = "gaps" in output ? { ...output, gaps: accepted.map((a, i) => ({ ...output.gaps[a.index], provenance: a.draft.metadata!.provenance, structured: a.draft.metadata!.structured, id: ids[i] })), rejected_candidates: rejected }
-              : { ...output, tactics: accepted.map((a, i) => ({ ...output.tactics[a.index], provenance: a.draft.metadata!.provenance, structured: a.draft.metadata!.structured, id: ids[i] })), rejected_candidates: rejected };
+            const canonical = await Promise.all(ids.map(id => getClaim(args.workspace_id, id)));
+            const acceptedPayload = (index: number) => {
+              const claim = canonical[index]!, meta = claimMetadata(claim);
+              return { provenance: meta.provenance, structured: meta.structured, id: claim.id,
+                ...(claim.claim_type === "gap" ? { statement: claim.statement } : { name: claim.statement, status: meta.tactic_status }) };
+            };
+            const persistedOutput = "gaps" in output ? { ...output, gaps: accepted.map((a, i) => ({ ...output.gaps[a.index], ...acceptedPayload(i) })), rejected_candidates: rejected }
+              : { ...output, tactics: accepted.map((a, i) => ({ ...output.tactics[a.index], ...acceptedPayload(i) })), rejected_candidates: rejected };
             await accuracyDb().update(t.accuracyModuleRuns).set({ output: persistedOutput }).where(and(eq(t.accuracyModuleRuns.workspace_id, args.workspace_id), eq(t.accuracyModuleRuns.id, result.run_id)));
+            const final_claims = accepted.map((entry, index) => ({ ...entry.draft, id: ids[index], statement: canonical[index]!.statement }));
+            await publishGeneratedItemHistory({ workspace_id: args.workspace_id, source_file_id: args.source_file_id,
+              run_id: result.run_id, claim_type: kind === "need_extract" ? "gap" : "tactic", final_claims, published_claim_ids: ids });
             return ids;
-          } });
+          }) });
         if (!complete) break outer;
       } catch (error) {
         failure = error;

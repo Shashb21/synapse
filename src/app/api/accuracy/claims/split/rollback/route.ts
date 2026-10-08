@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ownerGate } from "@/modules/auth/owner";
 import { rollbackAccuracySplit } from "@/accuracy/store/partial-split-store";
-import { labActor, parseLabBody, requireLabWorkspace } from "@/app/api/accuracy/_lib/request";
+import { labActor, labRevisionAuthor, parseLabBody, requireLabWorkspace } from "@/app/api/accuracy/_lib/request";
 import { splitErrorResponse } from "../errors";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   try {
     const body = await parseLabBody(request, schema);
     await requireLabWorkspace(body.workspace_id);
-    await rollbackAccuracySplit({ ...body, actor: await labActor() });
-    return NextResponse.json({ ok: true });
+    const result = await rollbackAccuracySplit({ ...body, actor: await labActor(), author: await labRevisionAuthor() });
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) { return splitErrorResponse(error); }
 }

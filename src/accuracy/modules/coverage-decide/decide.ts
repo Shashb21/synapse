@@ -15,6 +15,12 @@ export type CoverageDecideInput = {
   tactic_id: string;
   block_bundle_ids: string[];
   facts?: { gap: { statement: string; structured: unknown; factual_revision?: string; fields?: Record<string, unknown> }; tactic: { statement: string; structured: unknown; lifecycle: string; factual_revision?: string; fields?: Record<string, unknown> } };
+  selected_versions?: {
+    gap_version_id: string;
+    tactic_version_id: string;
+    gap_payload: Record<string, unknown>;
+    tactic_payload: Record<string, unknown>;
+  };
 };
 
 /**
@@ -82,8 +88,28 @@ export async function runCoverageDecide(
     tactic_id: input.tactic_id,
     block_bundle_ids: input.block_bundle_ids,
     blocks: bundleBlocks,
-    labels: input.facts ? { gap: { statement: input.facts.gap.statement }, tactic: { name: input.facts.tactic.statement } } : undefined,
     facts: input.facts,
+    labels: {
+      gap: {
+        statement: typeof input.selected_versions?.gap_payload.statement === "string"
+          ? input.selected_versions.gap_payload.statement
+          : input.facts?.gap.statement,
+        name: typeof input.selected_versions?.gap_payload.name === "string"
+          ? input.selected_versions.gap_payload.name
+          : undefined,
+      },
+      tactic: {
+        name: typeof input.selected_versions?.tactic_payload.name === "string"
+          ? input.selected_versions.tactic_payload.name
+          : undefined,
+        evidence_question: typeof input.selected_versions?.tactic_payload.evidence_question === "string"
+          ? input.selected_versions.tactic_payload.evidence_question
+          : undefined,
+        type: typeof input.selected_versions?.tactic_payload.type === "string"
+          ? input.selected_versions.tactic_payload.type
+          : undefined,
+      },
+    },
   });
   ctx.run.note("coverage:state", state);
 

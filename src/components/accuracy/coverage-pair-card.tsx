@@ -29,6 +29,7 @@ export function CoveragePairCard({
   const [pending, startTransition] = useTransition();
   const [rationale, setRationale] = useState(pair.rationale ?? "");
   const [overall, setOverall] = useState(pair.overall ?? "pending");
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function submit(next: "full" | "partial" | "limited" | "not_relevant" | "pending", reject = false) {
@@ -47,8 +48,9 @@ export function CoveragePairCard({
         setError(result.error);
         return;
       }
-      setOverall(next);
-      router.refresh();
+      if (result.json.awaiting_approval) setMessage("Successor awaiting assembly approval. Review the exact pair in the ledger’s Complete proposals.");
+      else setOverall(next);
+      if (!result.json.awaiting_approval) router.refresh();
     });
   }
 
@@ -81,6 +83,7 @@ export function CoveragePairCard({
           placeholder="Why this coverage overall?"
         />
       </label>
+      {message ? <p role="status">{message}</p> : null}
       {error ? <p role="alert" className="text-[12px] text-destructive">{error} Retry this decision; your rationale is retained.</p> : null}
       <div className="flex flex-wrap gap-2">
         {(["full", "partial", "limited", "not_relevant", "pending"] as const).map((value) => (

@@ -81,7 +81,7 @@ it("copies split lineage, evidence and reversible snapshots into an isolated exp
     addressed_gap_id: copy.claim_id_map[result.addressed_gap_id], open_residual_gap_id: copy.claim_id_map[result.open_residual_gap_id] });
   expect(operation.id).not.toBe(result.operation_id);
   for (const id of [f.workspace_id, f.parent.id, f.tactic.id, f.evidence[0].source_file_id, f.evidence[0].block_id]) {
-    expect(JSON.stringify(operation.snapshot)).not.toContain(id);
+    expect(JSON.stringify(operation.snapshot, (key, value) => key === "baseline_origin" ? undefined : value)).not.toContain(id);
     expect(JSON.stringify(operation.audit)).not.toContain(id);
   }
   await rollbackAccuracySplit({ workspace_id: copy.workspace_id, operation_id: operation.id, actor: splitActor, rationale: "Undo only copied split" });

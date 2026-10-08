@@ -1,3 +1,4 @@
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import { sourceHash, type SourceProgress } from "../domain/source-pages";
 import { newerSourceCoverageOverlaps, type SourceCoverageUnit } from "../domain/extraction-coverage";
 import { readParseBlocks, listDroppedUnits } from "./parse-store";
@@ -78,15 +79,7 @@ async function currentBatch(workspace_id: string, source_file_id: string, batch_
     await assertSourceRevision(batch);
     if (!batch.source_progress.complete) throw new ExtractionBatchError("source_incomplete", "Declared source pages are not complete.");
     if (batch.requested_kinds.some(kind => batches.some(newer => newerSourceCoverageOverlaps(batch, newer, kind, batch.source_progress!.pages.flatMap(page => page.units))))) return fail();
-    const members = batch.source_progress.pages.flatMap(page => batch.requested_kinds.map(kind => ({ page, kind, attempt: page.attempts[kind] })));
-    if (members.some(m => m.attempt.state !== "successful" || !m.attempt.run_id) || members.length !== batch.run_ids.length) return fail();
-    const runs = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(eq(t.accuracyModuleRuns.workspace_id, workspace_id), inArray(t.accuracyModuleRuns.id, batch.run_ids)));
-    for (const { page, kind, attempt } of members) {
-      const run = runs.find(r => r.id === attempt.run_id);
-      const input = run?.input as Record<string, unknown> | null;
-      if (!run || run.status !== "ok" || run.call_kind !== kind || input?.workspace_id !== workspace_id || input.source_file_id !== source_file_id
-        || (input.source_page as { id?: string } | undefined)?.id !== page.id) return fail();
-    }
+    await assertExtractionBatchEvidence(batch);
     return batch;
   }
   if (!batch || !batch.drafts_persisted || !batch.run_ids.length || batch.run_ids.length !== batch.requested_kinds.length
@@ -108,6 +101,25 @@ async function currentBatch(workspace_id: string, source_file_id: string, batch_
     if (!latest || !batch.run_ids.includes(latest.id)) return fail();
   }
   return batch;
+}
+
+/** Verify the exact successful page/run set using the existing source publication contract. */
+export async function assertExtractionBatchEvidence(batch: ExtractionBatch): Promise<void> {
+  if (!batch.source_progress) return;
+  const workspace_id = batch.workspace_id, source_file_id = batch.source_file_id;
+  const fail = () => { throw new ExtractionBatchError("stale_batch", "Source page publication evidence is incomplete or stale."); };
+  await assertSourceRevision(batch);
+  if (!batch.source_progress.complete || batch.source_progress.failed_units || batch.source_progress.upstream_dropped_units.length) return fail();
+    const members = batch.source_progress.pages.flatMap(page => batch.requested_kinds.map(kind => ({ page, kind, attempt: page.attempts[kind] })));
+    if (members.some(m => m.attempt.state !== "successful" || !m.attempt.run_id) || members.length !== batch.run_ids.length) return fail();
+    const runs = await accuracyDb().select().from(t.accuracyModuleRuns).where(and(eq(t.accuracyModuleRuns.workspace_id, workspace_id), inArray(t.accuracyModuleRuns.id, batch.run_ids)));
+    for (const { page, kind, attempt } of members) {
+      const run = runs.find(r => r.id === attempt.run_id);
+      const input = run?.input as Record<string, unknown> | null;
+      if (!run || run.status !== "ok" || run.call_kind !== kind || input?.workspace_id !== workspace_id || input.source_file_id !== source_file_id
+        || (input.source_page as { id?: string } | undefined)?.id !== page.id) return fail();
+    }
+  if (new Set(batch.run_ids).size !== batch.run_ids.length || members.some(m => !batch.run_ids.includes(m.attempt.run_id!))) return fail();
 }
 
 /** Reserve/capture briefly, judge without locks, then atomically apply the unchanged inputs. */
@@ -136,7 +148,7 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
     const implementation = await activeAccuracyModule("merge_dedupe");
     const completed = await reservedAccuracyRun(args.workspace_id, journal.merge_operation_id);
     const inputs = implementation.manifest.id === mergeDedupeModule.manifest.id && !completed
-      ? await captureMergeInputs(args.workspace_id) : undefined;
+      ? await withAssemblyPreparation(() => captureMergeInputs(args.workspace_id)) : undefined;
     const cached = journal.prepared_merge as PreparedAccuracyMerge | null;
     const prepared = inputs && cached && cached.judgment.revision === inputs.revision
       && cached.judgment.stub === isTestStub()
@@ -152,8 +164,8 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
   try {
     if (reservation.inputs && !prepared) {
       args.onMergePreparation?.(reservation.journal);
-      prepared = await prepareAccuracyMerge({ ...args.merge_context, workspace_id: args.workspace_id,
-        run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs, prior: reservation.prior });
+      prepared = await withAssemblyPreparation(() => prepareAccuracyMerge({ ...args.merge_context, workspace_id: args.workspace_id,
+        run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs!, prior: reservation.prior }));
       // Successful paid judgment survives an apply rollback. CAS fences lease takeover.
       const saved = await accuracyDb().update(t.accuracyResumeJournals).set({ prepared_merge: prepared, updated_at: nowIso() })
         .where(and(eq(t.accuracyResumeJournals.id, reservation.journal.id), eq(t.accuracyResumeJournals.preparation_token, token))).returning();
@@ -169,7 +181,7 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
       if (journal.preparation_token !== token) throw new ExtractionBatchError("resume_in_progress", "Resume reservation was superseded.");
       if (prepared) {
         const implementation = await activeAccuracyModule("merge_dedupe");
-        const inputs = await captureMergeInputs(args.workspace_id);
+        const inputs = await withAssemblyPreparation(() => captureMergeInputs(args.workspace_id));
         if (implementation.manifest.id !== prepared.module_id || implementation.manifest.version !== prepared.module_version
           || inputs.revision !== prepared.judgment.revision) {
           throw new ExtractionBatchError("stale_merge_inputs", "Merge inputs changed during judgment. Resume again to prepare the current inputs.");
@@ -210,7 +222,11 @@ export async function extractionDownstreamState(workspace_id: string, source_fil
   catch (error) { if (error instanceof ExtractionBatchError) return error.code === "source_incomplete" ? "incomplete" : "stale"; throw error; }
   const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(and(
     eq(t.accuracyResumeJournals.workspace_id, workspace_id), eq(t.accuracyResumeJournals.batch_id, batch_id)));
-  return journal?.final_response != null ? "completed" : "resumable";
+  if (journal?.final_response == null) return "resumable";
+  const [assembly] = await accuracyDb().select({ id: t.accuracyAssemblies.id }).from(t.accuracyAssemblies).where(and(
+    eq(t.accuracyAssemblies.workspace_id, workspace_id), eq(t.accuracyAssemblies.generation_key, batch_id),
+  )).limit(1);
+  return assembly ? "completed" : "resumable";
 }
 
 

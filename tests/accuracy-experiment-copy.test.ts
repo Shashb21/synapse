@@ -255,6 +255,18 @@ describe("copyExperimentWorkspace", () => {
     expect(await accuracyDb().select().from(t.accuracyOrganizations)).toEqual(organizations);
   });
 
+  it("preserves history-only baseline exclusion without inventing copied snapshots", async () => {
+    const source = await fixture();
+    await accuracyDb().update(t.accuracyClaims).set({ metadata: { history_only: true } }).where(eq(t.accuracyClaims.id, source.claim.id));
+    const copy = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
+    createdWorkspaces.push(copy.workspace_id);
+    const [copied] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, copy.claim_id_map[source.claim.id]));
+    const repeated = await copyExperimentWorkspace({ source_workspace_id: copy.workspace_id, source_file_ids: [copy.source_id_map[source.source_file_id]] });
+    createdWorkspaces.push(repeated.workspace_id);
+    expect(copied.metadata).toMatchObject({ history_only: true, baseline_origin: { workspace_id: source.workspace_id, claim_id: source.claim.id } });
+    expect(await accuracyDb().select().from(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, copy.workspace_id))).toEqual([]);
+  });
+
   it("remaps every supported metadata claim relationship inside the copy", async () => {
     const source = await fixture();
     const metadata = { parent_gap_id: source.claim.id, depends_on: [source.tactic.id], gap_ids: [source.claim.id],
@@ -264,7 +276,7 @@ describe("copyExperimentWorkspace", () => {
     const copy = await copyExperimentWorkspace({ source_workspace_id: source.workspace_id, source_file_ids: [source.source_file_id] });
     createdWorkspaces.push(copy.workspace_id);
     const [copied] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, copy.claim_id_map[source.tactic.id]));
-    expect(copied.metadata).toEqual({ parent_gap_id: copy.claim_id_map[source.claim.id], depends_on: [copy.claim_id_map[source.tactic.id]],
+    expect(copied.metadata).toEqual({ baseline_origin: { workspace_id: source.workspace_id, claim_id: source.tactic.id }, parent_gap_id: copy.claim_id_map[source.claim.id], depends_on: [copy.claim_id_map[source.tactic.id]],
       gap_ids: [copy.claim_id_map[source.claim.id]], merged_into: copy.claim_id_map[source.tactic.id], merged_from: [copy.claim_id_map[source.claim.id]],
       nested: { claim_id: copy.claim_id_map[source.claim.id], gap_id: copy.claim_id_map[source.claim.id], tactic_id: copy.claim_id_map[source.tactic.id] } });
     const [original] = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.id, source.tactic.id));

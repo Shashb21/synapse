@@ -8,6 +8,7 @@ export type RequestIdentity = {
   role: Role;
   signed_in: boolean;
   demo: boolean;
+  subject?: string | null;
 };
 
 /**
@@ -18,14 +19,14 @@ export type RequestIdentity = {
 export async function requestIdentity(body?: Record<string, unknown>): Promise<RequestIdentity> {
   const context = await sessionContext();
   if (context.signed_in) {
-    return { actor: context.actor, role: context.role, signed_in: true, demo: context.demo };
+    return { actor: context.actor, role: context.role, signed_in: true, demo: context.demo, subject: context.session?.subject ?? null };
   }
   const name = typeof body?.actor_name === "string" ? body.actor_name.trim() : "";
   const fn = typeof body?.actor_function === "string" ? body.actor_function.trim() : "";
   if (!context.demo) {
     return context.session
-      ? { actor: context.actor, role: context.role, signed_in: true, demo: false }
-      : { actor: context.actor, role: context.role, signed_in: false, demo: false };
+      ? { actor: context.actor, role: context.role, signed_in: true, demo: false, subject: context.session.subject }
+      : { actor: context.actor, role: context.role, signed_in: false, demo: false, subject: null };
   }
   return {
     actor: {
@@ -37,5 +38,6 @@ export async function requestIdentity(body?: Record<string, unknown>): Promise<R
     role: context.role,
     signed_in: false,
     demo: true,
+    subject: null,
   };
 }

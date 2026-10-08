@@ -13,6 +13,13 @@ export type WorkspaceDeleteCounts = {
   priority_placements: number;
   priority_configs: number;
   split_operations: number;
+  assembly_feedback: number;
+  assembly_reviews: number;
+  assembly_items: number;
+  assemblies: number;
+  item_relationship_decisions: number;
+  item_relationship_proposals: number;
+  item_versions: number;
   experiment_evaluations: number;
   experiment_calls: number;
   experiments: number;
@@ -216,91 +223,103 @@ export async function deleteWorkspace(workspace_id: string): Promise<{
     await ensureAccuracySchema([WORKSHOP_SNAPSHOT_DDL]);
     const db = accuracyDb();
 
-    const deleted: WorkspaceDeleteCounts = {
+  // Revision pointers and audit attempts depend on assemblies; delete them first.
+  await db.delete(t.accuracyAssemblyRevisionHeads).where(eq(t.accuracyAssemblyRevisionHeads.workspace_id, workspace_id));
+  await db.delete(t.accuracyAssemblyRevisionAttempts).where(eq(t.accuracyAssemblyRevisionAttempts.workspace_id, workspace_id));
+  await db.delete(t.accuracyAssemblyRevisions).where(eq(t.accuracyAssemblyRevisions.workspace_id, workspace_id));
+  const deleted: WorkspaceDeleteCounts = {
       priority_placements: (await db.delete(t.accuracyPriorityPlacements).where(eq(t.accuracyPriorityPlacements.workspace_id, workspace_id)).returning()).length,
       priority_configs: (await db.delete(t.accuracyPriorityConfigs).where(eq(t.accuracyPriorityConfigs.workspace_id, workspace_id)).returning()).length,
       split_operations: await deletedCount(await db.delete(t.accuracySplitOperations).where(eq(t.accuracySplitOperations.workspace_id, workspace_id)).returning({ id: t.accuracySplitOperations.id })),
-      experiment_evaluations: await deletedCount(await db.delete(t.accuracyExperimentEvaluations).where(eq(t.accuracyExperimentEvaluations.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentEvaluations.id })),
-      experiment_calls: await deletedCount(await db.delete(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentCalls.id })),
-      experiments: await deletedCount(await db.delete(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, workspace_id)).returning({ id: t.accuracyExperiments.id })),
-      omission_actions: await deletedCount(
-        await db.delete(t.accuracyOmissionActions)
-          .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))
-          .returning({ id: t.accuracyOmissionActions.id }),
-      ),
-      resume_journals: await deletedCount(
-        await db.delete(t.accuracyResumeJournals)
-          .where(eq(t.accuracyResumeJournals.workspace_id, workspace_id))
-          .returning({ id: t.accuracyResumeJournals.id }),
-      ),
-      extraction_batches: await deletedCount(
-        await db.delete(t.accuracyExtractionBatches)
-          .where(eq(t.accuracyExtractionBatches.workspace_id, workspace_id))
-          .returning({ id: t.accuracyExtractionBatches.id }),
-      ),
-      // The parent-run foreign key also cascades events inserted after this cleanup statement.
-      agent_events: await deletedCount(
-        await db
-          .delete(t.accuracyAgentEvents)
-          .where(eq(t.accuracyAgentEvents.workspace_id, workspace_id))
-          .returning({ id: t.accuracyAgentEvents.id }),
-      ),
-      miss_flag_actions: await deletedCount(
-        await db
-          .delete(t.accuracyMissFlagActions)
-          .where(eq(t.accuracyMissFlagActions.workspace_id, workspace_id))
-          .returning({ id: t.accuracyMissFlagActions.id }),
-      ),
-      provenance: await deletedCount(
-        await db
-          .delete(t.accuracyProvenance)
-          .where(eq(t.accuracyProvenance.workspace_id, workspace_id))
-          .returning({ id: t.accuracyProvenance.id }),
-      ),
-      coverage_joins: await deletedCount(
-        await db
-          .delete(t.accuracyCoverageJoins)
-          .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id))
-          .returning({ id: t.accuracyCoverageJoins.id }),
-      ),
-      parse_blocks: await deletedCount(
-        await db
-          .delete(t.accuracyParseBlocks)
-          .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id))
-          .returning({ id: t.accuracyParseBlocks.id }),
-      ),
-      source_files: await deletedCount(
-        await db
-          .delete(t.accuracySourceFiles)
-          .where(eq(t.accuracySourceFiles.workspace_id, workspace_id))
-          .returning({ id: t.accuracySourceFiles.id }),
-      ),
-      claims: await deletedCount(
-        await db
-          .delete(t.accuracyClaims)
-          .where(eq(t.accuracyClaims.workspace_id, workspace_id))
-          .returning({ id: t.accuracyClaims.id }),
-      ),
-      runs: await deletedCount(
-        await db
-          .delete(t.accuracyModuleRuns)
-          .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
-          .returning({ id: t.accuracyModuleRuns.id }),
-      ),
-      plans: await deletedCount(
-        await db
-          .delete(t.accuracyPlans)
-          .where(eq(t.accuracyPlans.workspace_id, workspace_id))
-          .returning({ id: t.accuracyPlans.id }),
-      ),
-      workshop_snapshots: await deletedCount(
-        await db
-          .delete(t.accuracyWorkshopSnapshots)
-          .where(eq(t.accuracyWorkshopSnapshots.workspace_id, workspace_id))
-          .returning({ id: t.accuracyWorkshopSnapshots.id }),
-      ),
-      workspace: 0,
-    };
+
+    assembly_feedback: await deletedCount(await db.delete(t.accuracyAssemblyFeedback).where(eq(t.accuracyAssemblyFeedback.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyFeedback.id })),
+    assembly_reviews: await deletedCount(await db.delete(t.accuracyAssemblyReviews).where(eq(t.accuracyAssemblyReviews.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyReviews.id })),
+    assembly_items: await deletedCount(await db.delete(t.accuracyAssemblyItems).where(eq(t.accuracyAssemblyItems.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblyItems.id })),
+    assemblies: await deletedCount(await db.delete(t.accuracyAssemblies).where(eq(t.accuracyAssemblies.workspace_id, workspace_id)).returning({ id: t.accuracyAssemblies.id })),
+    item_relationship_decisions: await deletedCount(await db.delete(t.accuracyItemRelationshipDecisions).where(eq(t.accuracyItemRelationshipDecisions.workspace_id, workspace_id)).returning({ id: t.accuracyItemRelationshipDecisions.id })),
+    item_relationship_proposals: await deletedCount(await db.delete(t.accuracyItemRelationshipProposals).where(eq(t.accuracyItemRelationshipProposals.workspace_id, workspace_id)).returning({ id: t.accuracyItemRelationshipProposals.id })),
+    item_versions: await deletedCount(await db.delete(t.accuracyItemVersions).where(eq(t.accuracyItemVersions.workspace_id, workspace_id)).returning({ id: t.accuracyItemVersions.id })),
+    experiment_evaluations: await deletedCount(await db.delete(t.accuracyExperimentEvaluations).where(eq(t.accuracyExperimentEvaluations.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentEvaluations.id })),
+    experiment_calls: await deletedCount(await db.delete(t.accuracyExperimentCalls).where(eq(t.accuracyExperimentCalls.workspace_id, workspace_id)).returning({ id: t.accuracyExperimentCalls.id })),
+    experiments: await deletedCount(await db.delete(t.accuracyExperiments).where(eq(t.accuracyExperiments.workspace_id, workspace_id)).returning({ id: t.accuracyExperiments.id })),
+    omission_actions: await deletedCount(
+      await db.delete(t.accuracyOmissionActions)
+        .where(eq(t.accuracyOmissionActions.workspace_id, workspace_id))
+        .returning({ id: t.accuracyOmissionActions.id }),
+    ),
+    resume_journals: await deletedCount(
+      await db.delete(t.accuracyResumeJournals)
+        .where(eq(t.accuracyResumeJournals.workspace_id, workspace_id))
+        .returning({ id: t.accuracyResumeJournals.id }),
+    ),
+    extraction_batches: await deletedCount(
+      await db.delete(t.accuracyExtractionBatches)
+        .where(eq(t.accuracyExtractionBatches.workspace_id, workspace_id))
+        .returning({ id: t.accuracyExtractionBatches.id }),
+    ),
+    // The parent-run foreign key also cascades events inserted after this cleanup statement.
+    agent_events: await deletedCount(
+      await db
+        .delete(t.accuracyAgentEvents)
+        .where(eq(t.accuracyAgentEvents.workspace_id, workspace_id))
+        .returning({ id: t.accuracyAgentEvents.id }),
+    ),
+    miss_flag_actions: await deletedCount(
+      await db
+        .delete(t.accuracyMissFlagActions)
+        .where(eq(t.accuracyMissFlagActions.workspace_id, workspace_id))
+        .returning({ id: t.accuracyMissFlagActions.id }),
+    ),
+    provenance: await deletedCount(
+      await db
+        .delete(t.accuracyProvenance)
+        .where(eq(t.accuracyProvenance.workspace_id, workspace_id))
+        .returning({ id: t.accuracyProvenance.id }),
+    ),
+    coverage_joins: await deletedCount(
+      await db
+        .delete(t.accuracyCoverageJoins)
+        .where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id))
+        .returning({ id: t.accuracyCoverageJoins.id }),
+    ),
+    parse_blocks: await deletedCount(
+      await db
+        .delete(t.accuracyParseBlocks)
+        .where(eq(t.accuracyParseBlocks.workspace_id, workspace_id))
+        .returning({ id: t.accuracyParseBlocks.id }),
+    ),
+    source_files: await deletedCount(
+      await db
+        .delete(t.accuracySourceFiles)
+        .where(eq(t.accuracySourceFiles.workspace_id, workspace_id))
+        .returning({ id: t.accuracySourceFiles.id }),
+    ),
+    claims: await deletedCount(
+      await db
+        .delete(t.accuracyClaims)
+        .where(eq(t.accuracyClaims.workspace_id, workspace_id))
+        .returning({ id: t.accuracyClaims.id }),
+    ),
+    runs: await deletedCount(
+      await db
+        .delete(t.accuracyModuleRuns)
+        .where(eq(t.accuracyModuleRuns.workspace_id, workspace_id))
+        .returning({ id: t.accuracyModuleRuns.id }),
+    ),
+    plans: await deletedCount(
+      await db
+        .delete(t.accuracyPlans)
+        .where(eq(t.accuracyPlans.workspace_id, workspace_id))
+        .returning({ id: t.accuracyPlans.id }),
+    ),
+    workshop_snapshots: await deletedCount(
+      await db
+        .delete(t.accuracyWorkshopSnapshots)
+        .where(eq(t.accuracyWorkshopSnapshots.workspace_id, workspace_id))
+        .returning({ id: t.accuracyWorkshopSnapshots.id }),
+    ),
+    workspace: 0,
+  };
 
     const removed = await accuracyDb()
       .delete(t.accuracyWorkspaces)

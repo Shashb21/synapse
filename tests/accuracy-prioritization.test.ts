@@ -4,7 +4,7 @@ import { applyClaimValidation, insertClaim } from "@/accuracy/store/claim-store"
 import { setAccuracyPlacement, listAccuracyPlacements } from "@/accuracy/store/priority-store";
 import { newId } from "@/modules/kernel/ids";
 import { coverageProvenance } from "./support/coverage-provenance";
-import { prioritizeModule } from "@/accuracy/modules/partial-split/module";
+import { prioritizeModule } from "@/accuracy/modules/prioritize/module";
 import { saveAccuracyPriorityConfig } from "@/accuracy/store/priority-store";
 import { scriptedPriorityContext as scriptedContext } from "./support/accuracy-priority";
 import { updateClaim } from "@/accuracy/store/claim-edit";

@@ -15,8 +15,9 @@ import { openAi, xaiGrok } from "@/modules/llm/provider";
 import { accuracyRouteConfig, setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
 import { updateClaim } from "@/accuracy/store/claim-edit";
 import * as session from "@/modules/auth/session";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import * as t from "@/accuracy/store/schema";
-import { createOrganization, createWorkspace } from "@/accuracy/store/tenant";
+import { createOrganization, createWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { insertSourceFile } from "@/accuracy/store/source-store";
 import { persistParseBlocks } from "@/accuracy/store/parse-store";
 import { applyOmissionAction, listBlockingOmissions } from "@/accuracy/store/omission-review-store";
@@ -26,7 +27,7 @@ import { newId, nowIso } from "@/modules/kernel/ids";
 import { applyExtractionBatch, createExtractionBatch, resumeExtractionBatch } from "@/accuracy/store/extraction-batch-store";
 import type { CallKind } from "@/accuracy/kernel/contracts";
 
-const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", actor: { name: "Test", function: "heor" } }));
+const identity = vi.hoisted(() => ({ signed_in: true, demo: false, role: "contributor", subject: "resume-subject" as string | null, actor: { name: "Test", function: "heor" } }));
 vi.mock("@/modules/auth/request", () => ({ requestIdentity: async () => identity }));
 
 // Concurrent HTTP requests need separate connections, as in the normal server pool.
@@ -37,26 +38,30 @@ const originals = new Map<CallKind, string>();
 afterEach(() => {
   for (const [call_kind, module_id] of originals) activateAccuracyModule({ call_kind, module_id, activated_by: "restore" });
   originals.clear();
-  Object.assign(identity, { signed_in: true, demo: false, role: "contributor" });
+  Object.assign(identity, { signed_in: true, demo: false, role: "contributor", subject: "resume-subject" });
   vi.restoreAllMocks();
 });
 async function fixture() {
   registerAccuracyStack(); await ensureAccuracySchema();
   const org_id = await createOrganization(newId("org-label"));
   const workspace_id = await createWorkspace({ org_id, name: "Resume", slug: newId("slug") });
+  await grantOrganizationAccess({ subject: identity.subject!, org_id });
   const source = await insertSourceFile({ workspace_id, org_id, filename: "notes.txt", mime: "text/plain", checksum: newId("sum"), doc_role: "medical" });
   const block_id = newId("block");
   await persistParseBlocks({ workspace_id, source_file_id: source.id, parser: "local", blocks: [{ id: block_id, source_file_id: source.id, index: 0, kind: "prose", heading: null, text: "Comparator evidence missing" }] });
   return { workspace_id, org_id, source_file_id: source.id, block_id };
 }
 function post(body: Record<string, unknown>) {
-  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(body) }));
+  const requestBody = { ...body };
+  delete requestBody.org_id;
+  delete requestBody.block_id;
+  return POST(new Request("http://localhost/api/accuracy/extract", { method: "POST", body: JSON.stringify(requestBody) }));
 }
 function installExtractor(blocker = true, gap_id: string | string[] = newId("gap")) {
   const call_kind = "need_extract";
   originals.set(call_kind, originals.get(call_kind) ?? activeAccuracyModuleId(call_kind)!);
   const id = newId("extract-test");
-  registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Test", summary: "Test", inputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()) }), outputSchema: needExtractOutputSchema,
+  registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Test", summary: "Test", inputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()), source_page: z.unknown().optional() }), outputSchema: needExtractOutputSchema,
     run: async (input, ctx) => {
       if (blocker) await appendAgentEvent({ workspace_id: input.workspace_id, run_id: ctx.run.id, event: { event_type: "critique", iteration: 3, score: null, issues: [], completeness: { risk_level: "important", checked_block_ids: input.block_ids, unchecked_block_ids: [], prior_issue_resolutions: [], suspected_omissions: [{ issue_id: "missing", item_kind: "gap", summary: "Comparator need", source_ref: { source_file_id: input.source_file_id, block_id: input.block_ids[0] }, evidence_quote: "Comparator evidence missing", basis: "explicit", importance: "important", reason: "Absent", suggested_action: "Add" }] }, latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } });
       return { output: needExtractOutputSchema.parse({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: (Array.isArray(gap_id) ? gap_id : [gap_id]).map(id => ({ id, statement: "Existing extracted need", external_id: null, provenance: [{ source_file_id: input.source_file_id, block_id: input.block_ids[0], quote: "Comparator evidence missing" }] })) }), summary: "Extracted" };
@@ -68,7 +73,7 @@ async function paused(scope: Awaited<ReturnType<typeof fixture>>) {
   const response = await post({ ...scope, kinds: ["need"] });
   expect(response.status).toBe(409);
   const body = await response.json();
-  expect(body).toMatchObject({ ok: false, paused: true, extraction_batch_id: expect.any(String), gaps_inserted: 1, tactics_inserted: 0, runs: [expect.objectContaining({ call_kind: "need_extract" })] });
+  expect(body, JSON.stringify(body)).toMatchObject({ ok: false, paused: true, extraction_batch_id: expect.any(String), gaps_inserted: 1, tactics_inserted: 0, runs: [expect.objectContaining({ call_kind: "need_extract" })] });
   return body;
 }
 async function resolve(scope: Awaited<ReturnType<typeof fixture>>, body: { runs: { run_id: string }[] }) {
@@ -99,10 +104,14 @@ async function liveJudge<T>(complete: typeof xaiGrok.complete, operation: () => 
   }
 }
 async function judgedFixture() {
-  const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+  const scope = await fixture();
+  // Only legacy unversioned entries participate in heuristic merging. Published source versions remain immutable.
+  await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Need comparator evidence for another group", source_file_id: scope.source_file_id,
+    metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
   const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
     statement: "Need comparator evidence", source_file_id: scope.source_file_id,
     metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
+  const body = await paused(scope); await resolve(scope, body);
   const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "scripted-resume" };
   return { scope, duplicate, request };
 }
@@ -140,7 +149,7 @@ describe("extraction omission resume", () => {
     expect(await runs(scope.workspace_id)).toHaveLength(1);
   });
 
-  it("rejects stale judgment when a human changes its inputs during the provider wait and prepares again", async () => {
+  it("rejects stale judgment when the source owner corrects legacy inputs during provider wait and prepares again", async () => {
     const { scope, duplicate, request } = await judgedFixture();
     let entered!: () => void; let release!: () => void;
     const started = new Promise<void>(resolve => { entered = resolve; });
@@ -155,9 +164,9 @@ describe("extraction omission resume", () => {
       const pending = post(request);
       await Promise.race([started, pending.then(() => { throw new Error("Provider was never reached"); })]);
       try {
-        await updateClaim({ workspace_id: scope.workspace_id, claim_id: duplicate.id,
+        await withAssemblyPreparation(() => updateClaim({ workspace_id: scope.workspace_id, claim_id: duplicate.id,
           patch: { statement: "Need survival evidence for another population" }, rationale: "Corrected source interpretation",
-          actor: { name: "Reviewer", function: "medical_affairs" } });
+          actor: { name: "Reviewer", function: "medical_affairs" } }));
       } finally { release(); }
       const stale = await pending;
       expect(stale.status).toBe(409);
@@ -181,7 +190,8 @@ describe("extraction omission resume", () => {
     const hold = new Promise<void>(resolve => { release = resolve; });
     let calls = 0;
     await liveJudge(async () => { calls++; expect(accuracyTransactionActive()).toBe(false); entered(); await hold; return decision(true); }, async () => {
-      const pending = post({ ...request, prepared_merge: { judgment: { equivalent: [], stub: true } }, merge_preparation: { equivalent: [] } });
+      expect((await post({ ...request, prepared_merge: { judgment: { equivalent: [], stub: true } }, merge_preparation: { equivalent: [] } })).status).toBe(400);
+      const pending = post(request);
       await Promise.race([started, pending.then(() => { throw new Error("Provider was never reached"); })]);
       try {
         const acquired = await withAccuracyTransaction(async () => {
@@ -217,7 +227,7 @@ describe("extraction omission resume", () => {
     let calls = 0;
     try {
       await liveJudge(async () => { calls++; expect(accuracyTransactionActive()).toBe(false); return decision(true); }, async () => {
-        expect((await post(request)).status).toBe(400);
+        expect((await post(request)).status).toBe(500);
         expect(await listClaims(scope.workspace_id)).toEqual(before);
         expect(await runs(scope.workspace_id)).toHaveLength(1);
         const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
@@ -244,10 +254,14 @@ describe("extraction omission resume", () => {
   });
 
   it("judges a production resume outside transactions and applies the model equivalence", async () => {
-    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
+    const scope = await fixture();
+    // Only legacy unversioned entries participate in heuristic merging. Published source versions remain immutable.
+    await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Need comparator evidence for another group", source_file_id: scope.source_file_id,
+      metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
     const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
       statement: "Need comparator evidence", source_file_id: scope.source_file_id,
       metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
+    const body = await paused(scope); await resolve(scope, body);
     const previousStub = process.env.SYNAPSE_TEST_STUB_LLM;
     const previousKey = process.env.XAI_API_KEY;
     process.env.SYNAPSE_TEST_STUB_LLM = "";
@@ -286,6 +300,7 @@ describe("extraction omission resume", () => {
     await resolve(scope, body);
     const response = await post(request); expect(response.status).toBe(200);
     const completed = await response.json();
+    expect(completed).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     expect(completed.runs.map((r: { call_kind: string }) => r.call_kind)).toEqual(["need_extract", "merge_dedupe", "status_derive"]);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     expect(await (await post({ ...request, idempotency_key: "resume-2" })).json()).toEqual(completed);
@@ -294,6 +309,7 @@ describe("extraction omission resume", () => {
   it("replays initial success without repeating downstream work", async () => {
     const scope = await fixture(); installExtractor(false);
     const initial = await (await post({ ...scope, kinds: ["need"] })).json();
+    expect(initial).toMatchObject({ assembly_id: expect.any(String), assembly_checks: expect.objectContaining({ status: "passed" }) });
     const review = await (await omissionGet(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${scope.workspace_id}&run_id=${initial.runs[0].run_id}`))).json();
     const before = await runs(scope.workspace_id);
     const replay = await post({ ...scope, action: "resume", extraction_batch_id: review.extraction_batch_id, idempotency_key: "repeat" });
@@ -314,17 +330,16 @@ describe("extraction omission resume", () => {
     expect(await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id))).toEqual(journals);
     Object.assign(identity, { signed_in: true, role: "contributor" });
     expect((await post(request)).status).toBe(200);
-    const trustedActor = (await import("@/modules/auth/owner")).ownerAccess;
-    const owner = await trustedActor();
+    const owner = identity;
     expect((await runs(scope.workspace_id)).filter(run => run.call_kind !== "need_extract")
       .every(run => run.actor_name === owner.actor.name && run.actor_function === owner.actor.function)).toBe(true);
     Object.assign(identity, { signed_in, role });
     expect((await post(request)).status).toBe(status);
   });
-  it("preserves unsigned demo-mode resume", async () => {
+  it("rejects unsigned demo-mode resume before assembly generation can invent an actor", async () => {
     const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
     Object.assign(identity, { signed_in: false, demo: true });
-    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(200);
+    expect((await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "demo" })).status).toBe(401);
   });
   it("returns the server source and batch even when an applied run has no findings", async () => {
     const scope = await fixture(); installExtractor(false);
@@ -373,7 +388,7 @@ describe("extraction omission resume", () => {
       return { output: { merged: 0 }, summary: "Recovered" };
     } })); activateAccuracyModule({ call_kind: kind, module_id: id, activated_by: "test" });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(await listClaims(scope.workspace_id)).toHaveLength(1);
     const journal = (await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id)))[0];
     expect(journal.merge_state).toBe("reserved");
@@ -397,9 +412,12 @@ describe("extraction omission resume", () => {
     expect((await post({ ...scope, action: "resume", extraction_batch_id: latest.extraction_batch_id, idempotency_key: "latest" })).status).toBe(200);
   });
   it("rolls back a real merge interrupted after the duplicate patch, then recovers both claims", async () => {
-    const scope = await fixture(); const body = await paused(scope); await resolve(scope, body);
-    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Existing extracted need", source_file_id: scope.source_file_id });
-    const before = await listClaims(scope.workspace_id);
+    const scope = await fixture();
+    // Legacy duplicates still exercise real merge rollback; generated histories need an explicit identity decision.
+    const legacy = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
+    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Legacy need awaiting review", source_file_id: scope.source_file_id });
+    const body = await paused(scope); await resolve(scope, body);
+    const before = await withAssemblyPreparation(() => listClaims(scope.workspace_id));
     const originalPatch = claimStore.persistClaimPatch;
     let writes = 0;
     const failure = vi.spyOn(claimStore, "persistClaimPatch").mockImplementation(async args => {
@@ -408,15 +426,18 @@ describe("extraction omission resume", () => {
       return originalPatch(args);
     });
     const request = { ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "real-merge-retry" };
-    expect((await post(request)).status).toBe(400);
+    expect((await post(request)).status).toBe(500);
     expect(writes).toBe(2);
-    expect(await listClaims(scope.workspace_id)).toEqual(before);
+    expect(await withAssemblyPreparation(() => listClaims(scope.workspace_id))).toEqual(before);
     expect(await runs(scope.workspace_id)).toHaveLength(1);
     const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, scope.workspace_id));
     failure.mockRestore();
     const completed = await post(request); expect(completed.status).toBe(200);
     expect((await completed.json()).runs[1].run_id).toBe(journal.merge_operation_id);
     expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
+    expect((await getClaim(scope.workspace_id, legacy.id))?.status).not.toBe("merged");
+    const generated = before.find(row => row.id !== legacy.id && row.id !== duplicate.id)!;
+    expect((await getClaim(scope.workspace_id, generated.id))?.status).not.toBe("merged");
   });
 
   it("serializes initial downstream work against an explicit resume", async () => {
@@ -500,7 +521,7 @@ describe("extraction omission resume", () => {
     expect(response.status).toBe(409);
     const body = await response.json();
     const [batch] = await accuracyDb().select().from(t.accuracyExtractionBatches).where(eq(t.accuracyExtractionBatches.source_file_id, scope.source_file_id));
-    expect(body).toMatchObject({ ok: false, paused: true, extraction_batch_id: batch.id, gaps_inserted: 1, tactics_inserted: 0,
+    expect(body, JSON.stringify(body)).toMatchObject({ ok: false, paused: true, extraction_batch_id: batch.id, gaps_inserted: 1, tactics_inserted: 0,
       runs: [expect.objectContaining({ call_kind: "need_extract", run_id: batch.run_ids[0], count: 1 })],
       blockers: [expect.objectContaining({ source_file_id: otherSource.id, workspace_id: scope.workspace_id })] });
     expect(batch.drafts_persisted).toBe(true);

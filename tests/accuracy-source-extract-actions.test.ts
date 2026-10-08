@@ -59,3 +59,18 @@ it("restores a saved incomplete cursor on reload and distinguishes full-source c
   expect(host.textContent).toContain("Full source: incomplete");
   expect([...host.querySelectorAll("button")].some(button => button.textContent === "Retry remaining pages")).toBe(true);
 });
+it("shows incomplete proposal linking and can resume the same batch", async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ ok: false, assembly_incomplete: true, gaps_inserted: 1, tactics_inserted: 1, extraction_batch_id: "batch-link", runs: [{ run_id: "need-run", call_kind: "need_extract", summary: "Extracted" }] }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, gaps_inserted: 1, tactics_inserted: 1 }) });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(createElement(SourceExtractActions, { workspaceId: "ws", sourceFileId: "source", blockCount: 1, gate: { ready: true, stub: true, connect_path: "/admin/control" } })));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.textContent).toContain("Complete proposal linking is incomplete");
+  const resume = [...host.querySelectorAll("button")].find(button => button.textContent === "Resume proposal linking")!;
+  await act(async () => resume.click());
+  expect(fetcher).toHaveBeenLastCalledWith("/api/accuracy/extract", expect.objectContaining({
+    body: JSON.stringify({ action: "resume", workspace_id: "ws", source_file_id: "source", extraction_batch_id: "batch-link", idempotency_key: "resume:batch-link" }),
+  }));
+  expect(host.textContent).toContain("Extracted 1 gap(s)");
+});

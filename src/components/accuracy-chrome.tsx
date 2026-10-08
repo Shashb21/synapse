@@ -10,6 +10,7 @@ import {
   ChartGantt,
   FileStack,
   Flag,
+  FlaskConical,
   GitCompareArrows,
   Menu,
   Presentation,
@@ -44,7 +45,8 @@ export type AccuracyShellId =
   | "timeline"
   | "audit"
   | "control"
-  | "runs";
+  | "runs"
+  | "experiments";
 
 type NavItem = {
   id: AccuracyShellId;
@@ -65,6 +67,7 @@ const NAV: NavItem[] = [
   { id: "audit", href: "/admin/accuracy/audit", label: "Audit", icon: ScrollText },
   { id: "control", href: "/admin/accuracy/routing", label: "Routing", icon: SlidersHorizontal },
   { id: "runs", href: "/admin/accuracy/runs", label: "Runs", icon: Activity },
+  { id: "experiments", href: "/admin/accuracy/experiments", label: "Experiments", icon: FlaskConical },
 ];
 
 function withWorkspace(href: string, workspaceId: string | null): string {
@@ -122,11 +125,11 @@ function AccuracyChromeInner({
   // The fetched label remembers which workspace it belongs to, so a stale one is never shown.
   const [fetched, setFetched] = useState<{ workspace_id: string; label: PlanLabel | null } | null>(null);
   const fetchedLabel = fetched && fetched.workspace_id === workspaceId ? fetched.label : null;
-  const planLabel = planLabelProp ?? fetchedLabel;
+  const planLabel = active === "experiments" ? null : planLabelProp ?? fetchedLabel;
   const planStatus = chromePlanLabelStatus(planLabel);
 
   useEffect(() => {
-    if (planLabelProp || !workspaceId) return;
+    if (active === "experiments" || planLabelProp || !workspaceId) return;
     let cancelled = false;
     fetch(`/api/accuracy/workspaces?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : null))
@@ -140,7 +143,7 @@ function AccuracyChromeInner({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, planLabelProp]);
+  }, [active, workspaceId, planLabelProp]);
 
   return (
     <div className="flex min-h-full bg-background">

@@ -8,7 +8,7 @@ import {
   gapsEligibleForIdeation,
   resolvePriorityBand,
 } from "@/accuracy/domain/iegp-semantics";
-import { claimMetadata, isActiveLedgerClaim, listClaims } from "@/accuracy/store/claim-store";
+import { claimMetadata, isActiveLedgerClaim, listDownstreamClaims } from "@/accuracy/store/claim-store";
 import { claimValidationFreshness } from "@/accuracy/domain/structured-fields";
 import { listCoverageJoins } from "@/accuracy/store/coverage-store";
 import { asTacticLifecycle, deriveWorkspaceGapStatuses, gapStatusSchema, type GapStatus } from "@/accuracy/modules/status-derive/engine";
@@ -31,7 +31,7 @@ export default async function AccuracyPlanPage({
   await requireOwnerPage();
   const { workspace_id: workspaceId = "" } = await searchParams;
   let active: Awaited<ReturnType<typeof getWorkspace>> = null;
-  let gaps: Awaited<ReturnType<typeof listClaims>> = [];
+  let gaps: Awaited<ReturnType<typeof listDownstreamClaims>> = [];
   let statuses = new Map<string, GapStatus>();
   let loadError: string | null = null;
   let ready: Awaited<ReturnType<typeof workshopReadiness>>["readiness"] | null = null;
@@ -41,7 +41,7 @@ export default async function AccuracyPlanPage({
   try {
     if (workspaceId) active = await getWorkspace(workspaceId);
     if (active) {
-      const claims = await listClaims(workspaceId, { limit: 2147483647 });
+      const claims = await listDownstreamClaims(workspaceId, { limit: null });
       gaps = claims.filter(claim => claim.claim_type === "gap" && isActiveLedgerClaim(claim));
       const coverages = await listCoverageJoins(workspaceId, { effective: true });
       statuses = new Map(deriveWorkspaceGapStatuses({

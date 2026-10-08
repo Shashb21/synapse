@@ -12,8 +12,8 @@ import { judgeCompleteness } from "./critic";
 import { assertAiEnabled } from "@/modules/kernel/ai-switch";
 import {
   claimMetadata,
-  isActiveLedgerClaim,
-  listClaims,
+  isDownstreamClaim, isActiveLedgerClaim,
+  listDownstreamClaims,
   type AccuracyClaimRow,
 } from "@/accuracy/store/claim-store";
 import { readAllParseBlocks } from "@/accuracy/store/parse-store";
@@ -61,8 +61,10 @@ const outputSchema = z.object({
 
 export type CompletenessAuditOutput = z.infer<typeof outputSchema>;
 
-function claimsForAudit(rows: AccuracyClaimRow[]): AuditClaimLite[] {
-  return rows.filter(isActiveLedgerClaim).map((row) => {
+function claimsForAudit(
+  rows: Awaited<ReturnType<typeof listDownstreamClaims>>,
+): AuditClaimLite[] {
+  return rows.filter(row => isDownstreamClaim(row) && isActiveLedgerClaim(row)).map((row: AccuracyClaimRow) => {
     const meta = claimMetadata(row);
     const provenance = Array.isArray(meta.provenance)
       ? (meta.provenance as Array<{ block_id?: string | null }>)
@@ -110,7 +112,7 @@ export const completenessAuditModule = agenticModule({
     await assertAiEnabled("The completeness audit");
     const [blocks, claimRows, resolved] = await Promise.all([
       readAllParseBlocks(input.workspace_id),
-      listClaims(input.workspace_id, { limit: 500 }),
+      listDownstreamClaims(input.workspace_id, { limit: 500 }),
       resolvedMissFlagBlockIds(input.workspace_id),
     ]);
     const claims = claimsForAudit(claimRows);

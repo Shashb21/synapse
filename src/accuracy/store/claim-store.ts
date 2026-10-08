@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or, notInArray, sql } from "drizzle-orm";
 import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -7,6 +7,11 @@ import { claimFactualRevision, readStructuredFields, structuredProvenance, valid
   gapStructuredFieldsSchema, tacticStructuredFieldsSchema, type GapStructuredFields, type TacticStructuredFields } from "@/accuracy/domain/structured-fields";
 import { invalidateAccuracyPriorityValidation } from "./priority-records";
 import { provenanceSpanSchema } from "./quote-validator";
+import { assemblyExecutionScope } from "@/accuracy/kernel/assembly-context";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
+
+import { isDownstreamClaim } from "@/accuracy/domain/item-history";
+export { isDownstreamClaim } from "@/accuracy/domain/item-history";
 
 export type AccuracyClaimType = "gap" | "tactic";
 
@@ -179,17 +184,84 @@ export async function insertClaim(args: {
     claim_type: args.claim_type,
     statement: args.statement,
     status: args.status ?? "draft",
-    validated: args.validated ?? false,
+    validated: args.metadata?.history_only === true ? false : args.validated ?? false,
     source_file_id: args.source_file_id ?? null,
     metadata: (args.metadata ?? {}) as Record<string, unknown>,
     created_at: now,
     updated_at: now,
   };
   return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+      await assertManagedClaimMutationAllowed(args.workspace_id, []);
       await accuracyDb().insert(t.accuracyClaims).values(row);
       await syncClaimProvenance(row as AccuracyClaimRow);
       return row as AccuracyClaimRow;
   });
+}
+
+async function approvedClaimIdsForMutation(workspace_id: string): Promise<Set<string> | null> {
+  if (assemblyExecutionScope().kind !== "production") return null;
+  const { approvedLiveInventory } = await import("./assembly-review-store");
+  const live = await approvedLiveInventory(workspace_id);
+  return live ? new Set(live.claims.map((claim) => claim.id)) : null;
+}
+
+async function assertManagedClaimMutationAllowed(workspace_id: string, claim_ids: string[]): Promise<void> {
+  const approved = await approvedClaimIdsForMutation(workspace_id);
+  if (!approved) return;
+  if (claim_ids.length === 0) {
+    throw new AssemblyReviewError("approval_required", "Claim changes require a revised approved assembly.");
+  }
+  const unknown = claim_ids.filter((id) => !approved.has(id));
+  if (unknown.length > 0) {
+    throw new AssemblyReviewError("approval_required", "Claim changes require claims from the current approved assembly.");
+  }
+}
+
+const APPROVED_METADATA_OVERLAY_KEYS = new Set([
+  "start",
+  "end",
+  "readout",
+  "readout_date",
+  "evidence_available",
+  "validation",
+  "computed_status",
+  "derived_at",
+  "status_override",
+  "priority",
+  "priority_band",
+  "priority_rationale",
+  "priority_origin", "priority_scoring",
+]);
+
+const APPROVED_PATCH_STATUS_VALUES = new Set(["validated", "rejected"]);
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, field]) => [key, canonical(field)]));
+  }
+  return value;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+function approvedOverlayMetadata(existing: AccuracyClaimMetadata, requested: AccuracyClaimMetadata): AccuracyClaimMetadata {
+  const next: AccuracyClaimMetadata = { ...existing };
+  for (const [key, value] of Object.entries(requested)) {
+    if (!APPROVED_METADATA_OVERLAY_KEYS.has(key)) {
+      if (!sameJson(value, existing[key])) {
+        throw new AssemblyReviewError("conflict", "Approved claim metadata changes are limited to documented workflow overlays.");
+      }
+      continue;
+    }
+    next[key] = value;
+  }
+  if (existing.history_only === true) next.history_only = true;
+  return next;
 }
 
 export async function listClaims(
@@ -201,14 +273,48 @@ export async function listClaims(
   const rows = await accuracyDb()
     .select()
     .from(t.accuracyClaims)
-    .where(eq(t.accuracyClaims.workspace_id, workspace_id))
+    .where(and(eq(t.accuracyClaims.workspace_id, workspace_id),
+      opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : undefined))
     .orderBy(desc(t.accuracyClaims.updated_at))
     .limit(limit);
-  if (!opts?.claim_type) return rows;
-  return rows.filter((row) => row.claim_type === opts.claim_type);
+  return rows;
 }
 
-/** Return every active gap and tactic for one source file, without the UI list limit. */
+/** Read downstream inventory with eligibility and item type applied before the SQL cap. */
+export async function listDownstreamClaims(
+  workspace_id: string,
+  opts?: { claim_type?: AccuracyClaimType; source_file_id?: string; limit?: number | null },
+): Promise<AccuracyClaimRow[]> {
+  if (assemblyExecutionScope().kind === "production") {
+    const { approvedLiveInventory } = await import("./assembly-review-store");
+    const live = await approvedLiveInventory(workspace_id);
+    if (live) {
+      const rows = live.claims.filter((claim) =>
+        (!opts?.claim_type || claim.claim_type === opts.claim_type)
+        && (opts?.source_file_id === undefined || claim.source_file_id === opts.source_file_id));
+      const ordered = rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      return opts?.limit === null ? ordered : ordered.slice(0, opts?.limit ?? 200);
+    }
+  }
+  return listRawDownstreamClaims(workspace_id, opts);
+}
+
+async function listRawDownstreamClaims(
+  workspace_id: string,
+  opts?: { claim_type?: AccuracyClaimType; source_file_id?: string; limit?: number | null },
+): Promise<AccuracyClaimRow[]> {
+  await ensureAccuracySchema();
+  const query = accuracyDb().select().from(t.accuracyClaims).where(and(
+    eq(t.accuracyClaims.workspace_id, workspace_id),
+    notInArray(t.accuracyClaims.status, ["merged", "rejected"]),
+    sql`${t.accuracyClaims.metadata}->'history_only' IS DISTINCT FROM 'true'::jsonb`,
+    opts?.claim_type ? eq(t.accuracyClaims.claim_type, opts.claim_type) : inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
+    opts?.source_file_id !== undefined ? eq(t.accuracyClaims.source_file_id, opts.source_file_id) : undefined,
+  )).orderBy(desc(t.accuracyClaims.updated_at));
+  return opts?.limit === null ? query : query.limit(opts?.limit ?? 200);
+}
+
+/** Return eligible source inventory for extraction completeness, without the UI list limit. */
 export async function listActiveSourceClaims(
   workspace_id: string,
   source_file_id: string,
@@ -225,7 +331,7 @@ export async function listActiveSourceClaims(
       inArray(t.accuracyClaims.claim_type, ["gap", "tactic"]),
     ));
   const rows = await (opts?.for_update ? query.for("update") : query);
-  return rows.filter(isActiveLedgerClaim);
+  return rows.filter(row => isActiveLedgerClaim(row) && isDownstreamClaim(row));
 }
 
 export async function getClaimsByIds(
@@ -268,12 +374,17 @@ export async function applyClaimValidation(args: {
 
   await ensureAccuracySchema();
   return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+    await assertManagedClaimMutationAllowed(args.workspace_id, args.claim_ids);
     const existing = await accuracyDb().select().from(t.accuracyClaims).where(and(
       eq(t.accuracyClaims.workspace_id, args.workspace_id), inArray(t.accuracyClaims.id, args.claim_ids))).for("update");
     if (existing.length !== args.claim_ids.length) {
       const found = new Set(existing.map((row) => row.id));
       const missing = args.claim_ids.filter((id) => !found.has(id));
       throw new Error(`Unknown claim(s) in workspace: ${missing.join(", ")}`);
+    }
+
+    if (args.action === "validate" && existing.some(claim => claimMetadata(claim).history_only === true)) {
+      throw new Error("History-only alternatives cannot be validated; approval requires a separate assembly decision.");
     }
 
     const now = nowIso();
@@ -302,6 +413,7 @@ export async function applyClaimValidation(args: {
         factual_revision,
         validation_history: [...(Array.isArray(prevMeta.validation_history) ? prevMeta.validation_history : []), ...(prevMeta.validation ? [prevMeta.validation] : [])],
         validation: {
+          ...(prevMeta.validation ?? {}),
           factual_revision,
           stale: false,
           action: args.action,
@@ -355,8 +467,14 @@ export async function updateClaimMetadata(args: {
   workspace_id: string;
   claim_id: string;
   metadata: AccuracyClaimMetadata;
+  /** Merge a sparse patch under the workspace lock; replacement remains the default. */
+  merge?: boolean;
 }): Promise<AccuracyClaimRow> {
-  return persistClaimPatch({ workspace_id: args.workspace_id, claim_id: args.claim_id, metadata: args.metadata });
+  return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+    const existing = args.merge ? await getClaim(args.workspace_id, args.claim_id) : null;
+    return persistClaimPatch({ workspace_id: args.workspace_id, claim_id: args.claim_id,
+      metadata: { ...(existing ? claimMetadata(existing) : {}), ...args.metadata } });
+  });
 }
 
 export function claimMetadata(claim: AccuracyClaimRow): AccuracyClaimMetadata {
@@ -384,9 +502,15 @@ export async function persistClaimPatch(args: {
       if (args.expected_factual_revision !== undefined && claimFactualRevision(existing) !== args.expected_factual_revision) {
         throw new Error("Claim factual inputs changed; reload before saving.");
       }
+      const managed = await approvedClaimIdsForMutation(args.workspace_id);
+      if (managed && !managed.has(args.claim_id)) throw new AssemblyReviewError("approval_required", "Claim changes require claims from the current approved assembly.");
+      if (managed && args.statement !== undefined && args.statement !== existing.statement) throw new AssemblyReviewError("conflict", "Claim content changes require a revised approved assembly.");
+      if (managed && args.status !== undefined && !APPROVED_PATCH_STATUS_VALUES.has(args.status)) throw new AssemblyReviewError("conflict", "Approved claim status changes are limited to documented workflow values.");
+      const metadata = managed ? approvedOverlayMetadata(claimMetadata(existing), args.metadata ?? claimMetadata(existing))
+        : { ...(args.metadata ?? claimMetadata(existing)), ...(claimMetadata(existing).history_only === true ? { history_only: true } : {}) };
       const at = args.at ?? nowIso();
       const next = invalidateClaimFacts(existing, { ...existing, statement: args.statement ?? existing.statement,
-        metadata: args.metadata ?? existing.metadata, status: args.status ?? existing.status, updated_at: at }, at);
+        metadata, status: args.status ?? existing.status, updated_at: at }, at);
       await accuracyDb().update(t.accuracyClaims).set({ statement: next.statement, status: next.status,
         validated: next.validated, metadata: next.metadata, updated_at: at }).where(and(
         eq(t.accuracyClaims.id, args.claim_id), eq(t.accuracyClaims.workspace_id, args.workspace_id)));
@@ -409,8 +533,9 @@ function metaStringList(value: unknown): string[] {
 
 /** Map tactic claims into inputs for `projectGanttFromTactics`. */
 export function tacticsForGantt(claims: AccuracyClaimRow[]) {
+  const excludedIds = new Set(claims.filter(row => !isDownstreamClaim(row)).map(row => row.id));
   return claims
-    .filter((row) => row.claim_type === "tactic")
+    .filter((row) => row.claim_type === "tactic" && isDownstreamClaim(row))
     .map((row) => {
       const meta = claimMetadata(row);
       const locked = metaStringList(meta.human_locked);
@@ -428,22 +553,24 @@ export function tacticsForGantt(claims: AccuracyClaimRow[]) {
           metaString(meta.readout) ??
           metaString(meta.readout_date) ??
           metaString(meta.evidence_available),
-        depends_on: metaStringList(meta.depends_on),
+        depends_on: metaStringList(meta.depends_on).filter(id => !excludedIds.has(id)),
         tactic_type: metaString(meta.tactic_type),
-        gap_ids: metaStringList(meta.gap_ids),
+        gap_ids: metaStringList(meta.gap_ids).filter(id => !excludedIds.has(id)),
       };
     });
 }
 
 /** Map gap claims into parent links for Gantt coverage continuity. */
 export function gapsForGantt(claims: AccuracyClaimRow[]) {
+  const excludedIds = new Set(claims.filter(row => !isDownstreamClaim(row)).map(row => row.id));
   return claims
-    .filter((row) => row.claim_type === "gap")
+    .filter((row) => row.claim_type === "gap" && isDownstreamClaim(row))
     .map((row) => {
       const meta = claimMetadata(row);
+      const parentId = metaString(meta.parent_gap_id);
       return {
         id: row.id,
-        parent_gap_id: metaString(meta.parent_gap_id),
+        parent_gap_id: parentId && excludedIds.has(parentId) ? null : parentId,
         validated: row.validated,
       };
     });

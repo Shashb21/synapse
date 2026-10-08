@@ -1,3 +1,4 @@
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
@@ -35,18 +36,23 @@ export async function GET(request: Request) {
   if (!workspace) {
     return NextResponse.json({ error: "Unknown workspace" }, { status: 404 });
   }
-  const { readiness, inventory } = await workshopReadiness(workspace_id);
-  const snapshot = await latestWorkshopSnapshot(workspace_id);
-  return NextResponse.json({
-    workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
-    readiness,
-    inventory_counts: {
-      gaps: inventory.gaps.length,
-      tactics: inventory.tactics.length,
-      joins: inventory.joins.length,
-    },
-    snapshot,
-  });
+  try {
+    const { readiness, inventory } = await workshopReadiness(workspace_id);
+    const snapshot = await latestWorkshopSnapshot(workspace_id);
+    return NextResponse.json({
+      workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
+      readiness,
+      inventory_counts: {
+        gaps: inventory.gaps.length,
+        tactics: inventory.tactics.length,
+        joins: inventory.joins.length,
+      },
+      snapshot,
+    });
+  } catch (error) {
+    if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
+    throw error;
+  }
 }
 
 const createSchema = z.object({

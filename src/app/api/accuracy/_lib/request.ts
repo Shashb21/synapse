@@ -1,3 +1,5 @@
+import { AssemblyError } from "@/accuracy/domain/assembly";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Actor } from "@/accuracy/kernel/contracts";
@@ -72,6 +74,8 @@ export async function labActor(): Promise<Actor> {
  * errors, unknown workspace, duplicate slug), or null for the route to handle.
  */
 export function labRequestErrorResponse(error: unknown): NextResponse | null {
+  if (error instanceof AssemblyError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
+  if (error instanceof AssemblyReviewError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "invalid_input" ? 400 : error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 : 409 });
   if (error instanceof LabRequestError) {
     return NextResponse.json(
       { ok: false, error: error.message, ...(error.code ? { code: error.code } : {}) },
@@ -85,4 +89,11 @@ export function labRequestErrorResponse(error: unknown): NextResponse | null {
     return NextResponse.json({ ok: false, error: validationMessage(error) }, { status: 400 });
   }
   return null;
+}
+
+export async function labRevisionAuthor() {
+  const { sessionContext } = await import("@/modules/auth/session");
+  const context = await sessionContext();
+  if (!context.signed_in || !context.session || context.role !== "contributor") return undefined;
+  return { subject: context.session.subject, provider: context.session.provider_id, actor: context.actor, role: "contributor" as const };
 }

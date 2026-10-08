@@ -1,0 +1,236 @@
+
+ RUN  v3.2.4 /private/tmp/synapse-kan39-worktree
+
+ ✓ tests/accuracy-pass-comparison-api.test.ts (61 tests) 8920ms
+   ✓ authenticated controlled pass comparison API > accepts original 'explicit' block selection for 'need_extract'  452ms
+   ✓ authenticated controlled pass comparison API > accepts original 'whole_source' block selection for 'need_extract'  467ms
+   ✓ authenticated controlled pass comparison API > accepts original 'explicit' block selection for 'inventory_extract'  484ms
+   ✓ authenticated controlled pass comparison API > accepts original 'whole_source' block selection for 'inventory_extract'  474ms
+   ✓ authenticated controlled pass comparison API > returns independently copied 1/2/3 attempts and permits a granted reader to recompute them  510ms
+   ✓ authenticated controlled pass comparison API > retains incomplete failed conditions with no recommendation  450ms
+   ✓ authenticated controlled pass comparison API > accepts the extraction pipeline shape and retains both extractor version sequences  1232ms
+ ✓ tests/accuracy-omission-pause.test.ts (47 tests) 15719ms
+   ✓ downstream omission pause > allows downstream progress with advisory findings  665ms
+   ✓ downstream omission pause > returns scoped 409 before coverage GET generates candidate pairs  477ms
+   ✓ downstream omission pause > renders paused coverage without generating or rendering a new pair queue  348ms
+   ✓ downstream omission pause > continues coverage candidate generation with advisory findings  510ms
+   ✓ downstream omission pause > pauses workshop snapshot before changing frozen inventory or ledger  524ms
+   ✓ downstream omission pause > pauses workshop scene before changing frozen inventory or ledger  695ms
+   ✓ downstream omission pause > pauses workshop add tag before changing frozen inventory or ledger  639ms
+   ✓ downstream omission pause > pauses workshop assign tag before changing frozen inventory or ledger  888ms
+   ✓ downstream omission pause > pauses workshop mark_addressed before changing frozen inventory or ledger  719ms
+   ✓ downstream omission pause > pauses workshop remap before changing frozen inventory or ledger  729ms
+   ✓ downstream omission pause > pauses workshop set_priority before changing frozen inventory or ledger  750ms
+   ✓ downstream omission pause > pauses workshop park before changing frozen inventory or ledger  788ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for coverage  357ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for assist  355ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for validate  338ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for manual ideate  320ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for live ideate  419ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for priority  339ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for claim insert validated  362ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for claim insert draft  351ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for gantt  353ms
+   ✓ downstream omission pause > returns scoped 409 without direct changes for save-final  384ms
+ ✓ tests/iegp-store.test.ts (19 tests) 6145ms
+   ✓ IEGP postgres store > ingests a demo pack file from a blank workspace  715ms
+   ✓ IEGP postgres store > reviews extracted tactics and only assigns accepted ones  850ms
+   ✓ IEGP postgres store > shows mapped tactics on the gaps workbench after ingest  667ms
+   ✓ IEGP postgres store > puts accepted and created tactics in the library so one tactic tags many gaps  738ms
+   ✓ IEGP postgres store > maps a newly created open gap onto an extracted tactic  802ms
+   ✓ IEGP postgres store > computes Open for proposed-only joins and Partial for planned evidence; override requires a reason; cancel does not save  534ms
+ ✓ tests/accuracy-pass-comparison-run.test.ts (14 tests) 6648ms
+   ✓ isolated pass cohorts > runs three independent single_call attempts with actual exact versions and preserves baseline rows  674ms
+   ✓ isolated pass cohorts > runs three independent pipeline attempts with actual exact versions and preserves baseline rows  1369ms
+   ✓ isolated pass cohorts > repeating a request creates a separate cohort and six isolated attempts  868ms
+   ✓ isolated pass cohorts > covers both extractors and every repeated downstream call for two selected sources  1964ms
+   ✓ isolated pass cohorts > returns uniform not-found for absent and foreign-workspace experiments  458ms
+   ✓ isolated pass cohorts > retains failed attempts, snapshots and error evaluations  416ms
+   ✓ isolated pass cohorts > makes a control-ignoring module's completed single snapshot ineligible  367ms
+ ✓ tests/accuracy-experiment-copy.test.ts (19 tests) 4764ms
+   ✓ copyExperimentWorkspace > rejects omitted metadata claim endpoints without leaving a copy  766ms
+   ✓ copyExperimentWorkspace > rejects unknown metadata claim endpoints without leaving a copy  738ms
+   ✓ copyExperimentWorkspace > rejects cross-workspace metadata claim endpoints without leaving a copy  843ms
+   ✓ copyExperimentWorkspace > keeps fingerprints stable for an unchanged baseline and changes the baseline fingerprint after a claim edit  319ms
+ ✓ tests/accuracy-experiment-pipeline.test.ts (13 tests) 4999ms
+   ✓ isolated extraction-pipeline experiments > propagates three fixed passes through the actual single_call path and retains terminal assessments  353ms
+   ✓ isolated extraction-pipeline experiments > propagates three fixed passes through the actual pipeline path and retains terminal assessments  489ms
+   ✓ isolated extraction-pipeline experiments > scores V0 and revision snapshots from the real inventory module in pipeline mode  452ms
+   ✓ isolated extraction-pipeline experiments > persists extracted drafts in the copy before downstream stages and retains evaluations  1431ms
+   ✓ isolated extraction-pipeline experiments > fails copied assembly coverage without appending a false status error version  356ms
+   ✓ isolated extraction-pipeline experiments > pauses the copied pipeline for an important extractor omission without touching the live workspace  332ms
+ ✓ tests/accuracy-experiment-records.test.ts (9 tests) 1098ms
+ ✓ tests/accuracy-assembly-review-store.test.ts (10 tests) 4098ms
+   ✓ assembly review store > stores exact approved review decisions and returns an identical initial retry  408ms
+   ✓ assembly review store > returns null for legacy workspaces and exposes exact approved payloads with safe workflow overlays only  324ms
+   ✓ assembly review store > approves empty production assemblies and keeps manual approvals out of implicit head resolution  365ms
+   ✓ assembly review store > fails closed for missing, rejected, stale, or experiment-only managed heads without falling back  449ms
+   ✓ assembly review store > retains an approved tactic head when a later gap-only head is approved  415ms
+   ✓ assembly review store > scopes projected selected items by source and kind  423ms
+   ✓ assembly review store > uses an earlier selected snapshot payload and fails closed for changed-version coverage  695ms
+   ✓ assembly review store > serializes concurrent review and batch publication and cleans up review records  560ms
+ ✓ tests/accuracy-workshop-v1.test.ts (16 tests) 467ms
+ ✓ tests/iegp-gap-flow.test.ts (11 tests) 3326ms
+   ✓ partial split and rewrite > splits a partial into addressed + open children and retires the original into history  638ms
+   ✓ partial split and rewrite > rewrites a partial as Open and keeps the original in version history  409ms
+   ✓ partial split and rewrite > splits with multiple tactics and copies constituent need links onto both children  560ms
+   ✓ partial split and rewrite > flags sibling coverage needs_review without copying dimension values  301ms
+   ✓ Gaps map existing vs record missed vs proposed > records missed ongoing, completed, and planned tactics and auto-maps them onto the gap  304ms
+ ✓ tests/accuracy-assembly-revision.test.ts (14 tests) 9001ms
+   ✓ KAN-39 immutable human revisions > removes with reason and lineage, preserves baseline, and requires fresh approval  642ms
+   ✓ KAN-39 immutable human revisions > rejects blank reasons, missing selected IDs, and stale competing parents atomically  448ms
+   ✓ KAN-39 immutable human revisions > adds explicit human history and edits cumulatively with exact unaffected coverage  1327ms
+   ✓ KAN-39 immutable human revisions > durably saves incomplete linking and retries only missing successful pairs  850ms
+   ✓ KAN-39 immutable human revisions > projects opposite-kind additions on a one-kind source batch after fresh approval  602ms
+   ✓ KAN-39 immutable human revisions > invalidates in-flight linking when a newer extraction publishes  564ms
+   ✓ KAN-39 immutable human revisions > allows only scoped contributors and rejects spoofed request identity  375ms
+   ✓ KAN-39 immutable human revisions > serializes competing contributors so exactly one current successor is published  374ms
+   ✓ KAN-39 immutable human revisions > refuses an approved human gap addition after a new extraction owns its kind  1015ms
+   ✓ KAN-39 immutable human revisions > refuses an approved human tactic addition after a new extraction owns its kind  944ms
+   ✓ KAN-39 immutable human revisions > preserves original extraction and evaluator gold scores, and refuses experiment revision targets  484ms
+   ✓ KAN-39 immutable human revisions > binds live provider inputs to exact edited content and refuses publication after a new revision  820ms
+ ✓ tests/accuracy-item-history-store.test.ts (15 tests) 4020ms
+   ✓ generated item history store > enforces split and merge cardinality, history-only successors, and one decision  380ms
+   ✓ joins third and fourth alternatives through canonical groups without rewriting origins  526ms
+   ✓ continues confirmed ancestry with new descendants while rejecting cycles and reused descendants  479ms
+   ✓ proposes later published alternatives after compatible confirmed joins  460ms
+ ✓ tests/accuracy-item-history-api.test.ts (46 tests) 4574ms
+   ✓ authorized item history API > refreshes stale proposals without changing their audit record or bypassing fresh conflicts  319ms
+ ✓ tests/accuracy-omission-resume.test.ts (15 tests) 3903ms
+   ✓ extraction omission resume > pauses a fully applied batch and resumes without extraction or duplicate drafts; replay is identical  474ms
+   ✓ extraction omission resume > rejects an earlier need batch when a later inventory-only batch applies  345ms
+   ✓ extraction omission resume > rolls back a real merge interrupted after the duplicate patch, then recovers both claims  314ms
+   ✓ extraction omission resume > preserves the applied extraction context when status pauses after merge publishes another source blocker  360ms
+ ✓ tests/accuracy-item-history-eligibility.test.ts (4 tests) 1069ms
+   ✓ keeps history-only drafts reviewable but blocks promotion, metadata removal and coverage  341ms
+   ✓ reads eligible downstream inventory before row caps even with more than 1000 newer review drafts  471ms
+ ✓ tests/accuracy-assembly-store.test.ts (11 tests) 2731ms
+   ✓ assembly store > creates, reads, and retries an immutable mixed-origin assembly with server-resolved coverage  399ms
+   ✓ assembly store > scopes reads, selections, sources, and coverage runs to the workspace  377ms
+   ✓ assembly store > serializes independent assembly creation and identity decision transactions under the workspace lock  335ms
+ ✓ tests/accuracy-experiment-run.test.ts (24 tests) 2498ms
+   ✓ isolated accuracy experiments > creates independent attempts for identical immutable requests  300ms
+ ✓ tests/accuracy-item-history-publication.test.ts (3 tests) 881ms
+   ✓ rolls back publication and batch together, then publishes canonical judged IDs with retry-safe raw origins  323ms
+   ✓ publishes stored production run snapshots and retains response counts while batch IDs resolve canonically  383ms
+ ✓ tests/accuracy-seed-from-gold.test.ts (1 test) 2276ms
+   ✓ seed workspace from gold > creates workspace with BGB gold gaps and tactics and parses pptx locally  2275ms
+ ✓ tests/accuracy-assembly-approval-integration.test.ts (49 tests) 23101ms
+   ✓ KAN-38 assembly approval enforcement > blocks managed live readers until approval and then serves exact approved payloads  1008ms
+   ✓ KAN-38 assembly approval enforcement > pauses immediately after rejection or newer applied publication without falling back  538ms
+   ✓ KAN-38 assembly approval enforcement > rejects explicit ID bypasses while allowing isolated experiments  663ms
+   ✓ KAN-38 assembly approval enforcement > rejects supplied production payloads that differ from the approved inventory  583ms
+   ✓ KAN-38 assembly approval enforcement > rejects forged ideation eligibility before opening a run  319ms
+   ✓ KAN-38 assembly approval enforcement > rejects forged ideation names before opening a run  306ms
+   ✓ KAN-38 assembly approval enforcement > rejects empty status coverages without changing persisted metadata  813ms
+   ✓ KAN-38 assembly approval enforcement > rejects empty status tactics without changing persisted metadata  769ms
+   ✓ KAN-38 assembly approval enforcement > rejects partial status coverages for full-plus-partial approved evidence  770ms
+   ✓ KAN-38 assembly approval enforcement > rejects partial status tactics for full-plus-partial approved evidence  808ms
+   ✓ KAN-38 assembly approval enforcement > selects gaps while retaining complete evidence and respecting persist false  1927ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against empty coverage evidence  468ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against empty tactics evidence  459ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against partial coverage evidence  449ms
+   ✓ KAN-38 assembly approval enforcement > guards direct status module against partial tactics evidence  451ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt coverage before opening a run  346ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt dependencies before opening a run  324ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt activity dependencies before opening a run  302ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt gap mapping before opening a run  309ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt validation before opening a run  320ms
+   ✓ KAN-38 assembly approval enforcement > rejects altered Gantt tactic type before opening a run  340ms
+   ✓ KAN-38 assembly approval enforcement > preserves approved Gantt relationships with scheduling overrides and ideation workflow options  966ms
+   ✓ KAN-38 assembly approval enforcement > persists only computed status fields for an approved assembly  1146ms
+   ✓ KAN-38 assembly approval enforcement > blocks direct public and store claim insertion for managed heads before approval  330ms
+   ✓ KAN-38 assembly approval enforcement > rejects unsupported metadata and status mutations on approved members  477ms
+   ✓ KAN-38 assembly approval enforcement > serializes direct priority route gate and write against publication  428ms
+   ✓ KAN-38 assembly approval enforcement > serializes direct metadata gate and write against publication  424ms
+   ✓ KAN-38 assembly approval enforcement > serializes direct patch gate and write against publication  511ms
+   ✓ KAN-38 assembly approval enforcement > serializes direct validation gate and write against publication  389ms
+   ✓ KAN-38 assembly approval enforcement > lists only approved coverage or mapping pairs for managed workspaces  474ms
+   ✓ KAN-38 assembly approval enforcement > rolls back module writes when approved heads change during execution  485ms
+   ✓ KAN-38 assembly approval enforcement > does not save agentic success output when approved heads change during provider work  376ms
+   ✓ KAN-38 assembly approval enforcement > rejects stale workshop snapshots when new approved bindings keep the same canonical IDs  851ms
+   ✓ assembly review API > derives reviewer identity from the authenticated session and exposes state metadata  336ms
+   ✓ assembly review API > enforces strict body, workspace grants, reviewer role, and expected review id  317ms
+   ✓ miss-flag review API claim promotion boundary > refuses approved managed new content as a revision-required conflict before insert  343ms
+ ✓ tests/modules-pipeline.test.ts (18 tests) 1485ms
+   ✓ modular pipeline, S0 to S10 > extracts gaps through proposer, critic and judge and commits only what it accepts  541ms
+ ✓ tests/accuracy-assembly-generation.test.ts (6 tests) 1558ms
+   ✓ generateExtractionAssembly > selects persisted judged versions, runs exact selected-version coverage, saves mappings, and retries by generation key  437ms
+ ✓ tests/accuracy-extract-api.test.ts (7 tests) 1110ms
+   ✓ accuracy extract API > returns a generic logged 500 with resumable batch identity when assembly linking fails, then resumes without re-extraction  320ms
+ ✓ tests/accuracy-omission-actions.test.ts (36 tests) 1029ms
+ ✓ tests/accuracy-omission-review-store.test.ts (8 tests) 416ms
+ ✓ tests/accuracy-assembly-api.test.ts (8 tests) 439ms
+   ✓ authorized assembly API > requires a signed-in authorized workspace and supports strict list/read queries  313ms
+ ✓ tests/accuracy-ledger-filters.test.ts (10 tests) 434ms
+   ✓ workspace plan_label (IEP vs IEGP) > seeds BGB gold with IEP + SI and Tisle gold with IEGP + chapter  340ms
+ ✓ tests/accuracy-experiment-api-integration.test.ts (1 test) 394ms
+   ✓ experiment API integration > grants the authenticated workspace creator and remaps a valid source workspace input into the isolated copy  394ms
+ ✓ tests/accuracy-hygiene.test.ts (9 tests) 359ms
+ ✓ tests/accuracy-gantt-save-final.test.ts (11 tests) 334ms
+ ✓ tests/accuracy-agent-events.test.ts (12 tests) 269ms
+ ✓ tests/accuracy-ideate-api.test.ts (5 tests) 249ms
+ ✓ tests/iegp-engine.test.ts (31 tests) 257ms
+ ✓ tests/accuracy-merge-status-store.test.ts (2 tests) 227ms
+ ✓ tests/accuracy-organization-grants-api.test.ts (3 tests) 202ms
+ ✓ tests/accuracy-review-miss-flags.test.ts (2 tests) 174ms
+ ✓ tests/accuracy-coverage-assist-api.test.ts (2 tests) 203ms
+ ✓ tests/accuracy-validation-gate.test.ts (5 tests) 129ms
+ ✓ tests/accuracy-gantt-continuity.test.ts (12 tests) 128ms
+ ✓ tests/accuracy-parse-block-preview.test.ts (8 tests) 160ms
+ ✓ tests/accuracy-source-upload.test.ts (5 tests) 125ms
+ ✓ tests/accuracy-completeness-skip-rules.test.ts (23 tests) 128ms
+ ✓ tests/accuracy-parse-ingest.test.ts (5 tests) 91ms
+ ✓ tests/accuracy-module-run.test.ts (1 test) 89ms
+ ✓ tests/accuracy-coverage-decide.test.ts (7 tests) 92ms
+ ✓ tests/accuracy-gantt-project.test.ts (7 tests) 122ms
+ ✓ tests/iegp-mapping.test.ts (6 tests) 86ms
+ ✓ tests/accuracy-extract-gate.test.ts (8 tests) 107ms
+ ✓ tests/accuracy-routing-defaults.test.ts (1 test) 72ms
+ ✓ tests/modules-contracts.test.ts (23 tests) 80ms
+ ✓ tests/accuracy-pass-comparison.test.ts (49 tests) 26ms
+ ✓ tests/accuracy-experiment-api.test.ts (26 tests) 18ms
+ ✓ tests/accuracy-assembly.test.ts (15 tests) 17ms
+ ✓ tests/accuracy-inventory-extract.test.ts (7 tests) 15ms
+ ✓ tests/accuracy-need-extract.test.ts (8 tests) 13ms
+ ✓ tests/iegp-demo-pack.test.ts (3 tests) 11ms
+ ✓ tests/accuracy-assembly-review.test.ts (4 tests) 11ms
+ ✓ tests/accuracy-snapshot-completeness.test.ts (11 tests) 11ms
+ ✓ tests/accuracy-item-history.test.ts (3 tests) 10ms
+ ✓ tests/accuracy-experiment-gold.test.ts (15 tests) 10ms
+ ✓ tests/accuracy-ideate.test.ts (5 tests) 8ms
+ ✓ tests/accuracy-agentic-cycle.test.ts (20 tests) 8ms
+ ✓ tests/iegp-create-buttons.test.ts (5 tests) 7ms
+ ✓ tests/accuracy-completeness-audit.test.ts (6 tests) 6ms
+ ✓ tests/accuracy-pack-recall.test.ts (7 tests) 5ms
+ ✓ tests/accuracy-llamaparse-gate.test.ts (3 tests) 3ms
+ ✓ tests/accuracy-merge-dedupe.test.ts (8 tests) 4ms
+ ✓ tests/iegp-seed.test.ts (16 tests) 4ms
+ ✓ tests/accuracy-reference-gold.test.ts (3 tests) 3ms
+ ✓ tests/accuracy-parse-policy.test.ts (5 tests) 2ms
+ ✓ tests/accuracy-coverage-schema.test.ts (1 test) 2ms
+ ✓ tests/accuracy-iegp-semantics.test.ts (6 tests) 2ms
+ ✓ tests/accuracy-gantt-export-svg.test.ts (4 tests) 3ms
+ ✓ tests/accuracy-cost-rollup.test.ts (3 tests) 2ms
+ ✓ tests/accuracy-coverage-queue.test.ts (4 tests) 2ms
+ ✓ tests/llm-api-key-routing.test.ts (3 tests) 2ms
+ ✓ tests/accuracy-run-api-key.test.ts (1 test) 2ms
+ ✓ tests/accuracy-status-engine.test.ts (9 tests) 2ms
+ ✓ tests/accuracy-gantt-activity-detail.test.ts (2 tests) 2ms
+ ✓ tests/accuracy-local-text-parse.test.ts (1 test) 2ms
+ ✓ tests/accuracy-reference-manifest.test.ts (1 test) 2ms
+ ✓ tests/accuracy-cost.test.ts (1 test) 1ms
+ ✓ tests/planning-context.test.ts (1 test) 1ms
+ ✓ tests/accuracy-quote-validator.test.ts (2 tests) 2ms
+ ✓ tests/accuracy-assembly-revision-ui.test.ts (18 tests) 498ms
+ ✓ tests/accuracy-assembly-review-ui.test.ts (8 tests) 173ms
+ ✓ tests/accuracy-item-history-ui.test.ts (11 tests) 114ms
+ ✓ tests/accuracy-omission-controls.test.ts (22 tests) 127ms
+ ✓ tests/accuracy-assembly-ui.test.ts (5 tests) 91ms
+ ✓ tests/req-docs-mermaid.test.ts (1 test) 92ms
+ ✓ tests/accuracy-source-extract-actions.test.ts (4 tests) 37ms
+
+ Test Files  91 passed (91)
+      Tests  1010 passed (1010)
+   Start at  06:07:02
+   Duration  169.08s (transform 1.51s, setup 0ms, collect 27.45s, tests 122.14s, environment 2.47s, prepare 3.21s)

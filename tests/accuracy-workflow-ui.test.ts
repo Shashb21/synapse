@@ -117,3 +117,13 @@ it("clears a fresh candidate display when reloaded priority inputs have changed"
   await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Reload current priority inputs")!.click());
   expect(host.textContent).not.toContain("Fresh suggestion: defer");
 });
+
+it("presents copied managed split history as read-only without offering a source inverse", async () => {
+  const { SplitOperationHistory } = await import("@/components/accuracy/claim-split-controls");
+  await act(async () => root.render(createElement(SplitOperationHistory, { workspaceId: "copy", operations: [{ id: "archived-split",
+    parent_gap_id: "parent", addressed_gap_id: "addressed", open_residual_gap_id: "residual", state: "archived",
+    actor: { name: "Source reviewer" }, rationale: "Historical review", created_at: "2026-10-08", rolled_back_at: null }] })));
+  expect(host.textContent).toContain("Copied history — read only");
+  expect(host.textContent).toContain("Source approvals do not authorize this copy");
+  expect([...host.querySelectorAll("button")].some(button => button.textContent === "Rollback split")).toBe(false);
+});

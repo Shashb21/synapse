@@ -3,7 +3,7 @@ import { agenticModule } from "../_factory";
 import type { AccuracyModuleContext } from "@/accuracy/kernel/contracts";
 import { accuracyTransactionActive, withAccuracyWorkspaceMutation } from "@/accuracy/store/db";
 import { readStructuredFields } from "@/accuracy/domain/structured-fields";
-import { listClaims, claimMetadata } from "@/accuracy/store/claim-store";
+import { listDownstreamClaims, claimMetadata, updateClaimMetadata } from "@/accuracy/store/claim-store";
 import { loadAccuracyPriorityConfig, priorityInputs, priorityContextSchema, accuracyPlacementSchema, readStoredAccuracyPlacements, writeAccuracyPlacement,
   readEffectiveAccuracyPlacement, PriorityError, type AccuracyPlacement, type PrioritySelection } from "@/accuracy/store/priority-store";
 import { suggestPriorities, mergePrioritySuggestion, placementFromScores } from "@/modules/stages/s8-prioritization/scoring";
@@ -14,7 +14,7 @@ import { aiSwitch, AiDisabledError } from "@/modules/kernel/ai-switch";
 export const accuracyPrioritizeInputSchema = z.object({
   workspace_id: z.string().min(1), gap_ids: z.array(z.string().min(1)).optional(),
   x_axis: z.string().optional(), y_axis: z.string().optional(), setting: z.string().optional(),
-  context: priorityContextSchema.optional(), only_missing: z.boolean().optional(), dry_run: z.boolean().default(false),
+  context: priorityContextSchema.optional(), only_missing: z.boolean().optional(), dry_run: z.boolean().optional(),
 });
 const outputSchema = z.object({
   mode: z.enum(["llm", "deterministic"]), axes: z.array(z.object({ id: z.string(), label: z.string(), weight: z.number(), higher_is_priority: z.boolean().optional() })),
@@ -30,7 +30,7 @@ export async function prioritizeAccuracy(input: z.infer<typeof accuracyPrioritiz
   const selection: PrioritySelection = { setting: input.setting, x_axis: input.x_axis, y_axis: input.y_axis, context: input.context };
   const skipped: { gap_id: string; reason: string }[] = [];
   const states = await withAccuracyWorkspaceMutation(input.workspace_id, async () => {
-    const claims = await listClaims(input.workspace_id, { limit: 2147483647 });
+    const claims = await listDownstreamClaims(input.workspace_id, { limit: null });
     const ids = input.gap_ids?.length ? [...new Set(input.gap_ids)] : claims.filter(c => c.claim_type === "gap").map(c => c.id);
     const stored = await readStoredAccuracyPlacements(input.workspace_id);
     const eligible: Awaited<ReturnType<typeof priorityInputs>>[] = [];
@@ -42,8 +42,8 @@ export async function prioritizeAccuracy(input: z.infer<typeof accuracyPrioritiz
         const reason = state.reason ?? (input.only_missing && already ? "already_placed" : null);
         if (reason) skipped.push({ gap_id: id, reason }); else eligible.push(state);
       } catch (error) {
-        if (!(error instanceof PriorityError) || error.code !== "unknown_gap") throw error;
-        skipped.push({ gap_id: id, reason: "unknown_gap" });
+        if (!(error instanceof PriorityError) || !["unknown_gap", "ineligible_gap"].includes(error.code)) throw error;
+        skipped.push({ gap_id: id, reason: error.code === "ineligible_gap" ? error.message : "unknown_gap" });
       }
     }
     return eligible;
@@ -79,7 +79,13 @@ export async function prioritizeAccuracy(input: z.infer<typeof accuracyPrioritiz
         input_revision: workingState?.input_revision ?? snapshot.input_revision, config_revision: workingState?.config_revision ?? snapshot.config_revision, score: workingState && [workingState.xAxis, workingState.yAxis].every(a => typeof working.axis_scores[a.id] === "number") ? placementFromScores(workingState.xAxis, workingState.yAxis, working.axis_scores).score : null,
         validation: current?.validation ?? null, references: state.references, limitations: [...state.limitations, ...(effective && !effective.inputs ? ["Working placement inputs are unavailable; select current axes and review."] : [])],
         history: stored?.history ?? [], human_revision: stored?.human_revision ?? null };
-      if (!input.dry_run) await writeAccuracyPlacement(row);
+      if (!input.dry_run) {
+        await writeAccuracyPlacement(row);
+        await updateClaimMetadata({ workspace_id: input.workspace_id, claim_id: row.gap_id, merge: true,
+          metadata: { priority_scoring: { gap_id: row.gap_id, axis_scores: suggestion.axis_scores, score: suggestion.score,
+            band: suggestion.suggested_band, rationale: suggestion.rationale, mode: outcome.mode, validated: false,
+            input_revision: state.input_revision, config_revision: state.config_revision } } });
+      }
       results.push(row);
     }
     return results;

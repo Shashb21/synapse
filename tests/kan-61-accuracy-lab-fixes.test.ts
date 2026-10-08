@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** A request cookie jar the route handlers read and signInDemo/signOut write. */
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
@@ -57,6 +57,8 @@ import {
   listWorkspaces,
 } from "@/accuracy/store/tenant";
 import { signInDemo } from "@/modules/auth/session";
+import * as session from "@/modules/auth/session";
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 import { HarnessAiOffError, harnessNoModelMessage, runHarness } from "@/modules/harness/harness";
 import { setAiEnabled } from "@/modules/kernel/ai-switch";
 
@@ -170,6 +172,11 @@ describe("unknown workspace (KAN-61 item 2)", () => {
   });
 
   it("every accuracy write route that takes workspace_id answers 404", async () => {
+    vi.stubEnv("OWNER_EMAILS", "kan61-reviewer@example.test");
+    const actor = { name: ADMIN, function: "medical_affairs" as const };
+    vi.spyOn(session, "sessionContext").mockResolvedValue({ signed_in: true, demo: false, role: "contributor", actor,
+      session: { id: "kan61-review-session", subject: "kan61-reviewer", provider_id: "fixture-idp", email: "kan61-reviewer@example.test",
+        actor, role: "contributor", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() } });
     const writes: [string, (req: Request) => Promise<Response>, string, Record<string, unknown>][] = [
       ["manual claim", claimsPost, "POST", { claim_type: "tactic", statement: "Orphan", rationale: "typed by hand" }],
       ["validate", validatePost, "POST", { claim_ids: ["c1"], action: "validate", rationale: "ok" }],
@@ -188,7 +195,7 @@ describe("unknown workspace (KAN-61 item 2)", () => {
     for (const [label, handler, method, body] of writes) {
       const res = await call(await handler(request("/api/accuracy/x", method, { workspace_id: missing, ...body })));
       expect({ label, status: res.status }).toEqual({ label, status: 404 });
-      expect(String(res.json.error)).toMatch(/^Unknown workspace/);
+      expect(String(res.json.error)).toMatch(label === "review" ? /^Workspace not found$/ : /^Unknown workspace/);
     }
   });
 

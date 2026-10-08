@@ -1,3 +1,5 @@
+import { approvedLiveInventory } from "@/accuracy/store/assembly-review-store";
+import { AssemblyHistory } from "@/components/accuracy/assembly-history";
 import { requireOwnerPage } from "@/modules/auth/owner";
 import Link from "next/link";
 import { AccuracyAppShell, PageIntro } from "@/components/accuracy-app-shell";
@@ -52,6 +54,7 @@ function toCard(claim: ClaimRow, statementById: Map<string, string>): LedgerClai
     statement: claim.statement,
     status: claim.status,
     validated: claim.validated,
+    history_only: meta.history_only === true,
     structured: readStructuredFields(claim),
     validation_freshness: claimValidationFreshness(claim),
     override_stale: Boolean(meta.status_override?.stale),
@@ -120,13 +123,16 @@ export default async function AccuracyLedgerPage({
         open_residual_gap_id: operation.open_residual_gap_id, state: operation.state, actor: { name: String((operation.audit as { last_human_edit?: { by?: string } })?.last_human_edit?.by ?? "") },
         rationale: String((operation.audit as { last_human_edit?: { rationale?: string } })?.last_human_edit?.rationale ?? ""), created_at: operation.created_at, rolled_back_at: operation.rolled_back_at,
       }));
-      const claims = await listClaims(workspaceId, { limit: 2147483647 });
+      const rawClaims = await listClaims(workspaceId, { limit: 2147483647 });
+      const approved = await approvedLiveInventory(workspaceId);
+      const claims = approved ? rawClaims.map(row => approved.claims.find(item => item.id === row.id)
+        ?? { ...row, validated: false, metadata: { ...claimMetadata(row), history_only: true } }) : rawClaims;
       const joins = await listCoverageJoins(workspaceId, { effective: true });
       const statusTactics = claims.filter(c => c.claim_type === "tactic" && isActiveLedgerClaim(c)).map(c => ({ id: c.id,
         status: asTacticLifecycle(claimMetadata(c).tactic_status) ?? asTacticLifecycle(c.status) ?? "unknown" as const }));
       const live = claims.filter((c) => c.status !== "merged" && c.status !== "retired");
       const statementById = new Map(claims.map((c) => [c.id, c.statement]));
-      const active = live.filter((c) => c.status !== "rejected");
+      const active = live.filter((c) => c.status !== "rejected" && claimMetadata(c).history_only !== true);
       tacticOptions = active
         .filter((c) => c.claim_type === "tactic")
         .map((c) => ({ id: c.id, statement: c.statement }));
@@ -330,6 +336,7 @@ export default async function AccuracyLedgerPage({
           <LedgerMergedList workspaceId={workspaceId} rows={merged} />
         </>
       )}
+      {activeWorkspace ? <AssemblyHistory key={`${workspaceId}:${operations.map(op => `${op.id}:${op.state}`).join(",")}`} workspaceId={workspaceId} /> : null}
       {activeWorkspace ? <SplitOperationHistory workspaceId={workspaceId} operations={operations} /> : null}
     </AccuracyAppShell>
   );

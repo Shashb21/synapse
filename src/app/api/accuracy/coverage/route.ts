@@ -12,7 +12,7 @@ import {
   upsertCoverageDecision,
 } from "@/accuracy/store/coverage-store";
 import {
-  labActor,
+  labActor, labRevisionAuthor,
   labErrorMessage,
   labRequestErrorResponse,
   readLabJson,
@@ -116,8 +116,9 @@ export async function POST(req: Request) {
       } });
       return NextResponse.json({ ok: true, ...coveragePagePayload(page), attempts: page.attempts });
     }
-    if (body.action === "reject") await rejectCoveragePair({ ...body, actor });
-    else await upsertCoverageDecision({ ...body, actor });
+    const author = await labRevisionAuthor();
+    const decision = body.action === "reject" ? await rejectCoveragePair({ ...body, actor, author }) : await upsertCoverageDecision({ ...body, actor, author });
+    if (decision.awaiting_approval) return NextResponse.json({ ok: true, awaiting_approval: true, assembly_id: decision.assembly_id });
     const derived = await runAccuracyModule({
       call_kind: "status_derive",
       agent_role: "none",

@@ -64,7 +64,7 @@ function controlled(fail = false) {
   originalModule ??= activeAccuracyModuleId("need_extract");
   const module_id = newId("pass-api-module");
   registerAccuracyModule(agenticModule({ id: module_id, call_kind: "need_extract", title: "API local extraction", summary: "No model calls",
-    inputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()).default([]) }),
+    inputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()).default([]), source_page: z.unknown().optional() }),
     outputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), gaps: z.array(z.unknown()) }),
     run: async (input, context) => {
       const result = await runShallowAgenticCycle({ run: context.run, maxExchanges: 0, proposer: async () => ({ gaps: [] }),

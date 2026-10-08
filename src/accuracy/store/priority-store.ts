@@ -13,7 +13,7 @@ import { claimFactualRevision, claimValidationFreshness, readStructuredFields, s
 import { deriveGapStatus, asTacticLifecycle } from "@/accuracy/modules/status-derive/engine";
 import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
-import { claimMetadata, getClaim, listClaims, isActiveLedgerClaim, requireClaimActor, requireValidationRationale } from "./claim-store";
+import { claimMetadata, getClaim, updateClaimMetadata, listDownstreamClaims, isActiveLedgerClaim, requireClaimActor, requireValidationRationale } from "./claim-store";
 import { listCoverageJoins } from "./coverage-store";
 import { getWorkspace } from "./tenant";
 import { readParseBlocksByIds } from "./parse-store";
@@ -155,15 +155,19 @@ async function verifiedReferences(workspace_id: string, raw: unknown): Promise<{
 }
 /** Read inside the common lock for a consistent eligibility/token snapshot. No model here. */
 export async function priorityInputs(workspace_id: string, gap_id: string, selection: PrioritySelection = {}) {
-  const gap = await getClaim(workspace_id, gap_id);
-  if (!gap || gap.claim_type !== "gap") throw new PriorityError("unknown_gap", "Unknown gap in workspace.");
+  const gap = (await listDownstreamClaims(workspace_id, { limit: null })).find(row => row.id === gap_id);
+  if (!gap || gap.claim_type !== "gap") {
+    const raw = await getClaim(workspace_id, gap_id);
+    if (raw?.claim_type === "gap" && !isActiveLedgerClaim(raw)) throw new PriorityError("ineligible_gap", "inactive");
+    throw new PriorityError("unknown_gap", "Unknown gap in workspace.");
+  }
   const workspace = await getWorkspace(workspace_id);
   if (!workspace) throw new PriorityError("unknown_workspace", "Unknown workspace.");
   const [configRow] = await accuracyDb().select().from(t.accuracyPriorityConfigs).where(eq(t.accuracyPriorityConfigs.workspace_id, workspace_id));
   if (!configRow) throw new PriorityError("unknown_workspace", "Priority workspace configuration is unavailable.");
   const config = configRow.data as AccuracyPriorityConfig;
   const resolved = resolveAccuracyPriorityAxes(config, selection);
-  const claims = await listClaims(workspace_id, { limit: 2147483647 });
+  const claims = await listDownstreamClaims(workspace_id, { limit: null });
   const tactics = claims.filter(c => c.claim_type === "tactic" && isActiveLedgerClaim(c)).sort((a, b) => a.id.localeCompare(b.id));
   const coverage = (await listCoverageJoins(workspace_id, { effective: true })).filter(c => c.gap_id === gap_id).sort((a, b) => a.tactic_id.localeCompare(b.tactic_id));
   const computed = deriveGapStatus({ gap_id, coverages: coverage,
@@ -258,7 +262,10 @@ export async function setAccuracyPlacement(args: { workspace_id: string; gap_id:
       score: [state.xAxis, state.yAxis].every(a => typeof working.axis_scores[a.id] === "number") ? placementFromScores(state.xAxis, state.yAxis, working.axis_scores).score : null, references: state.references, limitations: state.limitations,
       validation: working.validated ? { freshness: "current", input_revision: state.input_revision, config_revision: state.config_revision, by: args.actor.name, by_function: args.actor.function, rationale, at } : current?.validation ? { ...current.validation, freshness: "stale" } : null,
       history: [...(stored?.history ?? []), ...(audit.edit_history ?? [])] as unknown as Record<string, unknown>[], human_revision: priorityRevision({ prior: stored?.human_revision, at, actor: args.actor, working, rationale }) };
-    await writeAccuracyPlacement(row); return row;
+    await writeAccuracyPlacement(row);
+    if (row.band) await updateClaimMetadata({ workspace_id: args.workspace_id, claim_id: args.gap_id, merge: true,
+      metadata: { priority: row.band, priority_band: row.band, priority_origin: "review", priority_rationale: rationale } });
+    return row;
   });
 }
 export async function validateAccuracyPlacement(args: Parameters<typeof setAccuracyPlacement>[0] & { band: MatrixBand }) {

@@ -10,6 +10,8 @@ import { validateProvenance, provenanceSpanSchema, type ParseBlock } from "./quo
 import { newId } from "@/modules/kernel/ids";
 import { claimMetadata, getClaimsByIds, isActiveLedgerClaim, type AccuracyClaimRow } from "./claim-store";
 import { claimFactualRevision, structuredProvenance, readStructuredFields } from "@/accuracy/domain/structured-fields";
+import { assemblyExecutionScope } from "@/accuracy/kernel/assembly-context";
+import { AssemblyReviewError } from "@/accuracy/domain/assembly-review";
 
 export type CoverageJoinRow = typeof t.accuracyCoverageJoins.$inferSelect;
 export type CoverageOverall = "pending" | "full" | "partial" | "limited" | "not_relevant";
@@ -23,6 +25,25 @@ export type CoveragePair = {
   failure_reason?: string | null; pending_reason?: "missing_provenance" | null; protected?: boolean;
   evidence?: string[];
 };
+
+async function approvedInventory(workspace_id: string) {
+  if (assemblyExecutionScope().kind !== "production") return null;
+  const { approvedLiveInventory } = await import("./assembly-review-store");
+  return approvedLiveInventory(workspace_id);
+}
+
+async function requireApprovedPair(workspace_id: string, gap_id: string, tactic_id: string): Promise<boolean> {
+  const live = await approvedInventory(workspace_id);
+  if (!live) return false;
+  const claims = new Map(live.claims.map((claim) => [claim.id, claim]));
+  const gap = claims.get(gap_id);
+  const tactic = claims.get(tactic_id);
+  if (!gap || gap.claim_type !== "gap" || !tactic || tactic.claim_type !== "tactic") {
+    throw new AssemblyReviewError("approval_required", "Coverage requires claims from the current approved assembly.");
+  }
+  return true;
+}
+
 export type CoverageProgress = {
   eligible_total: number; pending: number; assessed: number; validated: number;
   stale: number; unknown: number; failed: number; rejected: number; missing_provenance: number;
@@ -38,6 +59,7 @@ export { canonicalCoverageOverall } from "@/accuracy/domain/coverage-overall";
 /** Inventory lifecycle does not limit assessment. Proposed/cancelled/unknown remain inspectable. */
 export function coverageExclusionReason(claim: AccuracyClaimRow): string | null {
   const meta = claimMetadata(claim);
+  if (meta.history_only === true) return "history_only";
   if (!isActiveLedgerClaim(claim)) return claim.status;
   if (claim.status === "excluded" || meta.excluded === true || meta.review_status === "rejected") return "excluded";
   if (claim.status === "retired" || meta.retired === true || meta.retired_at) return "retired";
@@ -153,7 +175,7 @@ export function rebaseCopiedCoverage(args: { join: CoverageJoinRow; gap: Accurac
 /** Full eligible entity picker, sharing the assessment eligibility owner. */
 export async function listCoverageInventory(workspace_id: string) {
   await ensureAccuracySchema();
-  const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id)).orderBy(t.accuracyClaims.id);
+  const claims = (await approvedInventory(workspace_id))?.claims ?? await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id)).orderBy(t.accuracyClaims.id);
   return { gaps: claims.filter((c) => c.claim_type === "gap" && !coverageExclusionReason(c)),
     tactics: claims.filter((c) => c.claim_type === "tactic" && !coverageExclusionReason(c)) };
 }
@@ -164,7 +186,7 @@ export async function listCoveragePage(args: CoveragePageInput): Promise<Coverag
   const page_size = args.page_size ?? 100;
   if (!Number.isSafeInteger(page_size) || page_size < 1 || page_size > 500) throw new Error("page_size must be an integer between 1 and 500.");
   return withAccuracyTransaction(async () => {
-    const claims = await accuracyDb().select().from(t.accuracyClaims)
+    const claims = (await approvedInventory(args.workspace_id))?.claims ?? await accuracyDb().select().from(t.accuracyClaims)
       .where(eq(t.accuracyClaims.workspace_id, args.workspace_id)).orderBy(t.accuracyClaims.id);
     const entities = claims.filter((c) => c.claim_type === "gap" || c.claim_type === "tactic");
     const exclusions = entities.flatMap((c) => { const reason = coverageExclusionReason(c); return reason ? [{ claim_id: c.id, reason }] : []; });
@@ -234,7 +256,8 @@ export async function listCoveragePairs(workspace_id: string): Promise<CoverageP
 
 /** Claims are workspace-scoped and must be eligible even for a human-selected pair. */
 export async function requireCoveragePairClaims(args: PairIdentity): Promise<{ gap: AccuracyClaimRow; tactic: AccuracyClaimRow }> {
-  const rows = await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
+  const live = await approvedInventory(args.workspace_id);
+  const rows = live ? live.claims.filter(claim => [args.gap_id, args.tactic_id].includes(claim.id)) : await getClaimsByIds(args.workspace_id, [args.gap_id, args.tactic_id]);
   const gap = rows.find((row) => row.id === args.gap_id);
   const tactic = rows.find((row) => row.id === args.tactic_id);
   if (!gap || gap.claim_type !== "gap") throw new Error(`Unknown gap: ${args.gap_id}`);
@@ -256,6 +279,7 @@ export type CoverageWrite = PairIdentity & Partial<CoverageRevisions> & {
   overall: string; rationale: string; evidence?: string[];
   expected_snapshot?: string;
   actor?: import("@/accuracy/kernel/contracts").Actor; run_id?: string;
+  author?: import("@/accuracy/domain/assembly-revision").AssemblyRevisionAuthor;
 };
 async function checkedClaims(args: CoverageWrite) {
   // Row locks coordinate claim edits even when their owner only joins an Accuracy transaction.
@@ -285,9 +309,27 @@ function historyOf(existing?: CoverageJoinRow): unknown[] {
   return [...(Array.isArray(d.decision_history) ? d.decision_history : []),
     { ...existing, dimensions: Object.fromEntries(Object.entries(d).filter(([k]) => k !== "decision_history")) }];
 }
-async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rejection" | "failure"): Promise<CoverageJoinRow> {
+async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rejection" | "failure"): Promise<CoverageJoinRow & { assembly_id?: string; awaiting_approval?: boolean }> {
   return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
     const claims = await checkedClaims(args);
+    const live = await approvedInventory(args.workspace_id);
+    if (live) {
+      if (kind === "model" || kind === "failure") throw new AssemblyReviewError("conflict", "Assessment is a suggestion; change approved coverage through an explicit human successor.");
+      if (!args.author || !args.actor || JSON.stringify(args.author.actor) !== JSON.stringify(args.actor)) throw new AssemblyReviewError("forbidden", "An authenticated contributor identity is required.");
+      if (kind === "human") await requireCoverageEvidence(args, claims);
+      const gap = live.selected_items.find(item => item.claim_id === args.gap_id)!;
+      const tactic = live.selected_items.find(item => item.claim_id === args.tactic_id)!;
+      const binding = live.bindings.find(binding => binding.source_file_id === gap.source_file_id && binding.call_kind === "need_extract")!;
+      const { getWorkspace } = await import("./tenant");
+      const { createCoverageAssemblyRevision } = await import("@/accuracy/kernel/assembly-revision");
+      const candidate = await createCoverageAssemblyRevision({ workspace_id: args.workspace_id, org_id: (await getWorkspace(args.workspace_id))!.org_id,
+        parent_assembly_id: binding.assembly_id, expected_head_id: binding.assembly_id, expected_fingerprint: binding.assembly_fingerprint,
+        author: args.author, gap_version_id: gap.item_version_id, tactic_version_id: tactic.item_version_id,
+        overall: kind === "rejection" ? "pending" : canonicalCoverageOverall(args.overall), evidence: args.evidence ?? [], reason: args.rationale });
+      return { id: candidate.revision.id, workspace_id: args.workspace_id, gap_id: args.gap_id, tactic_id: args.tactic_id,
+        overall: kind === "rejection" ? "pending" : canonicalCoverageOverall(args.overall), validated: false, dimensions: {}, confidence: null,
+        rationale: args.rationale, assembly_id: candidate.assembly.id, awaiting_approval: true };
+    }
     const [existing] = await accuracyDb().select().from(t.accuracyCoverageJoins).where(pairWhere(args)).for("update");
     if (kind === "model" || kind === "failure") {
       if (!args.run_id?.trim()) throw new Error("Assessment run_id is required.");
@@ -318,7 +360,7 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
     return saved;
   });
 }
-export async function upsertCoverageDecision(args: CoverageWrite): Promise<void> { await writeCoverage(args, "human"); }
+export async function upsertCoverageDecision(args: CoverageWrite) { return writeCoverage(args, "human"); }
 export async function saveCoverageAssessment(args: CoverageWrite): Promise<CoverageJoinRow> {
   if (!["full", "partial", "limited", "not_relevant"].includes(args.overall)) throw new Error("Model omitted a canonical coverage verdict.");
   return writeCoverage(args, "model");
@@ -353,13 +395,14 @@ export async function assessCoveragePage(args: CoveragePageInput & {
   }
   return { ...(await listCoveragePage(args)), attempts };
 }
-export async function rejectCoveragePair(args: Omit<CoverageWrite, "overall">): Promise<void> { await writeCoverage({ ...args, overall: "pending" }, "rejection"); }
+export async function rejectCoveragePair(args: Omit<CoverageWrite, "overall">) { return writeCoverage({ ...args, overall: "pending" }, "rejection"); }
 /** Default retains original history flags. Consumers can explicitly request current, provenance-checked decisions. */
 export async function listCoverageJoins(workspace_id: string, options?: { effective?: boolean }): Promise<Array<CoverageJoinRow & { freshness?: CoverageFreshness }>> {
   await ensureAccuracySchema();
-  const joins = await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
+  const live = await approvedInventory(workspace_id);
+  const joins = live?.coverage ?? await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, workspace_id));
   if (!options?.effective || !joins.length) return joins;
-  const claims = await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id));
+  const claims = live?.claims ?? await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, workspace_id));
   const eligible = claims.filter((claim) => !coverageExclusionReason(claim));
   const byId = new Map(eligible.map((claim) => [claim.id, claim]));
   const provenance = await coverageProvenanceStates(eligible);
@@ -373,6 +416,7 @@ export async function listCoverageJoins(workspace_id: string, options?: { effect
 /** Trusted legacy/import boundary. Missing revision/actor remains unknown; it cannot create current validation. */
 export async function insertCoverageJoin(args: PairIdentity & { overall: string; validated?: boolean; rationale?: string | null }): Promise<CoverageJoinRow> {
   return withAccuracyWorkspaceMutation(args.workspace_id, async () => {
+    if (await requireApprovedPair(args.workspace_id, args.gap_id, args.tactic_id)) throw new AssemblyReviewError("conflict", "Coverage changes require a revised approved assembly.");
     await requireCoveragePairClaims(args);
     const [existing] = await accuracyDb().select().from(t.accuracyCoverageJoins).where(pairWhere(args));
     if (existing) return existing;

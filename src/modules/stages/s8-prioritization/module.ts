@@ -55,6 +55,7 @@ async function ensurePlacementSchema() {
 const humanAxesOf = (row: { human_axes: unknown } | undefined): string[] =>
   Array.isArray(row?.human_axes) ? (row.human_axes as unknown[]).map(String) : [];
 
+
 const inputSchema = z.object({
   gap_ids: z.array(z.string()).optional(),
   /**

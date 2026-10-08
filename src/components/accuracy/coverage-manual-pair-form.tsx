@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { rationaleError, sendJson } from "@/components/accuracy/claim-api";
 
-type Option = { id: string; statement: string; revision: string };
+export type CoverageOption = { id: string; statement: string; revision: string; evidence?: { block_id: string; quote: string }[] };
 
 const OVERALLS = [
   { value: "full", label: "Full" },
@@ -26,8 +26,8 @@ export function CoverageManualPairForm({
   tactics,
 }: {
   workspaceId: string;
-  gaps: Option[];
-  tactics: Option[];
+  gaps: CoverageOption[];
+  tactics: CoverageOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -35,6 +35,8 @@ export function CoverageManualPairForm({
   const [tacticId, setTacticId] = useState("");
   const [overall, setOverall] = useState<(typeof OVERALLS)[number]["value"]>("full");
   const [rationale, setRationale] = useState("");
+  const [evidence, setEvidence] = useState<string[]>([]);
+  const availableEvidence = [...new Map([...(gaps.find(row => row.id === gapId)?.evidence ?? []), ...(tactics.find(row => row.id === tacticId)?.evidence ?? [])].map(span => [span.block_id, span])).values()];
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -58,7 +60,7 @@ export function CoverageManualPairForm({
       gap_id: gapId,
       tactic_id: tacticId,
       overall,
-      rationale,
+      rationale, evidence: overall === "pending" ? [] : evidence,
       expected_gap_revision: gaps.find((row) => row.id === gapId)?.revision,
       expected_tactic_revision: tactics.find((row) => row.id === tacticId)?.revision,
     });
@@ -68,9 +70,9 @@ export function CoverageManualPairForm({
       setError(detail && typeof detail === "object" && "message" in detail ? String(detail.message) : result.error);
       return;
     }
-    setMessage(`Saved: ${gapId} ↔ ${tacticId} · ${overall}`);
+    setMessage(result.json.awaiting_approval ? "Saved successor awaiting assembly approval. Review it in the ledger’s Complete proposals." : `Saved: ${gapId} ↔ ${tacticId} · ${overall}`);
     setRationale("");
-    router.refresh();
+    if (!result.json.awaiting_approval) router.refresh();
   }
 
   if (gaps.length === 0 || tactics.length === 0) return null;
@@ -90,7 +92,7 @@ export function CoverageManualPairForm({
         <form onSubmit={submit} className="grid gap-2" data-testid="coverage-manual-pair">
           <label className="grid gap-1 text-[11px] text-muted-foreground">
             Gap
-            <select aria-label="Gap" value={gapId} onChange={(e) => setGapId(e.target.value)} className={selectClass}>
+            <select aria-label="Gap" value={gapId} onChange={(e) => { setGapId(e.target.value); setEvidence([]); }} className={selectClass}>
               <option value="">Choose a gap…</option>
               {gaps.map((row) => (
                 <option key={row.id} value={row.id}>
@@ -104,7 +106,7 @@ export function CoverageManualPairForm({
             <select
               aria-label="Tactic"
               value={tacticId}
-              onChange={(e) => setTacticId(e.target.value)}
+              onChange={(e) => { setTacticId(e.target.value); setEvidence([]); }}
               className={selectClass}
             >
               <option value="">Choose a tactic…</option>
@@ -129,6 +131,13 @@ export function CoverageManualPairForm({
               </Button>
             ))}
           </fieldset>
+          {availableEvidence.length > 0 && overall !== "pending" ? <fieldset className="grid gap-2 text-[12px]">
+            <legend>Supporting source evidence</legend>
+            {availableEvidence.map(span => <label key={span.block_id} className="flex gap-2">
+              <input type="checkbox" checked={evidence.includes(span.block_id)} onChange={event => setEvidence(event.target.checked ? [...evidence, span.block_id] : evidence.filter(id => id !== span.block_id))} />
+              Evidence: {span.quote}
+            </label>)}
+          </fieldset> : null}
           <Textarea
             aria-label="Coverage decision rationale (required)"
             value={rationale}

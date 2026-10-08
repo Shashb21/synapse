@@ -9,6 +9,7 @@ import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
 import { isHumanProtectedClaim, preserveHumanLocks } from "@/accuracy/store/claim-edit";
 import { applyClaimValidation, claimMetadata, insertClaim } from "@/accuracy/store/claim-store";
 import { insertCoverageJoin, listCoverageJoins } from "@/accuracy/store/coverage-store";
+import { withAssemblyPreparation } from "@/accuracy/kernel/assembly-context";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { RequestIdentity } from "@/modules/auth/request";
@@ -58,9 +59,10 @@ async function claims(f: Awaited<ReturnType<typeof fixture>>) {
   return accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, f.workspace_id));
 }
 async function candidate(f: Awaited<ReturnType<typeof fixture>>, opts: { statement?: string; kind?: "gap" | "tactic"; status?: string; metadata?: Record<string, unknown>; workspace_id?: string } = {}) {
-  return insertClaim({ workspace_id: opts.workspace_id ?? f.workspace_id, claim_type: opts.kind ?? f.issue.item_kind,
+  // Candidate rows model existing extraction material. Keep the contributor decision outside this scope.
+  return withAssemblyPreparation(() => insertClaim({ workspace_id: opts.workspace_id ?? f.workspace_id, claim_type: opts.kind ?? f.issue.item_kind,
     source_file_id: f.source_file_id, statement: opts.statement ?? f.issue.summary, status: opts.status,
-    metadata: { provenance: [{ ...f.issue.source_ref, quote: f.issue.evidence_quote }], ...opts.metadata } });
+    metadata: { provenance: [{ ...f.issue.source_ref, quote: f.issue.evidence_quote }], ...opts.metadata } }));
 }
 async function post(body: unknown) {
   const { POST } = await import("@/app/api/accuracy/omissions/route");
@@ -72,13 +74,13 @@ describe("atomic omission decisions", () => {
     const f = await fixture();
     const gap = await candidate(f, { metadata: { provenance: [] } });
     const tactic = await candidate(f, { kind: "tactic", statement: "Registry R" });
-    await applyClaimValidation({ workspace_id: f.workspace_id, claim_ids: [gap.id], action: "validate", rationale: "Board confirmed this need", actor });
-    await insertCoverageJoin({ workspace_id: f.workspace_id, gap_id: gap.id, tactic_id: tactic.id,
-      overall: "full", validated: true, rationale: "Board reviewed the study" });
+    await withAssemblyPreparation(() => applyClaimValidation({ workspace_id: f.workspace_id, claim_ids: [gap.id], action: "validate", rationale: "Board confirmed this need", actor }));
+    await withAssemblyPreparation(() => insertCoverageJoin({ workspace_id: f.workspace_id, gap_id: gap.id, tactic_id: tactic.id,
+      overall: "full", validated: true, rationale: "Board reviewed the study" }));
     await store.applyOmissionAction({ ...request(f), action: "link_existing", claim_id: gap.id });
     expect((await claims(f)).find(row => row.id === gap.id)).toMatchObject({ validated: false,
       metadata: { validation: { by: actor.name, rationale: "Board confirmed this need", stale: true } } });
-    expect((await listCoverageJoins(f.workspace_id))[0]).toMatchObject({ validated: false, rationale: "Board reviewed the study" });
+    expect((await withAssemblyPreparation(() => listCoverageJoins(f.workspace_id)))[0]).toMatchObject({ validated: false, rationale: "Board reviewed the study" });
   });
   it("recovers a tactic with explicit unknown structured facts and lifecycle", async () => {
     const f = await fixture({ kind: "tactic", summary: "Registry inventory" });

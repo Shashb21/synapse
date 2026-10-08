@@ -37,7 +37,7 @@ async function fixture() {
 function controlled(call_kind: "need_extract" | "inventory_extract", fail = false, ignoreControl = false) {
   const original = activeAccuracyModuleId(call_kind); if (original) originals.set(call_kind, original);
   const id = newId("comparison-module");
-  const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()) });
+  const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()), source_page: z.unknown().optional() });
   const outputSchema: z.ZodType<Record<string, unknown>> = call_kind === "need_extract" ? z.object({ workspace_id: z.string(), source_file_id: z.string(), gaps: z.array(z.unknown()) }) : z.object({ workspace_id: z.string(), source_file_id: z.string(), tactics: z.array(z.unknown()) });
   registerAccuracyModule(agenticModule({ id, call_kind, title: "Controlled comparison", summary: "Local cycle", inputSchema, outputSchema,
     run: async (input, context) => {
