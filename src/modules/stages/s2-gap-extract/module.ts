@@ -243,7 +243,7 @@ async function reviseWithModel(
         user: JSON.stringify({
           source_document: titleOf(args.document),
           exchange: args.exchange,
-          reviewer_corrections: args.hints || undefined,
+          worked_examples: args.hints || undefined,
           note:
             attempt > 1
               ? "An earlier answer left these candidates unanswered, incomplete or invalid. Revise each completely or withdraw it with a reason."
@@ -357,7 +357,7 @@ async function reviewWithModel(
         system: GAP_CRITIC_SYSTEM,
         user: JSON.stringify({
           exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
-          reviewer_corrections: args.hints || undefined,
+          worked_examples: args.hints || undefined,
           note: attempt > 1 ? "An earlier answer left these candidates unreviewed. Review each." : undefined,
           plan_gaps: args.planGaps,
           plan_gaps_note: args.planGaps.some((gap) => gap.set_aside) ? SET_ASIDE_NOTE : undefined,
@@ -499,7 +499,7 @@ async function judgeWithModel(
       const payload = (await ctx.complete({
         system: GAP_JUDGE_SYSTEM,
         user: JSON.stringify({
-          reviewer_corrections: args.hints || undefined,
+          worked_examples: args.hints || undefined,
           note:
             attempt > 1
               ? "An earlier answer left these candidates undecided or its decision was invalid. Decide each."
@@ -551,7 +551,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
       "A model proposes evidence gaps per parsed document, a model critic challenges them over three exchanges, and a model judge decides what commits and which plan gaps they duplicate. Needs a connected LLM.",
     contract: 1,
     agentic: true,
-    capabilities: ["llm-proposer", "llm-critic", "llm-judge", "hillclimb-hints"],
+    capabilities: ["llm-proposer", "llm-critic", "llm-judge", "worked-examples"],
   },
   inputSchema,
   outputSchema,
@@ -588,7 +588,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           : { set_aside: gap.status === "excluded" ? ("excluded" as const) : ("parked" as const) }),
       }));
     const documentById = new Map(documents.map((document) => [document.id, document]));
-    // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
+    // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     let reviewerHints = "";
     // The model judge runs as soon as the proposer's last revision is in; the
     // kernel's synchronous judge step then reports its decisions.
@@ -718,7 +718,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
           };
         });
       },
-    });
+    }, { kinds: ["gap_suggestion"], text: documents.flatMap((document) => document.blocks.map((block) => block.text)).join(" ").slice(0, 20_000) });
 
     // The candidate row each judged candidate became: an overlap keeps a pointer to it,
     // so a rejected suggestion can still be promoted by hand later.

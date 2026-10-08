@@ -24,7 +24,7 @@ test.describe("Observability and the run trace", () => {
     expect(run.route).toBeTruthy();
     expect(run.evals.length).toBeGreaterThan(0);
     expect(run.steps.some((step) => step.name === "input:accepted")).toBe(true);
-    expect(run.steps.some((step) => step.name === "hillclimb:hints")).toBe(true);
+    expect(run.steps.some((step) => step.name === "learning:worked-examples")).toBe(true);
   });
 
   test("shows all three rounds of the debate on the run page", async ({ page, request }) => {

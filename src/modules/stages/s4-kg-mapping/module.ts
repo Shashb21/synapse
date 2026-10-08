@@ -121,7 +121,7 @@ Return JSON only: {"rows":[{"gap_id":"","mapping_status":"open|addressed|partial
 
 const MAPPING_CRITIC_SYSTEM = `You independently review a proposed gap ↔ tactic mapping table for a pharma Integrated Evidence Generation Plan.
 
-For each row, judge whether each mapping's coverage and dimensions are defensible from the gap statement and the tactic's evidence question, population, comparator and outcomes; whether a tactic in the library that bears on the gap was left out; and whether the row's mapping_status follows from its mappings. Weigh any reviewer corrections.
+For each row, judge whether each mapping's coverage and dimensions are defensible from the gap statement and the tactic's evidence question, population, comparator and outcomes; whether a tactic in the library that bears on the gap was left out; and whether the row's mapping_status follows from its mappings. Use worked_examples (past reviewer decisions on similar cases) for calibration only where a case really matches; they are examples, not rules.
 
 The status rule is fixed: a "full", "partial" or "limited" mapping bears on the gap, so a row with any of them cannot be "open". Never ask for "open" while such a mapping stays; to make a row open, ask for those mappings to become "not_relevant". A gap whose only bearing tactics are "limited" is "partially_addressed".
 
@@ -382,7 +382,7 @@ async function llmProposals(
   const payload = (await shared.ctx.complete({
     system: MAPPING_TABLE_PROPOSER_SYSTEM,
     user: JSON.stringify({
-      reviewer_corrections: shared.hints || undefined,
+      worked_examples: shared.hints || undefined,
       note: args.retry
         ? "An earlier answer left these gaps without a complete, valid row. Each gap's rejected_because says what was wrong; fix exactly that and return a complete row for each."
         : undefined,
@@ -422,7 +422,7 @@ async function llmReviews(
   const payload = (await shared.ctx.complete({
     system: MAPPING_CRITIC_SYSTEM,
     user: JSON.stringify({
-      reviewer_corrections: shared.hints || undefined,
+      worked_examples: shared.hints || undefined,
       exchange: `${args.round} of ${PROPOSER_CRITIC_EXCHANGES}`,
       note: args.retry
         ? "An earlier answer left these rows unreviewed, gave no verdict for some of their mappings, or objected to a mapping without a note. Review each row and every mapping in it; give a note for every revise or drop."
@@ -480,7 +480,7 @@ async function llmVerdicts(
   const payload = (await shared.ctx.complete({
     system: MAPPING_JUDGE_SYSTEM,
     user: JSON.stringify({
-      reviewer_corrections: shared.hints || undefined,
+      worked_examples: shared.hints || undefined,
       note: args.retry ? "An earlier answer left these rows without a verdict. Judge each." : undefined,
       rows: args.rows.map((row) => ({
         gap: promptGap(shared, row.gap_id),
@@ -514,7 +514,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
       "A model proposes one row per gap with a coverage verdict, confidence and rationale for each tactic; a model critic challenges each row over three exchanges and a model judge accepts or rejects it. Needs a connected LLM.",
     contract: 1,
     agentic: true,
-    capabilities: ["mapping-table", "llm-proposer", "llm-critic", "llm-judge", "hillclimb-hints"],
+    capabilities: ["mapping-table", "llm-proposer", "llm-critic", "llm-judge", "worked-examples"],
   },
   inputSchema,
   outputSchema,
@@ -525,7 +525,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
     const { gaps, tactics } = candidateSets(state, input);
     const gapById = new Map(gaps.map((gap) => [gap.id, gap]));
     const describeGap = (id: string) => gapById.get(id)?.name ?? id;
-    // The kernel hands reviewer corrections to the proposer; the critic and judge weigh them too.
+    // The kernel hands similar past reviewer decisions (worked examples, KAN-79) to the proposer; the critic and judge see them too.
     const shared: Shared = { ctx, state, input, gapById, tactics, hints: "", blocked: blockedPairs(state), rejections: new Map() };
     const reviewByGap = new Map<string, Review>();
     const judgeVerdicts = new Map<string, JudgeVerdict>();
@@ -649,7 +649,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
             note: verdict.reason,
           };
         }),
-    });
+    }, { kinds: ["s4_mapping"], text: gaps.map((gap) => `${gap.name} ${gap.statement}`).join(" ") });
 
     const created_at = nowIso();
     const rows = outcome.judged.flatMap((item) => {

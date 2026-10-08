@@ -41,6 +41,7 @@ import {
   rejectResidualGap,
   requireMappingRowStatus,
   saveMappingTableRow,
+  loadState,
   overrideGapStatus,
   rewritePartialGap,
   splitPartialGap,
@@ -66,6 +67,8 @@ import {
   type CustomerContext,
 } from "@/modules/auth/api-guard";
 import { iegpActionCapability } from "./capabilities";
+import { latestS4MappingRows } from "@/lib/iegp/mapping-table";
+import { captureMappingRowDecision } from "@/lib/iegp/learning-capture";
 import {
   restoreExcludedGap,
   restoreRejectedMapping,
@@ -551,6 +554,8 @@ export async function POST(request: Request) {
           .map((id) => id.trim())
           .filter(Boolean);
         const mapping_status = requireMappingRowStatus(body.mapping_status);
+        // The model's row for this gap, read before the save, for the learning example (KAN-78).
+        const aiRow = (await latestS4MappingRows().catch(() => null))?.find((row) => row.gap_id === body.gap_id) ?? null;
         await saveMappingTableRow({
           gap_id: body.gap_id,
           tactic_ids,
@@ -559,6 +564,17 @@ export async function POST(request: Request) {
           actor_function,
           rationale,
         });
+        if (aiRow) {
+          const gap = (await loadState().catch(() => null))?.gaps.find((row) => row.id === body.gap_id);
+          if (gap) {
+            await captureMappingRowDecision({
+              gap: { id: gap.id, name: gap.name, statement: gap.statement },
+              ai: { mapping_status: aiRow.mapping_status, tactic_ids: aiRow.tactic_ids },
+              saved: { mapping_status, tactic_ids },
+              rationale,
+            });
+          }
+        }
         break;
       }
       case "accept_residual_gap":

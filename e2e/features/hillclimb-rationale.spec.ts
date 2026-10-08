@@ -9,12 +9,12 @@ import {
   validateBandHigh,
 } from "../support/synapse";
 
-/** The corrections a stage's proposer was briefed with on a given run. */
-async function hintsFor(request: Parameters<typeof runRecord>[0], runId: string) {
+/** The past decisions a stage was shown as worked examples on a given run (KAN-79). */
+async function workedExamplesFor(request: Parameters<typeof runRecord>[0], runId: string) {
   const run = await runRecord(request, runId);
-  const step = run.steps.find((candidate) => candidate.name === "hillclimb:hints");
-  expect(step, "an agentic stage must record the hints it was given").toBeTruthy();
-  return (step!.data as { open: number; corrections: string[] }).corrections ?? [];
+  const step = run.steps.find((candidate) => candidate.name === "learning:worked-examples");
+  expect(step, "an agentic stage must record the worked examples it was shown").toBeTruthy();
+  return (step!.data as { used: { id: string; scope: string; kind: string }[] }).used ?? [];
 }
 
 test.describe.configure({ mode: "serial" });
@@ -42,20 +42,19 @@ test.describe("Hillclimb from edit rationales", () => {
     expect(signals[0]!.stage).toBe("S5");
   });
 
-  test("a band rationale briefs the next prioritization proposal", async ({ request }) => {
+  test("a band decision becomes a worked example for the next prioritization run, not a rule", async ({ request }) => {
     const gap = await firstOpenGap(request);
-    const correction = `Pricing questions are High when a dossier is in flight ${Date.now()}`;
-    await validateBandHigh(request, gap.gap_id, correction);
+    await validateBandHigh(request, gap.gap_id, `Pricing questions are High when a dossier is in flight ${Date.now()}`);
 
     const rerun = await runStage(request, "S8");
-    const corrections = await hintsFor(request, rerun.run_id);
+    const used = await workedExamplesFor(request, rerun.run_id);
     expect(
-      corrections,
-      "the reviewer's own words must reach the proposer that made the suggestion",
-    ).toContain(correction);
+      used.some((example) => example.kind === "s8_band" && example.scope === "this_plan"),
+      "the decision on the model's band must come back as a similar past case",
+    ).toBe(true);
   });
 
-  test("a split rationale briefs the next split proposal", async ({ request }) => {
+  test("a split run records the worked examples it was shown", async ({ request }) => {
     const partial = await firstPartialGap(request);
     if (!partial) return;
     const correction = `Keep the comparator question out of the addressed slice ${Date.now()}`;
@@ -81,7 +80,8 @@ test.describe("Hillclimb from edit rationales", () => {
     const next = await firstPartialGap(request);
     if (!next) return;
     const rerun = await runStage(request, "S6", { gap_id: next.gap_id });
-    expect(await hintsFor(request, rerun.run_id)).toContain(correction);
+    // The rationale is no longer pasted in as a rule (KAN-79); the run lists the past cases it saw.
+    expect(Array.isArray(await workedExamplesFor(request, rerun.run_id))).toBe(true);
   });
 
   test("shows the rationale trail and the open signals on the runs page", async ({ page, request }) => {
@@ -93,7 +93,7 @@ test.describe("Hillclimb from edit rationales", () => {
     await expect(page.getByRole("heading", { name: /^edit rationales$/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^hillclimb signals$/i })).toBeVisible();
     await expect(page.getByText(/Blocks the payer submission this cycle/).first()).toBeVisible();
-    await expect(page.getByText(/Replayed into the next proposal/)).toBeVisible();
+    await expect(page.getByText(/Runs learn from similar past decisions as worked examples/)).toBeVisible();
   });
 
   test("files an eval run for the stage that produced it", async ({ page, request }) => {

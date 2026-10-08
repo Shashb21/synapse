@@ -19,7 +19,7 @@ import {
 } from "@/modules/kernel/agentic";
 import { RunRecorder } from "@/modules/kernel/observability";
 import { canPrompt, DEFAULT_FALLBACKS, DEFAULT_PROVIDER_ID, resolveRoute } from "@/modules/kernel/routing";
-import { digestAsPrompt } from "@/modules/kernel/hillclimb";
+import { WORKED_EXAMPLES_FRAMING, workedExamplesAsPrompt } from "@/modules/kernel/decision-examples";
 import { compositeScore } from "@/modules/kernel/baselines";
 import { promptVersionsFor } from "@/modules/kernel/prompt-versions";
 import { scoreMustMatch } from "@/modules/eval-gold/types";
@@ -202,7 +202,7 @@ describe("the locked agentic loop", () => {
 
     const stepNames = recorder.steps().map((step) => step.name);
     expect(stepNames).toEqual([
-      "hillclimb:hints",
+      "learning:worked-examples",
       "round1:proposer",
       "round1:critic",
       "round1:proposer-revise",
@@ -367,16 +367,15 @@ describe("rationale, evals and hillclimb plumbing", () => {
     expect(requireRationale("  HTA asked for it  ")).toBe("HTA asked for it");
   });
 
-  it("renders reviewer corrections as prompt text, and nothing when there are none", () => {
-    expect(digestAsPrompt({ stage: "S2", open: 0, corrections: [], by_kind: {} })).toBe("");
-    const prompt = digestAsPrompt({
-      stage: "S2",
-      open: 1,
-      corrections: ["Do not treat a publication plan line as a gap"],
-      by_kind: { user_edit: 1 },
-    });
-    expect(prompt).toContain("Reviewer corrections");
-    expect(prompt).toContain("- Do not treat a publication plan line as a gap");
+  it("renders worked examples as calibration, not rules, and nothing when there are none (KAN-79)", () => {
+    expect(workedExamplesAsPrompt([])).toBe("");
+    const prompt = workedExamplesAsPrompt([
+      { id: "dex_1", scope: "other_plans", kind: "gap_suggestion", lesson: "Reviewers keep a narrower population as its own gap." },
+    ]);
+    expect(prompt.startsWith(WORKED_EXAMPLES_FRAMING)).toBe(true);
+    expect(prompt).toContain("examples, not rules");
+    expect(prompt).toContain("narrower population");
+    expect(prompt).not.toMatch(/Respect them/);
   });
 
   it("passes an eval run only when every targeted score clears its target", () => {
