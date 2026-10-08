@@ -460,7 +460,35 @@ describe("KAN-39 immutable human revisions", () => {
     const after = (await approvedLiveInventory(scope.workspace_id))!;
     expect(after.coverage.find(pair => pair.gap_id === suggested.gap.id && pair.tactic_id === suggested.tactic.id)).toMatchObject({ overall: "limited", validated: true });
     expect(after.coverage.filter(pair => pair.overall === "pending")).toHaveLength(1);
+    const remaining = (await listCoveragePage({ workspace_id: scope.workspace_id })).pairs.find(pair => pair.overall === "pending")!;
+    expect(remaining).toMatchObject({ protected: false, validated: false, assessment_state: "pending",
+      suggestion: { overall: "partial", freshness: "stale" } });
+    const retryFailure = await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => { throw new Error("Retry after approval failed"); } });
+    expect(retryFailure.pairs.find(pair => pair.gap.id === remaining.gap.id && pair.tactic.id === remaining.tactic.id)).toMatchObject({
+      overall: "pending", validated: false, assessment_state: "failed", failure_reason: "Retry after approval failed",
+      suggestion: { overall: "partial", freshness: "stale" } });
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(after);
+    const resumed = await assessCoveragePage({ workspace_id: scope.workspace_id, assess });
+    expect(resumed.attempts).toEqual([{ gap_id: remaining.gap.id, tactic_id: remaining.tactic.id }]);
+    expect(attempts()).toBe(4);
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(after);
     expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess })).attempts).toEqual([]);
+    const adopted = await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: remaining.gap.id, tactic_id: remaining.tactic.id,
+      expected_gap_revision: remaining.gap_revision, expected_tactic_revision: remaining.tactic_revision,
+      overall: "partial", rationale: "Human adopted the newly reassessed pair", evidence: blockBundleIdsForPair(remaining.gap, remaining.tactic), actor: author.actor, author });
+    await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+    const adoptedDetail = await assemblyReviewState(scope.workspace_id, adopted.assembly_id!);
+    await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: adopted.assembly_id!, expected_fingerprint: adoptedDetail.fingerprint,
+      decision: "approve", rationale: "Exact subsequent adoption", advisory_overrides: [], reviewer });
+    expect((await listCoveragePage({ workspace_id: scope.workspace_id })).progress).toMatchObject({ validated: 4, pending: 0 });
+    expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess })).attempts).toEqual([]);
+    // Nested assessment/approval audit remains typed and copyable without granting authority.
+    const adoptedCopy = await copyExperimentWorkspace({ source_workspace_id: scope.workspace_id, source_file_ids: [scope.source_file_id, other.source_file_id] });
+    workspaces.unshift(adoptedCopy.workspace_id);
+    const adoptedArchive = (adoptedCopy.baseline_snapshot as unknown as { managed_history: import("@/accuracy/experiments/baseline-history").ManagedBaselineHistory }).managed_history;
+    expect(adoptedArchive.authority).toBe("audit_only");
+    expect(JSON.stringify(adoptedArchive.coverage_audit)).toContain("Retry after approval failed");
+    expect(await approvedLiveInventory(adoptedCopy.workspace_id)).toBeNull();
   });
 
   it("invalidates in-flight linking when a newer extraction publishes", async () => {

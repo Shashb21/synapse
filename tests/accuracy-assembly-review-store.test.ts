@@ -552,9 +552,12 @@ it("keeps an explicit manual pending coverage successor inactive until exact app
   const live = (await approvedLiveInventory(scope.workspace_id))!;
   expect(live.coverage[0]).toMatchObject({ overall: "pending", validated: false });
   expect(live.mappings).toEqual([]);
+  const { listCoveragePage, assessCoveragePage } = await import("@/accuracy/store/coverage-store");
+  expect((await listCoveragePage({ workspace_id: scope.workspace_id })).pairs[0]).toMatchObject({ overall: "pending", protected: true });
+  expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => { throw new Error("Explicit human pending must remain protected"); } })).attempts).toEqual([]);
 });
 
-it.each(["single source", "multiple sources", "later priority decision", "split again after inverse", "copy archived split", "copy stale priority"])("publishes managed split/inverse only after exact reviews: %s", async scenario => {
+it.each(["single source", "multiple sources", "later priority decision", "split again after inverse", "copy archived split", "copy stale priority", "assessment resume", "assessment adoption", "legacy assessment adoption"])("publishes managed split/inverse only after exact reviews: %s", async scenario => {
   const scope = await fixture();
   const { assembly } = await approveCurrentAssembly(scope);
   if (scenario === "multiple sources") {
@@ -590,12 +593,74 @@ it.each(["single source", "multiple sources", "later priority decision", "split 
       expected_review_id: detail.expected_review_id, decision: "approve", rationale: "Reviewed exact successor and pending work", reviewer,
       advisory_overrides: detail.advisories.map(f => ({ code: f.code, item_version_ids: f.item_version_ids, reason: "Residual stays pending" })) });
   };
+  if (scenario === "legacy assessment adoption") {
+    const { readAssembly } = await import("@/accuracy/store/assembly-store");
+    const { assemblyFingerprint } = await import("@/accuracy/domain/assembly");
+    const oldAssembly = (await readAssembly(scope.workspace_id, candidate.assembly_id!))!;
+    const coverage = oldAssembly.coverage.map(pair => { const old = { ...pair }; delete old.intent; return old; });
+    const revisions = await accuracyDb().select().from(t.accuracyAssemblyRevisions).where(eq(t.accuracyAssemblyRevisions.workspace_id, scope.workspace_id));
+    for (const revision of revisions) await accuracyDb().update(t.accuracyAssemblyRevisions).set({ change: { ...revision.change,
+      coverage: revision.change.coverage?.map(pair => { const old = { ...pair }; delete old.intent; return old; }) } }).where(eq(t.accuracyAssemblyRevisions.id, revision.id));
+    await accuracyDb().update(t.accuracyAssemblies).set({ coverage, fingerprint: assemblyFingerprint({ ...oldAssembly, coverage }) })
+      .where(eq(t.accuracyAssemblies.id, oldAssembly.id));
+  }
   await reviewCandidate(candidate.assembly_id!);
+  if (scenario === "legacy assessment adoption") {
+    const rows = await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, scope.workspace_id));
+    for (const row of rows) {
+      const dimensions = { ...(row.dimensions as Record<string, unknown>) };
+      delete dimensions.coverage_intent; delete dimensions.human_rejected;
+      await accuracyDb().update(t.accuracyCoverageJoins).set({ dimensions }).where(eq(t.accuracyCoverageJoins.id, row.id));
+    }
+  }
   const live = (await approvedLiveInventory(scope.workspace_id))!;
   expect(live.claims.map(row => row.id)).not.toContain(selectedGap.canonical_claim_id);
   expect(live.claims.map(row => row.id)).toContain(candidate.open_residual_gap_id);
   expect(live.coverage.find(row => row.gap_id === candidate.open_residual_gap_id)).toMatchObject({ overall: "pending", validated: false });
   expect((await listAccuracySplitOperations(scope.workspace_id))[0].state).toBe("applied");
+  if (scenario.includes("assessment")) {
+    const { assessCoveragePage, listCoveragePage } = await import("@/accuracy/store/coverage-store");
+    const { accuracyTransactionActive } = await import("@/accuracy/store/db");
+    const residual = (await listCoveragePage({ workspace_id: scope.workspace_id })).pairs.find(pair => pair.gap.id === candidate.open_residual_gap_id)!;
+    expect(residual).toMatchObject({ protected: false, overall: "pending", validated: false });
+    const failed = await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => { throw new Error("Residual provider unavailable"); } });
+    expect(failed.attempts).toHaveLength(1);
+    expect(failed.progress.failed).toBe(1);
+    const assessed = await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => {
+      expect(accuracyTransactionActive()).toBe(false);
+      return { overall: "partial", rationale: "Residual model suggestion", evidence: [scope.block_id], run_id: "residual-model" };
+    } });
+    expect(assessed.attempts).toHaveLength(1);
+    expect(await approvedLiveInventory(scope.workspace_id)).toEqual(live);
+    const refreshed = (await listCoveragePage({ workspace_id: scope.workspace_id })).pairs.find(pair => pair.gap.id === candidate.open_residual_gap_id)!;
+    expect(refreshed).toMatchObject({ overall: "pending", validated: false, protected: false,
+      suggestion: { overall: "partial", freshness: "current", evidence: [scope.block_id] } });
+    expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => { throw new Error("Saved success must not repeat"); } })).attempts).toEqual([]);
+    if (scenario === "assessment resume") {
+      // Assessment alone is not a later human edit. The guarded inverse can still be approved.
+      const inverse = await rollbackAccuracySplit({ workspace_id: scope.workspace_id, operation_id: candidate.operation_id,
+        actor: author.actor, author, rationale: "Inverse after non-authoritative assessment" });
+      expect(inverse).toMatchObject({ state: "awaiting_inverse_approval" });
+      if (!inverse) throw new Error("Managed inverse must return its successor");
+      await reviewCandidate(inverse.assembly_id);
+      expect((await approvedLiveInventory(scope.workspace_id))!.claims.map(row => row.id)).toContain(selectedGap.canonical_claim_id);
+    } else {
+      const { upsertCoverageDecision } = await import("@/accuracy/store/coverage-store");
+      const adopted = await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: residual.gap.id, tactic_id: residual.tactic.id,
+        expected_gap_revision: residual.gap_revision, expected_tactic_revision: residual.tactic_revision,
+        overall: refreshed.suggestion!.overall, evidence: refreshed.suggestion!.evidence, rationale: "Human reviewed the residual assessment", actor: author.actor, author });
+      expect(adopted.awaiting_approval).toBe(true);
+      await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+      await expect(reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: adopted.assembly_id!, expected_fingerprint: assembly.fingerprint,
+        decision: "approve", rationale: "Stale review is forbidden", reviewer })).rejects.toMatchObject({ code: "conflict" });
+      await reviewCandidate(adopted.assembly_id!);
+      const accepted = (await listCoveragePage({ workspace_id: scope.workspace_id })).pairs.find(pair => pair.gap.id === candidate.open_residual_gap_id)!;
+      expect(accepted).toMatchObject({ overall: "partial", validated: true, protected: true });
+      await expect(rollbackAccuracySplit({ workspace_id: scope.workspace_id, operation_id: candidate.operation_id,
+        actor: author.actor, author, rationale: "Cannot erase the later human adoption" })).rejects.toMatchObject({ code: "rollback_blocked" });
+    }
+    return;
+  }
   if (scenario === "copy stale priority") {
     const { readAccuracyPriorityInputs, validateAccuracyPlacement, listAccuracyPlacements } = await import("@/accuracy/store/priority-store");
     const input = await readAccuracyPriorityInputs({ workspace_id: scope.workspace_id, gap_id: candidate.open_residual_gap_id });
@@ -789,4 +854,75 @@ it.each(["success", "failure"])("refuses a managed assessment after exact approv
   expect(after.snapshot).not.toBe(original.snapshot);
   expect(after.progress).toMatchObject({ assessed: 2, validated: 2, pending: 2, failed: 0 });
   expect(after.pairs.filter(pair => !pair.validated).every(pair => pair.overall === "pending" && !pair.suggestion)).toBe(true);
+});
+
+
+it.each(["current", "legacy"])("keeps %s human rejections and decisions protected while automatic pending work resumes", async format => {
+  const scope = await fixture();
+  const first = await approveCurrentAssembly(scope);
+  const other = await addSource(scope);
+  const second = await completeAssembly(other, gap(other, "Independent unmet need"), tactic(other, "Independent publication"));
+  await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id: second.assembly.id, expected_fingerprint: second.assembly.fingerprint,
+    decision: "approve", rationale: "Independent source approved", advisory_overrides: [], reviewer });
+  const { upsertCoverageDecision, rejectCoveragePair, coveragePairRevisions, listCoveragePage, assessCoveragePage, saveCoverageAssessment } = await import("@/accuracy/store/coverage-store");
+  const { readAssembly } = await import("@/accuracy/store/assembly-store");
+  const { assemblyFingerprint } = await import("@/accuracy/domain/assembly");
+  const author = { ...reviewer, role: "contributor" as const };
+  const rejected = { workspace_id: scope.workspace_id, gap_id: first.gapPub.version.claim_id, tactic_id: second.tacticPub.version.claim_id };
+  const actualDecision = { workspace_id: scope.workspace_id, gap_id: first.gapPub.version.claim_id, tactic_id: first.tacticPub.version.claim_id };
+  const approveCandidate = async (assembly_id: string) => {
+    const state = await assemblyReviewState(scope.workspace_id, assembly_id);
+    await reviewAssembly({ workspace_id: scope.workspace_id, assembly_id, expected_fingerprint: state.fingerprint,
+      expected_review_id: state.expected_review_id, decision: "approve", rationale: "Exact human review", reviewer,
+      advisory_overrides: state.advisories.map(f => ({ code: f.code, item_version_ids: f.item_version_ids, reason: "Unassessed pairs remain pending" })) });
+  };
+  const rejection = await rejectCoveragePair({ ...rejected, ...await coveragePairRevisions(rejected), actor: author.actor, author,
+    // Even this exact reserved text must not reclassify the explicit FIRST pair as automatic.
+    rationale: "This selected pair awaits assessment" });
+  if (format === "legacy") {
+    // Reconstruct the persisted pre-intent contract, including its immutable fingerprint and lineage.
+    const assembly = (await readAssembly(scope.workspace_id, rejection.assembly_id!))!;
+    const coverage = assembly.coverage.map(pair => { const old = { ...pair }; delete old.intent; return old; });
+    const rows = await accuracyDb().select().from(t.accuracyAssemblyRevisions).where(eq(t.accuracyAssemblyRevisions.workspace_id, scope.workspace_id));
+    for (const row of rows) await accuracyDb().update(t.accuracyAssemblyRevisions).set({ change: { ...row.change,
+      coverage: row.change.coverage?.map(pair => { const old = { ...pair }; delete old.intent; return old; }) } }).where(eq(t.accuracyAssemblyRevisions.id, row.id));
+    await accuracyDb().update(t.accuracyAssemblies).set({ coverage, fingerprint: assemblyFingerprint({ ...assembly, coverage }) })
+      .where(eq(t.accuracyAssemblies.id, assembly.id));
+  }
+  await approveCandidate(rejection.assembly_id!);
+  if (format === "legacy") {
+    const rows = await accuracyDb().select().from(t.accuracyCoverageJoins).where(eq(t.accuracyCoverageJoins.workspace_id, scope.workspace_id));
+    for (const row of rows) {
+      const dimensions = { ...(row.dimensions as Record<string, unknown>) };
+      delete dimensions.coverage_intent; delete dimensions.human_rejected;
+      await accuracyDb().update(t.accuracyCoverageJoins).set({ dimensions }).where(eq(t.accuracyCoverageJoins.id, row.id));
+    }
+    const legacyPage = await listCoveragePage({ workspace_id: scope.workspace_id });
+    expect(legacyPage.pairs.find(pair => pair.gap.id === rejected.gap_id && pair.tactic.id === rejected.tactic_id)).toMatchObject({ protected: true, overall: "pending" });
+    expect(legacyPage.pairs.filter(pair => !pair.protected)).toHaveLength(1);
+  }
+  // A later successor must retain BOTH the explicit rejection and the automatic placeholder's meaning.
+  const accepted = await upsertCoverageDecision({ ...actualDecision, ...await coveragePairRevisions(actualDecision), overall: "limited",
+    evidence: [scope.block_id], rationale: "Accepted precise human coverage", actor: author.actor, author });
+  await approveCandidate(accepted.assembly_id!);
+  const before = (await approvedLiveInventory(scope.workspace_id))!;
+  const page = await listCoveragePage({ workspace_id: scope.workspace_id });
+  const pending = page.pairs.find(pair => !pair.protected)!;
+  expect(pending).toMatchObject({ overall: "pending", validated: false });
+  expect(page.pairs.find(pair => pair.gap.id === rejected.gap_id && pair.tactic.id === rejected.tactic_id)).toMatchObject({ protected: true, overall: "pending", validated: false });
+  expect(page.pairs.find(pair => pair.gap.id === actualDecision.gap_id && pair.tactic.id === actualDecision.tactic_id)).toMatchObject({ protected: true, overall: "limited", validated: true });
+  for (const identity of [rejected, actualDecision]) await saveCoverageAssessment({ ...identity, ...await coveragePairRevisions(identity), expected_snapshot: page.snapshot,
+    overall: "full", rationale: "Model must not overwrite this choice", evidence: [scope.block_id], run_id: "protected-attempt" });
+  expect(await approvedLiveInventory(scope.workspace_id)).toEqual(before);
+  const assessed = await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => ({ overall: "partial", rationale: "Only automatic work",
+    evidence: [other.block_id], run_id: "unassessed-attempt" }) });
+  expect(assessed.attempts).toEqual([{ gap_id: pending.gap.id, tactic_id: pending.tactic.id }]);
+  expect(await approvedLiveInventory(scope.workspace_id)).toEqual(before);
+  const adopted = await upsertCoverageDecision({ workspace_id: scope.workspace_id, gap_id: pending.gap.id, tactic_id: pending.tactic.id,
+    expected_gap_revision: pending.gap_revision, expected_tactic_revision: pending.tactic_revision, overall: "partial", evidence: [other.block_id],
+    rationale: "Human adopts the automatic pair result", actor: author.actor, author });
+  await expect(approvedLiveInventory(scope.workspace_id)).rejects.toMatchObject({ code: "approval_required" });
+  await approveCandidate(adopted.assembly_id!);
+  expect((await listCoveragePage({ workspace_id: scope.workspace_id })).pairs.every(pair => pair.protected)).toBe(true);
+  expect((await assessCoveragePage({ workspace_id: scope.workspace_id, assess: async () => { throw new Error("Protected pair reached model"); } })).attempts).toEqual([]);
 });

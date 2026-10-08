@@ -16,7 +16,7 @@ import { accuracyDb, withAccuracyWorkspaceMutation } from "./db";
 import * as t from "./schema";
 import { claimMetadata, getClaim, insertClaim, isActiveLedgerClaim, requireClaimActor, requireValidationRationale, applyClaimValidation, type AccuracyClaimRow, type AccuracyClaimMetadata } from "./claim-store";
 import { withHumanEdit } from "./claim-edit";
-import { listCoverageJoins, upsertCoverageDecision, type CoverageJoinRow } from "./coverage-store";
+import { findCoverageRecord, listCoverageJoins, upsertCoverageDecision, type CoverageJoinRow } from "./coverage-store";
 import { getWorkspace } from "./tenant";
 import { provenanceSpanSchema, validateProvenance, type ProvenanceSpan, type ParseBlock } from "./quote-validator";
 import { accuracyPriorityHumanRevisions } from "./priority-records";
@@ -240,7 +240,9 @@ export async function rollbackAccuracySplit(args: { workspace_id: string; operat
 
 /** Model suggestions do not become human decisions; their mirror/timestamp cannot block an inverse. */
 function inverseComparable(rows: { claims: AccuracyClaimRow[]; coverage: CoverageJoinRow[]; provenance: unknown[] }) {
-  return { ...rows, claims: rows.claims.map(claim => {
+  return { ...rows, coverage: rows.coverage.map(row => (row.dimensions as Record<string, unknown>).managed_assessment === true
+    ? findCoverageRecord(row, prior => typeof (prior.dimensions as Record<string, unknown>).assembly_review_id === "string") ?? row : row),
+    claims: rows.claims.map(claim => {
     const meta = { ...claimMetadata(claim) };
     if ((meta.priority_scoring as { validated?: boolean } | undefined)?.validated === false) delete meta.priority_scoring;
     return { ...claim, updated_at: null, metadata: meta };

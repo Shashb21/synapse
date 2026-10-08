@@ -16,12 +16,14 @@ export type ResolvedAssemblyItem = ItemVersion & {
   reason: string;
 };
 export type AssemblyMapping = { gap_version_id: string; tactic_version_id: string };
+export type AssemblyCoverageIntent = "decision" | "rejection" | "unassessed";
 export type AssemblyCoverage = AssemblyMapping & {
   run_id: string;
   input: Record<string, unknown>;
   output: unknown;
   mode: "llm" | "stub" | "human";
   human_revision_id?: string;
+  intent?: AssemblyCoverageIntent;
 };
 export type AssemblyExtractionRun = {
   call_kind: "need_extract" | "inventory_extract";
@@ -137,6 +139,24 @@ function coverageInputBlockBundle(input: Record<string, unknown>): string[] | nu
 
 function payloadMatches(a: unknown, b: unknown): boolean {
   return canonicalString(a) === canonicalString(b);
+}
+
+/** Interpret old placeholders only from their immutable producer lineage, never from pending alone. */
+export function assemblyCoverageIntent(pair: AssemblyCoverage, revision?: import("./assembly-revision").AssemblyRevision): AssemblyCoverageIntent {
+  if (pair.intent) return pair.intent;
+  const output = coverageDecisionSchema.parse(pair.output);
+  if (output.overall !== "pending") return "decision";
+  if (pair.mode !== "human") return "unassessed";
+  const index = revision && revision.id === pair.human_revision_id
+    ? (revision.coverage ?? []).findIndex(saved => payloadMatches(saved, pair)) : -1;
+  if (index < 0 || output.quote_block_ids.length || coverageInputBlockBundle(pair.input)?.length !== 0) return "decision";
+  // A coverage revision's FIRST entry is the explicit human choice, even if its
+  // rationale happens to match the automatic text. Only appended holes are automatic.
+  if (output.rationale === "This selected pair awaits assessment"
+    && (revision!.action === "coverage" && index > 0 || revision!.action === "inverse")) return "unassessed";
+  if (revision!.action === "split" && revision!.successor_version_ids?.includes(pair.gap_version_id)
+    && output.rationale === "Residual or unmapped slice requires assessment") return "unassessed";
+  return "decision";
 }
 
 /** Build the deterministic content fingerprint for an immutable assembly body. */
@@ -307,6 +327,11 @@ export function checkAssembly(args: {
     if (!parsed.success) {
       addFinding(findings, "invalid_coverage_output", ids, "Coverage output does not satisfy the decision schema.");
       continue;
+    }
+    if (row.intent !== undefined && (!["decision", "rejection", "unassessed"].includes(row.intent)
+      || row.mode !== "human" || ((row.intent === "unassessed" || row.intent === "rejection")
+        && (parsed.data.overall !== "pending" || parsed.data.quote_block_ids.length > 0)))) {
+      addFinding(findings, "invalid_coverage_intent", ids, "Coverage intent must match its immutable human revision and pending semantics.");
     }
     if (parsed.data.gap_id !== row.gap_version_id || parsed.data.tactic_id !== row.tactic_version_id) {
       addFinding(findings, "coverage_endpoint_mismatch", ids, "Coverage output IDs do not match selected version endpoints.");

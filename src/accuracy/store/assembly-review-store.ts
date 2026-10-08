@@ -1,3 +1,4 @@
+import { findCoverageRecord } from "./coverage-store";
 import { withHumanEdit } from "./claim-edit";
 import { claimFactualRevision } from "@/accuracy/domain/structured-fields";
 import { syncClaimProvenance } from "./claim-store";
@@ -15,6 +16,7 @@ import {
 } from "@/accuracy/domain/assembly-review";
 import {
   assemblyFingerprint,
+  assemblyCoverageIntent,
   checkAssembly,
   type Assembly,
   type AssemblyCheckReport,
@@ -561,6 +563,13 @@ async function assemblyForHead(workspace_id: string, head: ProductionHead): Prom
   return { assembly, review };
 }
 
+async function coverageIntents(workspace_id: string, coverage: Assembly["coverage"]) {
+  const ids = [...new Set(coverage.flatMap(pair => pair.human_revision_id ? [pair.human_revision_id] : []))];
+  const revisions = ids.length ? await accuracyDb().select().from(t.accuracyAssemblyRevisions).where(and(
+    eq(t.accuracyAssemblyRevisions.workspace_id, workspace_id), inArray(t.accuracyAssemblyRevisions.id, ids))) : [];
+  return new Map(coverage.map(pair => [pair.run_id, assemblyCoverageIntent(pair, revisions.find(row => row.id === pair.human_revision_id)?.change)]));
+}
+
 /** Resolve the current approved production inventory, or null for legacy workspaces with no managed batches. */
 export async function approvedLiveInventory(workspace_id: string): Promise<ApprovedLiveInventory | null> {
   await ensureAccuracySchema();
@@ -615,6 +624,7 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
     }
 
     for (const { assembly, review } of selectedHeadAssemblies) {
+      const intents = await coverageIntents(workspace_id, assembly.coverage);
       const itemsByVersion = new Map(assembly.items.map((item) => [item.id, item]));
       for (const row of assembly.mappings) {
         const gap = itemsByVersion.get(row.gap_version_id);
@@ -651,17 +661,19 @@ export async function approvedLiveInventory(workspace_id: string): Promise<Appro
           ? input.block_bundle_ids.filter((id): id is string => typeof id === "string")
           : [];
         const saved = currentCoverage.find(c => c.gap_id === gap.canonical_claim_id && c.tactic_id === tactic.canonical_claim_id);
-        const savedDimensions = (saved?.dimensions ?? {}) as Record<string, unknown>;
-        const reviewed = savedDimensions.assembly_review_id === review.id;
+        const approved = findCoverageRecord(saved, row => (row.dimensions as Record<string, unknown>)?.assembly_review_id === review.id);
+        const savedDimensions = (approved?.dimensions ?? {}) as Record<string, unknown>;
+        const reviewed = Boolean(approved);
+        const intent = intents.get(row.run_id)!;
         const projected: CoverageRow = {
           id: `approved:${row.run_id}`,
           workspace_id,
           gap_id: gap.canonical_claim_id,
           tactic_id: tactic.canonical_claim_id,
           overall: parsed.data.overall,
-          dimensions: { ...(reviewed ? savedDimensions : {}), quote_block_ids: parsed.data.quote_block_ids, block_bundle_ids: blockBundle },
+          dimensions: { ...(reviewed ? savedDimensions : {}), coverage_intent: intent, human_rejected: intent === "rejection", quote_block_ids: parsed.data.quote_block_ids, block_bundle_ids: blockBundle },
           confidence: String(parsed.data.confidence),
-          validated: reviewed && Boolean(saved?.validated),
+          validated: intent !== "unassessed" && reviewed && Boolean(approved?.validated),
           rationale: parsed.data.rationale,
         };
         const key = `${projected.gap_id}\u0000${projected.tactic_id}`;
@@ -748,7 +760,9 @@ async function persistApprovedFacts(assembly: Assembly, review: AssemblyReview) 
     await syncClaimProvenance(claim);
     reviewed.set(item.id, claim);
   }
+  const intents = await coverageIntents(assembly.workspace_id, assembly.coverage);
   for (const pair of assembly.coverage) {
+    const intent = intents.get(pair.run_id)!;
     const gap = reviewed.get(pair.gap_version_id), tactic = reviewed.get(pair.tactic_version_id);
     if (!gap || !tactic) throw new AssemblyReviewError("conflict", "Reviewed coverage selection changed.");
     const output = coverageDecisionSchema.parse(pair.output);
@@ -756,9 +770,9 @@ async function persistApprovedFacts(assembly: Assembly, review: AssemblyReview) 
       eq(t.accuracyCoverageJoins.gap_id, gap.id), eq(t.accuracyCoverageJoins.tactic_id, tactic.id)));
     const row = { id: old?.id ?? newId("cov"), workspace_id: assembly.workspace_id, gap_id: gap.id, tactic_id: tactic.id,
       overall: output.overall, validated: output.overall !== "pending", rationale: output.rationale, confidence: String(output.confidence),
-      dimensions: { gap_revision: claimFactualRevision(gap), tactic_revision: claimFactualRevision(tactic),
+      dimensions: { coverage_intent: intent, human_rejected: intent === "rejection", gap_revision: claimFactualRevision(gap), tactic_revision: claimFactualRevision(tactic),
         actor: { name: review.reviewer_actor_name, function: review.reviewer_actor_function }, decided_at: review.created_at,
-        evidence: output.quote_block_ids, run_id: pair.run_id, assessment_state: output.overall === "pending" ? "pending" : "successful", validation_stale: false,
+        evidence: output.quote_block_ids, run_id: pair.run_id, assessment_state: intent === "rejection" ? "rejected" : output.overall === "pending" ? "pending" : "successful", validation_stale: false,
         assembly_review_id: review.id, assembly_fingerprint: assembly.fingerprint, gap_version_id: pair.gap_version_id,
         tactic_version_id: pair.tactic_version_id, decision_history: old ? [old] : [] } };
     await db.insert(t.accuracyCoverageJoins).values(row).onConflictDoUpdate({

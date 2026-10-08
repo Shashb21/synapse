@@ -143,20 +143,46 @@ function pairFrom(gap: AccuracyClaimRow, tactic: AccuracyClaimRow, join?: Covera
     assessment_state: rejected ? "rejected" : failed ? "failed" : overall !== "pending" && freshness === "current" ? "successful" : "pending",
     failure_reason: typeof d.failure_reason === "string" ? d.failure_reason : null,
     pending_reason: missing ? "missing_provenance" : null,
-    protected: Boolean(rejected || d.actor || join?.validated || d.prior_validated),
+    protected: Boolean(rejected || d.actor && d.coverage_intent !== "unassessed" || join?.validated || d.prior_validated),
     evidence: !rejected && Array.isArray(d.evidence) ? d.evidence.filter((id): id is string => typeof id === "string") : [] };
 }
-/** Queue-only overlay. Suggestions never enter approved coverage or status inputs. */
+/** Find a retained record for this exact pair, newest first, without rewriting history. */
+export function findCoverageRecord(row: CoverageJoinRow | undefined, matches: (record: CoverageJoinRow) => boolean): CoverageJoinRow | undefined {
+  if (!row) return undefined;
+  function visit(value: unknown): CoverageJoinRow | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as CoverageJoinRow;
+    if (record.workspace_id === row!.workspace_id && record.gap_id === row!.gap_id && record.tactic_id === row!.tactic_id && matches(record)) return record;
+    const d = dimensions(record);
+    for (const key of ["decision_history", "merge_history", "legacy_duplicates"]) {
+      const history = d[key];
+      if (!Array.isArray(history)) continue;
+      for (let n = history.length - 1; n >= 0; n--) {
+        const found = visit(history[n]);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+  return visit(row);
+}
+
+/** Queue-only overlay. Approval can archive attempts, but cannot hide unfinished work. */
 function pairWithAssessment(pair: CoveragePair, saved: CoverageJoinRow | undefined, snapshot: string): CoveragePair {
-  if (!saved || dimensions(saved).managed_assessment !== true || pair.protected) return pair;
-  const d = dimensions(saved);
-  const current = d.assessment_snapshot === snapshot && coverageFreshness(saved, pair.gap, pair.tactic) === "current";
+  if (pair.protected) return pair;
+  const attempt = findCoverageRecord(saved, row => dimensions(row).managed_assessment === true);
+  if (!attempt) return pair;
+  const d = dimensions(attempt);
+  const current = d.assessment_snapshot === snapshot && coverageFreshness(attempt, pair.gap, pair.tactic) === "current";
   const failed = d.assessment_state === "failed";
+  const success = findCoverageRecord(saved, row => dimensions(row).managed_assessment === true && dimensions(row).assessment_state === "successful");
+  const successDimensions = dimensions(success);
   return { ...pair, assessment_state: current ? failed ? "failed" : "successful" : "pending",
-    failure_reason: failed ? saved.rationale : null,
-    ...(failed ? {} : { suggestion: { overall: saved.overall, rationale: saved.rationale,
-      evidence: Array.isArray(d.evidence) ? d.evidence.filter((id): id is string => typeof id === "string") : [],
-      run_id: typeof d.run_id === "string" ? d.run_id : null, freshness: current ? "current" : "stale" } }) };
+    failure_reason: failed ? attempt.rationale : null,
+    ...(success ? { suggestion: { overall: success.overall, rationale: success.rationale,
+      evidence: Array.isArray(successDimensions.evidence) ? successDimensions.evidence.filter((id): id is string => typeof id === "string") : [],
+      run_id: typeof successDimensions.run_id === "string" ? successDimensions.run_id : null,
+      freshness: successDimensions.assessment_snapshot === snapshot && coverageFreshness(success, pair.gap, pair.tactic) === "current" ? "current" : "stale" } } : {}) };
 }
 
 /** Include the input tokens in module inputs as well as persistence, so cached runs cannot cross factual revisions. */
@@ -348,6 +374,7 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
       const candidate = await createCoverageAssemblyRevision({ workspace_id: args.workspace_id, org_id: (await getWorkspace(args.workspace_id))!.org_id,
         parent_assembly_id: binding.assembly_id, expected_head_id: binding.assembly_id, expected_fingerprint: binding.assembly_fingerprint,
         author: args.author, gap_version_id: gap.item_version_id, tactic_version_id: tactic.item_version_id,
+        intent: kind === "rejection" ? "rejection" : "decision",
         overall: kind === "rejection" ? "pending" : canonicalCoverageOverall(args.overall), evidence: args.evidence ?? [], reason: args.rationale });
       return { id: candidate.revision.id, workspace_id: args.workspace_id, gap_id: args.gap_id, tactic_id: args.tactic_id,
         overall: kind === "rejection" ? "pending" : canonicalCoverageOverall(args.overall), validated: false, dimensions: {}, confidence: null,
@@ -371,8 +398,11 @@ async function writeCoverage(args: CoverageWrite, kind: "human" | "model" | "rej
     if (kind === "rejection" && args.evidence?.length) throw new CoverageError("invalid_evidence", "A pair rejection does not accept supporting coverage evidence.");
     if (kind === "human" || kind === "model") await requireCoverageEvidence(args, claims);
     const at = new Date().toISOString();
-    const nextDimensions = { ...(live ? {} : dimensions(existing)), decision_history: historyOf(existing),
+    const nextDimensions = { ...(live ? {} : dimensions(existing)),
+      // Managed projection/inverse must recover the exact approved audit record.
+      decision_history: live ? existing ? [existing] : [] : historyOf(existing),
       ...(live ? { managed_assessment: true, assessment_snapshot: args.expected_snapshot } : {}),
+      ...(kind === "human" || kind === "rejection" ? { coverage_intent: kind === "rejection" ? "rejection" : "decision" } : {}),
       gap_revision: args.expected_gap_revision, tactic_revision: args.expected_tactic_revision,
       actor: kind === "human" || kind === "rejection" ? args.actor : null,
       run_id: live && kind === "failure" ? null : args.run_id ?? null, decided_at: at, evidence: kind === "rejection" || kind === "failure" ? [] : args.evidence ?? [],

@@ -206,6 +206,7 @@ async function moveRevisionHeads(workspace_id: string, revision: AssemblyRevisio
 /** Persist a reasoned version-bound coverage decision without invoking a model. */
 export async function createCoverageAssemblyRevision(args: Omit<CreateAssemblyRevisionArgs, "change"> & {
   gap_version_id: string; tactic_version_id: string; overall: string; evidence: string[]; reason: string;
+  intent?: "decision" | "rejection";
 }): Promise<AssemblyRevisionResult> {
   requireAuthor(args.author);
   if (args.reason.trim().length < 3) throw new AssemblyError("invalid_input", "A reasoned coverage decision is required.");
@@ -216,7 +217,7 @@ export async function createCoverageAssemblyRevision(args: Omit<CreateAssemblyRe
     const tactic = parent.items.find(item => item.id === args.tactic_version_id && item.claim_type === "tactic");
     if (!gap || !tactic) throw new AssemblyError("invalid_input", "Coverage endpoints must be selected versions of the parent.");
     const id = newId("ahr");
-    const pair = humanCoverage(id, gap, tactic, args.overall, args.evidence, args.reason);
+    const pair = humanCoverage(id, gap, tactic, args.overall, args.evidence, args.reason, args.intent);
     const coverage = [...parent.coverage.filter(row => row.gap_version_id !== gap.id || row.tactic_version_id !== tactic.id), pair];
     const revision: AssemblyRevision = { id, workspace_id: args.workspace_id, baseline_assembly_id: revision_state.baseline_assembly_id,
       parent_assembly_id: parent.id, baseline_assembly_ids: "baselines" in selection ? selection.baselines : undefined,
@@ -228,12 +229,13 @@ export async function createCoverageAssemblyRevision(args: Omit<CreateAssemblyRe
 }
 
 function humanCoverage(revision_id: string, gap: import("@/accuracy/domain/assembly").ResolvedAssemblyItem,
-  tactic: import("@/accuracy/domain/assembly").ResolvedAssemblyItem, overall: string, evidence: string[], rationale: string): import("@/accuracy/domain/assembly").AssemblyCoverage {
+  tactic: import("@/accuracy/domain/assembly").ResolvedAssemblyItem, overall: string, evidence: string[], rationale: string,
+  intent: import("@/accuracy/domain/assembly").AssemblyCoverageIntent = "decision"): import("@/accuracy/domain/assembly").AssemblyCoverage {
   const output = coverageDecisionSchema.parse({ gap_id: gap.id, tactic_id: tactic.id, overall,
     quote_block_ids: evidence, confidence: 1, rationale: rationale.trim() });
   if (output.overall === "pending" && evidence.length) throw new AssemblyError("invalid_input", "Pending coverage does not assert supporting evidence.");
   return { gap_version_id: gap.id, tactic_version_id: tactic.id, run_id: `${revision_id}:${gap.id}:${tactic.id}`,
-    mode: "human", human_revision_id: revision_id, output,
+    mode: "human", human_revision_id: revision_id, intent, output,
     input: { gap_id: gap.id, tactic_id: tactic.id, block_bundle_ids: evidence,
       selected_versions: { gap_version_id: gap.id, tactic_version_id: tactic.id, gap_payload: gap.payload, tactic_payload: tactic.payload } } };
 }
@@ -244,7 +246,7 @@ async function saveManualSuccessor(args: { workspace_id: string; author: Assembl
   const pending = [];
   for (const gap of chosen.filter(item => item.claim_type === "gap")) for (const tactic of chosen.filter(item => item.claim_type === "tactic")) {
     if (!coverage.some(pair => pair.gap_version_id === gap.id && pair.tactic_version_id === tactic.id)) {
-      pending.push(humanCoverage(revision.id, gap, tactic, "pending", [], "This selected pair awaits assessment"));
+      pending.push(humanCoverage(revision.id, gap, tactic, "pending", [], "This selected pair awaits assessment", "unassessed"));
     }
   }
   revision.coverage = [...(revision.coverage ?? []), ...pending];
@@ -299,7 +301,7 @@ export async function createSplitAssemblyRevision(args: Omit<CreateAssemblyRevis
     for (const child of items) for (const tactic of parent.items.filter(item => item.claim_type === "tactic")) {
       const addressed = child.payload.split_role === "addressed" && args.proposal.addressed_tactic_ids.includes(tactic.canonical_claim_id);
       additions.push(humanCoverage(id, child, tactic, addressed ? "full" : "pending",
-        addressed ? args.proposal.addressed_evidence.map(span => span.block_id) : [], addressed ? args.reason : "Residual or unmapped slice requires assessment"));
+        addressed ? args.proposal.addressed_evidence.map(span => span.block_id) : [], addressed ? args.reason : "Residual or unmapped slice requires assessment", addressed ? "decision" : "unassessed"));
     }
     const revision: AssemblyRevision = { id, workspace_id: args.workspace_id, baseline_assembly_id: revision_state.baseline_assembly_id,
       parent_assembly_id: parent.id, baseline_assembly_ids: "baselines" in selection ? selection.baselines : undefined,
