@@ -81,7 +81,8 @@ describe("KAN-90 plan action coverage", () => {
     const suggestionId = await overlapOn(gapId);
     await acceptGapMergeSuggestion({ suggestion_id: suggestionId, rationale: "Same question, wider population", ...who });
     const state = await loadState();
-    const version = state.gap_versions.find((row) => row.live_gap_id === gapId && row.event === "merge");
+    // Versions outlive resets (KAN-89): only this test's merge counts.
+    const version = state.gap_versions.find((row) => row.live_gap_id === gapId && row.event === "merge" && row.at >= started);
     expect(version).toMatchObject({ retired_gap_id: gapId, name: "Versus SoC", actor_name: ACTOR.name });
     const edits = await listEdits({ entity_id: gapId });
     expect(edits.find((row) => row.field === "name")).toMatchObject({
