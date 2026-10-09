@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db, ensureCurrentSchemaTables, sharedDb } from "@/lib/iegp/db";
+import { currentSchemaName, db, ensureCurrentSchemaTables, inWorkspaceTransaction, setBeforeWorkspaceTransaction, sharedDb } from "@/lib/iegp/db";
 import { AUDIT_DDL, PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
 import { KERNEL_WORKSPACE_DDL } from "@/lib/iegp/workspace-tables";
 
@@ -86,8 +86,27 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
   }
   await globalForPlatform.synapsePlatformSchema;
   if (moduleMigrations.length > 0) {
-    await applyDdl(moduleMigrations);
+    // Once per schema per process (KAN-14), like the workspace bootstrap.
+    const schema = await currentSchemaName();
+    const applied = (moduleDdlApplied[schema] ??= new Set());
+    const pending = moduleMigrations.filter((ddl) => !applied.has(ddl));
+    if (pending.length === 0) return;
+    await applyDdl(pending);
+    // DDL inside a transaction is undone if it rolls back, so only a committed run counts.
+    if (!inWorkspaceTransaction()) for (const ddl of pending) applied.add(ddl);
   }
+}
+
+// Shared tables exist before any workspace transaction opens (see withWorkspaceTransaction).
+setBeforeWorkspaceTransaction(() => ensurePlatformSchema());
+
+/** Module DDL already applied, per schema, in this process. */
+const moduleDdlApplied: Record<string, Set<string>> = {};
+
+/** Forgets applied module DDL (a dropped schema, or tests that drop tables). */
+export function forgetModuleDdl(schema?: string) {
+  if (schema) delete moduleDdlApplied[schema];
+  else for (const key of Object.keys(moduleDdlApplied)) delete moduleDdlApplied[key];
 }
 
 /**

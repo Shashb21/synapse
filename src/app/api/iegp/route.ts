@@ -2,6 +2,7 @@ import { decidePartialSplit } from "@/modules/stages/s6-partial-split/module";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
 import { NextResponse } from "next/server";
+import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import {
   acceptMapping,
   acceptResidualGap,
@@ -242,7 +243,54 @@ async function fileGateEdit(
   });
 }
 
+/**
+ * Actions that run the stage pipeline (model calls). Their stages record their
+ * own runs as they go, so no transaction is held open across them.
+ */
+const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo"]);
+
+/** Carries a refused or failed action's response out of its rolled-back transaction. */
+class RolledBack extends Error {
+  constructor(readonly response: Response) {
+    super("Action rolled back");
+  }
+}
+
+async function actionOf(request: Request): Promise<string> {
+  try {
+    const body = (await request.json()) as { action?: unknown };
+    return typeof body?.action === "string" ? body.action : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Every plan action is all or nothing (KAN-15): its writes share one database
+ * transaction, so an action that fails part-way, or is refused after a first
+ * write, leaves nothing half-written.
+ */
 export async function POST(request: Request) {
+  if (NON_ATOMIC_ACTIONS.has(await actionOf(request.clone()))) return handleAction(request);
+  try {
+    // An unresolvable workspace is the action's own error to report, unwrapped.
+    await currentSchemaName();
+  } catch {
+    return handleAction(request);
+  }
+  try {
+    return await withWorkspaceTransaction(async () => {
+      const response = await handleAction(request);
+      if (!response.ok) throw new RolledBack(response);
+      return response;
+    });
+  } catch (error) {
+    if (error instanceof RolledBack) return error.response;
+    return apiErrorResponse(error, "Failed");
+  }
+}
+
+async function handleAction(request: Request): Promise<Response> {
   let body: Record<string, string>;
   let identity: CustomerContext;
   try {
@@ -275,6 +323,8 @@ export async function POST(request: Request) {
   const actor_function = identity.actor.function;
   try {
     const before = await gateBefore(body);
+    // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
+    let createdId: string | undefined;
     switch (body.action) {
       case "reset":
         // Reset to blank: empties the plan and clears the workspace's demo flag.
@@ -510,7 +560,7 @@ export async function POST(request: Request) {
         });
         break;
       case "record_missed_tactic":
-        await recordMissedTactic({
+        createdId = await recordMissedTactic({
           name: body.name,
           type: body.type as never,
           description: body.description,
@@ -655,7 +705,7 @@ export async function POST(request: Request) {
         break;
       case "create_gap":
         if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
-        await createGap({
+        createdId = await createGap({
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
@@ -799,7 +849,7 @@ export async function POST(request: Request) {
         break;
       case "create_addressed_gap":
         if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
-        await createAddressedGap({
+        createdId = await createAddressedGap({
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
@@ -926,7 +976,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
     await fileGateEdit(body, before, actor_name, actor_function);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
     return apiErrorResponse(error, "Failed");
   }

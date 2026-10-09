@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
@@ -12,10 +13,38 @@ const DEFAULT_URL =
 
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>;
+  platformPg?: ReturnType<typeof postgres>;
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
   sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
+  beforeWorkspaceTransaction?: () => Promise<void>;
+  ambientTransaction?: AsyncLocalStorage<AmbientTransaction>;
+  workspaceQueries?: number;
 };
+
+/** A workspace transaction the current async call chain runs inside (see `withWorkspaceTransaction`). */
+type AmbientTransaction = { tx: postgres.TransactionSql; schema: string; done: boolean };
+
+/** One store per process: Next bundles routes separately, like the workspace scope (context.ts). */
+const ambient: AsyncLocalStorage<AmbientTransaction> = (globalForDb.ambientTransaction ??=
+  new AsyncLocalStorage<AmbientTransaction>());
+
+/**
+ * Connections in a pool. `DATABASE_POOL_MAX` sets the workspace pool (default 10,
+ * 3 on Vercel where many instances share the database, 1 under Vitest so reads
+ * follow writes on one connection). Platform tables (sessions, workspaces,
+ * routing, learning) use their own small pool, `DATABASE_PLATFORM_POOL_MAX`
+ * (default 4, 2 on Vercel, 1 under Vitest), so a workspace transaction holding
+ * its connection never waits on a platform read it makes itself (KAN-14/15).
+ */
+export function poolSize(kind: "workspace" | "platform", env: Record<string, string | undefined> = process.env): number {
+  const raw = kind === "workspace" ? env.DATABASE_POOL_MAX : env.DATABASE_PLATFORM_POOL_MAX;
+  const parsed = Number(raw);
+  if (raw && Number.isInteger(parsed) && parsed >= 1 && parsed <= 100) return parsed;
+  if (env.VITEST) return 1;
+  if (env.VERCEL) return kind === "workspace" ? 3 : 2;
+  return kind === "workspace" ? 10 : 4;
+}
 
 type SslOption =
   | false
@@ -59,21 +88,28 @@ export function sslFor(url: string, env: Record<string, string | undefined> = pr
   };
 }
 
-function connectOptions() {
+function connectOptions(kind: "workspace" | "platform") {
   return {
-    // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
-    max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
+    max: poolSize(kind),
     ssl: sslFor(DEFAULT_URL),
+    // "already exists, skipping" notices from idempotent DDL are not news.
+    connection: { client_min_messages: "warning" },
   };
 }
 
 /**
- * The one connection pool, however many workspaces there are. Workspace
+ * The workspace connection pool, however many workspaces there are. Workspace
  * queries borrow a connection and point it at their schema for that query.
  */
 function client() {
-  if (!globalForDb.pg) globalForDb.pg = postgres(DEFAULT_URL, connectOptions());
+  if (!globalForDb.pg) globalForDb.pg = postgres(DEFAULT_URL, connectOptions("workspace"));
   return globalForDb.pg;
+}
+
+/** The platform pool (public schema): shared tables only. */
+function platformClient() {
+  if (!globalForDb.platformPg) globalForDb.platformPg = postgres(DEFAULT_URL, connectOptions("platform"));
+  return globalForDb.platformPg;
 }
 
 /** Registered by the workspaces module: workspace id → schema name. */
@@ -108,13 +144,16 @@ function quoteSchema(name: string): string {
  * Runs `fn` on a connection whose search path is only `name`, then resets the
  * connection before it goes back to the pool. A workspace query therefore sees
  * only its own schema: a table it lacks is an error, never another
- * workspace's rows.
+ * workspace's rows. The search path is sent in the same round trip as the
+ * query (pipelined on the reserved connection) and both must succeed.
  */
 async function onSchema<T>(name: string, fn: (pg: postgres.ReservedSql) => Promise<T>): Promise<T> {
   const reserved = await client().reserve();
   try {
-    await reserved.unsafe(`set search_path to ${quoteSchema(name)}`);
-    return await fn(reserved);
+    const setPath = reserved.unsafe(`set search_path to ${quoteSchema(name)}`);
+    setPath.execute();
+    const [, result] = await Promise.all([setPath, fn(reserved)]);
+    return result;
   } finally {
     await reserved.unsafe("reset search_path").catch(() => undefined);
     reserved.release();
@@ -123,18 +162,33 @@ async function onSchema<T>(name: string, fn: (pg: postgres.ReservedSql) => Promi
 
 type PendingLike = PromiseLike<unknown> & { values(): Promise<unknown> };
 
+/** The ambient transaction, when it belongs to the schema this query resolves to. */
+function transactionFor(name: string): AmbientTransaction | undefined {
+  const current = ambient.getStore();
+  // Work started inside a transaction but still running after it ended (a
+  // fire-and-forget follow-up) runs on its own, not on the finished transaction.
+  return current && !current.done && current.schema === name ? current : undefined;
+}
+
 /**
  * A postgres-js stand-in that Drizzle drives exactly like the real client: each
- * query runs in the current workspace's schema when it executes.
+ * query runs in the current workspace's schema when it executes, inside the
+ * ambient transaction when there is one.
  */
 const router = {
   options: { parsers: {} as Record<string, unknown>, serializers: {} as Record<string, unknown> },
   unsafe(query: string, params?: unknown[]): PendingLike {
     const run = async (values: boolean) => {
+      globalForDb.workspaceQueries = (globalForDb.workspaceQueries ?? 0) + 1;
       // Drizzle installed its type parsers on this stand-in; the real pool needs them too.
       Object.assign(client().options.parsers, router.options.parsers);
       Object.assign(client().options.serializers, router.options.serializers);
       const name = await resolveSchema();
+      const open = transactionFor(name);
+      if (open) {
+        const pending = open.tx.unsafe(query, params as never);
+        return values ? pending.values() : pending;
+      }
       if (name === DEFAULT_SCHEMA) {
         const pending = client().unsafe(query, params as never);
         return values ? pending.values() : pending;
@@ -151,13 +205,57 @@ const router = {
   },
   async begin(fn: (tx: postgres.TransactionSql) => unknown) {
     const name = await resolveSchema();
+    const open = transactionFor(name);
+    // Nested: a savepoint, so the inner block can fail alone and the outer one still commits.
+    if (open) return open.tx.savepoint((sp) => runAmbient({ tx: sp, schema: name, done: false }, () => fn(sp)));
+    // Tables exist before the transaction opens: DDL rolled back with it would be
+    // remembered as done, and the pool may have no second connection for it.
+    if (name === DEFAULT_SCHEMA) await ensureCurrentSchemaTables();
     return client().begin(async (tx) => {
       // SET LOCAL ends with the transaction, so the connection comes back clean.
       if (name !== DEFAULT_SCHEMA) await tx.unsafe(`set local search_path to ${quoteSchema(name)}`);
-      return fn(tx);
+      return runAmbient({ tx, schema: name, done: false }, () => fn(tx));
     });
   },
 };
+
+async function runAmbient<T>(store: AmbientTransaction, fn: () => T): Promise<Awaited<T>> {
+  try {
+    return await ambient.run(store, fn);
+  } finally {
+    store.done = true;
+  }
+}
+
+/** Workspace queries run through `db()` in this process (KAN-14 measurement and tests). */
+export function workspaceQueryCount(): number {
+  return globalForDb.workspaceQueries ?? 0;
+}
+
+/**
+ * Runs `fn` in one database transaction on the current workspace's schema
+ * (KAN-15): every `db()` query inside it, however deep, joins it, so a failure
+ * part-way leaves nothing half-written. Nested calls become savepoints.
+ * Platform tables (`sharedDb()`) are not part of it.
+ */
+export async function withWorkspaceTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  // Platform DDL runs first, outside the transaction: once the transaction has
+  // written a platform row (an audit event), DDL on that table from the platform
+  // pool would wait on it while it waits on the DDL.
+  if (!inWorkspaceTransaction()) await globalForDb.beforeWorkspaceTransaction?.();
+  return (await router.begin(() => fn())) as T;
+}
+
+/** Registered by the kernel: platform setup that must finish before a workspace transaction opens. */
+export function setBeforeWorkspaceTransaction(hook: () => Promise<void>) {
+  globalForDb.beforeWorkspaceTransaction = hook;
+}
+
+/** True inside `withWorkspaceTransaction` (or a Drizzle `db().transaction`). */
+export function inWorkspaceTransaction(): boolean {
+  const current = ambient.getStore();
+  return Boolean(current && !current.done);
+}
 
 /** Workspace-scoped: every IEGP and stage table. */
 export function db() {
@@ -169,7 +267,7 @@ export function db() {
 
 /** Platform-wide tables: users, workspaces, sessions, routing, settings, accuracy. */
 export function sharedDb() {
-  if (!globalForDb.sharedDrizzle) globalForDb.sharedDrizzle = drizzle(client(), { schema });
+  if (!globalForDb.sharedDrizzle) globalForDb.sharedDrizzle = drizzle(platformClient(), { schema });
   return globalForDb.sharedDrizzle;
 }
 
@@ -335,6 +433,8 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_at text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_need_id text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS related_gap_ids jsonb NOT NULL DEFAULT '[]'::jsonb",
+    // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
+    "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",
     // KAN-90: every plan audit row says who (verifiably), in what role, from which request.
     "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_principal text",
     "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_role text",
@@ -345,12 +445,13 @@ function iegpStatements(): string[] {
   ];
 }
 
+/**
+ * Brings the current schema's tables up to date: once per schema per process
+ * (KAN-14), not on every load. `forgetSchemaBootstrap` makes the next call
+ * re-run it, e.g. after a schema was dropped.
+ */
 export async function ensureSchema() {
-  const d = db();
-  await d.execute(sql`set client_min_messages to warning`);
-  for (const stmt of iegpStatements()) {
-    await d.execute(sql.raw(stmt));
-  }
+  await ensureCurrentSchemaTables();
 }
 
 type RunStatement = (statement: string) => Promise<unknown>;
@@ -373,6 +474,12 @@ export function onWorkspaceBootstrap(hook: BootstrapHook): () => void {
 }
 
 const bootstrapped = new Map<string, Promise<void>>();
+
+/** Forgets that `name` (or every schema) was bootstrapped, so its DDL runs again on next use. */
+export function forgetSchemaBootstrap(name?: string) {
+  if (name) bootstrapped.delete(name);
+  else bootstrapped.clear();
+}
 
 /**
  * Loads every stage module before a schema is bootstrapped, so the registry

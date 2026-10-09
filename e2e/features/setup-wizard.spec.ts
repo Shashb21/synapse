@@ -159,7 +159,12 @@ test.describe.serial("IEGP setup wizard", () => {
     await page.getByTestId("setup-summary-company").getByRole("button", { name: "Edit" }).click();
     await page.getByLabel(/Plan owner/).fill("M. Hale");
     await expect(page.getByRole("button", { name: /continue later/i })).toHaveCount(0);
+    // "Saved …" already shows the earlier save's time, so wait for this save itself before reloading.
+    const saved = page.waitForResponse(
+      (res) => res.url().endsWith("/api/iegp") && res.request().method() === "POST" && (res.request().postData() ?? "").includes("save_product_setup"),
+    );
     await page.getByRole("button", { name: "Continue", exact: true }).click();
+    expect((await saved).ok()).toBeTruthy();
     await expect(page.getByTestId("setup-saved-at")).toContainText("Saved");
     await page.reload();
     await expect(page.getByTestId("setup-step-review")).toContainText("M. Hale");

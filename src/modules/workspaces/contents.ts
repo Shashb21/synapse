@@ -1,5 +1,5 @@
 import type { ActorFunction } from "@/lib/iegp/enums";
-import { currentSchemaName } from "@/lib/iegp/db";
+import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { loadState, replaceWorkspaceContents, type WorkspaceContents } from "@/lib/iegp/store";
 import type { IegpState } from "@/lib/iegp/types";
 import { resetWorkspaceModules } from "@/modules/kernel/db";
@@ -45,10 +45,13 @@ export async function replaceContents(
   actor?: { name: string; function: ActorFunction },
 ): Promise<void> {
   const before = contentCounts(await loadState());
-  await replaceWorkspaceContents(contents, actor);
-  await resetWorkspaceModules();
-  // The full demo also opens prioritized, with a dated timeline to try.
-  if (contents === "demo") await loadDemoPlan(workspaceId ?? undefined);
+  // All or nothing (KAN-15): a failure part-way leaves the workspace as it was.
+  await withWorkspaceTransaction(async () => {
+    await replaceWorkspaceContents(contents, actor);
+    await resetWorkspaceModules();
+    // The full demo also opens prioritized, with a dated timeline to try.
+    if (contents === "demo") await loadDemoPlan(workspaceId ?? undefined);
+  });
   if (workspaceId) await setWorkspaceDemo(workspaceId, contents !== "blank");
   await recordAudit({
     category: "workspace",

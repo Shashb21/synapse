@@ -145,7 +145,7 @@ describe("canonical expansion acceptance", () => {
     Object.assign(gap, {status: "validated_open", computed_status: "validated_open", human_validated: false, status_lock: unlocked(), status_override: null});
     state.residual_gap_suggestions = [{parent_gap_id: gap.id, statement: "Candidate leftover", reasons: ["Uncovered scope"], status: "candidate", lock: unlocked()}];
     await persistState(state);
-    const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics[0]!)});
+    const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!)});
     const coverage = (await loadState()).coverages[0]!;
     await lockCoverageOverall({coverage_id: coverage.id, overall: "full", rationale: "Human validates child only", actor_name: actor.name, actor_function: actor.function});
     expect((await loadState()).gaps.find(g => g.id === gap.id)!.computed_status).toBe("validated_open");
@@ -163,7 +163,7 @@ describe("canonical expansion acceptance", () => {
     await runInWorkspace({workspace_id: "expansion-success", schema: "ws_expansion_success"}, async () => {
       const state = buildSeed();
       await persistState(state);
-      const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics[0]!)});
+      const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!)});
       const planned = await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Separate workspace approved", actor, expected_version: child.version});
       expect((await loadState()).expansions[0]!.status).toBe("planned");
       expect(planned.history).toHaveLength(2);
@@ -252,7 +252,7 @@ describe("canonical expansion acceptance", () => {
     const state = await loadState();
     state.tactics[0]!.status = "completed";
     await persistState(state);
-    await expect(acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics[0]!), scope: {...scope, prospective_enrolment: true}})).rejects.toThrow(/prospective/i);
+    await expect(acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!), scope: {...scope, prospective_enrolment: true}})).rejects.toThrow(/prospective/i);
     expect((await loadState()).expansions).toEqual([]);
   });
   it("refuses missing, wrong-parent and cancelled scope assessments without altering parent", async () => {
@@ -301,7 +301,8 @@ describe("canonical expansion acceptance", () => {
       expect(inventory.find(t => t.expansion_id === child.id)?.comparator).toBe(recorded ? "Active comparator cohort" : "");
       expect(inventory.find(t => t.expansion_id === child.id)?.data_source).toBe(recorded ? "Linked registry" : "");
       expect(inventory.find(t => t.expansion_id === child.id)?.type).toBe(recorded ? "subgroup_analysis" : "not_recorded");
-      expect(inventory.find(t => t.id === args.tactic_id)?.evidence_question).toBe(before.tactics[0]!.evidence_question);
+      // Rows come back in no fixed order; look the parent up by id.
+      expect(inventory.find(t => t.id === args.tactic_id)?.evidence_question).toBe(before.tactics.find(t => t.id === args.tactic_id)!.evidence_question);
       const after = await loadState();
       expect(after.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages.filter(c => !c.expansion_id));
       expect(after.coverages.find(c => c.expansion_id === child.id)?.overall).toBe("full");

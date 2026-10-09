@@ -50,6 +50,8 @@ describe("KAN-17: one prioritization system", () => {
   beforeEach(async () => {
     await persistState(buildSeed());
     await resetWorkspaceModules();
+    // A reset keeps the audit history (KAN-89); start from no carry-over rows so a reused test DB counts only this test's.
+    await exec("DELETE FROM audit WHERE action LIKE 'carry_over%'");
     await carryOver(); // add the marker columns before the fixtures use them
   });
 

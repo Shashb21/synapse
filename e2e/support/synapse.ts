@@ -369,3 +369,13 @@ export async function firstPartialGap(request: APIRequestContext) {
 export async function validateBandHigh(request: APIRequestContext, gap_id: string, rationale: string) {
   return planAction(request, { action: "validate_band", gap_id, band: "high", rationale });
 }
+
+/**
+ * The gap id issued just before `id` (GAP-007 → GAP-006). Ids are never
+ * reissued after a reset (KAN-15), so specs derive them instead of assuming GAP-001.
+ */
+export function previousGapId(id: string): string {
+  const match = /^GAP-(\d+)$/.exec(id);
+  if (!match) throw new Error(`Not a numbered gap id: ${id}`);
+  return `GAP-${String(Number(match[1]) - 1).padStart(3, "0")}`;
+}
