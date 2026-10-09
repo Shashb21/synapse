@@ -108,7 +108,8 @@ describe("S1 source blocks: human edit, add, split, merge, delete", () => {
     const edits = (await listEdits({ entity_id: blocks[0]!.id })).filter((e) => e.at >= started);
     expect(edits.map((e) => e.field).sort()).toEqual(["heading", "text"]);
     expect(edits[0]!.rationale).toBe("Spell out 2L");
-    const audit = (await loadState()).audit.filter((a) => a.entity_id === blocks[0]!.id);
+    // The workspace audit outlives resets (KAN-89): count only this test's rows.
+    const audit = (await loadState()).audit.filter((a) => a.entity_id === blocks[0]!.id && a.at >= started);
     expect(audit.length).toBe(2);
   });
 

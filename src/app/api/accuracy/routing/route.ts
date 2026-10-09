@@ -9,6 +9,7 @@ import {
 } from "@/accuracy";
 import { CALL_KINDS, AGENT_ROLES, type AgentRole } from "@/accuracy/kernel/contracts";
 import { accuracyRouteConfig } from "@/accuracy/kernel/routing";
+import { recordAudit } from "@/modules/kernel/audit";
 import {
   ALTERNATE_ROUTE_PROVIDER,
   DEFAULT_ROUTE_PROVIDER,
@@ -65,6 +66,18 @@ function routeFallbacks(value: unknown): string[] | undefined {
   const unknown = cleaned.filter((id) => !findProvider(id));
   if (unknown.length > 0) throw new Error(`Unknown fallback provider: ${unknown.join(", ")}.`);
   return cleaned;
+}
+
+/** What the audit log keeps of an accuracy route (KAN-89). */
+function routeView(route: { provider_id: string; model: string; params: unknown; fallbacks: unknown } & Record<string, unknown>) {
+  return {
+    call_kind: route.call_kind ?? null,
+    agent_role: route.agent_role ?? null,
+    provider_id: route.provider_id,
+    model: route.model,
+    params: route.params,
+    fallbacks: route.fallbacks,
+  };
 }
 
 export async function GET() {
@@ -124,14 +137,33 @@ export async function POST(request: Request) {
           fallbacks: fallbacks ?? current.fallbacks,
           actor_name: identity.actor.name,
         });
+        await recordAudit({
+          category: "config",
+          action: "accuracy.set_route",
+          entity_type: "accuracy_route",
+          entity_id: `${call_kind}:${agent_role}`,
+          before: routeView(current),
+          after: routeView(config),
+          workspace_id: null,
+        });
         return NextResponse.json({ ok: true, config });
       }
       case "set_default_provider": {
         assertCan(identity.role, "configure_routing");
+        const was = await accuracyRouteConfigs();
         const configs = await setAccuracyDefaultProvider({
           provider_id: String(body.provider_id ?? ""),
           model: body.model ? String(body.model) : undefined,
           actor_name: identity.actor.name,
+        });
+        await recordAudit({
+          category: "config",
+          action: "accuracy.set_default_provider",
+          entity_type: "accuracy_route",
+          entity_id: "all",
+          before: was.map(routeView),
+          after: configs.map(routeView),
+          workspace_id: null,
         });
         return NextResponse.json({ ok: true, routes: configs.length });
       }

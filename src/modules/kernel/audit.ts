@@ -113,6 +113,17 @@ async function sessionActor(): Promise<AuditActor> {
   return { principal: "anonymous", name: "Anonymous", role: null };
 }
 
+/**
+ * The actor for a change made on behalf of `principal`: the signed-in person
+ * (with their name and role) when that is who it is, else the principal alone.
+ */
+export async function actorForPrincipal(principal: string): Promise<AuditActor> {
+  const session = await sessionActor();
+  return session.principal.toLowerCase() === principal.trim().toLowerCase()
+    ? session
+    : { principal, name: principal, role: null };
+}
+
 async function requestWorkspaceId(): Promise<string | null> {
   try {
     const { scopedWorkspaceId } = await import("@/modules/workspaces/context");
@@ -126,12 +137,16 @@ async function requestWorkspaceId(): Promise<string | null> {
 export const SYSTEM_ACTOR: AuditActor = { principal: "system", name: "Synapse", role: null };
 
 /**
- * Writes one audit row and returns it. Throws when the row cannot be written:
+ * Writes one audit row and returns it (in `options.tx` when the change runs in
+ * a transaction on the shared database). Throws when the row cannot be written:
  * callers of state-changing actions let that fail the request, so a change is
  * never reported as done without its record. Use `recordAuditBestEffort` for
  * events that must not block the user (sign-in).
  */
-export async function recordAudit(input: AuditEventInput): Promise<AuditEvent> {
+/** Anything that can insert: the shared database, or a transaction on it. */
+export type AuditWriter = Pick<ReturnType<typeof sharedDb>, "insert">;
+
+export async function recordAudit(input: AuditEventInput, options: { tx?: AuditWriter } = {}): Promise<AuditEvent> {
   await ensurePlatformSchema();
   const [facts, actor, workspace] = await Promise.all([
     requestFacts(),
@@ -158,7 +173,8 @@ export async function recordAudit(input: AuditEventInput): Promise<AuditEvent> {
     user_agent: facts.user_agent,
     meta: input.meta ? redactAuditSecrets(input.meta) : null,
   };
-  const [stored] = await sharedDb().insert(t.auditEvents).values(row).returning();
+  // Inside the caller's transaction when given one, so the change and its record commit together.
+  const [stored] = await (options.tx ?? sharedDb()).insert(t.auditEvents).values(row).returning();
   return toEvent(stored!);
 }
 

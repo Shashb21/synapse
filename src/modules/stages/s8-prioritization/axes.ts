@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
+import { recordAudit } from "@/modules/kernel/audit";
 import type { PriorityAxis } from "./axis-math";
 
 export {
@@ -193,10 +194,20 @@ export async function saveAxes(args: { config: unknown; actor_name: string }): P
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
+  const before = await loadAxes();
   await db()
     .insert(t.priorityAxes)
     .values(values)
     .onConflictDoUpdate({ target: t.priorityAxes.id, set: values });
+  // KAN-89: recorded right after the save; a failed record fails the request.
+  await recordAudit({
+    category: "config",
+    action: "save_axes",
+    entity_type: "priority_axes",
+    entity_id: ROW_ID,
+    before: { axes: before.axes, x_axis: before.x_axis, y_axis: before.y_axis, bands: before.bands },
+    after: config,
+  });
   return { ...config, updated_by: values.updated_by, updated_at: values.updated_at };
 }
 
@@ -249,9 +260,18 @@ export async function saveScopeAxes(args: {
     updated_by: args.actor_name,
     updated_at: nowIso(),
   };
+  const before = await loadScopeAxes(args.scope);
   await db()
     .insert(t.priorityAxes)
     .values(values)
     .onConflictDoUpdate({ target: t.priorityAxes.id, set: values });
+  await recordAudit({
+    category: "config",
+    action: "save_scope_axes",
+    entity_type: "priority_axes",
+    entity_id: values.id,
+    before: before ? { x_axis: before.x_axis, y_axis: before.y_axis } : null,
+    after: values.config,
+  });
   return { x_axis: args.x_axis, y_axis: args.y_axis, updated_by: args.actor_name, updated_at: values.updated_at };
 }

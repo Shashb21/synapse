@@ -213,12 +213,12 @@ export async function POST(request: Request) {
     switch (body.action) {
       case "reset":
         // Reset to blank: empties the plan and clears the workspace's demo flag.
-        await replaceContents(identity.workspace?.id ?? null, "blank");
+        await replaceContents(identity.workspace?.id ?? null, "blank", identity.actor);
         break;
       case "load_demo":
         // Replaces everything with the Velmara demo and flags the workspace as demo.
         // scope "setup" loads only the demo's asset and objectives (the stage tests' start).
-        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo");
+        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo", identity.actor);
         break;
       case "lock_need":
         await lockNeed({

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { ensureWorkspaceSchema, setWorkspaceSchemaLookup, sharedDb } from "@/lib/iegp/db";
 import { nowIso } from "@/modules/kernel/ids";
+import { actorForPrincipal, recordAudit } from "@/modules/kernel/audit";
 import { DEFAULT_SCHEMA, DEFAULT_WORKSPACE_ID, runInWorkspace } from "./context";
 
 /**
@@ -174,7 +175,26 @@ export async function createWorkspace(args: {
     values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo}, ${ai_enabled})`);
   await addMember({ workspace_id: id, principal: args.owner, role: "owner", added_by: args.owner });
   schemaCache.set(id, schemaName);
-  return { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled };
+  const workspace = { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled };
+  await auditWorkspace("workspace.create", id, args.owner, null, { name, owner: workspace.created_by, demo, ai_enabled });
+  return workspace;
+}
+
+/**
+ * Records a workspace change (KAN-89) right after it is made; a failed record
+ * fails the request rather than leave the change unrecorded.
+ */
+async function auditWorkspace(action: string, workspace_id: string, by: string, before: unknown, after: unknown): Promise<void> {
+  await recordAudit({
+    category: "workspace",
+    action,
+    entity_type: "workspace",
+    entity_id: workspace_id,
+    workspace_id,
+    before,
+    after,
+    actor: await actorForPrincipal(normalizePrincipal(by)),
+  });
 }
 
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
@@ -218,7 +238,9 @@ export async function setWorkspaceAiColumn(workspaceId: string, enabled: boolean
 export async function renameWorkspace(args: { workspace_id: string; name: string; by: string }): Promise<void> {
   if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new Error("Only the workspace owner can rename it.");
   const name = workspaceName(args.name);
+  const before = await getWorkspace(args.workspace_id);
   await rows(sql`update workspaces set name = ${name} where id = ${args.workspace_id}`);
+  await auditWorkspace("workspace.rename", args.workspace_id, args.by, { name: before?.name ?? null }, { name });
 }
 
 /** Any member may invite; the invitee sees the workspace on their next sign-in. */
@@ -226,14 +248,27 @@ export async function inviteMember(args: { workspace_id: string; email: string; 
   if (!(await memberRole(args.workspace_id, args.by))) throw new Error("You are not a member of this workspace.");
   const email = args.email.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
+  const before = await memberRole(args.workspace_id, email);
   await addMember({ workspace_id: args.workspace_id, principal: email, role: "member", added_by: args.by });
+  await auditWorkspace(
+    "workspace.member_invite",
+    args.workspace_id,
+    args.by,
+    before ? { principal: email, role: before } : null,
+    { principal: email, role: (await memberRole(args.workspace_id, email)) ?? "member" },
+  );
 }
 
 export async function removeMember(args: { workspace_id: string; principal: string; by: string }): Promise<void> {
   if ((await memberRole(args.workspace_id, args.by)) !== "owner") throw new Error("Only the workspace owner can remove people.");
   const target = normalizePrincipal(args.principal);
-  if ((await memberRole(args.workspace_id, target)) === "owner") throw new Error("The owner cannot be removed.");
-  await rows(sql`delete from workspace_members where workspace_id = ${args.workspace_id} and principal = ${target}`);
+  const role = await memberRole(args.workspace_id, target);
+  if (role === "owner") throw new Error("The owner cannot be removed.");
+  const gone = await rows(sql`
+    delete from workspace_members where workspace_id = ${args.workspace_id} and principal = ${target} returning principal`);
+  if (gone.length > 0) {
+    await auditWorkspace("workspace.member_remove", args.workspace_id, args.by, { principal: target, role }, null);
+  }
 }
 
 export async function listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
