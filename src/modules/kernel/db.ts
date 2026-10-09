@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { currentSchemaName, db, ensureCurrentSchemaTables, inWorkspaceTransaction, sharedDb } from "@/lib/iegp/db";
+import { currentSchemaName, db, ensureCurrentSchemaTables, inWorkspaceTransaction, setBeforeWorkspaceTransaction, sharedDb } from "@/lib/iegp/db";
 import { AUDIT_DDL, PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
 import { KERNEL_WORKSPACE_DDL } from "@/lib/iegp/workspace-tables";
 
@@ -96,6 +96,9 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
     if (!inWorkspaceTransaction()) for (const ddl of pending) applied.add(ddl);
   }
 }
+
+// Shared tables exist before any workspace transaction opens (see withWorkspaceTransaction).
+setBeforeWorkspaceTransaction(() => ensurePlatformSchema());
 
 /** Module DDL already applied, per schema, in this process. */
 const moduleDdlApplied: Record<string, Set<string>> = {};

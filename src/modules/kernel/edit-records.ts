@@ -3,6 +3,7 @@ import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
 import { recordSignal } from "./hillclimb";
+import { attributedActor, currentAttribution, recordAuditVia, type Attribution } from "./audit";
 import type { Actor, StageId } from "./contracts";
 
 export type EditAction = "edit" | "accept" | "reject" | "add" | "split" | "validate" | "override";
@@ -18,8 +19,13 @@ export type EditRecord = {
   action: EditAction;
   before: string | null;
   after: string | null;
-  rationale: string;
+  /** Null when no reason was given (a gate action without one, KAN-90). */
+  rationale: string | null;
   actor: Actor;
+  /** Account id or email of the signed-in person; "anonymous"/"demo"/"system" otherwise. Null on legacy rows. */
+  actor_principal: string | null;
+  actor_role: string | null;
+  request_id: string | null;
 };
 
 export const RATIONALE_REQUIRED = "A short rationale is required for every edit.";
@@ -32,7 +38,11 @@ export function requireRationale(rationale: string | null | undefined): string {
 
 /**
  * Persists a user edit with its rationale and feeds the same edit into the
- * hillclimb store. Every user-facing module calls this on every edit.
+ * hillclimb store. Every user-facing module calls this on every edit. The
+ * record carries who made it (principal, role) and the request it came from,
+ * in the request's real workspace, and is mirrored to the platform audit log in
+ * the same transaction (KAN-90). `rationale_optional` files the edit with a null
+ * rationale when none was given, instead of refusing it.
  */
 export async function recordEdit(args: {
   workspace_id?: string;
@@ -43,16 +53,20 @@ export async function recordEdit(args: {
   action: EditAction;
   before?: string | null;
   after?: string | null;
-  rationale: string;
+  rationale: string | null | undefined;
+  rationale_optional?: boolean;
   actor: Actor;
   signal_kind?: "user_edit" | "user_rejected_proposal" | "user_accepted_proposal";
+  /** Background jobs and tests: who to attribute the edit to instead of the request's session. */
+  attribution?: Attribution;
 }, transaction?: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0]): Promise<EditRecord> {
   if (!transaction) await ensurePlatformSchema();
-  const rationale = requireRationale(args.rationale);
+  const rationale = args.rationale_optional ? (args.rationale ?? "").trim() || null : requireRationale(args.rationale);
+  const attribution = args.attribution ?? (await currentAttribution());
   const record: EditRecord = {
     id: newId("edit"),
     at: nowIso(),
-    workspace_id: args.workspace_id ?? "default",
+    workspace_id: args.workspace_id ?? attribution.workspace_id,
     stage: args.stage,
     entity_type: args.entity_type,
     entity_id: args.entity_id,
@@ -62,8 +76,12 @@ export async function recordEdit(args: {
     after: args.after ?? null,
     rationale,
     actor: args.actor,
+    actor_principal: attribution.principal,
+    actor_role: attribution.role,
+    request_id: attribution.request_id,
   };
-  await (transaction ?? db()).insert(t.editRecords).values({
+  const writer = transaction ?? db();
+  await writer.insert(t.editRecords).values({
     id: record.id,
     at: record.at,
     workspace_id: record.workspace_id,
@@ -77,6 +95,22 @@ export async function recordEdit(args: {
     rationale: record.rationale,
     actor_name: record.actor.name,
     actor_function: record.actor.function,
+    actor_principal: record.actor_principal,
+    actor_role: record.actor_role,
+    request_id: record.request_id,
+  });
+  // The platform audit log's copy (category plan), committed with the edit.
+  await recordAuditVia(writer, {
+    category: "plan",
+    action: `${record.entity_type}.${record.action}`,
+    entity_type: record.entity_type,
+    entity_id: record.entity_id,
+    before: record.before === null ? null : { [record.field]: record.before },
+    after: record.after === null ? null : { [record.field]: record.after },
+    rationale: record.rationale,
+    actor: attributedActor(attribution, record.actor.name),
+    workspace_id: record.workspace_id,
+    meta: { source: "edit_record", edit_id: record.id, stage: record.stage, field: record.field, actor_function: record.actor.function },
   });
   await recordSignal({
     stage: args.stage,
@@ -88,7 +122,7 @@ export async function recordEdit(args: {
           ? "user_accepted_proposal"
           : "user_edit"),
     subject: `${record.entity_type}:${record.entity_id}`,
-    rationale,
+    rationale: rationale ?? "",
     payload: {
       field: record.field,
       action: record.action,
@@ -96,6 +130,8 @@ export async function recordEdit(args: {
       after: record.after,
       actor_function: record.actor.function,
     },
+    actor_principal: record.actor_principal,
+    actor_name: record.actor.name,
   }, transaction);
   return record;
 }
@@ -114,6 +150,9 @@ function toRecord(row: typeof t.editRecords.$inferSelect): EditRecord {
     after: row.after,
     rationale: row.rationale,
     actor: { name: row.actor_name, function: row.actor_function as Actor["function"] },
+    actor_principal: row.actor_principal ?? null,
+    actor_role: row.actor_role ?? null,
+    request_id: row.request_id ?? null,
   };
 }
 

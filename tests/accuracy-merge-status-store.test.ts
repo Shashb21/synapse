@@ -36,6 +36,8 @@ describe("merge-dedupe + status-derive persistence", () => {
         provenance: [],
       },
     });
+    // The older claim survives a merge; within the same millisecond the one with more provenance would.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     const dup = await insertClaim({
       workspace_id,
       claim_type: "gap",

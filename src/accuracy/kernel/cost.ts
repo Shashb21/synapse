@@ -87,3 +87,41 @@ export function estimateCostUsd(args: {
 export function listModelPrices(): ModelPrice[] {
   return [...MODEL_PRICES];
 }
+
+/**
+ * The price table's provider and model for a routed call: kernel provider ids
+ * (xai-grok, anthropic-claude, google-gemini) map to the table's, and an
+ * OpenRouter model ("anthropic/claude-sonnet-4.5") is priced as its maker's.
+ */
+export function priceKeyFor(provider_id: string, model: string): { provider_id: string; model: string } {
+  const KERNEL: Record<string, string> = { "xai-grok": "xai", "anthropic-claude": "anthropic", "google-gemini": "google", openai: "openai" };
+  if (provider_id === "openrouter") {
+    const [maker, ...rest] = model.split("/");
+    const OPENROUTER: Record<string, string> = { "x-ai": "xai", anthropic: "anthropic", openai: "openai", google: "google" };
+    return { provider_id: OPENROUTER[maker ?? ""] ?? maker ?? provider_id, model: rest.join("/") || model };
+  }
+  return { provider_id: KERNEL[provider_id] ?? provider_id, model };
+}
+
+/**
+ * Estimated cost of one call from the provider's token counts (KAN-91). Null,
+ * never 0, when the model's price is unknown or the counts are missing.
+ */
+export function estimateCallCost(args: {
+  provider_id: string;
+  model: string;
+  usage: { input_tokens: number | null; output_tokens: number | null };
+}): { cost_usd: number | null; price_source: string | null } {
+  if (args.usage.input_tokens === null && args.usage.output_tokens === null) return { cost_usd: null, price_source: null };
+  // OpenRouter's ":free" variants are billed at zero (https://openrouter.ai/docs/api-reference/limits).
+  if (args.provider_id === "openrouter" && args.model.endsWith(":free")) {
+    return { cost_usd: 0, price_source: "openrouter_free_model" };
+  }
+  const key = priceKeyFor(args.provider_id, args.model);
+  if (!priceForModel(key.provider_id, key.model)) return { cost_usd: null, price_source: null };
+  const { cost_usd, price_source } = estimateCostUsd({
+    ...key,
+    usage: { prompt_tokens: args.usage.input_tokens ?? 0, completion_tokens: args.usage.output_tokens ?? 0 },
+  });
+  return { cost_usd, price_source };
+}

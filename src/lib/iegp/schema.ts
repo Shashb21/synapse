@@ -281,6 +281,10 @@ export const audit = pgTable("audit", {
   entity_id: text("entity_id").notNull(),
   action: text("action").notNull(),
   detail: text("detail").notNull(),
+  /** Who, verifiably (KAN-90): account id or email, their role, and the request that made the change. */
+  actor_principal: text("actor_principal"),
+  actor_role: text("actor_role"),
+  request_id: text("request_id"),
 });
 
 export const goldNeeds = pgTable("gold_needs", {

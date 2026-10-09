@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
 import { newId, nowIso } from "./ids";
+import { currentAttribution } from "./audit";
 import type { HillclimbSignalDraft, HillclimbSignalKind, StageId } from "./contracts";
 
 export type HillclimbSignal = {
@@ -14,10 +15,17 @@ export type HillclimbSignal = {
   weight: number;
   status: "open" | "applied" | "dismissed";
   payload: unknown;
+  /** Provenance (KAN-90). Null on rows written before it was kept. */
+  actor_principal: string | null;
+  actor_name: string | null;
+  source_run_id: string | null;
 };
 
 export async function recordSignal(draft: HillclimbSignalDraft, transaction?: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0]): Promise<HillclimbSignal> {
   if (!transaction) await ensurePlatformSchema();
+  // Provenance the caller did not give comes from the request's session (KAN-90).
+  const who =
+    draft.actor_principal === undefined || draft.actor_name === undefined ? await currentAttribution() : null;
   const signal: HillclimbSignal = {
     id: newId("hc"),
     at: nowIso(),
@@ -28,6 +36,9 @@ export async function recordSignal(draft: HillclimbSignalDraft, transaction?: Pa
     weight: draft.weight ?? 1,
     status: "open",
     payload: draft.payload ?? null,
+    actor_principal: draft.actor_principal === undefined ? (who?.principal ?? null) : draft.actor_principal,
+    actor_name: draft.actor_name === undefined ? (who?.name ?? null) : draft.actor_name,
+    source_run_id: draft.source_run_id ?? null,
   };
   await (transaction ?? db()).insert(t.hillclimbSignals).values({
     id: signal.id,
@@ -39,6 +50,9 @@ export async function recordSignal(draft: HillclimbSignalDraft, transaction?: Pa
     weight: signal.weight,
     status: signal.status,
     payload: signal.payload,
+    actor_principal: signal.actor_principal,
+    actor_name: signal.actor_name,
+    source_run_id: signal.source_run_id,
   });
   return signal;
 }
@@ -54,6 +68,9 @@ function toSignal(row: typeof t.hillclimbSignals.$inferSelect): HillclimbSignal 
     weight: row.weight,
     status: row.status as HillclimbSignal["status"],
     payload: row.payload,
+    actor_principal: row.actor_principal ?? null,
+    actor_name: row.actor_name ?? null,
+    source_run_id: row.source_run_id ?? null,
   };
 }
 

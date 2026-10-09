@@ -17,6 +17,7 @@ const globalForDb = globalThis as unknown as {
   drizzle?: ReturnType<typeof drizzle<typeof schema>>;
   sharedDrizzle?: ReturnType<typeof drizzle<typeof schema>>;
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
+  beforeWorkspaceTransaction?: () => Promise<void>;
   ambientTransaction?: AsyncLocalStorage<AmbientTransaction>;
   workspaceQueries?: number;
 };
@@ -238,7 +239,16 @@ export function workspaceQueryCount(): number {
  * Platform tables (`sharedDb()`) are not part of it.
  */
 export async function withWorkspaceTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  // Platform DDL runs first, outside the transaction: once the transaction has
+  // written a platform row (an audit event), DDL on that table from the platform
+  // pool would wait on it while it waits on the DDL.
+  if (!inWorkspaceTransaction()) await globalForDb.beforeWorkspaceTransaction?.();
   return (await router.begin(() => fn())) as T;
+}
+
+/** Registered by the kernel: platform setup that must finish before a workspace transaction opens. */
+export function setBeforeWorkspaceTransaction(hook: () => Promise<void>) {
+  globalForDb.beforeWorkspaceTransaction = hook;
 }
 
 /** True inside `withWorkspaceTransaction` (or a Drizzle `db().transaction`). */
@@ -425,6 +435,11 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS related_gap_ids jsonb NOT NULL DEFAULT '[]'::jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
     "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",
+    // KAN-90: every plan audit row says who (verifiably), in what role, from which request.
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_principal text",
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_role text",
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS request_id text",
+    "CREATE INDEX IF NOT EXISTS audit_entity ON audit(entity_id, at)",
     // Kernel, source-block, room, walkthrough and stage-module tables.
     ...workspaceTableStatements(),
   ];

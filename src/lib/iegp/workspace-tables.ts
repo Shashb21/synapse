@@ -32,12 +32,20 @@ CREATE TABLE IF NOT EXISTS edit_records (
   field text NOT NULL, action text NOT NULL, before text, after text,
   rationale text NOT NULL, actor_name text NOT NULL, actor_function text NOT NULL
 );
+ALTER TABLE edit_records ALTER COLUMN rationale DROP NOT NULL;
+ALTER TABLE edit_records ADD COLUMN IF NOT EXISTS actor_principal text;
+ALTER TABLE edit_records ADD COLUMN IF NOT EXISTS actor_role text;
+ALTER TABLE edit_records ADD COLUMN IF NOT EXISTS request_id text;
+CREATE INDEX IF NOT EXISTS edit_records_entity ON edit_records(entity_id, at);
 CREATE TABLE IF NOT EXISTS hillclimb_signals (
   id text PRIMARY KEY, at text NOT NULL, stage text NOT NULL, kind text NOT NULL,
   subject text NOT NULL, rationale text NOT NULL,
   weight integer NOT NULL DEFAULT 1, status text NOT NULL DEFAULT 'open',
   payload jsonb
 );
+ALTER TABLE hillclimb_signals ADD COLUMN IF NOT EXISTS actor_principal text;
+ALTER TABLE hillclimb_signals ADD COLUMN IF NOT EXISTS actor_name text;
+ALTER TABLE hillclimb_signals ADD COLUMN IF NOT EXISTS source_run_id text;
 CREATE TABLE IF NOT EXISTS priority_axes (
   id text PRIMARY KEY, config jsonb NOT NULL,
   updated_by text NOT NULL, updated_at text NOT NULL

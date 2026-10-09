@@ -56,6 +56,7 @@ import { EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
 import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
+import { recordDenied } from "@/modules/kernel/audit";
 import type { StageId } from "@/modules/kernel/contracts";
 import {
   apiErrorResponse,
@@ -74,6 +75,7 @@ import {
   restoreRejectedTactic,
 } from "@/lib/iegp/restore";
 import type { SourceType } from "@/lib/iegp/enums";
+import type { IegpState } from "@/lib/iegp/types";
 import { ingestThroughStages, type IngestPayload } from "./ingest-pipeline";
 import { MAX_UPLOAD_BYTES, TOO_LARGE, uploadKindOf } from "@/lib/ingest/upload-formats";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
@@ -139,9 +141,10 @@ function coverageInput(body: Record<string, unknown>): {
 }
 
 /**
- * Gate actions on the legacy workbench that carry a user judgement. When the
- * user gave a reason, it is filed as an edit record so the same rationale reaches
- * hillclimb from this surface too.
+ * Gate actions on the legacy workbench that carry a user judgement. Each files an
+ * edit record with the field's real value before and after the action, and the
+ * person's reason when they gave one (null otherwise, KAN-90), so the same
+ * judgement reaches hillclimb and the gap's history from this surface too.
  */
 const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string; action: EditAction }> = {
   classify_gap: { stage: "S5", entity: "gap", field: "computed_status", action: "override" },
@@ -165,22 +168,77 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   record_missed_tactic: { stage: "S5", entity: "tactic", field: "created", action: "add" },
 };
 
-async function fileGateEdit(body: Record<string, string>, actor_name: string, actor_function: ActorFunction) {
+type GateEdit = (typeof GATE_EDITS)[string];
+
+function gateEntityId(body: Record<string, string>): string {
+  return body.gap_id || body.parent_gap_id || body.coverage_id || body.tactic_id || body.residual_id || "—";
+}
+
+/** The gated field's current value in the plan, as the edit record stores it (null when unset). */
+function gateFieldValue(state: IegpState, mapping: GateEdit, body: Record<string, string>): string | null {
+  const gap = state.gaps.find((row) => row.id === (body.gap_id || body.parent_gap_id));
+  const coverage = state.coverages.find((row) => row.id === body.coverage_id);
+  switch (mapping.field) {
+    case "computed_status":
+      if (!gap) return null;
+      return gap.status_override ? `${gap.status_override.status} (override)` : gap.computed_status;
+    case "human_validated":
+      return gap ? String(gap.human_validated) : null;
+    case "status":
+      return gap?.status ?? null;
+    case "parked_at":
+      return gap?.parked_at ?? null;
+    case "statement":
+      return gap?.statement ?? null;
+    case "mapping": {
+      const row = state.coverages.find((c) => c.gap_id === body.gap_id && c.tactic_id === body.tactic_id && !c.expansion_id);
+      return row ? `${row.tactic_id}: ${row.overall}` : null;
+    }
+    case "mapping_table_row": {
+      const ids = [...new Set(state.coverages.filter((c) => c.gap_id === body.gap_id).map((c) => c.tactic_id))].sort();
+      return ids.length ? ids.join(", ") : null;
+    }
+    case "dimension":
+      return coverage ? (coverage.dimensions[body.dimension as CoverageDimension]?.value ?? null) : null;
+    case "overall":
+      return coverage?.overall ?? null;
+    case "created":
+      // Nothing existed before; afterwards, the tactic as named.
+      return null;
+    default:
+      return null;
+  }
+}
+
+/** The gated field's value before the action runs, read only for gated actions. */
+async function gateBefore(body: Record<string, string>): Promise<string | null | undefined> {
   const mapping = GATE_EDITS[body.action ?? ""];
-  if (!mapping) return;
+  if (!mapping) return undefined;
+  return gateFieldValue(await loadState(), mapping, body);
+}
+
+async function fileGateEdit(
+  body: Record<string, string>,
+  before: string | null | undefined,
+  actor_name: string,
+  actor_function: ActorFunction,
+) {
+  const mapping = GATE_EDITS[body.action ?? ""];
+  if (!mapping || before === undefined) return;
   const rationale = (body.rationale || body.reason || body.note || body.override_reason || "").trim();
-  if (rationale.length < 3) return;
-  const entity_id =
-    body.gap_id || body.parent_gap_id || body.coverage_id || body.tactic_id || body.residual_id || "—";
+  const after =
+    mapping.field === "created" ? body.name?.trim() || null : gateFieldValue(await loadState(), mapping, body);
   await recordEdit({
     stage: mapping.stage,
     entity_type: mapping.entity,
-    entity_id,
+    entity_id: gateEntityId(body),
     field: mapping.field,
     action: mapping.action,
-    before: null,
-    after: body.status || body.band || body.value || body.overall || null,
-    rationale,
+    before,
+    after,
+    // A gate action without a reason is still a change on the record (KAN-90).
+    rationale: rationale || null,
+    rationale_optional: true,
     actor: { name: actor_name, function: actor_function },
   });
 }
@@ -244,6 +302,14 @@ async function handleAction(request: Request): Promise<Response> {
     if (!capability) return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     requireCapability(identity, capability);
     if (WORKSPACE_OWNER_ACTIONS.has(String(body.action)) && identity.workspace && identity.workspace.role !== "owner") {
+      await recordDenied({
+        category: "workspace",
+        action: `${body.action}.denied`,
+        reason: "Only the workspace owner can replace its contents.",
+        entity_type: "workspace",
+        entity_id: identity.workspace.id,
+        meta: { code: "forbidden", workspace_role: identity.workspace.role },
+      });
       return NextResponse.json(
         { error: "Only the workspace owner can replace its contents.", code: "forbidden" },
         { status: 403 },
@@ -256,6 +322,7 @@ async function handleAction(request: Request): Promise<Response> {
   const actor_name = identity.actor.name;
   const actor_function = identity.actor.function;
   try {
+    const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
@@ -908,7 +975,7 @@ async function handleAction(request: Request): Promise<Response> {
       default:
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
-    await fileGateEdit(body, actor_name, actor_function);
+    await fileGateEdit(body, before, actor_name, actor_function);
     return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
     return apiErrorResponse(error, "Failed");

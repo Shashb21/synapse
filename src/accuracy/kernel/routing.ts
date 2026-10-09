@@ -21,6 +21,7 @@ import {
   servedModel,
 } from "@/modules/llm/provider";
 import { estimateCostUsd, usageFromMessages } from "./cost";
+import { tracedCompletion } from "@/modules/kernel/llm-calls";
 import { DEFAULT_MAX_TOKENS } from "@/modules/kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
 
@@ -198,27 +199,39 @@ export function accuracyCompletionFor(args: {
     // Read at call time and handed straight to the provider; never logged or traced.
     const api_key = providerApiKey(args.route.provider_id);
     if (!api_key) throw new NoRouteError(missingKeyReason(provider));
-    const raw = await args.run.step(
-      `llm:${args.route.role}:${purpose}`,
-      () =>
-        provider.complete(
-          {
-            system,
-            user,
-            model: args.route.model,
-            temperature: args.route.params.temperature,
-            max_tokens: maxTokens ?? args.route.params.max_tokens,
-          },
-          { api_key },
-        ),
-      `${args.route.provider_label} · ${args.route.model}`,
-    );
-    const usage = usageFromMessages(system, user, raw);
-    const { cost_usd } = estimateCostUsd({
+    // Kept whole in llm_calls with the provider's token counts (KAN-91).
+    const traced = await tracedCompletion({
+      provider,
+      request: {
+        system,
+        user,
+        model: args.route.model,
+        temperature: args.route.params.temperature,
+        max_tokens: maxTokens ?? args.route.params.max_tokens,
+      },
+      api_key,
+      run: args.run,
+      step: `llm:${args.route.role}:${purpose}`,
+      detail: `${args.route.provider_label} · ${args.route.model}`,
+      purpose,
+      attempt: 1,
+      stage: `accuracy:${args.route.call_kind}`,
+      workspace_id: args.run.workspace_id ?? null,
+    });
+    const raw = traced.text;
+    // The provider's counts when it sent them; an estimate from the text otherwise.
+    const usage = traced.usage && traced.usage.input_tokens !== null && traced.usage.output_tokens !== null
+      ? {
+          prompt_tokens: traced.usage.input_tokens,
+          completion_tokens: traced.usage.output_tokens,
+          total_tokens: traced.usage.total_tokens ?? traced.usage.input_tokens + traced.usage.output_tokens,
+        }
+      : usageFromMessages(system, user, raw);
+    const cost_usd = traced.cost_usd ?? estimateCostUsd({
       provider_id: args.route.provider_id,
       model: args.route.model,
       usage,
-    });
+    }).cost_usd;
     args.onUsage(usage, cost_usd);
     return { raw, usage };
   };

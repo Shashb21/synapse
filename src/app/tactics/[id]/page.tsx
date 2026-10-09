@@ -9,6 +9,8 @@ import { ASSESSED_COVERAGE, COVERAGE_DIMENSIONS, DIMENSION_LABELS, DIMENSION_VAL
 import { loadState } from "@/lib/iegp/store";
 import { listTacticSourceReferences } from "@/modules/stages/s3-tactic-extract/suggestions";
 import { sessionContext } from "@/modules/auth/session";
+import { entityHistory } from "@/lib/iegp/entity-history";
+import { EntityHistory } from "@/components/entity-history";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,12 @@ export default async function TacticDetailPage({
     return c.tactic_id === tactic.id && gap !== undefined && isLiveGap(gap);
   });
   const expansions = state.expansions.filter((e) => e.tactic_id === tactic.id);
+  // The tactic's own changes plus its mappings' and expansions' (KAN-90).
+  const history = await entityHistory([
+    tactic.id,
+    ...state.coverages.filter((c) => c.tactic_id === tactic.id).map((c) => c.id),
+    ...expansions.map((e) => e.id),
+  ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
     actor_name: session.actor.name,
@@ -205,6 +213,7 @@ export default async function TacticDetailPage({
           </select>
         </label>
       </LockForm>
+      <EntityHistory entries={history} />
     </AppShell>
   );
 }
