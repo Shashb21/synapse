@@ -73,7 +73,9 @@ export function redactAuditSecrets<T>(value: T, depth = 0): T {
   if (Array.isArray(value)) return value.map((item) => redactAuditSecrets(item, depth + 1)) as T;
   const out: Record<string, unknown> = {};
   for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SECRET_KEY.test(key) && inner !== null && inner !== undefined ? REDACTED : redactAuditSecrets(inner, depth + 1);
+    // A boolean is a fact ("password_reset": true), never a secret.
+    const secret = SECRET_KEY.test(key) && inner !== null && inner !== undefined && typeof inner !== "boolean";
+    out[key] = secret ? REDACTED : redactAuditSecrets(inner, depth + 1);
   }
   return out as T;
 }
@@ -99,10 +101,12 @@ async function requestFacts(): Promise<RequestFacts> {
 /** Who is acting, from the session when the caller did not say. */
 async function sessionActor(): Promise<AuditActor> {
   try {
-    const { currentSession } = await import("@/modules/auth/session");
+    const { sessionContext } = await import("@/modules/auth/session");
     const { principalOf } = await import("@/modules/workspaces/session");
-    const session = await currentSession();
-    if (session) return { principal: principalOf(session), name: session.actor.name, role: session.role };
+    const context = await sessionContext();
+    if (context.session) return { principal: principalOf(context.session), name: context.actor.name, role: context.role };
+    // Signed out (demo mode keeps a typed name): no principal to vouch for.
+    return { principal: context.demo ? "demo" : "anonymous", name: context.actor.name, role: context.role };
   } catch {
     // Outside a request: fall through.
   }

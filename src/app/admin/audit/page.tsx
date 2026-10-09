@@ -44,9 +44,11 @@ function show(value: unknown): string {
 
 /** The top-level fields that differ between before and after, or the whole value when either is not an object. */
 function changes(event: AuditEvent): { field: string; before: unknown; after: unknown }[] {
-  const { before, after } = event;
   const isObject = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === "object" && !Array.isArray(value);
+  // A create (no before) or a delete (no after) still diffs field by field.
+  const before = event.before === null && isObject(event.after) ? {} : event.before;
+  const after = event.after === null && isObject(event.before) ? {} : event.after;
   if (!isObject(before) || !isObject(after)) {
     return before === null && after === null ? [] : [{ field: "value", before, after }];
   }

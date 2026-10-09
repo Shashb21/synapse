@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import { nowIso } from "@/modules/kernel/ids";
+import { recordAudit, type AuditActor } from "@/modules/kernel/audit";
 import { normalizeEmail, validEmail } from "./accounts";
 
 /**
@@ -240,6 +241,44 @@ export const SEATLESS_PROVIDERS = ["password", "demo"];
  * Ends the SSO sessions of these emails at once (after unassigning a seat or
  * deactivating the customer). Password and demo sessions are left alone.
  */
+/** What the audit log keeps of a customer. */
+function auditView(customer: Customer) {
+  return {
+    name: customer.name,
+    email_domains: customer.email_domains,
+    seats: customer.seats,
+    seats_used: customer.seats_used,
+    active: customer.active,
+  };
+}
+
+/**
+ * Records a customer or seat change (KAN-88). It runs right after the change
+ * and throws when the record can't be written, so the request fails rather
+ * than report an unrecorded change. `by` defaults to the signed-in session.
+ */
+async function auditCustomer(args: {
+  action: string;
+  customer_id: string;
+  before?: unknown;
+  after?: unknown;
+  meta?: Record<string, unknown>;
+  by?: AuditActor;
+}): Promise<void> {
+  await recordAudit({
+    category: "admin",
+    action: args.action,
+    entity_type: "customer",
+    entity_id: args.customer_id,
+    customer_id: args.customer_id,
+    workspace_id: null,
+    before: args.before ?? null,
+    after: args.after ?? null,
+    meta: args.meta ?? null,
+    actor: args.by,
+  });
+}
+
 export async function revokeSeatSessions(emails: string[]): Promise<number> {
   const addresses = [...new Set(emails.map(normalizeEmail).filter(Boolean))];
   if (addresses.length === 0) return 0;
@@ -273,7 +312,7 @@ async function assertNameFree(tx: Tx, name: string, exceptId: string | null): Pr
   }
 }
 
-export async function createCustomer(input: CustomerInput): Promise<Customer> {
+export async function createCustomer(input: CustomerInput, by?: AuditActor): Promise<Customer> {
   const name = parseName(input.name);
   const domains = parseDomains(input.email_domains);
   const seats = parseSeats(input.seats ?? 0);
@@ -287,7 +326,9 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
       insert into customers (id, name, email_domains, seats, active, created_at, updated_at)
       values (${id}, ${name}, ${textArray(domains)}, ${seats}, ${active}, ${now}, ${now})`);
   });
-  return (await getCustomer(id))!;
+  const customer = (await getCustomer(id))!;
+  await auditCustomer({ action: "customer.create", customer_id: id, after: auditView(customer), by });
+  return customer;
 }
 
 /**
@@ -295,8 +336,9 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
  * domains that some assigned email is outside. Deactivating ends every seat
  * holder's sessions at once; reactivating lets them sign in again.
  */
-export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
+export async function updateCustomer(id: string, input: CustomerInput, by?: AuditActor): Promise<Customer> {
   await ensureTables();
+  let before: Customer | null = null;
   const deactivated = await sharedDb().transaction(async (tx) => {
     const locked = (await tx.execute(sql`select * from customers where id = ${id} for update`)) as unknown as Row[];
     if (!locked[0]) throw new CustomerError("That customer does not exist.", "not_found");
@@ -326,10 +368,23 @@ export async function updateCustomer(id: string, input: CustomerInput): Promise<
       update customers set name = ${name}, email_domains = ${textArray(domains)}, seats = ${seats}, active = ${active},
         updated_at = ${nowIso()}
       where id = ${id}`);
+    before = { ...current, seats_used: assigned.length };
     return current.active && !active ? assigned : [];
   });
-  if (deactivated.length > 0) await revokeSeatSessions(deactivated);
-  return (await getCustomer(id))!;
+  const sessionsRevoked = deactivated.length > 0 ? await revokeSeatSessions(deactivated) : 0;
+  const customer = (await getCustomer(id))!;
+  const was = before as Customer | null;
+  const action =
+    was?.active && !customer.active ? "customer.deactivate" : was && !was.active && customer.active ? "customer.reactivate" : "customer.update";
+  await auditCustomer({
+    action,
+    customer_id: id,
+    before: was ? auditView(was) : null,
+    after: auditView(customer),
+    meta: action === "customer.deactivate" ? { seat_holders: deactivated.length, sessions_revoked: sessionsRevoked } : undefined,
+    by,
+  });
+  return customer;
 }
 
 export type AssignResult = { assigned: string[]; already: string[]; customer: Customer };
@@ -340,7 +395,12 @@ export type AssignResult = { assigned: string[]; already: string[]; customer: Cu
  * another customer; emails already on this customer are skipped. Refused when
  * the new ones don't fit in the seats that remain.
  */
-export async function assignSeats(args: { customer_id: string; emails: unknown; by: string }): Promise<AssignResult> {
+export async function assignSeats(args: {
+  customer_id: string;
+  emails: unknown;
+  by: string;
+  actor?: AuditActor;
+}): Promise<AssignResult> {
   const emails = parseEmailList(args.emails);
   if (emails.length === 0) throw new CustomerError("Enter at least one email address.");
   if (emails.length > MAX_BULK_EMAILS) {
@@ -399,18 +459,37 @@ export async function assignSeats(args: { customer_id: string; emails: unknown; 
     }
     throw error;
   });
-  return { ...result, customer: (await getCustomer(args.customer_id))! };
+  const customer = (await getCustomer(args.customer_id))!;
+  if (result.assigned.length > 0) {
+    await auditCustomer({
+      action: "seat.assign",
+      customer_id: customer.id,
+      before: { seats_used: customer.seats_used - result.assigned.length },
+      after: { seats_used: customer.seats_used, assigned: result.assigned },
+      meta: { customer: customer.name, seats: customer.seats, already_held: result.already.length },
+      by: args.actor,
+    });
+  }
+  return { ...result, customer };
 }
 
 /** Removes a seat; that person's SSO sessions end at once. */
-export async function unassignSeat(args: { customer_id: string; email: string }): Promise<Customer> {
+export async function unassignSeat(args: { customer_id: string; email: string; actor?: AuditActor }): Promise<Customer> {
   const email = normalizeEmail(String(args.email ?? ""));
   const gone = await rows(sql`
     delete from seat_assignments where customer_id = ${args.customer_id} and email = ${email} returning email`);
   if (!gone[0]) throw new CustomerError("That email does not hold a seat at this customer.", "not_found");
-  await revokeSeatSessions([email]);
+  const sessionsRevoked = await revokeSeatSessions([email]);
   const customer = await getCustomer(args.customer_id);
   if (!customer) throw new CustomerError("That customer does not exist.", "not_found");
+  await auditCustomer({
+    action: "seat.unassign",
+    customer_id: customer.id,
+    before: { seats_used: customer.seats_used + 1, email },
+    after: { seats_used: customer.seats_used },
+    meta: { customer: customer.name, sessions_revoked: sessionsRevoked },
+    by: args.actor,
+  });
   return customer;
 }
 
@@ -419,7 +498,10 @@ export async function unassignSeat(args: { customer_id: string; email: string })
  * once; a test customer's password session fails its per-request seat check
  * (sessionStillAllowed in modules/auth/session.ts) from the next request.
  */
-export async function deleteCustomer(id: string): Promise<{ customer: Customer; seats_removed: string[] }> {
+export async function deleteCustomer(
+  id: string,
+  by?: AuditActor,
+): Promise<{ customer: Customer; seats_removed: string[] }> {
   const customer = await getCustomer(id);
   if (!customer) throw new CustomerError("That customer does not exist.", "not_found");
   const emails = await sharedDb().transaction(async (tx) => {
@@ -431,7 +513,15 @@ export async function deleteCustomer(id: string): Promise<{ customer: Customer; 
     await tx.execute(sql`delete from customers where id = ${id}`);
     return held;
   });
-  await revokeSeatSessions(emails);
+  const sessionsRevoked = await revokeSeatSessions(emails);
+  await auditCustomer({
+    action: "customer.delete",
+    customer_id: id,
+    before: auditView(customer),
+    after: null,
+    meta: { seats_removed: emails.length, sessions_revoked: sessionsRevoked },
+    by,
+  });
   return { customer, seats_removed: emails };
 }
 

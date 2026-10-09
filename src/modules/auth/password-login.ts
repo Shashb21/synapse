@@ -4,6 +4,8 @@ import {
   getAccountWithHash,
   isLocked,
   isStaffAccount,
+  LOCKOUT_MS,
+  normalizeEmail,
   PASSWORD_PROVIDER,
   recordFailedSignIn,
   recordSuccessfulSignIn,
@@ -12,6 +14,7 @@ import {
   type Account,
   type AccountWithHash,
 } from "./accounts";
+import { recordAudit, recordAuditBestEffort, type AuditActor } from "@/modules/kernel/audit";
 import { emailDomainAllowed } from "./idp";
 import { dummyPasswordHash, MAX_PASSWORD_LENGTH, verifyPassword } from "./password";
 import { createSession, testOnlyAddress, testSeatPasswordAllowed, type Session } from "./session";
@@ -79,25 +82,78 @@ export async function signInWithPassword(args: { email: string; password: string
   const account = email.trim() ? await findAccountByEmail(email) : null;
   if (!account) {
     await verifyPassword(password, await dummyPasswordHash());
+    await auditLoginFailure("unknown_email", email, null);
     throw new PasswordLoginError("incorrect", INCORRECT_CREDENTIALS);
   }
-  if (isLocked(account)) throw new PasswordLoginError("locked", LOCKED_MESSAGE);
+  if (isLocked(account)) {
+    await auditLoginFailure("locked", email, account);
+    throw new PasswordLoginError("locked", LOCKED_MESSAGE);
+  }
   const ok = password.length > 0 && (await verifyPassword(password, account.password_hash));
   if (!ok) {
     const { locked } = await recordFailedSignIn(account.id);
+    await auditLoginFailure("wrong_password", email, account);
+    if (locked) {
+      await recordAuditBestEffort({
+        category: "auth",
+        action: "auth.lockout",
+        entity_type: "user",
+        entity_id: account.id,
+        actor: attemptActor(email, account),
+        workspace_id: null,
+        after: { locked: true },
+        meta: { email: account.email, minutes: LOCKOUT_MS / 60_000 },
+      });
+    }
     throw new PasswordLoginError(locked ? "locked" : "incorrect", locked ? LOCKED_MESSAGE : INCORRECT_CREDENTIALS);
   }
-  if (account.disabled) throw new PasswordLoginError("disabled", DISABLED_MESSAGE);
+  if (account.disabled) {
+    await auditLoginFailure("disabled", email, account);
+    throw new PasswordLoginError("disabled", DISABLED_MESSAGE);
+  }
   if (!isStaffAccount(account) && !(await testSeatPasswordAllowed(account))) {
     // A verified test-domain account is a test customer without an active seat right now.
     const testCustomer = account.email_verified && testOnlyAddress(account.email);
+    await auditLoginFailure(testCustomer ? "no_active_seat" : "not_staff", email, account);
     throw new PasswordLoginError("not_staff", testCustomer ? NO_ACTIVE_SEAT_MESSAGE : NOT_STAFF_MESSAGE);
   }
   if (!account.is_admin && !emailDomainAllowed(account.email)) {
+    await auditLoginFailure("domain_not_allowed", email, account);
     throw new PasswordLoginError("domain", "Your email domain is not allowed to sign in to this deployment.");
   }
   await recordSuccessfulSignIn(account.id);
-  return createSession(passwordSessionArgs(account));
+  const session = await createSession(passwordSessionArgs(account));
+  await recordAuditBestEffort({
+    category: "auth",
+    action: "auth.login",
+    entity_type: "user",
+    entity_id: account.id,
+    actor: { principal: account.email, name: account.name, role: account.role },
+    workspace_id: null,
+    meta: { method: PASSWORD_PROVIDER, email: account.email, is_admin: account.is_admin },
+  });
+  return session;
+}
+
+/** Who tried to sign in: the account when the email matched one, else the attempted email. */
+function attemptActor(email: string, account: Account | null): AuditActor {
+  const attempted = normalizeEmail(email).slice(0, 320) || "(blank)";
+  return account
+    ? { principal: account.email, name: account.name, role: account.role }
+    : { principal: attempted, name: "Unknown", role: null };
+}
+
+/** A refused sign-in (best-effort: never blocks the response). The attempted password is never recorded. */
+async function auditLoginFailure(reason: string, email: string, account: Account | null): Promise<void> {
+  await recordAuditBestEffort({
+    category: "auth",
+    action: "auth.login_failed",
+    entity_type: "user",
+    entity_id: account?.id ?? null,
+    actor: attemptActor(email, account),
+    workspace_id: null,
+    meta: { method: PASSWORD_PROVIDER, reason, email: normalizeEmail(email).slice(0, 320) },
+  });
 }
 
 /** The account behind a password session, or null for any other session. */
@@ -123,5 +179,14 @@ export async function changeOwnPassword(args: {
   if (args.confirm !== undefined && args.confirm !== args.next) throw new AccountError("The new passwords do not match.");
   if (args.current === args.next) throw new AccountError("Choose a password different from your current one.");
   await setPassword(account.id, String(args.next ?? ""));
-  await revokeAccountSessions(account.id, { except: args.session.id });
+  const revoked = await revokeAccountSessions(account.id, { except: args.session.id });
+  await recordAudit({
+    category: "admin",
+    action: "account.change_password",
+    entity_type: "user",
+    entity_id: account.id,
+    actor: { principal: account.email, name: account.name, role: account.role },
+    workspace_id: null,
+    meta: { password_changed: true, other_sessions_revoked: revoked },
+  });
 }
