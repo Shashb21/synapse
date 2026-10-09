@@ -371,13 +371,11 @@ export async function validateBandHigh(request: APIRequestContext, gap_id: strin
 }
 
 /**
- * The id of the gap whose card link on Gaps contains `name`. Ids are never
- * reissued after a reset (KAN-15), so specs look them up instead of assuming GAP-001.
+ * The gap id issued just before `id` (GAP-007 → GAP-006). Ids are never
+ * reissued after a reset (KAN-15), so specs derive them instead of assuming GAP-001.
  */
-export async function gapIdNamed(page: Page, name: string): Promise<string> {
-  await page.goto("/?place=gaps");
-  const link = page.locator('a[href^="/gaps/GAP-"]').filter({ hasText: name }).first();
-  await link.waitFor();
-  const href = (await link.getAttribute("href")) ?? "";
-  return href.split("/").pop() ?? "";
+export function previousGapId(id: string): string {
+  const match = /^GAP-(\d+)$/.exec(id);
+  if (!match) throw new Error(`Not a numbered gap id: ${id}`);
+  return `GAP-${String(Number(match[1]) - 1).padStart(3, "0")}`;
 }

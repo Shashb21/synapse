@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { ACTOR, gapIdNamed, iegpAction, planAction } from "../support/synapse";
+import { ACTOR, iegpAction, planAction, previousGapId } from "../support/synapse";
 
 /**
  * KAN-16 from a user's seat, with AI on:
@@ -67,14 +67,15 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
     await expect(page.getByTestId("manual-start-ai-on")).toContainText("1 gap and 0 tactics so far.");
   });
 
-  test("the server refuses Continue to tactics until every Open gap has a validated band", async ({ page, request }) => {
-    firstGap = await gapIdNamed(page, "Persistence versus standard of care");
+  test("the server refuses Continue to tactics until every Open gap has a validated band", async ({ request }) => {
     const created = await iegpAction(request, {
       action: "create_gap",
       statement: "No caregiver burden evidence for the EU5 HTA submission.",
       domain: "unmet_need",
     });
     secondGap = String(created.id);
+    // Ids come from one counter in order, so the gap added by hand just before is the previous number.
+    firstGap = previousGapId(secondGap);
     for (const gap_id of [firstGap, secondGap]) await iegpAction(request, { action: "validate_gap", gap_id });
     await iegpAction(request, { action: "complete_wizard" });
 
