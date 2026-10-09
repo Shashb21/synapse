@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { postJson } from "@/lib/post-json";
 
 export type BreakoutGapRow = {
   id: string;
@@ -37,13 +38,9 @@ const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12
 const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
 async function post(body: Record<string, unknown>): Promise<string | null> {
-  const res = await fetch("/api/iegp", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await postJson("/api/iegp", body);
   if (res.ok) return null;
-  return ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not save.";
+  return (res.json as { error?: string }).error ?? "Could not save.";
 }
 
 /** New group: a name, what it covers, and optionally the gaps of one theme to start with. */

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentSession, type Session } from "@/modules/auth/session";
+import { readJsonBody } from "@/modules/auth/api-guard";
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 
@@ -10,6 +11,7 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -34,13 +36,20 @@ export async function requireMembership(workspaceId: string): Promise<{
   return { session, principal, workspace: { ...workspace, role } };
 }
 
+/** The body as an object: none at all is `{}`, malformed JSON is a 400 (KAN-18). */
 export async function readBody(request: Request): Promise<Record<string, unknown>> {
-  return (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  try {
+    return await readJsonBody(request, { allowEmpty: true });
+  } catch {
+    throw new HttpError(400, "The request body is not valid JSON.", "invalid_json");
+  }
 }
 
 /** Turns a thrown error into JSON: auth problems keep their status, owner-only rules are 403. */
 export function errorResponse(error: unknown): NextResponse {
-  if (error instanceof HttpError) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof HttpError) {
+    return NextResponse.json(error.code ? { error: error.message, code: error.code } : { error: error.message }, { status: error.status });
+  }
   const message = error instanceof Error ? error.message : "Workspace request failed.";
   const status = /^(Only the workspace owner|You are not a member)/.test(message) ? 403 : 400;
   return NextResponse.json({ error: message }, { status });

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import type { StageTarget } from "@/components/platform/run-stage-button";
+import { postJson } from "@/lib/post-json";
 
 type EvalResponse = {
   error?: string;
@@ -36,17 +37,13 @@ function EvalsButton({
   async function run() {
     setPending(true);
     setResult(null);
-    const res = await fetch(target.endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(target.endpoint, {
         stage,
         actor_name: identity.actor_name,
         actor_function: identity.actor_function,
         ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as EvalResponse;
+      });
+    const json = res.json as EvalResponse;
     setPending(false);
     setResult(res.ok ? json : { error: json.error ?? "Eval run failed" });
     if (res.ok) router.refresh();

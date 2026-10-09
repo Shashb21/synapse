@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { AiSectionId } from "@/modules/kernel/ai-sections";
 import { cn } from "@/lib/utils";
 import { runTraceHref } from "@/components/admin/admin-nav";
+import { postJson } from "@/lib/post-json";
 
 type HarnessCase = {
   id: AiSectionId;
@@ -94,10 +95,7 @@ function HarnessCard({
     const started = Date.now();
     setElapsed(0);
     timer.current = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 500);
-    const res = await fetch("/api/admin/harness", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/admin/harness", {
         case: entry.id,
         mode,
         demo_id: demoId,
@@ -107,13 +105,12 @@ function HarnessCard({
         gap_statement: gapStatement,
         gap_domain: gapDomain || undefined,
         gap_id: gapId || undefined,
-      }),
-    }).catch(() => null);
+      });
     if (timer.current) clearInterval(timer.current);
     setPending(false);
-    const json = (await res?.json().catch(() => ({}))) as { result?: Result; error?: string; code?: string } | undefined;
-    if (!res?.ok || !json?.result) {
-      setError({ message: json?.error ?? "The run failed.", code: json?.code });
+    const json = res.json as { result?: Result; error?: string; code?: string };
+    if (!res.ok || !json.result) {
+      setError({ message: json.error ?? "The run failed.", code: json.code });
       return;
     }
     setResult(json.result);

@@ -4,23 +4,13 @@ import { LockForm } from "@/components/lock-form";
 import { LockMeta, PriorityBadge } from "@/components/iegp-badges";
 import { PRIORITY_BANDS } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
+import { residualRows } from "@/lib/iegp/residual-rows";
 
 export const dynamic = "force-dynamic";
 
 export default async function ResidualsPage() {
   const state = await loadState();
-  const rows = state.residuals.map((r) => {
-    const gap = state.gaps.find((g) => g.id === r.gap_id)!;
-    const pri = state.priorities.find((p) => p.residual_id === r.id);
-    return { r, gap, pri };
-  });
-  const bandRank = { critical: 0, high: 1, medium: 2, low: 3 } as const;
-  rows.sort((a, b) => {
-    const aRank = a.pri?.lock.locked ? bandRank[a.pri.band] : 8;
-    const bRank = b.pri?.lock.locked ? bandRank[b.pri.band] : 8;
-    if (aRank !== bRank) return aRank - bRank;
-    return a.gap.name.localeCompare(b.gap.name);
-  });
+  const rows = residualRows(state);
 
   return (
     <AppShell active="residuals">
@@ -43,9 +33,13 @@ export default async function ResidualsPage() {
               ) : (
                 <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked — human gate</span>
               )}
-              <Link href={`/gaps/${gap.id}`} className="text-[12px] text-muted-foreground">
-                Parent: {gap.name}
-              </Link>
+              {gap ? (
+                <Link href={`/gaps/${gap.id}`} className="text-[12px] text-muted-foreground">
+                  Parent: {gap.name}
+                </Link>
+              ) : (
+                <span className="text-[12px] text-muted-foreground">Parent gap no longer exists ({r.gap_id})</span>
+              )}
             </div>
             <p className="mt-2 text-[13px] text-foreground">{r.statement}</p>
             <p className="mt-2 text-[12px] text-muted-foreground">{r.draft_rationale}</p>

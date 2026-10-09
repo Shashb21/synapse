@@ -42,6 +42,15 @@ function StatusSummary({ row }: { row: MappingTableViewRow }) {
   );
 }
 
+/**
+ * A row editor starts from the row it was given. Keyed on what it shows, it
+ * starts over when a save or a re-run changes the row, instead of keeping the
+ * old tactics and status (KAN-18).
+ */
+export function mappingRowKey(row: Pick<MappingTableViewRow, "gap_id" | "source" | "mapping_status" | "tactic_ids">): string {
+  return [row.gap_id, row.source, row.mapping_status ?? "", [...row.tactic_ids].sort().join(",")].join("|");
+}
+
 export function MappingTableWorkbench({
   rows,
   tactics,
@@ -126,7 +135,7 @@ export function MappingTableWorkbench({
           </thead>
           <tbody>
             {filtered.map((row) => (
-              <MappingRowEditor key={row.gap_id} row={row} tactics={tactics} ai={ai} />
+              <MappingRowEditor key={mappingRowKey(row)} row={row} tactics={tactics} ai={ai} />
             ))}
           </tbody>
         </table>

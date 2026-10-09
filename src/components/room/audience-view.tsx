@@ -141,8 +141,14 @@ export function AudienceView({ workspaceKey, initialState }: { workspaceKey: str
             data-testid={visible ? "audience-frame" : "audience-frame-loading"}
             data-href={frame.href}
             aria-hidden={visible ? undefined : true}
-            tabIndex={visible ? undefined : -1}
-            className={visible ? "absolute inset-0 h-full w-full border-0" : "invisible absolute inset-0 h-full w-full border-0"}
+            // The audience watches; only the presenter edits (KAN-18). No clicks, no focus, no typing.
+            inert
+            tabIndex={-1}
+            className={
+              visible
+                ? "pointer-events-none absolute inset-0 h-full w-full border-0"
+                : "pointer-events-none invisible absolute inset-0 h-full w-full border-0"
+            }
           />
         );
       })}

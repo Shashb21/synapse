@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 const PACKS = [
   { id: "beone-bgb-58067-prmt5i", label: "BGB-58067 PRMT5i IEP" },
@@ -22,13 +23,8 @@ export function SeedFromGoldForm() {
     setError(null);
     setSummary(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/seed", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // AI off: load the gold claims only; the reference source is not parsed.
-        body: JSON.stringify({ pack_id: packId, parse_source: aiOn }),
-      });
-      const body = (await res.json()) as {
+      const res = await postJson("/api/accuracy/seed", { pack_id: packId, parse_source: aiOn });
+      const body = res.json as {
         ok?: boolean;
         workspace_id?: string;
         gaps?: number;

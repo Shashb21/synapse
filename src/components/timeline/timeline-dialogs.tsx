@@ -18,6 +18,7 @@ import { ActionDialog, type ActionIdentity } from "@/components/platform/action-
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 import { LANE_LABELS, TIMELINE_LANES, type TimelineActivity } from "@/modules/stages/s10-timeline/build";
 import { dependencyConflicts, type DependencyConflict } from "@/modules/stages/s10-timeline/gap-view";
+import { postJson } from "@/lib/post-json";
 
 const SMALL_TRIGGER = <Button size="xs" variant="outline" />;
 
@@ -221,10 +222,7 @@ export function DragRescheduleDialog({
     if (rationale.trim().length < 3) return setError("A short rationale is required.");
     if (!identity.signed_in && !actorName.trim()) return setError("Type your name so the edit has an actor.");
     setPending(true);
-    const res = await fetch("/api/plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/plan", {
         action: "move_activity",
         id: change.activity.id,
         start_date: start,
@@ -232,9 +230,8 @@ export function DragRescheduleDialog({
         rationale: rationale.trim(),
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: identity.actor_function,
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) return setError(json.error ?? "Could not save the new dates.");
     onClose();
@@ -331,17 +328,13 @@ export function ActivitySheetEditor({
   const [refreshing, startRefresh] = useTransition();
 
   async function post(endpoint: string, body: Record<string, unknown>): Promise<string | null> {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(endpoint, {
         ...body,
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: identity.actor_function,
-      }),
-    });
+      });
     if (res.ok) return null;
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const json = res.json as { error?: string };
     return json.error ?? "Saving failed";
   }
 

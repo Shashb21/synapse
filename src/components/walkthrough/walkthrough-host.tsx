@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { findTourTarget, onStepPage, TOUR_STEPS } from "./tour-steps";
 import { WalkthroughCard } from "./walkthrough-card";
+import { isPresenting } from "@/lib/room/presenting";
 import {
   fetchWalkthrough,
   updateWalkthrough,
@@ -64,7 +65,8 @@ function Host() {
   const search = useSearchParams();
   const [progress, setProgress] = useState<WalkthroughProgress | null>(null);
   // Signed out (or on a page with no workspace) there is no progress to load.
-  const applies = walkthroughApplies(pathname);
+  // Never inside a Room slide: the audience would see the tour over the page (KAN-18).
+  const applies = walkthroughApplies(pathname) && !isPresenting();
 
   useEffect(() => {
     if (!applies) return;

@@ -39,6 +39,7 @@ import {
   StakeholdersStep,
   type StepProps,
 } from "./setup-steps";
+import { postJson } from "@/lib/post-json";
 
 type StepId = "welcome" | SetupSection | "models" | "review";
 type Step = { id: StepId; label: string };
@@ -136,18 +137,14 @@ export function SetupWizard({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/iegp", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/iegp", {
           action: "save_product_setup",
           actor_name: actorName,
           actor_function: actorFunction,
           mark_complete: markComplete,
           context: form,
-        }),
-      });
-      const json = (await res.json()) as { error?: string; context?: PlanningContext };
+        });
+      const json = res.json as { error?: string; context?: PlanningContext };
       if (!res.ok) {
         setError(json.error ?? "Could not save setup");
         return false;

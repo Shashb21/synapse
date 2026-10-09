@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { postJson } from "@/lib/post-json";
 
 /** Picks which registered module version a stage runs (owner only: /api/control activate_module). */
 export function ModuleActivation({
@@ -22,12 +23,8 @@ export function ModuleActivation({
     setError(null);
     // finally re-enables the picker even when the request itself throws (offline, aborted).
     try {
-      const res = await fetch("/api/control", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "activate_module", stage, module_id: moduleId }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      const res = await postJson("/api/control", { action: "activate_module", stage, module_id: moduleId });
+      const json = res.json as { error?: string };
       if (!res.ok) {
         setError(json.error ?? "Could not activate that module");
         return;
