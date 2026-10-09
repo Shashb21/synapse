@@ -280,18 +280,31 @@ export async function recordSuccessfulSignIn(accountId: string): Promise<void> {
     where id = ${accountId}`);
 }
 
+/** How many live password sessions an account has (the audit log records how many an action ended). */
+export async function countPasswordSessions(accountId: string): Promise<number> {
+  await ensurePlatformSchema();
+  const found = await sharedDb()
+    .select({ id: t.authSessions.id })
+    .from(t.authSessions)
+    .where(and(eq(t.authSessions.provider_id, PASSWORD_PROVIDER), eq(t.authSessions.subject, accountId)));
+  return found.length;
+}
+
 /**
  * Ends an account's password sessions (after a reset, a role change or
  * disabling it), so the change applies at once rather than at next sign-in.
+ * Returns how many ended.
  */
-export async function revokeAccountSessions(accountId: string, options: { except?: string } = {}): Promise<void> {
+export async function revokeAccountSessions(accountId: string, options: { except?: string } = {}): Promise<number> {
   await ensurePlatformSchema();
   const match = and(eq(t.authSessions.provider_id, PASSWORD_PROVIDER), eq(t.authSessions.subject, accountId));
   // `except` is the caller's session token; rows hold its sha256 (sessionKey in session.ts, KAN-20).
   const keep = options.except ? createHash("sha256").update(options.except).digest("hex") : null;
-  await sharedDb()
+  const gone = await sharedDb()
     .delete(t.authSessions)
-    .where(keep ? and(match, ne(t.authSessions.id, keep)) : match);
+    .where(keep ? and(match, ne(t.authSessions.id, keep)) : match)
+    .returning({ id: t.authSessions.id });
+  return gone.length;
 }
 
 /**

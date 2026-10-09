@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { postJson } from "@/lib/post-json";
 
 export function SweepStaleRunsButton({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
@@ -11,12 +12,8 @@ export function SweepStaleRunsButton({ workspaceId }: { workspaceId: string }) {
   function sweep() {
     setMessage(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/hygiene", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "sweep_stale_runs", workspace_id: workspaceId }),
-      });
-      const body = (await res.json()) as { ok?: boolean; abandoned_ids?: string[]; error?: string };
+      const res = await postJson("/api/accuracy/hygiene", { action: "sweep_stale_runs", workspace_id: workspaceId });
+      const body = res.json as { ok?: boolean; abandoned_ids?: string[]; error?: string };
       if (!res.ok || !body.ok) {
         setMessage(body.error ?? "Sweep failed");
         return;

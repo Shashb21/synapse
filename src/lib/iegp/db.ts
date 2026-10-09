@@ -422,6 +422,11 @@ export async function ensureCurrentSchemaTables(): Promise<void> {
   });
 }
 
+/**
+ * Empties the workspace's plan tables before new contents are written. Never
+ * `audit` or `gap_versions` (KAN-89): the workspace's history outlives a reset
+ * to blank or a demo load, which is itself recorded in both audit logs.
+ */
 export async function wipeIegp() {
   const d = db();
   const tables = [
@@ -430,7 +435,6 @@ export async function wipeIegp() {
     "gap_suggestions",
     "gold_coverages",
     "gold_needs",
-    "audit",
     "roadmap",
     "priorities",
     "residuals",
@@ -440,7 +444,6 @@ export async function wipeIegp() {
     "residual_gap_suggestions",
     "need_gap_links",
     "needs",
-    "gap_versions",
     "breakout_group_gaps",
     "breakout_groups",
     "gaps",

@@ -41,6 +41,7 @@ import {
 } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { plural } from "@/lib/plural";
+import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
 
 export type PlanView = {
   version: number;
@@ -49,6 +50,8 @@ export type PlanView = {
   saved_by: string;
   saved_at: string;
   activities: number;
+  /** planFingerprint of the saved activities: what "changed since the last save" compares. */
+  fingerprint: string;
 };
 
 /**
@@ -147,7 +150,7 @@ export function TimelineBoard({
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = datedSelection !== null && editingId === datedSelection.id;
   const nameOf = new Map(model.activities.map((row) => [row.id, row.tactic_name]));
-  const stale = plan ? plan.activities !== model.activities.length : false;
+  const stale = plan ? plan.fingerprint !== planFingerprint(model.activities) : false;
   const [dragChange, setDragChange] = useState<DragChange | null>(null);
   const selectedConflicts = selected
     ? view.conflicts.filter((row) => row.successor_id === selected.id || row.predecessor_id === selected.id)
@@ -218,7 +221,16 @@ export function TimelineBoard({
                 : "Date them by hand or remove them before saving as final."}
             </p>
           ) : null}
-          {canSaveFinal ? (
+          {canSaveFinal && model.activities.length === 0 ? (
+            <Button size="sm" variant="default" disabled title="Date at least one activity first.">
+              Save as final
+            </Button>
+          ) : null}
+          {canSaveFinal && model.activities.length === 0 ? (
+            <p className="max-w-56 text-[11px] text-muted-foreground">
+              Nothing to save yet: date at least one activity first.
+            </p>
+          ) : canSaveFinal ? (
             <ActionDialog
               endpoint="/api/plan"
               payload={{ action: "save_plan" }}

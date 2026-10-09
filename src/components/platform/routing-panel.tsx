@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 export type ProviderOption = {
   id: string;
@@ -108,10 +109,7 @@ function StageRouteCard({
     setPending(true);
     setError(null);
     setSaved(false);
-    const res = await fetch("/api/control", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/control", {
         action: "set_route",
         stage: route.stage,
         provider_id: providerId,
@@ -121,9 +119,8 @@ function StageRouteCard({
         temperature,
         max_tokens: maxTokens,
         fallbacks,
-      }),
-    });
-    const json = (await res.json()) as {
+      });
+    const json = res.json as {
       error?: string;
       config?: { params: { temperature: number; max_tokens: number }; fallbacks: string[] };
     };
@@ -144,12 +141,8 @@ function StageRouteCard({
 
   async function activate(moduleId: string) {
     setError(null);
-    const res = await fetch("/api/control", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "activate_module", stage: route.stage, module_id: moduleId }),
-    });
-    const json = (await res.json()) as { error?: string };
+    const res = await postJson("/api/control", { action: "activate_module", stage: route.stage, module_id: moduleId });
+    const json = res.json as { error?: string };
     if (!res.ok) {
       setError(json.error ?? "Could not activate that module");
       return;

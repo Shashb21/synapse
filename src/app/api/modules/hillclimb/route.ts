@@ -7,6 +7,7 @@ import { STAGE_IDS, type StageId } from "@/modules/kernel/contracts";
 import { activeModule } from "@/modules/kernel/registry";
 import { runHillclimbSweep } from "@/modules/kernel/hillclimb-loop";
 import { requestIdentity } from "@/modules/auth/request";
+import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { HILLCLIMB_STAGES } from "@/modules/kernel/prompt-versions";
 
 export const runtime = "nodejs";
@@ -16,7 +17,12 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
-  const body = (await request.json()) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const stage = String(body.stage ?? "") as StageId;
   if (!STAGE_IDS.includes(stage)) {
     return NextResponse.json({ error: `Unknown stage ${body.stage}` }, { status: 400 });

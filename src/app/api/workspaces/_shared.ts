@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { currentSession, type Session } from "@/modules/auth/session";
+import { readJsonBody } from "@/modules/auth/api-guard";
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, WorkspaceLimitError, type WorkspaceWithRole } from "@/modules/workspaces/store";
-import { BodyTooLargeError, readBodyText } from "@/lib/http/body-limit";
+import { BodyTooLargeError } from "@/lib/http/body-limit";
 
 /** Where a brand-new workspace goes first: the setup wizard, in "new workspace" mode. */
 export const NEW_WORKSPACE_REDIRECT = "/setup?new=1";
@@ -11,6 +12,7 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -35,26 +37,24 @@ export async function requireMembership(workspaceId: string): Promise<{
   return { session, principal, workspace: { ...workspace, role } };
 }
 
-/** The JSON body, or {} when it is not JSON; a body over the size limit is a 413 (KAN-20). */
+/**
+ * The body as an object: none at all is `{}`, malformed JSON is a 400 (KAN-18),
+ * and a body over the size limit is a 413 (KAN-20).
+ */
 export async function readBody(request: Request): Promise<Record<string, unknown>> {
-  let text: string;
   try {
-    text = await readBodyText(request);
+    return await readJsonBody(request, { allowEmpty: true });
   } catch (error) {
-    if (error instanceof BodyTooLargeError) throw new HttpError(error.status, error.message);
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
+    if (error instanceof BodyTooLargeError) throw new HttpError(error.status, error.message, "too_large");
+    throw new HttpError(400, "The request body is not valid JSON.", "invalid_json");
   }
 }
 
 /** Turns a thrown error into JSON: auth problems keep their status, owner-only rules are 403. */
 export function errorResponse(error: unknown): NextResponse {
-  if (error instanceof HttpError) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof HttpError) {
+    return NextResponse.json(error.code ? { error: error.message, code: error.code } : { error: error.message }, { status: error.status });
+  }
   if (error instanceof WorkspaceLimitError) return NextResponse.json({ error: error.message, code: "workspace_limit" }, { status: 429 });
   const message = error instanceof Error ? error.message : "Workspace request failed.";
   const status = /^(Only the workspace owner|You are not a member)/.test(message) ? 403 : 400;

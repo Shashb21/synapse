@@ -3,6 +3,7 @@ import { db, ensureSchema, wipeIegp } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
+import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
@@ -380,10 +381,11 @@ export async function persistState(state: IegpState) {
   if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
   if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
   if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
-  if (state.audit.length) await d.insert(t.audit).values(state.audit);
+  // History is kept across resets (wipeIegp leaves it), so a seed row already there stays as it was.
+  if (state.audit.length) await d.insert(t.audit).values(state.audit).onConflictDoNothing();
   if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
   if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
-  if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
+  if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions).onConflictDoNothing();
   if (state.breakout_groups.length) await d.insert(t.breakoutGroups).values(state.breakout_groups);
   if (state.breakout_group_gaps.length) {
     await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
@@ -407,8 +409,22 @@ export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
 }
 
 /** Replaces every IEGP row in the current workspace with `contents`. */
-export async function replaceWorkspaceContents(contents: WorkspaceContents) {
-  await persistState(buildWorkspaceContents(contents));
+export async function replaceWorkspaceContents(
+  contents: WorkspaceContents,
+  actor: { name: string; function: ActorFunction } = { name: "System", function: "evidence_lead" },
+) {
+  const state = buildWorkspaceContents(contents);
+  await persistState(state);
+  // KAN-89: the reset goes in the workspace's history, which it no longer erases.
+  await appendAuditOn(
+    db(),
+    actor.name,
+    actor.function,
+    "plan",
+    state.asset.id,
+    WORKSPACE_RESET_ACTION,
+    contents === "blank" ? "Reset the workspace to blank." : contents === "demo" ? "Loaded the demo data." : "Loaded the demo setup.",
+  );
   return loadState();
 }
 
@@ -4260,25 +4276,46 @@ export async function createAddressedGap(args: {
 export async function createBreakoutGroup(args: {
   name: string;
   note?: string;
+  /** Gaps to start with. All are checked first: a bad one creates nothing (KAN-18). */
+  gap_ids?: string[];
   actor_name: string;
   actor_function: ActorFunction;
 }): Promise<string> {
   const name = args.name.trim();
   if (!name) throw new Error("A breakout group needs a name.");
   const state = await loadState();
+  const gapIds = [...new Set(args.gap_ids ?? [])];
+  const known = new Set(state.gaps.map((gap) => gap.id));
+  if (gapIds.some((id) => !known.has(id))) throw new Error("Gap not found");
   const id = nextId(
     "BRK",
     state.breakout_groups.map((g) => g.id),
   );
-  await db().insert(t.breakoutGroups).values({
-    id,
-    name,
-    note: args.note?.trim() || null,
-    created_at: now(),
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+  // The group and its starting gaps land together, or not at all.
+  await db().transaction(async (transaction) => {
+    await transaction.insert(t.breakoutGroups).values({
+      id,
+      name,
+      note: args.note?.trim() || null,
+      created_at: now(),
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+    if (gapIds.length > 0) {
+      await transaction.insert(t.breakoutGroupGaps).values(gapIds.map((gap_id) => ({ group_id: id, gap_id })));
+    }
   });
   await appendAudit(args.actor_name, args.actor_function, "breakout_group", id, "create", name);
+  if (gapIds.length > 0) {
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "breakout_group",
+      id,
+      "assign_gaps",
+      `${gapIds.length} gap${gapIds.length === 1 ? "" : "s"} → ${name}`,
+    );
+  }
   return id;
 }
 

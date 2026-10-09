@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ApiGuardError, readJsonBody } from "@/modules/auth/api-guard";
 import { ownerGate, ownerOnlyJson } from "@/modules/auth/owner";
 import {
   adminReturnPath,
@@ -18,6 +19,7 @@ const NO_STORE = { "cache-control": "no-store" };
 function failure(error: unknown): NextResponse {
   if (error instanceof NotOwnerError) return ownerOnlyJson();
   if (error instanceof UnknownWorkspaceError) return NextResponse.json({ error: error.message }, { status: 404 });
+  if (error instanceof ApiGuardError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   const message = error instanceof Error ? error.message : "Workspace request failed.";
   return NextResponse.json({ error: message }, { status: 400 });
 }
@@ -52,7 +54,7 @@ export async function POST(request: Request) {
   const denied = await ownerGate();
   if (denied) return denied;
   try {
-    const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    const body = await readJsonBody(request, { allowEmpty: true });
     const workspaceId = typeof body.workspace_id === "string" ? body.workspace_id.trim() : "";
     if (!workspaceId) return NextResponse.json({ error: "Choose a workspace." }, { status: 400 });
     const workspace = await selectAdminWorkspace(workspaceId);

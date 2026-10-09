@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import { ROLES, ROLE_LABELS, ROLE_SUMMARIES, type Role } from "@/modules/auth/roles";
+import { postJson } from "@/lib/post-json";
 
 /** Demo sign-in is for local preview and tests only; a production build never offers it. */
 const DEMO_SIGN_IN = process.env.NODE_ENV !== "production";
@@ -43,12 +44,8 @@ export function SessionPanel({
     setPending(key);
     setError(null);
     const url = body.action === "sign_out" ? "/api/auth/logout" : "/api/auth/login";
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json()) as { error?: string; authorize_url?: string; redirect?: string };
+    const res = await postJson(url, body);
+    const json = res.json as { error?: string; authorize_url?: string; redirect?: string };
     setPending(null);
     if (!res.ok) {
       setError(json.error ?? "Sign-in failed");

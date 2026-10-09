@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { LiveExtractGate } from "@/accuracy/kernel/extract-gate";
+import { postJson } from "@/lib/post-json";
 
 export function ExtractKeyGateBanner({ gate }: { gate: LiveExtractGate }) {
   if (gate.ready && gate.stub) return null;
@@ -58,16 +59,12 @@ export function SourceExtractActions({
     setConnectPath(null);
     setSummary(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/extract", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/extract", {
           workspace_id: workspaceId,
           source_file_id: sourceFileId,
           kinds,
-        }),
-      });
-      const json = (await res.json()) as {
+        });
+      const json = res.json as {
         ok?: boolean;
         error?: string;
         gaps_inserted?: number;

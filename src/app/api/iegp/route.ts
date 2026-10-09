@@ -213,12 +213,12 @@ export async function POST(request: Request) {
     switch (body.action) {
       case "reset":
         // Reset to blank: empties the plan and clears the workspace's demo flag.
-        await replaceContents(identity.workspace?.id ?? null, "blank");
+        await replaceContents(identity.workspace?.id ?? null, "blank", identity.actor);
         break;
       case "load_demo":
         // Replaces everything with the Velmara demo and flags the workspace as demo.
         // scope "setup" loads only the demo's asset and objectives (the stage tests' start).
-        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo");
+        await replaceContents(identity.workspace?.id ?? null, body.scope === "setup" ? "demo_setup" : "demo", identity.actor);
         break;
       case "lock_need":
         await lockNeed({
@@ -816,15 +816,14 @@ export async function POST(request: Request) {
         break;
       }
       case "create_breakout_group": {
-        const group_id = await createBreakoutGroup({
+        // Optionally starts with a theme's gaps (KAN-55), checked before anything is created (KAN-18).
+        await createBreakoutGroup({
           name: body.name,
           note: body.note,
+          gap_ids: String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean),
           actor_name,
           actor_function,
         });
-        // Optionally starts with a theme's gaps (KAN-55).
-        const gap_ids = String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean);
-        if (gap_ids.length > 0) await assignGapsToBreakoutGroup({ group_id, gap_ids, actor_name, actor_function });
         break;
       }
       case "delete_breakout_group":

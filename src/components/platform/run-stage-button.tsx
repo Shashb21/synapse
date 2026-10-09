@@ -8,6 +8,7 @@ import { sectionOfStage } from "@/modules/kernel/ai-sections";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { stageNeedsAi } from "@/modules/kernel/stage-ai";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
+import { postJson } from "@/lib/post-json";
 
 export type StageRunResponse = {
   ok?: boolean;
@@ -89,18 +90,15 @@ function StageButton({
   async function run() {
     setPending(true);
     setResult(null);
-    const res = await fetch(target.endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(target.endpoint, {
         stage,
         input: input ?? {},
         actor_name: identity.actor_name,
         actor_function: identity.actor_function,
         ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
-      }),
-    });
-    const json = (await res.json().catch(() => ({ error: `Stage run failed (HTTP ${res.status}).` }))) as StageRunResponse;
+      });
+    const json = res.json as StageRunResponse;
+    if (!res.ok && !json.error) json.error = `Stage run failed (HTTP ${res.status}).`;
     const show = () => {
       setPending(false);
       setResult(

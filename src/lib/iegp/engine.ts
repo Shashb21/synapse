@@ -23,6 +23,7 @@ import type {
 } from "./types";
 import { statementSimilarity } from "@/lib/text";
 import { plannedSettings } from "./planning-context";
+import { gapVersionsFor } from "./gap-history";
 
 /**
  * Test-stub support only. No production path ranks or assigns gap ↔ tactic
@@ -1169,7 +1170,7 @@ export function buildPlanWorkspace(state: IegpState): {
       human_validated: gap.human_validated,
       residual: residualByParent.get(gap.id) ?? null,
       parent_gap_id: gap.parent_gap_id,
-      history_count: state.gap_versions.filter((row) => row.live_gap_id === gap.id).length,
+      history_count: gapVersionsFor(state, gap.id).length,
       need_count: linkedNeeds.length,
       needs: linkedNeeds,
       needs_review: coverages.some((c) => c.needs_review),

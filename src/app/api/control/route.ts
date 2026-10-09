@@ -23,6 +23,8 @@ import { loadAxes, saveAxes } from "@/modules/stages/s8-prioritization/axes";
 import { aiSwitch, setAiEnabled, setAiSection, storedAiSections } from "@/modules/kernel/ai-switch";
 import { AI_SECTION_IDS, isAiSectionId } from "@/modules/kernel/ai-sections";
 import { computePendingLessons } from "@/modules/kernel/decision-examples";
+import { routeConfig } from "@/modules/kernel/routing";
+import { recordAudit } from "@/modules/kernel/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,6 +80,28 @@ export async function GET() {
   });
 }
 
+/** Only what a route is: never a key (routes hold none, but redaction applies anyway). */
+function routeView(route: { provider_id: string; model: string; params: unknown; fallbacks: unknown }) {
+  return { provider_id: route.provider_id, model: route.model, params: route.params, fallbacks: route.fallbacks };
+}
+
+/**
+ * Records a configuration change (KAN-89) right after it is saved. A failed
+ * write throws, so the request reports an error rather than an unrecorded change.
+ */
+async function audit(
+  action: string,
+  entity_type: string,
+  entity_id: string | null,
+  before: unknown,
+  after: unknown,
+  rationale?: string | null,
+  meta?: Record<string, unknown>,
+) {
+  // Platform-wide settings: no workspace. (save_axes is recorded by saveAxes, in its workspace.)
+  await recordAudit({ category: "config", action, entity_type, entity_id, before, after, rationale, meta, workspace_id: null });
+}
+
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try {
@@ -95,33 +119,40 @@ export async function POST(request: Request) {
     switch (action) {
       case "set_ai_enabled": {
         if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const was = await aiSwitch();
         const ai = await setAiEnabled({
           enabled: body.enabled,
           actor_name: identity.actor.name,
           rationale: typeof body.rationale === "string" ? body.rationale : undefined,
         });
+        await audit("set_ai_enabled", "ai_switch", "ai", { enabled: was.enabled }, { enabled: ai.enabled }, ai.rationale);
         return NextResponse.json({ ok: true, ai });
       }
       // One AI section on or off for every customer (KAN-53).
       case "set_ai_section": {
         if (!isAiSectionId(body.section)) throw new Error("Unknown AI section.");
         if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
+        const was = (await storedAiSections()).sections;
         const sections = await setAiSection({ section: body.section, enabled: body.enabled, actor_name: identity.actor.name });
+        await audit("set_ai_section", "ai_section", body.section, { enabled: was[body.section] }, { enabled: sections[body.section] });
         return NextResponse.json({ ok: true, ai_sections: sections });
       }
       // Every section at once (a fresh platform, or the e2e suite).
       case "set_ai_sections": {
         if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false");
-        let sections = (await storedAiSections()).sections;
+        const was = (await storedAiSections()).sections;
+        let sections = was;
         for (const section of AI_SECTION_IDS) {
           sections = await setAiSection({ section, enabled: body.enabled, actor_name: identity.actor.name });
         }
+        await audit("set_ai_sections", "ai_section", "all", was, sections);
         return NextResponse.json({ ok: true, ai_sections: sections });
       }
       case "set_route": {
         const stage = String(body.stage ?? "") as StageId;
         if (!STAGE_IDS.includes(stage)) throw new Error(`Unknown stage ${body.stage}`);
         const provider_id = String(body.provider_id ?? "");
+        const was = await routeConfig(stage);
         // Blank numbers keep the current value; blank fallbacks mean none (KAN-63).
         const config = await setRouteConfig({
           stage,
@@ -132,28 +163,49 @@ export async function POST(request: Request) {
           fallbacks: parseFallbacks(body.fallbacks, provider_id),
           actor_name: identity.actor.name,
         });
+        await audit("set_route", "route", stage, routeView(was), routeView(config));
         return NextResponse.json({ ok: true, config });
       }
       case "set_default_provider": {
+        const was = await routeConfigs();
         const configs = await setDefaultProvider({
           provider_id: String(body.provider_id ?? ""),
           model: body.model ? String(body.model) : undefined,
           actor_name: identity.actor.name,
         });
+        await audit(
+          "set_default_provider",
+          "route",
+          "all",
+          Object.fromEntries(was.map((route) => [route.stage, routeView(route)])),
+          Object.fromEntries(configs.map((route) => [route.stage, routeView(route)])),
+        );
         return NextResponse.json({ ok: true, stages: configs.length });
       }
       // Works out the de-identified lessons still pending (AI was off or no route at the time; KAN-78).
       case "compute_lessons": {
-        const tally = await computePendingLessons(typeof body.limit === "number" ? body.limit : 50);
+        const limit = typeof body.limit === "number" ? body.limit : 50;
+        const tally = await computePendingLessons(limit);
+        await audit("compute_lessons", "decision_examples", null, null, null, null, { limit, ...tally });
         return NextResponse.json({ ok: true, lessons: tally });
       }
       case "activate_module": {
         const stage = String(body.stage ?? "") as StageId;
+        const wiredModule = async () => (await stageWiring()).find((row) => row.stage === stage)?.active ?? null;
+        const was = await wiredModule();
         await activateModule({
           stage,
           module_id: String(body.module_id ?? ""),
           actor_name: identity.actor.name,
         });
+        const now = await wiredModule();
+        await audit(
+          "activate_module",
+          "stage_module",
+          stage,
+          was ? { module_id: was.id, version: was.version } : null,
+          now ? { module_id: now.id, version: now.version } : null,
+        );
         return NextResponse.json({ ok: true });
       }
       case "save_axes": {

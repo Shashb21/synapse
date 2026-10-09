@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 /** What the panel knows about a provider's key: whether it is set and where from. Never its value. */
 export type ProviderKeyCardView = {
@@ -53,12 +54,8 @@ export function ProviderPanel({
     setBusy(key);
     setError(null);
     setNotice(null);
-    const res = await fetch("/api/control", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json()) as { error?: string };
+    const res = await postJson("/api/control", body);
+    const json = res.json as { error?: string };
     setBusy(null);
     if (!res.ok) {
       setError(json.error ?? "Action failed");

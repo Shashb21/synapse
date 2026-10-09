@@ -34,6 +34,7 @@ import { runInWorkspace } from '@/modules/workspaces/context';
 import { runStage } from '@/modules/kernel/run';
 import { freezeRevisionCohort, proposePromptRevision, getRevisionCohort, activatePromptRevision, rollbackPromptRevision, activeRevisionPointer, revisionHistory, type PromptRevision } from '@/modules/kernel/prompt-revisions';
 import { evaluatePromptRevision, executeFrozenStage } from '@/modules/kernel/prompt-revision-evals';
+import { listAuditEvents } from '@/modules/kernel/audit';
 import { originatingSnapshot, type FrozenReplayCase } from '@/modules/kernel/decision-replay';
 import { kgMappingModule } from '@/modules/stages/s4-kg-mapping/module';
 import { prioritizationModule } from '@/modules/stages/s8-prioritization/module';
@@ -141,6 +142,12 @@ describe('isolated full-stage evaluation and atomic promotion', () => {
             expect(calls.every(c => !c.system.includes('Candidate instruction'))).toBe(true);
             await expect(activatePromptRevision({ revision_id: f.revision.id, evaluation_id: evaluation.id, expected_active_id: null, actor })).rejects.toThrow('changed');
             expect((await revisionHistory(f.ws.id))).toHaveLength(2);
+            // KAN-89: the one approval and the rollback are in the platform audit log, failed approvals are not.
+            const audited = (await listAuditEvents({ category: 'config', entity_id: f.revision.id })).events;
+            expect(audited.map(e => e.action)).toEqual(['prompt.rollback', 'prompt.approve']);
+            expect(audited[1].before).toMatchObject({ stage: 'S8', active_revision: null });
+            expect(audited[1].after).toMatchObject({ stage: 'S8', active_revision: f.revision.id });
+            expect(audited[0].after).toMatchObject({ active_revision: null });
         });
     });
     it('refuses promotion after the evaluated stage manifest version changes', async () => {
@@ -293,6 +300,9 @@ it('reserves held-out gold before real proposal generation and never trains on i
         const calls = scriptedModel();
         const revision = await proposePromptRevision({ stage: 'S8', workspace_id: f.ws.id, actor, exclude_ids: [] });
         expect(revision.training_ids).toEqual([trainingId]);
+        const generated = (await listAuditEvents({ entity_id: revision.id, action: 'prompt.generate' })).events;
+        expect(generated).toHaveLength(1);
+        expect(generated[0]).toMatchObject({ workspace_id: f.ws.id, run_id: revision.generation_run_id });
         expect(revision.excluded_ids).toEqual(expect.arrayContaining([heldId, linkedId]));
         const generation = calls.filter(c => c.purpose === 'prompt-revision');
         expect(generation).toHaveLength(1);

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { postJson } from "@/lib/post-json";
 
 export type CoveragePairCardModel = {
   id: string;
@@ -30,18 +31,14 @@ export function CoveragePairCard({
   function submit(next: "covers" | "partial" | "none" | "unknown") {
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/coverage", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/coverage", {
           workspace_id: workspaceId,
           gap_id: pair.gap_id,
           tactic_id: pair.tactic_id,
           overall: next,
           rationale,
-        }),
-      });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+        });
+      const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
         setError(body.error ?? "Save failed");
         return;

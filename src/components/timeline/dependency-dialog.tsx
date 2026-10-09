@@ -17,6 +17,7 @@ import {
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import type { TimelineActivity } from "@/modules/stages/s10-timeline/build";
+import { postJson } from "@/lib/post-json";
 
 /**
  * A user sets what an activity waits on by hand: tick the upstream activities,
@@ -74,10 +75,7 @@ export function DependencyDialog({
     }
     const depends_on = others.filter((row) => chosen.has(row.id)).map((row) => row.id);
     setPending(true);
-    const res = await fetch("/api/plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/plan", {
         action: "set_dependencies",
         id: activity.id,
         depends_on,
@@ -85,9 +83,8 @@ export function DependencyDialog({
         rationale: rationale.trim(),
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: actorFunction,
-      }),
-    });
-    const json = (await res.json()) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Action failed");

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ProviderOption } from "@/components/platform/routing-panel";
+import { postJson } from "@/lib/post-json";
 
 export type AccuracyRouteView = {
   call_kind: string;
@@ -83,10 +84,7 @@ function AccuracyRouteCard({
     setPending(true);
     setError(null);
     setSaved(false);
-    const res = await fetch("/api/accuracy/routing", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/accuracy/routing", {
         action: "set_route",
         call_kind: route.call_kind,
         agent_role: route.agent_role,
@@ -96,9 +94,8 @@ function AccuracyRouteCard({
         temperature,
         max_tokens: maxTokens,
         fallbacks,
-      }),
-    });
-    const json = (await res.json()) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not save this route");

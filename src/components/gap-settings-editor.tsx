@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { postJson } from "@/lib/post-json";
 
 /** Setting tags as small chips, read-only. */
 export function SettingChips({ settings, className }: { settings: string[]; className?: string }) {
@@ -48,12 +49,8 @@ export function GapSettingsEditor({
     setTags(next);
     setPending(true);
     setError(null);
-    const res = await fetch("/api/plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "set_gap_settings", gap_id: gapId, settings: next }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { settings?: string[]; error?: string };
+    const res = await postJson("/api/plan", { action: "set_gap_settings", gap_id: gapId, settings: next });
+    const json = res.json as { settings?: string[]; error?: string };
     setPending(false);
     if (!res.ok) {
       setTags(previous);

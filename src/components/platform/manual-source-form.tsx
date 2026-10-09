@@ -9,6 +9,7 @@ import type { ActionField, ActionIdentity } from "@/components/platform/action-d
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import { splitParagraphs } from "@/lib/ingest/manual-blocks";
 import { plural } from "@/lib/plural";
+import { postJson } from "@/lib/post-json";
 
 type DraftBlock = { key: number; text: string; heading: string; kind: string };
 
@@ -72,10 +73,7 @@ export function ManualSourceForm({
       if (field.required && !meta[field.name]?.trim()) return setError(`${field.label} is required.`);
     }
     setPending(true);
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(endpoint, {
         ...payload,
         ...meta,
         action: "manual_source",
@@ -87,9 +85,8 @@ export function ManualSourceForm({
         rationale,
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: actorFunction,
-      }),
-    });
-    const json = (await res.json()) as { error?: string; source_id?: string; source_file_id?: string };
+      });
+    const json = res.json as { error?: string; source_id?: string; source_file_id?: string };
     setPending(false);
     if (!res.ok) return setError(json.error ?? "Save failed");
     const id = json.source_id ?? json.source_file_id ?? "";
