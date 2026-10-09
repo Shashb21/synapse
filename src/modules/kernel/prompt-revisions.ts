@@ -6,6 +6,7 @@ import { listDecisionExamples, scrubLesson, workspaceEntityNames, type DecisionE
 import { ensurePlatformSchema, sharedDb } from "./db";
 import * as tables from "./schema";
 import { newId, nowIso } from "./ids";
+import { recordAudit } from "./audit";
 import { assertAiEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
 import { isTestStub } from "./llm";
@@ -192,7 +193,12 @@ export async function proposePromptRevision(args: CohortArgs & { actor: Actor })
         cohort_id: cohort.id, training_ids: lessons.map(item => item.id), heldout_ids: cohort.heldout_ids, excluded_ids: cohort.excluded_ids,
         generation_run_id: recorder.id, model: route?.model ?? null, provider_id: route?.provider_id ?? null,
       };
-      await sharedDb().insert(tables.promptRevisions).values(revision);
+      await sharedDb().transaction(async tx => {
+        await tx.insert(tables.promptRevisions).values(revision);
+        await recordAudit({ category: "config", action: "prompt.generate", entity_type: "prompt_revision", entity_id: revision.id, workspace_id: args.workspace_id,
+          after: { stage: revision.stage, parent_revision: parent, state: revision.state, instruction_text: revision.instruction_text },
+          run_id: recorder.id, meta: { training_count: revision.training_ids.length, heldout_count: revision.heldout_ids.length } }, { tx });
+      });
       await closeRun({ recorder, status: "ok", route: route ?? undefined, output: { revision_id: revision.id, state: revision.state } });
       return revision;
     } catch (error) {
@@ -264,6 +270,10 @@ export async function activatePromptRevision(args: {revision_id:string;evaluatio
   if(pointer.revision_id) await tx.execute(sql`update prompt_revisions set state='superseded' where id=${pointer.revision_id}`);
   await tx.execute(sql`update prompt_revisions set state='active' where id=${revision.id}`);
   await tx.execute(sql`insert into prompt_revision_history(id,workspace_id,stage,before_id,after_id,evaluation_id,actor,action,created_at,generation) values(${newId('prh')},${workspace_id},${revision.stage},${pointer.revision_id},${revision.id},${evaluation.id},${JSON.stringify(args.actor)}::jsonb,'approve',${nowIso()},${generation})`);
+  // KAN-89: the platform audit record commits with the pointer change.
+  await recordAudit({category:'config',action:'prompt.approve',entity_type:'prompt_revision',entity_id:revision.id,workspace_id,
+   before:{stage:revision.stage,active_revision:pointer.revision_id??null,generation:Number(pointer.generation)},
+   after:{stage:revision.stage,active_revision:revision.id,generation},meta:{evaluation_id:evaluation.id}},{tx});
  });
  return {...revision,state:'active'};
 }
@@ -282,6 +292,9 @@ export async function rollbackPromptRevision(args:{stage:StageId;expected_active
   await tx.execute(sql`update prompt_revisions set state='superseded' where id=${args.expected_active_id}`);
   if(previous) await tx.execute(sql`update prompt_revisions set state='active' where id=${previous}`);
   await tx.execute(sql`insert into prompt_revision_history(id,workspace_id,stage,before_id,after_id,actor,action,created_at,generation) values(${newId('prh')},${workspace_id},${args.stage},${args.expected_active_id},${previous},${JSON.stringify(args.actor)}::jsonb,'rollback',${nowIso()},${generation})`);
+  await recordAudit({category:'config',action:'prompt.rollback',entity_type:'prompt_revision',entity_id:args.expected_active_id,workspace_id,
+   before:{stage:args.stage,active_revision:args.expected_active_id,generation:Number(pointer.generation)},
+   after:{stage:args.stage,active_revision:previous,generation}},{tx});
  });
  return previous?getPromptRevision(previous,workspace_id):null;
 }

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, ensureCurrentSchemaTables, sharedDb } from "@/lib/iegp/db";
-import { PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
+import { AUDIT_DDL, PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
 import { KERNEL_WORKSPACE_DDL } from "@/lib/iegp/workspace-tables";
 
 export { db, sharedDb };
@@ -69,6 +69,7 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
       await applyDdl(SHARED_DDL.split(";"), sharedDb);
       await applyDdl(PROMPT_REVISION_DDL, sharedDb);
       await applyDdl(PROMPT_EVALUATION_DDL, sharedDb);
+      await applyDdl(AUDIT_DDL, sharedDb);
       await applyDdl(WORKSPACE_DDL.split(";"), sharedDb);
     })();
     // A failed attempt is forgotten, so the next call retries.
@@ -113,7 +114,11 @@ export async function resetWorkspaceModules() {
   }
 }
 
-/** Test helper: drops all rows from platform and module-owned tables. */
+/**
+ * Test helper: drops all rows from platform and module-owned tables. Never
+ * audit_events: the audit log is append-only (the database refuses it), so
+ * tests scope their audit assertions by unique ids instead.
+ */
 export async function wipePlatform(moduleTables: string[] = []) {
   await ensurePlatformSchema();
   const d = db();

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { afterSignIn, LOGIN_NEXT_COOKIE } from "@/modules/auth/redirect";
 import { completeLogin, NO_SEAT_ERROR, NoSeatError } from "@/modules/auth/session";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
+import { recordAuditBestEffort } from "@/modules/kernel/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +24,15 @@ export async function GET(request: Request) {
     return NextResponse.redirect(back);
   };
   if (!code || !state) {
-    return failed(
-      url.searchParams.get("error_description") ?? url.searchParams.get("error") ?? "The sign-in was cancelled.",
-    );
+    const reason = url.searchParams.get("error_description") ?? url.searchParams.get("error") ?? "The sign-in was cancelled.";
+    await recordAuditBestEffort({
+      category: "auth",
+      action: "auth.login_failed",
+      actor: { principal: "anonymous", name: "Anonymous", role: null },
+      workspace_id: null,
+      meta: { method: "sso", reason: "cancelled_or_refused_by_provider", detail: reason.slice(0, 300) },
+    });
+    return failed(reason);
   }
   try {
     await completeLogin({ code, state });
