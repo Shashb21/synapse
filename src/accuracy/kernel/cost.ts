@@ -113,6 +113,10 @@ export function estimateCallCost(args: {
   usage: { input_tokens: number | null; output_tokens: number | null };
 }): { cost_usd: number | null; price_source: string | null } {
   if (args.usage.input_tokens === null && args.usage.output_tokens === null) return { cost_usd: null, price_source: null };
+  // OpenRouter's ":free" variants are billed at zero (https://openrouter.ai/docs/api-reference/limits).
+  if (args.provider_id === "openrouter" && args.model.endsWith(":free")) {
+    return { cost_usd: 0, price_source: "openrouter_free_model" };
+  }
   const key = priceKeyFor(args.provider_id, args.model);
   if (!priceForModel(key.provider_id, key.model)) return { cost_usd: null, price_source: null };
   const { cost_usd, price_source } = estimateCostUsd({

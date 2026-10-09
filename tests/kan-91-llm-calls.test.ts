@@ -116,6 +116,8 @@ describe("KAN-91 provider usage", () => {
     const known = estimateCallCost({ provider_id: "xai-grok", model: "grok-4", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } });
     expect(known.cost_usd).toBe(18);
     expect(estimateCallCost({ provider_id: "openrouter", model: "mistral/large", usage: { input_tokens: 10, output_tokens: 10 } }).cost_usd).toBeNull();
+    // An OpenRouter ":free" model is known to cost nothing, not unknown.
+    expect(estimateCallCost({ provider_id: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free", usage: { input_tokens: 10, output_tokens: 10 } })).toEqual({ cost_usd: 0, price_source: "openrouter_free_model" });
     expect(estimateCallCost({ provider_id: "xai-grok", model: "grok-4", usage: { input_tokens: null, output_tokens: null } }).cost_usd).toBeNull();
   });
 
