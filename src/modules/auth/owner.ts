@@ -97,14 +97,21 @@ export function ownerSignInPath(path: string | null | undefined): string {
   return `/login?next=${encodeURIComponent(safeNext(path, "/admin"))}`;
 }
 
+export function signInFirstJson(): NextResponse {
+  return NextResponse.json({ code: "sign_in_required", error: "Sign in first." }, { status: 401 });
+}
+
 export function ownerOnlyJson(): NextResponse {
   return NextResponse.json({ code: "owner_only", error: OWNER_ONLY_MESSAGE }, { status: 403 });
 }
 
-/** For admin APIs: a 403 response for anyone but the owner, else null. */
+/** For admin APIs: 401 when signed out, 403 for anyone signed in but the owner, else null. */
 export async function ownerGate(): Promise<NextResponse | null> {
   const access = await ownerAccess();
   if (access.owner) return null;
+  // Signed out is "sign in first" (401), like every other API; signed in but not the owner is 403.
+  // The test-only "act as a customer" cookie stands for a signed-in customer.
+  if (!access.signed_in && !(await testOptOut())) return signInFirstJson();
   // A signed-in person trying the owner console is on the record (KAN-90); signed-out traffic is not.
   if (access.signed_in) {
     const { recordDenied } = await import("@/modules/kernel/audit");
