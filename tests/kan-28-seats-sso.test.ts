@@ -476,9 +476,12 @@ describe("KAN-28: /api/admin/customers", () => {
       expect(response.status).toBe(403);
       expect(((await response.json()) as { code: string }).code).toBe("owner_only");
     }
-    // Signed out, with an identity provider configured.
+    // Signed out, with an identity provider configured: "sign in first", not "owner only".
     useCookie(null);
-    for (const response of await calls()) expect(response.status).toBe(403);
+    for (const response of await calls()) {
+      expect(response.status).toBe(401);
+      expect(((await response.json()) as { code: string }).code).toBe("sign_in_required");
+    }
 
     const after = await getCustomer(lam.id);
     expect(after).toMatchObject({ seats: 1, seats_used: 1 });
