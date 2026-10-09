@@ -28,8 +28,23 @@ import {
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** An identity provider that does not answer in this long fails the sign-in instead of hanging it (KAN-20). */
+const IDP_TIMEOUT_MS = 15_000;
+
+async function idpFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(IDP_TIMEOUT_MS) });
+  } catch {
+    throw new Error("Your sign-in provider could not be reached or did not answer in time. Try signing in again.");
+  }
+}
 
 export type Session = {
+  /**
+   * The cookie token. Only its hash is stored (see sessionKey), so a database
+   * read alone cannot be replayed as a sign-in. Rows listed by activeSessions
+   * carry the hash instead, since the token is not on record.
+   */
   id: string;
   provider_id: string;
   subject: string;
@@ -53,6 +68,11 @@ function base64Url(input: Buffer): string {
   return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** What auth_sessions.id holds for a session token: sha256, hex (KAN-20). */
+export function sessionKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function asFunction(value: string | undefined | null): ActorFunction {
   return ACTOR_FUNCTIONS.includes((value ?? "") as ActorFunction)
     ? (value as ActorFunction)
@@ -72,7 +92,7 @@ export async function createSession(args: {
   const created_at = nowIso();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   await sharedDb().insert(t.authSessions).values({
-    id,
+    id: sessionKey(id),
     provider_id: args.provider_id,
     subject: args.subject,
     email: args.email ?? null,
@@ -107,12 +127,13 @@ export async function currentSession(): Promise<Session | null> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   await ensurePlatformSchema();
-  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
+  const key = sessionKey(id);
+  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, key)).limit(1);
   const row = rows[0];
   if (!row) return null;
   const expired = Date.parse(row.expires_at) < Date.now();
   if (expired || !(await sessionStillAllowed(row))) {
-    const gone = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id)).returning({ id: t.authSessions.id });
+    const gone = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, key)).returning({ id: t.authSessions.id });
     // A live session refused mid-way (disabled, seat removed, customer deactivated) is a revocation worth recording.
     if (!expired && gone.length > 0) {
       await recordAuditBestEffort({
@@ -128,7 +149,7 @@ export async function currentSession(): Promise<Session | null> {
     return null;
   }
   return {
-    id: row.id,
+    id,
     provider_id: row.provider_id,
     subject: row.subject,
     email: row.email,
@@ -204,7 +225,7 @@ export async function signOut() {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
     await ensurePlatformSchema();
-    const [ended] = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id)).returning();
+    const [ended] = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, sessionKey(id))).returning();
     if (ended) {
       await recordAuditBestEffort({
         category: "auth",
@@ -360,7 +381,7 @@ async function exchangeLogin(args: { code: string; state: string }): Promise<Ses
     ? process.env[provider.descriptor.client_secret_env]?.trim()
     : undefined;
   if (secret) body.set("client_secret", secret);
-  const tokenRes = await fetch(provider.descriptor.token_url, {
+  const tokenRes = await idpFetch(provider.descriptor.token_url, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body,
@@ -369,14 +390,14 @@ async function exchangeLogin(args: { code: string; state: string }): Promise<Ses
   if (!tokenRes.ok) throw new Error(`Token exchange failed (HTTP ${tokenRes.status}).`);
   const token = JSON.parse(tokenText) as { access_token?: string; id_token?: unknown };
   if (!token.access_token) throw new Error("Token exchange returned no access token.");
-  const profileRes = await fetch(provider.userinfo_url, {
+  const profileRes = await idpFetch(provider.userinfo_url, {
     headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
   });
   if (!profileRes.ok) throw new Error(`Profile lookup failed (HTTP ${profileRes.status}).`);
   const profile = (await profileRes.json()) as Record<string, unknown>;
   let github_emails: GithubEmail[] | null = null;
   if (provider.id === "github") {
-    const emailsRes = await fetch(GITHUB_EMAILS_URL, {
+    const emailsRes = await idpFetch(GITHUB_EMAILS_URL, {
       headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
     });
     const list = emailsRes.ok ? ((await emailsRes.json().catch(() => null)) as unknown) : null;

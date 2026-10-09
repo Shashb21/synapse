@@ -197,6 +197,35 @@ async function auditWorkspace(action: string, workspace_id: string, by: string, 
   });
 }
 
+/**
+ * How many workspaces one person may create for themselves (KAN-20), so a
+ * script or a stuck button cannot fill the database with schemas. Workspaces
+ * they were only added to do not count. SYNAPSE_MAX_WORKSPACES_PER_USER
+ * overrides it.
+ */
+export const DEFAULT_MAX_WORKSPACES_PER_USER = 20;
+
+export function workspaceCreationLimit(env: Record<string, string | undefined> = process.env): number {
+  const configured = Number(env.SYNAPSE_MAX_WORKSPACES_PER_USER);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : DEFAULT_MAX_WORKSPACES_PER_USER;
+}
+
+export class WorkspaceLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(
+      `One person can create up to ${limit} workspace${limit === 1 ? "" : "s"}, and you have reached that limit. Delete one you no longer need, or ask your administrator to raise the limit.`,
+    );
+    this.name = "WorkspaceLimitError";
+  }
+}
+
+/** Refuses a new workspace when this person already created as many as the limit allows. */
+export async function assertCanCreateWorkspace(principal: string, limit = workspaceCreationLimit()): Promise<void> {
+  const [row] = await rows(sql`
+    select count(*)::int as n from workspaces where created_by = ${normalizePrincipal(principal)}`);
+  if (Number(row?.n ?? 0) >= limit) throw new WorkspaceLimitError(limit);
+}
+
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
 export async function setWorkspaceDemo(workspaceId: string, demo: boolean): Promise<void> {
   await rows(sql`update workspaces set demo = ${demo} where id = ${workspaceId}`);

@@ -12,6 +12,7 @@ import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import { customerErrorMessage, isAdminOnlyError, stageOf } from "@/modules/kernel/stage-errors";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { ownerAccess } from "./owner";
+import { BodyTooLargeError, readBodyText } from "@/lib/http/body-limit";
 import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./roles";
 
 /**
@@ -145,18 +146,22 @@ export async function requireCustomerContext(options: GuardOptions = {}): Promis
   return context;
 }
 
-/** The JSON body as an object; malformed JSON is a 400, never a 500. */
+/**
+ * The JSON body as an object; malformed JSON is a 400, never a 500, and a body
+ * over the size limit is a 413 before it is parsed (KAN-20).
+ */
 export async function readJsonBody(
   request: Request,
   options: { allowEmpty?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   let parsed: unknown;
   try {
-    const text = await request.text();
+    const text = await readBodyText(request);
     // A route whose fields are all optional may be posted with no body at all.
     if (options.allowEmpty && !text.trim()) return {};
     parsed = JSON.parse(text);
-  } catch {
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) throw error;
     throw new ApiGuardError(400, "invalid_json", "The request body is not valid JSON.");
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -219,6 +224,9 @@ export async function apiErrorResponse(error: unknown, fallback = "Request faile
   }
   if (error instanceof ForbiddenError) {
     return NextResponse.json({ error: error.message, code: "forbidden" }, { status: 403 });
+  }
+  if (error instanceof BodyTooLargeError) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
   if (error instanceof NoWorkspaceError) {
     return NextResponse.json({ error: error.message, code: "no_workspace" }, { status: 409 });

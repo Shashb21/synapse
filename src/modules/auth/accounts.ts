@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
@@ -298,9 +298,11 @@ export async function countPasswordSessions(accountId: string): Promise<number> 
 export async function revokeAccountSessions(accountId: string, options: { except?: string } = {}): Promise<number> {
   await ensurePlatformSchema();
   const match = and(eq(t.authSessions.provider_id, PASSWORD_PROVIDER), eq(t.authSessions.subject, accountId));
+  // `except` is the caller's session token; rows hold its sha256 (sessionKey in session.ts, KAN-20).
+  const keep = options.except ? createHash("sha256").update(options.except).digest("hex") : null;
   const gone = await sharedDb()
     .delete(t.authSessions)
-    .where(options.except ? and(match, ne(t.authSessions.id, options.except)) : match)
+    .where(keep ? and(match, ne(t.authSessions.id, keep)) : match)
     .returning({ id: t.authSessions.id });
   return gone.length;
 }
