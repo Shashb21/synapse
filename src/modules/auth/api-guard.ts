@@ -195,7 +195,15 @@ export function stageFailureBody(error: unknown, owner: boolean, fallback = "Req
   };
 }
 
+/** A signed-in person refused by a workspace permission (403) goes on the record (KAN-90). */
+async function logRefusal(error: ApiGuardError | ForbiddenError): Promise<void> {
+  const code = error instanceof ApiGuardError ? error.code : "forbidden";
+  const { recordDenied } = await import("@/modules/kernel/audit");
+  await recordDenied({ category: "workspace", action: "permission.denied", reason: error.message, meta: { code } });
+}
+
 export async function apiErrorResponse(error: unknown, fallback = "Request failed"): Promise<NextResponse> {
+  if ((error instanceof ApiGuardError && error.status === 403) || error instanceof ForbiddenError) await logRefusal(error);
   if (error instanceof ApiGuardError) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }

@@ -192,6 +192,10 @@ export type HillclimbSignalDraft = {
   rationale: string;
   weight?: number;
   payload?: unknown;
+  /** Provenance (KAN-90): who the signal came from and the run that produced it. Omitted: the request's session. */
+  actor_principal?: string | null;
+  actor_name?: string | null;
+  source_run_id?: string | null;
 };
 
 export type ResolvedRoute = {

@@ -235,7 +235,8 @@ export async function runStage<O = unknown>(args: {
       });
     }
     for (const signal of result.signals ?? []) {
-      await recordSignal(signal);
+      // Provenance (KAN-90): the run that produced it, on behalf of whom.
+      await recordSignal({ actor_name: args.actor.name, ...signal, source_run_id: signal.source_run_id ?? recorder.id });
     }
     return {
       run_id: recorder.id,

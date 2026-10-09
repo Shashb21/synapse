@@ -2,6 +2,7 @@ import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import { newId } from "@/modules/kernel/ids";
 import * as t from "@/modules/kernel/schema";
+import { AUDIT_DDL } from "@/modules/kernel/schema";
 import { REQUEST_ID_HEADER } from "@/modules/kernel/request-id";
 
 export { REQUEST_ID_HEADER, requestIdFor } from "@/modules/kernel/request-id";
@@ -101,6 +102,19 @@ async function requestFacts(): Promise<RequestFacts> {
 /** Who is acting, from the session when the caller did not say. */
 async function sessionActor(): Promise<AuditActor> {
   try {
+    // The session the request's guard just verified: no query, so this is safe inside a transaction.
+    const { cookies } = await import("next/headers");
+    const { SESSION_COOKIE, recentlyVerifiedSession } = await import("@/modules/auth/session");
+    const id = (await cookies()).get(SESSION_COOKIE)?.value;
+    const recent = id ? recentlyVerifiedSession(id) : null;
+    if (recent) {
+      const { principalOf } = await import("@/modules/workspaces/session");
+      return { principal: principalOf(recent), name: recent.actor.name, role: recent.role };
+    }
+  } catch {
+    // Outside a request: fall through.
+  }
+  try {
     const { sessionContext } = await import("@/modules/auth/session");
     const { principalOf } = await import("@/modules/workspaces/session");
     const context = await sessionContext();
@@ -146,14 +160,14 @@ export const SYSTEM_ACTOR: AuditActor = { principal: "system", name: "Synapse", 
 /** Anything that can insert: the shared database, or a transaction on it. */
 export type AuditWriter = Pick<ReturnType<typeof sharedDb>, "insert">;
 
-export async function recordAudit(input: AuditEventInput, options: { tx?: AuditWriter } = {}): Promise<AuditEvent> {
-  await ensurePlatformSchema();
+/** One audit row, filled in from the request (id, IP, agent), the session and the workspace scope. */
+async function auditRow(input: AuditEventInput): Promise<typeof t.auditEvents.$inferInsert & { id: string }> {
   const [facts, actor, workspace] = await Promise.all([
     requestFacts(),
     input.actor ? Promise.resolve(input.actor) : sessionActor(),
     input.workspace_id !== undefined ? Promise.resolve(input.workspace_id) : requestWorkspaceId(),
   ]);
-  const row = {
+  return {
     id: newId("aud"),
     actor_principal: actor.principal,
     actor_name: actor.name,
@@ -173,9 +187,96 @@ export async function recordAudit(input: AuditEventInput, options: { tx?: AuditW
     user_agent: facts.user_agent,
     meta: input.meta ? redactAuditSecrets(input.meta) : null,
   };
+}
+
+export async function recordAudit(input: AuditEventInput, options: { tx?: AuditWriter } = {}): Promise<AuditEvent> {
+  await ensurePlatformSchema();
+  const row = await auditRow(input);
   // Inside the caller's transaction when given one, so the change and its record commit together.
   const [stored] = await (options.tx ?? sharedDb()).insert(t.auditEvents).values(row).returning();
   return toEvent(stored!);
+}
+
+const auditTable = globalThis as unknown as { synapseAuditTableSeen?: boolean };
+
+/**
+ * Makes sure audit_events exists, on the caller's own connection: inside a
+ * transaction a one-connection pool (Vercel, Vitest) has no other. Only
+ * audit_events DDL runs, every name schema-qualified, and only when the table is
+ * missing. Remembered once the table has been seen, never on a create that the
+ * caller's transaction might still roll back.
+ */
+async function ensureAuditTable(writer: SqlWriter): Promise<void> {
+  if (auditTable.synapseAuditTableSeen) return;
+  const found = (await writer.execute(sql`select to_regclass('public.audit_events') as name`)) as unknown as { name: unknown }[];
+  if (found[0]?.name) {
+    auditTable.synapseAuditTableSeen = true;
+    return;
+  }
+  for (const statement of AUDIT_DDL) await writer.execute(sql.raw(publicQualified(statement)));
+}
+
+/** AUDIT_DDL with the table named by its schema, for a connection whose search path is a workspace. */
+function publicQualified(statement: string): string {
+  return statement
+    .replace(/CREATE TABLE IF NOT EXISTS audit_events/g, "CREATE TABLE IF NOT EXISTS public.audit_events")
+    .replace(/ ON audit_events/g, " ON public.audit_events");
+}
+
+/** Anything that runs SQL: a workspace database handle or a transaction on one. */
+export type SqlWriter = { execute(query: SQL): PromiseLike<unknown> };
+
+const jsonb = (value: unknown) => (value === null || value === undefined ? sql`null` : sql`${JSON.stringify(value)}::jsonb`);
+
+/**
+ * Writes one audit row through a workspace connection or transaction (KAN-90). A
+ * workspace connection's search path is its own schema only, so the table is named
+ * with its schema; the plan change and its platform record then commit together.
+ * Throws like `recordAudit`. The caller ensures the platform schema beforehand
+ * when it passes a transaction (DDL must not run inside one).
+ */
+export async function recordAuditVia(writer: SqlWriter, input: AuditEventInput): Promise<string> {
+  await ensureAuditTable(writer);
+  const row = await auditRow(input);
+  await writer.execute(sql`insert into public.audit_events
+    (id, actor_principal, actor_name, actor_role, customer_id, workspace_id, category, action,
+     entity_type, entity_id, before, after, rationale, request_id, run_id, ip, user_agent, meta)
+    values (${row.id}, ${row.actor_principal}, ${row.actor_name}, ${row.actor_role ?? null}, ${row.customer_id ?? null},
+     ${row.workspace_id ?? null}, ${row.category}, ${row.action}, ${row.entity_type ?? null}, ${row.entity_id ?? null},
+     ${jsonb(row.before)}, ${jsonb(row.after)}, ${row.rationale ?? null}, ${row.request_id ?? null}, ${row.run_id ?? null},
+     ${row.ip ?? null}, ${row.user_agent ?? null}, ${jsonb(row.meta)})`);
+  return row.id;
+}
+
+/**
+ * Who did this, from where (KAN-90): the signed-in principal, their name and
+ * role, the request id, and the workspace the request is scoped to. Outside a
+ * request the workspace is the one in scope, else Default; the principal is
+ * "anonymous" (or "demo"), never guessed from a typed name.
+ */
+export type Attribution = {
+  principal: string;
+  name: string;
+  role: string | null;
+  request_id: string | null;
+  workspace_id: string;
+};
+
+export async function currentAttribution(): Promise<Attribution> {
+  const [facts, actor, workspace] = await Promise.all([requestFacts(), sessionActor(), requestWorkspaceId()]);
+  const { DEFAULT_WORKSPACE_ID } = await import("@/modules/workspaces/context");
+  return {
+    principal: actor.principal,
+    name: actor.name,
+    role: actor.role,
+    request_id: facts.request_id,
+    workspace_id: workspace ?? DEFAULT_WORKSPACE_ID,
+  };
+}
+
+/** The audit actor for an attribution, keeping the name the change was recorded under. */
+export function attributedActor(attribution: Attribution, name?: string | null): AuditActor {
+  return { principal: attribution.principal, name: name?.trim() || attribution.name, role: attribution.role };
 }
 
 /** For events that must never block the person (sign-in, sign-out): logs a failure instead. */
@@ -185,6 +286,29 @@ export async function recordAuditBestEffort(input: AuditEventInput): Promise<voi
   } catch (error) {
     console.error("[audit] could not record", input.category, input.action, error);
   }
+}
+
+/**
+ * A refused privileged attempt (KAN-90): an owner-only API, a workspace
+ * permission or an admin action the platform said no to. Best-effort, with
+ * meta.outcome "denied" and the reason. Callers log signed-in refusals only,
+ * so anonymous traffic does not flood the log.
+ */
+export async function recordDenied(input: {
+  category: AuditCategory;
+  action: string;
+  reason: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  meta?: Record<string, unknown>;
+}): Promise<void> {
+  await recordAuditBestEffort({
+    category: input.category,
+    action: input.action,
+    entity_type: input.entity_type ?? null,
+    entity_id: input.entity_id ?? null,
+    meta: { ...input.meta, outcome: "denied", reason: input.reason.slice(0, 500) },
+  });
 }
 
 function toEvent(row: typeof t.auditEvents.$inferSelect): AuditEvent {

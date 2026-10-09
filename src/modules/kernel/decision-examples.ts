@@ -10,6 +10,7 @@ import { originatingSnapshot } from "./decision-replay";
 import { closeRun, getRun, openRun, RunRecorder } from "./observability";
 import { aiSectionEnabled } from "./ai-switch";
 import { sectionOfStage } from "./ai-sections";
+import { currentAttribution, recordAuditBestEffort } from "./audit";
 
 /**
  * Learning from decisions (KAN-77). Every time a person accepts, edits or rejects
@@ -44,9 +45,13 @@ export type DecisionExample = {
   model: string | null;
   provider_id: string | null;
   created_at: string;
+  /** The AI run that proposed what the person decided on (its source run). */
   run_id?: string | null;
   prompt_version?: string | null;
   actor?: Actor | null;
+  /** Who decided, verifiably (KAN-90): account id or email, and the name they acted under. */
+  actor_principal?: string | null;
+  actor_name?: string | null;
   replay_input?: Record<string, unknown> | null;
   replay_exclusion_reason?: string | null;
 };
@@ -96,6 +101,8 @@ ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor jsonb;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_input jsonb;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS replay_exclusion_reason text;
 ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS capture_key text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor_principal text;
+ALTER TABLE decision_examples ADD COLUMN IF NOT EXISTS actor_name text;
 CREATE UNIQUE INDEX IF NOT EXISTS decision_examples_capture_key ON decision_examples(workspace_id, capture_key)`;
 
 let tableReady: Promise<unknown> | null = null;
@@ -133,9 +140,10 @@ function toExample(row: Row): DecisionExample {
 }
 
 /**
- * Keeps one decision as an example. Best-effort by design: a logging failure is
- * reported and swallowed, never failing the person's action. The lesson is worked
- * out afterwards, off the request.
+ * Keeps one decision as an example. Best-effort by design: a logging failure
+ * never fails the person's action, but it is not silent either — it lands in
+ * the audit log (category ai, outcome failed, KAN-90). The lesson is worked out
+ * afterwards, off the request.
  */
 export async function recordDecisionExample(draft: DecisionExampleDraft): Promise<string | null> {
   try {
@@ -150,11 +158,14 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
     const promptVersion = draft.prompt_version ?? (run?.steps.find(step => step.name === "prompt:variant")?.data as { version?: string } | undefined)?.version ?? null;
     const replay = draft.replay_input ?? (run?.status === "ok" ? await originatingSnapshot(run.id, workspace_id, draft.stage) : null);
     const captureKey = draft.capture_key ?? null;
+    const who = await currentAttribution();
+    const actorName = draft.actor?.name ?? who.name;
     const id = newId("dex");
     const inserted = await sharedDb().execute(sql`
       insert into decision_examples
         (id, workspace_id, stage, kind, subject_id, ai_input, ai_output, outcome, final, rationale,
-         lesson, lesson_status, model, provider_id, created_at, run_id, prompt_version, actor, replay_input, replay_exclusion_reason, capture_key)
+         lesson, lesson_status, model, provider_id, created_at, run_id, prompt_version, actor, replay_input, replay_exclusion_reason, capture_key,
+         actor_principal, actor_name)
       values
         (${id}, ${workspace_id}, ${draft.stage}, ${draft.kind}, ${draft.subject_id},
          ${JSON.stringify(draft.ai_input)}::jsonb, ${JSON.stringify(draft.ai_output)}::jsonb,
@@ -162,7 +173,8 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
          ${draft.rationale?.trim() || null}, null, 'pending', ${route?.model ?? null},
          ${route?.provider_id ?? null}, ${nowIso()}, ${draft.run_id ?? null}, ${promptVersion},
          ${JSON.stringify(draft.actor ?? null)}::jsonb, ${replay == null ? null : JSON.stringify(replay)}::jsonb,
-         ${draft.replay_exclusion_reason ?? (replay ? null : "No frozen originating stage input is available.")}, ${captureKey})
+         ${draft.replay_exclusion_reason ?? (replay ? null : "No frozen originating stage input is available.")}, ${captureKey},
+         ${who.principal}, ${actorName})
       on conflict (workspace_id, capture_key) do nothing
       returning id
     `);
@@ -172,6 +184,20 @@ export async function recordDecisionExample(draft: DecisionExampleDraft): Promis
     return id;
   } catch (error) {
     console.error("[learning] could not record a decision example", draft.kind, draft.subject_id, error);
+    await recordAuditBestEffort({
+      category: "ai",
+      action: "decision_example.record",
+      entity_type: draft.kind,
+      entity_id: draft.subject_id,
+      run_id: draft.run_id ?? null,
+      ...(draft.workspace_id ? { workspace_id: draft.workspace_id } : {}),
+      meta: {
+        outcome: "failed",
+        reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+        stage: draft.stage,
+        decision_outcome: draft.outcome,
+      },
+    });
     return null;
   }
 }

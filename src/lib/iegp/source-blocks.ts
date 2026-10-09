@@ -494,6 +494,18 @@ export async function restoreDroppedSourceUnit(args: {
     detail: `Restored dropped unit (${unit.location}: ${unit.reason}) as ${unit.source_id} block`,
   });
   await db().update(sourceDroppedUnits).set({ restored_block_id: row.id }).where(eq(sourceDroppedUnits.id, unit.id));
+  // The dropped unit's own record: dropped before, restored as this block after (KAN-90).
+  await recordEdit({
+    stage: "S1",
+    entity_type: "source_dropped_unit",
+    entity_id: unit.id,
+    field: "restored_block_id",
+    action: "override",
+    before: `dropped: ${unit.reason}`,
+    after: row.id,
+    rationale: args.rationale,
+    actor: args.actor,
+  });
   return row;
 }
 

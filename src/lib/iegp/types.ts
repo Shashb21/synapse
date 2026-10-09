@@ -199,7 +199,8 @@ export type GapMetadata = {
   notes: string;
 };
 
-export type GapVersionEvent = "split" | "rewrite";
+/** "merge": an overlap merged into the gap kept its id; the version holds the wording before (KAN-90). */
+export type GapVersionEvent = "split" | "rewrite" | "merge";
 
 export type GapVersion = {
   id: string;

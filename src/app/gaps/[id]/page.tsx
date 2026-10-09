@@ -32,6 +32,8 @@ import {
 } from "@/lib/iegp/enums";
 import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
 import { gapVersionsFor } from "@/lib/iegp/gap-history";
+import { entityHistory } from "@/lib/iegp/entity-history";
+import { EntityHistory } from "@/components/entity-history";
 import {
   buildTacticLibrary,
   computeGapStatus,
@@ -69,6 +71,12 @@ export default async function GapDetailPage({
     .map((l) => ({ link: l, need: state.needs.find((n) => n.id === l.need_id)! }))
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+  // The gap's own changes plus its mappings' and leftovers' (KAN-90).
+  const history = await entityHistory([
+    gap.id,
+    ...coverages.map((c) => c.id),
+    ...state.residuals.filter((r) => r.gap_id === gap.id).map((r) => r.id),
+  ]);
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
   const computed = computeGapStatus(coverages, state.tactics, {
     hasAcceptedChild: children.length > 0,
@@ -599,6 +607,8 @@ export default async function GapDetailPage({
           </ul>
         </section>
       ) : null}
+
+      <EntityHistory entries={history} />
 
       {!gap.retired && gap.status === "excluded" ? (
         <section

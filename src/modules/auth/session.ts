@@ -102,10 +102,36 @@ export async function createSession(args: {
   };
 }
 
+/**
+ * Sessions verified in the last minute, for attributing a change only (KAN-90).
+ * Access checks always call `currentSession`, which reads the database. A
+ * change's record is often written inside a transaction; with a one-connection
+ * pool (Vercel, Vitest) a second query there would wait forever, so the record
+ * reuses the session the request's guard already verified.
+ */
+const RECENT_SESSION_MS = 60_000;
+const recentSessions = new Map<string, { session: Session; at: number }>();
+
+function rememberSession(session: Session) {
+  if (recentSessions.size > 1_000) {
+    const cutoff = Date.now() - RECENT_SESSION_MS;
+    for (const [id, entry] of recentSessions) if (entry.at < cutoff) recentSessions.delete(id);
+  }
+  recentSessions.set(session.id, { session, at: Date.now() });
+}
+
+/** The session this cookie named when it was last verified, within the last minute. Never for access checks. */
+export function recentlyVerifiedSession(id: string): Session | null {
+  const entry = recentSessions.get(id);
+  if (!entry || Date.now() - entry.at > RECENT_SESSION_MS) return null;
+  return entry.session;
+}
+
 export async function currentSession(): Promise<Session | null> {
   const jar = await cookies();
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
+  recentSessions.delete(id);
   await ensurePlatformSchema();
   const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
   const row = rows[0];
@@ -127,7 +153,7 @@ export async function currentSession(): Promise<Session | null> {
     }
     return null;
   }
-  return {
+  const session: Session = {
     id: row.id,
     provider_id: row.provider_id,
     subject: row.subject,
@@ -137,6 +163,8 @@ export async function currentSession(): Promise<Session | null> {
     created_at: row.created_at,
     expires_at: row.expires_at,
   };
+  rememberSession(session);
+  return session;
 }
 
 /** The `?error=` code /login shows the no-seat message for (see LOGIN_ERROR_MESSAGES). */

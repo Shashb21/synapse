@@ -6,9 +6,9 @@ import { db, ensureCurrentSchemaTables } from "./db";
 import * as t from "./schema";
 import { ACTOR_FUNCTIONS, TACTIC_STATUSES, TACTIC_TYPES, type TacticStatus } from "./enums";
 import { emptyDimensions, unlocked } from "./engine";
-import { readState, syncComputedGapStatuses } from "./store";
+import { appendAudit, readState, syncComputedGapStatuses } from "./store";
 import { tacticDatesError } from "./tactic-dates";
-import { requireRationale } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { Actor, ExpansionScope, Tactic, TacticExpansion } from "./types";
 
@@ -104,8 +104,7 @@ export async function acceptTacticExpansion(args: AcceptExpansionArgs, transacti
       overall_lock: unlocked(), stale: false, needs_review: false});
     // The explicit acceptance history is the permission for this child scope only.
     // Preserve the parent's mapping decision and every sibling's rejection memory.
-    await tx.insert(t.audit).values({id: newId("AUD"), at, actor_name: args.actor.name, actor_function: args.actor.function,
-      entity_type: "tactic_expansion", entity_id: child.id, action: "accept", detail: `${args.proposal_id}: ${rationale}`});
+    await appendAudit(args.actor.name, args.actor.function, "tactic_expansion", child.id, "accept", `${args.proposal_id}: ${rationale}`, tx);
     await syncComputedGapStatuses(args.gap_id, undefined, tx);
     return child;
   };
@@ -132,8 +131,10 @@ export async function setExpansionStatus(args: {
     const updated: TacticExpansion = {...child, status: args.status, updated_at: at, version,
       history: [...child.history, {action: "status", at, actor: args.actor, rationale, status: args.status, version}]};
     await tx.update(t.tacticExpansions).set(updated).where(eq(t.tacticExpansions.id, child.id));
-    await tx.insert(t.audit).values({id: newId("AUD"), at, actor_name: args.actor.name, actor_function: args.actor.function,
-      entity_type: "tactic_expansion", entity_id: child.id, action: "status", detail: `${child.status} → ${args.status}: ${rationale}`});
+    // Attributed and mirrored to the platform log (KAN-90), with the status before and after.
+    await appendAudit(args.actor.name, args.actor.function, "tactic_expansion", child.id, "status", `${child.status} → ${args.status}: ${rationale}`, tx);
+    await recordEdit({stage: "S9", entity_type: "tactic_expansion", entity_id: child.id, field: "status", action: "edit",
+      before: child.status, after: args.status, rationale, actor: args.actor}, tx);
     for (const gapId of child.gap_ids) await syncComputedGapStatuses(gapId, undefined, tx);
     return updated;
   });
