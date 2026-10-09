@@ -3,7 +3,7 @@ import { db } from "./db";
 import * as t from "./schema";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { ActorFunction } from "./enums";
-import { appendAudit, isMappingRowKey, loadState, makeLock, syncComputedGapStatuses } from "./store";
+import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, makeLock, syncComputedGapStatuses } from "./store";
 
 /**
  * Undo for every "set aside" decision (KAN-16): an excluded gap, a rejected
@@ -76,6 +76,7 @@ export async function restoreExcludedGap(args: RestoreActor & { gap_id: string }
     .where(eq(t.gaps.id, args.gap_id));
   // A person's restore: the computation from coverage applies (Open, Partial or Addressed).
   await syncComputedGapStatuses(args.gap_id, { human: true });
+  await ensureGapHasConstituentNeed(args.gap_id);
   const after = (await loadState()).gaps.find((g) => g.id === args.gap_id)?.status ?? "validated_open";
   await fileRestore({
     stage: "S5",

@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { db, ensureSchema, wipeIegp } from "./db";
+import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
@@ -122,14 +122,47 @@ export function normalizeGapMetadata(value: unknown): GapMetadata {
 
 export async function loadState(): Promise<IegpState> {
   await ensureSchema();
-  const d = db();
-  const assetRows = await d.select().from(t.assets);
-  if (assetRows.length === 0) {
+  let state = await readSnapshot();
+  // A schema with no asset row yet (a brand-new database) starts blank.
+  if (!state.asset) {
     await persistState(buildBlankWorkspace());
+    state = await readSnapshot();
   }
-  const state = await readState();
-  if (state.gaps.some((gap) => !gap.number)) return numberGaps(state);
+  if (state.gaps.some((gap) => !gap.number)) state = await numberGaps(state);
+  if (!inWorkspaceTransaction() && (await repairNeedlessGapsOnce(state))) state = await readSnapshot();
   return state;
+}
+
+const repairedSchemas = new Set<string>();
+
+/**
+ * Data written before writes repaired their own gaps may hold a live gap with no
+ * need. Checked once per schema per process (from the state just read, so it
+ * costs no query), repaired only when one is found.
+ */
+async function repairNeedlessGapsOnce(state: IegpState): Promise<boolean> {
+  const schema = await currentSchemaName();
+  if (repairedSchemas.has(schema)) return false;
+  repairedSchemas.add(schema);
+  const linked = new Set(state.need_gap_links.map((link) => link.gap_id));
+  if (!state.gaps.some((gap) => isLiveGap(gap) && !linked.has(gap.id))) return false;
+  try {
+    await ensureAllLiveGapsHaveNeeds();
+    return true;
+  } catch (error) {
+    repairedSchemas.delete(schema);
+    throw error;
+  }
+}
+
+/**
+ * Every table read in one transaction (KAN-14/15): one connection and one search
+ * path for all of them, and a consistent picture even while someone else writes.
+ * Inside a caller's transaction the reads simply join it.
+ */
+function readSnapshot(): Promise<IegpState> {
+  if (inWorkspaceTransaction()) return readState();
+  return withWorkspaceTransaction(() => readState());
 }
 
 /**
@@ -138,14 +171,13 @@ export async function loadState(): Promise<IegpState> {
  */
 async function numberGaps(state: IegpState): Promise<IegpState> {
   const taken = new Set(state.gaps.map((gap) => gap.number).filter((n): n is number => Boolean(n)));
-  let next = Math.max(0, ...taken) + 1;
+  const floor = Math.max(0, ...taken) + 1;
   for (const gap of state.gaps) {
     if (gap.number) continue;
     const own = /^GAP-(\d+)$/.exec(gap.id);
     const wanted = own ? Number(own[1]) : null;
-    const number = wanted && !taken.has(wanted) ? wanted : next;
+    const number = wanted && !taken.has(wanted) ? wanted : await allocateNumber("gap_number", floor);
     taken.add(number);
-    next = Math.max(next, number + 1);
     await db().update(t.gaps).set({ number }).where(eq(t.gaps.id, gap.id));
     gap.number = number;
   }
@@ -203,7 +235,9 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.gapSuggestions),
     d.select().from(t.tacticExpansions),
   ]);
-  const asset = assetRows[0]!;
+  const asset = assetRows[0];
+  // loadState fills an empty schema; callers holding a transaction always have an asset.
+  if (!asset) return { asset: undefined } as unknown as IegpState;
   return {
     asset: {
       ...asset,
@@ -332,63 +366,71 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
   };
 }
 
+/**
+ * Replaces every IEGP row in the current workspace with `state`, in one
+ * transaction (KAN-15): a failure part-way leaves the old contents in place.
+ */
 export async function persistState(state: IegpState) {
   await ensureSchema();
-  await wipeIegp();
-  const d = db();
-  await d.insert(t.assets).values(state.asset);
-  if (state.objectives.length) await d.insert(t.objectives).values(state.objectives);
-  if (state.sources.length) {
-    await d.insert(t.sources).values(state.sources);
-  }
-  if (state.blocks.length) await d.insert(t.sourceBlocks).values(state.blocks);
-  if (state.needs.length) {
-    await d.insert(t.needs).values(
-      state.needs.map((n) => {
-        const { status_lock, ...rest } = n;
-        return { ...rest, lock: status_lock };
-      }),
-    );
-  }
-  if (state.gaps.length) {
-    await d.insert(t.gaps).values(
-      state.gaps.map((g) => {
-        const { status_lock, ...rest } = g;
-        return {
-          ...rest,
-          lock: status_lock,
-          computed_status: g.computed_status ?? null,
-          status_override: g.status_override ?? null,
-          retired: g.retired ?? false,
-          human_validated: g.human_validated ?? false,
-          parked_at: g.parked_at ?? null,
-          parked_reason: g.parked_reason ?? null,
-        };
-      }),
-    );
-  }
-  if (state.need_gap_links.length) await d.insert(t.needGapLinks).values(state.need_gap_links);
-  if (state.tactics.length) await d.insert(t.tactics).values(state.tactics);
-  if (state.expansions?.length) await d.insert(t.tacticExpansions).values(state.expansions);
-  if (state.coverages.length) await d.insert(t.coverages).values(state.coverages);
-  if (state.mapping_suggestions.length) {
-    await d.insert(t.mappingSuggestions).values(state.mapping_suggestions);
-  }
-  if (state.residual_gap_suggestions.length) {
-    await d.insert(t.residualGapSuggestions).values(state.residual_gap_suggestions);
-  }
-  if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
-  if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
-  if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
-  if (state.audit.length) await d.insert(t.audit).values(state.audit);
-  if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
-  if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
-  if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
-  if (state.breakout_groups.length) await d.insert(t.breakoutGroups).values(state.breakout_groups);
-  if (state.breakout_group_gaps.length) {
-    await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
-  }
-  if (state.gap_suggestions?.length) await d.insert(t.gapSuggestions).values(state.gap_suggestions);
+  await withWorkspaceTransaction(async () => {
+    await wipeIegp();
+    // A new plan numbers its gaps from 001 again; ids (GAP-NNN, NEED-NNN, …) are never reissued.
+    await db().execute(sql`DELETE FROM id_counters WHERE key = 'gap_number'`);
+    const d = db();
+    await d.insert(t.assets).values(state.asset);
+    if (state.objectives.length) await d.insert(t.objectives).values(state.objectives);
+    if (state.sources.length) {
+      await d.insert(t.sources).values(state.sources);
+    }
+    if (state.blocks.length) await d.insert(t.sourceBlocks).values(state.blocks);
+    if (state.needs.length) {
+      await d.insert(t.needs).values(
+        state.needs.map((n) => {
+          const { status_lock, ...rest } = n;
+          return { ...rest, lock: status_lock };
+        }),
+      );
+    }
+    if (state.gaps.length) {
+      await d.insert(t.gaps).values(
+        state.gaps.map((g) => {
+          const { status_lock, ...rest } = g;
+          return {
+            ...rest,
+            lock: status_lock,
+            computed_status: g.computed_status ?? null,
+            status_override: g.status_override ?? null,
+            retired: g.retired ?? false,
+            human_validated: g.human_validated ?? false,
+            parked_at: g.parked_at ?? null,
+            parked_reason: g.parked_reason ?? null,
+          };
+        }),
+      );
+    }
+    if (state.need_gap_links.length) await d.insert(t.needGapLinks).values(state.need_gap_links);
+    if (state.tactics.length) await d.insert(t.tactics).values(state.tactics);
+    if (state.expansions?.length) await d.insert(t.tacticExpansions).values(state.expansions);
+    if (state.coverages.length) await d.insert(t.coverages).values(state.coverages);
+    if (state.mapping_suggestions.length) {
+      await d.insert(t.mappingSuggestions).values(state.mapping_suggestions);
+    }
+    if (state.residual_gap_suggestions.length) {
+      await d.insert(t.residualGapSuggestions).values(state.residual_gap_suggestions);
+    }
+    if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
+    if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
+    if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
+    if (state.audit.length) await d.insert(t.audit).values(state.audit);
+    if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
+    if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
+    if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
+    if (state.breakout_groups.length) await d.insert(t.breakoutGroups).values(state.breakout_groups);
+    if (state.breakout_group_gaps.length) {
+      await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
+    }
+    if (state.gap_suggestions?.length) await d.insert(t.gapSuggestions).values(state.gap_suggestions);
+  });
 }
 
 /**
@@ -444,6 +486,44 @@ export function nextId(prefix: string, existing: string[]): string {
   return `${prefix}-${String(next).padStart(3, "0")}`;
 }
 
+/**
+ * The next `PREFIX-NNN` id, never one this workspace handed out before (KAN-15):
+ * a counter row per prefix only moves up, so an id freed by a delete or a reset
+ * is not reissued, and two concurrent writers cannot get the same one (the
+ * upsert locks the row). `existing` only lifts the counter past ids that were
+ * written without it (seeds, imports).
+ */
+export async function allocateId(
+  prefix: string,
+  existing: string[],
+  transaction?: Pick<ReturnType<typeof db>, "execute">,
+): Promise<string> {
+  const floor = Number(nextId(prefix, existing).slice(prefix.length + 1));
+  const next = await allocateNumber(`id:${prefix}`, floor, transaction);
+  return `${prefix}-${String(next).padStart(3, "0")}`;
+}
+
+/** Atomically takes the next number of the `key` counter, at least `floor`. */
+export async function allocateNumber(
+  key: string,
+  floor: number,
+  transaction?: Pick<ReturnType<typeof db>, "execute">,
+): Promise<number> {
+  const rows = (await (transaction ?? db()).execute(sql`
+    INSERT INTO id_counters (key, last) VALUES (${key}, ${floor})
+    ON CONFLICT (key) DO UPDATE SET last = GREATEST(id_counters.last + 1, EXCLUDED.last)
+    RETURNING last`)) as unknown as { last: string | number }[];
+  return Number(rows[0]!.last);
+}
+
+/**
+ * Wraps a multi-row write so it runs in one transaction (KAN-15): every row it
+ * writes lands, or none does. Inside a caller's transaction it is a savepoint.
+ */
+function atomic<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  return (...args: A) => withWorkspaceTransaction(() => fn(...args));
+}
+
 type StoreTransaction = Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0];
 
 const PLAN_ENTRY_SOURCE_ID = "SRC-PLAN-ENTRY";
@@ -493,7 +573,7 @@ async function insertLiveOpenGap(args: {
   objectiveId: string;
 }): Promise<string> {
   const live = await loadState();
-  const gapId = nextId(
+  const gapId = await allocateId(
     "GAP",
     live.gaps.map((g) => g.id),
   );
@@ -533,9 +613,10 @@ async function insertNeedForGap(args: {
   if (!gap) throw new Error("Gap not found");
   const statement = args.statement.trim();
   if (!statement) return;
-  const needId = nextId(
+  const needId = await allocateId(
     "NEED",
     state.needs.map((n) => n.id),
+    transaction,
   );
   await insertNeedRow({
     id: needId,
@@ -612,10 +693,15 @@ export async function ensureGapHasConstituentNeed(gapId: string, transaction?: S
   }, transaction);
 }
 
+/**
+ * Gives every live gap without a need its constituent need. Writes never leave a
+ * gap needless (a gap's last need cannot be unlinked or moved, new gaps get one);
+ * this repairs older data once per schema per process, never on every page
+ * render (KAN-14).
+ */
 export async function ensureAllLiveGapsHaveNeeds() {
   const state = await loadState();
-  // Pages run this on every render, refreshes included (KAN-68): a gap that already
-  // has a need is skipped here, not after a fresh loadState of its own.
+  // A gap that already has a need is skipped here, not after a fresh loadState of its own.
   const linked = new Set(state.need_gap_links.map((link) => link.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (linked.has(gap.id)) continue;
@@ -1585,7 +1671,7 @@ export async function lockPriority(args: {
     await db().update(t.priorities).set(row).where(eq(t.priorities.id, existing.id));
   } else {
     await db().insert(t.priorities).values({
-      id: nextId("PRI", state.priorities.map((p) => p.id)),
+      id: await allocateId("PRI", state.priorities.map((p) => p.id)),
       ...row,
     });
   }
@@ -1705,7 +1791,7 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
   const start_date = optionalTacticDate("start_date", args.start_date);
   const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
   assertTacticDateOrder(start_date, evidence_available);
-  const id = transaction ? newId("TAC") : nextId("TAC", state.tactics.map((x) => x.id));
+  const id = transaction ? newId("TAC") : await allocateId("TAC", state.tactics.map((x) => x.id));
   const reasonNote = args.note?.trim() || null;
   await d.insert(t.tactics).values({
     id,
@@ -2012,7 +2098,7 @@ export async function assignTacticToGap(args: {
       dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
     }
   }
-  const coverageId = existing?.id ?? nextId("COV", state.coverages.map((c) => c.id));
+  const coverageId = existing?.id ?? (await allocateId("COV", state.coverages.map((c) => c.id)));
   const row = {
     id: coverageId,
     gap_id: args.gap_id,
@@ -2406,7 +2492,7 @@ async function consumeResidualRecord(args: {
     return;
   }
   await db().insert(t.residuals).values({
-    id: nextId(
+    id: await allocateId(
       "RES",
       state.residuals.map((r) => r.id),
     ),
@@ -2651,9 +2737,10 @@ export async function createGap(args: {
     if (args.metadata === undefined) metadata = parent.metadata;
   }
   const name = args.name?.trim() || gapNameFromStatement(statement);
-  const id = nextId(
+  const id = await allocateId(
     "GAP",
     state.gaps.map((g) => g.id),
+    transaction,
   );
   await (transaction ?? db()).insert(t.gaps).values({
     id,
@@ -2674,7 +2761,7 @@ export async function createGap(args: {
     parked_reason: null,
     settings,
     metadata,
-    number: Math.max(0, ...state.gaps.map((gap) => gap.number)) + 1,
+    number: await allocateNumber("gap_number", Math.max(0, ...state.gaps.map((gap) => gap.number)) + 1, transaction),
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name, transaction);
   if (args.need_id) {
@@ -2833,7 +2920,7 @@ export async function lockRoadmapItem(args: {
     await db().update(t.roadmap).set(row).where(eq(t.roadmap.id, existing.id));
   } else {
     await db().insert(t.roadmap).values({
-      id: nextId("RM", state.roadmap.map((r) => r.id)),
+      id: await allocateId("RM", state.roadmap.map((r) => r.id)),
       ...row,
     });
   }
@@ -2851,7 +2938,7 @@ export async function lockRoadmapItem(args: {
  * S1 output: the domain source document and its blocks, with no extraction. The
  * modular parse stage stops here; extraction stages commit against `source_id`.
  */
-export async function persistSourceAndBlocks(args: {
+export const persistSourceAndBlocks = atomic(async function persistSourceAndBlocks(args: {
   title: string;
   source_type: IegpState["sources"][0]["source_type"];
   stakeholder_function: ActorFunction;
@@ -2864,7 +2951,7 @@ export async function persistSourceAndBlocks(args: {
   sections?: { heading: string; text: string; location: string }[];
 }): Promise<{ source_id: string; blocks: IegpState["blocks"] }> {
   const state = await loadState();
-  const sourceId = nextId("SRC", state.sources.map((s) => s.id));
+  const sourceId = await allocateId("SRC", state.sources.map((s) => s.id));
   await db().insert(t.sources).values({
     id: sourceId,
     filename: args.filename ?? args.title.replaceAll(" ", "_") + ".txt",
@@ -2889,7 +2976,7 @@ export async function persistSourceAndBlocks(args: {
   }));
   if (blocks.length) await db().insert(t.sourceBlocks).values(blocks);
   return { source_id: sourceId, blocks };
-}
+});
 
 export type CandidateNeedRow = {
   id: string;
@@ -2940,7 +3027,7 @@ export type OverlapRow = {
  *   stored accepted as that judge's decision unless a row says `candidate`.
  * Mapping is S4's job and leftovers are S6's: neither happens here.
  */
-export async function commitExtractedRecords(args: {
+export const commitExtractedRecords = atomic(async function commitExtractedRecords(args: {
   source_id: string;
   title: string;
   stakeholder_function: ActorFunction;
@@ -3061,7 +3148,7 @@ export async function commitExtractedRecords(args: {
     const key = quoteKey(args2.gapId, args2.quote || args2.statement);
     if (attached.has(key)) return;
     attached.add(key);
-    const needId = nextId("NEED", needIds);
+    const needId = await allocateId("NEED", needIds);
     needIds.push(needId);
     createdNeedIds.push(needId);
     await insertNeedRow({
@@ -3158,7 +3245,7 @@ export async function commitExtractedRecords(args: {
       skippedTacticIds.push(tac.id);
       continue;
     }
-    const tacticId = nextId("TAC", tacticIds);
+    const tacticId = await allocateId("TAC", tacticIds);
     tacticIds.push(tacticId);
     createdTacticIds.push(tacticId);
     await db().insert(t.tactics).values({
@@ -3209,7 +3296,7 @@ export async function commitExtractedRecords(args: {
     suggestion_id_by_row: suggestionIdByRow,
     flagged_gap_ids: flaggedGapIds,
   };
-}
+});
 
 /**
  * More sources for a pending suggestion: repeats of its candidate from other
@@ -3281,7 +3368,7 @@ function suggestionSources(suggestion: GapSuggestion): GapSuggestionSource[] {
  * they were judged against the old wording. The caller resets the gap's
  * validated priority (S8 owns that table).
  */
-export async function acceptGapMerge(
+export const acceptGapMerge = atomic(async function acceptGapMerge(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string }> {
   const rationale = requireRationale(args.rationale);
@@ -3334,14 +3421,14 @@ export async function acceptGapMerge(
   });
   await syncComputedGapStatuses(gap.id);
   return { gap_id: gap.id };
-}
+});
 
 /**
  * Accepts an overlap as a split (KAN-75): a new gap holds only the new part, with
  * the incoming source as its primary need; the shared part joins the existing gap
  * as a supporting need; and the two gaps are linked as related.
  */
-export async function acceptGapSplit(
+export const acceptGapSplit = atomic(async function acceptGapSplit(
   args: SuggestionDecision & { name?: string; statement?: string },
 ): Promise<{ gap_id: string; new_gap_id: string }> {
   const rationale = requireRationale(args.rationale);
@@ -3394,7 +3481,7 @@ export async function acceptGapSplit(
     signal_kind: "user_accepted_proposal",
   });
   return { gap_id: gap.id, new_gap_id: newGapId };
-}
+});
 
 /** Each gap lists the other as related; a link is never added twice. */
 async function linkRelatedGaps(a: string, b: string) {
@@ -3796,9 +3883,10 @@ async function insertGapVersion(args: {
   actor_function: ActorFunction;
 }, transaction?: StoreTransaction) {
   const state = transaction ? await readState(transaction) : await loadState();
-  const id = nextId(
+  const id = await allocateId(
     "GV",
     state.gap_versions.map((row) => row.id),
+    transaction,
   );
   await (transaction ?? db()).insert(t.gapVersions).values({
     id,
@@ -3915,9 +4003,10 @@ async function ensurePriorityResidual(
   if (!gap) return;
   if (state.residuals.some((r) => r.gap_id === gap_id)) return;
   await (transaction ?? db()).insert(t.residuals).values({
-    id: nextId(
+    id: await allocateId(
       "RES",
       state.residuals.map((r) => r.id),
+      transaction,
     ),
     gap_id,
     statement: gap.name,
@@ -4266,7 +4355,7 @@ export async function createBreakoutGroup(args: {
   const name = args.name.trim();
   if (!name) throw new Error("A breakout group needs a name.");
   const state = await loadState();
-  const id = nextId(
+  const id = await allocateId(
     "BRK",
     state.breakout_groups.map((g) => g.id),
   );

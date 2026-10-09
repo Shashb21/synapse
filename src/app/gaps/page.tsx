@@ -3,13 +3,12 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { GapBadge, ParkedFlag } from "@/components/iegp-badges";
 import { DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { displayedGapStatus } from "@/lib/iegp/engine";
-import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { loadState } from "@/lib/iegp/store";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function GapsPage() {
-  await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
   const ai = await aiSectionEnabled("ingestion").catch(() => false);
   return (

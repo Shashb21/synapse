@@ -30,7 +30,7 @@ import {
   GAP_STATUS_LABELS,
   ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
-import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
+import { loadState } from "@/lib/iegp/store";
 import {
   buildTacticLibrary,
   computeGapStatus,
@@ -50,7 +50,6 @@ export default async function GapDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await ensureGapHasConstituentNeed(id);
   const [state, session, ai] = await Promise.all([
     loadState(),
     sessionContext(),

@@ -23,6 +23,7 @@ The app uses Drizzle + `postgres` (see `src/lib/iegp/db.ts`). Local dev uses Doc
    | Name | Value |
    | --- | --- |
    | `DATABASE_URL` | Copy **Pooled** connection string from the Vercel Postgres store (or `POSTGRES_URL` if that is the pooled URL Vercel provides). |
+   | `DATABASE_POOL_MAX` / `DATABASE_PLATFORM_POOL_MAX` | Optional. Connections per instance for workspace data (default 3 on Vercel) and platform tables (default 2). Keep instances × (both) under the database's connection limit. |
 
 Apply to **Production**, **Preview**, and **Development** if you use Vercel previews.
 

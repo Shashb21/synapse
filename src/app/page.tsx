@@ -15,7 +15,7 @@ import { RejectedTactics, SetAsideGaps } from "@/components/restore-actions";
 import { aiSections } from "@/modules/kernel/ai-switch";
 import { noAiSections, type AiSections } from "@/modules/kernel/ai-sections";
 import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
-import { loadState, ensureAllLiveGapsHaveNeeds } from "@/lib/iegp/store";
+import { loadState } from "@/lib/iegp/store";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import {
   buildPlanWorkspace,
@@ -93,7 +93,6 @@ export default async function HomePage({
 }: {
   searchParams: Promise<{ place?: string; gap_filter?: string; setting?: string }>;
 }) {
-  await ensureAllLiveGapsHaveNeeds();
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
   const gates = planGates(state);
