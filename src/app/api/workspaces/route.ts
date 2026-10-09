@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { selectedWorkspaceId } from "@/modules/workspaces/context";
 import { myWorkspaces, selectWorkspace } from "@/modules/workspaces/session";
 import { replaceContentsOf, startChoice } from "@/modules/workspaces/contents";
-import { createWorkspace } from "@/modules/workspaces/store";
+import { assertCanCreateWorkspace, createWorkspace } from "@/modules/workspaces/store";
 import { errorResponse, HttpError, NEW_WORKSPACE_REDIRECT, readBody, requireSession } from "./_shared";
 
 export const runtime = "nodejs";
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
     const { principal } = await requireSession();
     const body = await readBody(request);
     const start = startChoice(body.start);
+    await assertCanCreateWorkspace(principal);
     const created = await createWorkspace({
       name: String(body.name ?? ""),
       owner: principal,

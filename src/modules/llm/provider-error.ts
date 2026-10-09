@@ -20,6 +20,8 @@ export type ProviderErrorInfo = {
   provider_message: string | null;
   /** A 429 for a per-day quota (Gemini's free tier): waiting a minute won't help (KAN-70). */
   daily_quota?: boolean;
+  /** No answer within the time limit, or no connection at all (KAN-20). Never an HTTP reply. */
+  no_response?: "timeout" | "network";
 };
 
 /** Where each provider's owner adds credit. */
@@ -98,6 +100,12 @@ function ownerMessage(info: ProviderErrorInfo, kind: ProviderErrorKind): string 
         ? `${name} has used this model's daily request quota (HTTP 429). It resets daily; until then switch the route to another model or provider in /admin/control.${said}`
         : `${name} is rate-limiting this account (HTTP 429). Wait a minute and run the stage again, or raise the account's rate limit.${said}`;
     case "unavailable":
+      if (info.no_response === "timeout") {
+        return `${name} did not answer within ${Math.round(providerTimeoutMs() / 1000)} seconds, so the request was stopped. Run the stage again in a few minutes, or switch its route in /admin/control. The limit is SYNAPSE_LLM_TIMEOUT_MS.`;
+      }
+      if (info.no_response === "network") {
+        return `Synapse could not reach ${name}. Check the server's network connection, then run the stage again.`;
+      }
       return `${name} is overloaded or unavailable (HTTP ${info.status}). Run the stage again in a few minutes, or switch its route in /admin/control.`;
     case "bad_request":
       return `${name} rejected the request as invalid (HTTP ${info.status}${info.error_type ? `, ${info.error_type}` : ""}).${said}`;
@@ -120,5 +128,45 @@ export class ProviderError extends Error {
 
   get status(): number {
     return this.info.status;
+  }
+}
+
+/**
+ * How long a provider call may take before it is stopped (KAN-20): long enough
+ * for a large structured answer, short enough that a hung connection cannot
+ * hold a request until the platform kills it. SYNAPSE_LLM_TIMEOUT_MS overrides.
+ */
+export const DEFAULT_PROVIDER_TIMEOUT_MS = 120_000;
+
+export function providerTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const configured = Number(env.SYNAPSE_LLM_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+type ProviderTarget = { provider_id: string; provider_name: string; key_env: string };
+
+/**
+ * fetch with the provider time limit, reading the whole body under it. A
+ * timeout or a failed connection becomes ProviderError "unavailable" (HTTP
+ * 504 / 503 by convention, since the provider sent nothing).
+ */
+export async function fetchProvider(
+  url: string,
+  init: RequestInit,
+  target: ProviderTarget,
+): Promise<{ res: Response; text: string }> {
+  const signal = AbortSignal.timeout(providerTimeoutMs());
+  try {
+    const res = await fetch(url, { ...init, signal });
+    return { res, text: await res.text() };
+  } catch (error) {
+    const timedOut = signal.aborted || (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"));
+    throw new ProviderError({
+      ...target,
+      status: timedOut ? 504 : 503,
+      error_type: null,
+      provider_message: null,
+      no_response: timedOut ? "timeout" : "network",
+    });
   }
 }

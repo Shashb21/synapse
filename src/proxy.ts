@@ -1,10 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ADMIN_PATH_HEADER, gateFor, isAdminPage, PRESENT_HEADER, PROXY_SESSION_COOKIE, PROXY_WORKSPACE_COOKIE } from "@/modules/auth/gate";
 import { verifyWorkspaceCookie } from "@/modules/workspaces/context";
+import { BodyTooLargeError, bodyLimitFor, declaredTooLarge } from "@/lib/http/body-limit";
 
 /** Customer routes need a session and a workspace; see modules/auth/gate.ts for the rules. */
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  // An oversized API body is refused before anything reads it (KAN-20).
+  const limit = bodyLimitFor(pathname, request.headers.get("content-type"));
+  if (limit !== null && declaredTooLarge(request.headers.get("content-length"), limit)) {
+    const tooLarge = new BodyTooLargeError(limit);
+    return NextResponse.json({ error: tooLarge.message, code: tooLarge.code }, { status: tooLarge.status });
+  }
   const gate = gateFor(pathname);
   if (gate === "open") return isAdminPage(pathname) ? withAdminPathHeader(request) : NextResponse.next();
 
