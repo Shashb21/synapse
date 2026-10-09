@@ -4184,6 +4184,15 @@ export async function createAddressedGap(args: {
   note?: string;
 }) {
   let tacticId = args.tactic_id?.trim();
+  if (tacticId) {
+    // The tactic must be a real one that counts toward coverage: an id that is
+    // not there, or a proposed or cancelled tactic, cannot close a gap.
+    const tactic = (await loadState()).tactics.find((x) => x.id === tacticId);
+    if (!tactic) throw new Error(`Tactic ${tacticId} does not exist. Choose one from the library, or record the missed tactic.`);
+    if (tactic.status === "proposed" || tactic.status === "cancelled") {
+      throw new Error(`${tactic.name} is ${tactic.status}, so it cannot address a gap. Choose a completed, ongoing or planned tactic.`);
+    }
+  }
   if (!tacticId) {
     if (!args.missed_name?.trim()) {
       throw new Error("Addressed gaps need an accompanying tactic.");

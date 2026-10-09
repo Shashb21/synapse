@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/iegp/db";
+import * as t from "@/lib/iegp/schema";
 import {
   resetDemoSetup,
   loadState,
@@ -462,6 +465,30 @@ describe("Gaps map existing vs record missed vs proposed", () => {
     const after = await loadState();
     expect(after.tactics.some((t) => t.name === "Invented chart review")).toBe(false);
     expect(after.coverages.filter((c) => c.gap_id === gapId)).toHaveLength(0);
+  });
+
+  it("refuses an Addressed gap whose tactic is missing, proposed or cancelled, and writes nothing", async () => {
+    await resetDemoSetup();
+    const before = await loadState();
+    await expect(
+      createAddressedGap({ statement: "Gap with a made-up tactic", tactic_id: "TAC-NOPE", actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/does not exist/i);
+    const draft = await recordMissedTactic({
+      name: "Planned registry",
+      type: "registry",
+      evidence_question: "Does a registry close this?",
+      status: "planned",
+      actor_name: "A. Rao",
+      actor_function: "heor",
+    });
+    const state = await loadState();
+    const cancelled = state.tactics.find((t) => t.id === draft)!;
+    await db().update(t.tactics).set({ status: "cancelled" }).where(eq(t.tactics.id, cancelled.id));
+    await expect(
+      createAddressedGap({ statement: "Gap with a cancelled tactic", tactic_id: draft, actor_name: "A. Rao", actor_function: "heor" }),
+    ).rejects.toThrow(/cancelled/i);
+    const after = await loadState();
+    expect(after.gaps.length).toBe(before.gaps.length);
   });
 
   it("still requires a tactic when adding an Addressed gap", async () => {
