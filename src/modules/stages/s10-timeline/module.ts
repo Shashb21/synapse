@@ -1103,6 +1103,9 @@ export async function savePlan(args: {
 }): Promise<IegpPlanRecord> {
   const note = requireRationale(args.note);
   const [model, state] = await Promise.all([timelineModel(), loadState()]);
+  if (args.status === "final" && model.activities.length === 0) {
+    throw new Error("There is nothing to save as final yet: date at least one activity on the timeline first.");
+  }
   if (args.status === "final" && model.pending.length > 0) {
     throw new Error(
       `${model.pending.length === 1 ? "1 activity has" : `${model.pending.length} activities have`} no schedule yet (${model.pending

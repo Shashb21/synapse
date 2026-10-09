@@ -4260,25 +4260,46 @@ export async function createAddressedGap(args: {
 export async function createBreakoutGroup(args: {
   name: string;
   note?: string;
+  /** Gaps to start with. All are checked first: a bad one creates nothing (KAN-18). */
+  gap_ids?: string[];
   actor_name: string;
   actor_function: ActorFunction;
 }): Promise<string> {
   const name = args.name.trim();
   if (!name) throw new Error("A breakout group needs a name.");
   const state = await loadState();
+  const gapIds = [...new Set(args.gap_ids ?? [])];
+  const known = new Set(state.gaps.map((gap) => gap.id));
+  if (gapIds.some((id) => !known.has(id))) throw new Error("Gap not found");
   const id = nextId(
     "BRK",
     state.breakout_groups.map((g) => g.id),
   );
-  await db().insert(t.breakoutGroups).values({
-    id,
-    name,
-    note: args.note?.trim() || null,
-    created_at: now(),
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+  // The group and its starting gaps land together, or not at all.
+  await db().transaction(async (transaction) => {
+    await transaction.insert(t.breakoutGroups).values({
+      id,
+      name,
+      note: args.note?.trim() || null,
+      created_at: now(),
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+    if (gapIds.length > 0) {
+      await transaction.insert(t.breakoutGroupGaps).values(gapIds.map((gap_id) => ({ group_id: id, gap_id })));
+    }
   });
   await appendAudit(args.actor_name, args.actor_function, "breakout_group", id, "create", name);
+  if (gapIds.length > 0) {
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "breakout_group",
+      id,
+      "assign_gaps",
+      `${gapIds.length} gap${gapIds.length === 1 ? "" : "s"} → ${name}`,
+    );
+  }
   return id;
 }
 

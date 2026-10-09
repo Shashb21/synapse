@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { postJson } from "@/lib/post-json";
 
 /** The optional note a dialog collects. Only actions that store a note pass one. */
 export type LockFormNote = { label: string; required?: boolean; placeholder?: string };
@@ -150,12 +151,8 @@ export function LockForm({
       if (k === "note") continue;
       payload[k] = v;
     }
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = (await res.json()) as { error?: string };
+    const res = await postJson("/api/iegp", payload);
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not save. Try again.");

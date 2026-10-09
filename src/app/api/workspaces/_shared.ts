@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentSession, type Session } from "@/modules/auth/session";
+import { readJsonBody } from "@/modules/auth/api-guard";
 import { principalOf } from "@/modules/workspaces/session";
 import { getWorkspace, memberRole, type WorkspaceWithRole } from "@/modules/workspaces/store";
 
@@ -34,8 +35,13 @@ export async function requireMembership(workspaceId: string): Promise<{
   return { session, principal, workspace: { ...workspace, role } };
 }
 
+/** The body as an object: none at all is `{}`, malformed JSON is a 400 (KAN-18). */
 export async function readBody(request: Request): Promise<Record<string, unknown>> {
-  return (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  try {
+    return await readJsonBody(request, { allowEmpty: true });
+  } catch {
+    throw new HttpError(400, "The request body is not valid JSON.");
+  }
 }
 
 /** Turns a thrown error into JSON: auth problems keep their status, owner-only rules are 403. */

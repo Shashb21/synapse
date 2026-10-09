@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { StageId } from "@/modules/kernel/contracts";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import type { StageTarget } from "@/components/platform/run-stage-button";
+import { postJson } from "@/lib/post-json";
 
 /** Scores prompt variants against gold. Prompts only matter to a model, so this is hidden while AI is off. */
 export function HillclimbSweepButton({ stage, target }: { stage: StageId; target?: StageTarget }) {
@@ -27,17 +28,13 @@ function SweepButton({
     setBusy(true);
     setError(null);
     setMessage(null);
-    const res = await fetch(target.endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(target.endpoint, {
         stage,
         actor_name: "Operator",
         actor_function: "medical_affairs",
         ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string; champion?: string };
+      });
+    const json = res.json as { error?: string; champion?: string };
     setBusy(false);
     if (!res.ok) {
       setError(json.error ?? "Sweep failed");

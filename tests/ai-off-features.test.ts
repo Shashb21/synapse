@@ -146,7 +146,8 @@ describe("the first screen with AI off", () => {
     expect(matrix).toMatch(/\{ai \? \(\s*<button[\s\S]*Re-suggest unvalidated/);
     expect(src("src/components/split-gap-dialog.tsx")).toMatch(/\{ai \? \(\s*<Button[\s\S]*Suggest a split/);
     const ideation = src("src/app/ideation/page.tsx");
-    expect(ideation.match(/\{ai \? \(\s*(<div>\s*)?<RunStageButton/g)?.length).toBe(3);
+    // Every run button is AI-gated; the empty-state one also yields to the list's (KAN-18).
+    expect(ideation.match(/\{ai( && withoutProposal\.length === 0)? \? \(\s*(<div>\s*)?<RunStageButton/g)?.length).toBe(3);
     expect(ideation).toContain("<AddIdeaDialog");
     expect(src("src/app/tactics/page.tsx")).toContain("ai || rejected.length > 0");
     expect(src("src/app/needs/page.tsx")).toContain("ai || rejected.length > 0");

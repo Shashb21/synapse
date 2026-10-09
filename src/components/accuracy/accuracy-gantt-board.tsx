@@ -20,6 +20,7 @@ import {
   GanttScheduleEditor,
   type GanttTacticSchedule,
 } from "@/components/accuracy/gantt-schedule-editor";
+import { postJson } from "@/lib/post-json";
 
 function toDay(iso: string): number {
   return Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
@@ -110,16 +111,12 @@ export function AccuracyGanttBoard({
     }
     setPending(true);
     try {
-      const res = await fetch("/api/accuracy/gantt/save-final", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/gantt/save-final", {
           workspace_id: workspaceId,
           status: "final",
           note,
-        }),
-      });
-      const body = (await res.json()) as {
+        });
+      const body = res.json as {
         error?: string;
         plan?: { version: number; status: string; id: string };
         snapshot_hash?: string;

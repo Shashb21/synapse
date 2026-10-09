@@ -21,6 +21,7 @@ import {
   type TacticType,
 } from "@/lib/iegp/enums";
 import { tacticColor } from "@/lib/iegp/tactic-type-colors";
+import { postJson } from "@/lib/post-json";
 
 /** The fields the side panel edits (KAN-50). */
 export type TacticEditModel = {
@@ -48,13 +49,9 @@ function customKey(value: CustomTacticType | null | undefined) {
 }
 
 async function post(body: Record<string, unknown>) {
-  const res = await fetch("/api/iegp", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await postJson("/api/iegp", body);
   if (res.ok) return null;
-  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  const json = res.json as { error?: string };
   return json.error ?? `Could not save (${res.status}).`;
 }
 

@@ -4,7 +4,7 @@ import { ROOM_ENABLED } from "@/lib/room/enabled";
 import { PresenterConsole, type BreakoutSummary } from "@/components/room/presenter-console";
 import { loadState } from "@/lib/iegp/store";
 import { getRoomState, listRoomNotes } from "@/lib/room/store";
-import { roomWorkspace } from "./room-data";
+import { requireRoomAccess, roomWorkspace } from "./room-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +17,7 @@ export const metadata: Metadata = { title: "Room · Presenter view · Synapse IE
  */
 export default async function RoomPage() {
   if (!ROOM_ENABLED) redirect("/");
+  await requireRoomAccess("/room");
   const [state, room, notes, workspace] = await Promise.all([
     loadState(),
     getRoomState(),

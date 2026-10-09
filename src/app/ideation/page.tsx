@@ -203,7 +203,8 @@ export default async function IdeationPage() {
               </Link>{" "}
               first{ai ? " (by hand or with the model), then generate ideas here or add them by hand." : ", then add ideas by hand here."}
             </p>
-            {ai ? (
+            {/* One run button per page: the gaps list above already has it (KAN-18). */}
+            {ai && withoutProposal.length === 0 ? (
               <div>
                 <RunStageButton
                   stage="S9"

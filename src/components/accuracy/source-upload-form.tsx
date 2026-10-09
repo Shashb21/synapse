@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { postJson } from "@/lib/post-json";
 
 const ROLES = [
   { id: "interview", label: "Interview" },
@@ -37,11 +38,8 @@ export function SourceUploadForm({ workspaceId }: { workspaceId: string }) {
     body.set("file", file);
 
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/sources/upload", {
-        method: "POST",
-        body,
-      });
-      const json = (await res.json()) as {
+      const res = await postJson("/api/accuracy/sources/upload", body);
+      const json = res.json as {
         ok?: boolean;
         error?: string;
         filename?: string;

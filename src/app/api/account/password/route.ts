@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { AccountError } from "@/modules/auth/accounts";
 import { changeOwnPassword } from "@/modules/auth/password-login";
 import { currentSession } from "@/modules/auth/session";
@@ -10,7 +11,12 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const session = await currentSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "Sign in first.", code: "no_session" }, { status: 401 });
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   try {
     await changeOwnPassword({
       session,

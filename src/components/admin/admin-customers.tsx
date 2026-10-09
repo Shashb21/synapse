@@ -8,15 +8,21 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { Customer, SeatAssignment } from "@/modules/auth/customers";
 import { formatUtc } from "@/lib/format-time";
+import { NETWORK_ERROR } from "@/lib/post-json";
 
 type Detail = { customer: Customer; seats: SeatAssignment[] };
 
 async function call<T>(url: string, method: string, body?: Record<string, unknown>): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error(NETWORK_ERROR);
+  }
   const json = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(json.error ?? `Request failed (HTTP ${res.status}).`);
   return json;

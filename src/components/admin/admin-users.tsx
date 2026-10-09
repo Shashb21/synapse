@@ -8,16 +8,13 @@ import { ACTOR_FUNCTIONS, FUNCTION_LABELS } from "@/lib/iegp/enums";
 import { ROLE_LABELS, ROLES, type Role } from "@/modules/auth/roles";
 import type { AdminUserView } from "@/modules/auth/admin-users";
 import { formatUtc } from "@/lib/format-time";
+import { postJson } from "@/lib/post-json";
 
 type Result = { user: AdminUserView; temporary_password?: string; deleted?: boolean; error?: string };
 
 async function call(body: Record<string, unknown>): Promise<Result> {
-  const res = await fetch("/api/admin/users", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as Result;
+  const res = await postJson("/api/admin/users", body);
+  const json = res.json as Result;
   if (!res.ok) throw new Error(json.error ?? `Request failed (HTTP ${res.status}).`);
   return json;
 }
