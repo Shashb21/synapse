@@ -158,6 +158,7 @@ describe("old lab URLs redirect into the owner console", () => {
     // The specific /accuracy/control rule must win over the /accuracy/:path* catch-all.
     const sources = ADMIN_REDIRECTS.map((rule) => rule.source);
     expect(sources.indexOf("/accuracy/control")).toBeLessThan(sources.indexOf("/accuracy/:path*"));
-    expect(rules.every((rule) => rule.destination.startsWith("/admin"))).toBe(true);
+    const moved = new Set(sources);
+    expect(rules.filter((rule) => moved.has(rule.source)).every((rule) => rule.destination.startsWith("/admin"))).toBe(true);
   });
 });

@@ -358,16 +358,6 @@ export const OVERALL_COVERAGE_HELPERS: Record<OverallCoverage, string> = {
     "This tactic is assigned but its coverage has not been assessed yet. Run S4 mapping or record the coverage.",
 };
 
-export const PRIORITY_BANDS = ["critical", "high", "medium", "low"] as const;
-export type PriorityBand = (typeof PRIORITY_BANDS)[number];
-
-export const PRIORITY_BAND_HELPERS: Record<PriorityBand, string> = {
-  critical: "Highest urgency among Open gaps. The plan folds Critical into High on the board.",
-  high: "High-priority Open gap — address first.",
-  medium: "Medium-priority Open gap.",
-  low: "Lower-priority Open gap.",
-};
-
 export const EXCLUSION_REASONS = [
   "sufficient_evidence",
   "not_decision_relevant",

@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import * as schema from "./schema";
 import { currentSchema, DEFAULT_SCHEMA } from "@/modules/workspaces/context";
 import { workspaceTableStatements } from "./workspace-tables";
+import { legacyPlanCarryOverStatements } from "./legacy-plan";
 
 const DEFAULT_URL =
   process.env.DATABASE_URL ??
@@ -344,6 +345,8 @@ async function loadModules() {
 async function bootstrap(run: RunStatement) {
   await run("set client_min_messages to warning");
   for (const stmt of iegpStatements()) await run(stmt);
+  // The retired priority board and roadmap carry over into S8 and mappings (KAN-17).
+  for (const stmt of legacyPlanCarryOverStatements()) await run(stmt);
   for (const hook of [...bootstrapHooks]) await hook(run);
 }
 

@@ -13,7 +13,7 @@ import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contr
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
-import { loadState, lockPriority } from "@/lib/iegp/store";
+import { loadState } from "@/lib/iegp/store";
 import type { IegpState } from "@/lib/iegp/types";
 import {
   loadAxes,
@@ -709,26 +709,6 @@ async function insertManualPlacement(values: {
   return row;
 }
 
-async function mirrorLegacyBand(gapId: string, band: Band, rationale: string, actor: Actor) {
-  // The legacy residual-keyed board has no Defer; it keeps its last band.
-  if (band === "defer") return;
-  // Keep the legacy residual-keyed board in step when the gap has a residual.
-  const state = await loadState();
-  const residual = state.residuals.find((row) => row.gap_id === gapId);
-  if (!residual) return;
-  try {
-    await lockPriority({
-      residual_id: residual.id,
-      band,
-      override_reason: rationale,
-      actor_name: actor.name,
-      actor_function: actor.function,
-    });
-  } catch {
-    // The legacy board is a mirror; a mismatch there must not fail validation.
-  }
-}
-
 /**
  * The S8 human gate: the user accepts or changes the suggested band with a
  * rationale, which is both the audit record and a hillclimb signal. A gap no
@@ -783,7 +763,6 @@ export async function validatePlacement(args: {
     rationale,
     actor: args.actor,
   });
-  await mirrorLegacyBand(args.gap_id, args.band, rationale, args.actor);
   await captureValidatedBand(current, args.band, rationale, args.actor, decisionEdit.id, args.workspace_id);
   return toRecord(row);
 }
@@ -902,7 +881,6 @@ export async function setPlacement(args: {
     rationale,
     actor: args.actor,
   });
-  if (validated) await mirrorLegacyBand(args.gap_id, band, rationale, args.actor);
   if (args.validate) await captureValidatedBand(current, band, rationale, args.actor, decisionEdit.id, args.workspace_id);
   return toRecord(row);
 }

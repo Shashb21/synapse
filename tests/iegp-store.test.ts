@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, lockPriority, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
+import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
 import { buildPlanWorkspace } from "@/lib/iegp/engine";
 import { buildSeed } from "@/lib/iegp/seed";
@@ -81,21 +81,6 @@ describe("IEGP postgres store", () => {
     const gap = state.gaps.find((g) => g.id === "GAP-CNS");
     expect(gap?.status).toBe("validated_addressed");
     expect(gap?.status_lock.locked).toBe(true);
-  });
-
-  it("lets a human lock priority without an engine suggestion or residual lock", async () => {
-    await persistState(buildSeed());
-    await lockPriority({
-      residual_id: "RES-OS",
-      band: "medium",
-      actor_name: "S. Iyer",
-      actor_function: "evidence_lead",
-    });
-    const state = await loadState();
-    const pri = state.priorities.find((p) => p.residual_id === "RES-OS");
-    expect(pri?.band).toBe("medium");
-    expect(pri?.suggested_score).toBe(0);
-    expect(pri?.reasons.join(" ")).toMatch(/does not assign priority/i);
   });
 
   it("ingests a source into mapped gaps with computed status, not a candidate inbox", async () => {
@@ -280,7 +265,6 @@ describe("IEGP postgres store", () => {
     expect(gap?.status_lock.locked).toBe(true);
     expect(state.residuals.some((r) => r.gap_id === id)).toBe(false);
     const workspace = buildPlanWorkspace(state);
-    expect(workspace.unprioritized.some((c) => c.gap_id === id)).toBe(false);
     expect(workspace.openGaps.some((c) => c.gap_id === id)).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === id)).toBe(true);
     const links = state.need_gap_links.filter((l) => l.gap_id === id);

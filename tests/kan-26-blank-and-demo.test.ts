@@ -73,7 +73,7 @@ describe("KAN-26: a blank workspace is truly blank", () => {
     const state = buildBlankWorkspace();
     expect(state.asset).toMatchObject({ name: "", inn: "", indication: "", geography: "", setup_complete: false });
     expect(state.objectives).toEqual([]);
-    for (const key of ["sources", "blocks", "needs", "gaps", "tactics", "coverages", "priorities", "roadmap"] as const) {
+    for (const key of ["sources", "blocks", "needs", "gaps", "tactics", "coverages"] as const) {
       expect(state[key], key).toEqual([]);
     }
     expect(JSON.stringify(state)).not.toMatch(DEMO_WORDS);

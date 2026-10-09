@@ -11,7 +11,6 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   load_demo: "reset_workspace",
   ingest: "upload",
   ingest_demo: "upload",
-  lock_priority: "prioritize",
   create_tactic: "ideate",
   record_missed_tactic: "ideate",
   promote_tactic_candidate: "ideate",
@@ -21,7 +20,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   modify_tactic: "ideate",
   unlock_tactics: "ideate",
   // Everything else is an edit with rationale: needs, gaps, mappings, coverage,
-  // residuals, setup, roadmap and breakout groups.
+  // residuals, setup and breakout groups.
   ...Object.fromEntries(
     [
       "lock_need",
@@ -42,7 +41,6 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "lock_dimension",
       "lock_overall",
       "confirm_coverage_review",
-      "lock_residual",
       "assign_tactic",
       "unassign_tactic",
       "accept_mapping",
@@ -64,7 +62,6 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "reject_split_proposal",
       "rewrite_partial_gap",
       "create_addressed_gap",
-      "lock_roadmap",
       "create_breakout_group",
       "delete_breakout_group",
       "assign_gap_to_breakout",
@@ -77,7 +74,23 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   ),
 };
 
+/**
+ * Actions of the retired legacy priority board, /residuals and /roadmap (KAN-17).
+ * Bands are set on the Prioritize matrix (S8) and dates on Timeline (S10), so an
+ * old client gets told where the action went instead of "Unknown action".
+ */
+const RETIRED_IEGP_ACTIONS: Record<string, string> = {
+  lock_priority: "Priority bands are set on the Prioritize matrix now.",
+  lock_residual: "Residual drafts are reviewed on Gaps now: accept, modify or reject them there.",
+  lock_roadmap: "Dates are planned on Timeline now.",
+};
+
 /** The capability an /api/iegp action needs; undefined for an unknown action. */
 export function iegpActionCapability(action: string): Capability | undefined {
   return Object.hasOwn(IEGP_ACTION_CAPABILITY, action) ? IEGP_ACTION_CAPABILITY[action] : undefined;
+}
+
+/** Where a retired action went (sent with 410 Gone); undefined for a live or unknown action. */
+export function retiredActionMessage(action: string): string | undefined {
+  return Object.hasOwn(RETIRED_IEGP_ACTIONS, action) ? RETIRED_IEGP_ACTIONS[action] : undefined;
 }
