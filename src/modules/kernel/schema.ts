@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, numeric, pgTable, text, unique } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 /**
  * Platform tables owned by the kernel and the cross-cutting modules. The IEGP
@@ -217,6 +217,66 @@ export const promptRevisions = pgTable("prompt_revisions", {
 });
 
 /** Apply whole statements: trigger bodies contain internal semicolons. */
+/** The platform audit log (KAN-87). Append-only: AUDIT_DDL makes the database refuse changes. */
+export const auditEvents = pgTable("audit_events", {
+  id: text("id").primaryKey(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  actor_principal: text("actor_principal").notNull(),
+  actor_name: text("actor_name").notNull(),
+  actor_role: text("actor_role"),
+  customer_id: text("customer_id"),
+  workspace_id: text("workspace_id"),
+  category: text("category").notNull(),
+  action: text("action").notNull(),
+  entity_type: text("entity_type"),
+  entity_id: text("entity_id"),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  rationale: text("rationale"),
+  request_id: text("request_id"),
+  run_id: text("run_id"),
+  ip: text("ip"),
+  user_agent: text("user_agent"),
+  meta: jsonb("meta"),
+});
+
+/**
+ * audit_events DDL (KAN-87). The triggers make the log append-only at the
+ * database level: UPDATE, DELETE and TRUNCATE all raise, whatever code or
+ * database user tries them.
+ */
+export const AUDIT_DDL = [
+  `CREATE TABLE IF NOT EXISTS audit_events (
+    id text PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(),
+    actor_principal text NOT NULL, actor_name text NOT NULL, actor_role text,
+    customer_id text, workspace_id text,
+    category text NOT NULL CHECK (category IN ('admin', 'auth', 'config', 'workspace', 'plan', 'ai')),
+    action text NOT NULL, entity_type text, entity_id text,
+    before jsonb, after jsonb, rationale text,
+    request_id text, run_id text, ip text, user_agent text, meta jsonb
+  )`,
+  `CREATE INDEX IF NOT EXISTS audit_events_at ON audit_events(at DESC)`,
+  `CREATE INDEX IF NOT EXISTS audit_events_category ON audit_events(category, at DESC)`,
+  `CREATE INDEX IF NOT EXISTS audit_events_workspace ON audit_events(workspace_id, at DESC)`,
+  `CREATE INDEX IF NOT EXISTS audit_events_actor ON audit_events(actor_principal, at DESC)`,
+  `CREATE INDEX IF NOT EXISTS audit_events_entity ON audit_events(entity_type, entity_id)`,
+  `CREATE INDEX IF NOT EXISTS audit_events_request ON audit_events(request_id)`,
+  `CREATE OR REPLACE FUNCTION public.audit_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN
+    RAISE EXCEPTION 'The audit log is append-only: % is not allowed on audit_events', TG_OP;
+  END; $$`,
+  `DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'audit_events_no_change') THEN
+      CREATE TRIGGER audit_events_no_change BEFORE UPDATE OR DELETE ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION public.audit_events_append_only();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'audit_events_no_truncate') THEN
+      CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events
+        FOR EACH STATEMENT EXECUTE FUNCTION public.audit_events_append_only();
+    END IF;
+  END $$`,
+];
+
 export const PROMPT_REVISION_DDL = [
   `CREATE TABLE IF NOT EXISTS prompt_revision_cohorts (
     id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL, created_at text NOT NULL,
