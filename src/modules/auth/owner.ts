@@ -103,5 +103,13 @@ export function ownerOnlyJson(): NextResponse {
 
 /** For admin APIs: a 403 response for anyone but the owner, else null. */
 export async function ownerGate(): Promise<NextResponse | null> {
-  return (await ownerAccess()).owner ? null : ownerOnlyJson();
+  const access = await ownerAccess();
+  if (access.owner) return null;
+  // A signed-in person trying the owner console is on the record (KAN-90); signed-out traffic is not.
+  if (access.signed_in) {
+    const { recordDenied } = await import("@/modules/kernel/audit");
+    const path = await headers().then((h) => h.get(ADMIN_PATH_HEADER)).catch(() => null);
+    await recordDenied({ category: "admin", action: "owner_api.denied", reason: OWNER_ONLY_MESSAGE, meta: { code: "owner_only", path } });
+  }
+  return ownerOnlyJson();
 }

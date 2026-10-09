@@ -7,7 +7,7 @@ import {
   TACTIC_CANDIDATES_DUPLICATE_DDL,
   tacticCandidates,
 } from "@/modules/stages/s3-tactic-extract/schema";
-import { createGap, loadState, recordMissedTactic } from "@/lib/iegp/store";
+import { appendAudit, createGap, loadState, recordMissedTactic } from "@/lib/iegp/store";
 import {
   EVIDENCE_DOMAINS,
   TACTIC_TYPES,
@@ -90,6 +90,8 @@ export async function promoteGapCandidate(args: {
     .update(gapCandidates)
     .set({ committed_gap_id: gapId })
     .where(eq(gapCandidates.id, row.id));
+  // On the gap's own trail too, so its history says where it came from (KAN-90).
+  await appendAudit(args.actor_name, args.actor_function, "gap", gapId, "promote_candidate", `${row.id}: ${rationale}`);
   await recordEdit({
     stage: "S2",
     entity_type: "gap_candidate",
@@ -138,6 +140,7 @@ export async function promoteTacticCandidate(args: {
     actor_name: args.actor_name,
     actor_function: args.actor_function,
   });
+  await appendAudit(args.actor_name, args.actor_function, "tactic", tacticId, "promote_candidate", `${row.id}: ${rationale}`);
   await recordEdit({
     stage: "S3",
     entity_type: "tactic_candidate",

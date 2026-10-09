@@ -160,6 +160,8 @@ export type RunStatus = "running" | "ok" | "error";
 
 export type RunHandle = {
   id: string;
+  /** The workspace the run belongs to, when the recorder knows it (llm_calls, KAN-91). */
+  workspace_id?: string;
   /** Record a named step with optional structured payload. */
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;
   /** Record a fact without timing a function. */
@@ -192,6 +194,10 @@ export type HillclimbSignalDraft = {
   rationale: string;
   weight?: number;
   payload?: unknown;
+  /** Provenance (KAN-90): who the signal came from and the run that produced it. Omitted: the request's session. */
+  actor_principal?: string | null;
+  actor_name?: string | null;
+  source_run_id?: string | null;
 };
 
 export type ResolvedRoute = {
@@ -267,6 +273,11 @@ export interface SynapseModule<I, O> {
   outputSchema: ZodType<O>;
   /** Capture domain facts before computation; used unchanged by both evaluation arms. */
   freeze?(input: I): Promise<Record<string, unknown>>;
+  /**
+   * What the run's trace keeps of its input, when that is not the input itself:
+   * S0 keeps each upload's hash, size, name and stored-file id, never its bytes (KAN-91).
+   */
+  traceInput?(input: unknown): unknown;
   run(input: I, ctx: ModuleContext): Promise<ModuleResult<O>>;
   evals?: EvalHarness<I, O>;
   /** DDL owned by this module. The kernel applies it before the first run. */

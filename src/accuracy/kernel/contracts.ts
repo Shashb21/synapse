@@ -217,6 +217,8 @@ export type JsonCompletion = (args: {
 
 export type RunHandle = {
   id: string;
+  /** The workspace the run belongs to, when the recorder knows it (llm_calls, KAN-91). */
+  workspace_id?: string;
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;
   note(name: string, data?: unknown, detail?: string): void;
   steps(): RunStep[];

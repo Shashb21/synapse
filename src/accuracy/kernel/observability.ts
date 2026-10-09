@@ -52,6 +52,10 @@ export class AccuracyRunRecorder implements RunHandle {
     this.id = id ?? newId("arun");
   }
 
+  get workspace_id(): string {
+    return this.meta.workspace_id;
+  }
+
   addCost(cost: CostEstimate) {
     this.totalUsage = {
       prompt_tokens: this.totalUsage.prompt_tokens + cost.usage.prompt_tokens,
@@ -79,7 +83,8 @@ export class AccuracyRunRecorder implements RunHandle {
         at: nowIso(),
         duration_ms: Date.now() - began,
         detail: error instanceof Error ? error.message : String(error),
-        data: null,
+        // A failed model call is still kept whole; the step names it (KAN-91).
+        data: error && typeof error === "object" && "llm_call_id" in error ? { llm_call_id: (error as { llm_call_id: unknown }).llm_call_id } : null,
       });
       throw error;
     }

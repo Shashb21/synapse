@@ -6,6 +6,8 @@ import { runTraceHref } from "@/components/admin/admin-nav";
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
 import { listRuns, stageHealth } from "@/modules/kernel/observability";
+import { llmTotalsByStage } from "@/modules/kernel/llm-calls";
+import { formatCost } from "@/components/admin/llm-calls";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { listSignals } from "@/modules/kernel/hillclimb";
 import { listEvalRuns } from "@/modules/kernel/evals";
@@ -25,16 +27,18 @@ function statusTone(status: string): string {
 export default async function RunsPage() {
   await requireOwnerPage();
   // Runs live in each workspace's own schema: this page reads the console's workspace (KAN-62).
-  const { workspace, runs, health, edits, signals, evals, ai } = await withAdminWorkspace(async (workspace) => {
-    const [runs, health, edits, signals, evals, ai] = await Promise.all([
+  const { workspace, runs, health, edits, signals, evals, ai, usage } = await withAdminWorkspace(async (workspace) => {
+    const [runs, health, edits, signals, evals, ai, usage] = await Promise.all([
       listRuns({ limit: 40 }),
       stageHealth(),
       listEdits({ limit: 12 }),
       listSignals({ limit: 12 }),
       listEvalRuns({ limit: 12 }),
       aiEnabled(),
+      // Tokens and estimated cost of every model call, per stage (KAN-91).
+      llmTotalsByStage(workspace.id),
     ]);
-    return { workspace, runs, health, edits, signals, evals, ai };
+    return { workspace, runs, health, edits, signals, evals, ai, usage };
   });
 
   return (
@@ -73,6 +77,14 @@ export default async function RunsPage() {
                   <div className="flex justify-between gap-2">
                     <dt>Median duration</dt>
                     <dd className="text-foreground">{row.p50_ms === null ? "—" : `${row.p50_ms} ms`}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt>Model tokens</dt>
+                    <dd className="text-foreground">{(usage[row.stage]?.total_tokens ?? 0).toLocaleString("en-US")}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt>Est. cost</dt>
+                    <dd className="text-foreground">{formatCost(usage[row.stage]?.cost_usd ?? null, usage[row.stage]?.unpriced ?? 0)}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
                     <dt>Last</dt>

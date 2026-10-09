@@ -5,6 +5,7 @@ import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
+import { attributedActor, currentAttribution, recordAuditVia } from "@/modules/kernel/audit";
 import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
@@ -629,8 +630,19 @@ export async function appendAudit(
   return appendAuditOn(transaction ?? db(), actor_name, actor_function, entity_type, entity_id, action, detail);
 }
 
+/**
+ * Plan actions whose platform-log copy is written elsewhere, with its own
+ * category (a reset or demo load is a workspace event, KAN-89).
+ */
+const NOT_MIRRORED = new Set([WORKSPACE_RESET_ACTION]);
+
+/**
+ * One row in the workspace's audit trail, attributed to the signed-in principal,
+ * their role and the request (KAN-90), and mirrored to the platform audit log
+ * (category plan) on the same connection or transaction, so the two commit together.
+ */
 async function appendAuditOn(
-  d: Pick<ReturnType<typeof db>, "insert">,
+  d: Pick<ReturnType<typeof db>, "insert" | "execute">,
   actor_name: string,
   actor_function: ActorFunction,
   entity_type: string,
@@ -639,6 +651,7 @@ async function appendAuditOn(
   detail: string,
 ) {
   const id = `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const who = await currentAttribution();
   await d.insert(t.audit).values({
     id,
     at: now(),
@@ -648,7 +661,22 @@ async function appendAuditOn(
     entity_id,
     action,
     detail,
+    actor_principal: who.principal,
+    actor_role: who.role,
+    request_id: who.request_id,
   });
+  if (!NOT_MIRRORED.has(action)) {
+    await recordAuditVia(d, {
+      category: "plan",
+      action: `${entity_type}.${action}`,
+      entity_type,
+      entity_id,
+      rationale: detail,
+      actor: attributedActor(who, actor_name),
+      workspace_id: who.workspace_id,
+      meta: { source: "plan_audit", plan_audit_id: id, actor_function },
+    });
+  }
   return id;
 }
 
@@ -1037,7 +1065,7 @@ function humanHeldStatus(gap: IegpState["gaps"][0]): MappedGapStatus | null {
  * applies. Otherwise (a model run, an ingest) a human override or a
  * human-validated status is kept and only flagged stale when it disagrees.
  */
-export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert">) {
+export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: boolean }, transaction?: Pick<ReturnType<typeof db>, "select" | "update" | "insert" | "execute">) {
   const d = transaction ?? db();
   const state = transaction ? await readState(transaction) : await loadState();
   const children = childParents(state);
@@ -2445,8 +2473,7 @@ async function recordResidualEdit(
   before: string | null,
   after: string | null,
 ) {
-  const rationale = args.note?.trim() ?? "";
-  if (rationale.length < 3) return;
+  // Every leftover decision leaves its record, with or without a reason (KAN-90).
   await recordEdit({
     stage: "S6",
     entity_type: "residual_gap",
@@ -2455,7 +2482,8 @@ async function recordResidualEdit(
     action,
     before,
     after,
-    rationale,
+    rationale: args.note,
+    rationale_optional: true,
     actor: { name: args.actor_name, function: args.actor_function },
   });
 }
@@ -3181,6 +3209,15 @@ export async function acceptGapMerge(
   if (!statement) throw new Error("Give the merged gap a statement.");
   const changes = diffFields(gap, { name, statement });
   if (changes.length > 0) {
+    // The wording before the merge is kept as a version of the gap (KAN-90).
+    await insertGapVersion({
+      live_gap_id: gap.id,
+      retired_gap_id: gap.id,
+      snapshot: gap,
+      event: "merge",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
     await db()
       .update(t.gaps)
       .set({ name, statement, lock: makeLock(args.actor_name, args.actor_function, rationale) })
@@ -3308,6 +3345,7 @@ export async function rejectGapSuggestion(args: SuggestionDecision): Promise<Gap
   if (!suggestion) throw new Error("Suggestion not found.");
   if (suggestion.status !== "pending") throw new Error("This suggestion was already decided.");
   await closeSuggestion(suggestion.id, "rejected", { ...args, rationale });
+  await appendAudit(args.actor_name, args.actor_function, "gap", suggestion.gap_id, "reject_suggestion", `${suggestion.id}: ${rationale}`);
   await recordEdit({
     stage: "S2",
     entity_type: "gap",
@@ -3339,6 +3377,7 @@ export async function clearNewSourceFlag(args: {
     .update(t.gaps)
     .set({ new_source_at: null, new_source_need_id: null })
     .where(eq(t.gaps.id, gap.id));
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "clear_new_source_flag", rationale);
   await recordEdit({
     stage: "S2",
     entity_type: "gap",

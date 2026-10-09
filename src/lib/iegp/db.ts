@@ -335,6 +335,11 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_at text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_need_id text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS related_gap_ids jsonb NOT NULL DEFAULT '[]'::jsonb",
+    // KAN-90: every plan audit row says who (verifiably), in what role, from which request.
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_principal text",
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS actor_role text",
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS request_id text",
+    "CREATE INDEX IF NOT EXISTS audit_entity ON audit(entity_id, at)",
     // Kernel, source-block, room, walkthrough and stage-module tables.
     ...workspaceTableStatements(),
   ];

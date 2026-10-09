@@ -37,9 +37,14 @@ export const editRecords = pgTable("edit_records", {
   action: text("action").notNull(),
   before: text("before"),
   after: text("after"),
-  rationale: text("rationale").notNull(),
+  /** Null when the person gave no reason (a gate action without one still leaves its record, KAN-90). */
+  rationale: text("rationale"),
   actor_name: text("actor_name").notNull(),
   actor_function: text("actor_function").notNull(),
+  /** Who, verifiably (KAN-90): account id or email, their role, and the request that made the change. */
+  actor_principal: text("actor_principal"),
+  actor_role: text("actor_role"),
+  request_id: text("request_id"),
 });
 
 export const hillclimbSignals = pgTable("hillclimb_signals", {
@@ -52,6 +57,10 @@ export const hillclimbSignals = pgTable("hillclimb_signals", {
   weight: integer("weight").notNull().default(1),
   status: text("status").notNull().default("open"),
   payload: jsonb("payload"),
+  /** Provenance (KAN-90): who the signal came from and the run that produced it. */
+  actor_principal: text("actor_principal"),
+  actor_name: text("actor_name"),
+  source_run_id: text("source_run_id"),
 });
 
 export const evalRuns = pgTable("eval_runs", {

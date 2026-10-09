@@ -3,6 +3,7 @@ import { AccountError } from "@/modules/auth/accounts";
 import { listAdminUsers, runAdminUserAction } from "@/modules/auth/admin-users";
 import { ownerAccess, ownerGate } from "@/modules/auth/owner";
 import { currentSession } from "@/modules/auth/session";
+import { recordDenied } from "@/modules/kernel/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,15 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccountError) {
+      // A refused admin action is on the record with its reason (KAN-90).
+      await recordDenied({
+        category: "admin",
+        action: `user.${typeof body.action === "string" ? body.action : "unknown"}`,
+        reason: error.message,
+        entity_type: "account",
+        entity_id: typeof body.id === "string" ? body.id : typeof body.email === "string" ? body.email : null,
+        meta: { code: error.code },
+      });
       const status = error.code === "not_found" ? 404 : error.code === "exists" ? 409 : 400;
       return NextResponse.json({ error: error.message, code: error.code }, { status });
     }
