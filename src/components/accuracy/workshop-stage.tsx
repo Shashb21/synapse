@@ -12,6 +12,7 @@ import {
 } from "@/accuracy/modules/workshop/readiness";
 import type { CoverageOverallWrite, WorkshopActionKind } from "@/accuracy/modules/workshop/actions";
 import type { WorkshopSnapshotRecord } from "@/accuracy/store/workshop-store";
+import { postJson } from "@/lib/post-json";
 
 type MenuKind = WorkshopActionKind | "split";
 
@@ -107,13 +108,9 @@ export function WorkshopStage({
     setPriority(band === "medium" || band === "low" ? band : "high");
   }, [overlays, scene, tactics]);
 
-  async function postJson(url: string, body: unknown) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json()) as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
+  async function postWorkshop(url: string, body: unknown) {
+    const res = await postJson(url, body);
+    const json = res.json as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
     if (!res.ok || !json.ok || !json.snapshot) {
       throw new Error(json.error ?? "Request failed");
     }
@@ -134,7 +131,7 @@ export function WorkshopStage({
           scene: next,
         }),
       });
-      const json = (await res.json()) as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
+      const json = res.json as { ok?: boolean; error?: string; snapshot?: WorkshopSnapshotRecord };
       if (!res.ok || !json.ok || !json.snapshot) {
         throw new Error(json.error ?? "Could not switch scene");
       }
@@ -153,7 +150,7 @@ export function WorkshopStage({
     setError(null);
     setPending(true);
     try {
-      await postJson("/api/accuracy/workshop/tags", {
+      await postWorkshop("/api/accuracy/workshop/tags", {
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
         action: "add_tag",
@@ -172,7 +169,7 @@ export function WorkshopStage({
     setError(null);
     setPending(true);
     try {
-      await postJson("/api/accuracy/workshop/tags", {
+      await postWorkshop("/api/accuracy/workshop/tags", {
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
         action: "assign",
@@ -192,7 +189,7 @@ export function WorkshopStage({
     setError(null);
     setPending(true);
     try {
-      await postJson("/api/accuracy/workshop/actions", {
+      await postWorkshop("/api/accuracy/workshop/actions", {
         workspace_id: workspaceId,
         snapshot_id: snapshot.id,
         kind: menuKind,

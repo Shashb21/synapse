@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { afterSignIn, LOGIN_NEXT_COOKIE, safeNext } from "@/modules/auth/redirect";
 import { beginLogin, signInDemo } from "@/modules/auth/session";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
@@ -20,7 +21,12 @@ export const dynamic = "force-dynamic";
  * sign-in is refused. With no email the user is `<name>@demo.synapse.local`.
  */
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const next = typeof body.next === "string" ? safeNext(body.next, "") : "";
   try {
     if (body.demo === true) {

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureCurrentSchemaTables, inWorkspaceTransaction, sharedDb } from "@/lib/iegp/db";
-import { PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
+import { AUDIT_DDL, PROMPT_REVISION_DDL, PROMPT_EVALUATION_DDL } from "./schema";
 import { KERNEL_WORKSPACE_DDL } from "@/lib/iegp/workspace-tables";
 
 export { db, sharedDb };
@@ -29,17 +29,23 @@ CREATE TABLE IF NOT EXISTS stage_modules (
   stage text PRIMARY KEY, module_id text NOT NULL,
   activated_by text NOT NULL, activated_at text NOT NULL
 );
--- Retired (KAN-65): LLM provider OAuth was removed. Kept so existing databases are untouched.
+-- Retired (KAN-65): LLM provider OAuth was removed. The table stays so existing
+-- databases are untouched, but any token left in it is erased (KAN-20).
 CREATE TABLE IF NOT EXISTS oauth_connections (
   provider_id text PRIMARY KEY, status text NOT NULL, account_label text,
   scopes jsonb NOT NULL, access_token text, refresh_token text, expires_at text,
   connected_by text, connected_at text, detail text
 );
+UPDATE oauth_connections SET access_token = NULL, refresh_token = NULL
+  WHERE access_token IS NOT NULL OR refresh_token IS NOT NULL;
+-- id is sha256(cookie token) in hex, never the token itself (KAN-20). No semicolons in comments: the DDL is split on them.
 CREATE TABLE IF NOT EXISTS auth_sessions (
   id text PRIMARY KEY, provider_id text NOT NULL, subject text NOT NULL, email text,
   actor_name text NOT NULL, actor_function text NOT NULL, role text NOT NULL,
   created_at text NOT NULL, expires_at text NOT NULL
 );
+-- Sessions from before hashing stored the raw token as id: end them, so those people sign in again.
+DELETE FROM auth_sessions WHERE id !~ '^[0-9a-f]{64}$';
 `;
 
 /** Tables every workspace schema has its own copy of (created at bootstrap, see workspace-tables.ts). */
@@ -69,6 +75,7 @@ export async function ensurePlatformSchema(moduleMigrations: string[] = []) {
       await applyDdl(SHARED_DDL.split(";"), sharedDb);
       await applyDdl(PROMPT_REVISION_DDL, sharedDb);
       await applyDdl(PROMPT_EVALUATION_DDL, sharedDb);
+      await applyDdl(AUDIT_DDL, sharedDb);
       await applyDdl(WORKSPACE_DDL.split(";"), sharedDb);
     })();
     // A failed attempt is forgotten, so the next call retries.
@@ -129,7 +136,11 @@ export async function resetWorkspaceModules() {
   }
 }
 
-/** Test helper: drops all rows from platform and module-owned tables. */
+/**
+ * Test helper: drops all rows from platform and module-owned tables. Never
+ * audit_events: the audit log is append-only (the database refuses it), so
+ * tests scope their audit assertions by unique ids instead.
+ */
 export async function wipePlatform(moduleTables: string[] = []) {
   await ensurePlatformSchema();
   const d = db();

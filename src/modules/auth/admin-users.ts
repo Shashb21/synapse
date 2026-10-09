@@ -1,6 +1,7 @@
 import {
   AccountError,
   asActorFunction,
+  countPasswordSessions,
   createAccount,
   deleteAccount,
   getAccount,
@@ -17,6 +18,8 @@ import {
 import { temporaryPassword } from "./password";
 import { isRole, type Role } from "./roles";
 import type { Session } from "./session";
+import { recordAudit, type AuditActor } from "@/modules/kernel/audit";
+import { principalOf } from "@/modules/workspaces/session";
 
 /**
  * What the owner console's Users page (/admin/users) may do to email + password
@@ -70,7 +73,61 @@ async function mustGet(id: unknown): Promise<Account> {
   return account;
 }
 
+/** What the audit log keeps of an account: never its password hash. */
+function auditView(account: Account | null) {
+  if (!account) return null;
+  return {
+    email: account.email,
+    name: account.name,
+    role: account.role,
+    is_admin: account.is_admin,
+    email_verified: account.email_verified,
+    disabled: account.disabled,
+    locked: isLocked(account),
+  };
+}
+
+/** Who acted, for the audit log: the signed-in admin, or the label the caller gave. */
+export function auditActorFor(by: { session: Session | null; label: string }): AuditActor {
+  return by.session
+    ? { principal: principalOf(by.session), name: by.session.actor.name, role: by.session.role }
+    : { principal: by.label || "system", name: by.label || "Synapse", role: null };
+}
+
+/**
+ * Runs one Users-page action and records it in the audit log (KAN-88) with the
+ * account before and after, and how many of its sessions it ended. A password
+ * is never logged, only that it was reset.
+ */
 export async function runAdminUserAction(
+  input: Record<string, unknown>,
+  by: { session: Session | null; label: string },
+): Promise<AdminUserResult> {
+  const action = String(input.action ?? "");
+  const id = typeof input.id === "string" ? input.id : null;
+  const before = id ? await getAccount(id) : null;
+  const sessionsBefore = id ? await countPasswordSessions(id) : 0;
+  const result = await applyAdminUserAction(input, by);
+  const sessionsAfter = await countPasswordSessions(result.user.id);
+  await recordAudit({
+    category: "admin",
+    action: `user.${action}`,
+    entity_type: "user",
+    entity_id: result.user.id,
+    before: auditView(before),
+    after: result.deleted ? null : auditView(await getAccount(result.user.id)),
+    actor: auditActorFor(by),
+    workspace_id: null,
+    meta: {
+      email: result.user.email,
+      ...(action === "reset_password" ? { password_reset: true } : {}),
+      ...(sessionsBefore > sessionsAfter ? { sessions_revoked: sessionsBefore - sessionsAfter } : {}),
+    },
+  });
+  return result;
+}
+
+async function applyAdminUserAction(
   input: Record<string, unknown>,
   by: { session: Session | null; label: string },
 ): Promise<AdminUserResult> {

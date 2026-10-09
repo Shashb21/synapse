@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildPlanBoard,
   buildPlanWorkspace,
   computeGapStatus,
   coverageEval,
@@ -14,7 +13,6 @@ import {
   needEvalMetrics,
   pairNeeds,
   persistedResidualGaps,
-  planColumn,
   splitSourceIntoBlocks,
   requireOverrideReason,
   suggestGapStatus,
@@ -418,36 +416,30 @@ We need to understand comparative effectiveness of Velmara versus regional stand
     expect(COVERAGE_DIMENSIONS).toHaveLength(10);
   });
 
-  it("boards the IEGP as high / medium / low with associated tactics", () => {
-    expect(planColumn("critical")).toBe("high");
-    const board = buildPlanBoard(buildSeed());
-    expect(board.high.some((c) => c.gap_id === "GAP-ELDERLY-CE")).toBe(true);
-    const elderly = board.high.find((c) => c.gap_id === "GAP-ELDERLY-CE")!;
-    expect(elderly.tactics.some((t) => t.id === "TAC-ELDERLY-RWE")).toBe(true);
-    expect(board.medium.some((c) => c.gap_id === "GAP-CNS")).toBe(true);
-    expect(board.low.some((c) => c.gap_id === "GAP-CAREGIVER")).toBe(true);
+  it("has no legacy priority board: bands come from S8 placements (KAN-17)", () => {
+    const workspace = buildPlanWorkspace(buildSeed()) as Record<string, unknown>;
+    expect(workspace).not.toHaveProperty("board");
+    expect(workspace).not.toHaveProperty("unprioritized");
+    expect((workspace.openGaps as { band: unknown }[]).every((card) => card.band === null)).toBe(true);
   });
 
   it("keeps addressed gaps on the workspace with their tactics", () => {
     const workspace = buildPlanWorkspace(buildSeed());
     expect(workspace.review.some((c) => c.gap_id === "GAP-ELDERLY-CE")).toBe(true);
     expect(workspace.review.some((c) => c.gap_id === "GAP-ILD")).toBe(false);
-    expect(workspace.unprioritized.every((c) => c.gap_status === "validated_open")).toBe(true);
-    expect(workspace.unprioritized.some((c) => c.gap_id === "GAP-OS")).toBe(false);
     // No template leftovers: the seed has no saved leftover rows, so none show.
     expect(workspace.reviewResiduals).toHaveLength(0);
     expect(workspace.residualGapSuggestions).toHaveLength(0);
     const pfs = workspace.addressed.find((c) => c.gap_id === "GAP-PFS-TRIAL");
     expect(pfs).toBeTruthy();
     expect(pfs!.tactics.some((t) => t.id === "TAC-VEL-301")).toBe(true);
-    expect(workspace.board.high.some((c) => c.gap_id === "GAP-SEQ")).toBe(true);
     expect(workspace.reviewTactics).toHaveLength(0);
     expect(workspace.availableTactics.some((t) => t.id === "TAC-REG")).toBe(true);
     const registry = workspace.availableTactics.find((t) => t.id === "TAC-REG");
     expect(registry?.gaps.map((g) => g.id).sort()).toEqual(["GAP-HCRU", "GAP-QOL", "GAP-SEQ"].sort());
   });
 
-  it("puts mapped tactics on review and unprioritized cards, and leaves empty gaps empty", () => {
+  it("puts mapped tactics on review cards, and leaves empty gaps empty", () => {
     const seed = buildSeed();
     const workspace = buildPlanWorkspace(seed);
     const elderly = workspace.review.find((c) => c.gap_id === "GAP-ELDERLY-CE");

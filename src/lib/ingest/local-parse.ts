@@ -104,7 +104,10 @@ async function parseDocx(buffer: Buffer): Promise<Omit<ParsedBlock, "id">[]> {
 }
 
 function parseXlsx(buffer: Buffer): Omit<ParsedBlock, "id">[] {
-  const wb = XLSX.read(buffer, { type: "buffer" });
+  // Values only: formulas, cell HTML and styles are never parsed (KAN-20). The file is
+  // already size-limited (MAX_UPLOAD_BYTES), and SheetJS comes from its own CDN at
+  // 0.20.3, the release that fixes the npm build's prototype-pollution and ReDoS advisories.
+  const wb = XLSX.read(buffer, { type: "buffer", cellFormula: false, cellHTML: false, cellStyles: false });
   const blocks: Omit<ParsedBlock, "id">[] = [];
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name];

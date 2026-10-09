@@ -1,9 +1,5 @@
 import Link from "next/link";
-import {
-  CoverageBadge,
-  PriorityBadge,
-  TacticBadge,
-} from "@/components/iegp-badges";
+import { CoverageBadge, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
 import { CustomTypeFields } from "@/components/custom-type-fields";
@@ -14,7 +10,6 @@ import type {
   PlanGapCard,
   PlanTactic,
   TacticLibraryItem,
-  UnprioritizedGapCard,
 } from "@/lib/iegp/engine";
 import {
   CATCH_UP_TACTIC_STATUSES,
@@ -390,66 +385,6 @@ function GapTacticsBlock({
   );
 }
 
-export function PrioritizeCard({
-  card,
-  availableTactics,
-}: {
-  card: UnprioritizedGapCard;
-  availableTactics: AvailableTactic[];
-}) {
-  return (
-    <article className="border border-border bg-card p-4 rounded-lg">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <GapStatusOverride
-          gapId={card.gap_id}
-          status={card.gap_status}
-          computedStatus={card.computed_status}
-          override={card.status_override}
-        />
-        <span className="text-[11px] text-amber-700 dark:text-amber-300">Priority unlocked</span>
-      </div>
-      <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
-      <Link
-        href={`/gaps/${card.gap_id}`}
-        className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
-      >
-        {card.gap_name}
-      </Link>
-      <GapTacticsBlock
-        gapId={card.gap_id}
-        tactics={card.tactics}
-        availableTactics={availableTactics}
-      />
-      <div className="mt-3">
-        <LockForm
-          label="Set priority"
-          action="lock_priority"
-          extra={{ residual_id: card.residual_id }}
-          confirmLabel="Lock band"
-          note={{ label: "Reason for this band (optional)" }}
-        >
-          <label className="grid gap-1 text-[12px] text-muted-foreground">
-            Band (you choose — no engine suggestion)
-            <select
-              name="band"
-              required
-              defaultValue=""
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-            >
-              <option value="" disabled>
-                Choose High, Medium, or Low
-              </option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </label>
-        </LockForm>
-      </div>
-    </article>
-  );
-}
-
 export function GapPlanCard({
   card,
   availableTactics,
@@ -460,7 +395,6 @@ export function GapPlanCard({
   return (
     <article className="border border-border bg-card p-3 rounded-lg">
       <div className="flex flex-wrap items-center gap-1.5">
-        {card.band ? <PriorityBadge band={card.band} /> : null}
         <GapStatusOverride
           gapId={card.gap_id}
           status={card.gap_status}
@@ -481,28 +415,5 @@ export function GapPlanCard({
         availableTactics={availableTactics}
       />
     </article>
-  );
-}
-
-export function PrioritizeQueue({
-  cards,
-  availableTactics,
-}: {
-  cards: UnprioritizedGapCard[];
-  availableTactics: AvailableTactic[];
-}) {
-  if (cards.length === 0) {
-    return (
-      <p className="text-[12px] text-muted-foreground">
-        No Open gaps to prioritize. Validate Open gaps on Gaps first. Partial must be split or rewritten.
-      </p>
-    );
-  }
-  return (
-    <div className="grid gap-3">
-      {cards.map((card) => (
-        <PrioritizeCard key={card.gap_id} card={card} availableTactics={availableTactics} />
-      ))}
-    </div>
   );
 }

@@ -367,7 +367,26 @@ export function GapsWorkbench({
   /** Overlaps waiting on a person: merge, split or reject (KAN-75). */
   suggestions?: GapSuggestionCard[];
 }) {
-  const [filter, setFilter] = useState<ReviewGapFilter>(initialFilter ?? "all");
+  const [filter, setFilterState] = useState<ReviewGapFilter>(initialFilter ?? "all");
+  // A link to another `gap_filter` (the readiness strip) keeps this component mounted:
+  // follow the URL when it changes (KAN-18).
+  const [seenFilter, setSeenFilter] = useState(initialFilter);
+  if (seenFilter !== initialFilter) {
+    setSeenFilter(initialFilter);
+    setFilterState(initialFilter ?? "all");
+  }
+  // A chip writes its filter into the URL, so a reload or a shared link keeps it.
+  const setFilter = (next: ReviewGapFilter) => {
+    setFilterState(next);
+    try {
+      const url = new URL(window.location.href);
+      if (next === "all") url.searchParams.delete("gap_filter");
+      else url.searchParams.set("gap_filter", next);
+      window.history.replaceState(window.history.state, "", url);
+    } catch {
+      // No URL to update (tests, sandboxed frames): the chip still filters.
+    }
+  };
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState("");
   const [setting, setSetting] = useState("");

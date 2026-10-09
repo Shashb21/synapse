@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { ensurePlatformSchema, sharedDb } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
 import { nowIso } from "@/modules/kernel/ids";
+import { recordAuditBestEffort } from "@/modules/kernel/audit";
 import type { ActorFunction } from "@/lib/iegp/enums";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
@@ -27,8 +28,23 @@ import {
 export const SESSION_COOKIE = "synapse_session";
 const PENDING_COOKIE = "synapse_oauth_pending";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** An identity provider that does not answer in this long fails the sign-in instead of hanging it (KAN-20). */
+const IDP_TIMEOUT_MS = 15_000;
+
+async function idpFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(IDP_TIMEOUT_MS) });
+  } catch {
+    throw new Error("Your sign-in provider could not be reached or did not answer in time. Try signing in again.");
+  }
+}
 
 export type Session = {
+  /**
+   * The cookie token. Only its hash is stored (see sessionKey), so a database
+   * read alone cannot be replayed as a sign-in. Rows listed by activeSessions
+   * carry the hash instead, since the token is not on record.
+   */
   id: string;
   provider_id: string;
   subject: string;
@@ -52,6 +68,11 @@ function base64Url(input: Buffer): string {
   return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** What auth_sessions.id holds for a session token: sha256, hex (KAN-20). */
+export function sessionKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function asFunction(value: string | undefined | null): ActorFunction {
   return ACTOR_FUNCTIONS.includes((value ?? "") as ActorFunction)
     ? (value as ActorFunction)
@@ -71,7 +92,7 @@ export async function createSession(args: {
   const created_at = nowIso();
   const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   await sharedDb().insert(t.authSessions).values({
-    id,
+    id: sessionKey(id),
     provider_id: args.provider_id,
     subject: args.subject,
     email: args.email ?? null,
@@ -106,15 +127,29 @@ export async function currentSession(): Promise<Session | null> {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   await ensurePlatformSchema();
-  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, id)).limit(1);
+  const key = sessionKey(id);
+  const rows = await sharedDb().select().from(t.authSessions).where(eq(t.authSessions.id, key)).limit(1);
   const row = rows[0];
   if (!row) return null;
-  if (Date.parse(row.expires_at) < Date.now() || !(await sessionStillAllowed(row))) {
-    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
+  const expired = Date.parse(row.expires_at) < Date.now();
+  if (expired || !(await sessionStillAllowed(row))) {
+    const gone = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, key)).returning({ id: t.authSessions.id });
+    // A live session refused mid-way (disabled, seat removed, customer deactivated) is a revocation worth recording.
+    if (!expired && gone.length > 0) {
+      await recordAuditBestEffort({
+        category: "auth",
+        action: "auth.session_revoked",
+        entity_type: "user",
+        entity_id: row.subject,
+        actor: { principal: row.email ?? `${row.provider_id}:${row.subject}`, name: row.actor_name, role: row.role },
+        workspace_id: null,
+        meta: { method: row.provider_id, reason: "no_longer_allowed" },
+      });
+    }
     return null;
   }
   return {
-    id: row.id,
+    id,
     provider_id: row.provider_id,
     subject: row.subject,
     email: row.email,
@@ -135,7 +170,8 @@ export const LOGIN_ERROR_MESSAGES: Record<string, string> = { [NO_SEAT_ERROR]: N
 /** SSO refused: the verified email holds no seat on an active customer. Carries no detail on purpose. */
 export class NoSeatError extends Error {
   readonly code = NO_SEAT_ERROR;
-  constructor() {
+  /** The verified email that has no seat, for the audit log (never shown to the person). */
+  constructor(readonly email: string | null = null) {
     super(NO_SEAT_MESSAGE);
     this.name = "NoSeatError";
   }
@@ -189,7 +225,18 @@ export async function signOut() {
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
     await ensurePlatformSchema();
-    await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, id));
+    const [ended] = await sharedDb().delete(t.authSessions).where(eq(t.authSessions.id, sessionKey(id))).returning();
+    if (ended) {
+      await recordAuditBestEffort({
+        category: "auth",
+        action: "auth.logout",
+        entity_type: "user",
+        entity_id: ended.subject,
+        actor: { principal: ended.email ?? `${ended.provider_id}:${ended.subject}`, name: ended.actor_name, role: ended.role },
+        workspace_id: null,
+        meta: { method: ended.provider_id },
+      });
+    }
   }
   jar.delete(SESSION_COOKIE);
 }
@@ -251,10 +298,62 @@ export async function beginLogin(args: {
     );
     url.searchParams.set("code_challenge_method", "S256");
   }
+  await recordAuditBestEffort({
+    category: "auth",
+    action: "auth.sso_start",
+    actor: { principal: "anonymous", name: "Anonymous", role: null },
+    workspace_id: null,
+    meta: { method: "sso", provider_id: provider.id },
+  });
   return { authorize_url: url.toString() };
 }
 
+/**
+ * Finishes an SSO sign-in and records it in the audit log (KAN-88): success
+ * with the person, or the refusal with its reason. Best-effort, so a logging
+ * failure never blocks sign-in.
+ */
 export async function completeLogin(args: { code: string; state: string }): Promise<Session> {
+  const jar = await cookies();
+  let provider_id: string | null = null;
+  try {
+    provider_id = (JSON.parse(jar.get(PENDING_COOKIE)?.value ?? "null") as { provider_id?: string } | null)?.provider_id ?? null;
+  } catch {
+    provider_id = null;
+  }
+  try {
+    const session = await exchangeLogin(args);
+    await recordAuditBestEffort({
+      category: "auth",
+      action: "auth.login",
+      entity_type: "user",
+      entity_id: session.subject,
+      actor: { principal: session.email ?? `${session.provider_id}:${session.subject}`, name: session.actor.name, role: session.role },
+      workspace_id: null,
+      meta: { method: "sso", provider_id: session.provider_id, email: session.email },
+    });
+    return session;
+  } catch (error) {
+    const email = error instanceof NoSeatError ? error.email : null;
+    await recordAuditBestEffort({
+      category: "auth",
+      action: "auth.login_failed",
+      entity_type: "user",
+      actor: { principal: email ? email.toLowerCase() : "anonymous", name: "Unknown", role: null },
+      workspace_id: null,
+      meta: {
+        method: "sso",
+        provider_id,
+        reason: error instanceof NoSeatError ? "no_active_seat" : "refused",
+        detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+        ...(email ? { email: email.toLowerCase() } : {}),
+      },
+    });
+    throw error;
+  }
+}
+
+async function exchangeLogin(args: { code: string; state: string }): Promise<Session> {
   const jar = await cookies();
   const raw = jar.get(PENDING_COOKIE)?.value;
   if (!raw) throw new Error("No sign-in is in progress.");
@@ -282,7 +381,7 @@ export async function completeLogin(args: { code: string; state: string }): Prom
     ? process.env[provider.descriptor.client_secret_env]?.trim()
     : undefined;
   if (secret) body.set("client_secret", secret);
-  const tokenRes = await fetch(provider.descriptor.token_url, {
+  const tokenRes = await idpFetch(provider.descriptor.token_url, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body,
@@ -291,14 +390,14 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   if (!tokenRes.ok) throw new Error(`Token exchange failed (HTTP ${tokenRes.status}).`);
   const token = JSON.parse(tokenText) as { access_token?: string; id_token?: unknown };
   if (!token.access_token) throw new Error("Token exchange returned no access token.");
-  const profileRes = await fetch(provider.userinfo_url, {
+  const profileRes = await idpFetch(provider.userinfo_url, {
     headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
   });
   if (!profileRes.ok) throw new Error(`Profile lookup failed (HTTP ${profileRes.status}).`);
   const profile = (await profileRes.json()) as Record<string, unknown>;
   let github_emails: GithubEmail[] | null = null;
   if (provider.id === "github") {
-    const emailsRes = await fetch(GITHUB_EMAILS_URL, {
+    const emailsRes = await idpFetch(GITHUB_EMAILS_URL, {
       headers: { authorization: `Bearer ${token.access_token}`, accept: "application/json" },
     });
     const list = emailsRes.ok ? ((await emailsRes.json().catch(() => null)) as unknown) : null;
@@ -312,7 +411,7 @@ export async function completeLogin(args: { code: string; state: string }): Prom
   });
   jar.delete(PENDING_COOKIE);
   // Customers sign in only with a seat their organisation was assigned (KAN-28).
-  if (!(await seatAllowsSignIn(sessionArgs.email))) throw new NoSeatError();
+  if (!(await seatAllowsSignIn(sessionArgs.email))) throw new NoSeatError(sessionArgs.email);
   return createSession(await withoutClaimedOperator(sessionArgs));
 }
 
@@ -398,7 +497,7 @@ export async function signInDemo(args: {
   const name = args.actor_name.trim();
   if (!name) throw new Error("Enter a name to continue as a demo user.");
   const fn = asFunction(args.actor_function);
-  return createSession({
+  const session = await createSession({
     provider_id: "demo",
     subject: `demo:${name}`,
     email: await demoEmailFor(name, args.email),
@@ -406,6 +505,16 @@ export async function signInDemo(args: {
     actor_function: fn,
     role: demoRole(fn, args.role),
   });
+  await recordAuditBestEffort({
+    category: "auth",
+    action: "auth.login",
+    entity_type: "user",
+    entity_id: session.subject,
+    actor: { principal: session.email ?? `demo:${session.subject}`, name, role: session.role },
+    workspace_id: null,
+    meta: { method: "demo" },
+  });
+  return session;
 }
 
 /** The role a demo sign-in gets (see signInDemo). Never "operator". */

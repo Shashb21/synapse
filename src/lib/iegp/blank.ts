@@ -24,8 +24,6 @@ function emptyState(asset: Asset, detail: string): IegpState {
     mapping_suggestions: [],
     residual_gap_suggestions: [],
     residuals: [],
-    priorities: [],
-    roadmap: [],
     audit: [
       {
         id: "AUD-BLANK",

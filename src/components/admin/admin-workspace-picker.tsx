@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { postJson } from "@/lib/post-json";
 
 export type PickerWorkspace = {
   id: string;
@@ -36,12 +37,8 @@ export function AdminWorkspacePicker({
     setBusy(id);
     setError(null);
     try {
-      const res = await fetch("/api/admin/workspace", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspace_id: id, next }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { error?: string; redirect?: string };
+      const res = await postJson("/api/admin/workspace", { workspace_id: id, next });
+      const json = res.json as { error?: string; redirect?: string };
       if (!res.ok) throw new Error(json.error ?? `Could not open that workspace (HTTP ${res.status}).`);
       router.push(json.redirect ?? "/admin");
       router.refresh();

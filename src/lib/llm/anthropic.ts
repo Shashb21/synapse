@@ -1,5 +1,5 @@
 import { anthropicModel, hasAnthropicKey } from "@/lib/config";
-import { ProviderError, parseProviderErrorBody, redactSecrets } from "@/modules/llm/provider-error";
+import { fetchProvider, ProviderError, parseProviderErrorBody, redactSecrets } from "@/modules/llm/provider-error";
 
 type AnthropicMessage = {
   content?: { type: string; text?: string }[];
@@ -26,7 +26,8 @@ export async function completeJson(args: {
   if (!hasAnthropicKey()) {
     throw new Error("ANTHROPIC_API_KEY is not set");
   }
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const target = { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY" };
+  const { res, text } = await fetchProvider("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -40,15 +41,12 @@ export async function completeJson(args: {
       system: args.system,
       messages: [{ role: "user", content: args.user }],
     }),
-  });
-  const text = await res.text();
+  }, target);
   if (!res.ok) {
     // Typed and classified like every provider call (KAN-68); the key is never in it.
     const parsed = parseProviderErrorBody(text);
     throw new ProviderError({
-      provider_id: "anthropic-claude",
-      provider_name: "Anthropic",
-      key_env: "ANTHROPIC_API_KEY",
+      ...target,
       status: res.status,
       error_type: parsed.error_type,
       provider_message: parsed.message

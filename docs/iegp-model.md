@@ -89,7 +89,7 @@ Gold: the curated Velmara pack (`src/modules/eval-gold/velmara-curated.ts`) for 
 | Tactic Ideation | Ideate/assign proposed tactics for High-priority Open gaps. |
 | Gantt Timeline | Dated activities, dependencies, save as final, PNG export. |
 
-Needs, Residuals and Roadmap stay as secondary sidebar items. Evals, specs and routing live in the owner console (`/admin`), never in the customer app.
+Needs stays as a secondary sidebar item. The legacy residual priority board (`/residuals`) and roadmap (`/roadmap`) are retired (KAN-17): priority is the Prioritize matrix (S8 placements), residual drafts are reviewed on Gaps, and the forward plan is Timeline (S10). The old URLs redirect there; locked legacy bands and roadmap links were carried over once at schema bootstrap (`src/lib/iegp/legacy-plan.ts`), and the legacy tables keep their rows. Evals, specs and routing live in the owner console (`/admin`), never in the customer app.
 
 Gap titles are evidence-topic noun phrases (not “We need…”).
 

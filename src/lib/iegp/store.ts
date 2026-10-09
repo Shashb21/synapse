@@ -3,6 +3,7 @@ import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, 
 import * as t from "./schema";
 import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
+import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
@@ -201,8 +202,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     mapping_suggestions,
     residual_gap_suggestions,
     residuals,
-    priorities,
-    roadmap,
     audit,
     gold_needs,
     gold_coverages,
@@ -224,8 +223,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.mappingSuggestions),
     d.select().from(t.residualGapSuggestions),
     d.select().from(t.residuals),
-    d.select().from(t.priorities),
-    d.select().from(t.roadmap),
     d.select().from(t.audit),
     d.select().from(t.goldNeeds),
     d.select().from(t.goldCoverages),
@@ -322,18 +319,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       created_gap_id: r.created_gap_id ?? null,
       lock: asLock(r.lock),
     })),
-    priorities: priorities.map((p) => ({
-      ...p,
-      suggested_band: p.suggested_band as IegpState["priorities"][0]["suggested_band"],
-      band: p.band as IegpState["priorities"][0]["band"],
-      reasons: p.reasons as string[],
-      lock: asLock(p.lock),
-    })),
-    roadmap: roadmap.map((r) => ({
-      ...r,
-      residual_ids: r.residual_ids as string[],
-      lock: asLock(r.lock),
-    })),
     audit: audit.map((a) => ({
       ...a,
       actor_function: a.actor_function as ActorFunction,
@@ -419,12 +404,11 @@ export async function persistState(state: IegpState) {
       await d.insert(t.residualGapSuggestions).values(state.residual_gap_suggestions);
     }
     if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
-    if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
-    if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
-    if (state.audit.length) await d.insert(t.audit).values(state.audit);
+    // History is kept across resets (wipeIegp leaves it), so a seed row already there stays as it was.
+    if (state.audit.length) await d.insert(t.audit).values(state.audit).onConflictDoNothing();
     if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
     if (state.gold_coverages.length) await d.insert(t.goldCoverages).values(state.gold_coverages);
-    if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions);
+    if (state.gap_versions.length) await d.insert(t.gapVersions).values(state.gap_versions).onConflictDoNothing();
     if (state.breakout_groups.length) await d.insert(t.breakoutGroups).values(state.breakout_groups);
     if (state.breakout_group_gaps.length) {
       await d.insert(t.breakoutGroupGaps).values(state.breakout_group_gaps);
@@ -449,8 +433,22 @@ export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
 }
 
 /** Replaces every IEGP row in the current workspace with `contents`. */
-export async function replaceWorkspaceContents(contents: WorkspaceContents) {
-  await persistState(buildWorkspaceContents(contents));
+export async function replaceWorkspaceContents(
+  contents: WorkspaceContents,
+  actor: { name: string; function: ActorFunction } = { name: "System", function: "evidence_lead" },
+) {
+  const state = buildWorkspaceContents(contents);
+  await persistState(state);
+  // KAN-89: the reset goes in the workspace's history, which it no longer erases.
+  await appendAuditOn(
+    db(),
+    actor.name,
+    actor.function,
+    "plan",
+    state.asset.id,
+    WORKSPACE_RESET_ACTION,
+    contents === "blank" ? "Reset the workspace to blank." : contents === "demo" ? "Loaded the demo data." : "Loaded the demo setup.",
+  );
   return loadState();
 }
 
@@ -1622,68 +1620,6 @@ export async function confirmCoverageReview(args: {
 }
 
 
-
-export async function lockResidual(args: {
-  residual_id: string;
-  statement: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-  note?: string;
-}) {
-  await db()
-    .update(t.residuals)
-    .set({
-      statement: args.statement,
-      lock: makeLock(args.actor_name, args.actor_function, args.note),
-    })
-    .where(eq(t.residuals.id, args.residual_id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "residual",
-    args.residual_id,
-    "lock",
-    args.statement.slice(0, 180),
-  );
-}
-
-export async function lockPriority(args: {
-  residual_id: string;
-  band: IegpState["priorities"][0]["band"];
-  override_reason?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const state = await loadState();
-  const residual = state.residuals.find((r) => r.id === args.residual_id);
-  if (!residual) throw new Error("Residual not found");
-  const existing = state.priorities.find((p) => p.residual_id === args.residual_id);
-  const row = {
-    residual_id: args.residual_id,
-    suggested_score: 0,
-    suggested_band: args.band,
-    band: args.band,
-    override_reason: args.override_reason ?? null,
-    reasons: ["Human-locked. The engine does not assign priority."],
-    lock: makeLock(args.actor_name, args.actor_function, args.override_reason),
-  };
-  if (existing) {
-    await db().update(t.priorities).set(row).where(eq(t.priorities.id, existing.id));
-  } else {
-    await db().insert(t.priorities).values({
-      id: await allocateId("PRI", state.priorities.map((p) => p.id)),
-      ...row,
-    });
-  }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "priority",
-    args.residual_id,
-    "lock_band",
-    args.band,
-  );
-}
 
 export const GAPS_PROPOSED_CREATE_ERROR =
   "Gaps cannot create proposed tactics. Record a completed, ongoing, or planned study, or invent on Tactics after you prioritize.";
@@ -2884,53 +2820,6 @@ export async function lockTactic(args: {
     args.tactic_id,
     "lock_status",
     `${prev} → ${args.status}`,
-  );
-}
-
-export async function lockRoadmapItem(args: {
-  tactic_id: string;
-  residual_ids: string[];
-  start_date: string | null;
-  evidence_available: string | null;
-  owner: string;
-  note?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const state = await loadState();
-  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
-  if (tactic.status === "completed") {
-    throw new Error("Completed tactics stay on the dossier, not the forward roadmap.");
-  }
-  const start_date = optionalTacticDate("start_date", args.start_date);
-  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
-  assertTacticDateOrder(start_date, evidence_available);
-  const existing = state.roadmap.find((r) => r.tactic_id === args.tactic_id);
-  const row = {
-    tactic_id: args.tactic_id,
-    residual_ids: args.residual_ids,
-    start_date,
-    evidence_available,
-    owner: args.owner,
-    note: args.note ?? null,
-    lock: makeLock(args.actor_name, args.actor_function, args.note),
-  };
-  if (existing) {
-    await db().update(t.roadmap).set(row).where(eq(t.roadmap.id, existing.id));
-  } else {
-    await db().insert(t.roadmap).values({
-      id: await allocateId("RM", state.roadmap.map((r) => r.id)),
-      ...row,
-    });
-  }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "roadmap",
-    args.tactic_id,
-    "lock_item",
-    tactic.name,
   );
 }
 
@@ -4349,25 +4238,46 @@ export async function createAddressedGap(args: {
 export async function createBreakoutGroup(args: {
   name: string;
   note?: string;
+  /** Gaps to start with. All are checked first: a bad one creates nothing (KAN-18). */
+  gap_ids?: string[];
   actor_name: string;
   actor_function: ActorFunction;
 }): Promise<string> {
   const name = args.name.trim();
   if (!name) throw new Error("A breakout group needs a name.");
   const state = await loadState();
+  const gapIds = [...new Set(args.gap_ids ?? [])];
+  const known = new Set(state.gaps.map((gap) => gap.id));
+  if (gapIds.some((id) => !known.has(id))) throw new Error("Gap not found");
   const id = await allocateId(
     "BRK",
     state.breakout_groups.map((g) => g.id),
   );
-  await db().insert(t.breakoutGroups).values({
-    id,
-    name,
-    note: args.note?.trim() || null,
-    created_at: now(),
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+  // The group and its starting gaps land together, or not at all.
+  await db().transaction(async (transaction) => {
+    await transaction.insert(t.breakoutGroups).values({
+      id,
+      name,
+      note: args.note?.trim() || null,
+      created_at: now(),
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+    if (gapIds.length > 0) {
+      await transaction.insert(t.breakoutGroupGaps).values(gapIds.map((gap_id) => ({ group_id: id, gap_id })));
+    }
   });
   await appendAudit(args.actor_name, args.actor_function, "breakout_group", id, "create", name);
+  if (gapIds.length > 0) {
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "breakout_group",
+      id,
+      "assign_gaps",
+      `${gapIds.length} gap${gapIds.length === 1 ? "" : "s"} → ${name}`,
+    );
+  }
   return id;
 }
 

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { resolveGapStatus, resolvePriorityBand } from "@/accuracy/domain/iegp-semantics";
 import { TACTIC_TYPES, TACTIC_TYPE_LABELS } from "@/lib/iegp/enums";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 type IdeateResponse = {
   ok?: boolean;
@@ -22,12 +23,8 @@ async function postIdeate(body: Record<string, unknown>): Promise<{
   status: number;
   json: IdeateResponse;
 }> {
-  const res = await fetch("/api/accuracy/ideate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json()) as IdeateResponse;
+  const res = await postJson("/api/accuracy/ideate", body);
+  const json = res.json as IdeateResponse;
   return { ok: res.ok && Boolean(json.ok), status: res.status, json };
 }
 
@@ -137,17 +134,13 @@ export function PlanPriorityCard({
       return;
     }
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/claims/priority", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/claims/priority", {
           workspace_id: workspaceId,
           claim_id: claimId,
           priority: next,
           rationale: priorityRationale.trim(),
-        }),
-      });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+        });
+      const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
         setError(body.error ?? "Update failed");
         return;

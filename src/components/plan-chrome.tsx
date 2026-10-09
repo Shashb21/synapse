@@ -34,8 +34,6 @@ export type ShellId =
   | "needs"
   | "gaps"
   | "tactics"
-  | "residuals"
-  | "roadmap"
   | "sources"
   | "matrix"
   | "ideation"
@@ -94,7 +92,7 @@ type PlaceItem = {
   ready: boolean;
 };
 
-type SecondaryId = "needs" | "residuals" | "roadmap";
+type SecondaryId = "needs";
 
 type SecondaryItem = {
   id: SecondaryId;
@@ -115,8 +113,6 @@ const TOOL_LABELS: Partial<Record<ShellId, string>> = {
 
 const SECONDARY: SecondaryItem[] = [
   { id: "needs", href: "/needs", label: "Needs", icon: ListChecks },
-  { id: "residuals", href: "/residuals", label: "Residuals", icon: ClipboardList },
-  { id: "roadmap", href: "/roadmap", label: "Roadmap", icon: ChartGantt },
 ];
 
 /**
