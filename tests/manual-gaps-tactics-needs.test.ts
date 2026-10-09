@@ -23,6 +23,7 @@ import {
 } from "@/lib/iegp/store";
 import { db, resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
 import { listEdits } from "@/modules/kernel/edit-records";
+import { lastResetAt } from "@/lib/iegp/gap-history";
 import { gapCandidates, GAP_CANDIDATES_DDL } from "@/modules/stages/s2-gap-extract/schema";
 import {
   tacticCandidates,
@@ -101,7 +102,10 @@ describe("manual gap edits", () => {
     expect(statementEdit.before).toBe("Original statement here.");
     expect(statementEdit.after).toBe("Human statement.");
     expect(statementEdit.rationale).toBe("Wording agreed at workshop");
-    const audit = (await loadState()).audit.filter((a) => a.entity_id === gapId && a.action === "modify");
+    // The workspace audit outlives resets (KAN-89): count only rows since this test's reset.
+    const state = await loadState();
+    const since = lastResetAt(state) ?? "";
+    const audit = state.audit.filter((a) => a.entity_id === gapId && a.action === "modify" && a.at >= since);
     expect(audit).toHaveLength(1);
   });
 

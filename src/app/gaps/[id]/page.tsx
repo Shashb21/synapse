@@ -31,6 +31,7 @@ import {
   ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState, ensureGapHasConstituentNeed } from "@/lib/iegp/store";
+import { gapVersionsFor } from "@/lib/iegp/gap-history";
 import {
   buildTacticLibrary,
   computeGapStatus,
@@ -582,12 +583,11 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {state.gap_versions.filter((row) => row.live_gap_id === gap.id).length > 0 ? (
+      {gapVersionsFor(state, gap.id).length > 0 ? (
         <section className="mb-8">
           <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Version history</h2>
           <ul className="grid gap-2">
-            {state.gap_versions
-              .filter((row) => row.live_gap_id === gap.id)
+            {gapVersionsFor(state, gap.id)
               .map((row) => (
                 <li key={row.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
