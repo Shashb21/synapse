@@ -17,8 +17,6 @@ function contentCounts(state: IegpState) {
     gaps: state.gaps.length,
     tactics: state.tactics.length,
     coverages: state.coverages.length,
-    priorities: state.priorities.length,
-    roadmap: state.roadmap.length,
     audit_entries: state.audit.length,
     gap_versions: state.gap_versions.length,
   };

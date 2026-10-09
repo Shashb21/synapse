@@ -6,12 +6,10 @@ import {
   GAP_STATUS_LABELS,
   OVERALL_COVERAGE_HELPERS,
   OVERALL_COVERAGE_LABELS,
-  PRIORITY_BAND_HELPERS,
   TACTIC_REVIEW_LABELS,
   TACTIC_STATUS_HELPERS,
   type GapStatus,
   type OverallCoverage,
-  type PriorityBand,
   type TacticReviewStatus,
   type TacticStatus,
 } from "@/lib/iegp/enums";
@@ -80,24 +78,6 @@ export function CoverageBadge({ overall }: { overall: OverallCoverage }) {
   return (
     <BadgeHelp help={OVERALL_COVERAGE_HELPERS[overall]}>
       <Badge variant="outline">{OVERALL_COVERAGE_LABELS[overall]}</Badge>
-    </BadgeHelp>
-  );
-}
-
-export function PriorityBadge({ band }: { band: PriorityBand }) {
-  const tone =
-    band === "critical"
-      ? "bg-red-500/15 text-red-700 dark:text-red-300"
-      : band === "high"
-        ? "bg-orange-500/15 text-orange-700 dark:text-orange-300"
-        : band === "medium"
-          ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-200"
-          : "bg-zinc-500/20 text-zinc-600 dark:text-zinc-400";
-  return (
-    <BadgeHelp help={PRIORITY_BAND_HELPERS[band]}>
-      <Badge variant="outline" className={`capitalize ${tone}`}>
-        {band}
-      </Badge>
     </BadgeHelp>
   );
 }

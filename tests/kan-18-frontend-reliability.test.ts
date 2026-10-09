@@ -4,7 +4,6 @@ import "@/modules";
 import * as owner from "@/modules/auth/owner";
 import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { NETWORK_ERROR, postJson } from "@/lib/post-json";
-import { residualRows } from "@/lib/iegp/residual-rows";
 import { isPresenting } from "@/lib/room/presenting";
 import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
 import { mappingRowKey } from "@/components/mapping-table-workbench";
@@ -97,21 +96,6 @@ describe("API errors keep a meaningful status", () => {
 });
 
 describe("pure helpers", () => {
-  it("residualRows lists a residual whose parent gap is gone instead of crashing", () => {
-    const lock = { locked: true } as never;
-    const rows = residualRows({
-      gaps: [{ id: "GAP-1", name: "Beta" }, { id: "GAP-2", name: "Alpha" }] as never,
-      residuals: [
-        { id: "R1", gap_id: "GAP-1" },
-        { id: "R2", gap_id: "GAP-GONE" },
-        { id: "R3", gap_id: "GAP-2" },
-      ] as never,
-      priorities: [{ residual_id: "R1", band: "high", lock }] as never,
-    });
-    expect(rows.map((row) => row.r.id)).toEqual(["R1", "R2", "R3"]);
-    expect(rows[1]!.gap).toBeNull();
-  });
-
   it("planFingerprint changes when a date moves, not only when the count does", () => {
     const row = {
       id: "A1",

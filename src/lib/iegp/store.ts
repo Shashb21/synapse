@@ -170,8 +170,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     mapping_suggestions,
     residual_gap_suggestions,
     residuals,
-    priorities,
-    roadmap,
     audit,
     gold_needs,
     gold_coverages,
@@ -193,8 +191,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.mappingSuggestions),
     d.select().from(t.residualGapSuggestions),
     d.select().from(t.residuals),
-    d.select().from(t.priorities),
-    d.select().from(t.roadmap),
     d.select().from(t.audit),
     d.select().from(t.goldNeeds),
     d.select().from(t.goldCoverages),
@@ -289,18 +285,6 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       created_gap_id: r.created_gap_id ?? null,
       lock: asLock(r.lock),
     })),
-    priorities: priorities.map((p) => ({
-      ...p,
-      suggested_band: p.suggested_band as IegpState["priorities"][0]["suggested_band"],
-      band: p.band as IegpState["priorities"][0]["band"],
-      reasons: p.reasons as string[],
-      lock: asLock(p.lock),
-    })),
-    roadmap: roadmap.map((r) => ({
-      ...r,
-      residual_ids: r.residual_ids as string[],
-      lock: asLock(r.lock),
-    })),
     audit: audit.map((a) => ({
       ...a,
       actor_function: a.actor_function as ActorFunction,
@@ -379,8 +363,6 @@ export async function persistState(state: IegpState) {
     await d.insert(t.residualGapSuggestions).values(state.residual_gap_suggestions);
   }
   if (state.residuals.length) await d.insert(t.residuals).values(state.residuals);
-  if (state.priorities.length) await d.insert(t.priorities).values(state.priorities);
-  if (state.roadmap.length) await d.insert(t.roadmap).values(state.roadmap);
   // History is kept across resets (wipeIegp leaves it), so a seed row already there stays as it was.
   if (state.audit.length) await d.insert(t.audit).values(state.audit).onConflictDoNothing();
   if (state.gold_needs.length) await d.insert(t.goldNeeds).values(state.gold_needs);
@@ -1552,68 +1534,6 @@ export async function confirmCoverageReview(args: {
 }
 
 
-
-export async function lockResidual(args: {
-  residual_id: string;
-  statement: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-  note?: string;
-}) {
-  await db()
-    .update(t.residuals)
-    .set({
-      statement: args.statement,
-      lock: makeLock(args.actor_name, args.actor_function, args.note),
-    })
-    .where(eq(t.residuals.id, args.residual_id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "residual",
-    args.residual_id,
-    "lock",
-    args.statement.slice(0, 180),
-  );
-}
-
-export async function lockPriority(args: {
-  residual_id: string;
-  band: IegpState["priorities"][0]["band"];
-  override_reason?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const state = await loadState();
-  const residual = state.residuals.find((r) => r.id === args.residual_id);
-  if (!residual) throw new Error("Residual not found");
-  const existing = state.priorities.find((p) => p.residual_id === args.residual_id);
-  const row = {
-    residual_id: args.residual_id,
-    suggested_score: 0,
-    suggested_band: args.band,
-    band: args.band,
-    override_reason: args.override_reason ?? null,
-    reasons: ["Human-locked. The engine does not assign priority."],
-    lock: makeLock(args.actor_name, args.actor_function, args.override_reason),
-  };
-  if (existing) {
-    await db().update(t.priorities).set(row).where(eq(t.priorities.id, existing.id));
-  } else {
-    await db().insert(t.priorities).values({
-      id: nextId("PRI", state.priorities.map((p) => p.id)),
-      ...row,
-    });
-  }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "priority",
-    args.residual_id,
-    "lock_band",
-    args.band,
-  );
-}
 
 export const GAPS_PROPOSED_CREATE_ERROR =
   "Gaps cannot create proposed tactics. Record a completed, ongoing, or planned study, or invent on Tactics after you prioritize.";
@@ -2813,53 +2733,6 @@ export async function lockTactic(args: {
     args.tactic_id,
     "lock_status",
     `${prev} → ${args.status}`,
-  );
-}
-
-export async function lockRoadmapItem(args: {
-  tactic_id: string;
-  residual_ids: string[];
-  start_date: string | null;
-  evidence_available: string | null;
-  owner: string;
-  note?: string;
-  actor_name: string;
-  actor_function: ActorFunction;
-}) {
-  const state = await loadState();
-  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
-  if (tactic.status === "completed") {
-    throw new Error("Completed tactics stay on the dossier, not the forward roadmap.");
-  }
-  const start_date = optionalTacticDate("start_date", args.start_date);
-  const evidence_available = optionalTacticDate("evidence_available", args.evidence_available);
-  assertTacticDateOrder(start_date, evidence_available);
-  const existing = state.roadmap.find((r) => r.tactic_id === args.tactic_id);
-  const row = {
-    tactic_id: args.tactic_id,
-    residual_ids: args.residual_ids,
-    start_date,
-    evidence_available,
-    owner: args.owner,
-    note: args.note ?? null,
-    lock: makeLock(args.actor_name, args.actor_function, args.note),
-  };
-  if (existing) {
-    await db().update(t.roadmap).set(row).where(eq(t.roadmap.id, existing.id));
-  } else {
-    await db().insert(t.roadmap).values({
-      id: nextId("RM", state.roadmap.map((r) => r.id)),
-      ...row,
-    });
-  }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "roadmap",
-    args.tactic_id,
-    "lock_item",
-    tactic.name,
   );
 }
 

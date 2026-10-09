@@ -7,7 +7,6 @@ import {
   type GapStatus,
   type MappedGapStatus,
   type OverallCoverage,
-  type PriorityBand,
   type TacticStatus,
   type TacticType,
 } from "./enums";
@@ -868,14 +867,6 @@ export function tacticEligibleForMapping(tactic: Pick<Tactic, "review_status" | 
   return tactic.review_status === "accepted" && tactic.status !== "cancelled";
 }
 
-export type PlanColumn = "high" | "medium" | "low";
-
-export function planColumn(band: PriorityBand): PlanColumn {
-  if (band === "critical" || band === "high") return "high";
-  if (band === "medium") return "medium";
-  return "low";
-}
-
 export type PlanTactic = {
   id: string;
   expansion_id?: string;
@@ -900,8 +891,6 @@ export type PlanGapCard = {
   computed_status: MappedGapStatus | null;
   status_override: GapStatusOverride | null;
   residual_id: string | null;
-  band: PriorityBand | null;
-  score: number;
   tactics: PlanTactic[];
   parent_gap_id: string | null;
 };
@@ -965,8 +954,11 @@ export type OpenGapCard = {
   tactics: PlanTactic[];
   parent_gap_id: string | null;
   residual: ResidualGapSuggestion | null;
-  /** Locked priority band, when one has been set on Prioritize. Null before that gate. */
-  band: PriorityBand | null;
+  /**
+   * The gap's validated band on the Prioritize matrix (S8). Bands live in S8's
+   * placements, not in IEGP state, so loaders that read them fill this in.
+   */
+  band: "high" | "medium" | "low" | "defer" | null;
 };
 
 export type ReviewTacticCard = {
@@ -975,18 +967,6 @@ export type ReviewTacticCard = {
   type: Tactic["type"];
   evidence_question: string;
   description: string;
-};
-
-export type UnprioritizedGapCard = {
-  gap_id: string;
-  gap_name: string;
-  statement: string;
-  residual: string;
-  gap_status: GapStatus;
-  computed_status: MappedGapStatus | null;
-  status_override: GapStatusOverride | null;
-  residual_id: string;
-  tactics: PlanTactic[];
 };
 
 const STATUS_ORDER: Record<TacticStatus, number> = {
@@ -1042,7 +1022,7 @@ function computedForGap(state: IegpState, gap: EvidenceGap, children: Set<string
   );
 }
 
-export function mappedTactics(state: IegpState, gapId: string, residualId?: string | null): PlanTactic[] {
+export function mappedTactics(state: IegpState, gapId: string): PlanTactic[] {
   const mapped: PlanTactic[] = [];
   for (const coverage of state.coverages.filter((c) => c.gap_id === gapId)) {
     const tactic = state.tactics.find((t) => t.id === coverage.tactic_id);
@@ -1064,48 +1044,9 @@ export function mappedTactics(state: IegpState, gapId: string, residualId?: stri
     }
     mapped.push(row);
   }
-  if (residualId) {
-    for (const item of state.roadmap.filter((row) => row.residual_ids.includes(residualId))) {
-      const tactic = state.tactics.find((t) => t.id === item.tactic_id);
-      if (!tactic || mapped.some((row) => row.id === tactic.id)) continue;
-      mapped.push(asPlanTactic(tactic, null, false, false, null));
-    }
-  }
   return mapped.sort(
     (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
   );
-}
-
-export function buildPlanBoard(state: IegpState): Record<PlanColumn, PlanGapCard[]> {
-  const children = childGapIds(state);
-  const cards: PlanGapCard[] = [];
-  for (const residual of state.residuals) {
-    const gap = state.gaps.find((g) => g.id === residual.gap_id);
-    if (!gap || gap.status === "excluded" || displayedGapStatus(gap) === "validated_addressed") continue;
-    const priority = state.priorities.find((p) => p.residual_id === residual.id);
-    if (!priority?.lock.locked) continue;
-    const computed = computedForGap(state, gap, children);
-    cards.push({
-      gap_id: gap.id,
-      gap_name: gap.name,
-      statement: gap.statement,
-      residual: residual.statement,
-      gap_status: displayedGapStatus(gap),
-      computed_status: computed,
-      status_override: gap.status_override ?? null,
-      residual_id: residual.id,
-      band: priority.band,
-      score: priority.suggested_score,
-      tactics: mappedTactics(state, gap.id, residual.id),
-      parent_gap_id: gap.parent_gap_id,
-    });
-  }
-  cards.sort((a, b) => b.score - a.score);
-  return {
-    high: cards.filter((c) => c.band && planColumn(c.band) === "high"),
-    medium: cards.filter((c) => c.band && planColumn(c.band) === "medium"),
-    low: cards.filter((c) => c.band && planColumn(c.band) === "low"),
-  };
 }
 
 export type TacticLibraryItem = {
@@ -1140,8 +1081,6 @@ export function buildPlanWorkspace(state: IegpState): {
   reviewTactics: ReviewTacticCard[];
   reviewResiduals: ResidualGapSuggestion[];
   openGaps: OpenGapCard[];
-  unprioritized: UnprioritizedGapCard[];
-  board: Record<PlanColumn, PlanGapCard[]>;
   addressed: PlanGapCard[];
   availableTactics: TacticLibraryItem[];
   residualGapSuggestions: ResidualGapSuggestion[];
@@ -1191,10 +1130,8 @@ export function buildPlanWorkspace(state: IegpState): {
     if (!isLiveGap(gap)) continue;
     const shown = displayedGapStatus(gap);
     if (shown !== "validated_open") continue;
-    const residual = state.residuals.find((r) => r.gap_id === gap.id);
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const computed = computedForGap(state, gap, children);
-    const priority = residual ? state.priorities.find((p) => p.residual_id === residual.id) : undefined;
     openGaps.push({
       gap_id: gap.id,
       gap_name: gap.name,
@@ -1208,10 +1145,10 @@ export function buildPlanWorkspace(state: IegpState): {
       suggested_status: computed,
       status_override: gap.status_override ?? null,
       counting_join_count: countingCoverages(coverages, state.tactics, state.expansions).length,
-      tactics: mappedTactics(state, gap.id, residual?.id),
+      tactics: mappedTactics(state, gap.id),
       parent_gap_id: gap.parent_gap_id,
       residual: residualByParent.get(gap.id) ?? null,
-      band: priority?.lock.locked ? priority.band : null,
+      band: null,
     });
   }
 
@@ -1224,30 +1161,6 @@ export function buildPlanWorkspace(state: IegpState): {
       evidence_question: t.evidence_question,
       description: t.description,
     }));
-
-  const prioritizedResidual = new Set(
-    state.priorities.filter((p) => p.lock.locked).map((p) => p.residual_id),
-  );
-  const unprioritized: UnprioritizedGapCard[] = [];
-  for (const residual of state.residuals) {
-    if (prioritizedResidual.has(residual.id)) continue;
-    if (residual.created_gap_id) continue;
-    const gap = state.gaps.find((g) => g.id === residual.gap_id);
-    if (!gap) continue;
-    const shown = displayedGapStatus(gap);
-    if (shown !== "validated_open") continue;
-    unprioritized.push({
-      gap_id: gap.id,
-      gap_name: gap.name,
-      statement: gap.statement,
-      residual: residual.statement,
-      gap_status: shown,
-      computed_status: computedForGap(state, gap, children),
-      status_override: gap.status_override ?? null,
-      residual_id: residual.id,
-      tactics: mappedTactics(state, gap.id, residual.id),
-    });
-  }
 
   const addressed: PlanGapCard[] = [];
   for (const gap of state.gaps) {
@@ -1264,9 +1177,7 @@ export function buildPlanWorkspace(state: IegpState): {
       computed_status: computed,
       status_override: gap.status_override ?? null,
       residual_id: residual?.id ?? null,
-      band: null,
-      score: 0,
-      tactics: mappedTactics(state, gap.id, residual?.id),
+      tactics: mappedTactics(state, gap.id),
       parent_gap_id: gap.parent_gap_id,
     });
   }
@@ -1276,8 +1187,6 @@ export function buildPlanWorkspace(state: IegpState): {
     reviewTactics,
     reviewResiduals,
     openGaps,
-    unprioritized,
-    board: buildPlanBoard(state),
     addressed,
     availableTactics: buildTacticLibrary(state),
     residualGapSuggestions: reviewResiduals,
