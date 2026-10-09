@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { postJson } from "@/lib/post-json";
 
 type HygieneAction = "archive_workspace" | "unarchive_workspace" | "delete_workspace";
 
@@ -27,12 +28,8 @@ export function WorkspaceHygieneActions({
     }
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/hygiene", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, workspace_id: workspaceId }),
-      });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+      const res = await postJson("/api/accuracy/hygiene", { action, workspace_id: workspaceId });
+      const body = res.json as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
         setError(body.error ?? "Hygiene action failed");
         return;

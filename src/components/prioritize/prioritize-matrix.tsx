@@ -18,6 +18,8 @@ import {
   unfavourableLabel,
   type PriorityAxis,
 } from "@/modules/stages/s8-prioritization/axis-math";
+import { postJson } from "@/lib/post-json";
+import { isPresenting } from "@/lib/room/presenting";
 
 export type PrioritizeGap = {
   gap_id: string;
@@ -74,10 +76,7 @@ async function runPrioritization(args: {
   setting: string;
   onlyMissing: boolean;
 }): Promise<{ ok: boolean; error?: string; summary?: string; mode?: string }> {
-  const res = await fetch("/api/modules", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  const res = await postJson("/api/modules", {
       stage: "S8",
       input: {
         gap_ids: args.gapIds,
@@ -88,20 +87,15 @@ async function runPrioritization(args: {
       },
       actor_name: args.identity.actor_name,
       actor_function: args.identity.actor_function,
-    }),
-  });
-  const json = (await res.json().catch(() => ({}))) as { error?: string; summary?: string; mode?: string };
+    });
+  const json = res.json as { error?: string; summary?: string; mode?: string };
   return res.ok ? { ok: true, summary: json.summary, mode: json.mode } : { ok: false, error: json.error ?? "Prioritization failed" };
 }
 
 async function saveAxes(scope: string, xAxis: string, yAxis: string): Promise<string | null> {
-  const res = await fetch("/api/plan", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save_scope_axes", scope, x_axis: xAxis, y_axis: yAxis }),
-  });
+  const res = await postJson("/api/plan", { action: "save_scope_axes", scope, x_axis: xAxis, y_axis: yAxis });
   if (res.ok) return null;
-  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  const json = res.json as { error?: string };
   return json.error ?? "Could not save the axes.";
 }
 
@@ -507,7 +501,9 @@ export function PrioritizeMatrix({
     /** Dragged in from the "Not placed yet" list: a drop outside the matrix places nothing. */
     fromList: boolean;
   } | null>(null);
-  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One debounce per gap: nudging a second gap never drops the first one's save (KAN-18).
+  const nudges = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; point: Point }>());
+  const commitRef = useRef<(gapId: string, point: Point) => Promise<void>>(async () => undefined);
   const autoPlaced = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
@@ -530,8 +526,9 @@ export function PrioritizeMatrix({
 
   // Gaps new to this scope (or to these axes) get a first placement automatically.
   useEffect(() => {
-    // With AI off nothing is placed for you: unplaced gaps wait for a person.
-    if (!ai || autoPlaced.current || unplaced.length === 0 || !mayPrioritize) return;
+    // With AI off nothing is placed for you: unplaced gaps wait for a person. A Room
+    // slide shows the matrix; it never starts an S8 run of its own (KAN-18).
+    if (!ai || autoPlaced.current || unplaced.length === 0 || !mayPrioritize || isPresenting()) return;
     autoPlaced.current = true;
     setBusy("Placing new gaps on the matrix…");
     void runPrioritization({
@@ -577,10 +574,7 @@ export function PrioritizeMatrix({
 
   async function commit(gapId: string, point: Point) {
     setMessage(null);
-    const res = await fetch("/api/plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/plan", {
         action: "move_placement",
         gap_id: gapId,
         x_axis: xAxis.id,
@@ -589,9 +583,8 @@ export function PrioritizeMatrix({
         y: Math.round(point.y),
         actor_name: identity.actor_name,
         actor_function: identity.actor_function,
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as {
+      });
+    const json = res.json as {
       error?: string;
       placement?: { band: Band; validated: boolean };
     };
@@ -607,6 +600,22 @@ export function PrioritizeMatrix({
     setBands((current) => ({ ...current, [gapId]: json.placement! }));
     refresh();
   }
+
+  useEffect(() => {
+    commitRef.current = commit;
+  });
+
+  // Leaving the page saves any nudge still waiting on its debounce.
+  useEffect(() => {
+    const waiting = nudges.current;
+    return () => {
+      for (const [gapId, { timer, point }] of waiting) {
+        clearTimeout(timer);
+        void commitRef.current(gapId, point);
+      }
+      waiting.clear();
+    };
+  }, []);
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
     if (!mayPrioritize || event.button !== 0) return;
@@ -706,8 +715,13 @@ export function PrioritizeMatrix({
     };
     setSelectedId(gapId);
     setPositions((current) => ({ ...current, [gapId]: next }));
-    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
-    nudgeTimer.current = setTimeout(() => void commit(gapId, next), 450);
+    const pending = nudges.current.get(gapId);
+    if (pending) clearTimeout(pending.timer);
+    const timer = setTimeout(() => {
+      nudges.current.delete(gapId);
+      void commit(gapId, next);
+    }, 450);
+    nudges.current.set(gapId, { timer, point: next });
   }
 
   async function resuggest() {

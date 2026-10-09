@@ -9,6 +9,7 @@ import { listDecisionExamples } from "@/modules/kernel/decision-examples";
 import { agreementSeries } from "@/modules/kernel/learning-agreement";
 import { listPromptRevisions, proposePromptRevision, REVISION_STAGES, activatePromptRevision, rollbackPromptRevision, revisionHistory } from "@/modules/kernel/prompt-revisions";
 import { stageErrorResponse } from "@/app/api/modules/ai-off";
+import { readJsonBody } from "@/modules/auth/api-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const denied = await ownerGate(); if (denied) return denied;
   try {
-    const body = proposalSchema.parse(await request.json());
+    const body = proposalSchema.parse(await readJsonBody(request));
     const access = await ownerAccess();
     return await withAdminWorkspace(async workspace => {
       if (body.action === "evaluate") return NextResponse.json({ evaluation: await evaluatePromptRevision({revision_id:body.revision_id,workspace_id:workspace.id,actor:access.actor}) });

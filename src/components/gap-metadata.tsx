@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { GapMetadata } from "@/lib/iegp/types";
 import { cn } from "@/lib/utils";
+import { postJson } from "@/lib/post-json";
 
 export function hasGapMetadata(metadata: GapMetadata) {
   return Boolean(
@@ -105,10 +106,7 @@ export function GapDetailsEditor({
   async function save() {
     setPending(true);
     setMessage(null);
-    const res = await fetch("/api/plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/plan", {
         action: "set_gap_metadata",
         gap_id: gapId,
         metadata: {
@@ -117,9 +115,8 @@ export function GapDetailsEditor({
           regional_nuances: form.regional_nuances,
           notes: form.notes,
         },
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string; metadata?: GapMetadata };
+      });
+    const json = res.json as { error?: string; metadata?: GapMetadata };
     setPending(false);
     if (!res.ok || !json.metadata) {
       setMessage({ tone: "error", text: json.error ?? "Could not save the details." });

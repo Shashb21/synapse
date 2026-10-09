@@ -7,6 +7,7 @@ import {
   type CoveragePairCardModel,
 } from "@/components/accuracy/coverage-pair-card";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 type AssistSuggestion = {
   overall: "covers" | "partial" | "none" | "unknown";
@@ -61,16 +62,12 @@ export function CoverageQueue({
     setAssistError(null);
     setSuggestion(null);
     startAssist(async () => {
-      const res = await fetch("/api/accuracy/coverage/assist", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await postJson("/api/accuracy/coverage/assist", {
           workspace_id: workspaceId,
           gap_id: current.gap_id,
           tactic_id: current.tactic_id,
-        }),
-      });
-      const body = (await res.json()) as {
+        });
+      const body = res.json as {
         ok?: boolean;
         error?: string;
         mode?: string;

@@ -20,6 +20,7 @@ import {
 import { DOMAIN_LABELS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
 import { cn } from "@/lib/utils";
+import { postJson } from "@/lib/post-json";
 
 export type PickableGap = {
   gap_id: string;
@@ -34,13 +35,9 @@ export type PickableGap = {
 const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
 
 async function postAction(body: Record<string, unknown>): Promise<string | null> {
-  const res = await fetch("/api/iegp", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await postJson("/api/iegp", body);
   if (res.ok) return null;
-  return ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not save.";
+  return (res.json as { error?: string }).error ?? "Could not save.";
 }
 
 /**

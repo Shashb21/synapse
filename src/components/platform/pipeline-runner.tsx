@@ -11,24 +11,21 @@ import { SOURCE_TYPES, SOURCE_TYPE_LABELS, type SourceType } from "@/lib/iegp/en
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { CUSTOMER_STAGE_TARGET, type StageTarget } from "@/components/platform/run-stage-button";
+import { postJson } from "@/lib/post-json";
 
 type StageStep = { stage: string; label: string; input?: Record<string, unknown> };
 
 type StepState = { status: "idle" | "running" | "ok" | "error"; detail?: string };
 
 async function runOne(step: StageStep, identity: ActionIdentity, target: StageTarget) {
-  const res = await fetch(target.endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  const res = await postJson(target.endpoint, {
       stage: step.stage,
       input: step.input ?? {},
       actor_name: identity.actor_name,
       actor_function: identity.actor_function,
       ...(target.workspace_id ? { workspace_id: target.workspace_id } : {}),
-    }),
-  });
-  const json = (await res.json().catch(() => ({}))) as { error?: string; summary?: string; mode?: string };
+    });
+  const json = res.json as { error?: string; summary?: string; mode?: string };
   if (!res.ok) throw new Error(json.error ?? `${step.stage} failed (HTTP ${res.status})`);
   return json;
 }

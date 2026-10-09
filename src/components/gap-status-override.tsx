@@ -22,6 +22,7 @@ import {
   type MappedGapStatus,
 } from "@/lib/iegp/enums";
 import type { GapStatusOverride as GapStatusOverrideRecord } from "@/lib/iegp/types";
+import { postJson } from "@/lib/post-json";
 
 export function GapStatusDisagreement({
   computedStatus,
@@ -99,17 +100,13 @@ export function GapStatusOverride({
       return;
     }
     setPending(true);
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/iegp", {
         action: "override_gap_status",
         gap_id: gapId,
         status: nextStatus,
         reason: why,
-      }),
-    });
-    const json = (await res.json()) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Override failed");
@@ -120,15 +117,11 @@ export function GapStatusOverride({
 
   async function clearOverride() {
     setPending(true);
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/iegp", {
         action: "clear_gap_status_override",
         gap_id: gapId,
-      }),
-    });
-    const json = (await res.json()) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Clear failed");

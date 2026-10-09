@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiErrorResponse, readJsonBody } from "@/modules/auth/api-guard";
 import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
 import { isAdminAccount } from "@/modules/auth/accounts";
 import { PasswordLoginError, signInWithPassword } from "@/modules/auth/password-login";
@@ -15,7 +16,12 @@ const STATUS: Record<PasswordLoginError["code"], number> = { incorrect: 401, loc
  * failure in a row locks the account for 15 minutes (423).
  */
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    return apiErrorResponse(error);
+  }
   const next = typeof body.next === "string" ? safeNext(body.next, "") : "";
   try {
     const session = await signInWithPassword({
