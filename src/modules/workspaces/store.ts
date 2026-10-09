@@ -193,7 +193,7 @@ export function workspaceCreationLimit(env: Record<string, string | undefined> =
 export class WorkspaceLimitError extends Error {
   constructor(readonly limit: number) {
     super(
-      `You have already created ${limit} workspace${limit === 1 ? "" : "s"}, the most one person can. Delete one you no longer need, or ask your administrator to raise the limit.`,
+      `One person can create up to ${limit} workspace${limit === 1 ? "" : "s"}, and you have reached that limit. Delete one you no longer need, or ask your administrator to raise the limit.`,
     );
     this.name = "WorkspaceLimitError";
   }

@@ -284,7 +284,8 @@ describe("KAN-20: provider calls time out", () => {
     expect(error).toBeInstanceOf(ProviderError);
     expect(error.kind).toBe("unavailable");
     expect(error.info.no_response).toBe("timeout");
-    expect(error.message).toMatch(/did not answer within 0 seconds|did not answer within/);
+    expect(error.message).toMatch(/did not answer within \d+ ms,/);
+    expect(error.message).not.toMatch(/within 0 seconds/);
   });
 
   it("a connection failure is 'unavailable' too, and never echoes the key", async () => {
@@ -354,7 +355,7 @@ describe("KAN-20: per-person workspace creation limit", () => {
     await createWorkspace({ name: "Limit two", owner });
     const error = await assertCanCreateWorkspace(owner, 2).catch((e) => e);
     expect(error).toBeInstanceOf(WorkspaceLimitError);
-    expect(error.message).toMatch(/already created 2 workspaces/);
+    expect(error.message).toMatch(/create up to 2 workspaces, and you have reached that limit/);
   });
 
   it("the create-workspace API answers 429 with the plain message", async () => {
@@ -373,6 +374,15 @@ describe("KAN-20: per-person workspace creation limit", () => {
     expect(refused.status).toBe(429);
     const json = (await refused.json()) as { error: string; code: string };
     expect(json.code).toBe("workspace_limit");
-    expect(json.error).toMatch(/already created 1 workspace,/);
+    expect(json.error).toMatch(/create up to 1 workspace, and you have reached that limit/);
+  });
+});
+
+describe("KAN-20 QA: timeout wording", () => {
+  it("never says 0 seconds", async () => {
+    const { describeTimeout } = await import("@/modules/llm/provider-error");
+    expect(describeTimeout(1)).toBe("1 ms");
+    expect(describeTimeout(1000)).toBe("1 second");
+    expect(describeTimeout(120000)).toBe("120 seconds");
   });
 });

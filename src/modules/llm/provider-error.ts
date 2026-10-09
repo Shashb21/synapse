@@ -101,7 +101,7 @@ function ownerMessage(info: ProviderErrorInfo, kind: ProviderErrorKind): string 
         : `${name} is rate-limiting this account (HTTP 429). Wait a minute and run the stage again, or raise the account's rate limit.${said}`;
     case "unavailable":
       if (info.no_response === "timeout") {
-        return `${name} did not answer within ${Math.round(providerTimeoutMs() / 1000)} seconds, so the request was stopped. Run the stage again in a few minutes, or switch its route in /admin/control. The limit is SYNAPSE_LLM_TIMEOUT_MS.`;
+        return `${name} did not answer within ${describeTimeout(providerTimeoutMs())}, so the request was stopped. Run the stage again in a few minutes, or switch its route in /admin/control. The limit is SYNAPSE_LLM_TIMEOUT_MS.`;
       }
       if (info.no_response === "network") {
         return `Synapse could not reach ${name}. Check the server's network connection, then run the stage again.`;
@@ -169,4 +169,11 @@ export async function fetchProvider(
       no_response: timedOut ? "timeout" : "network",
     });
   }
+}
+
+/** "120 seconds", "1 second", or "250 ms" for a sub-second limit (never "0 seconds"). */
+export function describeTimeout(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  const seconds = Math.round(ms / 1000);
+  return `${seconds} second${seconds === 1 ? "" : "s"}`;
 }
