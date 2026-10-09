@@ -369,3 +369,15 @@ export async function firstPartialGap(request: APIRequestContext) {
 export async function validateBandHigh(request: APIRequestContext, gap_id: string, rationale: string) {
   return planAction(request, { action: "validate_band", gap_id, band: "high", rationale });
 }
+
+/**
+ * The id of the gap whose card link on Gaps contains `name`. Ids are never
+ * reissued after a reset (KAN-15), so specs look them up instead of assuming GAP-001.
+ */
+export async function gapIdNamed(page: Page, name: string): Promise<string> {
+  await page.goto("/?place=gaps");
+  const link = page.locator('a[href^="/gaps/GAP-"]').filter({ hasText: name }).first();
+  await link.waitFor();
+  const href = (await link.getAttribute("href")) ?? "";
+  return href.split("/").pop() ?? "";
+}

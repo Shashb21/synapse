@@ -256,6 +256,8 @@ async function handleAction(request: Request): Promise<Response> {
   const actor_name = identity.actor.name;
   const actor_function = identity.actor.function;
   try {
+    // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
+    let createdId: string | undefined;
     switch (body.action) {
       case "reset":
         // Reset to blank: empties the plan and clears the workspace's demo flag.
@@ -491,7 +493,7 @@ async function handleAction(request: Request): Promise<Response> {
         });
         break;
       case "record_missed_tactic":
-        await recordMissedTactic({
+        createdId = await recordMissedTactic({
           name: body.name,
           type: body.type as never,
           description: body.description,
@@ -636,7 +638,7 @@ async function handleAction(request: Request): Promise<Response> {
         break;
       case "create_gap":
         if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
-        await createGap({
+        createdId = await createGap({
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
@@ -780,7 +782,7 @@ async function handleAction(request: Request): Promise<Response> {
         break;
       case "create_addressed_gap":
         if (!isEvidenceDomain(body.domain)) return NextResponse.json({ error: DOMAIN_REQUIRED }, { status: 400 });
-        await createAddressedGap({
+        createdId = await createAddressedGap({
           name: body.name,
           statement: body.statement,
           domain: (body.domain || undefined) as EvidenceDomain | undefined,
@@ -907,7 +909,7 @@ async function handleAction(request: Request): Promise<Response> {
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
     await fileGateEdit(body, actor_name, actor_function);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
     return apiErrorResponse(error, "Failed");
   }

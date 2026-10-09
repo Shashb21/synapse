@@ -16,17 +16,21 @@ async function setAi(request: APIRequestContext, enabled: boolean) {
 test.describe.configure({ mode: "serial" });
 
 test.describe("Place by hand", () => {
+  let gapIds: string[] = [];
   test.beforeAll(async ({ request }) => {
     // A blank plan with two hand-made, confirmed Open gaps and no placement rows yet.
     await setAi(request, false);
     await iegpAction(request, { action: "reset" });
+    // Gap ids are never reissued after a reset (KAN-15), so use the ids the server hands back.
+    gapIds = [];
     for (const [name, statement] of [
       ["Hand gap one", "No comparative persistence data versus the standard of care in routine practice."],
       ["Hand gap two", "No caregiver burden evidence for the HTA submission in the EU5."],
     ]) {
-      await iegpAction(request, { action: "create_gap", name, statement, domain: "unmet_need" });
+      const created = await iegpAction(request, { action: "create_gap", name, statement, domain: "unmet_need" });
+      gapIds.push(String(created.id));
     }
-    for (const gap_id of ["GAP-001", "GAP-002"]) {
+    for (const gap_id of gapIds) {
       await iegpAction(request, { action: "validate_gap", gap_id });
     }
     await planAction(request, { action: "save_scope_axes", scope: "all", x_axis: "feasibility", y_axis: "payer_value" });
@@ -71,7 +75,7 @@ test.describe("Place by hand", () => {
     const res = await page.request.post("/api/plan", {
       data: {
         action: "set_placement",
-        gap_id: "GAP-001",
+        gap_id: gapIds[0],
         x_axis: "feasibility",
         y_axis: "payer_value",
         y_score: 150,
@@ -154,13 +158,13 @@ test.describe("Place by hand", () => {
 
   // Owner feedback (KAN-52): drag a gap from the list onto the matrix; where it lands sets its scores.
   test("a gap dragged from the list onto the matrix is placed where it is dropped", async ({ page, request }) => {
-    await iegpAction(request, {
+    const created = await iegpAction(request, {
       action: "create_gap",
       name: "Drag gap three",
       statement: "No real-world outcomes in patients over 75 for the German dossier.",
       domain: "unmet_need",
     });
-    await iegpAction(request, { action: "validate_gap", gap_id: "GAP-003" });
+    await iegpAction(request, { action: "validate_gap", gap_id: String(created.id) });
     await page.goto("/?place=plan&setting=all");
     const unplaced = page.getByRole("region", { name: "Gaps not placed yet" });
     const item = unplaced.getByTestId("unplaced-gap").filter({ hasText: "Drag gap three" });

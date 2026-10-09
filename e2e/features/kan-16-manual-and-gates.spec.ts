@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { ACTOR, iegpAction, planAction } from "../support/synapse";
+import { ACTOR, gapIdNamed, iegpAction, planAction } from "../support/synapse";
 
 /**
  * KAN-16 from a user's seat, with AI on:
@@ -33,6 +33,9 @@ async function iegpRaw(request: APIRequestContext, body: Record<string, unknown>
 }
 
 test.describe("KAN-16: manual start, server gates, restore", () => {
+  // Ids are never reissued after a reset (KAN-15): the specs use the ones the plan actually got.
+  let firstGap = "";
+  let secondGap = "";
   test.beforeAll(async ({ request }) => {
     await setAi(request, true);
     await iegpAction(request, { action: "reset" });
@@ -64,30 +67,32 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
     await expect(page.getByTestId("manual-start-ai-on")).toContainText("1 gap and 0 tactics so far.");
   });
 
-  test("the server refuses Continue to tactics until every Open gap has a validated band", async ({ request }) => {
-    await iegpAction(request, {
+  test("the server refuses Continue to tactics until every Open gap has a validated band", async ({ page, request }) => {
+    firstGap = await gapIdNamed(page, "Persistence versus standard of care");
+    const created = await iegpAction(request, {
       action: "create_gap",
       statement: "No caregiver burden evidence for the EU5 HTA submission.",
       domain: "unmet_need",
     });
-    for (const gap_id of ["GAP-001", "GAP-002"]) await iegpAction(request, { action: "validate_gap", gap_id });
+    secondGap = String(created.id);
+    for (const gap_id of [firstGap, secondGap]) await iegpAction(request, { action: "validate_gap", gap_id });
     await iegpAction(request, { action: "complete_wizard" });
 
     const early = await iegpRaw(request, { action: "unlock_tactics" });
     expect(early.status).toBe(400);
     expect(early.body.error).toMatch(/0 of 2 validated, 2 to go/);
 
-    await planAction(request, { action: "validate_band", gap_id: "GAP-001", band: "high", rationale: "Blocks the HTA dossier" });
+    await planAction(request, { action: "validate_band", gap_id: firstGap, band: "high", rationale: "Blocks the HTA dossier" });
     const half = await iegpRaw(request, { action: "unlock_tactics" });
     expect(half.status).toBe(400);
     expect(half.body.error).toMatch(/1 of 2 validated, 1 to go/);
 
-    await planAction(request, { action: "validate_band", gap_id: "GAP-002", band: "low", rationale: "Next cycle is fine" });
+    await planAction(request, { action: "validate_band", gap_id: secondGap, band: "low", rationale: "Next cycle is fine" });
     expect((await iegpRaw(request, { action: "unlock_tactics" })).status).toBe(200);
   });
 
   test("an excluded gap is listed under Set aside and restored with a rationale", async ({ page }) => {
-    await page.goto("/gaps/GAP-002");
+    await page.goto(`/gaps/${secondGap}`);
     const exclude = await openDialog(page, "Exclude gap");
     await expect(exclude.locator('select[name="exclusion_reason"]')).toHaveValue("");
     await exclude.locator('select[name="exclusion_reason"]').selectOption("outside_scope");
@@ -111,14 +116,14 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
   });
 
   test("a rejected mapping stays listed and can be lifted", async ({ page, request }) => {
-    await iegpAction(request, {
+    const tactic = await iegpAction(request, {
       action: "record_missed_tactic",
       name: "Claims persistence study",
       type: "rwe_study",
       status: "ongoing",
       evidence_question: "What is 12-month persistence?",
     });
-    await iegpAction(request, { action: "reject_mapping", gap_id: "GAP-001", tactic_id: "TAC-001", rationale: "Wrong population" });
+    await iegpAction(request, { action: "reject_mapping", gap_id: firstGap, tactic_id: String(tactic.id), rationale: "Wrong population" });
     await page.goto("/mappings");
     const section = page.getByTestId("rejected-mappings");
     await expect(section).toContainText("Rejected mappings (1)");
