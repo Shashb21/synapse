@@ -155,7 +155,12 @@ describe("isolated extraction-pipeline experiments", () => {
           output_shape: { valid: false }, errors: [errors[0].output_error] }) }),
       ]);
       expect(journal).toMatchObject({ merge_state: "reserved", status_state: "reserved", final_response: null,
-        prepared_merge: null, preparation_token: null });
+        prepared_merge: expect.objectContaining({ run_id: journal.merge_operation_id }), preparation_token: null });
+      const evidence = experiment.run_evidence?.find(row => row.call_id === journal.merge_operation_id);
+      expect(evidence?.execution_identity.completions).toHaveLength(3);
+      expect(evidence?.execution_identity.completions.every(row => row.status === "succeeded" && !!row.system_fingerprint && !!row.user_fingerprint)).toBe(true);
+      expect(new Set(evidence?.execution_identity.completions.map(row => row.completion_id)).size).toBe(3);
+      expect(journal.prepared_merge).not.toHaveProperty("judgment");
       expect((await listAccuracyRuns(experiment.workspace_id)).map(run => run.call_kind).sort()).toEqual(["inventory_extract", "need_extract"]);
       expect(experiment.calls.filter(call => call.call_kind === "status_derive")).toEqual([]);
       expect(experiment.calls.filter(call => call.call_kind !== "merge_dedupe").map(call => call.call_kind).sort())
@@ -206,7 +211,12 @@ describe("isolated extraction-pipeline experiments", () => {
       expect(judgeCalls).toBe(1);
       const [journal] = await accuracyDb().select().from(t.accuracyResumeJournals).where(eq(t.accuracyResumeJournals.workspace_id, experiment.workspace_id));
       expect(journal).toMatchObject({ merge_state: "reserved", status_state: "reserved", final_response: null,
-        prepared_merge: null, preparation_token: null });
+        prepared_merge: expect.objectContaining({ run_id: journal.merge_operation_id }), preparation_token: null });
+      const evidence = experiment.run_evidence?.find(row => row.call_id === journal.merge_operation_id);
+      expect(evidence?.execution_identity.completions).toEqual([expect.objectContaining({ status: "failed",
+        purpose: "merge_dedupe:judge:a1:b1", system_fingerprint: expect.any(String), user_fingerprint: expect.any(String),
+        provider_id: "openai", provider_revision: null })]);
+      expect(journal.prepared_merge).not.toHaveProperty("judgment");
       expect(experiment.calls.filter(call => call.call_kind === "merge_dedupe")).toEqual([
         expect.objectContaining({ call_id: journal.merge_operation_id, version_index: 0, output: null, output_error: failure.message,
           input: { workspace_id: experiment.workspace_id } }),

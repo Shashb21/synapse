@@ -257,6 +257,8 @@ export type RunHandle = {
   usageSummary(): { token_usage: TokenUsage; cost_usd: number };
   step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T>;
   note(name: string, data?: unknown, detail?: string): void;
+  /** Persist completion identity before/after provider execution when a run is already open. */
+  checkpointExecution?(): Promise<void>;
   steps(): RunStep[];
 };
 

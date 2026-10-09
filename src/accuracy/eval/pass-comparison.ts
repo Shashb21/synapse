@@ -6,8 +6,9 @@ import type { TokenUsage, RunStatus } from "@/accuracy/kernel/contracts";
 import type { ExperimentItemOutcome, ExperimentVersionEvaluation } from "./experiment-gold";
 import { experimentPackFingerprint } from "./experiment-gold";
 import { mustFindForPack, type ReferenceMustFindTargets } from "./reference-gold";
+import { executionCompatibility, type ExecutionEvidence } from "@/accuracy/kernel/execution-identity";
 
-export const PASS_COMPARISON_EVALUATOR_VERSION = "pass-comparison-v1";
+export const PASS_COMPARISON_EVALUATOR_VERSION = "pass-comparison-v2";
 export type ComparisonRun = {
   call_id: string;
   module_id: string;
@@ -18,6 +19,7 @@ export type ComparisonRun = {
   cost_usd: number | null;
   token_usage: TokenUsage | null;
   events: AgentEvent[];
+  execution_identity?: ExecutionEvidence | null;
 };
 export type ComparisonEvidence = {
   experiment: ExperimentRecord;
@@ -58,6 +60,10 @@ export type ComparedCall = {
   lineage_key: string;
   runtime: ComparisonRun | null;
   versions: ComparedVersion[];
+  requested_revision_passes: number | null;
+  terminal_iteration: number | null;
+  selected_iteration: number | null;
+  quality_basis: "selected_raw_snapshot" | "retained_output" | "unavailable";
   full_call_metering: ComparisonMetering;
 };
 export type ComparedConditionTotals = ComparisonMetering & {
@@ -231,6 +237,10 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
     if (!runtime) {
       unknown.push(`Missing runtime for ${lineage_key}.`);
     } else {
+      if (executionCompatibility(runtime.execution_identity) === null) unknown.push(`Missing execution code/prompt identity for ${lineage_key}.`);
+      if (runtime.execution_identity?.completions.some(row => row.status !== "succeeded")) {
+        unknown.push(`Failed or interrupted completion evidence for ${lineage_key}.`);
+      }
       if (runtime.status !== "ok") ineligible.push(`Runtime ${lineage_key} is ${runtime.status}.`);
       if (runtime.cost_usd === null || runtime.duration_ms === null || runtime.token_usage === null) {
         unknown.push(`Missing runtime metering for ${lineage_key}.`);
@@ -245,9 +255,28 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
       ineligible.push(`Missing or extra requested versions for ${lineage_key}.`);
     }
     const events = runtime?.events ?? [];
-    const judgment = events.find(event => event.event_type === "judgment");
-    if (extraction && (!judgment || judgment.event_type !== "judgment" || judgment.selected_iteration !== pass_count)) {
-      unknown.push(`Missing matching terminal judgment for ${lineage_key}.`);
+    const snapshots = events.filter(event => event.event_type === "snapshot");
+    const critiques = events.filter(event => event.event_type === "critique");
+    const terminal_iteration = extraction
+      ? snapshots.length ? Math.max(...snapshots.map(event => event.iteration)) : null
+      : rows.at(-1)?.version_index ?? null;
+    if (extraction && runtime && (terminal_iteration !== pass_count
+      || snapshots.length > rows.length || critiques.length > rows.length
+      || snapshots.some(event => !rows.some(row => row.version_index === event.iteration))
+      || critiques.some(event => !rows.some(row => row.version_index === event.iteration)))) {
+      ineligible.push(`Produced depth disagrees with requested versions for ${lineage_key}.`);
+    }
+    const judgments = events.filter(event => event.event_type === "judgment");
+    const judgment = judgments[0];
+    const exactJudgment = judgments.length === 1 && Number.isInteger(judgment.selected_iteration)
+      && judgment.selected_iteration >= 0 && typeof judgment.reason === "string" && judgment.reason.trim().length > 0
+      && rows.filter(row => row.version_index === judgment.selected_iteration).length === 1
+      && snapshots.filter(event => event.iteration === judgment.selected_iteration).length === 1
+      && critiques.filter(event => event.iteration === judgment.selected_iteration).length === 1;
+    const selected_iteration = extraction ? exactJudgment ? judgment.selected_iteration : null : terminal_iteration;
+    const quality_basis = extraction ? exactJudgment ? "selected_raw_snapshot" : "unavailable" : "retained_output";
+    if (extraction && !exactJudgment) {
+      unknown.push(`Missing or invalid exact selected judgment for ${lineage_key}.`);
     }
     let cumulative_metering = emptyMetering();
     const versions: ComparedVersion[] = [];
@@ -279,8 +308,12 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
         event.event_type === "snapshot" && event.iteration === row.version_index) as AgentSnapshotEvent | undefined;
       const critique = events.find(event =>
         event.event_type === "critique" && event.iteration === row.version_index) as AgentCritiqueEvent | undefined;
-      if (extraction && (!snapshot || !critique || critique.score === null)) {
+      if (extraction && (snapshots.filter(event => event.iteration === row.version_index).length !== 1
+        || critiques.filter(event => event.iteration === row.version_index).length !== 1 || !critique || critique.score === null)) {
         unknown.push(`Missing assessment for ${lineage_key} V${row.version_index}.`);
+      }
+      if (extraction && snapshot && canonicalComparisonJson(snapshot.output) !== canonicalComparisonJson(row.output)) {
+        ineligible.push(`Retained raw output disagrees with snapshot for ${lineage_key} V${row.version_index}.`);
       }
       const prior = versions.at(-1);
       const initial = versions[0];
@@ -298,6 +331,9 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
         }
       }
       if (critique) {
+        if (extraction && critique.structural_fate?.status !== "assessed") {
+          unknown.push(`Structural disposition evidence is unavailable in ${lineage_key} V${row.version_index}.`);
+        }
         if (critique.completeness.risk_level === "check_failed" || critique.completeness.unchecked_block_ids.length) {
           unknown.push(`Incomplete completeness assessment in ${lineage_key} V${row.version_index}.`);
         }
@@ -344,7 +380,8 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
       latency_ms: runtime.duration_ms ?? 0,
       token_usage: runtime.token_usage ?? emptyMetering().token_usage,
     } : emptyMetering();
-    return { call_id, call_kind: first.call_kind, lineage_key, runtime, versions, full_call_metering };
+    return { call_id, call_kind: first.call_kind, lineage_key, runtime, versions, full_call_metering,
+      requested_revision_passes: extraction ? pass_count : null, terminal_iteration, selected_iteration, quality_basis };
   });
   // Request scope identifies missing pipeline stages even when another source completed.
   const request = record(condition.original_request_identity);
@@ -373,7 +410,7 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
   const exactGoldKeys = new Set<string>();
   const exactMustFindKeys = new Set<string>();
   for (const call of calls) {
-    const final = call.versions.at(-1);
+    const final = call.versions.find(version => version.version_index === call.selected_iteration);
     metering = addMetering(metering, call.full_call_metering);
     summed_call_outcomes = addCounts(summed_call_outcomes, final?.counts ?? emptyCounts());
     if (summed_call_must_find_outcomes !== null) {
@@ -412,6 +449,7 @@ function compareCondition(evidence: ComparisonEvidence, targets: ReferenceMustFi
       module_id: call.runtime?.module_id,
       module_version: call.runtime?.module_version,
       route: call.runtime?.route,
+      execution_identity: executionCompatibility(call.runtime?.execution_identity),
     })).sort((a, b) => a.lineage_key.localeCompare(b.lineage_key)),
   };
   return {

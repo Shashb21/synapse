@@ -35,6 +35,8 @@ function PassCallDetail({ condition, call, standalone = false }: { condition: Co
   return <details className="border-t border-border py-2">
     <summary className="cursor-pointer text-sm font-medium break-all">{standalone ? "Standalone" : `${condition.pass_count ?? "Unknown"} pass`} · {call.call_kind} · {call.call_id}</summary>
     <p className="mt-2 text-sm">Module: {unknown(call.runtime?.module_id)} / {unknown(call.runtime?.module_version)} · Cost: {money(call.runtime?.cost_usd)} · Latency: {milliseconds(call.runtime?.duration_ms)}</p>
+    <p className="mt-2 text-sm">Requested revisions: {unknown(call.requested_revision_passes)} · Terminal: {call.terminal_iteration == null ? "Unknown" : `V${call.terminal_iteration}`} · Selected: {call.selected_iteration == null ? "Unknown" : `V${call.selected_iteration}`}</p>
+    <p className="text-sm">Quality: {call.quality_basis === "selected_raw_snapshot" ? "selected raw snapshot" : call.quality_basis === "retained_output" ? "retained output" : "Unknown"} · Usage: entire run</p>
     <div className="overflow-x-auto"><table aria-label="Per-call version outcomes" className="mt-2 w-full min-w-[650px] border-collapse text-left text-sm">
       <caption className="mb-1 text-left">Per-call version outcomes</caption>
       <thead><tr className="border-b border-border"><th scope="col" className="p-2">Version</th><th scope="col" className="p-2">Found / partial / missed / wrong</th><th scope="col" className="p-2">Must-find keys</th><th scope="col" className="p-2">From previous</th><th scope="col" className="p-2">From V0</th><th scope="col" className="p-2">Regressions</th></tr></thead>
@@ -47,7 +49,7 @@ function PassCallDetail({ condition, call, standalone = false }: { condition: Co
         <tbody>{version.outcomes.map((outcome, index) => <tr key={index} className="border-b border-border align-top"><th scope="row" className="p-2">{outcome.outcome}</th><td className="p-2 break-all">{unknown(outcome.gold_item_key)}</td><td className="p-2">{unknown(outcome.model_item_index)}</td><td className="p-2">{outcome.reason}</td></tr>)}</tbody>
       </table></div> : <p className="mt-2">No retained item outcomes for this version.</p>}
     </details>)}
-    <EvidenceJson label="Exact critic, judge, route and version evidence" value={{ route: call.runtime?.route, events: call.runtime?.events, versions: call.versions }} />
+    <EvidenceJson label="Exact critic, judge, route and version evidence" value={{ requested_revision_passes: call.requested_revision_passes, terminal_iteration: call.terminal_iteration, selected_iteration: call.selected_iteration, quality_basis: call.quality_basis, route: call.runtime?.route, execution_identity: call.runtime?.execution_identity ?? null, events: call.runtime?.events, versions: call.versions }} />
   </details>;
 }
 

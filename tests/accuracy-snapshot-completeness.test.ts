@@ -19,6 +19,16 @@ function completion(response: Record<string, unknown>, onPrompt?: (prompt: strin
 }
 
 describe("snapshot completeness inspector", () => {
+  it.each(["partly_resolved", "invalid"] as const)("preserves supported omission %s evidence directly", async outcome => {
+    const prior: SuspectedOmission = { ...finding, issue_id: "prior", importance: "important" };
+    const disposition = { issue_id: "prior", outcome, reason: outcome === "invalid" ? "Prior interpretation was invalid" : "Current gap covers only part of the need",
+      ...(outcome === "partly_resolved" ? { matched_item_ref: "gap-a" } : {}) };
+    const assessed = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [prior],
+      complete: completion({ suspected_omissions: [], prior_issue_resolutions: [disposition] }) });
+    expect(assessed.prior_issue_resolutions).toEqual([disposition]);
+    expect(assessed.suspected_omissions).toEqual(outcome === "invalid" ? [] : [prior]);
+    expect(assessed.risk_level).toBe(outcome === "invalid" ? "none_detected" : "important");
+  });
   it("inspects every supplied block and item even when an item cites both blocks", async () => {
     let prompt = "";
     const result = await inspectSnapshotCompleteness({ blocks, items, prior_open_issues: [], complete: completion({ suspected_omissions: [finding], prior_issue_resolutions: [] }, (text) => { prompt = text; }) });

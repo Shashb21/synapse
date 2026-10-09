@@ -246,6 +246,14 @@ describe("atomic omission decisions", () => {
     await accuracyDb().insert(t.accuracyModuleRuns).values({ ...oldRun, id: newer, finished_at: "2099-01-01T00:00:00.000Z" });
     await accuracyDb().insert(t.accuracyExtractionBatches).values({ id: newId("batch"), workspace_id: f.workspace_id, source_file_id: f.source_file_id,
       requested_kinds: ["need_extract"], run_ids: [newer], created_claim_ids: [], drafts_persisted: true, created_at: nowIso() });
+    // A persisted run without a completed inspection cannot supersede older findings.
+    expect((await store.getOmissionReviewsForRun(f))?.current).toBe(true);
+    await appendAgentEvent({ workspace_id: f.workspace_id, run_id: newer, event: {
+      event_type: "critique", iteration: 3, score: 1, issues: [], completeness: {
+        risk_level: "none_detected", checked_block_ids: [f.block_id], unchecked_block_ids: [],
+        suspected_omissions: [], prior_issue_resolutions: [] }, latency_ms: 0, cost_usd: 0,
+      token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    } });
     await expect(store.applyOmissionAction(request(f))).rejects.toMatchObject({ status: 409 });
     const { GET } = await import("@/app/api/accuracy/omissions/route");
     const response = await GET(new Request(`http://localhost/api/accuracy/omissions?workspace_id=${f.workspace_id}&run_id=${f.run_id}`));

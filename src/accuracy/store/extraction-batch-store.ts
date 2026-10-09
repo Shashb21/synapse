@@ -150,7 +150,7 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
     const inputs = implementation.manifest.id === mergeDedupeModule.manifest.id && !completed
       ? await withAssemblyPreparation(() => captureMergeInputs(args.workspace_id)) : undefined;
     const cached = journal.prepared_merge as PreparedAccuracyMerge | null;
-    const prepared = inputs && cached && cached.judgment.revision === inputs.revision
+    const prepared = inputs && cached && cached.judgment?.revision === inputs.revision
       && cached.judgment.stub === isTestStub()
       && cached.module_id === implementation.manifest.id && cached.module_version === implementation.manifest.version
       && cached.workspace_id === args.workspace_id && cached.org_id === args.merge_context.org_id
@@ -165,7 +165,13 @@ export async function resumeExtractionBatch<T>(args: { workspace_id: string; sou
     if (reservation.inputs && !prepared) {
       args.onMergePreparation?.(reservation.journal);
       prepared = await withAssemblyPreparation(() => prepareAccuracyMerge({ ...args.merge_context, workspace_id: args.workspace_id,
-        run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs!, prior: reservation.prior }));
+        run_id: reservation.journal.merge_operation_id, inputs: reservation.inputs!, prior: reservation.prior,
+        onEvidence: async evidence => {
+          // The same lease fences audit checkpoints; evidence without a judgment is never reusable authority.
+          const saved = await accuracyDb().update(t.accuracyResumeJournals).set({ prepared_merge: evidence, updated_at: nowIso() })
+            .where(and(eq(t.accuracyResumeJournals.id, reservation.journal.id), eq(t.accuracyResumeJournals.preparation_token, token))).returning();
+          if (!saved.length) throw new ExtractionBatchError("resume_in_progress", "Resume reservation was superseded.");
+        } }));
       // Successful paid judgment survives an apply rollback. CAS fences lease takeover.
       const saved = await accuracyDb().update(t.accuracyResumeJournals).set({ prepared_merge: prepared, updated_at: nowIso() })
         .where(and(eq(t.accuracyResumeJournals.id, reservation.journal.id), eq(t.accuracyResumeJournals.preparation_token, token))).returning();
