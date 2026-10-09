@@ -6,6 +6,8 @@ import { AdminMain, AdminWorkspaceBar, PageIntro } from "@/components/admin/admi
 import { Badge } from "@/components/ui/badge";
 import { STAGES, type StageId } from "@/modules/kernel/contracts";
 import { getRun } from "@/modules/kernel/observability";
+import { listLlmCalls } from "@/modules/kernel/llm-calls";
+import { LlmCallList, LlmTotalsLine } from "@/components/admin/llm-calls";
 import type { AgenticRound } from "@/modules/kernel/agentic";
 import { UnknownWorkspaceError, withAdminWorkspace } from "@/modules/workspaces/admin-context";
 
@@ -17,6 +19,12 @@ function Json({ value }: { value: unknown }) {
       {JSON.stringify(value, null, 2)}
     </pre>
   );
+}
+
+/** The model call a trace step names (KAN-91), if any. */
+function llmCallIdOf(data: unknown): string | null {
+  const id = data && typeof data === "object" ? (data as { llm_call_id?: unknown }).llm_call_id : null;
+  return typeof id === "string" ? id : null;
 }
 
 export default async function RunDetailPage({
@@ -40,6 +48,7 @@ export default async function RunDetailPage({
   });
   if (!found?.run) notFound();
   const { workspace, run } = found;
+  const calls = await listLlmCalls(run.id);
   const exchanges =
     (run.steps.find((step) => step.name === "exchanges")?.data as AgenticRound[] | undefined) ?? [];
 
@@ -86,6 +95,11 @@ export default async function RunDetailPage({
             </div>
           </dl>
           {run.error ? <p className="mt-2 text-[12px] text-destructive">{run.error}</p> : null}
+        </article>
+
+        <article className="border border-border bg-card p-3 rounded-lg md:col-span-2" data-testid="run-llm-totals">
+          <h2 className="text-[12px] font-semibold text-foreground">Model calls</h2>
+          <LlmTotalsLine calls={calls} />
         </article>
 
         <article className="border border-border bg-card p-3 rounded-lg">
@@ -181,6 +195,8 @@ export default async function RunDetailPage({
         </section>
       ) : null}
 
+      <LlmCallList calls={calls} />
+
       <section className="mt-6 grid gap-2">
         <h2 className="text-[13px] font-semibold text-foreground">Steps</h2>
         {run.steps.length === 0 ? (
@@ -196,6 +212,11 @@ export default async function RunDetailPage({
                   </span>
                 </div>
                 {step.detail ? <p className="mt-1 text-[11px] text-muted-foreground">{step.detail}</p> : null}
+                {llmCallIdOf(step.data) ? (
+                  <a href={`#${llmCallIdOf(step.data)}`} className="mt-1 inline-block text-[11px] text-muted-foreground">
+                    Model call {llmCallIdOf(step.data)}
+                  </a>
+                ) : null}
                 <details className="mt-2">
                   <summary className="cursor-pointer text-[11px] text-muted-foreground">Payload</summary>
                   <div className="mt-2">

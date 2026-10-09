@@ -5,6 +5,7 @@ import * as t from "./schema";
 import { nowIso } from "./ids";
 import { STAGES, STAGE_IDS, type JsonCompletion, type ResolvedRoute, type RunHandle, type StageId } from "./contracts";
 import { extractJsonObject } from "@/lib/llm/anthropic";
+import { tracedCompletion } from "./llm-calls";
 import { missingKeyReason, providerApiKey, providerConfigured } from "@/modules/llm/api-keys";
 import {
   DEFAULT_ROUTE_FALLBACKS,
@@ -273,22 +274,26 @@ export function completionFor(route: ResolvedRoute, run: RunHandle): JsonComplet
     if (!api_key) throw new NoRouteError(`${missingKeyReason(provider)}. ${KEY_PROMPT}`);
     let invalid: string | null = null;
     for (let attempt = 1; attempt <= JSON_REPLY_ATTEMPTS; attempt += 1) {
-      const text = await run.step(
-        `llm:${purpose}`,
-        () =>
-          provider.complete(
-            {
-              // A reply that wasn't valid JSON is asked for again, saying why (KAN-66).
-              system: invalid ? `${system}\n\n${invalidJsonNote(invalid)}` : system,
-              user,
-              model: route.model,
-              temperature: route.params.temperature,
-              max_tokens: maxTokens ?? route.params.max_tokens,
-            },
-            { api_key },
-          ),
-        `${route.provider_label} · ${route.model}`,
-      );
+      // Every call is kept whole in llm_calls; the trace step names it (KAN-91).
+      const { text } = await tracedCompletion({
+        provider,
+        request: {
+          // A reply that wasn't valid JSON is asked for again, saying why (KAN-66).
+          system: invalid ? `${system}\n\n${invalidJsonNote(invalid)}` : system,
+          user,
+          model: route.model,
+          temperature: route.params.temperature,
+          max_tokens: maxTokens ?? route.params.max_tokens,
+        },
+        api_key,
+        run,
+        step: `llm:${purpose}`,
+        detail: `${route.provider_label} · ${route.model}`,
+        purpose,
+        attempt,
+        stage: route.stage,
+        workspace_id: run.workspace_id ?? null,
+      });
       try {
         return extractJsonObject(text);
       } catch (error) {

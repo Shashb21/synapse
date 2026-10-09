@@ -86,8 +86,48 @@ function withoutContent(row: typeof sourceFiles.$inferSelect): SourceFileRecord 
   };
 }
 
+function sha256Of(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
 function checksumOf(buffer: Buffer): string {
-  return createHash("sha256").update(buffer).digest("hex").slice(0, 32);
+  return sha256Of(buffer).slice(0, 32);
+}
+
+/** The stored file an upload becomes: its id is derived from its content, so a duplicate names the original. */
+function storedFileId(checksum: string): string {
+  return `FILE-${checksum.slice(0, 10)}`;
+}
+
+/**
+ * What a run's trace keeps of an upload (KAN-91): its SHA-256, byte size,
+ * filename, title, type and the id of the stored file (source_files), never the
+ * text or base64 itself. The bytes live once, in source_files; the trace points
+ * at them. Defensive: the kernel calls this before the input is validated.
+ */
+export function retainedUploadInput(input: unknown): unknown {
+  if (!input || typeof input !== "object") return input;
+  const raw = input as { files?: unknown; demo_ids?: unknown };
+  const files = Array.isArray(raw.files) ? raw.files : [];
+  return {
+    ...raw,
+    files: files.map((file) => {
+      if (!file || typeof file !== "object") return file;
+      const { text, content_base64, ...rest } = file as Record<string, unknown>;
+      const buffer =
+        typeof content_base64 === "string" && content_base64
+          ? Buffer.from(content_base64, "base64")
+          : Buffer.from(typeof text === "string" ? text : "", "utf8");
+      const sha256 = sha256Of(buffer);
+      return {
+        ...rest,
+        content: typeof content_base64 === "string" && content_base64 ? "base64" : "text",
+        sha256,
+        bytes: buffer.length,
+        stored_file_id: buffer.length > 0 ? storedFileId(sha256) : null,
+      };
+    }),
+  };
 }
 
 export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
@@ -106,6 +146,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
   inputSchema,
   outputSchema,
   migrations: [SOURCE_FILES_DDL],
+  traceInput: retainedUploadInput,
   async run(input, ctx) {
     const existing = await db().select().from(sourceFiles);
     const requested: z.infer<typeof fileInput>[] = [
@@ -140,7 +181,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
         skipped.push({ filename: file.filename, reason: `identical to ${duplicate.id}` });
         continue;
       }
-      const id = `FILE-${checksum.slice(0, 10)}`;
+      const id = storedFileId(checksum);
       const uploaded_at = nowIso();
       const record = {
         id,

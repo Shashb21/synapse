@@ -67,6 +67,10 @@ export class RunRecorder implements RunHandle {
     this.id = id ?? newId("run");
   }
 
+  get workspace_id(): string {
+    return this.meta.workspace_id;
+  }
+
   async step<T>(name: string, fn: () => Promise<T> | T, detail?: string): Promise<T> {
     const began = Date.now();
     try {
@@ -85,7 +89,11 @@ export class RunRecorder implements RunHandle {
         at: nowIso(),
         duration_ms: Date.now() - began,
         detail: detail ?? null,
-        data: { error: error instanceof Error ? error.message : String(error) },
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+          // A failed model call is still kept whole; the step names it (KAN-91).
+          ...(error && typeof error === "object" && "llm_call_id" in error ? { llm_call_id: (error as { llm_call_id: unknown }).llm_call_id } : {}),
+        },
       });
       throw error;
     }

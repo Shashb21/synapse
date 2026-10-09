@@ -163,7 +163,7 @@ export async function runStage<O = unknown>(args: {
     module_id: implementation.manifest.id,
     module_version: implementation.manifest.version,
     actor: args.actor,
-    input: args.input,
+    input: implementation.traceInput ? implementation.traceInput(args.input) : args.input,
   });
   await openRun(recorder);
 
@@ -176,7 +176,7 @@ export async function runStage<O = unknown>(args: {
     await closeRun({ recorder, status: "error", error: message });
     throw new Error(message);
   }
-  recorder.note("input:accepted", parsedInput.data);
+  recorder.note("input:accepted", implementation.traceInput ? implementation.traceInput(parsedInput.data) : parsedInput.data);
 
   const route = ai ? await resolveRouteForRun(args.stage) : await aiOffRoute(args.stage);
   recorder.note("route", route, route.degraded ? (route.reason ?? "degraded") : undefined);

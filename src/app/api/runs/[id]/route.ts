@@ -2,6 +2,7 @@ import { ownerGate } from "@/modules/auth/owner";
 import { NextResponse } from "next/server";
 import "@/modules";
 import { getRun } from "@/modules/kernel/observability";
+import { listLlmCalls, totalsOf } from "@/modules/kernel/llm-calls";
 import { listEdits } from "@/modules/kernel/edit-records";
 import { listSignals } from "@/modules/kernel/hillclimb";
 import { listEvalRuns } from "@/modules/kernel/evals";
@@ -17,11 +18,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const run = await getRun(id);
   if (!run) return NextResponse.json({ error: `Unknown run ${id}` }, { status: 404 });
   const url = new URL(request.url);
-  if (url.searchParams.get("with") !== "signals") return NextResponse.json({ run });
+  // Every model call of the run, whole (owner only), with the run's token and cost totals (KAN-91).
+  const llm_calls = await listLlmCalls(run.id);
+  const llm_totals = totalsOf(llm_calls);
+  if (url.searchParams.get("with") !== "signals") return NextResponse.json({ run, llm_calls, llm_totals });
   const [edits, signals, evals] = await Promise.all([
     listEdits({ stage: run.stage, limit: 20 }),
     listSignals({ stage: run.stage, limit: 20 }),
     listEvalRuns({ stage: run.stage, limit: 10 }),
   ]);
-  return NextResponse.json({ run, edits, signals, evals });
+  return NextResponse.json({ run, llm_calls, llm_totals, edits, signals, evals });
 }

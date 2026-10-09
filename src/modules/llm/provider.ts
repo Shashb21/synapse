@@ -18,6 +18,25 @@ export type LlmRequest = {
   max_tokens: number;
 };
 
+/**
+ * Token counts the provider reported for one call (KAN-91): Anthropic `usage`,
+ * OpenAI/OpenRouter/xAI `usage`, Gemini `usageMetadata`. Input includes cached
+ * prompt tokens; output includes reasoning ("thinking") tokens, which are billed
+ * as output. A count the provider left out is null.
+ */
+export type LlmUsage = {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  /** Of the output, the reasoning tokens, when the provider says. */
+  reasoning_tokens: number | null;
+};
+
+/** Optional observers of one call. The reply is still returned as plain text. */
+export type LlmCallHooks = {
+  onUsage?: (usage: LlmUsage) => void;
+};
+
 /** The provider's API key, read on the server and sent only to that provider. */
 export type LlmAuth = {
   api_key: string;
@@ -32,8 +51,11 @@ export type LlmProvider = {
   default_model: string;
   /** Marks the two locked first-class defaults for the one-click switch. */
   tier?: "default" | "alternate";
-  /** Returns raw assistant text. JSON parsing is the caller's job. */
-  complete(request: LlmRequest, auth: LlmAuth | null): Promise<string>;
+  /**
+   * Returns raw assistant text. JSON parsing is the caller's job. `hooks.onUsage`
+   * hears the provider's token counts, when it reports them (KAN-91).
+   */
+  complete(request: LlmRequest, auth: LlmAuth | null, hooks?: LlmCallHooks): Promise<string>;
 };
 
 export class NoRouteError extends Error {}
@@ -106,6 +128,47 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   }
 }
 
+const count = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+const sum = (...values: (number | null)[]): number | null =>
+  values.every((value) => value === null) ? null : values.reduce<number>((total, value) => total + (value ?? 0), 0);
+
+/** The provider's token counts from a reply payload, whatever its shape; null when it sent none. */
+export function usageFromPayload(payload: Record<string, unknown>): LlmUsage | null {
+  const gemini = payload.usageMetadata as Record<string, unknown> | undefined;
+  if (gemini && typeof gemini === "object") {
+    const input = count(gemini.promptTokenCount);
+    const reasoning = count(gemini.thoughtsTokenCount);
+    const output = sum(count(gemini.candidatesTokenCount), reasoning);
+    return { input_tokens: input, output_tokens: output, total_tokens: count(gemini.totalTokenCount) ?? sum(input, output), reasoning_tokens: reasoning };
+  }
+  const usage = payload.usage as Record<string, unknown> | undefined;
+  if (!usage || typeof usage !== "object") return null;
+  if ("input_tokens" in usage || "output_tokens" in usage) {
+    // Anthropic: cached prompt tokens are reported apart from input_tokens.
+    const input = sum(count(usage.input_tokens), count(usage.cache_creation_input_tokens), count(usage.cache_read_input_tokens));
+    const output = count(usage.output_tokens);
+    return { input_tokens: input, output_tokens: output, total_tokens: sum(input, output), reasoning_tokens: null };
+  }
+  // OpenAI-compatible (OpenAI, OpenRouter, xAI).
+  const input = count(usage.prompt_tokens);
+  const output = count(usage.completion_tokens);
+  const details = usage.completion_tokens_details as Record<string, unknown> | undefined;
+  return {
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: count(usage.total_tokens) ?? sum(input, output),
+    reasoning_tokens: count(details?.reasoning_tokens),
+  };
+}
+
+/** Tells the hook what the call used, before the reply is checked (a cut-off reply still cost tokens). */
+function reportUsage(payload: Record<string, unknown>, hooks: LlmCallHooks | undefined) {
+  if (!hooks?.onUsage) return;
+  const usage = usageFromPayload(payload);
+  if (usage) hooks.onUsage(usage);
+}
+
 function textFromPayload(payload: Record<string, unknown>): string {
   const content = payload.content;
   if (Array.isArray(content)) {
@@ -164,6 +227,7 @@ async function chatCompletions(args: {
   headers?: Record<string, string>;
   /** Ask for a JSON object reply (OpenAI-compatible `response_format`). */
   json?: boolean;
+  hooks?: LlmCallHooks;
 }): Promise<string> {
   const payload = await postJson(
     `${args.base.replace(/\/$/, "")}/chat/completions`,
@@ -180,6 +244,7 @@ async function chatCompletions(args: {
     },
     { ...args.target, api_key: args.auth.api_key },
   );
+  reportUsage(payload, args.hooks);
   return chatText(payload, { ...args.target, api_key: args.auth.api_key });
 }
 
@@ -219,12 +284,13 @@ export const xaiGrok: LlmProvider = {
   tier: "default",
   models: models("XAI_MODELS", ["grok-4", "grok-4-fast", "grok-3"]),
   default_model: models("XAI_MODELS", ["grok-4"])[0]!,
-  async complete(request, auth) {
+  async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("xai-grok has no API key: set XAI_API_KEY");
     return chatCompletions({
       base: env("XAI_BASE_URL", "https://api.x.ai/v1"),
       request,
       auth,
+      hooks,
       target: { provider_id: "xai-grok", provider_name: "xAI", key_env: "XAI_API_KEY" },
     });
   },
@@ -239,7 +305,7 @@ export const anthropicClaude: LlmProvider = {
   tier: "alternate",
   models: models("ANTHROPIC_MODELS", ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5-20251001"]),
   default_model: models("ANTHROPIC_MODELS", ["claude-sonnet-5-5"])[0]!,
-  async complete(request, auth) {
+  async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("anthropic-claude has no API key: set ANTHROPIC_API_KEY");
     const headers: Record<string, string> = {
       "x-api-key": auth.api_key,
@@ -262,6 +328,7 @@ export const anthropicClaude: LlmProvider = {
       },
       { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
     );
+    reportUsage(payload, hooks);
     return textFromPayload(payload);
   },
 };
@@ -273,12 +340,13 @@ export const openAi: LlmProvider = {
   auth: "api_key",
   models: models("OPENAI_MODELS", ["gpt-5.1", "gpt-5.1-mini", "o4-mini"]),
   default_model: models("OPENAI_MODELS", ["gpt-5.1"])[0]!,
-  async complete(request, auth) {
+  async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openai has no API key: set OPENAI_API_KEY");
     return chatCompletions({
       base: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
       request,
       auth,
+      hooks,
       target: { provider_id: "openai", provider_name: "OpenAI", key_env: "OPENAI_API_KEY" },
     });
   },
@@ -293,7 +361,7 @@ export const googleGemini: LlmProvider = {
   // gemini-2.5-* is closed to new keys (Google, Oct 2026).
   models: models("GEMINI_MODELS", ["gemini-3.8-flash", "gemini-3.1-pro-preview"]),
   default_model: models("GEMINI_MODELS", ["gemini-3.8-flash"])[0]!,
-  async complete(request, auth) {
+  async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("google-gemini has no API key: set GEMINI_API_KEY");
     const payload = await postJson(
       `${env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")}/models/${request.model}:generateContent`,
@@ -310,6 +378,7 @@ export const googleGemini: LlmProvider = {
       },
       { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
     );
+    reportUsage(payload, hooks);
     return geminiText(payload);
   },
 };
@@ -347,12 +416,13 @@ export const openRouter: LlmProvider = {
     "google/gemini-2.5-pro",
   ]),
   default_model: models("OPENROUTER_MODELS", ["x-ai/grok-4"])[0]!,
-  async complete(request, auth) {
+  async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("openrouter has no API key: set OPENROUTER_API_KEY");
     return chatCompletions({
       base: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
       request,
       auth,
+      hooks,
       target: { provider_id: "openrouter", provider_name: "OpenRouter", key_env: "OPENROUTER_API_KEY" },
       // Every stage parses a JSON object; models that can't honour it ignore the hint.
       json: true,
