@@ -135,7 +135,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(badges).toContain("OVERALL_COVERAGE_HELPERS");
     expect(badges).toContain("GAP_STATUS_DEFINITIONS");
     expect(badges).toContain("TACTIC_STATUS_HELPERS");
-    expect(badges).toContain("PRIORITY_BAND_HELPERS");
+    // The legacy four-band priority badge is retired; bands are S8 placements (KAN-17).
+    expect(badges).not.toContain("PriorityBadge");
     const enums = readFileSync(path.join(process.cwd(), "src/lib/iegp/enums.ts"), "utf8");
     expect(enums).toContain("Limited coverage");
     expect(badges).not.toContain(">Stale — re-lock<");

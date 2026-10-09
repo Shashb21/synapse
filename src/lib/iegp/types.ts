@@ -9,7 +9,6 @@ import type {
   MappedGapStatus,
   NeedStatus,
   OverallCoverage,
-  PriorityBand,
   SourceType,
   ResidualReviewStatus,
   TacticReviewStatus,
@@ -350,28 +349,6 @@ export type ResidualNeed = {
   lock: Lock;
 };
 
-export type PriorityAssessment = {
-  id: string;
-  residual_id: string;
-  suggested_score: number;
-  suggested_band: PriorityBand;
-  band: PriorityBand;
-  override_reason: string | null;
-  reasons: string[];
-  lock: Lock;
-};
-
-export type RoadmapItem = {
-  id: string;
-  tactic_id: string;
-  residual_ids: string[];
-  start_date: string | null;
-  evidence_available: string | null;
-  owner: string;
-  note: string | null;
-  lock: Lock;
-};
-
 export type AuditEvent = {
   id: string;
   at: string;
@@ -426,8 +403,6 @@ export type IegpState = {
   mapping_suggestions: MappingSuggestionRecord[];
   residual_gap_suggestions: ResidualGapSuggestionRecord[];
   residuals: ResidualNeed[];
-  priorities: PriorityAssessment[];
-  roadmap: RoadmapItem[];
   audit: AuditEvent[];
   gold_needs: GoldNeed[];
   gold_coverages: GoldCoverage[];

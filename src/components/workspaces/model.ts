@@ -1,4 +1,5 @@
 import type { WorkspaceRole } from "@/modules/workspaces/store";
+import { NETWORK_ERROR } from "@/lib/post-json";
 
 /** What the workspace tag needs: the open workspace, the others, and who is signed in. */
 export type WorkspaceTagModel = {
@@ -22,11 +23,16 @@ export async function sendJson<T = Record<string, unknown>>(
   body: Record<string, unknown>,
   method = "POST",
 ): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(NETWORK_ERROR);
+  }
   const json = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(json.error ?? `Request failed (HTTP ${res.status}).`);
   return json;

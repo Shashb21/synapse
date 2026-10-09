@@ -21,6 +21,16 @@ export const ADMIN_REDIRECTS: { source: string; destination: string }[] = [
   { source: "/docs/:path*", destination: "/admin/docs/:path*" },
 ];
 
+/**
+ * The legacy residual board and roadmap are retired (KAN-17): priority is the
+ * Prioritize matrix (S8), residual drafts are reviewed on Gaps, and the forward
+ * plan is Timeline (S10).
+ */
+export const RETIRED_PLAN_REDIRECTS: { source: string; destination: string }[] = [
+  { source: "/residuals", destination: "/?place=gaps" },
+  { source: "/roadmap", destination: "/timeline" },
+];
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ["mammoth", "xlsx", "jszip", "docx"],
   experimental: {
@@ -29,7 +39,7 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     // Temporary (307/308 off) so the paths stay free if they are ever reused.
-    return ADMIN_REDIRECTS.map((rule) => ({ ...rule, permanent: false }));
+    return [...ADMIN_REDIRECTS, ...RETIRED_PLAN_REDIRECTS].map((rule) => ({ ...rule, permanent: false }));
   },
   // Preview is proxied from Cursor hosts; Next 16 403s /_next/* unless those
   // hostnames are listed (scheme and port are ignored).

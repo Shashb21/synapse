@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useAiEnabled } from "@/components/platform/ai-status";
+import { postJson } from "@/lib/post-json";
 
 export function CreateWorkspaceForm() {
   const router = useRouter();
@@ -22,12 +23,8 @@ export function CreateWorkspaceForm() {
     event.preventDefault();
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/accuracy/workspaces", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, slug, plan_label: planLabel }),
-      });
-      const body = (await res.json()) as { ok?: boolean; workspace_id?: string; error?: string };
+      const res = await postJson("/api/accuracy/workspaces", { name, slug, plan_label: planLabel });
+      const body = res.json as { ok?: boolean; workspace_id?: string; error?: string };
       if (!res.ok || !body.ok || !body.workspace_id) {
         setError(body.error ?? "Create failed");
         return;

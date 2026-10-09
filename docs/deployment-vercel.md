@@ -26,7 +26,7 @@ The app uses Drizzle + `postgres` (see `src/lib/iegp/db.ts`). Local dev uses Doc
 
 Apply to **Production**, **Preview**, and **Development** if you use Vercel previews.
 
-**Alternative:** Any Neon / RDS / self-hosted Postgres with a standard `postgres://…` URL and TLS (`sslmode=require` for cloud hosts). The client enables SSL automatically for non-localhost hosts.
+**Alternative:** Any Neon / RDS / self-hosted Postgres with a standard `postgres://…` URL and TLS (`sslmode=require` for cloud hosts). The client enables TLS for non-localhost hosts and verifies the server certificate (`sslmode=require` and `verify-full` verify too; `verify-ca` skips only the host-name check). For a private CA such as RDS, set `DATABASE_CA_CERT` to the CA bundle's PEM text.
 
 Schema is created on first request (`ensureSchema` / platform DDL).
 
@@ -65,6 +65,12 @@ Set in **Vercel → Project → Settings → Environment Variables**. Use `.env.
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | **Yes** | Hosted Postgres (see §1) |
+| `DATABASE_CA_CERT` | Private-CA Postgres | PEM text of the CA that signed the database certificate (RDS, self-hosted). Not needed for Neon / Vercel Postgres |
+| `DATABASE_SSL_VERIFY` | Never, ideally | `false` keeps TLS but skips the certificate check. Last resort: it lets anyone on the path impersonate the database |
+| `SYNAPSE_LLM_TIMEOUT_MS` | Optional | Provider call time limit, default 120000. A timeout shows as "provider unavailable" |
+| `SYNAPSE_JSON_BODY_MAX_BYTES` | Optional | Largest JSON API request, default 5 MB (413 above it) |
+| `SYNAPSE_MAX_PARSE_UNITS` / `SYNAPSE_MAX_PARSE_CALLS` | Optional | Per-document parse limits, default 2000 sections / 50 model calls |
+| `SYNAPSE_MAX_WORKSPACES_PER_USER` | Optional | Workspaces one person may create, default 20 |
 | `SESSION_SECRET` | **Yes** | ≥ 32 random characters (`openssl rand -base64 48`). Signs the workspace-selection cookie (bound to the session, expires with it). The production server refuses to start without it — there is no fallback in production |
 | `OWNER_EMAILS` | Owner console | Comma-separated platform-owner emails. Only an identity provider's **verified** email matches |
 | `ALLOWED_EMAIL_DOMAINS` | Optional | Comma-separated domains (exact match). When set, only verified emails on these domains may sign in |

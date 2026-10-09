@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { DIMENSION_LABELS, type CoverageDimension } from "@/lib/iegp/enums";
 import type { PlanTactic } from "@/lib/iegp/engine";
+import { postJson } from "@/lib/post-json";
 
 
 function toggleId(list: string[], id: string): string[] {
@@ -186,8 +187,8 @@ export function SplitGapDialog({
     setPending(true);
     setError(null);
     try {
-      const res = await fetch("/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reject_split_proposal", parent_gap_id: gapId, originating_run_id: originatingRunId, note: rationale.trim() }) });
-      const json = await res.json();
+      const res = await postJson("/api/iegp", { action: "reject_split_proposal", parent_gap_id: gapId, originating_run_id: originatingRunId, note: rationale.trim() });
+      const json = res.json;
       if (!res.ok) { setError(json.error ?? "Could not reject the proposal."); return; }
       reset();
       setProposalNote("Proposal rejected. Fill the split in yourself or request another suggestion.");
@@ -202,15 +203,11 @@ export function SplitGapDialog({
     setProposing(true);
     setError(null);
     setProposalNote(null);
-    const res = await fetch("/api/modules", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/modules", {
         stage: "S6",
         input: { gap_id: gapId },
-      }),
-    });
-    const json = (await res.json()) as {
+      });
+    const json = res.json as {
       error?: string;
       run_id?: string;
       summary?: string;
@@ -312,12 +309,8 @@ export function SplitGapDialog({
             tactic_ids: rewriteStatus === "validated_addressed" ? addressedTacticIds.join(",") : "",
             note: rationale.trim(),
           };
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = (await res.json()) as { error?: string };
+    const res = await postJson("/api/iegp", payload);
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not resolve this gap.");

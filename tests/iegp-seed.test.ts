@@ -75,11 +75,9 @@ describe("Velmara IEGP seed", () => {
     expect(parent?.statement.toLowerCase()).toMatch(/elderly/);
   });
 
-  it("separates coverage from priority (CNS override)", () => {
-    const pri = state.priorities.find((p) => p.residual_id === "RES-CNS");
-    expect(pri?.suggested_band).toBe("high");
-    expect(pri?.band).toBe("medium");
-    expect(pri?.override_reason).toBeTruthy();
+  it("carries no legacy priority board or roadmap: bands are S8 placements (KAN-17)", () => {
+    expect("priorities" in state).toBe(false);
+    expect("roadmap" in state).toBe(false);
   });
 
   it("excludes congress footprint as a communication issue, not a gap", () => {
@@ -95,34 +93,17 @@ describe("Velmara IEGP seed", () => {
     expect(row?.overall).toBe("not_relevant");
   });
 
-  it("keeps completed tactics off the forward roadmap", () => {
-    const completed = state.tactics.filter((t) => t.status === "completed").map((t) => t.id);
-    expect(completed.length).toBeGreaterThan(0);
-    expect(state.roadmap.some((r) => completed.includes(r.tactic_id))).toBe(false);
-  });
-
-  it("places caregiver in low so the three plan boxes are populated", () => {
-    const pri = state.priorities.find((p) => p.residual_id === "RES-CAREGIVER");
-    expect(pri?.band).toBe("low");
+  it("maps the tactics the retired roadmap planned against a gap, unassessed", () => {
+    for (const [gap_id, tactic_id] of [["GAP-PERSIST", "TAC-CLAIMS"], ["GAP-IRA", "TAC-BIM"]]) {
+      const row = state.coverages.find((c) => c.gap_id === gap_id && c.tactic_id === tactic_id);
+      expect(row?.overall).toBe("unassessed");
+      expect(row?.overall_lock.locked).toBe(false);
+    }
   });
 
   it("keeps an extracted candidate gap off the Gaps workbench", () => {
     const gap = state.gaps.find((g) => g.id === "GAP-ILD");
     expect(gap?.status).toBe("candidate");
     expect(state.residuals.some((r) => r.gap_id === "GAP-ILD" && !r.lock.locked)).toBe(true);
-  });
-
-  it("leaves long-term OS unprioritized so the plan can prompt a human lock", () => {
-    const residual = state.residuals.find((r) => r.id === "RES-OS");
-    expect(residual).toBeTruthy();
-    expect(state.priorities.some((p) => p.residual_id === "RES-OS")).toBe(false);
-  });
-
-  it("locks every seed residual before priority", () => {
-    for (const pri of state.priorities) {
-      const residual = state.residuals.find((r) => r.id === pri.residual_id);
-      expect(residual?.lock.locked).toBe(true);
-      expect(pri.lock.locked).toBe(true);
-    }
   });
 });

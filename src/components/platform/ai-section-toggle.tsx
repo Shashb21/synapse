@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { AiSectionId } from "@/modules/kernel/ai-sections";
+import { postJson } from "@/lib/post-json";
 
 /** One section's AI switch for every customer (KAN-53). One click, no reason to type. */
 export function AiSectionToggle({
@@ -24,13 +25,9 @@ export function AiSectionToggle({
   function flip() {
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/control", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "set_ai_section", section, enabled: !enabled }),
-      });
+      const res = await postJson("/api/control", { action: "set_ai_section", section, enabled: !enabled });
       if (!res.ok) {
-        setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not change AI.");
+        setError((res.json as { error?: string }).error ?? "Could not change AI.");
         return;
       }
       router.refresh();

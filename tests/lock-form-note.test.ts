@@ -50,7 +50,6 @@ describe("LockForm note field", () => {
         "confirm_coverage_review",
         "lock_gap",
         "lock_need",
-        "lock_priority",
         "reject_gap_suggestion",
         "unpark_gap",
         "validate_gap",

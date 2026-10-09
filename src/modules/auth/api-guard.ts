@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { cookies } from "next/headers";
 import { ACTOR_FUNCTIONS, type ActorFunction } from "@/lib/iegp/enums";
 import type { Actor } from "@/modules/kernel/contracts";
@@ -11,6 +12,7 @@ import { NoRouteError, ProviderError } from "@/modules/llm/provider";
 import { customerErrorMessage, isAdminOnlyError, stageOf } from "@/modules/kernel/stage-errors";
 import { noLlmBody } from "@/modules/kernel/no-llm";
 import { ownerAccess } from "./owner";
+import { BodyTooLargeError, readBodyText } from "@/lib/http/body-limit";
 import { can, ForbiddenError, ROLE_LABELS, type Capability, type Role } from "./roles";
 
 /**
@@ -144,12 +146,22 @@ export async function requireCustomerContext(options: GuardOptions = {}): Promis
   return context;
 }
 
-/** The JSON body as an object; malformed JSON is a 400, never a 500. */
-export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+/**
+ * The JSON body as an object; malformed JSON is a 400, never a 500, and a body
+ * over the size limit is a 413 before it is parsed (KAN-20).
+ */
+export async function readJsonBody(
+  request: Request,
+  options: { allowEmpty?: boolean } = {},
+): Promise<Record<string, unknown>> {
   let parsed: unknown;
   try {
-    parsed = await request.json();
-  } catch {
+    const text = await readBodyText(request);
+    // A route whose fields are all optional may be posted with no body at all.
+    if (options.allowEmpty && !text.trim()) return {};
+    parsed = JSON.parse(text);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) throw error;
     throw new ApiGuardError(400, "invalid_json", "The request body is not valid JSON.");
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -202,6 +214,17 @@ async function logRefusal(error: ApiGuardError | ForbiddenError): Promise<void> 
   await recordDenied({ category: "workspace", action: "permission.denied", reason: error.message, meta: { code } });
 }
 
+/** "Gap not found", "Breakout group not found", "Activity GAP-1 not found." and the like. */
+const NOT_FOUND = /^[\w\s'-]{1,60} not found\.?$/i;
+
+/** The first problem in a schema failure, in words: "stage: Invalid option". */
+function zodMessage(error: ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "The request is not valid.";
+  const path = issue.path.join(".");
+  return path ? `${path}: ${issue.message}` : issue.message;
+}
+
 export async function apiErrorResponse(error: unknown, fallback = "Request failed"): Promise<NextResponse> {
   if ((error instanceof ApiGuardError && error.status === 403) || error instanceof ForbiddenError) await logRefusal(error);
   if (error instanceof ApiGuardError) {
@@ -210,6 +233,9 @@ export async function apiErrorResponse(error: unknown, fallback = "Request faile
   if (error instanceof ForbiddenError) {
     return NextResponse.json({ error: error.message, code: "forbidden" }, { status: 403 });
   }
+  if (error instanceof BodyTooLargeError) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+  }
   if (error instanceof NoWorkspaceError) {
     return NextResponse.json({ error: error.message, code: "no_workspace" }, { status: 409 });
   }
@@ -217,6 +243,17 @@ export async function apiErrorResponse(error: unknown, fallback = "Request faile
     return NextResponse.json({ error: error.message || AI_OFF_MESSAGE, code: "ai_off" }, { status: 409 });
   }
   if (error instanceof NoRouteError) return noLlmResponse(error.message);
+  // A body that is not JSON is the caller's mistake, never a 500 (KAN-18).
+  if (error instanceof SyntaxError) {
+    return NextResponse.json({ error: "The request body is not valid JSON.", code: "invalid_json" }, { status: 400 });
+  }
+  if (error instanceof ZodError) {
+    return NextResponse.json({ error: zodMessage(error), code: "invalid_request" }, { status: 400 });
+  }
+  // A record that does not exist is a 404, not a generic 400 (KAN-18).
+  if (error instanceof Error && NOT_FOUND.test(error.message)) {
+    return NextResponse.json({ error: error.message, code: "not_found" }, { status: 404 });
+  }
   // Only an owner-worded error needs the audience check.
   const owner = isAdminOnlyError(error) ? await requestIsOwner() : true;
   const status = error instanceof ProviderError ? 502 : 400;

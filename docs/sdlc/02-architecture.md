@@ -14,9 +14,9 @@ The v1 architecture (flat insight records, a theme catalog, a keyword/ontology s
 
 | Area | Path | What it owns |
 | --- | --- | --- |
-| Customer pages | `src/app/*` (not `admin`) | Plan context → Upload → Evidence Inventory (Gaps) → Prioritization Matrix → Tactic Ideation → Gantt Timeline, plus Ideation, Mappings, Needs, Residuals, Roadmap, Setup, Sources, Workspaces, Login, Account. Room, Breakouts and Presentation stay in the code but are switched off (`ROOM_ENABLED`, `BREAKOUTS_ENABLED` are `false`) and redirect to the plan |
+| Customer pages | `src/app/*` (not `admin`) | Plan context → Upload → Evidence Inventory (Gaps) → Prioritization Matrix → Tactic Ideation → Gantt Timeline, plus Ideation, Mappings, Needs, Setup, Sources, Workspaces, Login, Account. Room, Breakouts and Presentation stay in the code but are switched off (`ROOM_ENABLED`, `BREAKOUTS_ENABLED` are `false`) and redirect to the plan |
 | Owner console | `src/app/admin/*` | AI master and section switches, provider key status and routing, AI harness, customers and seats, staff users, accuracy lab, pipeline, runs, evals, catalog, module versions, specs |
-| IEGP domain | `src/lib/iegp/` | Gaps, needs, tactics, coverages, residuals, priorities, audit; engine status rules; blank and demo contents |
+| IEGP domain | `src/lib/iegp/` | Gaps, needs, tactics, coverages, residuals, audit (priority bands are S8 placements, KAN-17); engine status rules; blank and demo contents |
 | Kernel | `src/modules/kernel/` | Stage contracts, registry, `runStage`, routing, observability, edit records, evals, the AI switches |
 | Stages | `src/modules/stages/s0…s10/` | One module per stage, S0 upload to S10 timeline |
 | Identity | `src/modules/auth/` | SSO providers, verified identity, sessions, staff password accounts, customers and seats, roles, owner gate |

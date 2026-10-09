@@ -5,9 +5,48 @@
  */
 export function safeNext(value: string | null | undefined, fallback = "/"): string {
   const next = (value ?? "").trim();
-  if (!next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
-  if (/^\/(login|workspaces|api\/auth)(\/|\?|$)/.test(next)) return fallback;
+  if (!isSameOriginPath(next)) return fallback;
+  if (/^\/(login|workspaces|api\/auth)(\/|\?|#|$)/i.test(decodeAll(next))) return fallback;
   return next;
+}
+
+const PROBE_ORIGIN = "https://synapse.invalid";
+
+/** Undo percent-encoding until it settles, so `%2F%2F` or `%252F` cannot hide a `//`. */
+function decodeAll(value: string): string {
+  let current = value;
+  for (let i = 0; i < 5; i += 1) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      return current;
+    }
+    if (decoded === current) return current;
+    current = decoded;
+  }
+  return current;
+}
+
+/**
+ * True only for a path on this site: one leading slash, no second slash or
+ * backslash after it (raw or encoded), no control characters, no scheme, and
+ * a browser resolving it against our origin stays on our origin (KAN-20).
+ */
+function isSameOriginPath(next: string): boolean {
+  if (!next.startsWith("/")) return false;
+  const decoded = decodeAll(next);
+  for (const form of [next, decoded]) {
+    // Browsers strip tabs and newlines and treat `\` like `/`, so `/\t/evil` is `//evil`.
+    if (/[\u0000-\u001f\u007f\\]/.test(form)) return false;
+    if (!form.startsWith("/") || form.startsWith("//")) return false;
+  }
+  try {
+    const resolved = new URL(next, PROBE_ORIGIN);
+    return resolved.origin === PROBE_ORIGIN;
+  } catch {
+    return false;
+  }
 }
 
 /** Cookie that carries `next` across the identity provider round-trip. */

@@ -9,6 +9,7 @@ import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
 import { latestPlan, planHistory, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
+import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ function asView(plan: Awaited<ReturnType<typeof latestPlan>>): PlanView | null {
     saved_by: plan.saved_by,
     saved_at: plan.saved_at,
     activities: plan.snapshot.activities.length,
+    fingerprint: planFingerprint(plan.snapshot.activities),
   };
 }
 

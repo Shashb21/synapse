@@ -99,7 +99,7 @@ Severity scale:
 | AUD-OPS-06 | Medium | `npm audit` reports 8 high: `xlsx` (no fix available), `mermaid` → lodash-es, and `pptxgenjs` → `image-size`. | `package.json` |
 | AUD-OPS-07 | Low | Bare `npm run lint` scans `.claude/worktrees` and reports 51k problems. On real sources: 0 errors, 4 warnings. | `eslint.config.mjs` |
 | AUD-OPS-08 | Low | Two parallel stacks (the accuracy lab and the customer app) duplicate the kernel, routing, runs, plans, Gantt and workshop. This is by design for now, but it costs maintenance. | `src/accuracy/**` |
-| AUD-OPS-09 | Low | The package is still named `velmara-insights-engine`, and `clsx`/`tailwind-merge` are declared but unused. | `package.json` |
+| AUD-OPS-09 | Low | The package is still named `velmara-insights-engine`, and `clsx`/`tailwind-merge` are declared but unused. Fixed in KAN-20: renamed `synapse`, both removed. | `package.json` |
 
 ## 7. What is working well
 

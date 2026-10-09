@@ -6,6 +6,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import { CUSTOMER_STAGE_TARGET, type StageRunResponse } from "@/components/platform/run-stage-button";
+import { postJson } from "@/lib/post-json";
 
 /**
  * Runs mapping (S4) again for the open workspace (KAN-68), through the customer
@@ -31,14 +32,10 @@ export function RerunMappingButton({
   async function run() {
     setPending(true);
     setResult(null);
-    const res = await fetch(CUSTOMER_STAGE_TARGET.endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ stage: "S4", input: {} }),
-    }).catch(() => null);
-    const json = ((await res?.json().catch(() => null)) ?? {}) as StageRunResponse;
+    const res = await postJson(CUSTOMER_STAGE_TARGET.endpoint, { stage: "S4", input: {} });
+    const json = res.json as StageRunResponse;
     setPending(false);
-    const ok = Boolean(res?.ok);
+    const ok = res.ok;
     setResult(
       ok
         ? { ok, text: "Mapping finished. The table shows the new proposal." }

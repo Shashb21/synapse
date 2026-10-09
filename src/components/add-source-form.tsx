@@ -12,6 +12,7 @@ import {
   SOURCE_TYPES,
 } from "@/lib/iegp/enums";
 import { MAX_UPLOAD_BYTES, TOO_LARGE, UPLOAD_ACCEPT, UPLOAD_FORMATS_LABEL, uploadKindOf } from "@/lib/ingest/upload-formats";
+import { postJson } from "@/lib/post-json";
 
 const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
 const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -86,10 +87,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
       return;
     }
     setPending(true);
-    const res = await fetch("/api/iegp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson("/api/iegp", {
         action: "ingest",
         note: "",
         title: title.trim(),
@@ -97,9 +95,8 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         ...(binary ?? { text }),
         source_type: String(data.get("source_type") ?? ""),
         stakeholder_function: String(data.get("stakeholder_function") ?? ""),
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string; stage?: string };
+      });
+    const json = res.json as { error?: string; stage?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Could not read the source. Try again.");

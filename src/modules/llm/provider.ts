@@ -1,4 +1,4 @@
-import { ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
+import { fetchProvider, ProviderError, parseProviderErrorBody, redactSecrets } from "./provider-error";
 
 /**
  * LLM provider contract. Every cloud provider authenticates with a server-side
@@ -98,12 +98,12 @@ function requestedWait(res: Response, text: string): number | null {
 
 async function postJson(url: string, headers: Record<string, string>, body: unknown, target: CallTarget) {
   for (let attempt = 1; ; attempt += 1) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-    });
-    const text = await res.text();
+    // Time-limited (SYNAPSE_LLM_TIMEOUT_MS); a timeout is "unavailable" and not retried (KAN-20).
+    const { res, text } = await fetchProvider(
+      url,
+      { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) },
+      target,
+    );
     if (res.ok) return JSON.parse(text) as Record<string, unknown>;
     // A typed, classified error instead of the raw body; the key never appears in it.
     const parsed = parseProviderErrorBody(text);

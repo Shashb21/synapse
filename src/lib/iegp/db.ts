@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import * as schema from "./schema";
 import { currentSchema, DEFAULT_SCHEMA } from "@/modules/workspaces/context";
 import { workspaceTableStatements } from "./workspace-tables";
+import { legacyPlanCarryOverStatements } from "./legacy-plan";
 
 const DEFAULT_URL =
   process.env.DATABASE_URL ??
@@ -16,18 +17,53 @@ const globalForDb = globalThis as unknown as {
   schemaLookup?: (workspaceId: string) => Promise<string | null>;
 };
 
-function connectOptions() {
+type SslOption =
+  | false
+  | "prefer"
+  | "require"
+  | { rejectUnauthorized: true; ca?: string; checkServerIdentity?: () => undefined };
+
+/**
+ * TLS for the database connection, from DATABASE_URL's `sslmode` (KAN-20):
+ *
+ * - `disable`, or a localhost URL with no sslmode: plain TCP (local dev, CI).
+ * - `allow` / `prefer`: TLS when the server offers it, unverified (as libpq).
+ * - `require`, `verify-full`, or a remote host with no sslmode: TLS, and the
+ *   server certificate must chain to a trusted CA and match the host name.
+ *   `verify-ca` checks the chain but not the name.
+ *
+ * A private CA (RDS, self-hosted) goes in DATABASE_CA_CERT as PEM text.
+ * DATABASE_SSL_VERIFY=false keeps TLS but skips the certificate check; it is
+ * a last resort, since it lets anyone on the path impersonate the database.
+ */
+export function sslFor(url: string, env: Record<string, string | undefined> = process.env): SslOption {
   let host = "127.0.0.1";
+  let mode = "";
   try {
-    host = new URL(DEFAULT_URL.replace(/^postgres:\/\//, "http://")).hostname;
+    const parsed = new URL(url.replace(/^postgres(ql)?:\/\//, "http://"));
+    host = parsed.hostname;
+    mode = (parsed.searchParams.get("sslmode") ?? "").toLowerCase();
   } catch {
     // keep localhost default
   }
-  const remote = host !== "127.0.0.1" && host !== "localhost";
+  const local = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  if (mode === "disable") return false;
+  if (mode === "allow" || mode === "prefer") return "prefer";
+  if (!mode && local) return false;
+  if (env.DATABASE_SSL_VERIFY === "false") return "require";
+  const ca = env.DATABASE_CA_CERT?.trim() || undefined;
+  return {
+    rejectUnauthorized: true,
+    ...(ca ? { ca } : {}),
+    ...(mode === "verify-ca" ? { checkServerIdentity: () => undefined } : {}),
+  };
+}
+
+function connectOptions() {
   return {
     // Vitest sets VITEST=true — single connection avoids read-after-write races across pool clients.
     max: process.env.VERCEL || process.env.VITEST ? 1 : 8,
-    ssl: remote ? ("require" as const) : undefined,
+    ssl: sslFor(DEFAULT_URL),
   };
 }
 
@@ -349,6 +385,8 @@ async function loadModules() {
 async function bootstrap(run: RunStatement) {
   await run("set client_min_messages to warning");
   for (const stmt of iegpStatements()) await run(stmt);
+  // The retired priority board and roadmap carry over into S8 and mappings (KAN-17).
+  for (const stmt of legacyPlanCarryOverStatements()) await run(stmt);
   for (const hook of [...bootstrapHooks]) await hook(run);
 }
 

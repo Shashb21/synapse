@@ -27,9 +27,6 @@ import {
   confirmCoverageReview,
   lockGapStatus,
   lockNeed,
-  lockPriority,
-  lockResidual,
-  lockRoadmapItem,
   lockTactic,
   lockTacticReview,
   modifyGap,
@@ -67,7 +64,7 @@ import {
   requireCustomerContext,
   type CustomerContext,
 } from "@/modules/auth/api-guard";
-import { iegpActionCapability } from "./capabilities";
+import { iegpActionCapability, retiredActionMessage } from "./capabilities";
 import { latestS4MappingRows } from "@/lib/iegp/mapping-table";
 import { captureMappingRowDecision } from "@/lib/iegp/learning-capture";
 import {
@@ -166,7 +163,6 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   lock_gap: { stage: "S5", entity: "gap", field: "status", action: "edit" },
   park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
   unpark_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
-  lock_priority: { stage: "S8", entity: "residual", field: "priority_band", action: "edit" },
   create_tactic: { stage: "S9", entity: "tactic", field: "created", action: "add" },
   record_missed_tactic: { stage: "S5", entity: "tactic", field: "created", action: "add" },
 };
@@ -205,8 +201,6 @@ function gateFieldValue(state: IegpState, mapping: GateEdit, body: Record<string
       return coverage ? (coverage.dimensions[body.dimension as CoverageDimension]?.value ?? null) : null;
     case "overall":
       return coverage?.overall ?? null;
-    case "priority_band":
-      return state.priorities.find((row) => row.residual_id === body.residual_id)?.band ?? null;
     case "created":
       // Nothing existed before; afterwards, the tactic as named.
       return null;
@@ -254,6 +248,8 @@ export async function POST(request: Request) {
   try {
     body = (await readJsonBody(request)) as Record<string, string>;
     identity = await requireCustomerContext({ body });
+    const retired = retiredActionMessage(String(body.action ?? ""));
+    if (retired) return NextResponse.json({ error: retired }, { status: 410 });
     const capability = iegpActionCapability(String(body.action ?? ""));
     if (!capability) return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     requireCapability(identity, capability);
@@ -461,24 +457,6 @@ export async function POST(request: Request) {
           actor_name,
           actor_function,
           note: body.note,
-        });
-        break;
-      case "lock_residual":
-        await lockResidual({
-          residual_id: body.residual_id,
-          statement: body.statement,
-          actor_name,
-          actor_function,
-          note: body.note,
-        });
-        break;
-      case "lock_priority":
-        await lockPriority({
-          residual_id: body.residual_id,
-          band: body.band as never,
-          override_reason: body.note || body.override_reason,
-          actor_name,
-          actor_function,
         });
         break;
       case "create_tactic":
@@ -846,18 +824,6 @@ export async function POST(request: Request) {
           note: body.note,
         });
         break;
-      case "lock_roadmap":
-        await lockRoadmapItem({
-          tactic_id: body.tactic_id,
-          residual_ids: (body.residual_ids || "").split(",").filter(Boolean),
-          start_date: body.start_date || null,
-          evidence_available: body.evidence_available || null,
-          owner: body.owner,
-          note: body.note,
-          actor_name,
-          actor_function,
-        });
-        break;
       // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the
       // error says so. There is no rule-based ingest.
       case "ingest": {
@@ -885,15 +851,14 @@ export async function POST(request: Request) {
         break;
       }
       case "create_breakout_group": {
-        const group_id = await createBreakoutGroup({
+        // Optionally starts with a theme's gaps (KAN-55), checked before anything is created (KAN-18).
+        await createBreakoutGroup({
           name: body.name,
           note: body.note,
+          gap_ids: String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean),
           actor_name,
           actor_function,
         });
-        // Optionally starts with a theme's gaps (KAN-55).
-        const gap_ids = String(body.gap_ids ?? "").split(",").map((id) => id.trim()).filter(Boolean);
-        if (gap_ids.length > 0) await assignGapsToBreakoutGroup({ group_id, gap_ids, actor_name, actor_function });
         break;
       }
       case "delete_breakout_group":

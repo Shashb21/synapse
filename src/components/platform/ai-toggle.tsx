@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { postJson } from "@/lib/post-json";
 
 /** One click flips the platform master switch for every workspace. No dialog and no reason to type. */
 export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: string }) {
@@ -12,13 +13,9 @@ export function AiToggle({ enabled, actorName }: { enabled: boolean; actorName: 
   function flip() {
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/control", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "set_ai_enabled", enabled: !enabled, actor_name: actorName }),
-      });
+      const res = await postJson("/api/control", { action: "set_ai_enabled", enabled: !enabled, actor_name: actorName });
       if (!res.ok) {
-        setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not change AI.");
+        setError((res.json as { error?: string }).error ?? "Could not change AI.");
         return;
       }
       router.refresh();

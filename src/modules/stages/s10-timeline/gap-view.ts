@@ -223,10 +223,8 @@ export function gapTimelineView(args: {
 
   const shown = new Set<string>();
   const groupFor = (gap: IegpState["gaps"][number], band: PriorityBand | null): GapTimelineGroup => {
-    // The same tactics the Tactics place lists under this gap: mapped by coverage,
-    // plus roadmap tactics planned against its residual.
-    const residual = state.residuals.find((row) => row.gap_id === gap.id);
-    const mapped = mappedTactics(state, gap.id, residual?.id);
+    // The same tactics the Tactics place lists under this gap: mapped by coverage.
+    const mapped = mappedTactics(state, gap.id);
     const tacticIds = [...new Set(mapped.map(tactic => tactic.id))];
     const items = nestedItems(tacticIds.flatMap(tacticId => {
       let parent = itemFor(gap.id, tacticId);

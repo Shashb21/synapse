@@ -135,14 +135,17 @@ export default async function IdeationPage() {
               <span className="text-foreground">{eligibleCount}</span> open {eligibleCount === 1 ? "gap" : "gaps"} validated as High
             </li>
           </ul>
+          {/* With no ideas yet, the gaps-without-a-proposal list below runs the same thing (KAN-18). */}
           {ai ? (
-            <RunStageButton
-              stage="S9"
-              input={{}}
-              label={total === 0 ? "Generate ideas" : "Generate more ideas"}
-              identity={identity}
-              variant={total === 0 ? "default" : "outline"}
-            />
+            total === 0 && withoutProposal.length > 0 ? null : (
+              <RunStageButton
+                stage="S9"
+                input={{}}
+                label={total === 0 ? "Generate ideas" : "Generate more ideas"}
+                identity={identity}
+                variant={total === 0 ? "default" : "outline"}
+              />
+            )
           ) : (
             <p className="text-[11px] text-muted-foreground">Add ideas by hand.</p>
           )}
@@ -203,7 +206,8 @@ export default async function IdeationPage() {
               </Link>{" "}
               first{ai ? " (by hand or with the model), then generate ideas here or add them by hand." : ", then add ideas by hand here."}
             </p>
-            {ai ? (
+            {/* One run button per page: the gaps list above already has it (KAN-18). */}
+            {ai && withoutProposal.length === 0 ? (
               <div>
                 <RunStageButton
                   stage="S9"

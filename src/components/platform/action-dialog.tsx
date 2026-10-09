@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { ACTOR_FUNCTIONS, FUNCTION_LABELS, type ActorFunction } from "@/lib/iegp/enums";
 import { tacticDatesError } from "@/lib/iegp/tactic-dates";
+import { postJson } from "@/lib/post-json";
 
 export type ActionField = {
   name: string;
@@ -130,18 +131,14 @@ export function ActionDialog({
       return;
     }
     setPending(true);
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await postJson(endpoint, {
         ...payload,
         ...extra,
         rationale,
         actor_name: actorName.trim() || identity.actor_name,
         actor_function: actorFunction,
-      }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
+      });
+    const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
       setError(json.error ?? "Action failed");

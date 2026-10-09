@@ -29,6 +29,38 @@ const BLOCK_KINDS = [
 /** Characters of source text per prompt; keeps each call well inside context. */
 const CHUNK_CHARS = 12_000;
 
+/**
+ * The most one document may cost to parse (KAN-20): raw units (paragraphs,
+ * slides, sheet rows) and LLM calls. A file over either is refused before any
+ * call is made, so one upload cannot run up hundreds of provider calls.
+ * SYNAPSE_MAX_PARSE_UNITS and SYNAPSE_MAX_PARSE_CALLS override them.
+ */
+export const DEFAULT_MAX_PARSE_UNITS = 2_000;
+export const DEFAULT_MAX_PARSE_CALLS = 50;
+
+function positiveEnv(name: string, fallback: number, env: Record<string, string | undefined>): number {
+  const value = Number(env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+export function parseLimits(env: Record<string, string | undefined> = process.env) {
+  return {
+    units: positiveEnv("SYNAPSE_MAX_PARSE_UNITS", DEFAULT_MAX_PARSE_UNITS, env),
+    calls: positiveEnv("SYNAPSE_MAX_PARSE_CALLS", DEFAULT_MAX_PARSE_CALLS, env),
+  };
+}
+
+/** Plain-English refusal for a document over the parse limits, or null when it fits. */
+export function parseLimitError(filename: string, units: number, calls: number, limits = parseLimits()): string | null {
+  if (units > limits.units) {
+    return `${filename} is too long to parse in one go: it has ${units.toLocaleString("en-GB")} sections of text, and Synapse parses up to ${limits.units.toLocaleString("en-GB")} per document. Split it into smaller files, or paste only the part you need.`;
+  }
+  if (calls > limits.calls) {
+    return `${filename} is too long to parse in one go: it would take ${calls} model calls, and Synapse allows up to ${limits.calls} per document. Split it into smaller files, or paste only the part you need.`;
+  }
+  return null;
+}
+
 const STRUCTURE_SYSTEM = `You structure text extracted from a pharma evidence-planning document (slides, a report, interview notes, a spreadsheet) into blocks.
 
 You get numbered units of raw extracted text, each with its location (slide, page or sheet). For every unit, return the blocks it contains, in order:
@@ -133,8 +165,11 @@ export async function structureWithLlm(args: {
   dropped_units: DroppedUnit[];
 }> {
   const entries = args.units.map((unit, index) => ({ id: `u${index + 1}`, unit }));
+  const groups = chunk(entries);
+  const tooLong = parseLimitError(args.filename, entries.length, groups.length);
+  if (tooLong) throw new Error(tooLong);
   const answers = new Map<string, UnitAnswer>();
-  for (const [index, group] of chunk(entries).entries()) {
+  for (const [index, group] of groups.entries()) {
     const byId = new Map(group.map((entry) => [entry.id, entry.unit]));
     const done = await completeAll({
       ids: group.map((entry) => entry.id),
