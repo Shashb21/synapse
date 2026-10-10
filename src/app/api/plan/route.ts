@@ -242,6 +242,7 @@ export async function POST(request: Request) {
         const settings = await setGapSettings({
           gap_id: String(body.gap_id ?? ""),
           settings: Array.isArray(body.settings) ? body.settings.map(String) : [],
+          rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
           actor_function: identity.actor.function,
         });
@@ -261,6 +262,7 @@ export async function POST(request: Request) {
                   regional_nuances: body.regional_nuances,
                   notes: body.notes,
                 },
+          rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
           actor_function: identity.actor.function,
         });
