@@ -393,11 +393,23 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
       if (issue === "partial") {
         const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
           gap: { name: string };
-          coverages: { tactic_id: string; expansion_id: string | null }[];
+          coverages: {
+            tactic_id: string;
+            expansion_id: string | null;
+            tactic: { status: string } | null;
+            expansion: { status: string } | null;
+          }[];
         };
-        const tacticIds = [...new Set(record.coverages.map((c) => c.expansion_id ?? c.tactic_id))];
-        // Addressed only closes with counting evidence (a proposed scope does not): if the
-        // server refuses, the gap is rewritten as Open instead.
+        // Only completed, ongoing or planned work closes the addressed slice (a proposed scope does not).
+        const counting = new Set(["completed", "ongoing", "planned"]);
+        const tacticIds = [
+          ...new Set(
+            record.coverages
+              .filter((c) => counting.has((c.expansion_id ? c.expansion?.status : c.tactic?.status) ?? ""))
+              .map((c) => c.expansion_id ?? c.tactic_id),
+          ),
+        ];
+        // If the server still refuses, the gap is rewritten as Open instead.
         const addressed =
           tacticIds.length > 0
             ? await request.post("/api/iegp", {
