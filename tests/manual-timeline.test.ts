@@ -180,8 +180,22 @@ describe("S10 by hand", () => {
     expect(dependent.meta.dependency_note).toMatch(/Needs the registry cohort first/);
     for (const row of output.activities) expect(row.meta.schedule_basis.start).toBe("human");
 
+    // b waits on a but starts before a ends: a final save explains it and refuses (KAN-85).
+    const upstream = output.activities.find((row) => row.id === a)!;
+    await expect(savePlan({ status: "final", note: "Signed off without a model", actor: ACTOR })).rejects.toThrow(
+      new RegExp(`starts ${dependent.start_date}, before .* ends \\(${upstream.end_date}\\)`),
+    );
+    expect((await savePlan({ status: "draft", note: "Draft with the conflict open", actor: ACTOR })).status).toBe("draft");
+    await updateTimelineActivity({
+      id: b,
+      start_date: upstream.end_date,
+      end_date: "2031-01-01",
+      rationale: "Starts once the registry cohort is in",
+      actor: ACTOR,
+    });
     const plan = await savePlan({ status: "final", note: "Signed off without a model", actor: ACTOR });
     expect(plan.snapshot.pending).toHaveLength(0);
+    expect(plan.snapshot.fingerprint_code).toMatch(/^[0-9a-f]{8}$/);
   });
 
   it("refuses self, unknown and cyclic dependencies, and edits without a rationale", async () => {
@@ -243,7 +257,9 @@ describe("S10 by hand", () => {
     expect(added.meta.manual).toBe(true);
     expect(added.gap_ids).toEqual([]);
     expect(added.band).toBe("unprioritized");
-    expect(added.depends_on).toEqual([b]);
+    // The model's dependency is a proposal: it schedules nothing until a person accepts it (KAN-85).
+    expect(added.depends_on).toEqual([]);
+    expect(added.meta.proposed_dependencies).toEqual([{ id: b, reason: "model: after the second study" }]);
     expect(added.meta.schedule_rationale).toBe("Board meets after the first readout");
     expect(added.meta.schedule_basis).toEqual({ start: "human", end: "human", readout: null });
 
@@ -275,8 +291,10 @@ describe("S10 by hand", () => {
     const { output } = await timelineModule.run(input(), ctx);
     expect(output.activities.map((row) => row.id)).not.toContain(a);
     expect(output.removed.map((row) => row.activity_id)).toEqual([a]);
-    // Its dependent no longer waits on it on the chart, but the hand-set list is kept.
+    // Its dependent no longer waits on it on the chart, but the hand-set list is kept,
+    // and the build says so instead of dropping it silently (KAN-85).
     expect(output.activities.find((row) => row.id === b)!.depends_on).toEqual([]);
+    expect(output.problems).toEqual([expect.objectContaining({ kind: "dangling", activity_id: b, upstream_id: a })]);
 
     const tacticId = a.replace(/^ACT-/, "");
     await addTimelineActivity({ tactic_id: tacticId, rationale: "Back in scope", actor: ACTOR });

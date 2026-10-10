@@ -15,9 +15,13 @@ import type { IegpState, Tactic } from "@/lib/iegp/types";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import {
+  acceptedDependencies,
   activityId,
   buildTimeline,
+  estimatedFields,
+  inputsKey,
   missingSchedule,
+  savedProposals,
   TIMELINE_LANES,
   timelineCandidates,
   type TimelineBand,
@@ -31,6 +35,8 @@ import {
   type TimelineModel,
 } from "./build";
 import { plural } from "@/lib/plural";
+import { finalSaveRefusal, planIssues } from "./plan-checks";
+import { fingerprintCode, planFingerprint } from "./plan-fingerprint";
 
 const inputSchema = z.object({
   /** What the model's start offsets count from. Defaults to today. */
@@ -78,6 +84,13 @@ const activitySchema = z.object({
     depends_locked: z.boolean(),
     rationale_locked: z.boolean(),
     manual: z.boolean(),
+    objective: z.string().optional(),
+    outputs: z.string().optional(),
+    inclusion: z.enum(["committed", "completed", "proposed"]).optional(),
+    proposed_dependencies: z.array(z.object({ id: z.string(), reason: z.string() })).optional(),
+    rejected_dependencies: z.array(z.string()).optional(),
+    inputs_key: z.string().optional(),
+    estimate_stale: z.boolean().optional(),
   }),
 });
 
@@ -103,6 +116,10 @@ const outputSchema = z.object({
   removed: z.array(
     z.object({ activity_id: z.string(), tactic_id: z.string(), expansion_id: z.string().optional(), parent_activity_id: z.string().optional(), parent_tactic_name: z.string().optional(), tactic_name: z.string(), reason: z.string() }),
   ),
+  cancelled: z.array(z.object({ tactic_id: z.string(), tactic_name: z.string() })).default([]),
+  problems: z
+    .array(z.object({ kind: z.enum(["cycle", "dangling"]), activity_id: z.string(), upstream_id: z.string(), message: z.string() }))
+    .default([]),
 });
 
 export type TimelineInput = z.infer<typeof inputSchema>;
@@ -388,20 +405,28 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
     const describe = (id: string) => byId.get(id)?.tactic.name ?? id;
 
-    // Dependencies a user set by hand are theirs: never asked of the model, but
-    // seeded into the graph so the model's answers cannot close a loop through them.
+    // Dependencies a person set or accepted are theirs: seeded into the graph so
+    // the model's proposals cannot close a loop through them (KAN-85).
     const graph = new Map<string, string[]>();
-    const locked = new Map<string, DependencyAnswer>();
+    const accepted = new Map<string, DependencyAnswer>();
     for (const candidate of candidates) {
       const saved = candidate.saved;
-      if (saved?.meta?.depends_locked !== true) continue;
-      const upstream = saved.depends_on.filter((id) => id !== candidate.id && byId.has(id));
+      const upstream = acceptedDependencies(saved).filter((id) => id !== candidate.id && byId.has(id));
+      if (upstream.length === 0) continue;
       graph.set(candidate.id, upstream);
-      locked.set(candidate.id, {
-        upstream: upstream.map((id) => ({ id, reason: saved.meta?.dependency_reasons?.[id] ?? "Set by hand." })),
+      accepted.set(candidate.id, {
+        upstream: upstream.map((id) => ({ id, reason: saved?.meta?.dependency_reasons?.[id] ?? "Set by hand." })),
       });
     }
-    const askFor = candidates.filter((candidate) => !locked.has(candidate.id)).map((candidate) => candidate.id);
+    // The model is asked only about activities that are new or whose inputs
+    // changed since it was last asked, and never about ones a person set by hand.
+    const askFor = candidates
+      .filter(
+        (candidate) =>
+          candidate.saved?.meta?.depends_locked !== true &&
+          (!candidate.saved || candidate.saved.meta?.inputs_key !== inputsKey(candidate)),
+      )
+      .map((candidate) => candidate.id);
     const targets = candidates.filter((candidate) => missingSchedule(candidate).length > 0);
 
     // A lone activity has nothing to wait on, so there is nothing to ask. When
@@ -411,9 +436,11 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
     const ai = ctx.ai !== false;
     if (ai && (needsDependencies || targets.length > 0)) requireLlm(ctx, "The timeline");
 
-    // Test stub only: no model runs, so no dependency is inferred.
-    const asked: Map<string, DependencyAnswer> =
-      !ai || isTestStub() || !needsDependencies
+    // With AI off nothing is asked, so every saved dependency and proposal stays
+    // as it is. Test stub only: no model runs, so nothing is proposed.
+    const asked: Map<string, DependencyAnswer> = !ai
+      ? new Map()
+      : isTestStub() || !needsDependencies
         ? new Map(askFor.map((id) => [id, { upstream: [] }]))
         : await ctx.run.step("dependencies", () =>
             completeAll({
@@ -425,7 +452,8 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
                 llmDependencies(ctx, { state, anchor, candidates, missing, graph, retry: attempt > 1 }),
             }),
           );
-    const dependencies = new Map<string, DependencyAnswer>([...asked, ...locked]);
+    // What the estimate prompt is told each activity waits on: accepted, else proposed.
+    const dependencies = new Map<string, DependencyAnswer>([...asked, ...accepted]);
 
     let estimates = new Map<string, ScheduleEstimate>();
     if (!ai) {
@@ -466,7 +494,7 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
       );
     }
 
-    const model = buildTimeline({ state, placements, designs, overrides, estimates, dependencies, anchor });
+    const model = buildTimeline({ state, placements, designs, overrides, estimates, dependencies: asked, anchor });
     // With AI off, undated activities simply wait for a person; the dated ones are saved.
     if (ai && model.pending.length > 0) {
       throw new Error(
@@ -486,11 +514,11 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
           start_date: activity.start_date,
           end_date: activity.end_date,
           readout_date: activity.readout_date,
-          // Hand-set dependencies are stored as the user wrote them, even one
-          // whose upstream is off the timeline for now.
-          depends_on: activity.meta.depends_locked && saved ? saved.depends_on : activity.depends_on,
+          // Accepted and hand-set dependencies are stored as they were, even one
+          // whose upstream is off the timeline for now. A model's are proposals (meta).
+          depends_on: saved ? acceptedDependencies(saved) : activity.depends_on,
           band: activity.band,
-          meta: activity.meta.depends_locked && reasons ? { ...activity.meta, dependency_reasons: reasons } : activity.meta,
+          meta: reasons ? { ...activity.meta, dependency_reasons: reasons } : activity.meta,
           updated_by: ctx.actor.name,
           updated_at: nowIso(),
         };
@@ -519,6 +547,9 @@ export const timelineModule: SynapseModule<TimelineInput, TimelineOutput> = {
       months: model.window.months,
       unscheduled: model.unscheduled.length,
       estimated: estimates.size,
+      asked_dependencies: asked.size,
+      proposed_dependencies: model.activities.reduce((sum, row) => sum + row.meta.proposed_dependencies.length, 0),
+      problems: model.problems.length,
     });
     return {
       output: model,
@@ -617,6 +648,16 @@ async function activityRow(id: string): Promise<ActivityRow | undefined> {
 
 const rowMeta = (row: ActivityRow): RowMeta => ({ ...((row.meta as RowMeta | null) ?? {}) });
 
+const asSaved = (row: ActivityRow): SavedActivity => ({
+  id: row.id,
+  start_date: row.start_date,
+  end_date: row.end_date,
+  readout_date: row.readout_date,
+  lane: row.lane,
+  depends_on: (row.depends_on as string[] | null) ?? [],
+  meta: (row.meta as SavedActivity["meta"]) ?? null,
+});
+
 /** A row a user took off the timeline cannot be edited until it is added back. */
 function assertOnTimeline(row: ActivityRow | undefined, id: string): ActivityRow {
   if (!row) throw new Error(`Unknown activity ${id}. Date it by hand or rebuild the timeline first.`);
@@ -703,6 +744,10 @@ export async function updateTimelineActivity(args: {
     readout: !next.readout_date ? null : readoutChanged ? "human" : (basis.readout ?? "saved"),
   };
   if (args.lane) meta.lane_locked = !releaseLane;
+  // A date a person set is no longer an estimate; once none is left, nothing is stale.
+  if (estimatedFields(meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"]).length === 0) {
+    meta.estimate_stale = false;
+  }
   const rationaleChanged =
     args.schedule_rationale !== undefined &&
     (args.schedule_rationale?.trim() || null) !== ((meta.schedule_rationale as string | null | undefined) ?? null);
@@ -782,6 +827,8 @@ export async function setTimelineDependencies(args: {
     if (reason) reasons[id] = reason;
   }
   const meta = rowMeta(current);
+  const pendingProposals = savedProposals(asSaved(current)).filter((row) => !upstream.includes(row.id));
+  meta.proposed_dependencies = pendingProposals;
   meta.depends_locked = true;
   meta.dependency_reasons = reasons;
   meta.dependency_note =
@@ -1060,6 +1107,12 @@ export type IegpPlanRecord = {
     pending?: TimelineModel["pending"];
     /** Absent on snapshots saved before activities could be removed by hand. */
     removed?: TimelineModel["removed"];
+    /** Absent on snapshots saved before KAN-85. */
+    cancelled?: TimelineModel["cancelled"];
+    problems?: TimelineModel["problems"];
+    /** planFingerprint of the frozen activities, and its short code stamped on exports (KAN-85). */
+    fingerprint?: string;
+    fingerprint_code?: string;
     counts: { gaps: number; tactics: number; open: number; addressed: number };
   };
 };
@@ -1113,6 +1166,10 @@ export async function savePlan(args: {
         .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or remove it, then save the plan as final.`,
     );
   }
+  // Conflicts, loops, missing references, invalid dates, unreviewed estimates and
+  // proposed dependencies are explained and must be resolved first (KAN-85).
+  const issues = planIssues(model).filter((issue) => issue.kind !== "pending");
+  if (args.status === "final" && issues.length > 0) throw new Error(finalSaveRefusal(issues));
   const previous = await latestPlan();
   const version = (previous?.version ?? 0) + 1;
   const snapshot: IegpPlanRecord["snapshot"] = {
@@ -1122,6 +1179,10 @@ export async function savePlan(args: {
     unscheduled: model.unscheduled,
     pending: model.pending,
     removed: model.removed,
+    cancelled: model.cancelled,
+    problems: model.problems,
+    fingerprint: planFingerprint(model.activities),
+    fingerprint_code: fingerprintCode(planFingerprint(model.activities)),
     counts: {
       gaps: state.gaps.filter((gap) => !gap.retired).length,
       tactics: state.tactics.length,
@@ -1161,4 +1222,113 @@ export async function savePlan(args: {
     saved_at: record.saved_at,
     snapshot,
   };
+}
+
+/**
+ * A person reviews one dependency a model proposed (KAN-85). Accepting makes it
+ * theirs (it now gates the schedule and the dependencies are depends_locked, so
+ * no rebuild asks the model again); rejecting keeps it off for good.
+ */
+export async function reviewTimelineDependency(args: {
+  id: string;
+  upstream_id: string;
+  decision: "accept" | "reject";
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  const current = assertOnTimeline(await activityRow(args.id), args.id);
+  const saved = asSaved(current);
+  const proposals = savedProposals(saved);
+  const proposal = proposals.find((row) => row.id === args.upstream_id);
+  if (!proposal) throw new Error(`There is no proposed dependency of ${args.id} on ${args.upstream_id} to review.`);
+  const meta = rowMeta(current);
+  const before = acceptedDependencies(saved);
+  let dependsOn = before;
+  if (args.decision === "accept") {
+    const model = await timelineModel();
+    if (!model.activities.some((row) => row.id === args.upstream_id)) {
+      throw new Error(`${args.upstream_id} has no dates on the timeline, so nothing can wait on it yet.`);
+    }
+    const graph = new Map(model.activities.map((activity) => [activity.id, activity.depends_on]));
+    graph.delete(args.id);
+    dependsOn = [...new Set([...before, args.upstream_id])];
+    if (wouldCycle(graph, args.id, dependsOn)) {
+      throw new Error("Accepting that dependency would create a cycle: the other activity already waits on this one.");
+    }
+    meta.depends_locked = true;
+    meta.dependency_reasons = { ...((meta.dependency_reasons as Record<string, string> | undefined) ?? {}), [args.upstream_id]: proposal.reason };
+  } else {
+    meta.rejected_dependencies = [...new Set([...((meta.rejected_dependencies as string[] | undefined) ?? []), args.upstream_id])];
+  }
+  meta.proposed_dependencies = proposals.filter((row) => row.id !== args.upstream_id);
+  await db()
+    .update(t.timelineActivities)
+    .set({ depends_on: dependsOn, meta, updated_by: args.actor.name, updated_at: nowIso() })
+    .where(eq(t.timelineActivities.id, args.id));
+  await recordEdit({
+    workspace_id: args.workspace_id,
+    stage: "S10",
+    entity_type: "timeline_activity",
+    entity_id: args.id,
+    field: "proposed_dependency",
+    action: args.decision,
+    before: `proposed: waits on ${args.upstream_id} (${proposal.reason})`,
+    after: args.decision === "accept" ? `waits on ${dependsOn.join(", ")}` : `rejected: ${args.upstream_id}`,
+    rationale,
+    actor: args.actor,
+  });
+  return { id: args.id, depends_on: dependsOn, meta };
+}
+
+/**
+ * A person accepts a model's date estimates as theirs (KAN-85): the dates stay,
+ * their source becomes human, and the activity is no longer flagged as an
+ * estimate. With no ids, every activity that still carries an estimate.
+ */
+export async function acceptTimelineEstimates(args: {
+  ids?: string[];
+  rationale: string;
+  actor: Actor;
+  workspace_id?: string;
+}) {
+  const rationale = requireRationale(args.rationale);
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.timelineActivities);
+  const wanted = args.ids && args.ids.length > 0 ? new Set(args.ids) : null;
+  const accepted: string[] = [];
+  for (const row of rows) {
+    if (wanted && !wanted.has(row.id)) continue;
+    const meta = rowMeta(row);
+    if (meta.removed === true) continue;
+    const basis = meta.schedule_basis as TimelineActivity["meta"]["schedule_basis"] | undefined;
+    const fields = estimatedFields(basis);
+    if (!basis || fields.length === 0) continue;
+    meta.schedule_basis = {
+      start: basis.start === "model" ? "human" : basis.start,
+      end: basis.end === "model" ? "human" : basis.end,
+      readout: basis.readout === "model" ? "human" : basis.readout,
+    };
+    meta.estimate_stale = false;
+    await db()
+      .update(t.timelineActivities)
+      .set({ meta, updated_by: args.actor.name, updated_at: nowIso() })
+      .where(eq(t.timelineActivities.id, row.id));
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "timeline_activity",
+      entity_id: row.id,
+      field: "schedule_basis",
+      action: "accept",
+      before: `model estimate (${fields.join(", ")}): ${row.start_date} → ${row.end_date} (readout ${row.readout_date ?? "—"})`,
+      after: "accepted as set by hand",
+      rationale,
+      actor: args.actor,
+    });
+    accepted.push(row.id);
+  }
+  if (wanted && accepted.length === 0) throw new Error("None of those activities carries a model estimate to accept.");
+  return { accepted };
 }

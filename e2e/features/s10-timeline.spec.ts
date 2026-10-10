@@ -141,7 +141,9 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const download = page.waitForEvent("download", { timeout: 30_000 });
     await page.getByRole("button", { name: /export png/i }).click();
     const file = await download;
-    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-v.*\.png$/);
+    // A saved version is named vN-<code>; a plan edited since its last save (the test above
+    // changed a budget) exports as "current-<code>" so it is never mistaken for the saved one.
+    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-(v\d+|current)-[0-9a-f]{8}\.png$/);
     expect((await file.path()) ?? "").not.toBe("");
   });
 
@@ -180,6 +182,11 @@ test.describe("S10 interactive Gantt IEGP", () => {
   });
 
   test("saves the plan as final, versioned, with its sign-off rationale", async ({ page, request }) => {
+    // KAN-85: a final save first needs the model's estimated dates reviewed.
+    const before = await planState(request);
+    if ((before as { timeline_issues?: { kind: string }[] }).timeline_issues?.some((issue) => issue.kind === "estimate" || issue.kind === "stale_estimate")) {
+      await planAction(request, { action: "accept_estimates", rationale: "Estimates reviewed for the feature spec" });
+    }
     await page.goto("/timeline");
     await page.getByRole("button", { name: /save as final/i }).click();
     const dialog = page.getByRole("dialog");
