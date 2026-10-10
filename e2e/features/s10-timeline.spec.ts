@@ -141,7 +141,9 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const download = page.waitForEvent("download", { timeout: 30_000 });
     await page.getByRole("button", { name: /export png/i }).click();
     const file = await download;
-    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-v.*\.png$/);
+    // A saved version is named vN-<code>; a plan edited since its last save (the test above
+    // changed a budget) exports as "current-<code>" so it is never mistaken for the saved one.
+    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-(v\d+|current)-[0-9a-f]{8}\.png$/);
     expect((await file.path()) ?? "").not.toBe("");
   });
 
