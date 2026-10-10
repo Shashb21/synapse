@@ -114,6 +114,9 @@ test.describe("KAN-25 manual timeline", () => {
       .items.find((row) => row.tactic_name === NEW_ACTIVITY)!;
     await openTimeline(page);
     const body = page.locator(`[data-activity-id="${before.activity_id}"] rect[data-bar="body"]`);
+    // The final-plan checklist above the chart can render after it: measure once the page has settled.
+    await page.waitForLoadState("networkidle");
+    await body.scrollIntoViewIfNeeded();
     const box = (await body.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();

@@ -396,14 +396,32 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
           coverages: { tactic_id: string; expansion_id: string | null }[];
         };
         const tacticIds = [...new Set(record.coverages.map((c) => c.expansion_id ?? c.tactic_id))];
-        await iegpAction(request, {
-          action: "rewrite_partial_gap",
-          gap_id,
-          name: record.gap.name,
-          status: tacticIds.length > 0 ? "validated_addressed" : "validated_open",
-          tactic_ids: tacticIds.join(","),
-          note: "Resolved before the final plan",
-        });
+        // Addressed only closes with counting evidence (a proposed scope does not): if the
+        // server refuses, the gap is rewritten as Open instead.
+        const addressed =
+          tacticIds.length > 0
+            ? await request.post("/api/iegp", {
+                headers: { "content-type": "application/json" },
+                data: JSON.stringify({
+                  ...ACTOR,
+                  action: "rewrite_partial_gap",
+                  gap_id,
+                  name: record.gap.name,
+                  status: "validated_addressed",
+                  tactic_ids: tacticIds.join(","),
+                  note: "Resolved before the final plan",
+                }),
+              })
+            : null;
+        if (!addressed?.ok()) {
+          await iegpAction(request, {
+            action: "rewrite_partial_gap",
+            gap_id,
+            name: record.gap.name,
+            status: "validated_open",
+            note: "Resolved before the final plan",
+          });
+        }
       } else if (issue === "candidate") {
         await iegpAction(request, { action: "lock_gap", gap_id, status: "validated_open", note: "Kept as Open for the final plan" });
         await iegpAction(request, { action: "validate_gap", gap_id, note: "Confirmed for the final plan" });
