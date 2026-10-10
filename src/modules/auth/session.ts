@@ -193,8 +193,38 @@ export async function currentSession(): Promise<Session | null> {
 export const NO_SEAT_ERROR = "no_seat";
 export const NO_SEAT_MESSAGE = "Your organisation hasn't assigned you a Synapse seat. Ask your administrator.";
 
-/** Messages /login shows for an `?error=` code; anything else is shown as sent. */
-export const LOGIN_ERROR_MESSAGES: Record<string, string> = { [NO_SEAT_ERROR]: NO_SEAT_MESSAGE };
+/**
+ * The only messages /login shows for `?error=` (KAN-28). The callback sends a
+ * code, never text: a link carrying any other text gets the generic message, so
+ * nobody can make the sign-in page say something it does not.
+ */
+export const LOGIN_ERROR_MESSAGES = {
+  [NO_SEAT_ERROR]: NO_SEAT_MESSAGE,
+  cancelled: "The sign-in was cancelled or refused by your identity provider. Try again.",
+  expired: "That sign-in was interrupted or took too long. Start again.",
+  not_configured: "That sign-in option isn't set up in this deployment.",
+  other_directory: "That Microsoft account belongs to another organisation's directory.",
+  failed: "Sign-in failed. Try again.",
+} as const;
+
+export type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;
+
+/** The message /login shows for a raw `?error=` value: a known code's, else the generic one. */
+export function loginErrorMessage(raw: string | null | undefined): string | null {
+  const code = raw?.trim();
+  if (!code) return null;
+  return Object.hasOwn(LOGIN_ERROR_MESSAGES, code) ? LOGIN_ERROR_MESSAGES[code as LoginErrorCode] : LOGIN_ERROR_MESSAGES.failed;
+}
+
+/** The code the callback sends for a failed sign-in; the detail stays in the audit log. */
+export function loginErrorCode(error: unknown): LoginErrorCode {
+  if (error instanceof NoSeatError) return NO_SEAT_ERROR;
+  const message = error instanceof Error ? error.message : "";
+  if (/no sign-in is in progress|state mismatch/i.test(message)) return "expired";
+  if (/not configured/i.test(message)) return "not_configured";
+  if (/another directory/i.test(message)) return "other_directory";
+  return "failed";
+}
 
 /** SSO refused: the verified email holds no seat on an active customer. Carries no detail on purpose. */
 export class NoSeatError extends Error {
