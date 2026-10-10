@@ -1,5 +1,5 @@
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
@@ -37,6 +37,19 @@ import {
 import { plural } from "@/lib/plural";
 import { finalSaveRefusal, planIssues } from "./plan-checks";
 import { fingerprintCode, planFingerprint } from "./plan-fingerprint";
+import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
+import {
+  buildFinalPackage,
+  FINAL_PACKAGE_SCHEMA,
+  finalPackageBlockers,
+  findGapOrphans,
+  foreignReferences,
+  packageFingerprint,
+  packageRefusal,
+  type FinalPackage,
+  type PackageBlocker,
+} from "./final-package";
 
 const inputSchema = z.object({
   /** What the model's start offsets count from. Defaults to today. */
@@ -1114,14 +1127,19 @@ export type IegpPlanRecord = {
     fingerprint?: string;
     fingerprint_code?: string;
     counts: { gaps: number; tactics: number; open: number; addressed: number };
+    /**
+     * The complete frozen IEGP (KAN-86): gap inventory, tactics, priority,
+     * roadmap, open items and lineage. Absent on drafts and on finals saved
+     * before KAN-86, which are read as legacy timeline-only packages.
+     */
+    package?: FinalPackage;
+    /** sha256 of the canonical package JSON. */
+    package_fingerprint?: string;
+    schema_version?: typeof FINAL_PACKAGE_SCHEMA;
   };
 };
 
-export async function latestPlan(): Promise<IegpPlanRecord | null> {
-  await ensurePlatformSchema();
-  const rows = await db().select().from(t.iegpPlans).orderBy(desc(t.iegpPlans.version)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
+function toPlanRecord(row: typeof t.iegpPlans.$inferSelect): IegpPlanRecord {
   return {
     id: row.id,
     version: row.version,
@@ -1133,18 +1151,36 @@ export async function latestPlan(): Promise<IegpPlanRecord | null> {
   };
 }
 
+/** One saved version, read only from what was frozen; null when there is none. */
+export async function planVersion(version: number): Promise<IegpPlanRecord | null> {
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.iegpPlans).where(eq(t.iegpPlans.version, version)).limit(1);
+  return rows[0] ? toPlanRecord(rows[0]) : null;
+}
+
+export async function latestPlan(): Promise<IegpPlanRecord | null> {
+  await ensurePlatformSchema();
+  const rows = await db().select().from(t.iegpPlans).orderBy(desc(t.iegpPlans.version)).limit(1);
+  return rows[0] ? toPlanRecord(rows[0]) : null;
+}
+
 export async function planHistory(limit = 20): Promise<IegpPlanRecord[]> {
   await ensurePlatformSchema();
   const rows = await db().select().from(t.iegpPlans).orderBy(desc(t.iegpPlans.version)).limit(limit);
-  return rows.map((row) => ({
-    id: row.id,
-    version: row.version,
-    status: row.status as IegpPlanRecord["status"],
-    note: row.note,
-    saved_by: row.saved_by,
-    saved_at: row.saved_at,
-    snapshot: row.snapshot as IegpPlanRecord["snapshot"],
-  }));
+  return rows.map(toPlanRecord);
+}
+
+/**
+ * What a complete final waits on in the gap inventory (KAN-86): candidates,
+ * Partially Addressed or unconfirmed gaps, Open gaps without a validated band,
+ * orphans and outside references. The roadmap's own checks are planIssues.
+ */
+export async function finalPlanBlockers(): Promise<PackageBlocker[]> {
+  const [model, state, placements] = await Promise.all([timelineModel(), loadState(), listPlacements()]);
+  return [
+    ...finalPackageBlockers({ state, placements, orphans: await findGapOrphans(state) }),
+    ...foreignReferences(state, model),
+  ];
 }
 
 /** Saving as final freezes a snapshot; the plan the user stands behind is versioned. */
@@ -1155,73 +1191,109 @@ export async function savePlan(args: {
   workspace_id?: string;
 }): Promise<IegpPlanRecord> {
   const note = requireRationale(args.note);
-  const [model, state] = await Promise.all([timelineModel(), loadState()]);
-  if (args.status === "final" && model.activities.length === 0) {
-    throw new Error("There is nothing to save as final yet: date at least one activity on the timeline first.");
-  }
-  if (args.status === "final" && model.pending.length > 0) {
-    throw new Error(
-      `${model.pending.length === 1 ? "1 activity has" : `${model.pending.length} activities have`} no schedule yet (${model.pending
-        .map((row) => row.tactic_name)
-        .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or remove it, then save the plan as final.`,
-    );
-  }
-  // Conflicts, loops, missing references, invalid dates, unreviewed estimates and
-  // proposed dependencies are explained and must be resolved first (KAN-85).
-  const issues = planIssues(model).filter((issue) => issue.kind !== "pending");
-  if (args.status === "final" && issues.length > 0) throw new Error(finalSaveRefusal(issues));
-  const previous = await latestPlan();
-  const version = (previous?.version ?? 0) + 1;
-  const snapshot: IegpPlanRecord["snapshot"] = {
-    activities: model.activities,
-    window: model.window,
-    lanes: model.lanes,
-    unscheduled: model.unscheduled,
-    pending: model.pending,
-    removed: model.removed,
-    cancelled: model.cancelled,
-    problems: model.problems,
-    fingerprint: planFingerprint(model.activities),
-    fingerprint_code: fingerprintCode(planFingerprint(model.activities)),
-    counts: {
-      gaps: state.gaps.filter((gap) => !gap.retired).length,
-      tactics: state.tactics.length,
-      open: model.lanes.filter((lane) => lane.id !== "addressed").reduce((sum, lane) => sum + lane.count, 0),
-      addressed: model.lanes.find((lane) => lane.id === "addressed")?.count ?? 0,
-    },
-  };
-  const record = {
-    id: newId("plan"),
-    version,
-    status: args.status,
-    snapshot,
-    note,
-    saved_by: args.actor.name,
-    saved_function: args.actor.function,
-    saved_at: nowIso(),
-  };
-  await db().insert(t.iegpPlans).values(record);
-  await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S10",
-    entity_type: "iegp_plan",
-    entity_id: record.id,
-    field: "status",
-    action: "validate",
-    before: previous ? `v${previous.version} ${previous.status}` : "none",
-    after: `v${version} ${args.status}`,
-    rationale: note,
-    actor: args.actor,
+  // One transaction: the package is read from one revision of the workspace, the
+  // version is allocated under a lock (two saves never share a number), and a
+  // failure part-way writes nothing.
+  return withWorkspaceTransaction(async () => {
+    const schema = await currentSchemaName();
+    await db().execute(sql`select pg_advisory_xact_lock(hashtext(${`iegp_plans:${schema}`}))`);
+    const [model, state] = await Promise.all([timelineModel(), loadState()]);
+    if (args.status === "final" && model.activities.length === 0) {
+      throw new Error("There is nothing to save as final yet: date at least one activity on the timeline first.");
+    }
+    if (args.status === "final" && model.pending.length > 0) {
+      throw new Error(
+        `${model.pending.length === 1 ? "1 activity has" : `${model.pending.length} activities have`} no schedule yet (${model.pending
+          .map((row) => row.tactic_name)
+          .join(", ")}). Date each one with Set dates on the timeline (choose Show deferred gaps if it sits under a deferred gap), or remove it, then save the plan as final.`,
+      );
+    }
+    // Conflicts, loops, missing references, invalid dates, unreviewed estimates and
+    // proposed dependencies are explained and must be resolved first (KAN-85).
+    const issues = planIssues(model).filter((issue) => issue.kind !== "pending");
+    if (args.status === "final" && issues.length > 0) throw new Error(finalSaveRefusal(issues));
+    const fingerprint = planFingerprint(model.activities);
+    const fingerprint_code = fingerprintCode(fingerprint);
+    let finalPackage: FinalPackage | undefined;
+    let package_fingerprint: string | undefined;
+    if (args.status === "final") {
+      // The complete IEGP (KAN-86): every gap confirmed and resolved, every Open
+      // gap banded, nothing pointing at a retired gap or outside the workspace.
+      const placements = await listPlacements();
+      const blockers = [
+        ...finalPackageBlockers({ state, placements, orphans: await findGapOrphans(state) }),
+        ...foreignReferences(state, model),
+      ];
+      if (blockers.length > 0) throw new Error(packageRefusal(blockers));
+      finalPackage = await buildFinalPackage({
+        state,
+        model,
+        placements,
+        axes: await loadAxes(),
+        workspace_id: args.workspace_id ?? null,
+        fingerprint,
+        fingerprint_code,
+        built_at: nowIso(),
+      });
+      package_fingerprint = packageFingerprint(finalPackage);
+    }
+    const [{ max }] = (await db().execute(sql`select coalesce(max(version), 0)::int as max from iegp_plans`)) as unknown as { max: number }[];
+    const previous = max > 0 ? await planVersion(max) : null;
+    const version = max + 1;
+    const snapshot: IegpPlanRecord["snapshot"] = {
+      activities: model.activities,
+      window: model.window,
+      lanes: model.lanes,
+      unscheduled: model.unscheduled,
+      pending: model.pending,
+      removed: model.removed,
+      cancelled: model.cancelled,
+      problems: model.problems,
+      fingerprint,
+      fingerprint_code,
+      counts: {
+        gaps: state.gaps.filter((gap) => !gap.retired).length,
+        tactics: state.tactics.length,
+        open: model.lanes.filter((lane) => lane.id !== "addressed").reduce((sum, lane) => sum + lane.count, 0),
+        addressed: model.lanes.find((lane) => lane.id === "addressed")?.count ?? 0,
+      },
+      ...(finalPackage ? { package: finalPackage, package_fingerprint, schema_version: FINAL_PACKAGE_SCHEMA } : {}),
+    };
+    const record = {
+      id: newId("plan"),
+      version,
+      status: args.status,
+      snapshot,
+      note,
+      saved_by: args.actor.name,
+      saved_function: args.actor.function,
+      saved_at: nowIso(),
+    };
+    await db().insert(t.iegpPlans).values(record);
+    await recordEdit({
+      workspace_id: args.workspace_id,
+      stage: "S10",
+      entity_type: "iegp_plan",
+      entity_id: record.id,
+      field: "status",
+      action: "validate",
+      before: previous ? `v${previous.version} ${previous.status}` : "none",
+      after: package_fingerprint
+        ? `v${version} final · complete package ${FINAL_PACKAGE_SCHEMA} · fingerprint ${package_fingerprint}`
+        : `v${version} ${args.status}`,
+      rationale: note,
+      actor: args.actor,
+    });
+    return {
+      id: record.id,
+      version,
+      status: args.status,
+      note: record.note,
+      saved_by: record.saved_by,
+      saved_at: record.saved_at,
+      snapshot,
+    };
   });
-  return {
-    id: record.id,
-    version,
-    status: args.status,
-    note: record.note,
-    saved_by: record.saved_by,
-    saved_at: record.saved_at,
-    snapshot,
-  };
 }
 
 /**

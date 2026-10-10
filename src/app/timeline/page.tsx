@@ -7,7 +7,7 @@ import { loadState } from "@/lib/iegp/store";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
-import { latestPlan, planHistory, timelineModel } from "@/modules/stages/s10-timeline/module";
+import { finalPlanBlockers, latestPlan, planHistory, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
 import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
@@ -45,13 +45,14 @@ function savedModel(snapshot: NonNullable<Awaited<ReturnType<typeof latestPlan>>
 
 export default async function TimelinePage({ searchParams }: { searchParams: Promise<{ version?: string }> }) {
   const { version } = await searchParams;
-  const [liveModel, plan, history, identity, state, placements] = await Promise.all([
+  const [liveModel, plan, history, identity, state, placements, gapBlockers] = await Promise.all([
     timelineModel(),
     latestPlan(),
     planHistory(20),
     sessionContext(),
     loadState(),
     listPlacements(),
+    finalPlanBlockers(),
   ]);
   const saved = version ? history.find((entry) => String(entry.version) === version) : undefined;
   const model = saved ? savedModel(saved.snapshot) : liveModel;
@@ -84,13 +85,18 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
           drag, add and sequence activities by hand; click an activity for its full record,
           export the chart as an image, and save the version you stand behind.
         </PageIntro>
-        {BREAKOUTS_ENABLED ? (
-          <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
+        <div className="flex flex-wrap gap-3 text-[12px] text-muted-foreground">
+          {history.some((entry) => entry.status === "final") ? (
+            <Link href="/plan/final" className="no-underline hover:underline" data-testid="open-final-plan">
+              Open the complete final plan →
+            </Link>
+          ) : null}
+          {BREAKOUTS_ENABLED ? (
             <Link href="/breakouts" className="no-underline hover:underline">
               Open breakouts →
             </Link>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       <TimelineBoard
@@ -112,6 +118,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
         gapDomains={gapDomains}
         addable={addable}
         issues={saved ? [] : planIssues(model)}
+        gapBlockers={saved ? [] : gapBlockers}
         viewingVersion={saved ? { version: saved.version, status: saved.status } : null}
       />
     </AppShell>

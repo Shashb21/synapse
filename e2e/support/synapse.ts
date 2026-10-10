@@ -374,6 +374,49 @@ export async function validateBandHigh(request: APIRequestContext, gap_id: strin
  * The gap id issued just before `id` (GAP-007 → GAP-006). Ids are never
  * reissued after a reset (KAN-15), so specs derive them instead of assuming GAP-001.
  */
+/**
+ * Resolves what a complete final waits on in the gap inventory (KAN-86), as a
+ * person would: each gap the plan names is kept and confirmed, rewritten if
+ * Partially Addressed (as Addressed with its mapped tactics, else Open), and
+ * banded if Open. Roadmap checks (KAN-85) stay with the spec.
+ */
+export async function resolveFinalPlanGaps(request: APIRequestContext) {
+  for (let round = 0; round < 4; round += 1) {
+    const plan = await request.get("/api/plan");
+    expect(plan.ok()).toBeTruthy();
+    const { final_blockers } = (await plan.json()) as {
+      final_blockers: { issue: string; gap_id: string | null; message: string }[];
+    };
+    const gaps = final_blockers.filter((row) => row.gap_id && row.issue !== "foreign_reference");
+    if (gaps.length === 0) return;
+    for (const { gap_id, issue } of gaps) {
+      if (issue === "partial") {
+        const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
+          gap: { name: string };
+          coverages: { tactic_id: string; expansion_id: string | null }[];
+        };
+        const tacticIds = [...new Set(record.coverages.map((c) => c.expansion_id ?? c.tactic_id))];
+        await iegpAction(request, {
+          action: "rewrite_partial_gap",
+          gap_id,
+          name: record.gap.name,
+          status: tacticIds.length > 0 ? "validated_addressed" : "validated_open",
+          tactic_ids: tacticIds.join(","),
+          note: "Resolved before the final plan",
+        });
+      } else if (issue === "candidate") {
+        await iegpAction(request, { action: "lock_gap", gap_id, status: "validated_open", note: "Kept as Open for the final plan" });
+        await iegpAction(request, { action: "validate_gap", gap_id, note: "Confirmed for the final plan" });
+      } else if (issue === "unconfirmed") {
+        await iegpAction(request, { action: "validate_gap", gap_id, note: "Confirmed for the final plan" });
+      } else if (issue === "no_band") {
+        await planAction(request, { action: "validate_band", gap_id, band: "low", rationale: "Banded for the final plan" });
+      }
+    }
+  }
+  throw new Error("Gaps still block the final plan after four rounds.");
+}
+
 export function previousGapId(id: string): string {
   const match = /^GAP-(\d+)$/.exec(id);
   if (!match) throw new Error(`Not a numbered gap id: ${id}`);

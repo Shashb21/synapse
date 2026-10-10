@@ -7,8 +7,7 @@ import {
   planState,
   runStage,
   seedMapped,
-  validateBandHigh,
-} from "../support/synapse";
+  validateBandHigh, resolveFinalPlanGaps } from "../support/synapse";
 
 type TimelineOutput = {
   activities: {
@@ -182,6 +181,8 @@ test.describe("S10 interactive Gantt IEGP", () => {
   });
 
   test("saves the plan as final, versioned, with its sign-off rationale", async ({ page, request }) => {
+    // KAN-86: the complete plan needs every gap resolved, confirmed and banded.
+    await resolveFinalPlanGaps(request);
     // KAN-85: a final save first needs the model's estimated dates reviewed.
     const before = await planState(request);
     if ((before as { timeline_issues?: { kind: string }[] }).timeline_issues?.some((issue) => issue.kind === "estimate" || issue.kind === "stale_estimate")) {

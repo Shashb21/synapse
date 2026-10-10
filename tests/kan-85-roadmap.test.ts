@@ -1,3 +1,4 @@
+import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -233,6 +234,8 @@ describe("KAN-85: dependencies are proposals a person reviews", () => {
     expect(reviewed.meta.schedule_basis).toEqual({ start: "human", end: "human", readout: null });
     expect(reviewed.meta.estimate_stale).toBe(false);
 
+    // A complete final needs every gap resolved, confirmed and banded (KAN-86).
+    await makeFinalReady(ACTOR);
     const model = await timelineModel(ANCHOR);
     expect(planIssues(model)).toEqual([]);
     const plan = await savePlan({ status: "final", note: "Signed off after review", actor: ACTOR });
