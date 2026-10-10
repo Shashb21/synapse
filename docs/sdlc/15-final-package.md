@@ -80,6 +80,12 @@ The page labels them the same way.
   - A non-numeric version: 400.
 - **Chart image:** `/timeline?version=N` and its PNG export stay as they were.
 
+## Workspace reset
+
+- A reset or demo load deletes the workspace's frozen finals along with the rest of its plan (KAN-99, owner decision). Export a final (`GET /api/plan/final/N`) before resetting if you need to keep it.
+- The workspace's own audit trail keeps the reset, and the platform audit log keeps the earlier final save as an edit record with its fingerprint.
+- Version numbers start again at 1 after a reset. An older export is told apart by its `saved_at` and fingerprint.
+
 ## Older finals
 
 A final saved before KAN-86 has no `package`. It is read as **"Legacy package (timeline only) — gap inventory, tactics and priority were not frozen"**, showing only its frozen timeline. Nothing is filled in or inferred for the parts that were never frozen.
