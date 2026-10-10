@@ -280,13 +280,13 @@ describe("S10 on the model path", () => {
         .depends_on,
     ).toEqual([{ id: upstream, reason: "needs its readout first" }]);
 
-    const upstreamRow = output.activities.find((row) => row.id === upstream)!;
+    // The model's dependency is a proposal for a person to review: it gates nothing yet (KAN-85).
     const dependent = output.activities.find((row) => row.id === fresh.id)!;
-    expect(dependent.depends_on).toEqual([upstream]);
-    expect(dependent.meta.dependency_note).toMatch(/needs its readout first/);
-    expect(dependent.start_date >= (upstreamRow.readout_date ?? upstreamRow.end_date)).toBe(true);
+    expect(dependent.depends_on).toEqual([]);
+    expect(dependent.meta.proposed_dependencies).toEqual([{ id: upstream, reason: "needs its readout first" }]);
     for (const row of output.activities.filter((activity) => activity.id !== fresh.id)) {
       expect(row.depends_on).toEqual([]);
+      expect(row.meta.proposed_dependencies).toEqual([]);
     }
   });
 
@@ -312,9 +312,9 @@ describe("S10 on the model path", () => {
     expect(answerFor(dependencyCalls[1]!)).toHaveLength(1);
     expect(dependencyCalls[1]!.body.note).toMatch(/cycle/);
     const rows = new Map(output.activities.map((row) => [row.id, row]));
-    const edges = [rows.get(a)!.depends_on, rows.get(b)!.depends_on];
+    const edges = [rows.get(a)!.meta.proposed_dependencies, rows.get(b)!.meta.proposed_dependencies];
     // One direction survives; never both.
-    expect(edges.filter((list) => list.length > 0)).toHaveLength(1);
+    expect(edges.filter((list) => (list ?? []).length > 0)).toHaveLength(1);
   });
 
   it("never places an activity by a band nobody validated", async () => {

@@ -35,13 +35,16 @@ import {
   type TacticStatus,
 } from "@/lib/iegp/enums";
 import {
+  estimatedFields,
+  INCLUSION_LABELS,
   LANE_LABELS,
   type ScheduleSource,
   type TimelineModel,
 } from "@/modules/stages/s10-timeline/build";
+import type { PlanIssue } from "@/modules/stages/s10-timeline/plan-checks";
 import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { plural } from "@/lib/plural";
-import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
+import { fingerprintCode, planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
 
 export type PlanView = {
   version: number;
@@ -53,6 +56,17 @@ export type PlanView = {
   /** planFingerprint of the saved activities: what "changed since the last save" compares. */
   fingerprint: string;
 };
+
+/** Short code stamped on an exported chart, so an image can be matched to what it shows (KAN-85). */
+export function exportStamp(args: { version: number | null; status?: string; activities: Parameters<typeof planFingerprint>[0] }) {
+  const code = fingerprintCode(planFingerprint(args.activities));
+  const label = args.version === null ? "Current plan (not saved)" : `Saved v${args.version}${args.status ? ` ${args.status}` : ""}`;
+  return {
+    code,
+    text: `Synapse IEGP · ${label} · fingerprint ${code}`,
+    fileName: `synapse-iegp-${args.version === null ? "current" : `v${args.version}`}-${code}.png`,
+  };
+}
 
 /**
  * What a pending activity still needs. With AI off nothing will estimate it,
@@ -111,13 +125,15 @@ export function TimelineBoard({
   identity,
   plan,
   history,
-  canSaveFinal,
-  canReschedule,
-  canRun = canReschedule,
-  canCreate = canReschedule,
-  canEditDetails = canCreate,
+  canSaveFinal: canSaveFinalProp,
+  canReschedule: canRescheduleProp,
+  canRun: canRunProp = canRescheduleProp,
+  canCreate: canCreateProp = canRescheduleProp,
+  canEditDetails: canEditDetailsProp = canCreateProp,
   gapDomains,
   addable = [],
+  issues = [],
+  viewingVersion = null,
 }: {
   model: TimelineModel;
   /** The gap-grouped view the chart draws (KAN-25). */
@@ -138,8 +154,19 @@ export function TimelineBoard({
   gapDomains: Record<string, string>;
   /** Tactics not on the timeline in any form, which a user can add by hand. */
   addable?: { tactic_id: string; name: string }[];
+  /** What must be resolved before a final save (KAN-85). */
+  issues?: PlanIssue[];
+  /** Set when the board shows a saved version read-only, for export (KAN-85). */
+  viewingVersion?: { version: number; status: string } | null;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  // A saved version is shown read-only (KAN-85).
+  const readOnly = Boolean(viewingVersion);
+  const canSaveFinal = canSaveFinalProp && !readOnly;
+  const canReschedule = canRescheduleProp && !readOnly;
+  const canRun = canRunProp && !readOnly;
+  const canCreate = canCreateProp && !readOnly;
+  const canEditDetails = canEditDetailsProp && !readOnly;
   const ai = useAiEnabled();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Read from the live model, so an edit shows as soon as the page refreshes.
@@ -169,6 +196,12 @@ export function TimelineBoard({
     return [...seen.values()].sort((a, b) => a.localeCompare(b));
   }, [view]);
   const hasRows = view.prioritized.length + view.not_prioritized.length + view.deferred.length + view.other.length > 0;
+  const stamp = exportStamp({
+    version: viewingVersion ? viewingVersion.version : stale || !plan ? null : plan.version,
+    status: viewingVersion?.status ?? plan?.status,
+    activities: model.activities,
+  });
+  const estimates = model.activities.filter((row) => estimatedFields(row.meta.schedule_basis).length > 0);
 
   return (
     <div className="grid gap-4">
@@ -210,9 +243,41 @@ export function TimelineBoard({
           ) : null}
           <ExportImageButton
             svgRef={svgRef}
-            fileName={`synapse-iegp-v${plan?.version ?? "draft"}.png`}
+            fileName={stamp.fileName}
+            stamp={stamp.text}
             disabledReason={model.activities.length === 0 ? "Nothing to export yet." : undefined}
           />
+          {!viewingVersion && history.length > 0 ? (
+            <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              Show
+              <select
+                aria-label="Show a saved version"
+                className="h-7 rounded-md border border-input bg-transparent px-1.5 text-[11px] text-foreground"
+                defaultValue=""
+                onChange={(event) => {
+                  if (event.target.value) window.location.assign(`/timeline?version=${event.target.value}`);
+                }}
+              >
+                <option value="">Current plan</option>
+                {history.map((entry) => (
+                  <option key={entry.version} value={entry.version}>
+                    Saved v{entry.version} {entry.status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {canReschedule && estimates.length > 0 && !viewingVersion ? (
+            <ActionDialog
+              endpoint="/api/plan"
+              payload={{ action: "accept_estimates" }}
+              label={`Accept ${plural(estimates.length, "estimate")}`}
+              title="Accept the model's date estimates"
+              description={`The dates stay as they are and become yours: ${estimates.map((row) => row.tactic_name).join(", ")}. Check them first.`}
+              confirmLabel="Accept"
+              identity={identity}
+            />
+          ) : null}
           {canSaveFinal && model.pending.length > 0 ? (
             <p className="max-w-56 text-[11px] text-muted-foreground">
               {plural(model.pending.length, "activity", "activities")} not dated yet.{" "}
@@ -263,6 +328,40 @@ export function TimelineBoard({
           )}
         </div>
       </section>
+
+      {viewingVersion ? (
+        <section role="status" className="border border-primary/40 bg-primary/5 p-3 rounded-lg text-[12px] text-foreground">
+          Viewing saved v{viewingVersion.version} ({viewingVersion.status}), read-only. Export stamps this version and its
+          fingerprint {stamp.code}.{" "}
+          <a href="/timeline" className="underline">Back to the current plan</a>
+        </section>
+      ) : null}
+
+      {!viewingVersion && issues.length > 0 ? (
+        <section className="grid gap-1 border border-amber-500/50 bg-amber-50 p-3 rounded-lg dark:bg-amber-950/30" data-testid="final-save-checklist">
+          <h2 className="flex items-center gap-1 text-[12px] font-semibold text-foreground">
+            <AlertTriangle className="size-4 text-amber-600" /> Before this can be saved as final ({plural(issues.length, "item")})
+          </h2>
+          <ul className="grid gap-0.5 text-[11px] text-muted-foreground">
+            {issues.slice(0, 10).map((issue, index) => (
+              <li key={`${issue.kind}:${issue.activity_id}:${index}`}>
+                <button type="button" className="text-left hover:underline" onClick={() => setSelectedId(issue.activity_id)}>
+                  {issue.message}
+                </button>
+              </li>
+            ))}
+            {issues.length > 10 ? <li>…and {issues.length - 10} more.</li> : null}
+          </ul>
+          <p className="text-[11px] text-muted-foreground">A draft can still be saved at any time.</p>
+        </section>
+      ) : null}
+
+      {model.cancelled?.length ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="cancelled-count">
+          {plural(model.cancelled.length, "cancelled tactic")} not in the plan:{" "}
+          {model.cancelled.map((row) => row.tactic_name).join(", ")}.
+        </p>
+      ) : null}
 
       {view.conflicts.length > 0 ? (
         <section role="alert" className="grid gap-1 border border-destructive/50 bg-destructive/10 p-3">
@@ -444,6 +543,16 @@ export function TimelineBoard({
                         ? "not yet prioritized"
                         : `${selected.band} priority`}
                   </Badge>
+                  {selected.meta.inclusion && selected.meta.inclusion !== "committed" ? (
+                    <Badge variant="outline" className="text-[10px]" data-testid="inclusion-badge">
+                      {INCLUSION_LABELS[selected.meta.inclusion]}
+                    </Badge>
+                  ) : null}
+                  {datedSelection && estimatedFields(datedSelection.meta.schedule_basis).length > 0 ? (
+                    <Badge variant="outline" className="border-amber-500 text-[10px] text-amber-700" data-testid="estimate-badge">
+                      {datedSelection.meta.estimate_stale ? "Estimate — out of date" : "Estimate"}
+                    </Badge>
+                  ) : null}
                   {selected.meta.counts_toward_addressing ? (
                     <Badge variant="secondary" className="text-[10px]">
                       counts toward addressing
@@ -451,6 +560,14 @@ export function TimelineBoard({
                   ) : selected.expansion_id ? <span className="text-xs text-muted-foreground">Not counting toward addressing</span> : null}
                 </div>
                 {selected.expansion_id && selected.expansion_version && canEditDetails ? <ActionDialog endpoint="/api/plan" payload={{action: "set_expansion_status", expansion_id: selected.expansion_id, expected_version: selected.expansion_version}} label="Change expansion status" title={`Status for ${selected.tactic_name}`} description="Change only this expansion. Coverage still needs its own review." confirmLabel="Save status" identity={identity} fields={[{name: "status", label: "Status", type: "select", defaultValue: selected.tactic_status, options: ["proposed", "planned", "ongoing", "completed", "cancelled"].map(value => ({value, label: value}))}]} /> : null}
+
+                <section>
+                  <dl className="grid gap-1 text-[12px] text-muted-foreground">
+                    <Row label="Objective" value={selected.meta.objective || "Not recorded"} />
+                    <Row label="Outputs" value={selected.meta.outputs || "Not recorded"} />
+                    <Row label="Owner" value={selected.meta.owner || "Not recorded"} />
+                  </dl>
+                </section>
 
                 <section>
                   <h3 className="text-[12px] font-medium text-foreground">Evidence gaps it answers</h3>
@@ -491,10 +608,64 @@ export function TimelineBoard({
                         datedSelection.depends_on.length > 0
                           ? datedSelection.depends_on.map((id) => nameOf.get(id) ?? id).join(", ")
                           : "nothing"
-                      } · ${datedSelection.meta.depends_locked ? "set by hand" : "model"}`}
+                      } · ${datedSelection.meta.depends_locked ? "set or accepted by hand" : datedSelection.depends_on.length > 0 ? "saved" : "none accepted"}`}
                     />
                     {datedSelection.meta.manual ? <Row label="Added" value="by hand" /> : null}
                   </dl>
+                  {estimatedFields(datedSelection.meta.schedule_basis).length > 0 ? (
+                    <div className="mt-2 grid gap-1 border border-amber-500/50 bg-amber-50 p-2 dark:bg-amber-950/30">
+                      <p className="text-[11px] text-foreground">
+                        {datedSelection.meta.estimate_stale
+                          ? "These dates were estimated by the model before the tactic or its design changed. Check them."
+                          : "The model estimated these dates. They are not from a source or a person until you accept or edit them."}
+                      </p>
+                      {canReschedule && !viewingVersion ? (
+                        <ActionDialog
+                          endpoint="/api/plan"
+                          payload={{ action: "accept_estimates", id: datedSelection.id }}
+                          label="Accept estimate"
+                          title={`Accept the estimated dates for ${datedSelection.tactic_name}`}
+                          description="The dates stay as they are and are marked as set by you."
+                          confirmLabel="Accept"
+                          identity={identity}
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {(datedSelection.meta.proposed_dependencies ?? []).length > 0 ? (
+                    <div className="mt-2 grid gap-1 border border-border p-2" data-testid="proposed-dependencies">
+                      <p className="text-[11px] font-medium text-foreground">Proposed by the model — not yet a dependency</p>
+                      <ul className="grid gap-1">
+                        {datedSelection.meta.proposed_dependencies.map((proposal) => (
+                          <li key={proposal.id} className="grid gap-1 text-[11px] text-muted-foreground">
+                            <span>
+                              Waits on <span className="text-foreground">{nameOf.get(proposal.id) ?? proposal.id}</span>: {proposal.reason}
+                            </span>
+                            {canReschedule && !viewingVersion ? (
+                              <span className="flex flex-wrap gap-1">
+                                {(["accept", "reject"] as const).map((decision) => (
+                                  <ActionDialog
+                                    key={decision}
+                                    endpoint="/api/plan"
+                                    payload={{ action: "review_dependency", id: datedSelection.id, upstream_id: proposal.id, decision }}
+                                    label={decision === "accept" ? "Accept" : "Reject"}
+                                    title={`${decision === "accept" ? "Accept" : "Reject"}: ${datedSelection.tactic_name} waits on ${nameOf.get(proposal.id) ?? proposal.id}`}
+                                    description={
+                                      decision === "accept"
+                                        ? "It then gates this activity's start, and a rebuild keeps it."
+                                        : "It is not proposed again for this activity."
+                                    }
+                                    confirmLabel={decision === "accept" ? "Accept" : "Reject"}
+                                    identity={identity}
+                                  />
+                                ))}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   {selectedConflicts.length > 0 ? (
                     <div role="alert" className="mt-2 grid gap-1 border border-destructive/50 bg-destructive/10 p-2">
                       <p className="flex items-center gap-1 text-[11px] font-medium text-destructive">
@@ -577,7 +748,8 @@ export function TimelineBoard({
 
 const BASIS_LABELS: Record<ScheduleSource, string> = {
   human: "set by hand",
-  saved: "saved",
+  // Saved before the source of a date was recorded: never presented as a fact.
+  saved: "unknown source",
   tactic: "from the tactic",
   design: "from the study design",
   model: "model estimate",

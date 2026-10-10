@@ -115,6 +115,13 @@ test.describe("platform surfaces", () => {
     await expect(page.getByRole("heading", { name: /^gantt timeline$/i })).toBeVisible();
     await expect(page.locator("svg[role='img']")).toBeVisible();
 
+    // KAN-85: the stub's estimated dates are reviewed before a final save.
+    const accepted = await page.request.post("/api/plan", {
+      data: { action: "accept_estimates", rationale: "Estimates reviewed in the e2e", actor_name: "E2E Platform", actor_function: "medical_affairs" },
+    });
+    expect(accepted.ok()).toBeTruthy();
+    await page.reload();
+
     await page.getByRole("button", { name: /save as final/i }).click();
     await page.getByPlaceholder(/why this decision/i).fill("Signed off in the e2e review");
     await fillNameIfAsked(page.getByRole("dialog"), "E2E Platform");

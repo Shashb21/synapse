@@ -180,6 +180,11 @@ test.describe("S10 interactive Gantt IEGP", () => {
   });
 
   test("saves the plan as final, versioned, with its sign-off rationale", async ({ page, request }) => {
+    // KAN-85: a final save first needs the model's estimated dates reviewed.
+    const before = await planState(request);
+    if ((before as { timeline_issues?: { kind: string }[] }).timeline_issues?.some((issue) => issue.kind === "estimate" || issue.kind === "stale_estimate")) {
+      await planAction(request, { action: "accept_estimates", rationale: "Estimates reviewed for the feature spec" });
+    }
     await page.goto("/timeline");
     await page.getByRole("button", { name: /save as final/i }).click();
     const dialog = page.getByRole("dialog");

@@ -28,16 +28,19 @@ import { setExpansionStatus } from "@/lib/iegp/tactic-expansions";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
 import {
+  acceptTimelineEstimates,
   addTimelineActivity,
   createTimelineActivity,
   latestPlan,
   planHistory,
   removeTimelineActivity,
+  reviewTimelineDependency,
   savePlan,
   setTimelineDependencies,
   timelineModel,
   updateTimelineActivity,
 } from "@/modules/stages/s10-timeline/module";
+import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +63,9 @@ export async function GET() {
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history, tactic_suggestions });
+  // What must be resolved before a final save (KAN-85).
+  const timeline_issues = planIssues(timeline);
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -389,6 +394,26 @@ export async function POST(request: Request) {
           workspace_id: identity.workspace?.id,
         });
         return NextResponse.json({ ok: true, activity });
+      }
+      case "review_dependency": {
+        // A model's proposed dependency: accept it (it then gates the schedule) or reject it for good.
+        assertCan(identity.role, "validate");
+        const activity = await reviewTimelineDependency({
+          id: String(body.id ?? ""),
+          upstream_id: field(z.string().trim().min(1), body.upstream_id, "upstream_id"),
+          decision: field(decisionSchema, body.decision, "decision"),
+          rationale,
+          actor: identity.actor,
+          workspace_id: identity.workspace?.id,
+        });
+        return NextResponse.json({ ok: true, activity });
+      }
+      case "accept_estimates": {
+        // A model's date estimates become the person's own; with no ids, every one left.
+        assertCan(identity.role, "validate");
+        const ids = body.id ? [String(body.id)] : field(z.array(z.string()), body.ids ?? [], "ids");
+        const result = await acceptTimelineEstimates({ ids, rationale, actor: identity.actor, workspace_id: identity.workspace?.id });
+        return NextResponse.json({ ok: true, ...result });
       }
       case "save_plan": {
         const status = field(planStatusSchema, body.status ?? "draft", "status");

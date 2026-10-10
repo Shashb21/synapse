@@ -10,6 +10,8 @@ import { sessionContext } from "@/modules/auth/session";
 import { latestPlan, planHistory, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { gapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
+import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
+import type { TimelineModel } from "@/modules/stages/s10-timeline/build";
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 
 export const dynamic = "force-dynamic";
@@ -27,15 +29,32 @@ function asView(plan: Awaited<ReturnType<typeof latestPlan>>): PlanView | null {
   };
 }
 
-export default async function TimelinePage() {
-  const [model, plan, history, identity, state, placements] = await Promise.all([
+/** A saved plan as a timeline model, so a saved version can be shown and exported as it was (KAN-85). */
+function savedModel(snapshot: NonNullable<Awaited<ReturnType<typeof latestPlan>>>["snapshot"]): TimelineModel {
+  return {
+    activities: snapshot.activities,
+    window: snapshot.window,
+    lanes: snapshot.lanes,
+    unscheduled: snapshot.unscheduled,
+    pending: snapshot.pending ?? [],
+    removed: snapshot.removed ?? [],
+    cancelled: snapshot.cancelled ?? [],
+    problems: snapshot.problems ?? [],
+  };
+}
+
+export default async function TimelinePage({ searchParams }: { searchParams: Promise<{ version?: string }> }) {
+  const { version } = await searchParams;
+  const [liveModel, plan, history, identity, state, placements] = await Promise.all([
     timelineModel(),
     latestPlan(),
-    planHistory(5),
+    planHistory(20),
     sessionContext(),
     loadState(),
     listPlacements(),
   ]);
+  const saved = version ? history.find((entry) => String(entry.version) === version) : undefined;
+  const model = saved ? savedModel(saved.snapshot) : liveModel;
   const today = new Date().toISOString().slice(0, 10);
   const view = gapTimelineView({ model, state, placements, today });
 
@@ -92,6 +111,8 @@ export default async function TimelinePage() {
         canEditDetails={can(identity.role, "ideate")}
         gapDomains={gapDomains}
         addable={addable}
+        issues={saved ? [] : planIssues(model)}
+        viewingVersion={saved ? { version: saved.version, status: saved.status } : null}
       />
     </AppShell>
   );

@@ -36,6 +36,46 @@ export type ScheduleBasis = {
   readout: ScheduleSource | null;
 };
 
+/** A dependency a model inferred, waiting for a person to accept or reject it (KAN-85). */
+export type ProposedDependency = { id: string; reason: string };
+
+/**
+ * How an activity belongs to the plan (KAN-85): committed future work
+ * (planned/ongoing), historical evidence already generated (completed), or a
+ * proposed tactic that is not yet in the plan.
+ */
+export type Inclusion = "committed" | "completed" | "proposed";
+
+export function inclusionOf(status: TacticStatus): Inclusion {
+  if (status === "completed") return "completed";
+  if (status === "proposed") return "proposed";
+  return "committed";
+}
+
+export const INCLUSION_LABELS: Record<Inclusion, string> = {
+  committed: "In the plan",
+  completed: "Completed — historical evidence",
+  proposed: "Proposed — not yet in the plan",
+};
+
+/** The schedule fields of an activity that a model estimated and no person has reviewed. */
+export function estimatedFields(basis: ScheduleBasis | undefined | null): ("start" | "end" | "readout")[] {
+  if (!basis) return [];
+  return (["start", "end", "readout"] as const).filter((field) => basis[field] === "model");
+}
+
+/**
+ * Problems in the saved schedule that the build reports instead of silently
+ * ignoring (KAN-85): a dependency loop, or a dependency on an activity that is
+ * not on the timeline (removed, undated or unknown).
+ */
+export type TimelineProblem = {
+  kind: "cycle" | "dangling";
+  activity_id: string;
+  upstream_id: string;
+  message: string;
+};
+
 export type TimelineActivity = {
   id: string;
   tactic_id: string;
@@ -58,6 +98,11 @@ export type TimelineActivity = {
   gap_ids: string[];
   gap_names: string[];
   meta: {
+    /** The strategic objectives of the gaps it answers ("" when none is recorded). */
+    objective: string;
+    /** What the work delivers: its intended use, else "" (shown as "Not recorded"). */
+    outputs: string;
+    inclusion: Inclusion;
     evidence_question: string;
     population: string;
     comparator: string;
@@ -83,6 +128,17 @@ export type TimelineActivity = {
     rationale_locked: boolean;
     /** True when a user added this activity by hand (its tactic need not be mapped to a gap). */
     manual: boolean;
+    /**
+     * Dependencies a model inferred that no person has reviewed (KAN-85). They
+     * never gate scheduling, conflicts or the saved plan until accepted.
+     */
+    proposed_dependencies: ProposedDependency[];
+    /** Upstream ids a person rejected: never proposed again for this activity. */
+    rejected_dependencies: string[];
+    /** The inputs the model saw last: when they change, its proposals and estimates are asked again. */
+    inputs_key: string;
+    /** True when a model estimate was made from inputs that have since changed. */
+    estimate_stale: boolean;
   };
 };
 
@@ -104,7 +160,8 @@ export type ActivityDetails = Pick<TimelineActivity,
   "tactic_type" | "tactic_custom_type" | "tactic_status" | "band" | "gap_ids" | "gap_names"
 > & {meta: Pick<TimelineActivity["meta"],
   "evidence_question" | "population" | "comparator" | "outcomes" | "data_source" |
-  "study_design" | "owner" | "budget" | "function" | "priority_rationale" | "counts_toward_addressing"
+  "study_design" | "owner" | "budget" | "function" | "priority_rationale" | "counts_toward_addressing" |
+  "objective" | "outputs" | "inclusion"
 >};
 
 export type PendingActivity = ActivityDetails & {
@@ -129,6 +186,10 @@ export type TimelineModel = {
   pending: PendingActivity[];
   /** Activities a user removed by hand. */
   removed: RemovedActivity[];
+  /** Cancelled tactics mapped to live gaps: excluded from the plan, listed so the count is visible. */
+  cancelled: { tactic_id: string; tactic_name: string }[];
+  /** Cycles and dependencies on activities not on the timeline. */
+  problems: TimelineProblem[];
 };
 
 /** Duration and readout lag carried by the tactic's own design (S9, model- or human-authored). */
@@ -172,6 +233,10 @@ export type SavedActivity = {
       > & {
         /** A user's reason for each dependency they set, by upstream activity id. */
         dependency_reasons?: Record<string, string>;
+        proposed_dependencies?: ProposedDependency[];
+        rejected_dependencies?: string[];
+        inputs_key?: string;
+        estimate_stale?: boolean;
         removed?: boolean;
         removed_reason?: string;
       })
@@ -185,6 +250,8 @@ export function isRemoved(saved: SavedActivity | null | undefined): boolean {
 
 export type TimelineCandidate = {
   id: string;
+  /** The strategic objectives of its gaps. */
+  objective: string;
   tactic: Omit<Tactic, "type"> & {type: TacticType | "not_recorded"};
   expansion?: TacticExpansion;
   parent_name?: string;
@@ -238,6 +305,7 @@ export function timelineCandidates(args: {
 }): TimelineCandidate[] {
   const placementByGap = new Map(args.placements.map((placement) => [placement.gap_id, placement]));
   const liveGaps = args.state.gaps.filter(isLiveGap);
+  const objectiveById = new Map(args.state.objectives.map((objective) => [objective.id, objective.name]));
   const gapById = new Map(liveGaps.map((gap) => [gap.id, gap]));
 
   const gapsForTactic = new Map<string, string[]>();
@@ -285,6 +353,9 @@ export function timelineCandidates(args: {
     if (isRemoved(saved)) continue;
     candidates.push({
       id,
+      objective: [
+        ...new Set(gapIds.map((gapId) => objectiveById.get(gapById.get(gapId)?.objective_id ?? "") ?? "").filter(Boolean)),
+      ].join("; "),
       tactic,
       expansion,
       parent_name,
@@ -330,8 +401,52 @@ function activityDetails(candidate: TimelineCandidate): ActivityDetails {
       function: tactic.function,
       priority_rationale: candidate.priority_rationale,
       counts_toward_addressing: candidate.counting,
+      objective: candidate.objective,
+      outputs: (tactic as { intended_use?: string }).intended_use?.trim() ?? "",
+      inclusion: inclusionOf(tactic.status),
     },
   };
+}
+
+/**
+ * What a model's dependency answer and date estimate for an activity depend on:
+ * its tactic's dates and status, its design timing and the gaps it answers.
+ * When this changes, a rebuild asks again (KAN-85); otherwise it never does.
+ */
+export function inputsKey(candidate: TimelineCandidate): string {
+  return JSON.stringify([
+    candidate.tactic.start_date ?? null,
+    candidate.tactic.evidence_available ?? null,
+    candidate.tactic.status,
+    candidate.design.duration_months ?? null,
+    candidate.design.readout_lag_months ?? null,
+    [...candidate.gap_ids].sort(),
+  ]);
+}
+
+/** True when a saved row predates KAN-85: its unlocked dependencies were a model's facts. */
+function legacyRow(saved: SavedActivity): boolean {
+  return saved.meta?.inputs_key === undefined && saved.meta?.proposed_dependencies === undefined;
+}
+
+/**
+ * The model's proposals waiting on a saved row. Rows from before KAN-85 kept a
+ * model's dependencies as facts; they come back as proposals for a person to
+ * review. A person's own (depends_locked) stay as they are.
+ */
+export function savedProposals(saved: SavedActivity | null): ProposedDependency[] {
+  if (!saved) return [];
+  if (saved.meta?.proposed_dependencies) return saved.meta.proposed_dependencies;
+  if (saved.meta?.depends_locked === true || !legacyRow(saved)) return [];
+  return saved.depends_on.map((id) => ({ id, reason: saved.meta?.dependency_note ?? "Inferred by an earlier build." }));
+}
+
+/** The dependencies that schedule a saved activity: a person's own, or ones they accepted. */
+export function acceptedDependencies(saved: SavedActivity | null): string[] {
+  if (!saved) return [];
+  if (saved.meta?.depends_locked === true) return saved.depends_on;
+  if (legacyRow(saved)) return [];
+  return saved.depends_on;
 }
 
 /** Which schedule fields no human, saved row or design supplies, so a model must estimate them. */
@@ -348,11 +463,14 @@ export function missingSchedule(candidate: TimelineCandidate): ScheduleField[] {
 
 /**
  * Lays out the final IEGP timeline. It makes no judgement: every date comes
- * from a saved row, the tactic, its design, or a model estimate passed in, and
- * dependencies come from the model (or the saved row). The only arithmetic is
- * calendar layout — a start the model estimated is pushed past the readouts it
- * was told it depends on. Activities still missing a value are returned as
- * pending, never filled in.
+ * from a saved row, the tactic, its design, or a model estimate passed in.
+ * Only dependencies a person set or accepted schedule anything; a model's are
+ * proposals shown for review (KAN-85, docs/sdlc/14-roadmap-policy.md). The only
+ * arithmetic is calendar layout — a start the model estimated is pushed past
+ * the readouts of the activities it is accepted to wait on. Activities still
+ * missing a value are returned as pending, never filled in. Loops and
+ * dependencies on activities that are not on the timeline are reported as
+ * problems, not silently dropped.
  */
 export function buildTimeline(args: {
   state: IegpState;
@@ -361,6 +479,7 @@ export function buildTimeline(args: {
   /** Saved activity rows: a user's edits and earlier builds. Their dates always win. */
   overrides?: SavedActivity[];
   estimates?: Map<string, ScheduleEstimate>;
+  /** A model's fresh dependency proposals, for the activities this build asked about. */
   dependencies?: Map<string, DependencyAnswer>;
   /** What model start offsets count from. Defaults to today. */
   anchor?: string;
@@ -453,29 +572,82 @@ export function buildTimeline(args: {
     });
   }
 
-  // Dependencies a user set by hand always win; else the model's for this
-  // build; else the ones saved with the row.
+  const problems: TimelineProblem[] = [];
+  const nameOf = (id: string) => resolved.get(id)?.candidate.tactic.name ?? id;
+  const allCandidates = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+
+  // Only dependencies a person set or accepted gate the schedule. One on an
+  // activity that is not dated on the timeline is reported, not dropped silently.
   const dependenciesOf = (id: string): { id: string; reason: string | null }[] => {
-    const saved = resolved.get(id)?.candidate.saved;
-    const locked = saved?.meta?.depends_locked === true;
-    const answer = locked ? undefined : args.dependencies?.get(id);
-    const list = answer
-      ? answer.upstream.map((row) => ({ id: row.id, reason: row.reason }))
-      : (saved?.depends_on ?? []).map((upstream) => ({
-          id: upstream,
-          reason: locked ? (saved?.meta?.dependency_reasons?.[upstream] ?? null) : null,
-        }));
-    return list.filter((row) => row.id !== id && resolved.has(row.id));
+    const saved = resolved.get(id)?.candidate.saved ?? null;
+    return acceptedDependencies(saved)
+      .filter((upstream) => upstream !== id)
+      .filter((upstream) => resolved.has(upstream))
+      .map((upstream) => ({ id: upstream, reason: saved?.meta?.dependency_reasons?.[upstream] ?? null }));
   };
+  for (const id of resolved.keys()) {
+    const saved = resolved.get(id)!.candidate.saved;
+    for (const upstream of acceptedDependencies(saved)) {
+      if (upstream === id || resolved.has(upstream)) continue;
+      const known = allCandidates.get(upstream);
+      problems.push({
+        kind: "dangling",
+        activity_id: id,
+        upstream_id: upstream,
+        message: `${nameOf(id)} waits on ${known ? known.tactic.name : upstream}, which ${
+          known ? "has no dates on the timeline" : "is not on the timeline"
+        }. Date it, or edit the dependencies.`,
+      });
+    }
+  }
+
+  // A model's proposals: this build's fresh answer, else what the row kept.
+  // Never one a person rejected or already accepted, never the activity itself.
+  const proposalsOf = (id: string): ProposedDependency[] => {
+    const saved = resolved.get(id)?.candidate.saved ?? null;
+    if (saved?.meta?.depends_locked === true && !args.dependencies?.has(id)) return savedProposals(saved);
+    const fresh = args.dependencies?.get(id);
+    const list = fresh ? fresh.upstream.map((row) => ({ id: row.id, reason: row.reason })) : savedProposals(saved);
+    const accepted = new Set(acceptedDependencies(saved));
+    const rejected = new Set(saved?.meta?.rejected_dependencies ?? []);
+    return list.filter((row) => row.id !== id && resolved.has(row.id) && !accepted.has(row.id) && !rejected.has(row.id));
+  };
+
+  // An estimated start is itself a proposal, so it is laid out after the readouts
+  // of what it is accepted or proposed to wait on; nothing saved is ever moved.
+  const estimatedStart = (id: string) => {
+    const row = resolved.get(id)!;
+    return row.startSource === "model" && !row.candidate.saved;
+  };
+  const gatesOf = (id: string): string[] => [
+    ...new Set([
+      ...dependenciesOf(id).map((dependency) => dependency.id),
+      ...(estimatedStart(id) ? proposalsOf(id).map((proposal) => proposal.id) : []),
+    ]),
+  ];
+  const acceptedEdge = (id: string, upstream: string) => dependenciesOf(id).some((dependency) => dependency.id === upstream);
 
   // Layout in dependency order, so an upstream readout is final before it gates.
   const order: string[] = [];
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const visit = (id: string) => {
-    if (visited.has(id) || visiting.has(id)) return;
+    if (visited.has(id)) return;
     visiting.add(id);
-    for (const upstream of dependenciesOf(id)) visit(upstream.id);
+    for (const upstreamId of gatesOf(id)) {
+      const upstream = { id: upstreamId };
+      if (visiting.has(upstream.id)) {
+        if (!acceptedEdge(id, upstream.id)) continue;
+        problems.push({
+          kind: "cycle",
+          activity_id: id,
+          upstream_id: upstream.id,
+          message: `${nameOf(id)} and ${nameOf(upstream.id)} wait on each other (a dependency loop). Remove one of the dependencies.`,
+        });
+        continue;
+      }
+      visit(upstream.id);
+    }
     visiting.delete(id);
     visited.add(id);
     order.push(id);
@@ -488,10 +660,11 @@ export function buildTimeline(args: {
     const row = resolved.get(id)!;
     const upstream = dependenciesOf(id);
     let { start, end, readout } = row;
-    if (upstream.length > 0 && row.startSource === "model" && !row.candidate.saved) {
+    const gates = gatesOf(id);
+    if (gates.length > 0 && estimatedStart(id)) {
       const gate = maxDate(
-        upstream.map((dependency) => {
-          const other = placed.get(dependency.id);
+        gates.map((upstreamId) => {
+          const other = placed.get(upstreamId);
           return other?.readout_date ?? other?.end_date ?? "";
         }),
       );
@@ -504,6 +677,11 @@ export function buildTimeline(args: {
     const reasons = upstream.filter((dependency) => dependency.reason);
     const candidate = row.candidate;
     const tactic = candidate.tactic;
+    const savedMeta = candidate.saved?.meta ?? null;
+    const currentKey = inputsKey(candidate);
+    const askedNow = args.dependencies?.has(id) === true || !candidate.saved;
+    const savedKey = savedMeta?.inputs_key;
+    const basisNow = { start: row.startSource, end: row.endSource, readout: readout ? row.readoutSource : null };
     const laneLocked = candidate.saved?.meta?.lane_locked === true;
     const savedLane = candidate.saved?.lane as TimelineBand | undefined;
     const details = activityDetails(candidate);
@@ -527,11 +705,20 @@ export function buildTimeline(args: {
               ? (candidate.saved?.meta?.dependency_note ?? null)
               : null,
         schedule_rationale: row.rationale,
-        schedule_basis: { start: row.startSource, end: row.endSource, readout: readout ? row.readoutSource : null },
+        schedule_basis: basisNow,
         lane_locked: laneLocked,
         depends_locked: candidate.saved?.meta?.depends_locked === true,
         rationale_locked: candidate.saved?.meta?.rationale_locked === true,
         manual: candidate.saved?.meta?.manual === true,
+        proposed_dependencies: proposalsOf(id),
+        rejected_dependencies: savedMeta?.rejected_dependencies ?? [],
+        inputs_key: askedNow ? currentKey : (savedKey ?? ""),
+        // A model estimate made from inputs that have since changed is out of date.
+        estimate_stale:
+          !askedNow &&
+          savedKey !== undefined &&
+          savedKey !== currentKey &&
+          estimatedFields(basisNow).length > 0,
       },
     };
     placed.set(id, activity);
@@ -576,6 +763,16 @@ export function buildTimeline(args: {
         : "Open gap with no mapped or ideated tactic yet.",
     }));
 
+  // Cancelled tactics on live gaps are not in the plan; the count stays visible.
+  const liveGapIds = new Set(liveGaps.map((gap) => gap.id));
+  const cancelled = args.state.tactics
+    .filter(
+      (tactic) =>
+        tactic.status === "cancelled" &&
+        args.state.coverages.some((coverage) => coverage.tactic_id === tactic.id && liveGapIds.has(coverage.gap_id)),
+    )
+    .map((tactic) => ({ tactic_id: tactic.id, tactic_name: tactic.name }));
+
   const lanes: TimelineModel["lanes"] = TIMELINE_LANES.map((lane) => ({
     id: lane,
     label: LANE_LABELS[lane],
@@ -595,5 +792,7 @@ export function buildTimeline(args: {
     unscheduled,
     pending,
     removed,
+    cancelled,
+    problems,
   };
 }
