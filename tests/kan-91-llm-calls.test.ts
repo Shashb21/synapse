@@ -161,7 +161,8 @@ describe("KAN-91 llm_calls", () => {
       purpose: "gap-extract",
       provider_id: "anthropic-claude",
       model: "claude-sonnet-5-5",
-      params: { temperature: 0, max_tokens: 4000 },
+      // Claude 5 is called without temperature, so the log records none (KAN-71).
+      params: { temperature: null, max_tokens: 4000 },
       reply: "not json",
       status: "ok",
       usage: { input_tokens: 1300, output_tokens: 300 },

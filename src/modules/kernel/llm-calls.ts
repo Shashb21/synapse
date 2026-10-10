@@ -14,7 +14,8 @@ import { providerApiKey } from "@/modules/llm/api-keys";
  * trace step names its call by id, and the run page shows them.
  */
 
-export type LlmCallParams = { temperature: number; max_tokens: number };
+/** What was sent: `temperature` is null when the model is called without it (KAN-71). */
+export type LlmCallParams = { temperature: number | null; max_tokens: number };
 
 export type LlmCallRecord = {
   id: string;
@@ -206,7 +207,10 @@ export async function tracedCompletion(args: {
             attempt: args.attempt,
             provider_id: args.provider.id,
             model: args.request.model,
-            params: { temperature: args.request.temperature, max_tokens: args.request.max_tokens },
+            params: {
+              temperature: args.provider.sendsTemperature?.(args.request.model) === false ? null : args.request.temperature,
+              max_tokens: args.request.max_tokens,
+            },
             system_prompt: args.request.system,
             user_prompt: args.request.user,
             reply,
