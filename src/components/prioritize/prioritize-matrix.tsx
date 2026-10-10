@@ -504,6 +504,7 @@ export function PrioritizeMatrix({
   // One debounce per gap: nudging a second gap never drops the first one's save (KAN-18).
   const nudges = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; point: Point }>());
   const commitRef = useRef<(gapId: string, point: Point) => Promise<void>>(async () => undefined);
+  const bodyRef = useRef<(gapId: string, point: Point) => Record<string, unknown>>(() => ({}));
   const autoPlaced = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
@@ -572,18 +573,22 @@ export function PrioritizeMatrix({
     };
   }
 
+  function placementBody(gapId: string, point: Point) {
+    return {
+      action: "move_placement",
+      gap_id: gapId,
+      x_axis: xAxis.id,
+      y_axis: yAxis.id,
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      actor_name: identity.actor_name,
+      actor_function: identity.actor_function,
+    };
+  }
+
   async function commit(gapId: string, point: Point) {
     setMessage(null);
-    const res = await postJson("/api/plan", {
-        action: "move_placement",
-        gap_id: gapId,
-        x_axis: xAxis.id,
-        y_axis: yAxis.id,
-        x: Math.round(point.x),
-        y: Math.round(point.y),
-        actor_name: identity.actor_name,
-        actor_function: identity.actor_function,
-      });
+    const res = await postJson("/api/plan", placementBody(gapId, point));
     const json = res.json as {
       error?: string;
       placement?: { band: Band; validated: boolean };
@@ -603,12 +608,29 @@ export function PrioritizeMatrix({
 
   useEffect(() => {
     commitRef.current = commit;
+    bodyRef.current = placementBody;
   });
 
-  // Leaving the page saves any nudge still waiting on its debounce.
+  // Leaving the page saves any nudge still waiting on its debounce: on unmount (moving within
+  // the app) and on pagehide (reload, closing the tab, typing another address), where only a
+  // keepalive request survives the page going away.
   useEffect(() => {
     const waiting = nudges.current;
+    const flushOnUnload = () => {
+      for (const [gapId, { timer, point }] of waiting) {
+        clearTimeout(timer);
+        void fetch("/api/plan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(bodyRef.current(gapId, point)),
+          keepalive: true,
+        }).catch(() => undefined);
+      }
+      waiting.clear();
+    };
+    window.addEventListener("pagehide", flushOnUnload);
     return () => {
+      window.removeEventListener("pagehide", flushOnUnload);
       for (const [gapId, { timer, point }] of waiting) {
         clearTimeout(timer);
         void commitRef.current(gapId, point);
