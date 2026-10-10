@@ -42,6 +42,7 @@ import {
   type TimelineModel,
 } from "@/modules/stages/s10-timeline/build";
 import type { PlanIssue } from "@/modules/stages/s10-timeline/plan-checks";
+import type { PackageBlocker } from "@/modules/stages/s10-timeline/final-package";
 import type { GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { plural } from "@/lib/plural";
 import { fingerprintCode, planFingerprint } from "@/modules/stages/s10-timeline/plan-fingerprint";
@@ -133,6 +134,7 @@ export function TimelineBoard({
   gapDomains,
   addable = [],
   issues = [],
+  gapBlockers = [],
   viewingVersion = null,
 }: {
   model: TimelineModel;
@@ -156,6 +158,8 @@ export function TimelineBoard({
   addable?: { tactic_id: string; name: string }[];
   /** What must be resolved before a final save (KAN-85). */
   issues?: PlanIssue[];
+  /** What the gap inventory must resolve before a complete final (KAN-86). */
+  gapBlockers?: PackageBlocker[];
   /** Set when the board shows a saved version read-only, for export (KAN-85). */
   viewingVersion?: { version: number; status: string } | null;
 }) {
@@ -337,12 +341,25 @@ export function TimelineBoard({
         </section>
       ) : null}
 
-      {!viewingVersion && issues.length > 0 ? (
+      {!viewingVersion && issues.length + gapBlockers.length > 0 ? (
         <section className="grid gap-1 border border-amber-500/50 bg-amber-50 p-3 rounded-lg dark:bg-amber-950/30" data-testid="final-save-checklist">
           <h2 className="flex items-center gap-1 text-[12px] font-semibold text-foreground">
-            <AlertTriangle className="size-4 text-amber-600" /> Before this can be saved as final ({plural(issues.length, "item")})
+            <AlertTriangle className="size-4 text-amber-600" /> Before this can be saved as final (
+            {plural(issues.length + gapBlockers.length, "item")})
           </h2>
           <ul className="grid gap-0.5 text-[11px] text-muted-foreground">
+            {gapBlockers.slice(0, 10).map((blocker, index) => (
+              <li key={`${blocker.issue}:${blocker.gap_id ?? index}`} data-testid="final-gap-blocker">
+                {blocker.gap_id && blocker.issue !== "foreign_reference" ? (
+                  <a href={`/gaps/${blocker.gap_id}`} className="hover:underline">
+                    {blocker.message}
+                  </a>
+                ) : (
+                  blocker.message
+                )}
+              </li>
+            ))}
+            {gapBlockers.length > 10 ? <li>…and {gapBlockers.length - 10} more about gaps.</li> : null}
             {issues.slice(0, 10).map((issue, index) => (
               <li key={`${issue.kind}:${issue.activity_id}:${index}`}>
                 <button type="button" className="text-left hover:underline" onClick={() => setSelectedId(issue.activity_id)}>

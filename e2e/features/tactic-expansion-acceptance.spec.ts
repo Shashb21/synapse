@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import postgres from "postgres";
 import { COVERAGE_DIMENSIONS } from "../../src/lib/iegp/enums";
 import { freshWorkspace } from "../support/session";
-import { iegpAction, resetWorkspace, planAction, planActionExpectingError, runStage, validateBandHigh } from "../support/synapse";
+import { iegpAction, resetWorkspace, planAction, planActionExpectingError, resolveFinalPlanGaps, runStage, validateBandHigh } from "../support/synapse";
 
 let tacticId = "";
 const workspace = freshWorkspace({ name: "Expansion timeline acceptance", seed: async request => {
@@ -114,6 +114,8 @@ test("schedules nested children, changes only child status, preserves scope and 
     // KAN-85: TWO waits on ONE but starts before it ends, so a final save is refused until the conflict is fixed.
     await planActionExpectingError(request, {action: "save_plan", status: "final", note: "Nested activities reviewed"});
     await planAction(request, {action: "move_activity", id: "ACT-EXP-EXP-BROWSER-TWO", start_date: "2027-01-01", end_date: "2027-04-01", rationale: "After the first readout"});
+    // KAN-86: the complete plan needs every gap resolved, confirmed and banded.
+    await resolveFinalPlanGaps(request);
     const saved = await planAction(request, {action: "save_plan", status: "final", note: "Nested activities reviewed"});
     expect(JSON.stringify(saved)).toContain("ACT-EXP-EXP-BROWSER-ONE");
     expect(await pg`select * from ${pg(`${schema}.tactics`)}`).toEqual(beforeParents);

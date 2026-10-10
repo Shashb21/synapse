@@ -21,6 +21,7 @@ export const SPEC_DOCS = [
   { slug: "12-gold-set.md", rel: "docs/sdlc/12-gold-set.md", id: "GOLD", title: "Gold set", retired: true },
   { slug: "13-testing.md", rel: "docs/sdlc/13-testing.md", id: "TEST", title: "Testing", retired: false },
   { slug: "14-roadmap-policy.md", rel: "docs/sdlc/14-roadmap-policy.md", id: "ROAD", title: "Roadmap date and dependency policy", retired: false },
+  { slug: "15-final-package.md", rel: "docs/sdlc/15-final-package.md", id: "FINAL", title: "Final IEGP package", retired: false },
   { slug: "requirements-compliance.md", rel: "docs/sdlc/requirements-compliance.md", id: "CMP", title: "Requirements compliance", retired: false },
 ] as const;
 

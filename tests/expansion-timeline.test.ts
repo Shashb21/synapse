@@ -1,4 +1,5 @@
 /** Independent accepted scopes use the existing schedule and coverage owners. */
+import { makeFinalReady } from "./support/final-ready";
 import { describe, expect, it } from "vitest";
 import { buildSeed } from "@/lib/iegp/seed";
 import type { TacticExpansion } from "@/lib/iegp/types";
@@ -153,6 +154,8 @@ it("persists independent dates and human dependency locks through rebuild, child
   // B now waits on A but starts before A ends: a final save explains and refuses it (KAN-85).
   await expect(savePlan({status: "final", note: "Reviewed separate child activities", actor})).rejects.toThrow(/Added scope B starts 2026-04-01, before Added scope A ends/);
   await updateTimelineActivity({id: "ACT-EXP-B", start_date: "2027-03-01", end_date: "2027-09-01", rationale: "After the child analysis", actor});
+  // A complete final needs every gap resolved, confirmed and banded (KAN-86).
+  await makeFinalReady(actor);
   const plan = await savePlan({status: "final", note: "Reviewed separate child activities", actor});
   expect(plan.snapshot.activities.find(a => a.id === "ACT-EXP-A")).toMatchObject({expansion_id: "A", parent_activity_id: `ACT-${args.parent.id}`});
   await expect(addTimelineActivity({tactic_id: args.parent.id, expansion_id: "missing", rationale: "Wrong child", actor})).rejects.toThrow(/expansion/i);

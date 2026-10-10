@@ -1,3 +1,4 @@
+import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
@@ -261,6 +262,8 @@ describe("modular pipeline, S0 to S10", () => {
     );
     const { accepted } = await acceptTimelineEstimates({ rationale: "Estimates reviewed in the Q1 planning call", actor: ACTOR });
     expect(accepted.length).toBeGreaterThan(0);
+    // A complete final needs every gap resolved, confirmed and banded (KAN-86).
+    await makeFinalReady(ACTOR);
     const plan = await savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR });
     expect(plan.version).toBe(1);
     expect(plan.status).toBe("final");

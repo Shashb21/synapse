@@ -31,6 +31,7 @@ import {
   acceptTimelineEstimates,
   addTimelineActivity,
   createTimelineActivity,
+  finalPlanBlockers,
   latestPlan,
   planHistory,
   removeTimelineActivity,
@@ -63,9 +64,10 @@ export async function GET() {
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
-  // What must be resolved before a final save (KAN-85).
+  // What must be resolved before a final save: the roadmap (KAN-85) and the gap inventory (KAN-86).
   const timeline_issues = planIssues(timeline);
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, plan, history, tactic_suggestions });
+  const final_blockers = await finalPlanBlockers();
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);

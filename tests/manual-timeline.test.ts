@@ -1,3 +1,4 @@
+import { makeFinalReady } from "./support/final-ready";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -193,6 +194,8 @@ describe("S10 by hand", () => {
       rationale: "Starts once the registry cohort is in",
       actor: ACTOR,
     });
+    // A complete final needs every gap resolved, confirmed and banded (KAN-86).
+    await makeFinalReady(ACTOR);
     const plan = await savePlan({ status: "final", note: "Signed off without a model", actor: ACTOR });
     expect(plan.snapshot.pending).toHaveLength(0);
     expect(plan.snapshot.fingerprint_code).toMatch(/^[0-9a-f]{8}$/);
