@@ -42,6 +42,8 @@ import {
   type FinalPackage,
 } from "@/modules/stages/s10-timeline/final-package";
 import { finalPlanView } from "@/modules/stages/s10-timeline/final-view";
+import { replaceContents } from "@/modules/workspaces/contents";
+import { WORKSPACE_RESET_ACTION } from "@/lib/iegp/gap-history";
 import { makeFinalReady } from "./support/final-ready";
 
 /**
@@ -304,5 +306,15 @@ describe("KAN-86: the export is for members of the workspace only", () => {
     const res = await withWorkspace(other.id, () => get(version));
     expect(res.status).toBe(404);
     expect((await withWorkspace(other.id, () => get("abc"))).status).toBe(400);
+  });
+
+  // Owner decision (KAN-99): a reset starts the workspace over, finals included. Export first to keep one.
+  it("a workspace reset removes its frozen finals, and records the reset", async () => {
+    await withWorkspace(home.id, () => replaceContents(home.id, "blank", ACTOR));
+    await signIn(OWNER, home);
+    expect((await withWorkspace(home.id, () => get(version))).status).toBe(404);
+    expect(await withWorkspace(home.id, () => db().select().from(t.iegpPlans))).toEqual([]);
+    const audit = (await withWorkspace(home.id, () => loadState())).audit;
+    expect(audit.some((row) => row.action === WORKSPACE_RESET_ACTION)).toBe(true);
   });
 });

@@ -222,4 +222,26 @@ test.describe("S10 interactive Gantt IEGP", () => {
     expect(body.metrics.find((metric) => metric.name === "dates_coherent")!.value).toBe(1);
     expect(body.metrics.find((metric) => metric.name === "dependencies_respect_readouts")!.value).toBe(1);
   });
+
+  // KAN-99 (owner decision): a reset starts the workspace over, frozen finals included.
+  test("resetting the workspace removes the final plan, after a warning that says so", async ({ page, request }) => {
+    const state = await planState(request);
+    expect(state.plan?.status).toBe("final");
+    await page.goto(`/plan/final?version=${state.plan!.version}`);
+    await expect(page.getByText(/Signed off for the feature spec/).first()).toBeVisible({ timeout: 30_000 });
+
+    const list = (await (await request.get("/api/workspaces")).json()) as { current_id: string | null; workspaces: { id: string }[] };
+    const workspaceId = list.current_id ?? list.workspaces[0]!.id;
+    await page.goto(`/workspaces/${workspaceId}`);
+    await page.getByRole("button", { name: "Reset to blank" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("finals included");
+    await expect(dialog).toContainText("Export a final plan first");
+    await dialog.getByRole("button", { name: "Reset to blank" }).click();
+    await expect(page.getByRole("status")).toContainText("reset to blank", { timeout: 60_000 });
+
+    await page.goto("/plan/final");
+    await expect(page.getByText("No final plan yet")).toBeVisible({ timeout: 30_000 });
+    expect((await request.get(`/api/plan/final/${state.plan!.version}`)).status()).toBe(404);
+  });
 });
