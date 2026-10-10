@@ -193,6 +193,16 @@ function toCandidate(id: string, document: ParsedDocumentRecord, raw: RawGap): G
   };
 }
 
+/** The block a candidate's quote comes from, when one block holds it (KAN-97). */
+export function blockIdFor(document: ParsedDocumentRecord | undefined, quote: string): string | null {
+  if (!document) return null;
+  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
+  const needle = norm(quote).slice(0, 120);
+  if (!needle) return null;
+  const block = document.blocks.find((row) => norm(row.text).includes(needle));
+  return block?.id ?? null;
+}
+
 const titleOf = (document: ParsedDocumentRecord) => document.blocks[0]?.heading ?? document.source_id;
 
 /**
@@ -761,6 +771,12 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
         if (target && target.id !== candidate.id) representative.set(candidate.id, target);
       }
       const validatedGapIds = await validatedPlacementGapIds();
+      // Each need records where it came from (KAN-97): this run, its candidate row and the block it quotes.
+      const provenanceOf = (candidate: GapCandidate) => ({
+        run_id: ctx.run.id,
+        candidate_row_id: rowIdByCandidate.get(candidate.id) ?? null,
+        block_id: blockIdFor(documents.find((document) => document.id === candidate.document_id), candidate.source_quote),
+      });
       const gapByCandidate = new Map<string, string>();
       const suggestionByCandidate = new Map<string, string>();
       const commitFor = (document: ParsedDocumentRecord, rows: Omit<Parameters<typeof commitExtractedRecords>[0], "source_id" | "title" | "stakeholder_function" | "actor_name" | "actor_function" | "tactics" | "validated_gap_ids">) => {
@@ -791,6 +807,7 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               id: candidate.id,
               statement: candidate.statement,
               source_quote: candidate.source_quote,
+              provenance: provenanceOf(candidate),
             })),
             gaps: asGap.map((candidate) => ({
               id: candidate.id,
@@ -846,12 +863,19 @@ export const gapExtractModule: SynapseModule<GapExtractInput, GapExtractOutput> 
               statement: candidate.statement,
               source_quote: candidate.source_quote,
               gap_id: gapByCandidate.get(representative.get(candidate.id)!.id)!,
+              provenance: provenanceOf(candidate),
             })),
             gaps: [],
           }),
         );
         committed_need_ids.push(...result.need_ids);
         joined_gap_ids.push(...Object.values(result.gap_id_by_row));
+        for (const [id, gapId] of Object.entries(result.gap_id_by_row)) gapByCandidate.set(id, gapId);
+      }
+      // Every candidate row says which gap it became or joined (KAN-97).
+      for (const [candidateId, gapId] of gapByCandidate) {
+        const rowId = rowIdByCandidate.get(candidateId);
+        if (rowId) await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, rowId));
       }
     }
 

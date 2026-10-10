@@ -3,7 +3,7 @@ import { db } from "./db";
 import * as t from "./schema";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { ActorFunction } from "./enums";
-import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, makeLock, syncComputedGapStatuses } from "./store";
+import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, makeLock, NOT_CONFIRMED, syncComputedGapStatuses } from "./store";
 
 /**
  * Undo for every "set aside" decision (KAN-16): an excluded gap, a rejected
@@ -71,6 +71,8 @@ export async function restoreExcludedGap(args: RestoreActor & { gap_id: string }
       exclusion_reason: null,
       exclusion_note: null,
       human_validated: false,
+      // A restored gap is confirmed again by a person, not by its old confirmation (KAN-97).
+      ...NOT_CONFIRMED,
       lock: makeLock(args.actor_name, args.actor_function, rationale),
     })
     .where(eq(t.gaps.id, args.gap_id));

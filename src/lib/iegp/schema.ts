@@ -70,6 +70,10 @@ export const needs = pgTable("needs", {
   confidence: real("confidence"),
   status: text("status").notNull(),
   lock: jsonb("lock").notNull(),
+  /** Where the need came from (KAN-97): the S2 run, its candidate row and the source block. */
+  run_id: text("run_id"),
+  candidate_row_id: text("candidate_row_id"),
+  block_id: text("block_id"),
 });
 
 export const gaps = pgTable("gaps", {
@@ -96,6 +100,12 @@ export const gaps = pgTable("gaps", {
   new_source_at: text("new_source_at"),
   new_source_need_id: text("new_source_need_id"),
   related_gap_ids: jsonb("related_gap_ids").$type<string[]>().notNull().default([]),
+  /** Who confirmed the gap, when and why (KAN-97). Later edits never overwrite these. */
+  validated_by: jsonb("validated_by"),
+  validated_at: text("validated_at"),
+  validation_rationale: text("validation_rationale"),
+  /** The gap an accepted S2 split suggestion took this one from (KAN-97); not a parent. */
+  origin_gap_id: text("origin_gap_id"),
 });
 
 /** Overlap suggestions from the S2 judge, waiting on a person (KAN-74/75). */
@@ -136,6 +146,8 @@ export const gapVersions = pgTable("gap_versions", {
   at: text("at").notNull(),
   actor_name: text("actor_name").notNull(),
   actor_function: text("actor_function").notNull(),
+  /** Everything else the gap held at that moment (KAN-97); null on older rows. */
+  snapshot: jsonb("snapshot"),
 });
 
 export const needGapLinks = pgTable(
