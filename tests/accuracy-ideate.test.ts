@@ -63,6 +63,14 @@ const highOpenGaps = [
 ];
 
 describe("ideate module", () => {
+  it("identifies same-name structural findings by their proposal content rather than position", () => {
+    const proposals = ["first-ineligible", "second-ineligible"].map(gap_id => ({ gap_id, name: "Unapproved proposal",
+      type: "rwe_study", design_summary: "Independent cohort" }));
+    const first = critiqueIdeationDraft({ proposals }, { eligibleIds: new Set(), existingNames: new Set() });
+    const reordered = critiqueIdeationDraft({ proposals: [...proposals].reverse() }, { eligibleIds: new Set(), existingNames: new Set() });
+    expect(first.finding_fingerprints[0]).not.toBe(first.finding_fingerprints[1]);
+    expect(first.finding_fingerprints[0]).toBe(reordered.finding_fingerprints[1]);
+  });
   it("returns empty proposals under SYNAPSE_TEST_STUB_LLM", async () => {
     expect(process.env.SYNAPSE_TEST_STUB_LLM).toBe("1");
     const ctx = mockCtx(true);

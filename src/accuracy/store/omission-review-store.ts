@@ -2,7 +2,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ACTOR_FUNCTIONS } from "@/lib/iegp/enums";
-import type { AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
+import { resolveEffectiveAssessment, type EffectiveAssessment } from "../domain/effective-assessment";
 import { newId } from "@/modules/kernel/ids";
 import { invalidateClaimFacts, invalidateDependentClaimValidation, syncClaimProvenance } from "./claim-store";
 import { withHumanEdit } from "./claim-edit";
@@ -10,7 +10,6 @@ import { isDownstreamClaim } from "./claim-store";
 import { claimToMergeCandidate } from "@/accuracy/modules/merge-dedupe/module";
 import { emptyGapStructuredFields, emptyTacticStructuredFields } from "@/accuracy/domain/structured-fields";
 import { identityKeys, normalizeStatement, packsMayMerge, sharedBlockIds, tacticStatusesConflict, type MergeCandidate } from "@/accuracy/modules/merge-dedupe/engine";
-import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import type { SnapshotCompletenessAssessment, SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { accuracyDb, ensureAccuracySchema, lockAccuracyWorkspace, withAccuracyTransaction } from "./db";
 import * as t from "./schema";
@@ -25,11 +24,11 @@ export type OmissionAction = Omit<typeof t.accuracyOmissionActions.$inferSelect,
 export type OmissionReviewItem = {
   workspace_id: string; source_file_id: string; run_id: string;
   call_kind: "need_extract" | "inventory_extract";
-  issue: SuspectedOmission; latest_action: OmissionAction | null; blocking: boolean;
+  issue: SuspectedOmission; latest_action: OmissionAction | null; blocking: boolean; actionable?: boolean;
 };
 type Executor = Pick<ReturnType<typeof accuracyDb>, "select" | "insert" | "update" | "execute">;
 type AppliedRun = typeof t.accuracyModuleRuns.$inferSelect & { source_file_id: string; call_kind: OmissionReviewItem["call_kind"];
-  batch: SourceCoverageBatch; units: SourceCoverageUnit[] | null; successful_coverage: boolean };
+  batch: SourceCoverageBatch; units: SourceCoverageUnit[] | null; successful_coverage: boolean; assessment: EffectiveAssessment };
 
 /** Human importance decisions override the model default until a closing action. */
 function isBlocking(issue: SuspectedOmission, action: OmissionAction | null): boolean {
@@ -46,8 +45,8 @@ async function appliedRuns(workspace_id: string, d: Executor = accuracyDb()): Pr
   const runs = await d.select().from(t.accuracyModuleRuns).where(and(
     eq(t.accuracyModuleRuns.workspace_id, workspace_id), eq(t.accuracyModuleRuns.status, "ok")))
     .orderBy(desc(t.accuracyModuleRuns.finished_at), desc(t.accuracyModuleRuns.id));
-  const critiques = await d.select().from(t.accuracyAgentEvents).where(and(
-    eq(t.accuracyAgentEvents.workspace_id, workspace_id), eq(t.accuracyAgentEvents.event_type, "critique")))
+  const events = await d.select().from(t.accuracyAgentEvents).where(and(
+    eq(t.accuracyAgentEvents.workspace_id, workspace_id)))
     .orderBy(desc(t.accuracyAgentEvents.iteration));
   return runs.flatMap((run): AppliedRun[] => {
     if (!run.finished_at || (run.call_kind !== "need_extract" && run.call_kind !== "inventory_extract")) return [];
@@ -59,12 +58,12 @@ async function appliedRuns(workspace_id: string, d: Executor = accuracyDb()): Pr
     if (!batch) return [];
     const page = batch.source_progress?.pages.find(p => p.attempts[run.call_kind]?.run_id === run.id);
     if (batch.source_progress && (!page || (input.source_page as { id?: string } | undefined)?.id !== page.id)) return [];
-    const completeness = (critiques.find(event => event.run_id === run.id)?.payload as AgentCritiqueEvent | undefined)?.completeness;
+    const assessment = resolveEffectiveAssessment(events.filter(event => event.run_id === run.id));
     const scopedBatch: SourceCoverageBatch = { ...batch, legacy_block_ids: Array.isArray(input.block_ids) ? input.block_ids as string[] : undefined };
     const units = page?.units ?? scopedBatch.legacy_block_ids?.map(block_id => ({ block_id, char_start: 0, char_end: Infinity })) ?? null;
-    return [{ ...run, source_file_id, call_kind: run.call_kind, batch: scopedBatch, units,
+    return [{ ...run, source_file_id, call_kind: run.call_kind, batch: scopedBatch, units, assessment,
       successful_coverage: (!page || page.attempts[run.call_kind]?.state === "successful")
-        && completeness?.risk_level !== "check_failed" && !completeness?.unchecked_block_ids.length }];
+        && assessment.successful_coverage }];
   });
 }
 
@@ -104,20 +103,21 @@ export async function listOmissionActionHistory(args: {
   return rows as OmissionAction[];
 }
 
-/** Overlay contributor decisions on the highest critique iteration. */
+/** Overlay contributor decisions on the same selected/terminal resolution used by guards. */
 async function reviewsForRun(run: AppliedRun) {
-  const progression = await readAgentProgression({ workspace_id: run.workspace_id, run_id: run.id });
-  const critique = progression?.events.filter((record) => record.event.event_type === "critique")
-    .sort((a, b) => b.iteration - a.iteration)[0]?.event;
-  const completeness: SnapshotCompletenessAssessment | null = critique?.event_type === "critique" ? critique.completeness : null;
+  const assessment = run.assessment;
+  const completeness = assessment.lineage === "legacy_terminal" ? assessment.terminal_completeness : assessment.selected_completeness;
   const history = await listOmissionActionHistory({ workspace_id: run.workspace_id, run_id: run.id });
-  const items = (completeness?.suspected_omissions ?? []).filter((issue) => issue.source_ref.source_file_id === run.source_file_id)
+  const items = assessment.findings.filter((issue) => issue.source_ref.source_file_id === run.source_file_id)
     .map((issue): OmissionReviewItem => {
-      const latest_action = history.filter((action) => action.issue_id === issue.issue_id && action.source_file_id === run.source_file_id).at(-1) ?? null;
+      const latest_action = assessment.lineage === "invalid" || assessment.ambiguous_issue_ids.includes(issue.issue_id) ? null : history.filter((action) => action.issue_id === issue.issue_id && action.source_file_id === run.source_file_id).at(-1) ?? null;
       return { workspace_id: run.workspace_id, source_file_id: run.source_file_id, run_id: run.id,
-        call_kind: run.call_kind, issue, latest_action, blocking: isBlocking(issue, latest_action) };
+        call_kind: run.call_kind, issue, latest_action, blocking: isBlocking(issue, latest_action),
+        actionable: assessment.lineage !== "invalid" && !assessment.ambiguous_issue_ids.includes(issue.issue_id) };
     });
-  return { items, completeness };
+  return { items, completeness, terminal_completeness: assessment.terminal_completeness,
+    selected_iteration: assessment.selected_iteration, terminal_iteration: assessment.terminal_iteration,
+    lineage: assessment.lineage, ambiguous_issue_ids: assessment.ambiguous_issue_ids };
 }
 
 /** Read current findings for every source/kind in a workspace.
@@ -125,9 +125,17 @@ async function reviewsForRun(run: AppliedRun) {
  * @returns Both blocking and advisory findings, with decisions applied.
  */
 export async function listCurrentOmissionReviews(workspace_id: string): Promise<OmissionReviewItem[]> {
+  return (await currentOmissionReviewState(workspace_id)).items;
+}
+
+/** Keep invalid lineage separate from factual omission findings, so guards need no invented blocker. */
+export async function currentOmissionReviewState(workspace_id: string): Promise<{
+  items: OmissionReviewItem[]; invalid_lineage_run_ids: string[];
+}> {
   const runs = await appliedRuns(workspace_id);
-  const result = await Promise.all(currentRuns(runs).map(async run => (await reviewsForRun(run)).items.filter(item => issueCurrent(run, runs, item.issue))));
-  return result.flat();
+  const current = currentRuns(runs);
+  const result = await Promise.all(current.map(async run => (await reviewsForRun(run)).items.filter(item => issueCurrent(run, runs, item.issue))));
+  return { items: result.flat(), invalid_lineage_run_ids: current.filter(run => run.assessment.lineage === "invalid").map(run => run.id) };
 }
 
 /** Read only unresolved important explicit findings that pause downstream work.
@@ -144,6 +152,8 @@ export async function listBlockingOmissions(workspace_id: string): Promise<Omiss
  */
 export async function getOmissionReviewsForRun(args: { workspace_id: string; run_id: string }): Promise<{
   current: boolean; items: OmissionReviewItem[]; completeness: SnapshotCompletenessAssessment | null;
+  terminal_completeness: SnapshotCompletenessAssessment | null; selected_iteration: number | null;
+  terminal_iteration: number | null; lineage: EffectiveAssessment["lineage"]; ambiguous_issue_ids: string[];
 } | null> {
   const runs = await appliedRuns(args.workspace_id);
   const run = runs.find((candidate) => candidate.id === args.run_id);
@@ -242,12 +252,12 @@ export async function applyOmissionAction(args: OmissionActionInput): Promise<Om
     const run = runs.find((row) => row.id === input.run_id);
     if (!run) throw new OmissionActionError(404, "Run has no applied extraction findings.");
     if (!currentRuns(runs).some((row) => row.id === input.run_id)) throw new OmissionActionError(409, "Run was superseded; review its current extraction instead.");
-    const critiques = await tx.select().from(t.accuracyAgentEvents).where(and(
-      eq(t.accuracyAgentEvents.workspace_id, input.workspace_id), eq(t.accuracyAgentEvents.run_id, input.run_id),
-      eq(t.accuracyAgentEvents.event_type, "critique"))).orderBy(desc(t.accuracyAgentEvents.iteration)).limit(1);
-    const critique = critiques[0]?.payload as AgentCritiqueEvent | undefined;
-    const issues = critique?.completeness?.suspected_omissions.filter((issue) => issue.issue_id === input.issue_id
-      && issue.source_ref.source_file_id === run.source_file_id) ?? [];
+    const assessment = run.assessment;
+    if (assessment.lineage === "invalid" || assessment.ambiguous_issue_ids.includes(input.issue_id)) {
+      throw new OmissionActionError(409, "Selected lineage or finding evidence is ambiguous; rerun extraction before deciding.");
+    }
+    const issues = assessment.findings.filter(issue => issue.issue_id === input.issue_id
+      && issue.source_ref.source_file_id === run.source_file_id);
     if (issues.length !== 1) throw new OmissionActionError(404, "Unknown or ambiguous finding in run.");
     const issue = issues[0];
     if (!issueCurrent(run, runs, issue)) throw new OmissionActionError(409, "Finding was superseded by successful inspection of its source units.");

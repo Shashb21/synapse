@@ -80,6 +80,17 @@ const critique = {
 };
 
 describe("agent event persistence", () => {
+  it("renders structural fate evidence and preserves unavailable historical fate", async () => {
+    const ids = await fixture();
+    await appendAgentEvent({ ...ids, event: { ...critique, structural_fate: { status: "assessed", check: null,
+      prior_issue_resolutions: [{ issue_key: "content-evidence", issue: { ...critique.issues[0], category: "structural" },
+        outcome: "partly_resolved", reason: "Only the first source assertion was repaired", evidence: { kind: "validated_assessment", explanation: "Reviewed remaining assertion" } }] } } });
+    const html = renderPageContent(await AccuracyRunDetailPage({ params: Promise.resolve({ run_id: ids.run_id }),
+      searchParams: Promise.resolve({ workspace_id: ids.workspace_id }) }));
+    expect(html).toContain("Structural issue fate"); expect(html).toContain("Partly resolved");
+    expect(html).toContain("Only the first source assertion was repaired"); expect(html).toContain("Reviewed remaining assertion");
+    await deleteWorkspace(ids.workspace_id);
+  });
   it("loads every active source claim in the workspace beyond the UI list limit", async () => {
     const ids = await fixture();
     const other = await fixture();
@@ -113,7 +124,7 @@ describe("agent event persistence", () => {
     expect(progression?.events[0].event).toEqual({ ...legacy, completeness: {
       risk_level: "not_applicable", checked_block_ids: [], unchecked_block_ids: [],
       suspected_omissions: [], prior_issue_resolutions: [],
-    } });
+    }, structural_fate: { status: "unavailable", check: null, prior_issue_resolutions: [] } });
   });
 
   it("retains exact V0, critique, V1 and judgment in progression order", async () => {
@@ -134,7 +145,8 @@ describe("agent event persistence", () => {
     ]);
     expect(progression?.events.map(({ id }) => id).every((id) => typeof id === "string" && id.length > 0)).toBe(true);
     expect(new Set(progression?.events.map(({ id }) => id)).size).toBe(4);
-    expect(progression?.events.map(({ event }) => event)).toEqual([v0, critique, v1, judgment]);
+    expect(progression?.events.map(({ event }) => event)).toEqual([v0, { ...critique,
+      structural_fate: { status: "unavailable", check: null, prior_issue_resolutions: [] } }, v1, judgment]);
     expect(progression?.events[0].recorded_at).toBeTruthy();
   });
 
@@ -255,7 +267,8 @@ describe("run progression detail", () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.progression.events.map((row: { event: unknown }) => row.event)).toEqual([v0, critique, v1, judgment]);
+    expect(body.progression.events.map((row: { event: unknown }) => row.event)).toEqual([v0, { ...critique,
+      structural_fate: { status: "unavailable", check: null, prior_issue_resolutions: [] } }, v1, judgment]);
 
     const html = renderPageContent(await AccuracyRunDetailPage({
       params: Promise.resolve({ run_id: ids.run_id }),

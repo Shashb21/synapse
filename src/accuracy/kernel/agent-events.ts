@@ -26,6 +26,22 @@ const criticIssueSchema = z.strictObject({
   claim: z.string().min(1),
   source_ref: sourceRefSchema.optional(),
   suggested_action: z.string().min(1),
+  content_fingerprint: z.string().min(1).optional(),
+});
+export const structuralResolutionSchema = z.strictObject({
+  issue_key: z.string().min(1),
+  issue: criticIssueSchema,
+  outcome: z.enum(["unresolved", "partly_resolved", "resolved", "invalid"]),
+  reason: z.string().trim().min(1),
+  evidence: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("deterministic_rerun"), check_id: z.string().min(1) }),
+    z.strictObject({ kind: z.literal("validated_assessment"), explanation: z.string().trim().min(1) }),
+  ]).nullable(),
+});
+const structuralFateSchema = z.strictObject({
+  status: z.enum(["assessed", "unavailable"]),
+  check: z.strictObject({ id: z.string().min(1), exhaustive: z.literal(true) }).nullable(),
+  prior_issue_resolutions: z.array(structuralResolutionSchema),
 });
 const productionSignalsSchema = z.strictObject({
   quote_validity: z.strictObject({
@@ -79,6 +95,7 @@ const critiqueSchema = z.strictObject({
   score: z.number().finite().min(0).max(1).nullable(),
   issues: z.array(criticIssueSchema),
   completeness: completenessSchema,
+  structural_fate: structuralFateSchema.optional(),
   ...metering,
 });
 const judgmentSchema = z.strictObject({
@@ -94,6 +111,10 @@ const agentEventSchema = z.discriminatedUnion("event_type", [
 /** Supply an explicit historical state only for stored critiques predating completeness. */
 function parseStoredEvent(payload: unknown): AgentEvent {
   if (typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    && "event_type" in payload && payload.event_type === "critique" && !("structural_fate" in payload)) {
+    payload = { ...payload, structural_fate: { status: "unavailable", check: null, prior_issue_resolutions: [] } };
+  }
+  if (typeof payload === "object" && payload !== null && !Array.isArray(payload)
     && "event_type" in payload && payload.event_type === "critique" && !("completeness" in payload)) {
     return agentEventSchema.parse({ ...payload, completeness: {
       risk_level: "not_applicable", checked_block_ids: [], unchecked_block_ids: [],
@@ -104,6 +125,8 @@ function parseStoredEvent(payload: unknown): AgentEvent {
 }
 
 export type CriticIssue = z.infer<typeof criticIssueSchema>;
+export type StructuralIssueResolution = z.infer<typeof structuralResolutionSchema>;
+export type StructuralFate = z.infer<typeof structuralFateSchema>;
 export type ProductionSignals = z.infer<typeof productionSignalsSchema>;
 export type AgentSnapshotEvent = z.infer<typeof snapshotSchema>;
 export type AgentCritiqueEvent = z.infer<typeof critiqueSchema>;

@@ -279,3 +279,109 @@ describe("agentic version capture", () => {
       score: 0.8, issues: [terminalIssue] });
   });
 });
+
+
+describe("retained snapshot selection", () => {
+  it("selects V0 on production early exit with only produced candidates and its exact assessment", async () => {
+    const { run, events } = recordingRun();
+    const result = await runShallowAgenticCycle({ run,
+      onSnapshot: async () => signals,
+      proposer: async round => ({ round, text: "V0 supported source" }),
+      critic: async () => ({ score: 1, issues: [] }), onCompleteness: async () => clean,
+      judge: async draft => draft,
+      select: async candidates => {
+        expect(candidates.map(candidate => candidate.iteration)).toEqual([0]);
+        return { selected_iteration: 0, reason: "Produced V0 already passes all checks" };
+      },
+    });
+    expect(result).toMatchObject({ final: { round: 0, text: "V0 supported source" }, selected_iteration: 0 });
+    expect(result.selected_assessment).toEqual({ score: 1, issues: [], completeness: clean,
+      structural_fate: { status: "assessed", check: null, prior_issue_resolutions: [] } });
+    expect(events.map(event => event.event_type)).toEqual(["snapshot", "critique", "judgment"]);
+    expect(events.at(-1)).toMatchObject({ selected_iteration: 0, reason: "Produced V0 already passes all checks" });
+  });
+  it("returns exact earlier content and assessment and records its explainable selection", async () => {
+    // Break caught: judging only the terminal draft, or accepting replacement content.
+    const { run, events } = recordingRun();
+    Object.assign(run, { evaluation_context: "experiment", experiment_cycle_control: { critic_revision_passes: 3 } });
+    const priors: unknown[] = [];
+    const result = await runShallowAgenticCycle({ run, onSnapshot: async () => ({ ...signals, quote_validity: { valid_count: 1, invalid_count: 0, unchecked_count: 0 } }),
+      proposer: async (round, prior) => { priors.push(prior); return { round, text: `V${round}` }; },
+      critic: async () => ({ score: 1, issues: [] }), onCompleteness: async () => clean,
+      judge: async draft => draft,
+      select: async candidates => {
+        expect(candidates.map(candidate => candidate.iteration)).toEqual([0, 1, 2, 3]);
+        expect(candidates[1]).toMatchObject({ draft: { round: 1, text: "V1" }, assessment: { completeness: clean } });
+        return { selected_iteration: 1, reason: "V1 retains the supported source claim" };
+      },
+    });
+    expect(priors).toEqual([null, { round: 0, text: "V0" }, { round: 1, text: "V1" }, { round: 2, text: "V2" }]);
+    expect(result.final).toEqual({ round: 1, text: "V1" });
+    expect(result.selected_assessment).toMatchObject({ completeness: clean });
+    expect(events.at(-1)).toMatchObject({ event_type: "judgment", selected_iteration: 1,
+      reason: "V1 retains the supported source claim" });
+  });
+});
+
+
+describe("validated selection failures", () => {
+  it.each([
+    { selected_iteration: 9, reason: "Missing version" },
+    { selected_iteration: -1, reason: "Negative version" },
+    { selected_iteration: 0.5, reason: "Fractional version" },
+    { selected_iteration: 0, reason: "   " },
+    { selected_iteration: 0, reason: "Replace it", content: { value: "fabricated" } },
+    null,
+  ])("rejects invalid decision %j without a judgment", async decision => {
+    const { run, events } = recordingRun();
+    await expect(runShallowAgenticCycle({ run, maxExchanges: 0, onSnapshot: async () => ({ ...signals, quote_validity: { valid_count: 1, invalid_count: 0, unchecked_count: 0 } }),
+      proposer: async () => ({ value: "V0" }), critic: async () => ({ score: 1, issues: [] }),
+      onCompleteness: async () => clean, judge: async draft => draft,
+      select: async () => decision,
+    })).rejects.toThrow();
+    expect(events.map(event => event.event_type)).toEqual(["snapshot", "critique"]);
+  });
+
+  it.each(["invalid", "unchecked", "invariant", "failed", "unassessed", "uninspected"])("rejects %s evidence without a judgment", async kind => {
+    const { run, events } = recordingRun();
+    await expect(runShallowAgenticCycle({ run, maxExchanges: 0,
+      onSnapshot: async () => ({ ...signals, quote_validity: { valid_count: 1,
+        invalid_count: kind === "invalid" ? 1 : 0, unchecked_count: kind === "unchecked" ? 1 : 0 },
+        invariant_failures: kind === "invariant" ? ["wrong_origin"] : [] }),
+      proposer: async () => ({ value: "V0" }), critic: async () => ({ score: 1, issues: [] }),
+      onCompleteness: kind === "unassessed" ? undefined : async () => kind === "failed"
+        ? { ...clean, risk_level: "check_failed" } : kind === "uninspected" ? { ...clean, checked_block_ids: [] } : clean,
+      judge: async draft => draft, select: async () => ({ selected_iteration: 0, reason: "Use V0" }),
+    })).rejects.toThrow();
+    expect(events.map(event => event.event_type)).toEqual(["snapshot", "critique"]);
+  });
+
+  it("propagates provider selection failure and preserves all preceding observations", async () => {
+    const { run, events } = recordingRun();
+    await expect(runShallowAgenticCycle({ run, maxExchanges: 0, onSnapshot: async () => ({ ...signals, quote_validity: { valid_count: 1, invalid_count: 0, unchecked_count: 0 } }),
+      proposer: async () => ({ value: "V0" }), critic: async () => ({ score: 1, issues: [] }),
+      onCompleteness: async () => clean, judge: async draft => draft,
+      select: async () => { throw new Error("judge provider failed"); },
+    })).rejects.toThrow("judge provider failed");
+    expect(events.map(event => event.event_type)).toEqual(["snapshot", "critique"]);
+  });
+
+  it("isolates retained snapshots from sequential proposer mutation", async () => {
+    const { run, events } = recordingRun();
+    const reused = { value: "V0", nested: { quote: "source" } };
+    const result = await runShallowAgenticCycle<typeof reused>({ run, maxExchanges: 1, onSnapshot: async () => ({ ...signals, quote_validity: { valid_count: 1, invalid_count: 0, unchecked_count: 0 } }),
+      proposer: async (round, prior) => {
+        if (round) { prior!.nested.quote = "mutated prior"; reused.value = "V1"; }
+        return reused;
+      },
+      critic: async () => ({ score: 0.8, issues: [] }), onCompleteness: async () => clean,
+      judge: async draft => draft, select: async candidates => {
+        expect(Object.isFrozen(candidates[0].draft.nested)).toBe(true);
+        return { selected_iteration: 0, reason: "Preserve V0 source" };
+      },
+    });
+    reused.nested.quote = "external mutation";
+    expect(result.final).toEqual({ value: "V0", nested: { quote: "source" } });
+    expect(events[0]).toMatchObject({ output: { value: "V0", nested: { quote: "source" } } });
+  });
+});
