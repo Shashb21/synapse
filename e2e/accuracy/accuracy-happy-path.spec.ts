@@ -77,15 +77,16 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
     const card = page.locator("article").filter({ has: page.getByText("Gap", { exact: true }) }).first();
     await expect(card.getByText("Gap", { exact: true })).toBeVisible();
     await expect(card.getByText("Tactic", { exact: true })).toBeVisible();
-    await expect(card.getByText(/Status: undecided/i)).toBeVisible();
+    await expect(card.getByText(/Assessment: pending/i)).toBeVisible();
 
     await page.getByRole("button", { name: /suggest with llm/i }).click();
     await expect(page.getByText(/Assist \(stub\)/i)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/not_relevant → none/i)).toBeVisible();
+    await expect(card.getByText(/Model suggestion: not_relevant/i)).toBeVisible();
+    await card.getByRole("button", { name: "Use suggestion", exact: true }).click();
 
     // Assist pre-fills rationale; confirm with a decide button.
-    await card.getByRole("button", { name: /^none$/i }).click();
-    await expect(page.getByText(/decided pair/i)).toBeVisible({ timeout: 30_000 });
+    await card.getByRole("button", { name: /^not relevant$/i }).click();
+    await expect(page.getByRole("button", { name: "Show 1 decided pair(s)", exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
   test("plan lists seeded gaps and accepts a priority band", async ({ page }) => {
@@ -96,6 +97,7 @@ test.describe("accuracy happy path (seeded gold, stub LLM)", () => {
 
     const firstCard = page.locator("article").first();
     await expect(firstCard).toBeVisible();
+    await firstCard.getByLabel("Priority rationale", { exact: true }).fill("E2E review: prioritize the first gold gap");
     await firstCard.getByRole("button", { name: /^high$/i }).click();
     await expect(firstCard.getByRole("button", { name: /^high$/i })).toHaveClass(
       /bg-foreground/,

@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { workspaceUrl } from "../support/accuracy";
+import { coverageProvenance } from "../../tests/support/coverage-provenance";
+import { coveragePairRevisions } from "../../src/accuracy/store/coverage-store";
 
 test.use({
   video: { mode: "on", size: { width: 1280, height: 720 } },
@@ -17,11 +19,13 @@ async function seedDatedGantt(request: APIRequestContext) {
   expect(ws.ok).toBe(true);
   const workspace_id = ws.workspace_id;
 
+  const provenance = await coverageProvenance(workspace_id, "Need overall survival evidence in 2L NSCLC");
   const gapRes = await request.post("/api/accuracy/claims", {
     data: {
       workspace_id,
       claim_type: "gap",
       statement: "Need overall survival evidence in 2L NSCLC",
+      metadata: { provenance },
       status: "validated",
       validated: true,
     },
@@ -40,6 +44,7 @@ async function seedDatedGantt(request: APIRequestContext) {
         end: "2026-06-01",
         readout: "2026-07-01",
         tactic_type: "clinical_study",
+        tactic_status: "planned",
       },
     },
   });
@@ -61,16 +66,18 @@ async function seedDatedGantt(request: APIRequestContext) {
     },
   });
 
-  await request.post("/api/accuracy/coverage", {
+  const coverage = await request.post("/api/accuracy/coverage", {
     data: {
       workspace_id,
       gap_id: gap.claim.id,
       tactic_id: t1.claim.id,
-      overall: "covers",
+      overall: "full",
+      ...await coveragePairRevisions({ workspace_id, gap_id: gap.claim.id, tactic_id: t1.claim.id }),
       rationale: "Pivotal follow-up addresses the OS gap",
     },
   });
 
+  expect(coverage.ok(), await coverage.text()).toBe(true);
   return workspace_id;
 }
 
