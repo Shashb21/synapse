@@ -145,7 +145,7 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
     await priority.getByRole("button", { name: "Save Accuracy configuration" }).click();
     await expect(priority).toContainText("Human working decision: defer · Validation: stale");
     await priority.getByRole("button", { name: "Validate working priority" }).click();
-    await expect(priority).toContainText("Human working decision: defer · Validation: current");
+    await expect(priority).toContainText("Human working decision: defer · Validation: current", { timeout: 30_000 });
     const prior = (await (await request.get(`/api/accuracy/claims/priority?workspace_id=${workspaceId}`)).json()).placements.find((row: { gap_id: string }) => row.gap_id === first.open_residual_gap_id);
     await page.goto(workspaceUrl("/admin/accuracy/ledger", workspaceId));
     const blocked = page.getByTestId(`split-operation-${first.operation_id}`);
@@ -168,6 +168,7 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
       const switched = await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: false, rationale: "Browser proof of manual Accuracy controls" } });
       expect(switched.ok(), await switched.text()).toBe(true);
       await page.goto(workspaceUrl("/admin/accuracy/ledger", workspaceId));
+      await page.waitForLoadState("networkidle");
       await page.getByTestId(`ledger-claim-${clean.id}`).getByRole("button", { name: "Resolve Partial gap" }).click();
       const manual = page.getByTestId(`ledger-claim-${clean.id}`).getByRole("region", { name: "Resolve Partial gap" });
       await expect(manual.getByRole("button", { name: "Suggest a split" })).toHaveCount(0);
@@ -197,7 +198,7 @@ test.describe("KAN83 Accuracy stage completion (scripted HTTP provider, real own
       await expect(priority.getByRole("button", { name: "Suggest S8 priority" })).toHaveCount(0);
       await priority.getByLabel("S8 rationale", { exact: true }).fill("Human rechecks this deferred residual with AI switched off");
       await priority.getByRole("button", { name: "Validate working priority" }).focus(); await page.keyboard.press("Enter");
-      await expect(priority).toContainText("Human working decision: defer · Validation: current");
+      await expect(priority).toContainText("Human working decision: defer · Validation: current", { timeout: 30_000 });
     } finally {
       const restored = await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: control.ai.enabled, rationale: "Restore the pre-proof AI setting" } });
       expect(restored.ok(), await restored.text()).toBe(true);
@@ -259,9 +260,12 @@ async function approveCurrentProposal(page: Page, request: APIRequestContext, wo
   const list = await response.json();
   const id = assemblyId ?? list.assemblies[0].id;
   await page.goto(workspaceUrl("/admin/accuracy/ledger", workspaceId));
+  // Wait for the cold dev server to finish delivering the interactive page before toggling it.
+  await page.waitForLoadState("networkidle");
   const proposals = page.getByRole("region", { name: "Complete assembly proposals", exact: true });
   await proposals.getByRole("button", { name: "Complete proposals", exact: true }).click();
-  await proposals.getByRole("button", { name: `Inspect proposal ${id}`, exact: true }).click();
+  // The scripted provider uses a second cold Next server; allow its initial list read to finish.
+  await proposals.getByRole("button", { name: `Inspect proposal ${id}`, exact: true }).click({ timeout: 60_000 });
   await expect(proposals.getByRole("region", { name: "Selected items", exact: true })).toBeVisible();
   await expect(proposals.getByRole("region", { name: "Coverage outcomes", exact: true })).toBeVisible();
   const review = proposals.getByRole("form", { name: "Review proposal", exact: true });
