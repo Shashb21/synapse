@@ -22,7 +22,8 @@ import { INVENTORY_PROPOSER_SYSTEM } from "@/accuracy/modules/inventory-extract/
 import { NEED_PROPOSER_SYSTEM } from "@/accuracy/modules/need-extract/prompts";
 import { captureMergeInputs, prepareMergeJudgment, applyMergeJudgment } from "@/accuracy/modules/merge-dedupe/module";
 import { withAccuracyTransaction } from "@/accuracy/store/db";
-import type { AgentEvent } from "@/accuracy/kernel/agent-events";
+import { readAgentProgression, type AgentEvent } from "@/accuracy/kernel/agent-events";
+import { listAccuracyRuns } from "@/accuracy/kernel/observability";
 import { copyExperimentWorkspace } from "@/accuracy/experiments/copy-workspace";
 
 async function sourceFixture(text: string) {
@@ -143,46 +144,40 @@ describe("source-backed structured extraction", () => {
   it.each([
     ["speaker without attribution", "speaker", "Ada", "attribution_not_in_evidence"],
     ["invalid role quote", "role", "Medical Affairs", "quote_not_substring"],
-  ])("reports %s instead of assigning it to a quotation", async (_label, field, value, reason) => {
+  ])("fails extraction for %s instead of assigning it to a quotation", async (_label, field, value) => {
     const fixture = await sourceFixture("We need survival data.");
     const span = { source_file_id: fixture.source_file_id, block_id: fixture.block_id, quote: "We need survival data" };
     const unknown = { state: "unknown", value: null, reason: "not_stated", provenance: [] };
-    const result = await live(() => needExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
+    await expect(live(() => needExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
       gaps: [{ statement: "Need survival data", provenance: [span], structured: { version: 1, interview_quotes: {
         state: "known", provenance: [span], value: [{ quote: span, speaker: unknown, role: unknown,
           [field]: { state: "known", value, provenance: [{ ...span, quote: field === "role" ? "Medical Affairs" : span.quote }] } }] } } }],
-    })));
-    expect(result.output.gaps).toEqual([]);
-    expect(result.output.rejected_candidates).toEqual([{ index: 0, field: `structured.interview_quotes.0.${field}`, reason }]);
+    })))).rejects.toThrow("No admissible extraction snapshot");
   });
 
   it.each([
     ["missing reason", { state: "unknown", value: null, provenance: [] }],
     ["invented unknown evidence", { state: "unknown", value: null, reason: "not_stated", provenance: [{ source_file_id: "x", block_id: "y", quote: "z" }] }],
-  ])("reports an unknown field with %s as a rejected candidate", async (_label, owner) => {
+  ])("fails extraction for an unknown field with %s", async (_label, owner) => {
     const fixture = await sourceFixture("Registry R.");
     const span = { source_file_id: fixture.source_file_id, block_id: fixture.block_id, quote: "Registry R" };
-    const result = await live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
+    await expect(live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
       tactics: [{ name: "Registry R", type: "registry", status: "unknown", evidence_question: "Survival?", provenance: [span],
         structured: { version: 1, owner } }],
-    })));
-    expect(result.output.tactics).toEqual([]);
-    expect(result.output.rejected_candidates).toEqual([{ index: 0, field: "structured", reason: "invalid_candidate_shape" }]);
+    })))).rejects.toThrow("No admissible extraction snapshot");
   });
 
   it.each([
     ["invalid field quote", "Invented owner", false, "quote_not_substring"],
     ["wrong source", "Ada owns Registry R", true, "source_file_mismatch"],
-  ])("rejects and reports %s rather than accepting its valid record quote", async (_label, quote, wrongSource, reason) => {
+  ])("fails extraction for %s despite its valid record quote", async (_label, quote, wrongSource) => {
     const fixture = await sourceFixture("Registry R measures survival. Ada owns Registry R.");
     const span = { source_file_id: fixture.source_file_id, block_id: fixture.block_id, quote: "Registry R measures survival" };
-    const result = await live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
+    await expect(live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
       tactics: [{ name: "Registry R", type: "registry", status: "unknown", evidence_question: "Survival?", provenance: [span],
         structured: { version: 1, owner: { state: "known", value: "Ada", provenance: [
           { ...span, source_file_id: wrongSource ? "wrong-source" : span.source_file_id, quote }] } } }],
-    })));
-    expect(result.output.tactics).toEqual([]);
-    expect(result.output).toMatchObject({ rejected_candidates: [{ index: 0, field: "structured.owner", reason }] });
+    })))).rejects.toThrow("No admissible extraction snapshot");
   });
 
   it("records invalid structured evidence in the experiment snapshot signals", async () => {
@@ -192,8 +187,8 @@ describe("source-backed structured extraction", () => {
       provenance: [span], structured: { version: 1, owner: { state: "known", value: "Ada", provenance: [{ ...span, quote: "Invented owner" }] } } }] });
     const events: AgentEvent[] = [];
     ctx.run.recordAgentEvent = async event => { events.push(event); };
-    const result = await live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, ctx));
-    expect(result.output.tactics).toEqual([]);
+    await expect(live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, ctx))).rejects.toThrow("No admissible extraction snapshot");
+    expect(events.some(event => event.event_type === "judgment")).toBe(false);
     expect(events.find(event => event.event_type === "snapshot")).toMatchObject({ signals: { quote_validity: { invalid_count: 1 } } });
     expect(events.find(event => event.event_type === "critique")).toMatchObject({ issues: [expect.objectContaining({ code: "quote_not_substring" })] });
   });
@@ -201,12 +196,10 @@ describe("source-backed structured extraction", () => {
   it("does not relabel ideation as source inventory", async () => {
     const fixture = await sourceFixture("Registry R measures survival.");
     const span = { source_file_id: fixture.source_file_id, block_id: fixture.block_id, quote: "Registry R" };
-    const result = await live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
+    await expect(live(() => inventoryExtractModule.run({ ...fixture, block_ids: [fixture.block_id] }, context(fixture, {
       tactics: [{ name: "Registry R", type: "registry", status: "proposed", evidence_question: "Survival?",
         provenance: [span], origin: "ideated" }],
-    })));
-    expect(result.output.tactics).toEqual([]);
-    expect(result.output).toMatchObject({ rejected_candidates: [{ index: 0, field: "origin", reason: "wrong_origin" }] });
+    })))).rejects.toThrow("No admissible extraction snapshot");
   });
 
   it("reads missing legacy facts as unknown without changing validation or timestamps", async () => {
@@ -308,8 +301,13 @@ describe("source-backed structured extraction", () => {
         expect(response.status).toBe(mode === "production_rejected" ? 409 : 200);
         if (mode === "production_rejected") expect(body.source_progress).toMatchObject({ complete: false, next_cursor: expect.any(String) });
         if (mode === "production_rejected") {
-          expect(body.runs.find((run: { call_kind: string }) => run.call_kind === "inventory_extract")).toMatchObject({
-            count: 0, rejected_candidates: [{ index: 0, field: "structured.owner", reason: "quote_not_substring" }] });
+          expect(body.error).toContain("No admissible extraction snapshot");
+          const failed = (await listAccuracyRuns(workspace_id)).find(run => run.call_kind === "inventory_extract")!;
+          expect(failed.status).toBe("error");
+          const progression = await readAgentProgression({ workspace_id, run_id: failed.id });
+          expect(progression!.events.some(event => event.event_type === "judgment")).toBe(false);
+          expect(progression!.events.find(event => event.event_type === "snapshot")!.event).toMatchObject({
+            signals: { quote_validity: { invalid_count: 1 } } });
           expect((await listClaims(workspace_id)).filter(claim => !claimMetadata(claim).history_only)).toHaveLength(1);
           return;
         }

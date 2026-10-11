@@ -3,6 +3,7 @@ import { comparisonRequestFingerprint, evaluatePassComparison, PASS_COMPARISON_E
 import { readAgentProgression } from "@/accuracy/kernel/agent-events";
 import { validateExperimentCycleControl, type RunStatus } from "@/accuracy/kernel/contracts";
 import { reservedAccuracyRun } from "@/accuracy/kernel/observability";
+import { executionEvidenceFromSteps } from "@/accuracy/kernel/execution-identity";
 import { newId } from "@/modules/kernel/ids";
 import { exportExperimentsForSourceWorkspace, getExperimentForSourceWorkspace, type ExperimentRecord } from "./records";
 import { runAccuracyExperiment, type AccuracyExperimentRequest } from "./run";
@@ -28,7 +29,8 @@ export async function loadPassComparisonEvidence(experiments: ExperimentRecord[]
       const progression = await readAgentProgression({ workspace_id: experiment.workspace_id, run_id: call_id });
       return { call_id, module_id: runtime.module_id, module_version: runtime.module_version, route: runtime.route, status: runtime.status as RunStatus,
         duration_ms: runtime.duration_ms, cost_usd: runtime.cost_usd === null ? null : Number(runtime.cost_usd),
-        token_usage: runtime.token_usage as ComparisonEvidence["runs"][number]["token_usage"], events: progression?.events.map(row => row.event) ?? [] };
+        token_usage: runtime.token_usage as ComparisonEvidence["runs"][number]["token_usage"], events: progression?.events.map(row => row.event) ?? [],
+        execution_identity: executionEvidenceFromSteps(runtime.steps) };
     }));
     return { experiment, runs: runs.filter((run): run is NonNullable<typeof run> => run !== null) };
   }));

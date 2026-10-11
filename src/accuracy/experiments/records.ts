@@ -1,15 +1,18 @@
 /** Append-only, workspace-scoped persistence for isolated gold experiments. */
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { EXPERIMENT_EVALUATOR_VERSION, experimentPackFingerprint, type ExperimentVersionEvaluation } from "@/accuracy/eval/experiment-gold";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { accuracyDb, ensureAccuracySchema, withAccuracyTransaction } from "../store/db";
 import * as t from "../store/schema";
 import { getWorkspace } from "../store/tenant";
+import { executionEvidenceFromSteps, type ExecutionEvidence } from "../kernel/execution-identity";
+import { readAgentProgression, type AgentEvent } from "../kernel/agent-events";
 
 type ExperimentRow = typeof t.accuracyExperiments.$inferSelect;
 type CallRow = typeof t.accuracyExperimentCalls.$inferSelect;
 type EvaluationRow = typeof t.accuracyExperimentEvaluations.$inferSelect;
-export type ExperimentRecord = ExperimentRow & { calls: CallRow[]; evaluations: EvaluationRow[] };
+export type ExperimentRecord = ExperimentRow & { calls: CallRow[]; evaluations: EvaluationRow[];
+  run_evidence?: { call_id: string; execution_identity: ExecutionEvidence; events: AgentEvent[] }[] };
 
 /** Create a distinct immutable experiment attempt for an isolated workspace. */
 export async function createExperiment(args: { workspace_id: string; org_id: string; source_workspace_id: string; pack_id: string; source_fingerprint: string; baseline_fingerprint: string; baseline_snapshot: unknown; condition: Record<string, unknown>; pack_fingerprint?: string }): Promise<ExperimentRow> {
@@ -86,7 +89,18 @@ export async function getExperiment(args: { workspace_id: string; experiment_id:
     accuracyDb().select().from(t.accuracyExperimentCalls).where(and(eq(t.accuracyExperimentCalls.workspace_id, args.workspace_id), eq(t.accuracyExperimentCalls.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentCalls.recorded_at), asc(t.accuracyExperimentCalls.call_id), asc(t.accuracyExperimentCalls.version_index), asc(t.accuracyExperimentCalls.id)),
     accuracyDb().select().from(t.accuracyExperimentEvaluations).where(and(eq(t.accuracyExperimentEvaluations.workspace_id, args.workspace_id), eq(t.accuracyExperimentEvaluations.experiment_id, row.id))).orderBy(asc(t.accuracyExperimentEvaluations.recorded_at), asc(t.accuracyExperimentEvaluations.call_id), asc(t.accuracyExperimentEvaluations.version_index), asc(t.accuracyExperimentEvaluations.id)),
   ]);
-  return { ...row, calls, evaluations };
+  const callIds = [...new Set(calls.map(call => call.call_id))];
+  const runs = callIds.length ? await accuracyDb().select({ id: t.accuracyModuleRuns.id, steps: t.accuracyModuleRuns.steps })
+    .from(t.accuracyModuleRuns).where(and(eq(t.accuracyModuleRuns.workspace_id, args.workspace_id), inArray(t.accuracyModuleRuns.id, callIds))) : [];
+  const preparations = callIds.length ? await accuracyDb().select({ run_id: t.accuracyResumeJournals.merge_operation_id, evidence: t.accuracyResumeJournals.prepared_merge })
+    .from(t.accuracyResumeJournals).where(and(eq(t.accuracyResumeJournals.workspace_id, args.workspace_id), inArray(t.accuracyResumeJournals.merge_operation_id, callIds))) : [];
+  const run_evidence = await Promise.all(callIds.map(async call_id => {
+    const runtime = runs.find(run => run.id === call_id);
+    const progression = runtime ? await readAgentProgression({ workspace_id: args.workspace_id, run_id: call_id }) : null;
+    const preparation = preparations.find(row => row.run_id === call_id)?.evidence as { steps?: unknown } | null | undefined;
+    return { call_id, execution_identity: executionEvidenceFromSteps(runtime?.steps ?? preparation?.steps), events: progression?.events.map(row => row.event) ?? [] };
+  }));
+  return { ...row, calls, evaluations, run_evidence };
 }
 
 /** Read an experiment from the original workspace boundary, never from its private copy ID. */

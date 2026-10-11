@@ -2,6 +2,8 @@
 import { createServer, type Server } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { createAccount, deleteAccountsLike, revokeAccountSessions } from "../../src/modules/auth/accounts";
@@ -61,7 +63,7 @@ export async function startKan83Provider(): Promise<() => Promise<void>> {
   await deleteAccountsLike(KAN83_EMAIL);
   const account = await createAccount({ email: KAN83_EMAIL, name: "KAN83 browser reviewer", password: KAN83_PASSWORD, role: "contributor", is_admin: true, email_verified: true, actor_function: "medical_affairs", created_by: "KAN83 browser fixture" });
   let failInventory = true, failPriority = false, child: ChildProcess | undefined, server: Server | undefined;
-  const log = createWriteStream(`/private/tmp/kan83-browser-server-${KAN83_PORT}.log`);
+  const log = createWriteStream(join(tmpdir(), `kan83-browser-server-${KAN83_PORT}.log`));
   async function stop() {
     if (child && child.exitCode === null) {
       const exited = once(child, "exit");

@@ -72,6 +72,16 @@ function delayReviewReads() {
 }
 
 describe("omission review controls", () => {
+  it("shows selected and terminal lineage and prevents ambiguous contributor actions", async () => {
+    review.selected_iteration = 1; review.terminal_iteration = 3; review.lineage = "selected";
+    review.items = [{ ...item, actionable: false }, { ...item, actionable: false,
+      issue: { ...issue, basis: "inferred", importance: "advisory" }, blocking: false }];
+    await mount();
+    expect(text()).toContain("Selected: V1 · Terminal: V3");
+    expect(text()).toContain("Conflicting or invalid finding lineage");
+    expect(host.querySelectorAll("form")).toHaveLength(0);
+    expect(text()).not.toContain("Resume downstream work");
+  });
   it("shows a paused important issue, exact identity and four contributor choices", async () => {
     await mount();
     expect(text()).toContain("Paused");

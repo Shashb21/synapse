@@ -200,7 +200,8 @@ export async function POST(req: Request) {
     if (error instanceof AssemblyError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 400 });
     if (error instanceof ForbiddenError) return NextResponse.json({ error: error.message }, { status: 403 });
     if (error instanceof ExtractionBatchError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 409 });
-    if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, blockers: error.blockers }, { status: 409 });
+    if (error instanceof AccuracyPausedError) return NextResponse.json({ ok: false, paused: true, error: error.message, blockers: error.blockers,
+      invalid_lineage_run_ids: error.invalid_lineage_run_ids }, { status: 409 });
     const aiOff = aiOffFromError(error);
     if (aiOff) return aiOff;
     if (error instanceof NoRouteError) {

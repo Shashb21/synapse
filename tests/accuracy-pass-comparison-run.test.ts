@@ -34,7 +34,7 @@ async function fixture() {
   await insertClaim({ workspace_id, claim_type: "gap", statement: "Baseline", source_file_id: source.id });
   return { mode: "single_call" as const, source_workspace_id: workspace_id, source_file_ids: [source.id], pack_id: "beone-bgb-58067-prmt5i", condition: { label: "local", nested: { b: 2, a: 1 } }, actor: { name: "test", function: "medical_affairs" as const }, call: { call_kind: "need_extract" as const, input: { workspace_id, source_file_id: source.id, block_ids: [block_id] } } };
 }
-function controlled(call_kind: "need_extract" | "inventory_extract", fail = false, ignoreControl = false) {
+function controlled(call_kind: "need_extract" | "inventory_extract", fail = false, ignoreControl = false, earlier = false) {
   const original = activeAccuracyModuleId(call_kind); if (original) originals.set(call_kind, original);
   const id = newId("comparison-module");
   const inputSchema = z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()), source_page: z.unknown().optional() });
@@ -44,7 +44,12 @@ function controlled(call_kind: "need_extract" | "inventory_extract", fail = fals
       if (ignoreControl) return { output: { workspace_id: input.workspace_id, source_file_id: input.source_file_id, ...(call_kind === "need_extract" ? { gaps: [] } : { tactics: [] }) }, summary: "ignored" };
       const result = await runShallowAgenticCycle({ run: context.run, maxExchanges: 0, proposer: async () => call_kind === "need_extract" ? { gaps: [] } : { tactics: [] },
         onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
-        critic: async () => { if (fail) throw new Error("controlled critic failure"); return { score: 1, issues: [] }; }, judge: async draft => draft });
+        critic: async () => { if (fail) throw new Error("controlled critic failure"); return { score: 1, issues: [] }; },
+        ...(earlier ? {
+          onCompleteness: async () => ({ risk_level: "none_detected" as const, checked_block_ids: input.block_ids,
+            unchecked_block_ids: [], suspected_omissions: [], prior_issue_resolutions: [] }),
+          select: async () => ({ selected_iteration: 1, reason: "Keep the checked V1 while retaining every produced pass" }),
+        } : { judge: async draft => draft }) });
       return { output: { workspace_id: input.workspace_id, source_file_id: input.source_file_id, ...result.final }, summary: "controlled" };
     } }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "comparison test" });
@@ -75,6 +80,25 @@ describe("isolated pass cohorts", () => {
     expect(await accuracyDb().select().from(t.accuracyClaims).where(eq(t.accuracyClaims.workspace_id, request.source_workspace_id))).toEqual(baseline);
     expect(await accuracyDb().select().from(t.accuracyModuleRuns).where(eq(t.accuracyModuleRuns.workspace_id, request.source_workspace_id))).toEqual([]);
     const reread = await readPassComparison({ source_workspace_id: request.source_workspace_id, experiment_ids: result.experiments.map(row => row.id) });
+    expect(reread).toEqual(result.comparison);
+  });
+  it("persists earlier selected judgments independently of forced depth and rereads all raw evidence", async () => {
+    const request = await fixture(); controlled("need_extract", false, false, true);
+    const result = await runPassComparison(request);
+    workspaces.push(...result.experiments.map(row => row.workspace_id));
+    expect(result.comparison).toMatchObject({ matched: true, comparison_evaluator_version: "pass-comparison-v2" });
+    expect(result.comparison.conditions.map(condition => ({ eligibility: condition.eligibility,
+      requested: condition.calls[0].requested_revision_passes, terminal: condition.calls[0].terminal_iteration,
+      selected: condition.calls[0].selected_iteration, versions: condition.calls[0].versions.length })))
+      .toEqual([1, 2, 3].map(pass => ({ eligibility: "eligible", requested: pass, terminal: pass, selected: 1, versions: pass + 1 })));
+    for (const [index, condition] of result.comparison.conditions.entries()) {
+      expect(result.experiments[index].calls.map(call => call.version_index)).toEqual(Array.from({ length: index + 2 }, (_, i) => i));
+      expect(condition.calls[0].runtime!.events.at(-1)).toMatchObject({ event_type: "judgment", selected_iteration: 1 });
+      expect(condition.totals.latency_ms).toBe(condition.calls[0].runtime!.duration_ms);
+      expect(condition.totals.token_usage).toEqual(condition.calls[0].runtime!.token_usage);
+    }
+    const reread = await readPassComparison({ source_workspace_id: request.source_workspace_id,
+      experiment_ids: result.experiments.map(row => row.id) });
     expect(reread).toEqual(result.comparison);
   });
   it("repeating a request creates a separate cohort and six isolated attempts", async () => {

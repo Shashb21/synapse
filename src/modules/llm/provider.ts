@@ -16,6 +16,8 @@ export type LlmRequest = {
   model: string;
   temperature: number;
   max_tokens: number;
+  /** Optional server-side observer; never included in the provider request body. */
+  onResponseIdentity?: (identity: { response_model: string | null; provider_revision: string | null }) => void;
 };
 
 /** The provider's API key, read on the server and sent only to that provider. */
@@ -155,6 +157,12 @@ function textFromPayload(payload: Record<string, unknown>): string {
   throw new Error("Provider returned no text content");
 }
 
+function observeResponse(request: LlmRequest, payload: Record<string, unknown>) {
+  const text = (value: unknown) => typeof value === "string" && value.trim() ? value : null;
+  request.onResponseIdentity?.({ response_model: text(payload.model) ?? text(payload.modelVersion),
+    provider_revision: text(payload.system_fingerprint) ?? text(payload.modelVersion) });
+}
+
 /** OpenAI-compatible /chat/completions call with the API key as a bearer token. */
 async function chatCompletions(args: {
   base: string;
@@ -180,6 +188,7 @@ async function chatCompletions(args: {
     },
     { ...args.target, api_key: args.auth.api_key },
   );
+  observeResponse(args.request, payload);
   return chatText(payload, { ...args.target, api_key: args.auth.api_key });
 }
 
@@ -262,6 +271,7 @@ export const anthropicClaude: LlmProvider = {
       },
       { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
     );
+    observeResponse(request, payload);
     return textFromPayload(payload);
   },
 };
@@ -310,6 +320,7 @@ export const googleGemini: LlmProvider = {
       },
       { provider_id: "google-gemini", provider_name: "Google Gemini", key_env: "GEMINI_API_KEY", api_key: auth.api_key },
     );
+    observeResponse(request, payload);
     return geminiText(payload);
   },
 };

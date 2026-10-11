@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
 import {
   accuracyAuthAllowsLive,
   inspectLiveExtractGate,
@@ -9,6 +10,10 @@ import {
 import { registerAccuracyStack } from "@/accuracy";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as t from "@/modules/kernel/schema";
+import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
+import { accuracyRoutingConfig } from "@/accuracy/store/schema";
+import { setAccuracyRouteConfig } from "@/accuracy/kernel/routing";
+import { xaiGrok } from "@/modules/llm/provider";
 
 const KEY_ENVS = [
   "SYNAPSE_TEST_STUB_LLM",
@@ -20,6 +25,41 @@ const KEY_ENVS = [
 
 describe("live extract API-key gate", () => {
   const saved: Record<string, string | undefined> = {};
+  const savedOauth = new Map<string, typeof t.oauthConnections.$inferSelect | undefined>();
+  const gateRoute = and(
+    eq(accuracyRoutingConfig.call_kind, "need_extract"),
+    eq(accuracyRoutingConfig.agent_role, "proposer"),
+  );
+  let savedRoute: typeof accuracyRoutingConfig.$inferSelect | undefined;
+  let routeSnapshotTaken = false;
+
+  beforeAll(async () => {
+    await ensureAccuracySchema();
+    [savedRoute] = await accuracyDb().select().from(accuracyRoutingConfig).where(gateRoute);
+    routeSnapshotTaken = true;
+    await setAccuracyRouteConfig({
+      call_kind: "need_extract",
+      agent_role: "proposer",
+      provider_id: "xai-grok",
+      model: xaiGrok.default_model,
+      fallbacks: ["anthropic-claude", "openai"],
+      actor_name: "KAN-4 gate fixture",
+    });
+  });
+
+  afterAll(async () => {
+    // A failed snapshot must never delete an existing row. Restore raw values:
+    // the routing setter normalizes fallbacks and replaces update metadata.
+    if (!routeSnapshotTaken) return;
+    if (savedRoute) {
+      await accuracyDb().insert(accuracyRoutingConfig).values(savedRoute).onConflictDoUpdate({
+        target: [accuracyRoutingConfig.call_kind, accuracyRoutingConfig.agent_role],
+        set: savedRoute,
+      });
+    } else {
+      await accuracyDb().delete(accuracyRoutingConfig).where(gateRoute);
+    }
+  });
 
   function stash(name: (typeof KEY_ENVS)[number]) {
     if (!(name in saved)) saved[name] = process.env[name];
@@ -39,13 +79,13 @@ describe("live extract API-key gate", () => {
   }
 
   /** The retired OAuth table (KAN-65): a row left in it must not make a provider live. */
-  async function clearLegacyOauth() {
-    await ensurePlatformSchema();
-    await db().delete(t.oauthConnections);
-  }
-
   async function legacyOauthRow(provider_id: string) {
     await ensurePlatformSchema();
+    if (!savedOauth.has(provider_id)) {
+      const [row] = await db().select().from(t.oauthConnections)
+        .where(eq(t.oauthConnections.provider_id, provider_id));
+      savedOauth.set(provider_id, row);
+    }
     const values = {
       provider_id,
       status: "connected",
@@ -74,7 +114,18 @@ describe("live extract API-key gate", () => {
       else process.env[name] = saved[name];
       delete saved[name];
     }
-    await clearLegacyOauth();
+    // Only restore rows this test touched; never clear unrelated OAuth data.
+    for (const [provider_id, row] of savedOauth) {
+      if (row) {
+        await db().insert(t.oauthConnections).values(row).onConflictDoUpdate({
+          target: t.oauthConnections.provider_id,
+          set: row,
+        });
+      } else {
+        await db().delete(t.oauthConnections).where(eq(t.oauthConnections.provider_id, provider_id));
+      }
+      savedOauth.delete(provider_id);
+    }
   });
 
   it("accuracyAuthAllowsLive accepts any provider's API key, Claude included without a workspace id (KAN-65)", () => {

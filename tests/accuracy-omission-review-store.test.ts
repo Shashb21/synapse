@@ -4,11 +4,11 @@ import { createOrganization, createWorkspace, deleteWorkspace } from "@/accuracy
 import { describe, expect, it } from "vitest";
 import { accuracyDb, ensureAccuracySchema } from "@/accuracy/store/db";
 import * as t from "@/accuracy/store/schema";
-import { appendAgentEvent } from "@/accuracy/kernel/agent-events";
+import { appendAgentEvent, type AgentCritiqueEvent } from "@/accuracy/kernel/agent-events";
 import type { SuspectedOmission } from "@/accuracy/modules/completeness-audit/snapshot-inspector";
 import { applyOmissionAction, getOmissionReviewsForRun, listBlockingOmissions, listCurrentOmissionReviews, listOmissionActionHistory } from "@/accuracy/store/omission-review-store";
 import { runAccuracyModule, registerAccuracyStack } from "@/accuracy";
-import { AccuracyPausedError } from "@/accuracy/kernel/omission-pause";
+import { AccuracyPausedError, assertAccuracyCanProgress } from "@/accuracy/kernel/omission-pause";
 import { newId, nowIso } from "@/modules/kernel/ids";
 
 function issue(source: string, id: string, importance: "important" | "advisory" = "important"): SuspectedOmission {
@@ -21,7 +21,7 @@ async function fixture() {
   return { workspace_id: newId("workspace"), source_file_id: newId("source") };
 }
 async function run(scope: Awaited<ReturnType<typeof fixture>>, findings: SuspectedOmission[], opts: {
-  time?: string; applied?: boolean; input?: object; status?: string; kind?: string; risk?: "important" | "check_failed";
+  time?: string; applied?: boolean; input?: object; status?: string; kind?: string; risk?: "important" | "check_failed"; score?: number | null;
 } = {}) {
   const id = newId("run");
   const kind = opts.kind ?? "need_extract";
@@ -30,7 +30,7 @@ async function run(scope: Awaited<ReturnType<typeof fixture>>, findings: Suspect
     finished_at: opts.time ?? "2026-09-30T10:00:00.000Z", actor_name: "test", actor_function: "test",
     input: opts.input ?? { ...scope, call_kind: kind }, steps: [] });
   await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
-    event_type: "critique", iteration: 3, score: null, issues: [], completeness: { risk_level: opts.risk ?? "important",
+    event_type: "critique", iteration: 3, score: opts.score === undefined ? 1 : opts.score, issues: [], completeness: { risk_level: opts.risk ?? "important",
       checked_block_ids: ["same-block"], unchecked_block_ids: [], suspected_omissions: findings, prior_issue_resolutions: [] },
     latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0,
   } });
@@ -45,12 +45,162 @@ async function action(scope: Awaited<ReturnType<typeof fixture>>, run_id: string
     created_at: time, idempotency_key: newId("key"), request_fingerprint: "canonical-fingerprint" });
 }
 
+async function selectEarlier(scope: Awaited<ReturnType<typeof fixture>>, id: string, findings: SuspectedOmission[], options: {
+  selected_patch?: Partial<AgentCritiqueEvent["completeness"]>;
+  terminal_patch?: Partial<AgentCritiqueEvent["completeness"]>;
+  selected_iteration?: number; terminal_score?: number | null;
+} = {}) {
+  const rows = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, id));
+  const terminal = rows.find(row => row.event_type === "critique")!;
+  const payload = terminal.payload as AgentCritiqueEvent;
+  payload.score = options.terminal_score === undefined ? 1 : options.terminal_score;
+  payload.completeness = { ...payload.completeness, ...options.terminal_patch };
+  await accuracyDb().update(t.accuracyAgentEvents).set({ payload }).where(eq(t.accuracyAgentEvents.id, terminal.id));
+  const metering = { latency_ms: 0, cost_usd: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+  await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+    event_type: "critique", iteration: 1, score: 1, issues: [], completeness: {
+      risk_level: "important", checked_block_ids: ["same-block"], unchecked_block_ids: [],
+      suspected_omissions: findings, prior_issue_resolutions: [], ...options.selected_patch }, ...metering,
+  } });
+  for (const iteration of [1, 3]) await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+    event_type: "snapshot", iteration, output: { gaps: [] }, evaluation_context: "production",
+    signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }, ...metering,
+  } });
+  await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+    event_type: "judgment", selected_iteration: options.selected_iteration ?? 1, reason: "Retain source-backed V1", ...metering,
+  } });
+}
+
 describe("current omission review store", () => {
+  it("retains selected and terminal blockers, without borrowing terminal resolutions", async () => {
+    const scope = await fixture();
+    const id = await run(scope, [issue(scope.source_file_id, "terminal")]);
+    await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+      event_type: "critique", iteration: 1, score: 1, issues: [], completeness: {
+        risk_level: "important", checked_block_ids: ["same-block"], unchecked_block_ids: [],
+        suspected_omissions: [issue(scope.source_file_id, "selected")], prior_issue_resolutions: [] },
+      latency_ms: 0, cost_usd: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    } });
+    for (const iteration of [1, 3]) await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+      event_type: "snapshot", iteration, output: { gaps: [] }, evaluation_context: "production",
+      signals: { quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" },
+      latency_ms: 0, cost_usd: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    } });
+    const terminal = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, id));
+    const row = terminal.find(row => row.event_type === "critique" && row.iteration === 3)!;
+    const payload = row.payload as { completeness: { prior_issue_resolutions: unknown[] } };
+    payload.completeness.prior_issue_resolutions = [{ issue_id: "selected", outcome: "resolved", reason: "Added in V3", matched_item_ref: "gap-3" }];
+    await accuracyDb().update(t.accuracyAgentEvents).set({ payload }).where(eq(t.accuracyAgentEvents.id, row.id));
+    await appendAgentEvent({ workspace_id: scope.workspace_id, run_id: id, event: {
+      event_type: "judgment", selected_iteration: 1, reason: "Earlier source-backed output", latency_ms: 0,
+      cost_usd: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    } });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.issue.issue_id).sort()).toEqual(["selected", "terminal"]);
+    const review = await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id });
+    expect(review).toMatchObject({ selected_iteration: 1, terminal_iteration: 3,
+      completeness: { suspected_omissions: [expect.objectContaining({ issue_id: "selected" })] },
+      terminal_completeness: { suspected_omissions: [expect.objectContaining({ issue_id: "terminal" })] } });
+    await accuracyDb().insert(t.accuracySourceFiles).values({ id: scope.source_file_id, workspace_id: scope.workspace_id, org_id: "test", filename: "test", mime: "text/plain", checksum: "test", doc_role: "medical", uploaded_at: nowIso() });
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: `${scope.source_file_id}-block`, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, index: 0, kind: "prose", text: "Regional comparator evidence", parser: "local", created_at: nowIso() });
+    await applyOmissionAction({ workspace_id: scope.workspace_id, run_id: id, issue_id: "selected", action: "dismiss",
+      reason: "Reviewed selected finding", actor: { name: "Reviewer", function: "heor" }, idempotency_key: newId("key") });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.issue.issue_id)).toEqual(["terminal"]);
+  });
+  it.each(["selected", "terminal"])("keeps a %s-only important blocker visible", async location => {
+    const scope = await fixture(); const finding = issue(scope.source_file_id, "only");
+    const id = await run(scope, location === "terminal" ? [finding] : []);
+    await selectEarlier(scope, id, location === "selected" ? [finding] : []);
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.issue.issue_id)).toEqual(["only"]);
+  });
+  it("cannot downgrade conflicting same-ID evidence or apply a human decision to ambiguous content", async () => {
+    const scope = await fixture();
+    const id = await run(scope, [issue(scope.source_file_id, "same", "advisory")]);
+    await selectEarlier(scope, id, [issue(scope.source_file_id, "same")]);
+    // A recorded action on this ID cannot close another conflicting interpretation.
+    await action(scope, id, "same", "dismiss");
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => [row.issue.issue_id, row.issue.importance, row.latest_action]))
+      .toEqual([["same", "important", null]]);
+    expect((await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id }))?.ambiguous_issue_ids).toEqual(["same"]);
+    await expect(applyOmissionAction({ workspace_id: scope.workspace_id, run_id: id, issue_id: "same", action: "dismiss",
+      reason: "Cannot bind to ambiguous content", actor: { name: "Reviewer", function: "heor" }, idempotency_key: newId("key") }))
+      .rejects.toMatchObject({ status: 409 });
+    expect(await listOmissionActionHistory({ workspace_id: scope.workspace_id, run_id: id })).toHaveLength(1);
+  });
+  it.each(["selected_failed", "terminal_failed", "selected_unchecked", "terminal_unchecked", "terminal_structural_failed", "invalid_judgment"])("does not supersede earlier evidence with %s coverage", async problem => {
+    const scope = await fixture();
+    const old = await run(scope, [issue(scope.source_file_id, "earlier")]);
+    const id = await run(scope, [], { time: "2026-09-30T12:00:00.000Z" });
+    await selectEarlier(scope, id, [], {
+      selected_patch: problem === "selected_failed" ? { risk_level: "check_failed" }
+        : problem === "selected_unchecked" ? { unchecked_block_ids: ["unseen"] } : {},
+      terminal_patch: problem === "terminal_failed" ? { risk_level: "check_failed" }
+        : problem === "terminal_unchecked" ? { unchecked_block_ids: ["unseen"] } : {},
+      terminal_score: problem === "terminal_structural_failed" ? null : 1,
+      selected_iteration: problem === "invalid_judgment" ? 99 : 1,
+    });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.run_id)).toEqual([old]);
+    expect((await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: old }))?.current).toBe(true);
+  });
+  it("rejects actions on invalid present judgment while retaining earlier selected findings", async () => {
+    const scope = await fixture(); const id = await run(scope, []);
+    await selectEarlier(scope, id, [issue(scope.source_file_id, "retained")], { selected_iteration: 99 });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.issue.issue_id)).toEqual(["retained"]);
+    expect(await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id })).toMatchObject({ lineage: "invalid", completeness: null });
+    await expect(applyOmissionAction({ workspace_id: scope.workspace_id, run_id: id, issue_id: "retained", action: "dismiss",
+      reason: "Invalid selection cannot receive approval", actor: { name: "Reviewer", function: "heor" }, idempotency_key: newId("key") }))
+      .rejects.toMatchObject({ status: 409 });
+  });
+  it("does not treat a malformed persisted judgment as absent historical judgment", async () => {
+    const scope = await fixture(); const id = await run(scope, []);
+    await selectEarlier(scope, id, [issue(scope.source_file_id, "selected-retained")]);
+    const events = await accuracyDb().select().from(t.accuracyAgentEvents).where(eq(t.accuracyAgentEvents.run_id, id));
+    const judgment = events.find(row => row.event_type === "judgment")!;
+    await accuracyDb().update(t.accuracyAgentEvents).set({ payload: { event_type: "unreadable", selected_iteration: 1 } })
+      .where(eq(t.accuracyAgentEvents.id, judgment.id));
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.issue.issue_id)).toEqual(["selected-retained"]);
+    expect(await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id })).toMatchObject({ lineage: "invalid", completeness: null });
+    await expect(applyOmissionAction({ workspace_id: scope.workspace_id, run_id: id, issue_id: "selected-retained", action: "dismiss",
+      reason: "Malformed evidence cannot bind a decision", actor: { name: "Reviewer", function: "heor" }, idempotency_key: newId("key") }))
+      .rejects.toMatchObject({ status: 409 });
+  });
+  it("pauses downstream on invalid selected lineage even without fabricated omission findings", async () => {
+    const scope = await fixture(); const id = await run(scope, []);
+    await selectEarlier(scope, id, [], { selected_iteration: 99 });
+    await expect(assertAccuracyCanProgress(scope.workspace_id, "merge_dedupe")).rejects.toMatchObject({
+      invalid_lineage_run_ids: [id], blockers: [],
+    });
+    await expect(assertAccuracyCanProgress(scope.workspace_id, "need_extract")).resolves.toBeUndefined();
+  });
   it("keeps same-block findings independent and advisory findings visible", async () => {
     const scope = await fixture();
     await run(scope, [issue(scope.source_file_id, "a"), issue(scope.source_file_id, "b"), issue(scope.source_file_id, "c", "advisory")]);
     expect((await listCurrentOmissionReviews(scope.workspace_id)).map((x) => [x.issue.issue_id, x.blocking])).toEqual([["a", true], ["b", true], ["c", false]]);
     expect((await listBlockingOmissions(scope.workspace_id)).map((x) => x.issue.issue_id)).toEqual(["a", "b"]);
+  });
+  it("retains earlier blockers when legacy null-score terminal coverage has a complete checked scope", async () => {
+    const scope = await fixture();
+    const old = await run(scope, [issue(scope.source_file_id, "earlier")]);
+    const later = await run(scope, [], { time: "2026-09-30T12:00:00.000Z", score: null });
+    expect((await listBlockingOmissions(scope.workspace_id)).map(row => row.run_id)).toEqual([old]);
+    expect(await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: old })).toMatchObject({ current: true });
+    expect(await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: later })).toMatchObject({
+      lineage: "legacy_terminal", selected_iteration: null, terminal_iteration: 3,
+      completeness: { checked_block_ids: ["same-block"], unchecked_block_ids: [] }, items: [],
+    });
+  });
+  it("keeps historical null-score terminal findings readable and actionable without a judgment", async () => {
+    const scope = await fixture();
+    const id = await run(scope, [issue(scope.source_file_id, "legacy")], { score: null });
+    expect(await getOmissionReviewsForRun({ workspace_id: scope.workspace_id, run_id: id })).toMatchObject({
+      current: true, lineage: "legacy_terminal", selected_iteration: null, terminal_iteration: 3,
+      items: [expect.objectContaining({ issue: expect.objectContaining({ issue_id: "legacy" }), actionable: true, blocking: true })],
+    });
+    await accuracyDb().insert(t.accuracySourceFiles).values({ id: scope.source_file_id, workspace_id: scope.workspace_id, org_id: "test", filename: "test", mime: "text/plain", checksum: "test", doc_role: "medical", uploaded_at: nowIso() });
+    await accuracyDb().insert(t.accuracyParseBlocks).values({ id: `${scope.source_file_id}-block`, workspace_id: scope.workspace_id, source_file_id: scope.source_file_id, index: 0, kind: "prose", text: "Regional comparator evidence", parser: "local", created_at: nowIso() });
+    await applyOmissionAction({ workspace_id: scope.workspace_id, run_id: id, issue_id: "legacy", action: "dismiss",
+      reason: "Reviewed historical finding", actor: { name: "Reviewer", function: "heor" }, idempotency_key: newId("key") });
+    expect(await listBlockingOmissions(scope.workspace_id)).toEqual([]);
+    expect(await listOmissionActionHistory({ workspace_id: scope.workspace_id, run_id: id })).toMatchObject([{ issue_id: "legacy", action: "dismiss" }]);
   });
   it("supersedes only with fully persisted OK batches and preserves historical actions", async () => {
     const scope = await fixture();

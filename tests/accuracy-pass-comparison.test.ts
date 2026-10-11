@@ -1,10 +1,16 @@
 /** Conservative pass comparisons over retained, controlled evidence. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { comparePassExperiments, comparisonRequestFingerprint, evaluatePassComparison, type ComparisonEvidence } from "@/accuracy/eval/pass-comparison";
+import { comparePassExperiments, comparisonRequestFingerprint, evaluatePassComparison, PASS_COMPARISON_EVALUATOR_VERSION, type ComparisonEvidence } from "@/accuracy/eval/pass-comparison";
+import { buildExperimentResultsReport, serializeExperimentResultsReport } from "@/accuracy/experiments/results-report";
 import * as goldIdentity from "@/accuracy/eval/experiment-gold";
 import * as referenceGold from "@/accuracy/eval/reference-gold";
 import type { ExperimentRecord } from "@/accuracy/experiments/records";
 import type { AgentEvent } from "@/accuracy/kernel/agent-events";
+import type { ExecutionEvidence } from "@/accuracy/kernel/execution-identity";
+
+const execution: ExecutionEvidence = { status: "available", identities: [{ schema_version: "execution-identity-v1", status: "available",
+  git_commit: "commit", worktree: "clean", source_fingerprint: "source-code", prompt_sources_fingerprint: "templates",
+  build_id: null, deployment_id: null }], completions: [] };
 
 const targets = { gap_ids: ["a", "b"], tactic_numbers: [], tactic_identifiers: [] };
 afterEach(() => vi.restoreAllMocks());
@@ -14,12 +20,12 @@ function cohort(): ComparisonEvidence[] {
     const events: AgentEvent[] = [];
     const calls = Array.from({ length: pass + 1 }, (_, version_index) => {
       events.push({ event_type: "snapshot", iteration: version_index, output: { gaps: [] }, evaluation_context: "experiment", signals: { quote_validity: { valid_count: 1, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }, latency_ms: 2, cost_usd: 1, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
-      events.push({ event_type: "critique", iteration: version_index, score: 1, issues: [], completeness: { risk_level: "none_detected", checked_block_ids: ["block"], unchecked_block_ids: [], suspected_omissions: [], prior_issue_resolutions: [] }, latency_ms: 3, cost_usd: 2, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+      events.push({ event_type: "critique", iteration: version_index, score: 1, issues: [], completeness: { risk_level: "none_detected", checked_block_ids: ["block"], unchecked_block_ids: [], suspected_omissions: [], prior_issue_resolutions: [] }, structural_fate: { status: "assessed", check: null, prior_issue_resolutions: [] }, latency_ms: 3, cost_usd: 2, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
       return { id: `row-${pass}-${version_index}`, workspace_id: `copy-${pass}`, experiment_id: `experiment-${pass}`, call_id, call_kind: "need_extract", version_index, input: { source_file_id: `source-copy-${pass}` }, output: { gaps: [] }, output_error: null, module_version: "v1", route: { model: "local", nested: { b: 2, a: 1 } }, recorded_at: "now" };
     });
     events.push({ event_type: "judgment", selected_iteration: pass, reason: "latest", latency_ms: 4, cost_usd: 3, token_usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
-    const experiment = { id: `experiment-${pass}`, workspace_id: `copy-${pass}`, source_workspace_id: "source", source_fingerprint: "source-hash", baseline_fingerprint: "baseline", pack_id: "pack", pack_fingerprint: "pack-hash", evaluator_version: "eval-v1", baseline_snapshot: { source_files: [{ original_id: "source-original", copied_id: `source-copy-${pass}` }] }, condition: { critic_revision_passes: pass, comparison_id: "cohort", comparison_evaluator_version: "pass-comparison-v1", original_request_identity: { mode: "single_call", source_file_ids: ["source-original"] }, original_request_fingerprint: "request" }, status: "completed", calls, evaluations: calls.map(call => ({ id: `eval-${call.id}`, workspace_id: call.workspace_id, experiment_id: call.experiment_id, call_id, version_index: call.version_index, evaluator_version: "eval-v1", recorded_at: "now", evaluation: { evaluator_version: "eval-v1", pack_id: "pack", pack_fingerprint: "pack-hash", call_kind: "need_extract", status: "scored", output_shape: { valid: true }, outcomes: [{ outcome: "found", gold_item_key: "a", reason: "exact" }, { outcome: "missed", gold_item_key: "b", reason: "absent" }], errors: [] } })) } as ExperimentRecord;
-    return { experiment, runs: [{ call_id, module_id: "module", module_version: "v1", route: calls[0].route, status: "ok", duration_ms: 20, cost_usd: 10, token_usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 }, events }] };
+    const experiment = { id: `experiment-${pass}`, workspace_id: `copy-${pass}`, source_workspace_id: "source", source_fingerprint: "source-hash", baseline_fingerprint: "baseline", pack_id: "pack", pack_fingerprint: "pack-hash", evaluator_version: "eval-v1", baseline_snapshot: { source_files: [{ original_id: "source-original", copied_id: `source-copy-${pass}` }] }, condition: { critic_revision_passes: pass, comparison_id: "cohort", comparison_evaluator_version: PASS_COMPARISON_EVALUATOR_VERSION, original_request_identity: { mode: "single_call", source_file_ids: ["source-original"] }, original_request_fingerprint: "request" }, status: "completed", calls, evaluations: calls.map(call => ({ id: `eval-${call.id}`, workspace_id: call.workspace_id, experiment_id: call.experiment_id, call_id, version_index: call.version_index, evaluator_version: "eval-v1", recorded_at: "now", evaluation: { evaluator_version: "eval-v1", pack_id: "pack", pack_fingerprint: "pack-hash", call_kind: "need_extract", status: "scored", output_shape: { valid: true }, outcomes: [{ outcome: "found", gold_item_key: "a", reason: "exact" }, { outcome: "missed", gold_item_key: "b", reason: "absent" }], errors: [] } })) } as ExperimentRecord;
+    return { experiment, runs: [{ call_id, module_id: "module", module_version: "v1", route: calls[0].route, status: "ok", duration_ms: 20, cost_usd: 10, token_usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 }, events, execution_identity: structuredClone(execution) }] };
   });
 }
 
@@ -56,6 +62,106 @@ function multiSourceCohort(): ComparisonEvidence[] {
 }
 
 describe("retained pass comparison", () => {
+  it("keeps missing historical structural disposition evidence unknown even with available code identity", () => {
+    const evidence = cohort();
+    for (const row of evidence) for (const event of row.runs[0].events) if (event.event_type === "critique") delete event.structural_fate;
+    const comparison = comparePassExperiments(evidence, targets);
+    expect(comparison.conditions.every(row => row.eligibility === "unknown")).toBe(true);
+    expect(comparison.recommendation).toBeNull();
+  });
+  it.each(["source_fingerprint", "prompt_sources_fingerprint", "git_commit", "build_id"] as const)("rejects material execution %s mismatches", field => {
+    const evidence = cohort();
+    evidence[2].runs[0].execution_identity!.identities[0][field] = "changed";
+    expect(comparePassExperiments(evidence, targets)).toMatchObject({ matched: false, recommendation: null });
+  });
+  it("does not use historical missing execution identity as recommendation-grade proof", () => {
+    const evidence = cohort();
+    for (const row of evidence) delete row.runs[0].execution_identity;
+    const comparison = comparePassExperiments(evidence, targets);
+    expect(comparison.recommendation).toBeNull();
+    expect(comparison.conditions.every(row => row.eligibility === "unknown")).toBe(true);
+    expect(comparison.conditions[0].calls[0].runtime?.execution_identity ?? null).toBeNull();
+  });
+  it("allows dynamic prompt differences across depth while rejecting provider response revision drift", () => {
+    const evidence = cohort();
+    evidence.forEach((row, index) => { row.runs[0].execution_identity!.completions = Array.from({ length: index + 2 }, (_, round) => ({
+      completion_id: `completion-${index}-${round}`, purpose: `extract:r${round}`, system_fingerprint: `rendered-system-${index}-${round}`,
+      user_fingerprint: `source-${index}-V${round}`, provider_id: "provider", configured_model: "model", temperature: 0,
+      max_tokens: 200, response_model: "snapshot", provider_revision: "revision", status: "succeeded" as const })); });
+    expect(comparePassExperiments(evidence, targets)).toMatchObject({ matched: true, recommendation: { pass_count: 1 } });
+    evidence[2].runs[0].execution_identity!.completions[0].provider_revision = "different-revision";
+    expect(comparePassExperiments(evidence, targets)).toMatchObject({ matched: false, recommendation: null });
+  });
+  it("totals the selected raw snapshot while retaining produced depth and entire run usage", () => {
+    const evidence = cohort();
+    const earlier = evidence[2];
+    const judgment = earlier.runs[0].events.at(-1)!;
+    if (judgment.event_type === "judgment") { judgment.selected_iteration = 1; judgment.reason = "V1 retains better supported content"; }
+    earlier.experiment.evaluations[1].evaluation = { ...earlier.experiment.evaluations[1].evaluation as object,
+      outcomes: [{ outcome: "found", gold_item_key: "a" }, { outcome: "found", gold_item_key: "b" }] };
+    const comparison = comparePassExperiments(evidence, targets);
+    expect(comparison.conditions[2]).toMatchObject({ eligibility: "eligible", pass_count: 3,
+      totals: { summed_call_outcomes: { found: 2, partial: 0, missed: 0, wrong: 0 }, distinct_exact_must_find_found_count: 2,
+        cost_usd: 10, latency_ms: 20, token_usage: { total_tokens: 20 } },
+      calls: [{ requested_revision_passes: 3, terminal_iteration: 3, selected_iteration: 1, quality_basis: "selected_raw_snapshot" }] });
+    expect(comparison.conditions[2].calls[0].versions).toHaveLength(4);
+    expect(comparison.recommendation?.pass_count).toBe(3);
+  });
+  it("exports earlier selected quality and full retained versions with all-version serious gates", () => {
+    const evidence = cohort();
+    const run = evidence[2].runs[0];
+    const judgment = run.events.at(-1)!;
+    if (judgment.event_type === "judgment") judgment.selected_iteration = 1;
+    const terminal = run.events.find(event => event.event_type === "critique" && event.iteration === 3)!;
+    if (terminal.event_type === "critique") terminal.issues = [{ issue_id: "terminal-false", category: "unsupported",
+      code: "unsupported_claim", severity: "critical", claim: "Unsupported V3", suggested_action: "remove" }];
+    evidence[2].experiment.evaluations[1].evaluation = { ...evidence[2].experiment.evaluations[1].evaluation as object,
+      outcomes: [{ outcome: "found", gold_item_key: "a" }, { outcome: "found", gold_item_key: "b" }] };
+    const comparison = comparePassExperiments(evidence, targets);
+    expect(comparison.conditions[2]).toMatchObject({ eligibility: "ineligible", totals: { distinct_exact_found_count: 2 } });
+    expect(comparison.conditions[2].calls[0].versions[3].regressions).toContain("New serious critic finding: terminal-false");
+    expect(comparison.recommendation?.pass_count).toBe(1);
+    const report = buildExperimentResultsReport({ source_workspace_id: "source", experiments: evidence.map(row => row.experiment),
+      pass_comparisons: [comparison], mixed_comparisons: [], loaded_pack_fingerprints: { pack: "pack-hash" } });
+    for (const format of ["json", "jsonl"] as const) {
+      const lines = serializeExperimentResultsReport(report, format).trim().split("\n").map(line => JSON.parse(line));
+      const exported = format === "json" ? lines[0].entries[1].evidence.pass_comparison : lines[1].entry.evidence.pass_comparison;
+      expect(exported.comparison_evaluator_version).toBe(PASS_COMPARISON_EVALUATOR_VERSION);
+      expect(exported.conditions[2].calls[0]).toMatchObject({ selected_iteration: 1, terminal_iteration: 3, requested_revision_passes: 3 });
+      expect(exported.conditions[2].calls[0].versions).toHaveLength(4);
+      expect(exported.conditions[2].calls[0].runtime.events).toHaveLength(9);
+      expect(exported.conditions[2].totals).toMatchObject({ distinct_exact_found_count: 2, cost_usd: 10, latency_ms: 20 });
+    }
+  });
+  it.each(["duplicate_judgment", "out_of_range", "fractional", "empty_reason", "duplicate_snapshot", "raw_mismatch", "extra_version"])("fails closed for %s without selecting the terminal as a fallback", problem => {
+    const evidence = cohort(); const run = evidence[2].runs[0];
+    const judgment = run.events.at(-1)!;
+    if (judgment.event_type === "judgment") {
+      judgment.selected_iteration = 1;
+      if (problem === "duplicate_judgment") run.events.push(structuredClone(judgment));
+      if (problem === "out_of_range") judgment.selected_iteration = 99;
+      if (problem === "fractional") judgment.selected_iteration = 1.5;
+      if (problem === "empty_reason") judgment.reason = " ";
+    }
+    if (problem === "duplicate_snapshot") run.events.push(structuredClone(run.events[2]));
+    if (problem === "raw_mismatch") evidence[2].experiment.calls[1].output = { gaps: ["different raw output"] };
+    if (problem === "extra_version") { const snapshot = structuredClone(run.events[0]); if (snapshot.event_type === "snapshot") snapshot.iteration = 4; run.events.push(snapshot); }
+    const condition = comparePassExperiments(evidence, targets).conditions[2];
+    expect(condition.eligibility).not.toBe("eligible");
+    if (!["raw_mismatch", "extra_version"].includes(problem)) {
+      expect(condition.calls[0].selected_iteration).toBeNull();
+      expect(condition.calls[0].quality_basis).toBe("unavailable");
+      expect(condition.totals.distinct_exact_found_count).toBe(0);
+    }
+  });
+  it("keeps v1 outcomes inspectable without attributing a v2 comparison to historical identity", () => {
+    const evidence = cohort();
+    for (const row of evidence) Object.assign(row.experiment.condition as object, { comparison_evaluator_version: "pass-comparison-v1" });
+    const result = comparePassExperiments(evidence, targets);
+    expect(result).toMatchObject({ matched: false, recommendation: null, comparison_evaluator_version: "pass-comparison-v2" });
+    expect(result.conditions[2].calls[0].versions).toHaveLength(4);
+    expect(result.conditions[2].totals.distinct_exact_found_count).toBe(1);
+  });
   it("refuses changed current must-find targets without rewriting historical target outcomes", () => {
     const evidence = cohort();
     vi.spyOn(goldIdentity, "experimentPackFingerprint").mockReturnValue("pack-hash");

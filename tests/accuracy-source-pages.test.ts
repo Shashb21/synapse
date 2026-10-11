@@ -205,7 +205,8 @@ it("keeps malformed model responses and upstream dropped parse units explicitly 
     expect(response.status).toBe(409);
     const output = await response.json();
     expect(output.source_progress).toMatchObject({ complete: false, processed_units: 0, failed_units: 1, next_cursor: expect.any(String) });
-    expect(output.runs[0].rejected_candidates).toContainEqual({ index: 0, field: "response", reason: "malformed_response" });
+    expect(output.error).toContain("No admissible extraction snapshot");
+    expect(output.runs).toEqual([]);
     expect(await listActiveSourceClaims(scope.workspace_id, scope.source_file_id)).toEqual([]);
     expect(await extractionDownstreamState(scope.workspace_id, scope.source_file_id, output.extraction_batch_id)).toBe("incomplete");
     await expect(resumeExtractionBatch({ ...scope, batch_id: output.extraction_batch_id, merge_context: { org_id: "unused", actor: { name: "Reviewer", function: "heor" } }, execute: async () => "invalid" })).rejects.toMatchObject({ code: "source_incomplete" });
@@ -255,7 +256,8 @@ it("preserves distinct source entities sharing wording and reports indistinguish
     expect(ambiguous.status).toBe(409);
     const output = await ambiguous.json();
     expect(output.source_progress.complete).toBe(false);
-    expect(output.runs[0].rejected_candidates).toEqual([0, 1].map(index => ({ index, field: "identity", reason: "ambiguous_source_identity" })));
+    expect(output.error).toContain("No admissible extraction snapshot");
+    expect(output.runs).toEqual([]);
   });
 });
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agenticModule } from "../_factory";
 import { runShallowAgenticCycle } from "../../kernel/agentic";
+import { structuralContentFingerprint } from "../../kernel/structural-fate";
 import type { ProductionSignals } from "../../kernel/agent-events";
 import { completeJson } from "../../kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
@@ -106,11 +107,13 @@ function normalizeDraft(raw: unknown): IdeationDraft {
 export function critiqueIdeationDraft(
   draft: IdeationDraft,
   args: { eligibleIds: Set<string>; existingNames: Set<string> },
-): { score: number; issues: string[] } {
+): { score: number; issues: string[]; finding_fingerprints: string[] } {
   const issues: string[] = [];
+  const finding_fingerprints: string[] = [];
   const seen = new Set<string>();
-  for (const [index, row] of draft.proposals.entries()) {
-    const subject = row.name?.trim() || row.gap_id || `proposal_${index}`;
+  for (const row of draft.proposals) {
+    const before = issues.length;
+    const subject = row.name?.trim() || row.gap_id || "unnamed_proposal";
     if (!args.eligibleIds.has(row.gap_id)) issues.push(`${subject}:ineligible_gap`);
     if (row.origin && row.origin !== "ideated") issues.push(`${subject}:wrong_origin`);
     if (row.status && row.status !== "proposed") issues.push(`${subject}:wrong_status`);
@@ -128,9 +131,10 @@ export function critiqueIdeationDraft(
       if (seen.has(key)) issues.push(`${subject}:duplicate`);
       seen.add(key);
     }
+    for (let issue = before; issue < issues.length; issue++) finding_fingerprints.push(structuralContentFingerprint(row));
   }
   const score = draft.proposals.length === 0 ? 0 : Math.max(0, 1 - issues.length * 0.15);
-  return { score, issues };
+  return { score, issues, finding_fingerprints };
 }
 
 /**
@@ -249,10 +253,11 @@ export const ideateModule = agenticModule({
         proposeIdeation(ctx, input, eligible, round, prior, critiques),
       critic: async (draft) => {
         const critique = critiqueIdeationDraft(draft, { eligibleIds, existingNames });
-        return { score: critique.score, issues: critique.issues.map((claim, index) => ({
+        return { score: critique.score, check: { id: "ideate-structural-v1", exhaustive: true as const }, issues: critique.issues.map((claim, index) => ({
           issue_id: `ideate:${index}`, category: "ideate_invariant",
           code: claim.split(":").at(-1) ?? "invariant_failure", severity: "medium" as const,
           claim, suggested_action: claim,
+          content_fingerprint: critique.finding_fingerprints[index],
         })) };
       },
       judge: async (draft) => draft,

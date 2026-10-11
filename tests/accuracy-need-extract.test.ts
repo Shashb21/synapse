@@ -102,7 +102,8 @@ describe("need extract module", () => {
           { source_file_id: "src-1", block_id: "blk-1", quote: "Need safety evidence B" }] });
         return { raw: JSON.stringify({ gaps }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
       });
-      await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1", "missing"] }, ctx);
+      const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1", "missing"] }, ctx);
+      expect(result.output.source_complete).toBe(false);
       const critiques = events.filter((event) => event.event_type === "critique");
       expect(critiques[0]).toMatchObject({ completeness: { risk_level: "important",
         checked_block_ids: ["blk-1"], unchecked_block_ids: ["missing"], suspected_omissions: [expect.objectContaining({ item_kind: "gap",
@@ -160,13 +161,11 @@ describe("need extract module", () => {
           quote: "Invented quote" }] }] }),
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
       withCompleteness(ctx);
-      const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
-        block_ids: ["blk-1"] }, ctx);
-      expect(result.output.gaps).toEqual([]);
-      expect(result.output.rejected_candidates).toEqual([{ index: 0, field: "provenance", reason: "quote_not_substring" }]);
+      await expect(needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
+        block_ids: ["blk-1"] }, ctx)).rejects.toThrow("No admissible extraction snapshot");
       expect(vi.mocked(ctx.complete).mock.calls.map(([request]) => request.purpose))
         .toEqual([expect.stringContaining("proposer"), "snapshot_completeness"]);
-      expect(events.find((event) => event.event_type === "judgment")).toMatchObject({ selected_iteration: 0 });
+      expect(events.some(event => event.event_type === "judgment")).toBe(false);
       expect(events.find((event) => event.event_type === "snapshot")).toMatchObject({
         signals: { quote_validity: { invalid_count: 1 } },
       });
@@ -176,7 +175,7 @@ describe("need extract module", () => {
       });
     } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
   });
-  it("keeps observation-only quote findings out of revision feedback", async () => {
+  it("keeps distinct same-block quote findings independent and out of revision feedback", async () => {
     const prev = process.env.SYNAPSE_TEST_STUB_LLM;
     process.env.SYNAPSE_TEST_STUB_LLM = "0";
     try {
@@ -185,12 +184,14 @@ describe("need extract module", () => {
       ctx.run.recordAgentEvent = async (event) => { events.push(event); };
       ctx.complete = vi.fn(async () => ({ raw: JSON.stringify({ gaps: [
         { statement: "Need OS evidence", external_id: "G1", provenance: [
-          { source_file_id: "src-1", block_id: "blk-1", quote: "Invented quote" }] },
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Invented quote" },
+          { source_file_id: "src-1", block_id: "blk-1", quote: "Another invented quote" }] },
         { statement: "Need PFS evidence", external_id: "G2", provenance: [] },
       ] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
       withCompleteness(ctx);
-      await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
-        block_ids: ["blk-1"] }, ctx);
+      await expect(needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1",
+        block_ids: ["blk-1"] }, ctx)).rejects.toThrow("No admissible extraction snapshot");
+      expect(events.some(event => event.event_type === "judgment")).toBe(false);
       expect(ctx.complete).toHaveBeenCalledTimes(4);
       const proposals = vi.mocked(ctx.complete).mock.calls.filter(([request]) => request.purpose?.includes("proposer"));
       expect(proposals).toHaveLength(2);
@@ -204,6 +205,10 @@ describe("need extract module", () => {
       expect(events.find((event) => event.event_type === "critique")).toMatchObject({
         issues: expect.arrayContaining([expect.objectContaining({ code: "quote_not_substring" })]),
       });
+      const terminal = events.find(event => event.event_type === "critique" && event.iteration === 1);
+      if (terminal?.event_type !== "critique") throw new Error("Missing terminal assessment");
+      expect(terminal.issues.filter(issue => issue.category === "quote_validity")).toHaveLength(2);
+      expect(terminal.structural_fate?.prior_issue_resolutions).toHaveLength(3);
     } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
   });
   it("returns empty gaps under SYNAPSE_TEST_STUB_LLM", async () => {
@@ -250,6 +255,7 @@ describe("need extract module", () => {
         }),
         usage: { prompt_tokens: 4, completion_tokens: 6, total_tokens: 10 },
       });
+      withCompleteness(ctx);
       const result = await needExtractModule.run(
         {
           workspace_id: "ws-test",
@@ -318,4 +324,104 @@ describe("need extract module", () => {
     expect(emptyPack.missing).toEqual([]);
     expect(emptyPack.recall).toBe(1);
   });
+});
+
+
+describe("need retained-version extraction", () => {
+  it.each([{ regress: true, selected: 1, fullyChecked: false }, { regress: false, selected: 3, fullyChecked: false }, { regress: true, selected: 1, fullyChecked: true }])("selects source-supported V$selected (regress=$regress, fullyChecked=$fullyChecked)", async ({ regress, selected, fullyChecked }) => {
+    // Break caught: accepting terminal invented evidence instead of a retained supported snapshot.
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([{ id: "blk-1", source_file_id: "src-1",
+        workspace_id: "ws-test", index: 0, kind: "prose", heading: null,
+        text: "Actual source says survival evidence is needed.", parser: "test", created_at: "now" }]);
+      const ctx = stubCtx();
+      Object.assign(ctx.run, { evaluation_context: "experiment", experiment_cycle_control: { critic_revision_passes: 3 } });
+      const events: AgentEvent[] = [];
+      const inputs: string[] = [];
+      ctx.run.recordAgentEvent = async event => { events.push(event); };
+      let round = -1;
+      ctx.complete = async request => {
+        inputs.push(request.user);
+        if (request.purpose === "snapshot_completeness") return { raw: JSON.stringify({
+          checked_block_ids: regress && round >= 2 && !fullyChecked ? [] : ["blk-1"], suspected_omissions: [], prior_issue_resolutions: [] }),
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+        round++;
+        const quote = regress && round >= 2 ? "Invented evidence" : "Actual source says survival evidence is needed";
+        const item = { statement: `Need V${round}`, external_id: null,
+          provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote }] };
+        return { raw: JSON.stringify({ gaps: [item] }), usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      };
+      const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx);
+      expect(result.output.gaps[0].statement).toBe(`Need V${selected}`);
+      expect(result.output.source_complete).toBe(true);
+      expect(events.filter(event => event.event_type === "snapshot").map(event => event.iteration)).toEqual([0, 1, 2, 3]);
+      expect(events.at(-1)).toMatchObject({ event_type: "judgment", selected_iteration: selected, reason: expect.stringContaining("source") });
+      expect(inputs.join(" ")).not.toMatch(/gold|precision|recall|f1/i);
+      if (fullyChecked) {
+        expect(events.filter(event => event.event_type === "critique").map(event => event.completeness.unchecked_block_ids)).toEqual([[], [], [], []]);
+        expect(events.filter(event => event.event_type === "snapshot").map(event => event.signals.quote_validity.invalid_count)).toEqual([0, 0, 1, 1]);
+      }
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
+
+  it("fails safely when completeness provider fails", async () => {
+    const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+    process.env.SYNAPSE_TEST_STUB_LLM = "0";
+    try {
+      vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([{ id: "blk-1", source_file_id: "src-1",
+        workspace_id: "ws-test", index: 0, kind: "prose", heading: null,
+        text: "Actual source says survival evidence is needed.", parser: "test", created_at: "now" }]);
+      const ctx = stubCtx();
+      const events: AgentEvent[] = [];
+      ctx.run.recordAgentEvent = async event => { events.push(event); };
+      ctx.complete = async request => {
+        if (request.purpose === "snapshot_completeness") throw new Error("provider offline");
+        return { raw: JSON.stringify({ gaps: [{ statement: "Need evidence",
+          provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote: "Actual source" }] }] }),
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      };
+      await expect(needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx)).rejects.toThrow();
+      expect(events.map(event => event.event_type)).toEqual(["snapshot", "critique"]);
+      expect(events[1]).toMatchObject({ completeness: { risk_level: "check_failed" } });
+    } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
+  });
+});
+
+
+it("need: preserves the selected important omission when terminal assessment clears it", async () => {
+  const prev = process.env.SYNAPSE_TEST_STUB_LLM;
+  process.env.SYNAPSE_TEST_STUB_LLM = "0";
+  try {
+    vi.mocked(readParseBlocksByIds).mockResolvedValueOnce([{ id: "blk-1", source_file_id: "src-1",
+      workspace_id: "ws-test", index: 0, kind: "prose", heading: null,
+      text: "Actual source. Important omitted need.", parser: "test", created_at: "now" }]);
+    const ctx = stubCtx();
+    const events: AgentEvent[] = [];
+    ctx.run.recordAgentEvent = async event => { events.push(event); };
+    let round = -1;
+    ctx.complete = async request => {
+      if (request.purpose === "snapshot_completeness") {
+        const prior = JSON.parse(request.user).prior_open_issues;
+        return { raw: JSON.stringify({ checked_block_ids: ["blk-1"],
+          suspected_omissions: round === 0 ? [{ item_kind: "gap", summary: "Important omitted need",
+            source_ref: { source_file_id: "src-1", block_id: "blk-1" }, evidence_quote: "Important omitted need",
+            basis: "explicit", reason: "Distinct source item is absent", suggested_action: "Add the omitted item" }] : [],
+          prior_issue_resolutions: prior.map((issue: { issue_id: string }) => ({ issue_id: issue.issue_id,
+            outcome: "invalid", reason: "Terminal inspector reclassified the finding" })) }),
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+      }
+      round++;
+      return { raw: JSON.stringify({ gaps: [{ statement: `Need V${round}`,
+        provenance: [{ source_file_id: "src-1", block_id: "blk-1", quote: round === 0 ? "Actual source" : "Invented evidence" }] }] }),
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+    };
+    const result = await needExtractModule.run({ workspace_id: "ws-test", source_file_id: "src-1", block_ids: ["blk-1"] }, ctx);
+    expect(result.output.gaps[0].statement).toBe("Need V0");
+    expect(result.output.source_complete).toBe(true);
+    expect(events[1]).toMatchObject({ completeness: { risk_level: "important", suspected_omissions: [expect.objectContaining({ importance: "important" })] } });
+    expect(events[3]).toMatchObject({ completeness: { risk_level: "none_detected" } });
+    expect(events.at(-1)).toMatchObject({ event_type: "judgment", selected_iteration: 0, reason: expect.stringContaining("1 important omissions") });
+  } finally { process.env.SYNAPSE_TEST_STUB_LLM = prev; }
 });

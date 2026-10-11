@@ -83,6 +83,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const state = await planState(request);
     const activity = state.timeline.activities[0]!;
     await page.goto("/timeline");
+    await page.getByRole("button", { name: "Show not prioritized gaps", exact: true }).click();
     await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
 
     const panel = page.getByRole("dialog");
@@ -100,6 +101,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const activity = state.timeline.activities[0]!;
     await page.goto("/timeline");
     await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Show not prioritized gaps", exact: true }).click();
     await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
 
     const panel = page.getByRole("dialog");
@@ -132,6 +134,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
     await expect(panel.getByText("$120k")).toBeVisible();
     // Saved: it is still there after a reload.
     await page.reload();
+    await page.getByRole("button", { name: "Show not prioritized gaps", exact: true }).click();
     await page.locator(`g[aria-label*="${activity.tactic_name.slice(0, 24)}"]`).first().click();
     await expect(page.getByRole("dialog").getByText("$120k")).toBeVisible();
   });

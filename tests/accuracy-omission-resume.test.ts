@@ -63,7 +63,7 @@ function installExtractor(blocker = true, gap_id: string | string[] = newId("gap
   const id = newId("extract-test");
   registerAccuracyModule(mechanicalModule({ id, call_kind, title: "Test", summary: "Test", inputSchema: z.object({ workspace_id: z.string(), source_file_id: z.string(), block_ids: z.array(z.string()), source_page: z.unknown().optional() }), outputSchema: needExtractOutputSchema,
     run: async (input, ctx) => {
-      if (blocker) await appendAgentEvent({ workspace_id: input.workspace_id, run_id: ctx.run.id, event: { event_type: "critique", iteration: 3, score: null, issues: [], completeness: { risk_level: "important", checked_block_ids: input.block_ids, unchecked_block_ids: [], prior_issue_resolutions: [], suspected_omissions: [{ issue_id: "missing", item_kind: "gap", summary: "Comparator need", source_ref: { source_file_id: input.source_file_id, block_id: input.block_ids[0] }, evidence_quote: "Comparator evidence missing", basis: "explicit", importance: "important", reason: "Absent", suggested_action: "Add" }] }, latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } });
+      await appendAgentEvent({ workspace_id: input.workspace_id, run_id: ctx.run.id, event: { event_type: "critique", iteration: 3, score: 1, issues: [], completeness: { risk_level: blocker ? "important" : "none_detected", checked_block_ids: input.block_ids, unchecked_block_ids: [], prior_issue_resolutions: [], suspected_omissions: blocker ? [{ issue_id: "missing", item_kind: "gap", summary: "Comparator need", source_ref: { source_file_id: input.source_file_id, block_id: input.block_ids[0] }, evidence_quote: "Comparator evidence missing", basis: "explicit", importance: "important", reason: "Absent", suggested_action: "Add" }] : [] }, latency_ms: 0, token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, cost_usd: 0 } });
       return { output: needExtractOutputSchema.parse({ workspace_id: input.workspace_id, source_file_id: input.source_file_id, gaps: (Array.isArray(gap_id) ? gap_id : [gap_id]).map(id => ({ id, statement: "Existing extracted need", external_id: null, provenance: [{ source_file_id: input.source_file_id, block_id: input.block_ids[0], quote: "Comparator evidence missing" }] })) }), summary: "Extracted" };
     } }));
   activateAccuracyModule({ call_kind, module_id: id, activated_by: "test" });
@@ -254,39 +254,20 @@ describe("extraction omission resume", () => {
   });
 
   it("judges a production resume outside transactions and applies the model equivalence", async () => {
-    const scope = await fixture();
-    // Only legacy unversioned entries participate in heuristic merging. Published source versions remain immutable.
-    await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap", statement: "Need comparator evidence for another group", source_file_id: scope.source_file_id,
-      metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
-    const duplicate = await insertClaim({ workspace_id: scope.workspace_id, claim_type: "gap",
-      statement: "Need comparator evidence", source_file_id: scope.source_file_id,
-      metadata: { provenance: [{ source_file_id: scope.source_file_id, block_id: scope.block_id, quote: "Comparator evidence missing" }] } });
-    const body = await paused(scope); await resolve(scope, body);
-    const previousStub = process.env.SYNAPSE_TEST_STUB_LLM;
-    const previousKey = process.env.XAI_API_KEY;
-    process.env.SYNAPSE_TEST_STUB_LLM = "";
-    process.env.XAI_API_KEY = "scripted-provider-key";
-    vi.spyOn(session, "sessionContext").mockResolvedValue({ session: null, actor: { name: "Owner", function: "medical_affairs" },
-      role: "operator", demo: false, signed_in: true });
+    const { scope, duplicate, request } = await judgedFixture();
     const transactions: boolean[] = [];
-    const provider = vi.spyOn(xaiGrok, "complete").mockImplementation(async () => {
+    await liveJudge(async () => {
       transactions.push(accuracyTransactionActive());
-      return JSON.stringify({ decisions: [{ pair_id: "p1", same: true, rationale: "Same comparator need" }] });
-    });
-    try {
-      const response = await post({ ...scope, action: "resume", extraction_batch_id: body.extraction_batch_id, idempotency_key: "live-judge" });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ merge: { mode: "llm", merged: 1,
+      return decision(true);
+    }, async () => {
+      const response = await post({ ...request, idempotency_key: "live-judge" });
+      const result = await response.json();
+      expect(response.status, JSON.stringify(result)).toBe(200);
+      expect(result).toMatchObject({ merge: { mode: "llm", merged: 1,
         merges: [expect.objectContaining({ reason: "model_equivalence", rationale: "Same comparator need" })] } });
       expect((await getClaim(scope.workspace_id, duplicate.id))?.status).toBe("merged");
       expect(transactions).toEqual([false]);
-    } finally {
-      provider.mockRestore();
-      if (previousStub === undefined) delete process.env.SYNAPSE_TEST_STUB_LLM;
-      else process.env.SYNAPSE_TEST_STUB_LLM = previousStub;
-      if (previousKey === undefined) delete process.env.XAI_API_KEY;
-      else process.env.XAI_API_KEY = previousKey;
-    }
+    });
   });
   it("pauses a fully applied batch and resumes without extraction or duplicate drafts; replay is identical", async () => {
     const scope = await fixture(); const body = await paused(scope);

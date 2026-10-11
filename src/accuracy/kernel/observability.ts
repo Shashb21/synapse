@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
-import { accuracyDb, ensureAccuracySchema } from "../store/db";
+import { accuracyDb, accuracyTransactionActive, ensureAccuracySchema } from "../store/db";
 import * as t from "../store/schema";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { rollupAccuracyRunCost, type AccuracyCostRollup } from "./cost-rollup";
 import { appendAgentEvent, type AgentEvent } from "./agent-events";
+import { captureExecutionIdentity } from "./execution-identity";
 import type {
   Actor,
   AgentRole,
@@ -37,6 +38,9 @@ export class AccuracyRunRecorder implements RunHandle {
   private readonly startedAtMs: number;
   private totalUsage: TokenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   private totalCostUsd = 0;
+  private opened = false;
+  private checkpoints: Promise<void> = Promise.resolve();
+  private preparationCheckpoint?: () => Promise<void>;
 
   constructor(
     readonly meta: {
@@ -56,6 +60,7 @@ export class AccuracyRunRecorder implements RunHandle {
   ) {
     this.id = id ?? newId("arun");
     this.startedAtMs = preparedStartedAt ? Date.parse(preparedStartedAt) : Date.now();
+    this.note("execution:identity", captureExecutionIdentity());
   }
 
   startedAtIso() { return new Date(this.startedAtMs).toISOString(); }
@@ -111,6 +116,22 @@ export class AccuracyRunRecorder implements RunHandle {
     return [...this.collected];
   }
 
+  markOpened() { this.opened = true; }
+  setPreparationCheckpoint(checkpoint: () => Promise<void>) { this.preparationCheckpoint = checkpoint; }
+
+  /** Serialize checkpoints so overlapping completions cannot overwrite newer evidence. */
+  async checkpointExecution(): Promise<void> {
+    if (!this.opened && !this.preparationCheckpoint) return;
+    if (accuracyTransactionActive()) throw new Error("Completion evidence must be checkpointed outside a transaction");
+    this.checkpoints = this.checkpoints.then(async () => {
+      if (!this.opened) { await this.preparationCheckpoint!(); return; }
+      await accuracyDb().update(t.accuracyModuleRuns).set({ steps: this.steps() }).where(and(
+        eq(t.accuracyModuleRuns.id, this.id), eq(t.accuracyModuleRuns.workspace_id, this.meta.workspace_id),
+        eq(t.accuracyModuleRuns.status, "running")));
+    });
+    await this.checkpoints;
+  }
+
   /** Reuse durable provider evidence when applying a previously prepared merge. */
   restorePreparation(steps: RunStep[], costs: CostEstimate[]) {
     this.collected.push(...steps);
@@ -153,13 +174,14 @@ export async function openAccuracyRun(recorder: AccuracyRunRecorder) {
       error: null,
       input: recorder.meta.input as Record<string, unknown>,
       output: null,
-      steps: [],
+      steps: recorder.steps(),
       route: null,
       token_usage: null,
       cost_usd: null,
       evals: null,
       evaluation_context: recorder.meta.evaluation_context,
     });
+  recorder.markOpened();
 }
 
 export async function closeAccuracyRun(args: {

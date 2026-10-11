@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOrganization, createWorkspace, deleteWorkspace, getAuthorizedWorkspace, grantOrganizationAccess } from "@/accuracy/store/tenant";
 import { createExperiment, exportExperiments, finishExperiment, getExperiment, recordExperimentCall, recordVersionEvaluation } from "@/accuracy/experiments/records";
 import { evaluateExperimentVersion } from "@/accuracy/eval/experiment-gold";
@@ -7,6 +7,12 @@ import { accuracyDb, withAccuracyTransaction } from "@/accuracy/store/db";
 import { ACCURACY_MIGRATIONS } from "@/accuracy/store/schema";
 import * as tables from "@/accuracy/store/schema";
 import postgres from "postgres";
+import { AccuracyRunRecorder, openAccuracyRun, closeAccuracyRun, reservedAccuracyRun } from "@/accuracy/kernel/observability";
+import { runShallowAgenticCycle } from "@/accuracy/kernel/agentic";
+import { readAgentProgression } from "@/accuracy/kernel/agent-events";
+import { structuralIssueKey } from "@/accuracy/kernel/structural-fate";
+import { accuracyCompletionFor } from "@/accuracy/kernel/routing";
+import type { ResolvedAccuracyRoute } from "@/accuracy/kernel/contracts";
 
 const workspaces: string[] = [];
 function deferred() {
@@ -35,6 +41,93 @@ async function fixture() {
 afterEach(async () => { for (const id of workspaces.splice(0)) await deleteWorkspace(id); });
 
 describe("experiment records", () => {
+  it("reads and exports malformed historical rows as unavailable while retaining valid identity", async () => {
+    const scope = await fixture();
+    const experiment = await createExperiment({ ...scope, pack_id: "beone-bgb-58067-prmt5i", source_fingerprint: "source",
+      baseline_fingerprint: "baseline", baseline_snapshot: {}, condition: {} });
+    const run = new AccuracyRunRecorder({ ...scope, call_kind: "need_extract", agent_role: "proposer", module_id: "extract",
+      module_version: "v1", evaluation_context: "experiment", actor: { name: "test", function: "medical_affairs" }, input: {} });
+    await openAccuracyRun(run);
+    await closeAccuracyRun({ recorder: run, status: "ok", output: { gaps: [] } });
+    await recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id: run.id,
+      call_kind: "need_extract", version_index: 0, input: {}, output: { gaps: [] }, module_version: "v1", route: {} });
+    await finishExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id, status: "completed" });
+    const valid = (await getExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id }))!.run_evidence![0].execution_identity;
+    expect(valid.status).toBe("available");
+    expect(valid.identities).toHaveLength(1);
+    for (const row of [{ name: 42 }, { name: {} }, { name: null }, {}, null, 42, "corrupt", false, []]) {
+      // Simulate corrupted JSON retained by a historical run, alongside its valid identity.
+      await accuracyDb().update(tables.accuracyModuleRuns).set({ steps: [...run.steps(), row] })
+        .where(and(eq(tables.accuracyModuleRuns.workspace_id, scope.workspace_id), eq(tables.accuracyModuleRuns.id, run.id)));
+      const expected = { ...valid, status: "unavailable" };
+      for (const format of ["json", "jsonl"] as const) {
+        const exported = JSON.parse((await exportExperiments({ workspace_id: scope.workspace_id, format })).trim());
+        const retained = format === "json" ? exported[0] : exported;
+        expect(retained.id).toBe(experiment.id);
+        expect(retained.calls).toHaveLength(1);
+        expect(retained.run_evidence[0].execution_identity).toEqual(expected);
+      }
+      const record = await getExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id });
+      expect(record?.run_evidence?.[0].execution_identity).toEqual(expected);
+    }
+  });
+  it("roundtrips all structural dispositions and exact execution evidence in complete JSON and JSONL history", async () => {
+    const scope = await fixture();
+    const pack_id = "beone-bgb-58067-prmt5i";
+    const experiment = await createExperiment({ ...scope, pack_id, source_fingerprint: "source", baseline_fingerprint: "baseline",
+      baseline_snapshot: {}, condition: {} });
+    const run = new AccuracyRunRecorder({ ...scope, call_kind: "need_extract", agent_role: "proposer", module_id: "extract",
+      module_version: "v1", evaluation_context: "experiment", experiment_cycle_control: { critic_revision_passes: 1 },
+      actor: { name: "test", function: "medical_affairs" }, input: {} });
+    await openAccuracyRun(run);
+    const route: ResolvedAccuracyRoute = { call_kind: "need_extract", role: "proposer", provider_id: "xai-grok", provider_label: "xAI",
+      model: "configured-model", auth: "api_key", connected: true, params: { temperature: 0, max_tokens: 200 }, fallbacks: [], degraded: false, reason: null };
+    const outcomes = ["resolved", "partly_resolved", "invalid", "unresolved"] as const;
+    const findings = outcomes.map(outcome => ({ issue_id: outcome, category: "structural", code: "unsupported", severity: "high" as const,
+      claim: `Source-backed assessment ${outcome}`, suggested_action: "Review evidence" }));
+    try {
+      vi.stubEnv("XAI_API_KEY", "kan4-secret");
+      vi.stubGlobal("fetch", async () => {
+        const before = await reservedAccuracyRun(scope.workspace_id, run.id);
+        expect(before?.steps).toEqual(expect.arrayContaining([expect.objectContaining({ name: "llm:completion:started",
+          data: expect.objectContaining({ system_fingerprint: expect.any(String), user_fingerprint: expect.any(String) }) })]));
+        return new Response(JSON.stringify({ model: "response-model", system_fingerprint: "revision",
+          choices: [{ message: { content: "x".repeat(45000) } }] }), { status: 200 });
+      });
+      await accuracyCompletionFor({ route, run, onUsage: () => {} })({ system: "exact system", user: "exact source prompt", purpose: "extract:r0" });
+      vi.stubGlobal("fetch", async () => { throw new Error("provider failed kan4-secret"); });
+      await expect(accuracyCompletionFor({ route, run, onUsage: () => {} })({ system: "exact system", user: "retry source", purpose: "extract:r1" })).rejects.toThrow("provider failed");
+      const failed = await reservedAccuracyRun(scope.workspace_id, run.id);
+      expect(failed?.steps).toEqual(expect.arrayContaining([expect.objectContaining({ name: "llm:completion:finished", data: expect.objectContaining({ status: "failed" }) })]));
+      const cycle = await runShallowAgenticCycle({ run, proposer: async round => ({ gaps: [], round }),
+        onSnapshot: async () => ({ quote_validity: { valid_count: 0, invalid_count: 0, unchecked_count: 0 }, invariant_failures: [], completeness: "not_checked" }),
+        critic: async (draft, prior) => ({ score: 1, issues: draft.round === 0 ? findings : [],
+          prior_issue_resolutions: prior.map((issue, index) => ({ issue_key: structuralIssueKey(issue), issue, outcome: outcomes[index],
+            reason: "Source assessment completed", evidence: { kind: "validated_assessment", explanation: "Independent source review" } })) }),
+        validateStructuralResolution: async draft => draft.round === 1, judge: async draft => draft });
+      await closeAccuracyRun({ recorder: run, status: "ok", output: cycle.final, route });
+      const progression = await readAgentProgression({ workspace_id: scope.workspace_id, run_id: run.id });
+      for (const row of progression!.events) if (row.event.event_type === "snapshot") {
+        await recordExperimentCall({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id: run.id,
+          call_kind: "need_extract", version_index: row.event.iteration, input: {}, output: row.event.output, module_version: "v1", route });
+        await recordVersionEvaluation({ workspace_id: scope.workspace_id, experiment_id: experiment.id, call_id: run.id,
+          version_index: row.event.iteration, evaluation: evaluateExperimentVersion({ pack_id, call_kind: "need_extract", output: row.event.output }) });
+      }
+      await finishExperiment({ workspace_id: scope.workspace_id, experiment_id: experiment.id, status: "completed" });
+      for (const format of ["json", "jsonl"] as const) {
+        const exported = JSON.parse((await exportExperiments({ workspace_id: scope.workspace_id, format })).trim());
+        const retained = format === "json" ? exported[0] : exported;
+        expect(retained.run_evidence[0].execution_identity.completions[0]).toMatchObject({ purpose: "extract:r0", status: "succeeded",
+          system_fingerprint: expect.any(String), user_fingerprint: expect.any(String), configured_model: "configured-model", provider_revision: "revision" });
+        expect(retained.run_evidence[0].execution_identity.identities[0].source_fingerprint).toEqual(expect.any(String));
+        expect(retained.run_evidence[0].execution_identity.completions[1]).toMatchObject({ status: "failed", purpose: "extract:r1", provider_revision: null });
+        expect(retained.run_evidence[0].events.find((event: { event_type: string; iteration: number }) => event.event_type === "critique" && event.iteration === 1)
+          .structural_fate.prior_issue_resolutions.map((resolution: { outcome: string }) => resolution.outcome)).toEqual(outcomes);
+        expect(retained.calls).toHaveLength(2); expect(retained.evaluations).toHaveLength(2);
+        expect(JSON.stringify(retained)).not.toContain("kan4-secret");
+      }
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
   it("allows a source workspace only to its granted subject or an operator", async () => {
     const scope = await fixture();
     expect(await getAuthorizedWorkspace({ workspace_id: scope.source_workspace_id, subject: "different-org-user", role: "contributor" })).toBeNull();

@@ -39,6 +39,8 @@ export type PreparedAccuracyMerge = {
   workspace_id: string; org_id: string; run_id: string; module_id: string; module_version: string;
   judgment: MergeJudgment; route: ResolvedAccuracyRoute | null; steps: RunStep[]; costs: CostEstimate[]; started_at: string;
 };
+/** Audit evidence is deliberately missing a judgment and cannot authorize merge application. */
+export type MergePreparationEvidence = Omit<PreparedAccuracyMerge, "judgment">;
 import { assemblyExecutionScope, withAssemblyWorkspaceLock } from "./assembly-context";
 import {
   approvedLiveInventory,
@@ -82,6 +84,7 @@ export async function runAccuracyModule<O = unknown>(args: {
   experiment_cycle_control?: ExperimentCycleControl;
   /** Internal merge-only boundary. HTTP handlers never forward these from client input. */
   merge_preparation?: MergeInputs;
+  on_merge_preparation_evidence?: (evidence: MergePreparationEvidence) => Promise<void>;
   prepared_merge?: PreparedAccuracyMerge;
 }): Promise<AccuracyRunResult<O>> {
   if (args.merge_preparation && accuracyTransactionActive()) throw new Error("Merge preparation cannot join an outer transaction.");
@@ -162,7 +165,14 @@ export async function runAccuracyModule<O = unknown>(args: {
   if (!args.prepared_merge) recorder.note("input:accepted", runInput);
   if (consumedAssemblyBindings) recorder.note("assembly:approved-live-bindings", consumedAssemblyBindings);
 
-  let route = null;
+  let route: ResolvedAccuracyRoute | null = null;
+  const costs: CostEstimate[] = [];
+  if (args.merge_preparation && args.on_merge_preparation_evidence) {
+    recorder.setPreparationCheckpoint(() => args.on_merge_preparation_evidence!({ workspace_id: args.workspace_id, org_id: args.org_id,
+      run_id: recorder.id, module_id: implementation.manifest.id, module_version: implementation.manifest.version,
+      route, steps: recorder.steps(), costs: [...costs], started_at: recorder.startedAtIso() }));
+    await recorder.checkpointExecution();
+  }
   try {
     if (args.prepared_merge) {
       route = args.prepared_merge.route;
@@ -198,7 +208,6 @@ export async function runAccuracyModule<O = unknown>(args: {
     }
   }
 
-  const costs: CostEstimate[] = [];
   const llmReady =
     route &&
     route.connected &&
@@ -328,20 +337,19 @@ export async function runAccuracyModule<O = unknown>(args: {
 /** Use the ordinary kernel gates/routing/recorder without opening or applying a run. */
 export async function prepareAccuracyMerge(args: { workspace_id: string; org_id: string; actor: Actor;
   run_id: string; inputs: MergeInputs; evaluation_context?: "production" | "experiment";
-  prior?: PreparedAccuracyMerge }): Promise<PreparedAccuracyMerge> {
+  prior?: MergePreparationEvidence; onEvidence?: (evidence: MergePreparationEvidence) => Promise<void> }): Promise<PreparedAccuracyMerge> {
+  const withPrior = <T extends MergePreparationEvidence>(evidence: T): T => {
+    const prior = args.prior;
+    if (prior && prior.workspace_id === evidence.workspace_id && prior.org_id === evidence.org_id && prior.run_id === evidence.run_id) {
+      return { ...evidence, steps: [...prior.steps, ...evidence.steps], costs: [...prior.costs, ...evidence.costs],
+        started_at: prior.started_at ?? evidence.started_at };
+    }
+    return evidence;
+  };
   const result = await runAccuracyModule<PreparedAccuracyMerge>({ ...args, call_kind: "merge_dedupe", agent_role: "judge",
-    reserved_run_id: args.run_id, input: { workspace_id: args.workspace_id }, merge_preparation: args.inputs });
-  const prepared = result.output;
-  // Repreparing stale inputs spends again. Keep all successful paid attempts
-  // under the same journal operation rather than losing their cost/evidence.
-  const prior = args.prior;
-  if (prior && prior.workspace_id === prepared.workspace_id && prior.org_id === prepared.org_id
-    && prior.run_id === prepared.run_id) {
-    prepared.steps = [...prior.steps, ...prepared.steps];
-    prepared.costs = [...prior.costs, ...prepared.costs];
-    prepared.started_at = prior.started_at ?? prepared.started_at;
-  }
-  return prepared;
+    reserved_run_id: args.run_id, input: { workspace_id: args.workspace_id }, merge_preparation: args.inputs,
+    on_merge_preparation_evidence: args.onEvidence ? evidence => args.onEvidence!(withPrior(evidence)) : undefined });
+  return withPrior(result.output);
 }
 
 function existingAssemblyBindings(steps: unknown): ApprovedAssemblyBinding[] | null {

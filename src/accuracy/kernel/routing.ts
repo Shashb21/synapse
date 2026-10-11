@@ -23,6 +23,9 @@ import {
 import { estimateCostUsd, usageFromMessages } from "./cost";
 import { DEFAULT_MAX_TOKENS } from "@/modules/kernel/routing";
 import { isTestStub } from "@/modules/kernel/llm";
+import { executionFingerprint, type CompletionIdentity } from "./execution-identity";
+import { newId } from "@/modules/kernel/ids";
+import { redactSecrets } from "@/modules/llm/provider-error";
 
 /**
  * Whether an Anthropic workspace id is set. Optional: only an org-scoped key
@@ -198,21 +201,31 @@ export function accuracyCompletionFor(args: {
     // Read at call time and handed straight to the provider; never logged or traced.
     const api_key = providerApiKey(args.route.provider_id);
     if (!api_key) throw new NoRouteError(missingKeyReason(provider));
-    const raw = await args.run.step(
-      `llm:${args.route.role}:${purpose}`,
-      () =>
-        provider.complete(
-          {
-            system,
-            user,
-            model: args.route.model,
-            temperature: args.route.params.temperature,
-            max_tokens: maxTokens ?? args.route.params.max_tokens,
-          },
-          { api_key },
-        ),
-      `${args.route.provider_label} · ${args.route.model}`,
-    );
+    const identity: CompletionIdentity = { completion_id: newId("completion"), purpose,
+      system_fingerprint: executionFingerprint(system), user_fingerprint: executionFingerprint(user),
+      provider_id: args.route.provider_id, configured_model: args.route.model, temperature: args.route.params.temperature,
+      max_tokens: maxTokens ?? args.route.params.max_tokens, response_model: null, provider_revision: null, status: "started" };
+    args.run.note("llm:completion:started", { ...identity });
+    await args.run.checkpointExecution?.();
+    let raw: string;
+    try {
+      raw = await args.run.step(
+        `llm:${args.route.role}:${purpose}`,
+        () => provider.complete({ system, user, model: args.route.model, temperature: args.route.params.temperature,
+          max_tokens: maxTokens ?? args.route.params.max_tokens,
+          onResponseIdentity: response => { Object.assign(identity, response); },
+        }, { api_key }).catch(error => {
+          if (error instanceof Error) { error.message = redactSecrets(error.message, [api_key]); throw error; }
+          throw new Error(redactSecrets(String(error), [api_key]));
+        }),
+        `${args.route.provider_label} · ${args.route.model}`,
+      );
+    } catch (error) {
+      args.run.note("llm:completion:finished", { ...identity, status: "failed" });
+      await args.run.checkpointExecution?.();
+      throw error;
+    }
+    args.run.note("llm:completion:finished", { ...identity, status: "succeeded" });
     const usage = usageFromMessages(system, user, raw);
     const { cost_usd } = estimateCostUsd({
       provider_id: args.route.provider_id,
@@ -220,6 +233,7 @@ export function accuracyCompletionFor(args: {
       usage,
     });
     args.onUsage(usage, cost_usd);
+    await args.run.checkpointExecution?.();
     return { raw, usage };
   };
 }

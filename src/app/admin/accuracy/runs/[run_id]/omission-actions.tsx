@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OmissionAction, OmissionReviewItem } from "@/accuracy/store/omission-review-store";
 
-type Review = { current: boolean; items: OmissionReviewItem[]; actions: OmissionAction[];
+type Review = { selected_iteration?: number | null; terminal_iteration?: number | null; lineage?: "selected" | "legacy_terminal" | "invalid";
+  current: boolean; items: OmissionReviewItem[]; actions: OmissionAction[];
   extraction_batch_id: string | null; source_file_id: string | null; downstream_state: "completed" | "resumable" | "stale" | "incomplete" };
 type Decision = "add" | "link_existing" | "dismiss" | "reclassify";
 const fieldClass = "w-full border border-border bg-background p-2 text-[12px] text-foreground";
@@ -151,7 +152,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
   }
 
   async function resume() {
-    if (!review?.extraction_batch_id || !review.source_file_id || loading || error || resuming || pendingDecisions.size || blockers.length || review.items.some(item => item.blocking)) return;
+    if (review?.lineage === "invalid" || !review?.extraction_batch_id || !review.source_file_id || loading || error || resuming || pendingDecisions.size || blockers.length || review.items.some(item => item.blocking)) return;
     setResuming(true); setError(null);
     try {
       await readResponse(await fetch("/api/accuracy/extract", { method: "POST", headers: { "content-type": "application/json" },
@@ -170,20 +171,23 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
     {!loading && !error && !review ? <p className="mt-2">No applied extraction review is available for this run.</p> : null}
     {review ? <>
       <p className="mt-2">{review.current ? "Current extraction" : "Superseded extraction · historical findings"} · Run {runId}</p>
+      {review.lineage === "selected" ? <p className="mt-1">Selected: V{review.selected_iteration} · Terminal: V{review.terminal_iteration}. Findings from both versions remain open until reviewed.</p> : null}
+      {review.lineage === "invalid" ? <p className="mt-1">Invalid selected lineage. Rerun extraction before contributor decisions or downstream resume.</p> : null}
       {review.downstream_state === "incomplete" ? <p className="mt-1">Source extraction is incomplete. Retry remaining pages from the source before resuming downstream work.</p> : null}
       {review.downstream_state === "completed" ? <p className="mt-1">Downstream work completed.</p> : null}
       {review.current && blockers.length ? <p className="mt-1">Paused · {blockers.length} important unresolved {blockers.length === 1 ? "finding" : "findings"} in this workspace.</p> : null}
-      <ul className="mt-2 grid gap-3">{review.items.map((item) => {
+      <ul className="mt-2 grid gap-3">{review.items.map((item, index) => {
         const action = item.latest_action;
         const closed = !!action && (action.action !== "reclassify" || action.new_importance === "advisory");
-        return <li key={item.issue.issue_id} id={`omission-${encodeURIComponent(item.issue.issue_id)}`} className="border-t border-border pt-2">
+        return <li key={`${item.issue.issue_id}:${index}`} id={`omission-${encodeURIComponent(item.issue.issue_id)}`} className="border-t border-border pt-2">
           <strong>{(action?.new_importance ?? item.issue.importance) === "important" ? "Important" : "Advisory"} · {item.blocking ? "Blocking" : "Non-blocking"}</strong>: {item.issue.summary}
           <p>Issue ID: {item.issue.issue_id} · Run {item.run_id}</p>
           <p>Source file {item.source_file_id}, block {item.issue.source_ref.block_id}</p>
           <p>Evidence quote: “{item.issue.evidence_quote}”</p>
           {action ? <><p>Latest action: {action.action.replaceAll("_", " ")}{action.claim_id ? ` · Claim ${action.claim_id}` : ""}</p>
             <p>Actor: {action.actor_name} ({action.actor_function}) · Reason: {action.reason}</p></> : <p>Open · No contributor decision recorded.</p>}
-          {canReview && review.current && !closed ? <DecisionForm item={item} onSaved={refreshReview}
+          {item.actionable === false ? <p>Conflicting or invalid finding lineage. Rerun extraction before deciding.</p> : null}
+          {canReview && review.current && !closed && item.actionable !== false ? <DecisionForm item={item} onSaved={refreshReview}
             unavailable={loading || !!error || resuming} onPendingChange={recordPendingDecision} /> : null}
         </li>;
       })}</ul>
@@ -194,7 +198,7 @@ export default function OmissionActions({ workspaceId, runId, canReview }: {
         </li>)}</ul></details> : null}
       {canReview ? <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClass} disabled={loading || resuming || pendingDecisions.size > 0} onClick={() => void refreshReview()}>Refresh review</button>
-        {review.current && review.downstream_state === "resumable" && review.extraction_batch_id && review.source_file_id && !blockers.length && !review.items.some(item => item.blocking) && !loading && !error && !resumed
+        {review.lineage !== "invalid" && review.current && review.downstream_state === "resumable" && review.extraction_batch_id && review.source_file_id && !blockers.length && !review.items.some(item => item.blocking) && !loading && !error && !resumed
           ? <button type="button" className={buttonClass} disabled={resuming || pendingDecisions.size > 0} onClick={() => void resume()}>{resuming ? "Resuming…" : "Resume downstream work"}</button> : null}
       </div> : null}
       {resuming ? <p role="status">Resuming downstream work…</p> : null}

@@ -132,10 +132,23 @@ export default async function AccuracyRunDetailPage({
                       </ul>
                     ) : null}
                   </div>
+                  <div className="mt-3 border-t border-border pt-2 text-[12px] text-foreground">
+                    <h3 className="font-medium">Structural issue fate</h3>
+                    {event.structural_fate?.status === "assessed" ? (
+                      event.structural_fate.prior_issue_resolutions.length ? <ul className="mt-2 grid gap-2">
+                        {event.structural_fate.prior_issue_resolutions.map(resolution => <li key={resolution.issue_key}>
+                          <strong>{resolution.outcome === "partly_resolved" ? "Partly resolved" : resolution.outcome[0].toUpperCase() + resolution.outcome.slice(1)}</strong>
+                          {" · "}{resolution.issue.claim}<p>{resolution.reason}</p>
+                          {resolution.evidence ? <p>{resolution.evidence.kind === "deterministic_rerun"
+                            ? `Check: ${resolution.evidence.check_id}` : resolution.evidence.explanation}</p> : null}
+                        </li>)}
+                      </ul> : <p>No prior open structural findings.</p>
+                    ) : <p>Structural fate evidence unavailable for this historical assessment.</p>}
+                  </div>
                   {event.issues.length ? (
                     <ul className="mt-2 grid gap-2">
-                      {event.issues.map((issue) => (
-                        <li key={issue.issue_id} className="border-t border-border pt-2 text-[12px] text-foreground">
+                      {event.issues.map((issue, index) => (
+                        <li key={`${issue.issue_id}:${index}`} className="border-t border-border pt-2 text-[12px] text-foreground">
                           <strong>{issue.severity} · {issue.category}</strong>: {issue.claim}
                           {issue.source_ref ? <span> · Source {issue.source_ref.source_file_id}, block {issue.source_ref.block_id}</span> : null}
                           <p>Suggested action: {issue.suggested_action}</p>
