@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   activityIdForTactic,
+  assertSaveFinalActivities,
+  ganttProblems,
   coverageCountsTowardGantt,
   dependenciesRespectReadouts,
   projectGanttFromTactics,
@@ -115,7 +117,7 @@ describe("gantt coverage → date continuity", () => {
     expect(b.readout).toBe("2026-06-15");
   });
 
-  it("infers dissemination waits on generating tactics that cover the same gap", () => {
+  it("proposes (never imposes) that dissemination waits on generating tactics covering the same gap", () => {
     const activities = projectGanttFromTactics({
       tactics: [
         {
@@ -141,8 +143,10 @@ describe("gantt coverage → date continuity", () => {
     });
     const pub = activities.find((row) => row.tactic_id === "T-pub")!;
     expect(pub.gap_ids).toEqual(["G-ce"]);
-    expect(pub.depends_on).toEqual([activityIdForTactic("T-rwe")]);
-    expect(pub.start).toBe("2026-08-01");
+    // KAN-85: inferred from a shared gap only, so it is a proposal and moves no date.
+    expect(pub.depends_on).toEqual([]);
+    expect(pub.proposed_depends_on).toEqual([activityIdForTactic("T-rwe")]);
+    expect(pub.start).toBe("2026-02-01");
     expect(dependenciesRespectReadouts(activities)).toBe(true);
   });
 
@@ -201,8 +205,9 @@ describe("gantt coverage → date continuity", () => {
       ],
     });
     const child = activities.find((row) => row.tactic_id === "T-child")!;
-    expect(child.depends_on).toEqual([activityIdForTactic("T-parent")]);
-    expect(child.start).toBe("2026-05-01");
+    expect(child.depends_on).toEqual([]);
+    expect(child.proposed_depends_on).toEqual([activityIdForTactic("T-parent")]);
+    expect(child.start).toBe("2026-02-01");
   });
 
   it("does not invent bars or dates from coverage alone", () => {
@@ -342,8 +347,28 @@ describe("workspace gantt reads coverage joins", () => {
     expect(projected.activities).toHaveLength(2);
     const pubBar = projected.activities.find((row) => row.tactic_id === pub.id)!;
     expect(pubBar.gap_ids).toEqual([gap.id]);
-    expect(pubBar.depends_on).toEqual([activityIdForTactic(study.id)]);
-    expect(pubBar.start).toBe("2026-09-01");
+    expect(pubBar.depends_on).toEqual([]);
+    expect(pubBar.proposed_depends_on).toEqual([activityIdForTactic(study.id)]);
+    expect(pubBar.start).toBe("2026-03-01");
     expect(dependenciesRespectReadouts(projected.activities)).toBe(true);
+  });
+});
+
+describe("KAN-85: gantt dependency problems", () => {
+  it("reports loops and dependencies on bars not on the chart instead of skipping them", () => {
+    const activities = projectGanttFromTactics({
+      tactics: [
+        { id: "T-a", validated: true, start: "2026-01-01", end: "2026-02-01", depends_on: ["T-b"] },
+        { id: "T-b", validated: true, start: "2026-01-01", end: "2026-02-01", depends_on: ["T-a"] },
+        { id: "T-c", validated: true, start: "2026-01-01", end: "2026-02-01", depends_on: ["T-missing"] },
+      ],
+    });
+    const problems = ganttProblems(activities);
+    expect(problems.filter((row) => row.kind === "cycle").map((row) => row.activity_id).sort()).toEqual([
+      activityIdForTactic("T-a"),
+      activityIdForTactic("T-b"),
+    ]);
+    expect(problems).toContainEqual({ kind: "dangling", activity_id: activityIdForTactic("T-c"), upstream_id: "T-missing" });
+    expect(() => assertSaveFinalActivities(activities, ["T-a", "T-b", "T-c"])).toThrow(/dependency problem/);
   });
 });

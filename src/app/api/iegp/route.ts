@@ -36,6 +36,7 @@ import {
   modifyResidualGap,
   parkGap,
   unparkGap,
+  setGapObjective,
   rejectMapping,
   rejectResidualGap,
   requireMappingRowStatus,
@@ -438,6 +439,15 @@ async function handleAction(request: Request): Promise<Response> {
           actor_name,
           actor_function,
           note: body.note,
+        });
+        break;
+      case "set_gap_objective":
+        await setGapObjective({
+          gap_id: body.gap_id,
+          objective_id: body.objective_id,
+          rationale: body.rationale || body.note || null,
+          actor_name,
+          actor_function,
         });
         break;
       case "park_gap":

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { afterSignIn, LOGIN_NEXT_COOKIE } from "@/modules/auth/redirect";
-import { completeLogin, NO_SEAT_ERROR, NoSeatError } from "@/modules/auth/session";
+import { completeLogin, loginErrorCode, type LoginErrorCode } from "@/modules/auth/session";
 import { clearWorkspaceSelection } from "@/modules/workspaces/session";
 import { recordAuditBestEffort } from "@/modules/kernel/audit";
 
@@ -18,7 +18,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const failed = (reason: string) => {
+  // /login is sent a code, never the provider's or the error's text (KAN-28).
+  const failed = (reason: LoginErrorCode) => {
     const back = new URL("/login", url.origin);
     back.searchParams.set("error", reason);
     return NextResponse.redirect(back);
@@ -32,15 +33,15 @@ export async function GET(request: Request) {
       workspace_id: null,
       meta: { method: "sso", reason: "cancelled_or_refused_by_provider", detail: reason.slice(0, 300) },
     });
-    return failed(reason);
+    return failed("cancelled");
   }
   try {
     await completeLogin({ code, state });
   } catch (error) {
-    // No seat (none assigned, unassigned, or the customer deactivated): a bare
-    // code, so /login shows one message and nothing about which part failed.
-    if (error instanceof NoSeatError) return failed(NO_SEAT_ERROR);
-    return failed(error instanceof Error ? error.message : "Sign-in failed.");
+    // No seat (none assigned, unassigned, or the customer deactivated) is a bare
+    // code too, so /login shows one message and nothing about which part failed.
+    // completeLogin has already put the detail in the audit log.
+    return failed(loginErrorCode(error));
   }
   const jar = await cookies();
   const next = jar.get(LOGIN_NEXT_COOKIE)?.value;

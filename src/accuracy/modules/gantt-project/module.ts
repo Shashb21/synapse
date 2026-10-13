@@ -54,6 +54,7 @@ const outputSchema = z.object({
       end: z.string(),
       readout: z.string().nullable(),
       depends_on: z.array(z.string()),
+      proposed_depends_on: z.array(z.string()).optional(),
       gap_ids: z.array(z.string()),
     }),
   ),
@@ -97,6 +98,7 @@ export {
   activityIdForTactic,
   assertSaveFinalActivities,
   dependenciesRespectReadouts,
+  ganttProblems,
   activityGateDate,
   coverageCountsTowardGantt,
 } from "./engine";

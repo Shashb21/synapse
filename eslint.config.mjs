@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Agent worktrees, browser-tool output and test artifacts are not this project's source.
+    ".claude/**",
+    ".playwright-mcp/**",
+    ".superpowers/**",
+    "test-results/**",
+    "playwright-report/**",
   ]),
 ]);
 

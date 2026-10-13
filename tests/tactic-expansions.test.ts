@@ -250,7 +250,8 @@ describe("canonical expansion acceptance", () => {
     await expect(acceptTacticExpansion({...args, proposal_id: " "})).rejects.toThrow(/origin/i);
     await expect(acceptTacticExpansion({...args, scope: {...scope, post_hoc: false}})).rejects.toThrow(/post.hoc/i);
     const state = await loadState();
-    state.tactics[0]!.status = "completed";
+    // Rows come back in no fixed order: complete the parent itself, found by id.
+    state.tactics.find(t => t.id === args.tactic_id)!.status = "completed";
     await persistState(state);
     await expect(acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!), scope: {...scope, prospective_enrolment: true}})).rejects.toThrow(/prospective/i);
     expect((await loadState()).expansions).toEqual([]);

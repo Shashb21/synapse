@@ -28,16 +28,20 @@ import { setExpansionStatus } from "@/lib/iegp/tactic-expansions";
 import { TACTIC_STATUSES, TACTIC_TYPES } from "@/lib/iegp/enums";
 import { field, fieldLabel, optionalMonths, optionalScore } from "./field-errors";
 import {
+  acceptTimelineEstimates,
   addTimelineActivity,
   createTimelineActivity,
+  finalPlanBlockers,
   latestPlan,
   planHistory,
   removeTimelineActivity,
+  reviewTimelineDependency,
   savePlan,
   setTimelineDependencies,
   timelineModel,
   updateTimelineActivity,
 } from "@/modules/stages/s10-timeline/module";
+import { planIssues } from "@/modules/stages/s10-timeline/plan-checks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +64,10 @@ export async function GET() {
   ]);
   // The gap-grouped view the /timeline page draws (KAN-25).
   const timeline_view = gapTimelineView({ model: timeline, state, placements });
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, plan, history, tactic_suggestions });
+  // What must be resolved before a final save: the roadmap (KAN-85) and the gap inventory (KAN-86).
+  const timeline_issues = planIssues(timeline);
+  const final_blockers = await finalPlanBlockers();
+  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -237,6 +244,7 @@ export async function POST(request: Request) {
         const settings = await setGapSettings({
           gap_id: String(body.gap_id ?? ""),
           settings: Array.isArray(body.settings) ? body.settings.map(String) : [],
+          rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
           actor_function: identity.actor.function,
         });
@@ -256,6 +264,7 @@ export async function POST(request: Request) {
                   regional_nuances: body.regional_nuances,
                   notes: body.notes,
                 },
+          rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
           actor_function: identity.actor.function,
         });
@@ -389,6 +398,26 @@ export async function POST(request: Request) {
           workspace_id: identity.workspace?.id,
         });
         return NextResponse.json({ ok: true, activity });
+      }
+      case "review_dependency": {
+        // A model's proposed dependency: accept it (it then gates the schedule) or reject it for good.
+        assertCan(identity.role, "validate");
+        const activity = await reviewTimelineDependency({
+          id: String(body.id ?? ""),
+          upstream_id: field(z.string().trim().min(1), body.upstream_id, "upstream_id"),
+          decision: field(decisionSchema, body.decision, "decision"),
+          rationale,
+          actor: identity.actor,
+          workspace_id: identity.workspace?.id,
+        });
+        return NextResponse.json({ ok: true, activity });
+      }
+      case "accept_estimates": {
+        // A model's date estimates become the person's own; with no ids, every one left.
+        assertCan(identity.role, "validate");
+        const ids = body.id ? [String(body.id)] : field(z.array(z.string()), body.ids ?? [], "ids");
+        const result = await acceptTimelineEstimates({ ids, rationale, actor: identity.actor, workspace_id: identity.workspace?.id });
+        return NextResponse.json({ ok: true, ...result });
       }
       case "save_plan": {
         const status = field(planStatusSchema, body.status ?? "draft", "status");

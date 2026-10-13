@@ -56,6 +56,8 @@ export type LlmProvider = {
    * hears the provider's token counts, when it reports them (KAN-91).
    */
   complete(request: LlmRequest, auth: LlmAuth | null, hooks?: LlmCallHooks): Promise<string>;
+  /** False when this model is called without `temperature` (Claude 5, KAN-71). Absent means it is sent. */
+  sendsTemperature?(model: string): boolean;
 };
 
 export class NoRouteError extends Error {}
@@ -296,6 +298,43 @@ export const xaiGrok: LlmProvider = {
   },
 };
 
+/**
+ * Whether a Claude model still takes `temperature`. Claude 5 models and Opus
+ * 4.7/4.8 return a 400 for sampling parameters; older models accept them (KAN-71).
+ */
+export function anthropicAcceptsTemperature(model: string): boolean {
+  return !/^claude-(?:(?:opus|sonnet|fable|mythos)-5|opus-4-[78])(?:-|$)/.test(model);
+}
+
+/**
+ * The answer text of a Messages API response, or a clear error (KAN-71).
+ * Thinking blocks are skipped. With adaptive thinking one answer can arrive as
+ * several text blocks; they are one continuous answer, so they are joined with
+ * nothing in between (a newline would land inside JSON strings). A refusal or
+ * a reply cut off at max_tokens is never usable, so it is an error, not text.
+ */
+export function anthropicText(payload: Record<string, unknown>): string {
+  const stop = payload.stop_reason;
+  if (stop === "refusal") {
+    const details = payload.stop_details as { category?: string | null } | null | undefined;
+    throw new Error(`Claude declined this request${details?.category ? ` (${details.category})` : ""}.`);
+  }
+  const content = Array.isArray(payload.content) ? (payload.content as { type?: string; text?: string }[]) : [];
+  const text = content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("");
+  if (stop === "max_tokens") {
+    throw new Error(
+      text.trim()
+        ? "Claude's reply was cut off at its max_tokens limit before it finished. Raise Max tokens for this stage in AI & routing."
+        : "Claude used its whole max_tokens budget before answering. Raise Max tokens for this stage in AI & routing.",
+    );
+  }
+  if (!text.trim()) throw new Error("Claude returned no answer text.");
+  return text;
+}
+
 /** The locked one-click alternate: Anthropic Claude, reached with `x-api-key`. */
 export const anthropicClaude: LlmProvider = {
   id: "anthropic-claude",
@@ -305,6 +344,7 @@ export const anthropicClaude: LlmProvider = {
   tier: "alternate",
   models: models("ANTHROPIC_MODELS", ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5-20251001"]),
   default_model: models("ANTHROPIC_MODELS", ["claude-sonnet-5-5"])[0]!,
+  sendsTemperature: anthropicAcceptsTemperature,
   async complete(request, auth, hooks) {
     if (!auth) throw new NoRouteError("anthropic-claude has no API key: set ANTHROPIC_API_KEY");
     const headers: Record<string, string> = {
@@ -322,14 +362,15 @@ export const anthropicClaude: LlmProvider = {
       {
         model: request.model,
         max_tokens: request.max_tokens,
-        temperature: request.temperature,
+        // Claude 5 models (and Opus 4.7/4.8) reject sampling parameters with a 400.
+        ...(anthropicAcceptsTemperature(request.model) ? { temperature: request.temperature } : {}),
         system: request.system,
         messages: [{ role: "user", content: request.user }],
       },
       { provider_id: "anthropic-claude", provider_name: "Anthropic", key_env: "ANTHROPIC_API_KEY", api_key: auth.api_key },
     );
     reportUsage(payload, hooks);
-    return textFromPayload(payload);
+    return anthropicText(payload);
   },
 };
 

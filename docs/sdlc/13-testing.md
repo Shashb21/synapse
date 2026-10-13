@@ -27,7 +27,12 @@ How the code is tested today. This replaces the retired v1 pages [04-tdd.md](./0
 
 ## End to end: Playwright
 
-- **Config:** `playwright.config.ts`. One worker, Chromium. It starts the dev server (port 43217, or `E2E_PORT` for a parallel checkout) with `SYNAPSE_TEST_STUB_LLM=1` and every provider key blanked, so no spec can reach a real model.
+- **Config:** `playwright.config.ts`. One worker, Chromium. It starts its **own** dev server with `SYNAPSE_TEST_STUB_LLM=1` and every provider key blanked, so no spec can reach a real model.
+- **Isolation (KAN-19):** the suite never uses your dev server or dev database. The setup turns AI on platform-wide and specs reset workspaces, so it must not touch the data you work in.
+  - Port: `E2E_PORT` (default **43219**; `npm run dev` is 43217).
+  - Database: `E2E_DATABASE_URL` (default `postgres://synapse:synapse@127.0.0.1:5433/synapse_e2e`). Create it once: `docker exec synapse-postgres psql -U synapse -d synapse -c "create database synapse_e2e"`. In CI the workflow's `DATABASE_URL` (its Postgres service) is used.
+  - The config refuses to run against the dev database (`synapse`) unless `E2E_ALLOW_DEV_DB=1`.
+  - An existing server on the port is reused only with `E2E_REUSE=1`; otherwise Playwright starts its own and fails if the port is taken.
 - **Setup:** `e2e/global.setup.ts` signs in once with the demo sign-in (development builds only), turns AI and every section on, and saves the cookies every other spec starts from.
 - **Specs (45 files):**
   - `e2e/features/` — one spec per stage, `s0-upload` to `s10-timeline`, each with its own gold case; feature specs (`ai-off`, `ai-toggle-settings`, `control-panel-provider-keys`, `observability-trace`, `hillclimb-rationale`, `login-workspaces`, `admin-customers`, `admin-users`, `setup-wizard`, …); and KAN specs (`kan-8-tactic-ideation`, `kan-16-manual-and-gates`, `kan-25-manual-timeline`, `kan-26-blank-and-demo`, `kan-49` to `kan-55`, …). `room.spec.ts`, `prep-room.spec.ts` and `kan-55-breakouts.spec.ts` cover Room and Breakouts, which are switched off in the app.

@@ -31,9 +31,9 @@ import {
   ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
-import { gapVersionsFor } from "@/lib/iegp/gap-history";
-import { entityHistory } from "@/lib/iegp/entity-history";
+import { gapRecord } from "@/lib/iegp/gap-record";
 import { EntityHistory } from "@/components/entity-history";
+import { GapConfirmationAndObjective, GapRecordSections, NeedProvenance } from "@/components/gap-record-sections";
 import {
   buildTacticLibrary,
   computeGapStatus,
@@ -70,12 +70,10 @@ export default async function GapDetailPage({
     .map((l) => ({ link: l, need: state.needs.find((n) => n.id === l.need_id)! }))
     .filter((x) => x.need);
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
-  // The gap's own changes plus its mappings' and leftovers' (KAN-90).
-  const history = await entityHistory([
-    gap.id,
-    ...coverages.map((c) => c.id),
-    ...state.residuals.filter((r) => r.gap_id === gap.id).map((r) => r.id),
-  ]);
+  // Everything about the gap from one loader (KAN-97); history is its own, its mappings' and leftovers'.
+  const record = (await gapRecord(gap.id, state))!;
+  const history = record.history;
+  const provenanceByNeed = new Map(record.needs.map((entry) => [entry.need.id, entry]));
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
   const computed = computeGapStatus(coverages, state.tactics, {
     hasAcceptedChild: children.length > 0,
@@ -194,6 +192,11 @@ export default async function GapDetailPage({
         </div>
         <GapDetailsEditor gapId={gap.id} metadata={gap.metadata} readOnly={gap.retired} className="mt-3" />
       </div>
+      <GapConfirmationAndObjective
+        record={record}
+        objectives={state.objectives.map((o) => ({ id: o.id, name: o.name }))}
+        identity={identity}
+      />
       <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
         {GAP_STATUS_DEFINITIONS[shown]}{" "}
         {shown === "validated_partial"
@@ -248,8 +251,11 @@ export default async function GapDetailPage({
                   </span>
                   <p className="mt-1">{need.statement}</p>
                   {need.source_quote && need.source_quote !== need.statement ? (
-                    <p className="mt-1 text-[12px] text-muted-foreground">“{need.source_quote}”</p>
+                    <p className="mt-1 text-[12px] text-muted-foreground" title={need.source_quote}>
+                      “{need.source_quote.length > 400 ? `${need.source_quote.slice(0, 397)}…` : need.source_quote}”
+                    </p>
                   ) : null}
+                  {provenanceByNeed.get(need.id) ? <NeedProvenance entry={provenanceByNeed.get(need.id)!} /> : null}
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <ActionDialog
                       endpoint="/api/iegp"
@@ -590,11 +596,13 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      {gapVersionsFor(state, gap.id).length > 0 ? (
+      <GapRecordSections record={record} />
+
+      {record.versions.length > 0 ? (
         <section className="mb-8">
           <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Version history</h2>
           <ul className="grid gap-2">
-            {gapVersionsFor(state, gap.id)
+            {record.versions
               .map((row) => (
                 <li key={row.id} className="border border-border bg-card p-3 text-[13px] rounded-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">

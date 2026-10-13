@@ -42,9 +42,19 @@ export type GanttActivity = {
   start: string;
   end: string;
   readout: string | null;
+  /** Dependencies recorded on the tactic (a person's or the source's): they gate the dates. */
   depends_on: string[];
+  /**
+   * Dependencies inferred only from sharing a gap (dissemination after the work
+   * it reports; a sub-gap after its parent). Proposals, never scheduling facts
+   * (KAN-85, docs/sdlc/14-roadmap-policy.md): they do not shift dates.
+   */
+  proposed_depends_on?: string[];
   gap_ids: string[];
 };
+
+/** A loop, or a dependency on an activity that is not on the chart (KAN-85). */
+export type GanttProblem = { kind: "cycle" | "dangling"; activity_id: string; upstream_id: string };
 
 /** Dissemination waits on generating work that covers the same gap. */
 export const GANTT_DISSEMINATION_TYPES = new Set([
@@ -248,6 +258,26 @@ function applyDateContinuity(
   }
 }
 
+/**
+ * Loops and dependencies on activities that are not on the chart, reported
+ * instead of silently skipped (KAN-85). Proposed dependencies are not checked:
+ * they gate nothing.
+ */
+export function ganttProblems(activities: GanttActivity[]): GanttProblem[] {
+  const ids = new Set(activities.map((row) => row.id));
+  const cyclic = cyclicActivityIds(activities);
+  const problems: GanttProblem[] = [];
+  for (const activity of activities) {
+    for (const upstreamId of activity.depends_on) {
+      if (!ids.has(upstreamId)) problems.push({ kind: "dangling", activity_id: activity.id, upstream_id: upstreamId });
+      else if (cyclic.has(activity.id) && cyclic.has(upstreamId)) {
+        problems.push({ kind: "cycle", activity_id: activity.id, upstream_id: upstreamId });
+      }
+    }
+  }
+  return problems;
+}
+
 /** True when every successor starts on or after each resolvable upstream gate. */
 export function dependenciesRespectReadouts(activities: GanttActivity[]): boolean {
   const byId = new Map(activities.map((row) => [row.id, row]));
@@ -310,15 +340,15 @@ export function projectGanttFromTactics(args: {
     });
   }
 
+  // Inferred from shared gaps only: kept apart as proposals, never merged into depends_on.
   const inferred = inferCoverageDependencies({
     activities: working,
     gaps: args.gaps ?? [],
   });
   for (const activity of working) {
-    activity.depends_on = uniqueSorted([
-      ...activity.depends_on,
-      ...(inferred.get(activity.id) ?? []),
-    ]);
+    activity.proposed_depends_on = (inferred.get(activity.id) ?? []).filter(
+      (id) => !activity.depends_on.includes(id),
+    );
   }
 
   const pinned = new Set(
@@ -365,6 +395,15 @@ export function assertSaveFinalActivities(
   );
   if (activities.length === 0) {
     throw new Error("Cannot save final: no activities projected from validated tactics");
+  }
+  const problems = ganttProblems(activities);
+  if (problems.length > 0) {
+    const first = problems[0]!;
+    throw new Error(
+      `Cannot save final: ${problems.length} dependency problem(s), e.g. ${first.activity_id} ${
+        first.kind === "cycle" ? "is in a dependency loop with" : "waits on an activity not on the chart:"
+      } ${first.upstream_id}`,
+    );
   }
   for (const [index, row] of activities.entries()) {
     const tacticId = row.tactic_id?.trim();

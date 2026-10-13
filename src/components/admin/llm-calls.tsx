@@ -81,7 +81,7 @@ export function LlmCallList({ calls }: { calls: LlmCallRecord[] }) {
               </span>
             </div>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              {call.provider_id} · {call.model} · temperature {call.params.temperature} · max {tokens(call.params.max_tokens)} tokens
+              {call.provider_id} · {call.model} · {call.params.temperature === null ? "temperature not sent" : `temperature ${call.params.temperature}`} · max {tokens(call.params.max_tokens)} tokens
             </p>
             <p className="mt-1 text-[12px] text-muted-foreground">
               Tokens in {tokens(call.usage?.input_tokens)} · out {tokens(call.usage?.output_tokens)}

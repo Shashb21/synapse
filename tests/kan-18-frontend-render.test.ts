@@ -187,6 +187,44 @@ describe("Prioritize matrix nudges", () => {
   });
 });
 
+describe("Prioritize matrix nudges on unload", () => {
+  it("a nudge still waiting on its debounce is sent with keepalive when the page goes away", () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ placement: { band: "high", validated: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    act(() =>
+      root.render(
+        createElement(PrioritizeMatrix, {
+          scope: "all",
+          gaps: [gap("GAP-A", 40, 40), gap("GAP-B", 60, 60)],
+          axes: [axis("impact"), axis("urgency")],
+          xAxis: axis("impact"),
+          yAxis: axis("urgency"),
+          identity: { signed_in: true, actor_name: "Tester", actor_function: "medical_affairs" },
+          mayPrioritize: true,
+        }),
+      ),
+    );
+    const button = (name: string) =>
+      container.querySelector(`button[aria-label^="Gap ${name}:"]`) as HTMLButtonElement;
+    act(() => {
+      button("GAP-A").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      button("GAP-B").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    // Reload / close before the 450 ms debounce: React does not unmount, the page just goes.
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    const sent = fetchMock.mock.calls
+      .filter(([, init]) => init?.keepalive === true)
+      .map(([, init]) => JSON.parse(String(init.body)))
+      .filter((body) => body.action === "move_placement")
+      .map((body) => `${body.gap_id}:${body.x},${body.y}`)
+      .sort();
+    expect(sent).toEqual(["GAP-A:42,40", "GAP-B:60,62"]);
+  });
+});
+
 describe("Room audience", () => {
   it("the audience frame is watch-only: inert, no pointer, no tab stop", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({})));

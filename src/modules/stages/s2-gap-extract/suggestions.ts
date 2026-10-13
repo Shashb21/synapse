@@ -34,6 +34,13 @@ async function beforeDecision(
   }
 }
 
+/** The S2 candidate row records the gap it became or joined (KAN-97). */
+async function linkCandidateToGap(candidateRowId: string | null | undefined, gapId: string) {
+  if (!candidateRowId) return;
+  await ensurePlatformSchema([GAP_CANDIDATES_DDL]);
+  await db().update(gapCandidates).set({ committed_gap_id: gapId }).where(eq(gapCandidates.id, candidateRowId));
+}
+
 /**
  * Merge: the gap is reworded, the source joins it, its mappings are flagged for
  * review, and its validated priority goes back to draft, because the band was set
@@ -45,6 +52,7 @@ export async function acceptGapMergeSuggestion(
   const before = await beforeDecision(args.suggestion_id);
   const { gap_id } = await acceptGapMerge(args);
   const priority_reset = await resetPlacementValidation(gap_id);
+  await linkCandidateToGap(before?.suggestion.candidate_row_id, gap_id);
   if (before) {
     await captureGapSuggestionDecision({
       ...before,
@@ -62,6 +70,7 @@ export async function acceptGapMergeSuggestion(
 export async function acceptGapSplitSuggestion(args: Decision & { name?: string; statement?: string }) {
   const before = await beforeDecision(args.suggestion_id);
   const result = await acceptGapSplit(args);
+  await linkCandidateToGap(before?.suggestion.candidate_row_id, result.new_gap_id);
   if (before) {
     await captureGapSuggestionDecision({
       ...before,

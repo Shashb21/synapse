@@ -1,4 +1,4 @@
-import { desc, inArray } from "drizzle-orm";
+import { and, desc, gte, inArray } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as kernel from "@/modules/kernel/schema";
 import * as t from "./schema";
@@ -34,13 +34,20 @@ const LIMIT = 200;
  * the edit (no before/after), so it is folded into it; rows from before
  * request ids were kept are all shown.
  */
-export async function entityHistory(entityIds: string[]): Promise<HistoryEntry[]> {
+export async function entityHistory(entityIds: string[], options: { since?: string | null } = {}): Promise<HistoryEntry[]> {
   const ids = [...new Set(entityIds.filter(Boolean))];
   if (ids.length === 0) return [];
   await ensurePlatformSchema();
+  // Only this instance of the record (KAN-97): history from before the workspace's
+  // last reset belongs to a plan that no longer exists.
+  const since = options.since ?? null;
   const [edits, actions] = await Promise.all([
-    db().select().from(kernel.editRecords).where(inArray(kernel.editRecords.entity_id, ids)).orderBy(desc(kernel.editRecords.at)).limit(LIMIT),
-    db().select().from(t.audit).where(inArray(t.audit.entity_id, ids)).orderBy(desc(t.audit.at)).limit(LIMIT),
+    db().select().from(kernel.editRecords)
+      .where(since ? and(inArray(kernel.editRecords.entity_id, ids), gte(kernel.editRecords.at, since)) : inArray(kernel.editRecords.entity_id, ids))
+      .orderBy(desc(kernel.editRecords.at)).limit(LIMIT),
+    db().select().from(t.audit)
+      .where(since ? and(inArray(t.audit.entity_id, ids), gte(t.audit.at, since)) : inArray(t.audit.entity_id, ids))
+      .orderBy(desc(t.audit.at)).limit(LIMIT),
   ]);
   const editKeys = new Set(edits.filter((row) => row.request_id).map((row) => `${row.request_id}|${row.entity_id}`));
   const entries: HistoryEntry[] = [

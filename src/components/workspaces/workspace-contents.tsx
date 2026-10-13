@@ -22,14 +22,14 @@ const COPY: Record<Replace, { button: string; title: string; body: string; confi
   load_demo: {
     button: "Load demo data",
     title: "Replace everything with the Velmara demo?",
-    body: "Every source, gap, tactic, priority, timeline and room note in this workspace is deleted and replaced with the Velmara demo data. The workspace is marked Demo. This cannot be undone.",
+    body: "Every source, gap, tactic, priority, timeline, saved plan version (finals included) and room note in this workspace is deleted and replaced with the Velmara demo data. The workspace is marked Demo. Export a final plan first if you need to keep it. This cannot be undone.",
     confirm: "Replace with demo data",
     done: "Demo data loaded. This workspace is marked Demo.",
   },
   reset: {
     button: "Reset to blank",
     title: "Reset this workspace to blank?",
-    body: "Everything in this workspace is deleted: the asset details, objectives, sources, gaps, tactics, priorities, timeline and room notes. Setup starts again from an empty plan. This cannot be undone.",
+    body: "Everything in this workspace is deleted: the asset details, objectives, sources, gaps, tactics, priorities, timeline, saved plan versions (finals included) and room notes. Setup starts again from an empty plan. Export a final plan first if you need to keep it. This cannot be undone.",
     confirm: "Reset to blank",
     done: "Workspace reset to blank. Run setup to start the plan.",
   },

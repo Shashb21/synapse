@@ -35,6 +35,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "clear_gap_status_override",
       "park_gap",
       "unpark_gap",
+      "set_gap_objective",
       "restore_gap",
       "restore_need",
       "restore_mapping",

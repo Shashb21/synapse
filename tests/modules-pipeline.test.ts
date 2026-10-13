@@ -1,3 +1,4 @@
+import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
@@ -16,7 +17,7 @@ import { listGapCandidates } from "@/modules/stages/s2-gap-extract/module";
 import { listMappingCandidates } from "@/modules/stages/s4-kg-mapping/module";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import { decideIdeationProposal, listIdeationProposals } from "@/modules/stages/s9-ideation/module";
-import { latestPlan, savePlan, timelineModel, updateTimelineActivity } from "@/modules/stages/s10-timeline/module";
+import { acceptTimelineEstimates, latestPlan, savePlan, timelineModel, updateTimelineActivity } from "@/modules/stages/s10-timeline/module";
 import type { ConsolidationOutput } from "@/modules/stages/s7-consolidation/module";
 import type { GapExtractOutput } from "@/modules/stages/s2-gap-extract/module";
 import type { MappingOutput } from "@/modules/stages/s4-kg-mapping/module";
@@ -255,6 +256,14 @@ describe("modular pipeline, S0 to S10", () => {
     const moved = rebuilt.activities.find((row) => row.id === activity.id)!;
     expect(moved.start_date).toBe("2027-01-01");
 
+    // The other activities' dates are model estimates nobody reviewed: final waits for that (KAN-85).
+    await expect(savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR })).rejects.toThrow(
+      /model-estimated .* nobody has reviewed/,
+    );
+    const { accepted } = await acceptTimelineEstimates({ rationale: "Estimates reviewed in the Q1 planning call", actor: ACTOR });
+    expect(accepted.length).toBeGreaterThan(0);
+    // A complete final needs every gap resolved, confirmed and banded (KAN-86).
+    await makeFinalReady(ACTOR);
     const plan = await savePlan({ status: "final", note: "Signed off in the Q1 review", actor: ACTOR });
     expect(plan.version).toBe(1);
     expect(plan.status).toBe("final");

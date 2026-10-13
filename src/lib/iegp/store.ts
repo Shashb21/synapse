@@ -10,8 +10,10 @@ import type { PlanningContext, SetupObjective } from "./planning-context";
 import { parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type {
+  GapConfirmer,
   GapMetadata,
   GapStatusOverride,
+  GapVersionSnapshot,
   GapSuggestion,
   GapSuggestionSource,
   GapSuggestionStatus,
@@ -77,6 +79,36 @@ function asStatusOverride(value: unknown): GapStatusOverride | null {
     stale: Boolean(v.stale),
   };
 }
+
+function asConfirmer(value: unknown): GapConfirmer | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.name !== "string") return null;
+  return {
+    principal: typeof v.principal === "string" ? v.principal : "anonymous",
+    name: v.name,
+    function: (typeof v.function === "string" ? v.function : "evidence_lead") as ActorFunction,
+    role: typeof v.role === "string" ? v.role : null,
+  };
+}
+
+/**
+ * The confirmation fields a confirming action writes (KAN-97): who (as the session
+ * knows them, falling back to the name typed), when, and why.
+ */
+export async function confirmationBy(actor_name: string, actor_function: ActorFunction, rationale?: string | null) {
+  const who = await currentAttribution();
+  const validated_by: GapConfirmer = {
+    principal: who.principal,
+    name: actor_name?.trim() || who.name,
+    function: actor_function,
+    role: who.role,
+  };
+  return { validated_by, validated_at: now(), validation_rationale: rationale?.trim() || null };
+}
+
+/** Clears a confirmation that no longer holds (the wording or status it confirmed changed). */
+export const NOT_CONFIRMED = { validated_by: null, validated_at: null, validation_rationale: null } as const;
 
 function asLock(value: unknown): Lock {
   const v = value as Lock;
@@ -257,6 +289,9 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       stakeholder: n.stakeholder as ActorFunction,
       status: n.status as IegpState["needs"][0]["status"],
       status_lock: asLock(n.lock),
+      run_id: n.run_id ?? null,
+      candidate_row_id: n.candidate_row_id ?? null,
+      block_id: n.block_id ?? null,
     })),
     gaps: gaps.map((g) => ({
       ...g,
@@ -277,6 +312,10 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       new_source_at: g.new_source_at ?? null,
       new_source_need_id: g.new_source_need_id ?? null,
       related_gap_ids: Array.isArray(g.related_gap_ids) ? g.related_gap_ids.map(String) : [],
+      validated_by: asConfirmer(g.validated_by),
+      validated_at: g.validated_at ?? null,
+      validation_rationale: g.validation_rationale ?? null,
+      origin_gap_id: g.origin_gap_id ?? null,
     })),
     need_gap_links: need_gap_links.map((l) => ({
       ...l,
@@ -335,6 +374,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       domain: row.domain as IegpState["gaps"][0]["domain"],
       event: row.event as IegpState["gap_versions"][0]["event"],
       actor_function: row.actor_function as ActorFunction,
+      snapshot: (row.snapshot as GapVersionSnapshot | null) ?? null,
     })),
     breakout_groups: breakout_groups.map((row) => ({
       ...row,
@@ -597,6 +637,9 @@ async function insertLiveOpenGap(args: {
   return gapId;
 }
 
+/** Where a need came from (KAN-97): the S2 run, its candidate row and the source block. */
+export type NeedProvenance = { run_id?: string | null; candidate_row_id?: string | null; block_id?: string | null };
+
 async function insertNeedForGap(args: {
   gapId: string;
   sourceId: string;
@@ -604,6 +647,7 @@ async function insertNeedForGap(args: {
   sourceQuote: string;
   role: "primary" | "supporting";
   actor_function: ActorFunction;
+  provenance?: NeedProvenance;
 }, transaction?: StoreTransaction) {
   const state = transaction ? await readState(transaction) : await loadState();
   const gap = state.gaps.find((g) => g.id === args.gapId);
@@ -626,6 +670,7 @@ async function insertNeedForGap(args: {
     source_id: args.sourceId,
     objective: obj,
     geography: state.asset.geography,
+    provenance: args.provenance,
   }, transaction);
   await linkNeedOntoGap(needId, args.gapId, args.role, transaction);
 }
@@ -644,6 +689,7 @@ async function insertNeedRow(args: {
   /** Undefined in a plan with no objectives yet: the need is stored unlinked. */
   objective: IegpState["objectives"][0] | undefined;
   geography: string;
+  provenance?: NeedProvenance;
 }, transaction?: StoreTransaction) {
   await (transaction ?? db()).insert(t.needs).values({
     id: args.id,
@@ -659,10 +705,14 @@ async function insertNeedRow(args: {
     outcome: "",
     timing: "",
     source_id: args.source_id,
-    source_quote: args.source_quote.trim().slice(0, 280) || args.statement.slice(0, 280),
+    // The whole quote is kept (KAN-97); screens shorten it for display.
+    source_quote: args.source_quote.trim() || args.statement,
     confidence: null,
     status: "candidate",
     lock: unlocked(),
+    run_id: args.provenance?.run_id ?? null,
+    candidate_row_id: args.provenance?.candidate_row_id ?? null,
+    block_id: args.provenance?.block_id ?? null,
   });
 }
 
@@ -1232,6 +1282,8 @@ export async function syncComputedGapStatuses(gapId?: string, opts?: { human?: b
           lock: unlocked(),
           status_override: null,
           human_validated: false,
+          // The status a person confirmed no longer holds (KAN-97).
+          ...NOT_CONFIRMED,
         })
         .where(eq(t.gaps.id, gap.id));
       await appendAuditOn(d,
@@ -1440,6 +1492,8 @@ export async function setGapSettings(args: {
   settings: string[];
   actor_name: string;
   actor_function: ActorFunction;
+  /** Optional: why the settings changed (KAN-97). */
+  rationale?: string | null;
 }): Promise<string[]> {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -1447,6 +1501,20 @@ export async function setGapSettings(args: {
   if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
   const settings = normalizeSettings(args.settings);
   await db().update(t.gaps).set({ settings }).where(eq(t.gaps.id, args.gap_id));
+  if (settings.join("|") !== gap.settings.join("|")) {
+    await recordEdit({
+      stage: "S2",
+      entity_type: "gap",
+      entity_id: gap.id,
+      field: "settings",
+      action: "edit",
+      before: gap.settings.join(", ") || null,
+      after: settings.join(", ") || null,
+      rationale: args.rationale ?? null,
+      rationale_optional: true,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+  }
   await appendAudit(
     args.actor_name,
     args.actor_function,
@@ -1464,6 +1532,8 @@ export async function setGapMetadata(args: {
   metadata: unknown;
   actor_name: string;
   actor_function: ActorFunction;
+  /** Optional: why the details changed (KAN-97). */
+  rationale?: string | null;
 }): Promise<GapMetadata> {
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -1471,6 +1541,28 @@ export async function setGapMetadata(args: {
   if (gap.retired) throw new Error("A retired gap cannot be edited.");
   const metadata = normalizeGapMetadata(args.metadata);
   await db().update(t.gaps).set({ metadata }).where(eq(t.gaps.id, args.gap_id));
+  // Each changed field is its own edit record, with the full before and after text.
+  const fieldText = (m: GapMetadata, key: keyof GapMetadata) => {
+    const value = m[key];
+    return (Array.isArray(value) ? value.join(", ") : String(value ?? "")).trim() || null;
+  };
+  for (const key of ["stakeholders", "geography", "regional_nuances", "notes"] as const) {
+    const before = fieldText(gap.metadata, key);
+    const after = fieldText(metadata, key);
+    if (before === after) continue;
+    await recordEdit({
+      stage: "S2",
+      entity_type: "gap",
+      entity_id: gap.id,
+      field: `metadata.${key}`,
+      action: "edit",
+      before,
+      after,
+      rationale: args.rationale ?? null,
+      rationale_optional: true,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+  }
   const summary = [
     metadata.stakeholders.length ? `Stakeholders: ${metadata.stakeholders.join(", ")}` : null,
     metadata.geography ? `Geography: ${metadata.geography}` : null,
@@ -1486,6 +1578,45 @@ export async function setGapMetadata(args: {
     summary.length ? summary.join(" · ") : "Metadata cleared",
   );
   return metadata;
+}
+
+/**
+ * Links a gap to one of the plan's objectives (KAN-97): the decision its evidence
+ * serves. An edit record keeps the old and new objective and why.
+ */
+export async function setGapObjective(args: {
+  gap_id: string;
+  objective_id: string;
+  rationale?: string | null;
+  actor_name: string;
+  actor_function: ActorFunction;
+}): Promise<string> {
+  const state = await loadState();
+  const gap = state.gaps.find((g) => g.id === args.gap_id);
+  if (!gap) throw new Error("Gap not found");
+  if (gap.retired) throw new Error("A retired gap cannot be edited. Edit the live gap.");
+  const objective = state.objectives.find((o) => o.id === args.objective_id);
+  if (!objective) throw new Error("Choose one of the plan's objectives.");
+  if (gap.objective_id === objective.id) throw new Error("The gap already serves that objective.");
+  const label = (id: string) => {
+    const found = state.objectives.find((o) => o.id === id);
+    return found ? `${found.id} · ${found.name}` : id || null;
+  };
+  await db().update(t.gaps).set({ objective_id: objective.id }).where(eq(t.gaps.id, gap.id));
+  await recordEdit({
+    stage: "S2",
+    entity_type: "gap",
+    entity_id: gap.id,
+    field: "objective",
+    action: "edit",
+    before: label(gap.objective_id),
+    after: label(objective.id),
+    rationale: args.rationale ?? null,
+    rationale_optional: true,
+    actor: { name: args.actor_name, function: args.actor_function },
+  });
+  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "set_objective", objective.id);
+  return objective.id;
 }
 
 export async function unparkGap(args: {
@@ -2682,6 +2813,12 @@ export async function createGap(args: {
   /** Provenance for a gap promoted from a rejected S2 candidate: its source and quote. */
   source_id?: string;
   source_quote?: string;
+  /** An explicit objective, e.g. inherited from the gap an S2 split took this one from. */
+  objective_id?: string;
+  /** The gap an accepted S2 split suggestion took this one from (KAN-97). */
+  origin_gap_id?: string | null;
+  /** Provenance of the need made from source_id/source_quote (KAN-97). */
+  need_provenance?: NeedProvenance;
 }, transaction?: StoreTransaction) {
   // The description is what evidence is missing; a person may give only the title (KAN-52).
   const statement = (args.statement ?? "").trim() || (args.name ?? "").trim();
@@ -2693,9 +2830,12 @@ export async function createGap(args: {
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
   let metadata = normalizeGapMetadata(args.metadata ?? {});
+  let objectiveId = obj?.id ?? "";
   if (args.parent_gap_id) {
     const parent = state.gaps.find((g) => g.id === args.parent_gap_id);
     if (!parent) throw new Error("Parent gap not found");
+    // A child answers the same objective as its parent (KAN-97).
+    if (parent.objective_id) objectiveId = parent.objective_id;
     if (!args.settings) settings = parent.settings;
     // …and its metadata (KAN-49): who it affects and where do not change on a split.
     if (args.metadata === undefined) metadata = parent.metadata;
@@ -2711,7 +2851,7 @@ export async function createGap(args: {
     name,
     statement,
     domain,
-    objective_id: obj?.id ?? "",
+    objective_id: args.objective_id ?? objectiveId,
     status: "validated_open",
     exclusion_reason: null,
     exclusion_note: null,
@@ -2725,6 +2865,7 @@ export async function createGap(args: {
     parked_reason: null,
     settings,
     metadata,
+    origin_gap_id: args.origin_gap_id ?? null,
     number: await allocateNumber("gap_number", Math.max(0, ...state.gaps.map((gap) => gap.number)) + 1, transaction),
   });
   await appendAudit(args.actor_name, args.actor_function, "gap", id, "create", name, transaction);
@@ -2738,6 +2879,7 @@ export async function createGap(args: {
       sourceQuote: args.source_quote?.trim() || statement,
       role: "primary",
       actor_function: args.actor_function,
+      provenance: args.need_provenance,
     }, transaction);
   }
   await syncComputedGapStatuses(id, undefined, transaction);
@@ -2904,6 +3046,8 @@ export type CandidateNeedRow = {
    * gap row in the same commit that carries the same candidate `id`.
    */
   gap_id?: string | null;
+  /** The S2 run, candidate row and source block this need came from (KAN-97). */
+  provenance?: NeedProvenance;
 };
 
 /**
@@ -3047,8 +3191,9 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
 
   // A gap holds each source sentence once: re-running extraction on a document, or two
   // candidates quoting the same sentence, must not attach it again (KAN-74).
+  // Older rows kept only the first 280 characters of a quote, so compare on those.
   const quoteKey = (gapId: string, quote: string) =>
-    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim()}`;
+    `${gapId}|${sourceId}|${quote.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 280)}`;
   const attached = new Set(
     state.need_gap_links.flatMap((link) => {
       const need = state.needs.find((row) => row.id === link.need_id);
@@ -3061,6 +3206,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
     statement: string;
     quote: string;
     domain: EvidenceDomain;
+    provenance?: NeedProvenance;
   }) => {
     const key = quoteKey(args2.gapId, args2.quote || args2.statement);
     if (attached.has(key)) return;
@@ -3077,6 +3223,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       source_id: sourceId,
       objective: obj,
       geography: state.asset.geography,
+      provenance: args2.provenance,
     });
     const role = hasPrimary.has(args2.gapId) ? "supporting" : "primary";
     hasPrimary.add(args2.gapId);
@@ -3111,6 +3258,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: need?.statement ?? gapRow.statement,
       quote: need?.source_quote ?? gapRow.source_quote,
       domain: gapRow.domain,
+      provenance: need?.provenance,
     });
   }
   for (const need of needsOnExistingGaps) {
@@ -3120,6 +3268,7 @@ export const commitExtractedRecords = atomic(async function commitExtractedRecor
       statement: need.statement,
       quote: need.source_quote,
       domain: gap.domain,
+      provenance: need.provenance,
     });
     gapIdByRow[need.id] = gap.id;
   }
@@ -3305,10 +3454,24 @@ export const acceptGapMerge = atomic(async function acceptGapMerge(
       actor_name: args.actor_name,
       actor_function: args.actor_function,
     });
+    // The wording a person confirmed changed: the gap needs confirming again (KAN-97).
     await db()
       .update(t.gaps)
-      .set({ name, statement, lock: makeLock(args.actor_name, args.actor_function, rationale) })
+      .set({ name, statement, lock: makeLock(args.actor_name, args.actor_function, rationale), human_validated: false, ...NOT_CONFIRMED })
       .where(eq(t.gaps.id, gap.id));
+    if (gap.human_validated) {
+      await recordEdit({
+        stage: "S2",
+        entity_type: "gap",
+        entity_id: gap.id,
+        field: "confirmation",
+        action: "edit",
+        before: gap.validated_by ? `Confirmed by ${gap.validated_by.name}` : "Confirmed",
+        after: "Needs confirming",
+        rationale: "The wording changed by merging an overlapping source, so the gap needs confirming again.",
+        actor: { name: args.actor_name, function: args.actor_function },
+      });
+    }
     await recordFieldEdits({
       stage: "S2",
       entity_type: "gap",
@@ -3319,7 +3482,7 @@ export const acceptGapMerge = atomic(async function acceptGapMerge(
       actor_function: args.actor_function,
     });
   }
-  for (const source of suggestionSources(suggestion)) {
+  for (const [index, source] of suggestionSources(suggestion).entries()) {
     await insertNeedForGap({
       gapId: gap.id,
       sourceId: source.source_id,
@@ -3327,6 +3490,8 @@ export const acceptGapMerge = atomic(async function acceptGapMerge(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
+      // The suggestion's own candidate is the first source; repeats came from the same run.
+      provenance: { run_id: suggestion.run_id, candidate_row_id: index === 0 ? suggestion.candidate_row_id : null },
     });
   }
   // Mappings were judged against the old wording.
@@ -3363,6 +3528,8 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
   const statement = (args.statement ?? suggestion.split_statement).trim();
   if (!name) throw new Error("Give the new gap a name.");
   if (!statement) throw new Error("Give the new gap a statement.");
+  // The new gap comes from the existing one (KAN-97): same objective, settings and who
+  // it affects, a link back to it, and its source's provenance. Both stay live.
   const newGapId = await createGap({
     name,
     statement,
@@ -3372,6 +3539,11 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     note: rationale,
     source_id: suggestion.source_id,
     source_quote: suggestion.source_quote,
+    objective_id: gap.objective_id || undefined,
+    settings: gap.settings,
+    metadata: gap.metadata,
+    origin_gap_id: gap.id,
+    need_provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
   });
   for (const source of suggestion.extra_sources) {
     await insertNeedForGap({
@@ -3381,6 +3553,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
       sourceQuote: source.source_quote,
       role: "supporting",
       actor_function: args.actor_function,
+      provenance: { run_id: suggestion.run_id },
     });
   }
   await insertNeedForGap({
@@ -3390,6 +3563,7 @@ export const acceptGapSplit = atomic(async function acceptGapSplit(
     sourceQuote: suggestion.source_quote,
     role: "supporting",
     actor_function: args.actor_function,
+    provenance: { run_id: suggestion.run_id, candidate_row_id: suggestion.candidate_row_id },
   });
   await linkRelatedGaps(gap.id, newGapId);
   await closeSuggestion(suggestion.id, "split", { ...args, rationale, result_gap_id: newGapId });
@@ -3802,6 +3976,23 @@ export async function unlockTacticsStage(args: {
   );
 }
 
+/** Everything else a gap holds, for its version row (KAN-97). */
+function versionSnapshot(gap: IegpState["gaps"][0], extra?: Partial<GapVersionSnapshot>): GapVersionSnapshot {
+  return {
+    settings: gap.settings,
+    metadata: gap.metadata,
+    objective_id: gap.objective_id,
+    status_override: gap.status_override,
+    human_validated: gap.human_validated,
+    validated_by: gap.validated_by ?? null,
+    validated_at: gap.validated_at ?? null,
+    validation_rationale: gap.validation_rationale ?? null,
+    new_source_at: gap.new_source_at ?? null,
+    related_gap_ids: gap.related_gap_ids ?? [],
+    ...extra,
+  };
+}
+
 async function insertGapVersion(args: {
   live_gap_id: string;
   retired_gap_id: string;
@@ -3809,6 +4000,8 @@ async function insertGapVersion(args: {
   event: IegpState["gap_versions"][0]["event"];
   actor_name: string;
   actor_function: ActorFunction;
+  /** What the version records beyond the gap row: carried links, the priority it had. */
+  extra?: Partial<GapVersionSnapshot>;
 }, transaction?: StoreTransaction) {
   const state = transaction ? await readState(transaction) : await loadState();
   const id = await allocateId(
@@ -3828,7 +4021,147 @@ async function insertGapVersion(args: {
     at: now(),
     actor_name: args.actor_name,
     actor_function: args.actor_function,
+    snapshot: versionSnapshot(args.snapshot, args.extra),
   });
+}
+
+type RetiredGapTargets = {
+  /** The successor that keeps the open question: it takes the priority, ideas and pending suggestions. */
+  open: string | null;
+  /** Every successor: each takes the groups, related gaps and rejected mappings. */
+  all: string[];
+};
+
+const rowsOf = (result: unknown) => (Array.isArray(result) ? result : ((result as { rows?: unknown[] })?.rows ?? [])) as Record<string, unknown>[];
+
+/**
+ * Moves or closes everything that hangs off a gap a split or rewrite retires
+ * (KAN-97), inside the caller's transaction, so nothing is left pointing at a
+ * retired id: the S8 placement (to the open successor, to be validated again),
+ * ideas, breakout groups, related gaps, pending overlap suggestions, rejected
+ * mappings, timeline activities and expansion scopes. The parent's residual is
+ * closed; coverages a person did not carry stay on the retired gap and are named
+ * in its version. Returns what the version records about it.
+ */
+async function carryRetiredGapLinks(
+  transaction: StoreTransaction,
+  args: { from: IegpState["gaps"][0]; targets: RetiredGapTargets; event: "split" | "rewrite"; actor_name: string; actor_function: ActorFunction },
+): Promise<Partial<GapVersionSnapshot>> {
+  const fromId = args.from.id;
+  const { open, all } = args.targets;
+  const state = await readState(transaction);
+  const at = now();
+  const carried: Record<string, string[]> = {};
+  const verb = args.event === "split" ? "split" : "rewritten";
+
+  // Priority: the band was set for the old question, so it moves as a draft to validate again.
+  const [placement] = rowsOf(await transaction.execute(sql`SELECT * FROM priority_placements WHERE gap_id = ${fromId}`));
+  if (placement) {
+    const [taken] = open ? rowsOf(await transaction.execute(sql`SELECT gap_id FROM priority_placements WHERE gap_id = ${open}`)) : [];
+    if (open && !taken) {
+      const was = placement.band ? `${String(placement.band)}${placement.validated ? ", validated" : ""}` : "no band";
+      await transaction.execute(sql`UPDATE priority_placements
+        SET gap_id = ${open}, validated = false, human_band = false, at = ${at},
+            rationale = ${`Carried from ${fromId} when it was ${verb} (was ${was}${placement.rationale ? `: ${String(placement.rationale)}` : ""}). Validate the band again for the new wording.`}
+        WHERE gap_id = ${fromId}`);
+      carried.priority = [open];
+    } else {
+      await transaction.execute(sql`DELETE FROM priority_placements WHERE gap_id = ${fromId}`);
+      carried.priority = [];
+    }
+  }
+
+  // Ideas follow the open question; with none left, pending ideas are closed with the reason.
+  const ideas = rowsOf(await transaction.execute(sql`SELECT id, status FROM ideation_proposals WHERE gap_id = ${fromId}`));
+  if (ideas.length > 0) {
+    if (open) {
+      await transaction.execute(sql`UPDATE ideation_proposals SET gap_id = ${open} WHERE gap_id = ${fromId}`);
+    } else {
+      await transaction.execute(sql`UPDATE ideation_proposals
+        SET status = 'rejected', decided_by = ${args.actor_name}, decided_at = ${at},
+            decision_rationale = ${`Superseded: ${fromId} was ${verb} as Addressed, so no open question is left for this idea.`}
+        WHERE gap_id = ${fromId} AND status = 'proposed'`);
+    }
+    carried.ideas = ideas.map((row) => String(row.id));
+  }
+
+  // Breakout groups, related gaps and rejected mappings belong to every successor.
+  const groups = state.breakout_group_gaps.filter((row) => row.gap_id === fromId).map((row) => row.group_id);
+  for (const group_id of groups) {
+    for (const gap_id of all) await transaction.insert(t.breakoutGroupGaps).values({ group_id, gap_id }).onConflictDoNothing();
+  }
+  if (groups.length > 0) {
+    await transaction.delete(t.breakoutGroupGaps).where(eq(t.breakoutGroupGaps.gap_id, fromId));
+    carried.breakout_groups = groups;
+  }
+  const related = args.from.related_gap_ids ?? [];
+  for (const gap_id of all) {
+    const child = state.gaps.find((g) => g.id === gap_id);
+    const merged = [...new Set([...(child?.related_gap_ids ?? []), ...related])].filter((id) => id !== gap_id);
+    if (merged.length) await transaction.update(t.gaps).set({ related_gap_ids: merged }).where(eq(t.gaps.id, gap_id));
+  }
+  for (const other of state.gaps.filter((g) => g.id !== fromId && (g.related_gap_ids ?? []).includes(fromId))) {
+    const next = [...new Set((other.related_gap_ids ?? []).flatMap((id) => (id === fromId ? all : [id])))].filter((id) => id !== other.id);
+    await transaction.update(t.gaps).set({ related_gap_ids: next }).where(eq(t.gaps.id, other.id));
+  }
+  const rejections = state.mapping_suggestions.filter((m) => m.gap_id === fromId && m.status === "rejected" && m.lock.locked);
+  for (const rejection of rejections) {
+    for (const gap_id of all) {
+      await transaction
+        .insert(t.mappingSuggestions)
+        .values({ gap_id, tactic_id: rejection.tactic_id, status: "rejected", lock: rejection.lock })
+        .onConflictDoNothing();
+    }
+  }
+  if (rejections.length > 0) carried.mapping_rejections = rejections.map((m) => m.tactic_id);
+
+  // An overlap waiting on a person is about the question, which now lives on the successor.
+  const pending = state.gap_suggestions.filter((row) => row.gap_id === fromId && row.status === "pending");
+  const suggestionTarget = open ?? all[0] ?? null;
+  if (pending.length > 0 && suggestionTarget) {
+    await transaction.update(t.gapSuggestions).set({ gap_id: suggestionTarget })
+      .where(and(eq(t.gapSuggestions.gap_id, fromId), eq(t.gapSuggestions.status, "pending")));
+    carried.suggestions = pending.map((row) => row.id);
+  }
+
+  // The parent's queued leftover is closed; the open successor gets its own.
+  const residuals = state.residuals.filter((r) => r.gap_id === fromId && r.review_status !== "rejected");
+  for (const residual of residuals) {
+    await transaction.update(t.residuals).set({
+      review_status: "rejected",
+      lock: makeLock(args.actor_name, args.actor_function, `Closed: ${fromId} was ${verb}${open ? `; ${open} carries the open question` : ""}.`),
+    }).where(eq(t.residuals.id, residual.id));
+  }
+
+  // Timeline activities point at the successors whose coverage holds their tactic.
+  const coveredBy = (tacticId: string) => all.filter((gap_id) => state.coverages.some((c) => c.gap_id === gap_id && c.tactic_id === tacticId));
+  const fallback = open ? [open] : all;
+  const activities = rowsOf(await transaction.execute(sql`SELECT id, tactic_id, gap_ids FROM timeline_activities WHERE gap_ids @> ${JSON.stringify([fromId])}::jsonb`));
+  for (const activity of activities) {
+    const ids = (activity.gap_ids as string[]) ?? [];
+    const successors = coveredBy(String(activity.tactic_id));
+    const replacement = successors.length ? successors : fallback;
+    const next = [...new Set(ids.flatMap((id) => (id === fromId ? replacement : [id])))];
+    await transaction.execute(sql`UPDATE timeline_activities SET gap_ids = ${JSON.stringify(next)}::jsonb, updated_at = ${at} WHERE id = ${String(activity.id)}`);
+  }
+  if (activities.length > 0) carried.timeline_activities = activities.map((row) => String(row.id));
+
+  // Expansion scopes: the retired id leaves (its lineage stays in the scope's history).
+  const expansions = state.expansions.filter((e) => e.gap_ids.includes(fromId));
+  for (const expansion of expansions) {
+    const kept = expansion.gap_ids.filter((id) => id !== fromId);
+    const successors = coveredBy(expansion.tactic_id);
+    const next = kept.some((id) => all.includes(id)) ? kept : [...kept, ...(successors.length ? successors : fallback)];
+    await transaction.update(t.tacticExpansions).set({ gap_ids: [...new Set(next)], updated_at: at }).where(eq(t.tacticExpansions.id, expansion.id));
+  }
+  if (expansions.length > 0) carried.expansions = expansions.map((e) => e.id);
+
+  const leftBehind = state.coverages
+    .filter((c) => c.gap_id === fromId)
+    .map((c) => ({ id: c.id, tactic_id: c.tactic_id, expansion_id: c.expansion_id ?? null, overall: c.overall }));
+  await appendAudit(args.actor_name, args.actor_function, "gap", fromId, "carry_links",
+    Object.entries(carried).map(([kind, ids]) => `${kind}: ${ids.length}`).join(", ") || "nothing to carry", transaction);
+  return { priority: placement ?? null, coverages_left_behind: leftBehind, carried };
 }
 
 async function retireGap(gap_id: string, transaction?: StoreTransaction) {
@@ -3905,6 +4238,7 @@ export async function validateGap(args: {
     .set({
       human_validated: true,
       lock: makeLock(args.actor_name, args.actor_function, args.note),
+      ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Confirmed ${shown}`)),
     })
     .where(eq(t.gaps.id, args.gap_id));
   if (shown === "validated_open") {
@@ -4069,6 +4403,7 @@ export async function splitPartialGap(args: {
         computed_status: "validated_addressed",
         human_validated: true,
         lock: makeLock(args.actor_name, args.actor_function, "Split addressed slice."),
+        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Split from ${parent.id}: addressed slice.`)),
       })
       .where(eq(t.gaps.id, addressedId));
     await transaction
@@ -4078,8 +4413,16 @@ export async function splitPartialGap(args: {
         computed_status: "validated_open",
         human_validated: true,
         lock: makeLock(args.actor_name, args.actor_function, "Split open leftover."),
+        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Split from ${parent.id}: open leftover.`)),
       })
       .where(eq(t.gaps.id, openId));
+    const carried = await carryRetiredGapLinks(transaction, {
+      from: parent,
+      targets: { open: openId, all: [addressedId, openId] },
+      event: "split",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
     await ensurePriorityResidual(openId, args.actor_name, args.actor_function, transaction);
     await insertGapVersion({
       live_gap_id: addressedId,
@@ -4088,6 +4431,7 @@ export async function splitPartialGap(args: {
       event: "split",
       actor_name: args.actor_name,
       actor_function: args.actor_function,
+      extra: carried,
     }, transaction);
     await insertGapVersion({
       live_gap_id: openId,
@@ -4096,6 +4440,7 @@ export async function splitPartialGap(args: {
       event: "split",
       actor_name: args.actor_name,
       actor_function: args.actor_function,
+      extra: carried,
     }, transaction);
     await retireGap(parent.id, transaction);
     await appendAudit(
@@ -4178,8 +4523,16 @@ export async function rewritePartialGap(args: {
         computed_status: args.status,
         human_validated: true,
         lock: makeLock(args.actor_name, args.actor_function, args.note),
+        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Rewritten from ${original.id}.`)),
       })
       .where(eq(t.gaps.id, liveId));
+    const carried = await carryRetiredGapLinks(transaction, {
+      from: original,
+      targets: { open: args.status === "validated_open" ? liveId : null, all: [liveId] },
+      event: "rewrite",
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
     if (args.status === "validated_open") {
       await ensurePriorityResidual(liveId, args.actor_name, args.actor_function, transaction);
     }
@@ -4190,6 +4543,7 @@ export async function rewritePartialGap(args: {
       event: "rewrite",
       actor_name: args.actor_name,
       actor_function: args.actor_function,
+      extra: carried,
     }, transaction);
     await retireGap(original.id, transaction);
     await appendAudit(
@@ -4274,6 +4628,7 @@ export async function createAddressedGap(args: {
       computed_status: "validated_addressed",
       human_validated: true,
       lock: makeLock(args.actor_name, args.actor_function, args.note),
+      ...(await confirmationBy(args.actor_name, args.actor_function, args.note || "Created as Addressed with its accompanying tactic.")),
     })
     .where(eq(t.gaps.id, id));
   return id;

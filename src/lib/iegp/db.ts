@@ -433,6 +433,16 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_at text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS new_source_need_id text",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS related_gap_ids jsonb NOT NULL DEFAULT '[]'::jsonb",
+    // KAN-97: a confirmed gap is one record: who confirmed it, where its needs came from,
+    // and what a retired version held.
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS validated_by jsonb",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS validated_at text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS validation_rationale text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS origin_gap_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS run_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS candidate_row_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
     "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",
     // KAN-90: every plan audit row says who (verifiably), in what role, from which request.

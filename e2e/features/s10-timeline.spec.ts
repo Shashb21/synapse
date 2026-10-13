@@ -7,8 +7,7 @@ import {
   planState,
   runStage,
   seedMapped,
-  validateBandHigh,
-} from "../support/synapse";
+  validateBandHigh, resolveFinalPlanGaps } from "../support/synapse";
 
 type TimelineOutput = {
   activities: {
@@ -141,7 +140,9 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const download = page.waitForEvent("download", { timeout: 30_000 });
     await page.getByRole("button", { name: /export png/i }).click();
     const file = await download;
-    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-v.*\.png$/);
+    // A saved version is named vN-<code>; a plan edited since its last save (the test above
+    // changed a budget) exports as "current-<code>" so it is never mistaken for the saved one.
+    expect(file.suggestedFilename()).toMatch(/^synapse-iegp-(v\d+|current)-[0-9a-f]{8}\.png$/);
     expect((await file.path()) ?? "").not.toBe("");
   });
 
@@ -180,6 +181,13 @@ test.describe("S10 interactive Gantt IEGP", () => {
   });
 
   test("saves the plan as final, versioned, with its sign-off rationale", async ({ page, request }) => {
+    // KAN-86: the complete plan needs every gap resolved, confirmed and banded.
+    await resolveFinalPlanGaps(request);
+    // KAN-85: a final save first needs the model's estimated dates reviewed.
+    const before = await planState(request);
+    if ((before as { timeline_issues?: { kind: string }[] }).timeline_issues?.some((issue) => issue.kind === "estimate" || issue.kind === "stale_estimate")) {
+      await planAction(request, { action: "accept_estimates", rationale: "Estimates reviewed for the feature spec" });
+    }
     await page.goto("/timeline");
     await page.getByRole("button", { name: /save as final/i }).click();
     const dialog = page.getByRole("dialog");
@@ -213,5 +221,27 @@ test.describe("S10 interactive Gantt IEGP", () => {
     expect(names).toContain("every_activity_carries_a_gap");
     expect(body.metrics.find((metric) => metric.name === "dates_coherent")!.value).toBe(1);
     expect(body.metrics.find((metric) => metric.name === "dependencies_respect_readouts")!.value).toBe(1);
+  });
+
+  // KAN-99 (owner decision): a reset starts the workspace over, frozen finals included.
+  test("resetting the workspace removes the final plan, after a warning that says so", async ({ page, request }) => {
+    const state = await planState(request);
+    expect(state.plan?.status).toBe("final");
+    await page.goto(`/plan/final?version=${state.plan!.version}`);
+    await expect(page.getByText(/Signed off for the feature spec/).first()).toBeVisible({ timeout: 30_000 });
+
+    const list = (await (await request.get("/api/workspaces")).json()) as { current_id: string | null; workspaces: { id: string }[] };
+    const workspaceId = list.current_id ?? list.workspaces[0]!.id;
+    await page.goto(`/workspaces/${workspaceId}`);
+    await page.getByRole("button", { name: "Reset to blank" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("finals included");
+    await expect(dialog).toContainText("Export a final plan first");
+    await dialog.getByRole("button", { name: "Reset to blank" }).click();
+    await expect(page.getByRole("status")).toContainText("reset to blank", { timeout: 60_000 });
+
+    await page.goto("/plan/final");
+    await expect(page.getByText("No final plan yet")).toBeVisible({ timeout: 30_000 });
+    expect((await request.get(`/api/plan/final/${state.plan!.version}`)).status()).toBe(404);
   });
 });

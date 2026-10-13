@@ -4,14 +4,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { LoginPanel } from "@/components/workspaces/login-panel";
 import { ownerAccess } from "@/modules/auth/owner";
 import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
-import { currentSession, LOGIN_ERROR_MESSAGES, loginOptions } from "@/modules/auth/session";
-
-/** A known `?error=` code gets its fixed message; any other text is shown as sent. */
-function loginErrorMessage(raw: string | undefined): string | null {
-  const error = raw?.trim();
-  if (!error) return null;
-  return Object.hasOwn(LOGIN_ERROR_MESSAGES, error) ? LOGIN_ERROR_MESSAGES[error] : error;
-}
+import { currentSession, loginErrorMessage, loginOptions } from "@/modules/auth/session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

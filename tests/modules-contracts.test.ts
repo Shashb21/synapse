@@ -508,7 +508,7 @@ describe("timeline build", () => {
     expect(activity.lane).toBe("medium");
   });
 
-  it("gates a model-dated start on the readouts the model said it depends on", () => {
+  it("gates a model-dated start on the readouts the model proposed it depends on, without accepting the dependency", () => {
     const state = buildSeed();
     const [upstream, downstream] = timelineCandidates({ state, placements: [] });
     // The downstream tactic has no start of its own, so its start is the model's to set.
@@ -526,10 +526,11 @@ describe("timeline build", () => {
     });
     const before = model.activities.find((row) => row.id === upstream!.id)!;
     const after = model.activities.find((row) => row.id === downstream!.id)!;
-    expect(after.depends_on).toEqual([upstream!.id]);
+    // The dependency is a proposal (KAN-85): it gates the estimate's layout, never a saved schedule.
+    expect(after.depends_on).toEqual([]);
+    expect(after.meta.proposed_dependencies).toEqual([{ id: upstream!.id, reason: "reports its results" }]);
     expect(after.start_date).toBe(before.readout_date);
     expect(after.end_date).toBe(addMonths(after.start_date, 6));
-    expect(after.meta.dependency_note).toMatch(/reports its results/);
   });
 
   it("keeps a user's saved dates when it rebuilds", () => {

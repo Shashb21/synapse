@@ -23,7 +23,7 @@ import {
 } from "@/app/api/workspaces/[id]/members/route";
 import { gateFor } from "@/modules/auth/gate";
 import { afterOwnerSignIn, afterSignIn, safeNext } from "@/modules/auth/redirect";
-import { loginOptions, signInDemo } from "@/modules/auth/session";
+import { loginErrorCode, loginErrorMessage, loginOptions, signInDemo } from "@/modules/auth/session";
 import { WORKSPACE_COOKIE } from "@/modules/workspaces/context";
 import { currentWorkspace } from "@/modules/workspaces/session";
 
@@ -180,12 +180,26 @@ describe("login and workspaces API", () => {
     expect((await listGet()).status).toBe(401);
   });
 
-  it("an OAuth callback without a code goes back to /login with the reason", async () => {
-    const res = await callbackGet(req("/api/auth/callback?error=access_denied"));
+  it("an OAuth callback without a code goes back to /login with a code, not the provider's text", async () => {
+    const res = await callbackGet(req("/api/auth/callback?error=access_denied&error_description=Call%20us%20now"));
     expect(res.status).toBe(307);
     const location = new URL(res.headers.get("location")!);
     expect(location.pathname).toBe("/login");
-    expect(location.searchParams.get("error")).toBe("access_denied");
+    expect(location.searchParams.get("error")).toBe("cancelled");
+  });
+
+  it("/login shows only fixed messages for ?error= (KAN-28)", () => {
+    expect(loginErrorMessage("no_seat")).toMatch(/hasn't assigned you a Synapse seat/);
+    expect(loginErrorMessage("cancelled")).toMatch(/cancelled or refused/);
+    // Any other text is never shown as sent.
+    expect(loginErrorMessage("Your account is suspended, call +1 555 0100")).toBe("Sign-in failed. Try again.");
+    expect(loginErrorMessage("toString")).toBe("Sign-in failed. Try again.");
+    expect(loginErrorMessage("  ")).toBeNull();
+    expect(loginErrorMessage(undefined)).toBeNull();
+    expect(loginErrorCode(new Error("Sign-in state mismatch."))).toBe("expired");
+    expect(loginErrorCode(new Error("Google sign-in is not configured in this deployment."))).toBe("not_configured");
+    expect(loginErrorCode(new Error("That Microsoft account belongs to another directory."))).toBe("other_directory");
+    expect(loginErrorCode(new Error("Token exchange failed: 500 secret detail"))).toBe("failed");
   });
 
   it("never offers or accepts demo sign-in in production", async () => {

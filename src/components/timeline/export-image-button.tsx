@@ -12,10 +12,13 @@ import { Button } from "@/components/ui/button";
 export function ExportImageButton({
   svgRef,
   fileName,
+  stamp,
   disabledReason,
 }: {
   svgRef: RefObject<SVGSVGElement | null>;
   fileName: string;
+  /** A line drawn under the chart in the image: which version it shows and its fingerprint (KAN-85). */
+  stamp?: string;
   disabledReason?: string;
 }) {
   const [pending, setPending] = useState(false);
@@ -34,7 +37,32 @@ export function ExportImageButton({
       clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
       clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
       const width = Number(svg.getAttribute("width") ?? svg.clientWidth);
-      const height = Number(svg.getAttribute("height") ?? svg.clientHeight);
+      const chartHeight = Number(svg.getAttribute("height") ?? svg.clientHeight);
+      const STAMP_H = stamp ? 22 : 0;
+      const height = chartHeight + STAMP_H;
+      if (stamp) {
+        const ns = "http://www.w3.org/2000/svg";
+        clone.setAttribute("height", String(height));
+        const viewBox = clone.getAttribute("viewBox");
+        if (viewBox) {
+          const [x, y, w] = viewBox.split(/\s+/).map(Number);
+          clone.setAttribute("viewBox", `${x} ${y} ${w} ${height}`);
+        }
+        const band = document.createElementNS(ns, "rect");
+        band.setAttribute("x", "0");
+        band.setAttribute("y", String(chartHeight));
+        band.setAttribute("width", String(width));
+        band.setAttribute("height", String(STAMP_H));
+        band.setAttribute("fill", "#ffffff");
+        const text = document.createElementNS(ns, "text");
+        text.setAttribute("x", "8");
+        text.setAttribute("y", String(chartHeight + 15));
+        text.setAttribute("font-size", "11");
+        text.setAttribute("fill", "#374151");
+        text.textContent = stamp;
+        clone.appendChild(band);
+        clone.appendChild(text);
+      }
       const markup = new XMLSerializer().serializeToString(clone);
       const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
       const scale = 2;

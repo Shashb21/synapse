@@ -17,7 +17,7 @@ import { CreateActivityDialog, ManualDatesDialog, type DragChange } from "@/comp
 import { TACTIC_TYPE_FAMILIES, tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import { customTypesInUse } from "@/lib/iegp/custom-tactic-type";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
-import type { TimelineActivity, TimelineBand } from "@/modules/stages/s10-timeline/build";
+import { estimatedFields, type TimelineActivity, type TimelineBand } from "@/modules/stages/s10-timeline/build";
 import type { GapTimelineGroup, GapTimelineItem, GapTimelineView } from "@/modules/stages/s10-timeline/gap-view";
 import { plural } from "@/lib/plural";
 
@@ -318,6 +318,12 @@ export function GapGantt({
         </>
       ),
     })),
+    {
+      key: "estimate",
+      label: "Model estimate (not reviewed)",
+      labelX: 23,
+      mark: <rect x={0} y={-8} width={18} height={11} rx={3} fill="none" stroke="#d97706" strokeWidth={1.2} strokeDasharray="2 2" />,
+    },
     { key: "readout", label: "Readout", labelX: 16, mark: <polygon points="5,-8 10,-3 5,2 0,-3" fill={palette.readout} /> },
     {
       key: "depends",
@@ -629,12 +635,17 @@ export function GapGantt({
           const insideChars = Math.floor((barWidth - 12) / 5.6);
           const barLabel = insideChars >= 6 ? truncate(tacticTypeLabel(typed), insideChars) : "";
           const dragging = drag?.id === activity.id;
+          // KAN-85: a model's dates are marked until a person accepts them; completed work is history.
+          const estimate = estimatedFields(activity.meta.schedule_basis).length > 0;
+          const historical = activity.tactic_status === "completed";
+          const flags = [estimate ? "estimate" : "", historical ? "completed, historical" : "", activity.tactic_status === "proposed" ? "proposed, not yet in the plan" : ""].filter(Boolean);
           return (
             <g
               key={row.key}
               role="button"
               tabIndex={0}
-              aria-label={`${activity.tactic_name}, ${start} to ${end}${activity.expansion_id ? `, expansion of ${activity.parent_tactic_name}, ${activity.tactic_status}, ${activity.meta.counts_toward_addressing ? "counts toward addressing" : "not counting"}` : ""}`}
+              aria-label={`${activity.tactic_name}, ${start} to ${end}${flags.length ? `, ${flags.join(", ")}` : ""}${activity.expansion_id ? `, expansion of ${activity.parent_tactic_name}, ${activity.tactic_status}, ${activity.meta.counts_toward_addressing ? "counts toward addressing" : "not counting"}` : ""}`}
+              data-estimate={estimate ? "true" : undefined}
               data-parent-activity-id={activity.parent_activity_id}
               data-activity-id={activity.id}
               className="cursor-pointer focus:outline-none"
@@ -646,7 +657,7 @@ export function GapGantt({
                 }
               }}
             >
-              <title>{`${activity.tactic_name} · ${start} → ${end}${activity.readout_date ? ` · readout ${activity.readout_date}` : ""}${
+              <title>{`${activity.tactic_name} · ${start} → ${end}${activity.readout_date ? ` · readout ${activity.readout_date}` : ""}${flags.length ? ` · ${flags.join(" · ")}` : ""}${
                 editable ? " · drag to move, drag an end to resize" : ""
               }`}</title>
               <rect
@@ -661,7 +672,9 @@ export function GapGantt({
                 {truncate(`${activity.expansion_id ? "↳ " : ""}${activity.tactic_name}`, 40)}
               </text>
               <text x={indent} y={row.y + 25} fill={palette.muted} fontSize={9.5}>
-                {activity.expansion_id ? truncate(`${activity.tactic_status} · Expansion of ${activity.parent_tactic_name}`, 52) : `${start} → ${end}`}
+                {activity.expansion_id
+                  ? truncate(`${activity.tactic_status} · Expansion of ${activity.parent_tactic_name}`, 52)
+                  : `${start} → ${end}${estimate ? " · Estimate" : historical ? " · Completed" : ""}`}
               </text>
               <rect
                 data-bar="body"
@@ -686,6 +699,20 @@ export function GapGantt({
                   height={BAR_H}
                   rx={3}
                   fill={STATUS_PATTERN[activity.tactic_status]}
+                  pointerEvents="none"
+                />
+              ) : null}
+              {estimate ? (
+                <rect
+                  x={x1 - 1.5}
+                  y={cy - BAR_H / 2 - 1.5}
+                  width={barWidth + 3}
+                  height={BAR_H + 3}
+                  rx={4}
+                  fill="none"
+                  stroke="#d97706"
+                  strokeWidth={1.2}
+                  strokeDasharray="2 2"
                   pointerEvents="none"
                 />
               ) : null}

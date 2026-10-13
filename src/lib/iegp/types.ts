@@ -98,6 +98,10 @@ export type EvidenceNeed = {
   confidence: number | null;
   status: NeedStatus;
   status_lock: Lock;
+  /** Provenance (KAN-97): the S2 run and candidate row the need came from, and its source block. */
+  run_id?: string | null;
+  candidate_row_id?: string | null;
+  block_id?: string | null;
 };
 
 export type GapStatusOverride = {
@@ -149,6 +153,23 @@ export type EvidenceGap = {
   new_source_need_id?: string | null;
   /** Gaps split from a shared question (KAN-75): each side lists the other. */
   related_gap_ids?: string[];
+  /**
+   * Who confirmed the gap (KAN-97): validated it, or made it by a split or rewrite.
+   * Written once per confirmation; later edits do not overwrite it. Null when not confirmed.
+   */
+  validated_by?: GapConfirmer | null;
+  validated_at?: string | null;
+  validation_rationale?: string | null;
+  /** The gap an accepted S2 split suggestion took this one from (not a parent: both stay live). */
+  origin_gap_id?: string | null;
+};
+
+/** The person who confirmed a gap, as the session knew them. */
+export type GapConfirmer = {
+  principal: string;
+  name: string;
+  function: ActorFunction;
+  role: string | null;
 };
 
 export type GapSuggestionStatus = "pending" | "merged" | "split" | "rejected";
@@ -213,6 +234,32 @@ export type GapVersion = {
   at: string;
   actor_name: string;
   actor_function: ActorFunction;
+  /** What else the gap held when this version was taken (KAN-97). Null on older rows. */
+  snapshot?: GapVersionSnapshot | null;
+};
+
+/**
+ * The rest of a gap at the moment a version was taken (KAN-97): its settings,
+ * metadata, objective, override and confirmation, plus what a split or rewrite
+ * did not carry to a successor (the priority it had, coverages left behind).
+ */
+export type GapVersionSnapshot = {
+  settings: string[];
+  metadata: GapMetadata;
+  objective_id: string;
+  status_override: GapStatusOverride | null;
+  human_validated: boolean;
+  validated_by: GapConfirmer | null;
+  validated_at: string | null;
+  validation_rationale: string | null;
+  new_source_at: string | null;
+  related_gap_ids: string[];
+  /** The S8 placement it held, before it moved to a successor or was closed. */
+  priority?: Record<string, unknown> | null;
+  /** Coverages the split or rewrite did not select: they stay on the retired gap. */
+  coverages_left_behind?: { id: string; tactic_id: string; expansion_id: string | null; overall: string }[];
+  /** Where each kind of linked record went. */
+  carried?: Record<string, string[]>;
 };
 
 export type NeedGapLink = {
