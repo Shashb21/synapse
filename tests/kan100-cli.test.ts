@@ -112,6 +112,33 @@ describe('explicit isolated CLI', () => {
     expect(result.exitCode).toBe(1); expect(JSON.stringify(result)).not.toContain('private-value');
     expect(f.context.credential).not.toHaveBeenCalled(); expect(f.context.fetch).not.toHaveBeenCalled();
   });
+  it('uses each explicitly selected audit account for its configuration', async () => {
+    const f = await fixture();
+    for (const route of f.config.routes.filter(r => r.stage === 'completeness_audit')) {
+      route.credentialEnvName = route.configuration === 'baseline' ? 'CLI_BASELINE_AUDIT_KEY' : 'CLI_EXTRACT_AUDIT_KEY';
+    }
+    await f.put('config', f.config);
+    const credentials: Record<string, string> = {
+      CLI_SYNTHETIC_KEY: 'synthetic-secret',
+      CLI_BASELINE_AUDIT_KEY: 'baseline-audit-secret',
+      CLI_EXTRACT_AUDIT_KEY: 'extract-audit-secret',
+    };
+    const result = await runBenchmarkCli(f.args('run'), {
+      ...f.context, envNames: Object.keys(credentials), credential: name => credentials[name],
+    });
+    expect(result.status).toBe('incomplete'); expect(result.runs).toBe(24);
+    const manifest = JSON.parse(await readFile(path.join(root, f.storage, 'manifest.json'), 'utf8'));
+    expect(manifest.runs.every((r: BatchRun) => r.audit?.complete)).toBe(true);
+    const auditCalls = f.context.fetch.mock.calls.filter(([, init]) => {
+      if (typeof init?.body !== 'string') return false;
+      const body = JSON.parse(init!.body as string);
+      return body.model === 'synthetic-audit';
+    });
+    expect(auditCalls).toHaveLength(24);
+    expect(auditCalls.map(([, init]) => new Headers(init!.headers).get('authorization'))).toEqual(
+      manifest.runs.map((r: BatchRun) => r.configuration === 'baseline' ? 'Bearer baseline-audit-secret' : 'Bearer extract-audit-secret'),
+    );
+  });
   it('missing authorization/prerequisites persist blockers before credential access', async () => {
     const f = await fixture(); f.config.routes[0].accountVerified = false;
     await f.put('config', f.config);

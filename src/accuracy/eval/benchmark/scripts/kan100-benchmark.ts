@@ -217,8 +217,10 @@ function normalizedUsage(raw: Record<string, unknown>) {
   const input = count(u.input_tokens ?? u.prompt_tokens);
   return { input_tokens: input === null ? null : input + (count(u.cache_creation_input_tokens) ?? 0) + (count(u.cache_read_input_tokens) ?? 0), output_tokens: count(u.output_tokens ?? u.completion_tokens) };
 }
-function auditTransport(runtime: Runtime, key: string, fetch: typeof globalThis.fetch): BatchServices['audit'] {
-  return { redactValues: [key], complete: async request => {
+function auditTransport(runtime: Runtime, secrets: ReadonlyMap<string, string>, fetch: typeof globalThis.fetch): BatchServices['audit'] {
+  return { redactValues: [...secrets.values()], complete: async request => {
+    const key = secrets.get(request.route.credentialEnvName);
+    if (!key) throw new Blocked(['Selected provider credential is missing or empty.']);
     const provider = request.route.providerId, base = endpoint(provider, runtime.auditBaseUrl);
     let url = `${base}/chat/completions`, headers: Record<string, string> = { 'content-type': 'application/json', authorization: `Bearer ${key}` };
     let body: unknown = { model: request.route.requestedModel, ...request.settings, messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }] };
@@ -292,7 +294,7 @@ async function execute(root: string, command: string, config: BenchmarkConfig, f
     maxPolls: runtime.maxPolls, overheadCharges: runtime.overheadCharges, referenceCorrection: runtime.referenceCorrection,
     resumeDigest: checkpoint.latest, onCheckpoint: checkpoint.write,
     extraction: command === 'review' ? noPaid : route => ({ fetch: context.fetch ?? globalThis.fetch, apiKey: secrets.get(route.credentialEnvName)! }),
-    audit: command === 'review' ? { complete: noPaid } : { ...auditTransport(runtime, secrets.get(auditRoute.credentialEnvName)!, context.fetch ?? globalThis.fetch), redactValues: [...secrets.values()] },
+    audit: command === 'review' ? { complete: noPaid } : auditTransport(runtime, secrets, context.fetch ?? globalThis.fetch),
     human: async ({ run }) => decisions[run.id] ?? null,
     verifyReview: async request => { requests.push(request); return request.digest === artifactDigest(request.contents) && approved.has(request.digest); },
   };
