@@ -77,6 +77,7 @@ type Manifest = {
 };
 const stages: ScoringStage[] = ['need_extract', 'inventory_extract'];
 const configurations = ['baseline', 'extract'] as const;
+const pricingAmounts = ['baselineMaxUsd', 'extractJobMaxUsd', 'uploadMaxUsd', 'auditMaxUsd', 'inputUsdPerMillion', 'outputUsdPerMillion'] as const;
 /** Require finite, explicit nonnegative amounts. */
 function money(n: unknown): n is number { return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
 /** Strict source/reference hash recomputation prevents attested labels hiding edits. */
@@ -141,7 +142,9 @@ function costLedger(manifest: Manifest): BatchCosts {
   }, 0);
   const remainingWorkUsd = manifest.allowances.reduce((n, a) => n + a.remaining * a.boundUsd, 0);
   const unknown = overhead.setupUsd === null || overhead.tuningUsd === null || manifest.costs.some(e => e.costUsd === null && !(e.operation === 'submit' && manifest.jobs.find(j => j.jobId === e.jobId)?.complete)) || manifest.jobs.some(j => !j.complete);
-  return { overheadCharges: structuredClone(overhead), spentUsd, reservedUsd, remainingWorkUsd, conservativeTotalUsd: spentUsd + reservedUsd + remainingWorkUsd, unknown, entries: structuredClone(manifest.costs), jobs: structuredClone(manifest.jobs) };
+  const conservativeTotalUsd = spentUsd + reservedUsd + remainingWorkUsd;
+  if (![spentUsd, reservedUsd, remainingWorkUsd, conservativeTotalUsd].every(money)) throw new Error('Nonfinite or invalid derived ledger totals');
+  return { overheadCharges: structuredClone(overhead), spentUsd, reservedUsd, remainingWorkUsd, conservativeTotalUsd, unknown, entries: structuredClone(manifest.costs), jobs: structuredClone(manifest.jobs) };
 }
 
 /** Run/resume the complete frozen matrix in excluded private filesystem storage.
@@ -196,7 +199,7 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
   packs.forEach(p => verifyPack(p, config));
   if (!Number.isInteger(services.maxPolls) || services.maxPolls < 1 || services.maxPolls > 100) throw new Error('Explicit bounded polling required');
   const pricing = structuredClone(services.pricing);
-  if (pricing.asOf !== config.budget.priceAsOf || pricing.source !== config.budget.priceSource || Object.entries(pricing).some(([k, v]) => k !== 'asOf' && k !== 'source' && !money(v))) throw new Error('Explicit dated conservative prices required');
+  if (!pricing || pricing.asOf !== config.budget.priceAsOf || pricing.source !== config.budget.priceSource || pricingAmounts.some(key => !money(pricing[key])) || Object.entries(pricing).some(([k, v]) => k !== 'asOf' && k !== 'source' && !money(v))) throw new Error('Explicit dated conservative prices required');
   if (config.auditProcessHash !== FROZEN_AUDIT_PROCESS_HASH) throw new Error('Audit process hash mismatch');
   const baselines = structuredClone(services.baselines), auditSettings = structuredClone(services.auditSettings);
   const publicBaselines = Object.fromEntries(stages.map(stage => { const { headers: _headers, ...baseline } = baselines[stage]; void _headers; return [stage, baseline]; }));
@@ -211,6 +214,7 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
   const storage = await PrivateBatchStorage.acquire(services.root, config.storage.path);
   let manifest: Manifest;
   let checkpointDigest = '';
+  let checkpointFailed = false;
   const secrets = new Set<string>([...stages.flatMap(s => Object.values(baselines[s].headers ?? {})), ...services.audit.redactValues ?? []]);
   try {
     const saved = await storage.read('manifest.json');
@@ -246,14 +250,22 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
     }
     /** Persist checkpoint and trusted caller digest BEFORE any external action. */
     async function checkpoint() {
-      manifest.updatedAt = new Date().toISOString();
-      // Never persist transport keys/headers. Request headers are represented only by runtimeDigest.
-      const safe = redact(manifest, secrets);
-      checkpointDigest = artifactDigest(safe);
-      await storage.write('manifest.json', JSON.stringify(safe, null, 2));
-      const interimCosts = costLedger(manifest);
-      await storage.write('interim-report.md', `# Benchmark ${config.batchId}\n\nStatus: **${manifest.status}**\n\nCompleted extractions: ${manifest.runs.filter(r => r.extraction?.status === 'completed').length}/${manifest.runs.length}.\n\nSpent: $${interimCosts.spentUsd}; reserved: $${interimCosts.reservedUsd}; remaining work: $${interimCosts.remainingWorkUsd}. Unknown billing: ${interimCosts.unknown}.\n\nCheckpoint: ${checkpointDigest}\n\n${manifest.stopped ?? 'Execution/review may still be pending; consult manifest.json.'}\n`);
-      await services.onCheckpoint?.(checkpointDigest);
+      try {
+        manifest.updatedAt = new Date().toISOString();
+        // Never persist transport keys/headers. Request headers are represented only by runtimeDigest.
+        const safe = redact(manifest, secrets);
+        checkpointDigest = artifactDigest(safe);
+        await storage.write('manifest.json', JSON.stringify(safe, null, 2));
+        const interimCosts = costLedger(manifest);
+        await storage.write('interim-report.md', `# Benchmark ${config.batchId}\n\nStatus: **${manifest.status}**\n\nCompleted extractions: ${manifest.runs.filter(r => r.extraction?.status === 'completed').length}/${manifest.runs.length}.\n\nSpent: $${interimCosts.spentUsd}; reserved: $${interimCosts.reservedUsd}; remaining work: $${interimCosts.remainingWorkUsd}. Unknown billing: ${interimCosts.unknown}.\n\nCheckpoint: ${checkpointDigest}\n\n${manifest.stopped ?? 'Execution/review may still be pending; consult manifest.json.'}\n`);
+        await services.onCheckpoint?.(checkpointDigest);
+      } catch (error) {
+        // extractStage can catch hook failures. Keep the batch terminal even if
+        // a later checkpoint succeeds, and retain any started reservation/state.
+        checkpointFailed = true;
+        manifest.stopped = 'Checkpoint/storage failure; batch execution stopped';
+        throw error;
+      }
     }
     /** Reserve/record exactly one new operation, retaining all remaining work reserves. */
     async function before(run: BatchRun, id: string, operation: string, retry: boolean) {
@@ -355,6 +367,7 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
             },
             checkpoint: async state => { run.extractionState = state; reconcileExtraction(run, state); await checkpoint(); },
           });
+          if (checkpointFailed) break;
           run.extractionElapsedMs += result.elapsedMs;
           if (run.extraction?.status === 'completed' && result.status === 'completed' && artifactDigest(run.extraction.findings) !== artifactDigest(result.findings)) {
             manifest.stopped = 'Completed job findings changed during billing reconciliation'; run.extractionHistory.push(result);

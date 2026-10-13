@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, rm, writeFile, mkdir, symlink, stat, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runBenchmarkBatch, type BatchServices } from '@/accuracy/eval/benchmark/batch';
 import { artifactDigest } from '@/accuracy/eval/benchmark/artifacts';
 import { FROZEN_AUDIT_PROCESS_HASH } from '@/accuracy/eval/benchmark/audit';
@@ -9,7 +10,7 @@ import { freezeReferencePack } from '@/accuracy/eval/benchmark/inputs';
 import { scoringIdentity } from '@/accuracy/eval/benchmark/scoring';
 import { checkPreflight } from '@/accuracy/eval/benchmark/preflight';
 import type { BenchmarkConfig, BenchmarkRoute } from '@/accuracy/eval/benchmark/contracts';
-const root = '/private/tmp/synapse-kan100';
+const root = fileURLToPath(new URL('../', import.meta.url));
 const cleanup: string[] = [];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
 const stages = ['need_extract', 'inventory_extract'] as const;
@@ -48,6 +49,32 @@ async function fixture(singleDeck = false) {
   return { config, packs, services, fetch };
 }
 describe('restart-safe isolated full batch', () => {
+  it.each(['baselineMaxUsd', 'extractJobMaxUsd', 'uploadMaxUsd', 'auditMaxUsd', 'inputUsdPerMillion', 'outputUsdPerMillion'] as const)('rejects missing required pricing field %s before provider work', async field => {
+    const f = await fixture(true);
+    const pricing: Partial<BatchServices['pricing']> = { ...f.services.pricing };
+    delete pricing[field];
+    f.services.pricing = pricing as BatchServices['pricing'];
+    const extraction = vi.fn(f.services.extraction);
+    f.services.extraction = extraction;
+    await expect(runBenchmarkBatch(f.config, f.packs, f.services)).rejects.toThrow('Explicit dated conservative prices required');
+    expect(extraction).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.services.audit.complete).not.toHaveBeenCalled();
+  });
+  it('rejects overflowed reservation totals before provider work', async () => {
+    const f = await fixture(true);
+    f.services.pricing.baselineMaxUsd = Number.MAX_VALUE;
+    await expect(runBenchmarkBatch(f.config, f.packs, f.services)).rejects.toThrow('derived ledger totals');
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.services.audit.complete).not.toHaveBeenCalled();
+  });
+  it('rejects overflowed reconciled token totals before further provider work', async () => {
+    const f = await fixture(true);
+    f.services.pricing.inputUsdPerMillion = Number.MAX_VALUE;
+    await expect(runBenchmarkBatch(f.config, f.packs, f.services)).rejects.toThrow('derived ledger totals');
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+    expect(f.services.audit.complete).not.toHaveBeenCalled();
+  });
   it('persists a separate complete matrix, human scores, audit, costs, raw attempts and safe CSV', async () => {
     const f = await fixture();
     const result = await runBenchmarkBatch(f.config, f.packs, f.services);
@@ -250,24 +277,35 @@ describe('restart-safe isolated full batch', () => {
     expect(resumed.status).toBe('incomplete'); expect(f.fetch).toHaveBeenCalledTimes(calls);
     expect(result.runs.filter(r => r.configuration === 'extract').every(r => r.extractionState?.submissionUncertain)).toBe(true);
   });
-  it('records an operation before HTTP and retains it when the durable checkpoint is interrupted', async () => {
+  it.each([1, 2, 3])('records an operation before HTTP and retains it when pre-HTTP checkpoint %s is interrupted once', async failAt => {
     const f = await fixture(true);
-    let digest = '', broke = false;
+    let digest = '', broke = false, reservedCheckpoints = 0;
     const filename = path.join(root, f.config.storage.path, 'manifest.json');
     const services = { ...f.services, onCheckpoint: async (d: string) => {
       digest = d;
       const saved = JSON.parse(await readFile(filename, 'utf8'));
-      if (!broke && saved.costs.some((e: { status: string }) => e.status === 'started')) { broke = true; throw new Error('checkpoint interrupted'); }
+      if (saved.costs.some((e: { status: string }) => e.status === 'started')) reservedCheckpoints++;
+      if (!broke && reservedCheckpoints === failAt) { broke = true; throw new Error('checkpoint interrupted'); }
     } };
     // Adapter fails closed even if its beforeAttempt hook never returns.
     const first = await runBenchmarkBatch(f.config, f.packs, services);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.services.audit.complete).not.toHaveBeenCalled();
     const calls = f.fetch.mock.calls.length;
-    expect(first.runs[0].extraction?.status).toBe('blocked');
+    expect(broke).toBe(true);
+    expect(first.status).toBe('incomplete');
+    expect(first.reasons).toContain('Checkpoint/storage failure; batch execution stopped');
+    expect(first.costs.entries).toHaveLength(1);
+    expect(first.runs[0].extraction?.status).not.toBe('completed');
     expect(first.costs.entries[0].status).toBe('started');
     expect(first.costs.entries[0].costUsd).toBeNull();
+    expect(first.costs.reservedUsd).toBeCloseTo(0.01);
+    if (failAt > 1) expect(first.runs[0].extractionState?.attempts[0].status).toBe('started');
     expect(await readFile(path.join(root, f.config.storage.path, 'interim-report.md'), 'utf8')).toContain('incomplete');
     const next = await runBenchmarkBatch(f.config, f.packs, { ...f.services, resumeDigest: digest });
     expect(next.status).toBe('incomplete'); expect(f.fetch).toHaveBeenCalledTimes(calls);
+    expect(next.costs.entries).toEqual(first.costs.entries);
+    expect(f.services.audit.complete).not.toHaveBeenCalled();
   });
   it('reconciles delayed billing on the same completed job while retaining the extraction findings', async () => {
     const f = await fixture(true), original = f.fetch.getMockImplementation()!;
