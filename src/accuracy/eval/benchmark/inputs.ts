@@ -1,3 +1,7 @@
+/** Prepare immutable complete-source benchmark packs and evaluator-only gold locally.
+ * Hashes bind input bytes, parser/version metadata and reviewed reference content.
+ * No persistence, database, environment or provider access occurs here.
+ */
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parsedBlockSchema, sourceLocationSchema, type ParsedBlock } from "@/lib/schema";
@@ -44,6 +48,7 @@ export type FrozenReferencePack = {
   gold: { needs: FrozenGoldStage; tactics: FrozenGoldStage };
 };
 
+/** Serialize JSON-like value with sorted object keys; returns stable text for hashing. */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -52,9 +57,11 @@ function canonical(value: unknown): string {
   }
   return JSON.stringify(value);
 }
+/** Return lowercase SHA-256 of canonical JSON-like input; serialization errors propagate. */
 function hash(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
+/** Recursively freeze supplied snapshot in place and return it; freeze errors propagate. */
 function freezeDeep<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freezeDeep);
@@ -62,6 +69,7 @@ function freezeDeep<T>(value: T): T {
   }
   return value;
 }
+/** Require distinct supplied identities; returns void or throws Error for duplicates. */
 function unique(ids: string[]): void {
   if (new Set(ids).size !== ids.length) throw new Error("Duplicate identity");
 }
@@ -69,6 +77,10 @@ function unique(ids: string[]): void {
 /** Pure local preparation: no persistence, database, environment or provider calls.
  * Hashes are lowercase SHA-256. Output is detached and recursively frozen.
  * The caller owns complete-source attestation and human review authenticity.
+ * @param input Original bytes, complete source configuration, parser metadata and separate gold stages.
+ * @returns Detached recursively frozen pack, with source and reference hashes and review state.
+ * @throws Validation errors for invalid identities, source hashes/counts, gold links or reviews;
+ * local document parser failures propagate when blocks are not supplied.
  */
 export async function freezeReferencePack(input: FreezeReferencePackInput): Promise<FrozenReferencePack> {
   const packId = identity.parse(input.packId);
@@ -94,6 +106,7 @@ export async function freezeReferencePack(input: FreezeReferencePackInput): Prom
   unique(blocks.map((block) => block.id));
   if (blocks.length !== sourceConfig.blocks) throw new Error("Complete block count mismatch");
   const blockIds = new Set(blocks.map((block) => block.id));
+  /** Validate gold rows/review against source links; return frozen-pack stage data or throw. */
   function stage(rows: FrozenGoldItem[], suppliedReview?: GoldReview): FrozenGoldStage {
     const items = z.array(itemSchema).parse(rows);
     unique(items.map((item) => item.id));

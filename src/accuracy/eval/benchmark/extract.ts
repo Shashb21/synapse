@@ -1,3 +1,6 @@
+/** Isolated complete-source benchmark extraction with caller-owned authorization,
+ * checkpoints and accounting. Uses single-attempt HTTP without loading provider env.
+ */
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parsedBlockSchema, type ParsedBlock } from "@/lib/schema";
@@ -56,30 +59,44 @@ export type ExtractResult = {
   error?: { code: string; temporary: boolean; httpStatus: number | null };
 };
 
+/** USD per credit, verified 2026-10-13 against official LlamaCloud pricing:
+ * https://developers.llamaindex.ai/llamaparse/general/pricing/ ($1.25 / 1000 credits).
+ */
+const EXTRACT_USD_PER_CREDIT_2026_10_13 = 1.25 / 1000;
+
 const need = z.object({ statement: z.string().min(1), external_id: z.string().nullable().optional(), provenance: z.array(provenanceSpanSchema).optional() });
 const tactic = z.object({ name: z.string().min(1), type: z.enum(TACTIC_TYPES), status: z.enum(TACTIC_STATUSES), evidence_question: z.string().min(1), origin: z.literal("inventory"), external_id: z.string().nullable().optional(), provenance: z.array(provenanceSpanSchema).optional() });
 const schemas = { need_extract: z.object({ gaps: z.array(need) }), inventory_extract: z.object({ tactics: z.array(tactic) }) };
+/** Return an object view of unknown input, or an empty object. */
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+/** Return nonempty string input, otherwise null. */
 const string = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
+/** Return finite nonnegative numeric input, otherwise null. */
 const count = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+/** Return array input, otherwise an empty array. */
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
+/** Internal classified failure; public results expose only code, retryability and status. */
 class StageError extends Error {
   constructor(readonly code: string, readonly temporary = false, readonly httpStatus: number | null = null) { super(code); }
 }
+/** Recursively redact supplied secrets from a JSON-like value; returns a detached value. */
 function sanitize(value: unknown, secrets: string[]): unknown {
   if (typeof value === "string") return secrets.filter(Boolean).reduce((s, secret) => s.split(secret).join("[REDACTED]"), value);
   if (Array.isArray(value)) return value.map((v) => sanitize(v, secrets));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, sanitize(v, secrets)]));
   return value;
 }
+/** Hash request content/settings for resume binding; JSON serialization errors propagate. */
 function contextHash(request: ExtractRequest): string {
   // Bind resume to actual content and supplied settings, not just caller-attested hashes.
   return createHash("sha256").update(JSON.stringify({ runId: request.runId, packId: request.pack.packId, source: request.pack.source, route: request.route, baseline: request.baseline, projectId: request.projectId })).digest("hex");
 }
+/** Serialize every request source block with its original markers; returns untruncated text. */
 function sourceText(request: ExtractRequest): string {
   return [`source_file_id=${request.pack.packId}`, ...request.pack.source.blocks.map((b) => `### block_id=${b.id}${b.heading ? ` · ${b.heading}` : ""}\nlocation=${JSON.stringify(b.location)}\n${b.text}`)].join("\n\n");
 }
+/** Validate request source, route and resume binding; returns void or throws StageError. */
 function validateRequest(request: ExtractRequest): void {
   if (!request.runId || !request.attemptId || !request.pack.sourceHash || !request.pack.packId) throw new StageError("invalid_request");
   const blocks = z.array(parsedBlockSchema).min(1).safeParse(request.pack.source.blocks);
@@ -103,6 +120,7 @@ function validateRequest(request: ExtractRequest): void {
   // Baseline failures/revisions cannot be replayed invisibly. Batch starts separately labelled attempts.
   if (r.configuration === "baseline" && s?.attempts.length) throw new StageError("baseline_resume_unsupported");
 }
+/** Read provider-reported token counts from payload; returns null when absent. */
 function tokenUsage(payload: Record<string, unknown>): LlmUsage | null {
   const u = record(payload.usage), g = record(payload.usageMetadata);
   if (Object.keys(g).length) {
@@ -114,11 +132,13 @@ function tokenUsage(payload: Record<string, unknown>): LlmUsage | null {
   const cached = (count(u.cache_creation_input_tokens) ?? 0) + (count(u.cache_read_input_tokens) ?? 0);
   return { input_tokens: input === null ? null : input + cached, output_tokens: count(u.output_tokens ?? u.completion_tokens), total_tokens: count(u.total_tokens), reasoning_tokens: count(record(u.completion_tokens_details).reasoning_tokens) };
 }
+/** Convert complete finite usage credits to USD; returns null for unknown billing. */
 function extractCost(usage: unknown): number | null {
   const u = record(usage), credits = count(u.credits);
   // credits can include only recorded components; missing component billing stays unknown.
-  return credits !== null && count(u.extract_credits) !== null && count(u.parse_credits) !== null ? credits * 1.25 / 1000 : null;
+  return credits !== null && count(u.extract_credits) !== null && count(u.parse_credits) !== null ? credits * EXTRACT_USD_PER_CREDIT_2026_10_13 : null;
 }
+/** Validate stage data and map citation metadata against request blocks; throws StageError for invalid schema. */
 function normalize(data: unknown, metadata: unknown, request: ExtractRequest): ExtractFinding[] {
   const stage = request.route.stage as keyof typeof schemas;
   const parsed = schemas[stage].safeParse(data);
@@ -149,29 +169,39 @@ function normalize(data: unknown, metadata: unknown, request: ExtractRequest): E
     return { id: `${request.runId}:${key}:${index}`, statement: String(item.statement ?? item.evidence_question), external_id: string(item.external_id), details: item, provenance, citation: { valid: reasons.length === 0, reasons: [...new Set(reasons)], locations, metadata: fieldMetadata[index] ?? null } };
   });
 }
+/** Check raw stage draft using existing stage-specific checklist; returns revision issues before strict schema validation. */
 function critique(data: unknown, request: ExtractRequest): string[] {
   const key = request.route.stage === "need_extract" ? "gaps" : "tactics", items = list(record(data)[key]);
   const issues: string[] = [], seen = new Set<string>();
   if (!items.length) issues.push(key === "gaps" ? "no_gaps_proposed" : "no_tactics_proposed");
   for (const [index, value] of items.entries()) {
-    const item = record(value), subject = string(item.external_id) ?? string(item.name) ?? string(item.statement)?.slice(0, 40) ?? `${key}_${index}`;
+    const item = record(value), inventory = key === "tactics";
+    const subject = inventory ? string(item.name)?.trim() || `tactic_${index}` : string(item.external_id) || string(item.statement)?.slice(0, 40) || `gap_${index}`;
+    if (inventory && item.origin && item.origin !== "inventory") issues.push(`${subject}:wrong_origin`);
     if (!string(item.statement ?? item.name)?.trim()) issues.push(`${subject}:missing_${key === "gaps" ? "statement" : "name"}`);
     const spans = list(item.provenance);
     if (!spans.length) issues.push(`${subject}:no_quote`);
     for (const value of spans) { const s = record(value); if (s.source_file_id !== request.pack.packId) issues.push(`${subject}:source_file_mismatch`); if (!string(s.quote)?.trim()) issues.push(`${subject}:empty_quote`); }
-    const identity = String(item.external_id ?? item.name ?? item.statement ?? "").trim().toLowerCase();
-    if (seen.has(identity)) issues.push(`${subject}:duplicate`); seen.add(identity);
+    const identity = String(inventory ? item.name ?? "" : item.external_id || item.statement || "").trim().toLowerCase();
+    if (identity) { if (seen.has(identity)) issues.push(`${subject}:duplicate`); seen.add(identity); }
   }
   return issues;
 }
 
-/** One extraction submission or poll. No retries, fallback calls, DB, env loading or gold access. */
+/** Run one baseline proposal (and checklist revision), or one Extract submission/poll.
+ * @param request Complete source, frozen route and optional opaque resume checkpoint; no gold is read.
+ * @param transport Single-attempt fetch, credential and caller approval/persistence callbacks.
+ * @returns Findings and ledger, or pending/blocked/failed status with a structured error.
+ * Transport, schema and checkpoint failures are captured; no automatic retry occurs.
+ */
 export async function extractStage(request: ExtractRequest, transport: ExtractTransport): Promise<ExtractResult> {
   const start = Date.now();
   const state: ExtractState = structuredClone(request.resume ?? { runId: request.runId, sourceHash: request.pack.sourceHash, settingsHash: request.route.settingsHash, contextHash: contextHash(request), stage: request.route.stage, configuration: request.route.configuration, uploadId: null, jobId: null, submissionUncertain: false, rawOutputs: [], attempts: [] });
   const result: ExtractResult = { status: "blocked", runId: request.runId, attemptId: request.attemptId, state, findings: [], rawOutputs: state.rawOutputs, attempts: state.attempts, actualRoute: { providerId: null, model: null, version: null, tier: null, label: "unverified" }, usage: null, costUsd: null, elapsedMs: 0 };
   const secrets = [transport.apiKey, ...Object.values(request.baseline?.headers ?? {})];
+  /** Persist a detached current state; callback failures stop extraction. */
   async function checkpoint() { await transport.checkpoint(structuredClone(state)); }
+  /** Approve and record one HTTP operation; return parsed payload or throw a classified failure. */
   async function http(operation: ExtractAttempt["operation"], url: string, init: RequestInit): Promise<Record<string, unknown>> {
     const attempt: ExtractAttempt = { id: `${request.attemptId}:${state.attempts.length + 1}`, operation, startedAt: new Date().toISOString(), elapsedMs: 0, httpStatus: null, status: "started", costUsd: null, usage: null };
     try { await transport.beforeAttempt(structuredClone(attempt), structuredClone(state)); } catch { throw new StageError("budget_blocked"); }
@@ -237,11 +267,15 @@ export async function extractStage(request: ExtractRequest, transport: ExtractTr
       else throw new StageError("unknown_job_status");
     } else {
       const baseline = request.baseline!, snapshot = baseline.snapshot, provider = snapshot.provider_id;
+      /** Send source plus checklist issues; return raw draft or throw on provider/JSON failure. */
       async function complete(critiques: string[]) {
         const user = [`workspace_id=benchmark:${request.runId}`, text, critiques.length ? `Critic issues to fix:\n${critiques.map((c) => `- ${c}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
         let url = `${baseline.baseUrl.replace(/\/$/, "")}/chat/completions`;
         let headers: Record<string, string> = { ...baseline.headers, "content-type": "application/json", authorization: `Bearer ${transport.apiKey}` };
-        let body: unknown = { model: snapshot.model, ...snapshot.params, messages: [{ role: "system", content: system }, { role: "user", content: user }] };
+        let body: unknown = { model: snapshot.model, ...snapshot.params, ...(provider === "openrouter" ? { response_format: { type: "json_object" } } : {}), messages: [{ role: "system", content: system }, { role: "user", content: user }] };
+        if (provider === "openrouter") {
+          headers = { "http-referer": "https://github.com/Shashb21/synapse", "x-title": "Synapse IEGP", ...headers };
+        }
         if (provider === "anthropic-claude") {
           url = `${baseline.baseUrl.replace(/\/$/, "")}/v1/messages`; headers = { ...baseline.headers, "content-type": "application/json", "x-api-key": transport.apiKey, "anthropic-version": "2023-06-01" };
           body = { model: snapshot.model, ...snapshot.params, system, messages: [{ role: "user", content: user }] };

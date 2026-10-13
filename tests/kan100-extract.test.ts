@@ -114,6 +114,15 @@ describe("complete source extraction", () => {
     expect(done.findings[0].citation.valid).toBe(true); expect(t.fetch).toHaveBeenCalledTimes(1);
     const body = JSON.parse(vi.mocked(t.fetch).mock.calls[0][1]?.body as string);
     expect(protocol === "gemini" ? body.generationConfig.maxOutputTokens : body.max_tokens).toBe(777);
+    expect(protocol === "gemini" ? body.generationConfig.temperature : body.temperature).toBe(0.12);
+    if (protocol === "gemini") expect(body.generationConfig.responseMimeType).toBe("application/json");
+    if (protocol === "anthropic") expect(new Headers(vi.mocked(t.fetch).mock.calls[0][1]?.headers).get("anthropic-version")).toBe("2023-06-01");
+    if (provider === "openai") expect(body).not.toHaveProperty("response_format");
+    if (provider === "openrouter") {
+      expect(body.response_format).toEqual({ type: "json_object" });
+      expect(new Headers(vi.mocked(t.fetch).mock.calls[0][1]?.headers).get("x-title")).toBe("Synapse IEGP");
+      expect(new Headers(vi.mocked(t.fetch).mock.calls[0][1]?.headers).get("http-referer")).toBe("https://github.com/Shashb21/synapse");
+    }
     const failure = transport([]); failure.fetch = vi.fn(async () => new Response("upstream failure", { status: 503 }));
     expect((await extractStage(r, failure)).error?.temporary).toBe(true); expect(failure.fetch).toHaveBeenCalledTimes(1);
   });
@@ -132,6 +141,20 @@ describe("complete source extraction", () => {
     const done = await extractStage(r, t);
     expect(done.status).toBe("completed"); expect(done.findings[0].details.name).toBe("Renal registry");
     expect(JSON.parse(vi.mocked(t.fetch).mock.calls[0][1]?.body as string).messages[0].content).toContain("extract tactics");
+  });
+  it.each(["duplicate_name", "wrong_origin"])("revises inventory %s before strict output validation", async (issue) => {
+    const r = request("baseline"); r.route.stage = "inventory_extract"; r.baseline!.snapshot.call_kind = "inventory_extract";
+    const candidate = { name: "Renal registry", type: "registry", status: "planned", origin: "inventory", evidence_question: "How do renal patients respond?", external_id: "TACTIC_1", provenance: gap.provenance };
+    const draft = issue === "duplicate_name"
+      ? [candidate, { ...candidate, name: "  RENAL REGISTRY  ", external_id: "TACTIC_2" }]
+      : [{ ...candidate, origin: "generated" }];
+    const reply = (tactics: unknown[]) => ({ model: "frozen-model", choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ tactics }) } }] });
+    const t = transport([reply(draft), reply([candidate])]);
+    const done = await extractStage(r, t);
+    expect(t.fetch).toHaveBeenCalledTimes(2);
+    expect(done.status).toBe("completed"); expect(done.findings).toHaveLength(1);
+    const revision = JSON.parse(vi.mocked(t.fetch).mock.calls[1][1]?.body as string);
+    expect(revision.messages[1].content).toContain(issue === "duplicate_name" ? "RENAL REGISTRY:duplicate" : "Renal registry:wrong_origin");
   });
   it("marks an absent actual model unverified without inventing the requested model", async () => {
     const t = transport([{ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ gaps: [gap] }) } }] }]);
