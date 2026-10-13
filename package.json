@@ -19,7 +19,10 @@
     "ci": "vitest run && playwright test",
     "test:e2e:features": "playwright test e2e/features",
     "test:e2e:feature": "playwright test --grep",
-    "test:evals": "playwright test e2e/features --grep \"gold case\""
+    "test:evals": "playwright test e2e/features --grep \"gold case\"",
+    "benchmark:kan100": "tsx src/accuracy/eval/benchmark/scripts/kan100-benchmark.ts",
+    "test:kan100": "vitest run --config vitest.kan100.config.ts",
+    "typecheck:kan100": "tsc --noEmit -p tsconfig.kan100.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
