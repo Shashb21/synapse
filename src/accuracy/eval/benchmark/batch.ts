@@ -1,6 +1,7 @@
 /** Restart-safe, isolated benchmark orchestration. Explicit inputs and single-call
  * transports only; no application DB, provider/env module or deployment writes.
  */
+import { renderBenchmarkReport } from './report';
 import { benchmarkConfigSchema, type BenchmarkConfig, type BenchmarkRoute } from './contracts';
 import { checkPreflight } from './preflight';
 import type { FrozenReferencePack } from './inputs';
@@ -35,6 +36,9 @@ export type ReviewVerificationRequest = {
 };
 export type BatchServices = {
   root: string; envNames: readonly string[];
+  /** Report provenance only; never turns synthetic scores into live evidence. */
+  reportEvidenceKind?: 'live' | 'synthetic';
+  reportBlockers?: readonly string[];
   baselines: Record<ScoringStage, NonNullable<ExtractRequest['baseline']>>;
   projectId: string; auditSettings: Record<string, unknown>; pricing: BatchPricing; maxPolls: number;
   /** Return native single-attempt fetch and explicit key; keys never enter artifacts. */
@@ -208,7 +212,7 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
     const settings = route.stage === 'completeness_audit' ? auditSettings : route.configuration === 'baseline' ? publicBaselines[route.stage] : { version: route.version, tier: route.tier, cite_sources: route.citationsEnabled };
     if (route.settingsHash !== artifactDigest(settings)) throw new Error('Frozen route settings/content mismatch');
   }
-  const runtimeDigest = artifactDigest({ baselines, auditSettings, pricing, projectId: services.projectId, maxPolls: services.maxPolls });
+  const runtimeDigest = artifactDigest({ baselines, auditSettings, pricing, projectId: services.projectId, maxPolls: services.maxPolls, reportEvidenceKind: services.reportEvidenceKind, reportBlockers: services.reportBlockers });
   const inputDigest = artifactDigest({ config, packs, runtimeDigest });
   const currentExecutionDigest = executionDigest(config, packs, runtimeDigest);
   const storage = await PrivateBatchStorage.acquire(services.root, config.storage.path);
@@ -479,7 +483,8 @@ export async function runBenchmarkBatch(configInput: BenchmarkConfig, packsInput
     for (const job of manifest.jobs) jobs.push([job.jobId, job.costUsd, job.parseJobId, job.parseUsd, job.complete]);
     await storage.write('attempts.csv', analysisCsv(attempts)); await storage.write('jobs.csv', analysisCsv(jobs));
     await storage.write('runs.csv', analysisCsv(rows)); await storage.write('findings.csv', analysisCsv(findings));
-    await storage.write('interim-report.md', `# Benchmark ${config.batchId}\n\nStatus: **${result.status}**\n\n${manifest.runs.length} planned separate runs; ${manifest.runs.filter(r => r.extraction?.status === 'completed').length} completed extractions.\n\nSpent: $${costs.spentUsd}; reserved: $${costs.reservedUsd}; remaining work: $${costs.remainingWorkUsd}. Unknown billing: ${costs.unknown}.\n\nAudit warnings are not recovered extraction findings. Human adoption/deployment remains separate.\n\n${result.reasons.map(r => `- ${r}`).join('\n')}\n`);
+    const report = renderBenchmarkReport({ result, packs, ceilingUsd: config.budget.ceilingUsd, evidenceKind: services.reportEvidenceKind, blockers: services.reportBlockers });
+    await storage.write('interim-report.md', redact(report.markdown, secrets));
     if (result.status === 'completed') await storage.write('final.json', JSON.stringify(redact({ ...result, config, packs, history: manifest.history }, secrets), null, 2));
     else if (await storage.read('final.json')) await storage.write('final.json', JSON.stringify({ status: 'superseded', checkpointDigest, reason: 'Full matrix/reference review is pending; prior evidence retained in manifest history' }, null, 2));
     return result;

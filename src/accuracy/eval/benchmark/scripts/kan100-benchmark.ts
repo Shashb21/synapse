@@ -29,6 +29,8 @@ const runtimeSchema = z.strictObject({
   pricing: z.strictObject({ asOf: z.iso.date(), source: text, baselineMaxUsd: amount, extractJobMaxUsd: amount,
     uploadMaxUsd: amount, auditMaxUsd: amount, inputUsdPerMillion: amount, outputUsdPerMillion: amount }),
   overheadCharges: z.strictObject({ setupUsd: amount.nullable(), tuningUsd: amount.nullable() }).optional(),
+  reportEvidenceKind: z.enum(['live', 'synthetic']).optional(),
+  reportBlockers: z.array(text).optional(),
   referenceCorrection: z.strictObject({ rationale: text, reviewerId: text, reviewedAt: z.iso.datetime() }).optional(),
 });
 type Runtime = z.infer<typeof runtimeSchema>;
@@ -291,7 +293,7 @@ async function execute(root: string, command: string, config: BenchmarkConfig, f
   const noPaid = () => { throw new Blocked(['Review cannot invoke provider work.']); };
   const services: BatchServices = { root, envNames: command === 'review' ? config.routes.map(r => r.credentialEnvName) : envNames,
     baselines: runtime.baselines, projectId: runtime.projectId, auditSettings: runtime.auditSettings, pricing: runtime.pricing,
-    maxPolls: runtime.maxPolls, overheadCharges: runtime.overheadCharges, referenceCorrection: runtime.referenceCorrection,
+    maxPolls: runtime.maxPolls, reportEvidenceKind: context.fetch ? 'synthetic' : runtime.reportEvidenceKind, reportBlockers: runtime.reportBlockers, overheadCharges: runtime.overheadCharges, referenceCorrection: runtime.referenceCorrection,
     resumeDigest: checkpoint.latest, onCheckpoint: checkpoint.write,
     extraction: command === 'review' ? noPaid : route => ({ fetch: context.fetch ?? globalThis.fetch, apiKey: secrets.get(route.credentialEnvName)! }),
     audit: command === 'review' ? { complete: noPaid } : auditTransport(runtime, secrets, context.fetch ?? globalThis.fetch),

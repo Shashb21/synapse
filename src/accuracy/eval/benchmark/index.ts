@@ -7,3 +7,6 @@ export type { BenchmarkConfig, BenchmarkRoute, BaselineRouteSnapshot } from './c
 export { checkPreflight } from './preflight';
 export { freezeReferencePack } from './inputs';
 export type { FrozenReferencePack, FreezeReferencePackInput } from './inputs';
+
+export { renderBenchmarkReport } from './report';
+export type { BenchmarkReportInput, BenchmarkReport } from './report';

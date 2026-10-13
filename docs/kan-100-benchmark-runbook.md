@@ -121,3 +121,25 @@ CLI returns sanitized JSON and exits 0 for successful local preparation or a ful
 ## Current local evidence
 
 Private `data/runtime/benchmark/kan106-local-reference/prepare.json` records the actual local PPTX preparation: PRMT5i 3,005 blocks / 57 XML and parsed slides; Tislelizumab 5,080 blocks / 91 XML and parsed slides. The manifest lists 59 Tislelizumab slides; this discrepancy requires inspection, not silent truncation. These are parser counts, not semantic ground-truth approval. Complete source text and original narrative candidates remain excluded private artifacts. No real HTTP extraction, account pilot or paid audit occurred; gold, actual baseline/settings, authorization, token sizing and current prices remain blocked.
+
+## Readable final analysis: what, why, verification
+
+`renderBenchmarkReport({result,packs,ceilingUsd,evidenceKind?,blockers?})` in `src/accuracy/eval/benchmark/report.ts` returns `{status,blockers,markdown}` without I/O or semantic inference. Batch and CLI save the readable analysis to the existing private `interim-report.md` after execution/review, including incomplete results. During interrupted execution the checkpoint report remains a short incomplete summary; `manifest.json` retains detailed attempts. No production endpoint, database or deployment is involved.
+
+The report shows each deck/stage/configuration/repetition with explicit recall numerators, denominators and percentages, citation validity and the content/citation intersection. It retains parsing losses in overall gold recall, source-linked omissions, additional/duplicate/unsupported/specificity examples, human rationale, recurring misses and repeat ranges. Each stage's advisory comparison gives observed mean recall, citation intersection and extraction/audit time; it does not impose an adoption threshold. Original block IDs, locations, text and quotes stay in private storage. Audit verdicts and human flag judgments remain separate from extraction credit. Attempt failures, requested/responding identities, costs, reservations and timings remain inspectable alongside JSON/CSV.
+
+Optional explicit runtime JSON fields `reportEvidenceKind:"live"|"synthetic"` and `reportBlockers:string[]` are frozen with runtime settings. Set synthetic for controlled responses; the CLI always forces synthetic when a test fetch is supplied. Omission of provenance means unverified empirical evidence. A live label is an operator attestation, not a substitute for source completeness, provider protocol checks, authorization, authenticated review or real paid outputs. Preserve exact external blockers (including the Tislelizumab 59-manifest/91-XML discrepancy) until a human resolves them. Batch JSON status describes software eligibility; report status additionally requires live provenance and absence of supplied empirical blockers. A synthetic completed JSON matrix therefore still yields an empirically incomplete report.
+
+Verify with timeout-bounded synchronous commands, without `.env` loading or database test setup:
+
+```sh
+/private/tmp/kan96-timeout 120s npm run test:kan100 -- tests/kan100-report.test.ts
+/private/tmp/kan96-timeout 300s npm run test:kan100
+/private/tmp/kan96-timeout 120s npm run typecheck:kan100
+/private/tmp/kan96-timeout 120s npm run typecheck
+/private/tmp/kan96-timeout 120s node_modules/.bin/eslint src/accuracy/eval/benchmark/report.ts tests/kan100-report.test.ts
+```
+
+The timeout utility is a local harness path, not a repository dependency; use an available equivalent that terminates the process group on other hosts. Inspect private `interim-report.md` against `runs.csv`, `findings.csv`, `attempts.csv`, `jobs.csv`, `interim.json` and the authoritative manifest. Check all 24 run identities, three repeats per deck/stage/configuration, source/reference/settings hashes and actual responses, final authenticated extraction/audit judgments, and whole-experiment billing including setup/tuning/retry reservations. Run `git check-ignore --quiet -- <artifact-path>` before retaining source-derived artifacts. Never copy their contents into tracked documentation.
+
+Actual setup remains pending: approve atomic versioned gold and all source links/losses; inspect original slides/images/notes and resolve the 59/91 slide discrepancy without changing the manifest silently; export actual baseline settings; document provider-specific processing authorization; verify real account/version/tier/citation protocols; measure input tokens and validate dated prices within US$10; execute the full live two-pack matrix; authenticate every final semantic/audit judgment and reconcile all billing. Local preparation and passing synthetic tests fulfill software verification only. KAN-100 remains empirically incomplete and human adoption remains undecided. See [all 40 story evidence mappings](kan-100-story-evidence.md).
