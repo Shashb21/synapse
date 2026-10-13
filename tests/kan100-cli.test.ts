@@ -68,6 +68,63 @@ async function fixture() {
 }
 
 describe('explicit isolated CLI', () => {
+  it.each([
+    ['anthropic-claude', 'claude-sonnet-5-5', 'end_turn'],
+    ['anthropic-claude', 'claude-opus-4-7', 'end_turn'],
+    ['anthropic-claude', 'claude-opus-4-8', 'end_turn'],
+    ['anthropic-claude', 'claude-haiku-4-5-20251001', 'end_turn'],
+    ['anthropic-claude', 'claude-sonnet-5-5', 'refusal'],
+    ['anthropic-claude', 'claude-sonnet-5-5', 'max_tokens'],
+    ['google-gemini', 'gemini-synthetic', 'STOP'],
+    ['google-gemini', 'gemini-synthetic', 'MAX_TOKENS'],
+    ['google-gemini', 'gemini-synthetic', 'unknown-usage'],
+  ])('records synthetic %s audit protocol for %s / %s', async (provider, model, stop) => {
+    const f = await fixture();
+    const anthropic = provider === 'anthropic-claude';
+    f.runtime.auditBaseUrl = anthropic ? 'https://api.anthropic.com' : 'https://generativelanguage.googleapis.com/v1beta';
+    for (const route of f.config.routes.filter(r => r.stage === 'completeness_audit')) {
+      route.providerId = provider;
+      route.requestedModel = route.actualModel = model;
+    }
+    await f.put('config', f.config);
+    await f.put('runtime', f.runtime);
+    const original = f.context.fetch.getMockImplementation()!;
+    const requests: { url: string; body: Record<string, unknown>; headers: Headers }[] = [];
+    f.context.fetch.mockImplementation(async (url, init) => {
+      if (!String(url).includes(anthropic ? '/v1/messages' : ':generateContent')) return original(url, init);
+      requests.push({ url: String(url), body: JSON.parse(init!.body as string), headers: new Headers(init!.headers) });
+      const json = JSON.stringify({ verdicts: ['b1', 'b2'].map(block_id => ({ block_id, missed: false, claim_type: null, rationale: 'Synthetic evidence.' })) });
+      const split = json.indexOf('evidence') + 3;
+      return Response.json(anthropic
+        ? { model, stop_reason: stop, content: [{ type: 'thinking', text: 'ignore' }, { type: 'text', text: json.slice(0, split) }, { type: 'tool_use', text: 'ignore' }, { type: 'text', text: json.slice(split) }], usage: { input_tokens: 10, cache_read_input_tokens: 3, output_tokens: 5 } }
+        : { modelVersion: model, candidates: [{ finishReason: stop === 'unknown-usage' ? 'STOP' : stop, content: { parts: [{ text: json }] } }], ...(stop === 'unknown-usage' ? {} : { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 2 } }) });
+    });
+    await runBenchmarkCli(f.args('run'), f.context);
+    const manifest = JSON.parse(await readFile(path.join(root, f.storage, 'manifest.json'), 'utf8'));
+    const attempts = manifest.runs.flatMap((r: BatchRun) => r.auditAttempts) as BatchRun['auditAttempts'];
+    expect(attempts.length).toBeGreaterThan(0);
+    expect(requests[0].url).toBe(anthropic ? 'https://api.anthropic.com/v1/messages' : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
+    expect(requests[0].headers.get(anthropic ? 'x-api-key' : 'x-goog-api-key')).toBe('synthetic-secret');
+    if (anthropic) {
+      expect(requests[0].headers.get('anthropic-version')).toBe('2023-06-01');
+      if (model.includes('haiku')) expect(requests[0].body.temperature).toBe(0);
+      else expect(requests[0].body).not.toHaveProperty('temperature');
+      expect(requests[0].body.max_tokens).toBe(100);
+    } else expect(requests[0].body.generationConfig).toEqual({ temperature: 0, maxOutputTokens: 100, responseMimeType: 'application/json' });
+    const failed = ['refusal', 'max_tokens', 'MAX_TOKENS'].includes(stop);
+    expect(attempts.every(a => a.status === (failed ? 'failed' : 'completed'))).toBe(true);
+    expect(attempts[0].usage).toEqual(stop === 'unknown-usage' ? { input_tokens: null, output_tokens: null } : { input_tokens: anthropic ? 13 : 10, output_tokens: anthropic ? 5 : 7 });
+    if (!failed) expect(attempts[0].actual).toMatchObject({ providerId: provider, model });
+    else expect(attempts[0].raw).toBeDefined();
+    if (stop === 'unknown-usage') {
+      const result = JSON.parse(await readFile(path.join(root, f.storage, 'interim.json'), 'utf8'));
+      expect(result.costs.unknown).toBe(true);
+      expect(result.costs.reservedUsd).toBeGreaterThan(0);
+      expect(result.costs.conservativeTotalUsd).toBeLessThanOrEqual(10);
+    }
+    expect(f.runtime.auditSettings.temperature).toBe(0);
+  });
+
   it('rejects missing commands without reflecting values', async () => {
     const result = await runBenchmarkCli(['private-secret']);
     expect(result.exitCode).toBe(1);

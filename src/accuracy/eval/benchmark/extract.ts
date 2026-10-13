@@ -1,6 +1,7 @@
 /** Isolated complete-source benchmark extraction with caller-owned authorization,
  * checkpoints and accounting. Uses single-attempt HTTP without loading provider env.
  */
+import { anthropicSampling, anthropicAnswer } from "./anthropic-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parsedBlockSchema, type ParsedBlock } from "@/lib/schema";
@@ -278,7 +279,7 @@ export async function extractStage(request: ExtractRequest, transport: ExtractTr
         }
         if (provider === "anthropic-claude") {
           url = `${baseline.baseUrl.replace(/\/$/, "")}/v1/messages`; headers = { ...baseline.headers, "content-type": "application/json", "x-api-key": transport.apiKey, "anthropic-version": "2023-06-01" };
-          body = { model: snapshot.model, ...snapshot.params, system, messages: [{ role: "user", content: user }] };
+          body = { model: snapshot.model, max_tokens: snapshot.params.max_tokens, ...anthropicSampling(snapshot.model, snapshot.params.temperature), system, messages: [{ role: "user", content: user }] };
         } else if (provider === "google-gemini") {
           url = `${baseline.baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(snapshot.model)}:generateContent`; headers = { ...baseline.headers, "content-type": "application/json", "x-goog-api-key": transport.apiKey };
           body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { temperature: snapshot.params.temperature, maxOutputTokens: snapshot.params.max_tokens, responseMimeType: "application/json" } };
@@ -290,8 +291,8 @@ export async function extractStage(request: ExtractRequest, transport: ExtractTr
         const usage = tokenUsage(payload); result.usage = usage;
         state.attempts.at(-1)!.usage = usage;
         const choice = record(list(payload.choices)[0]), candidate = record(list(payload.candidates)[0]);
-        if (payload.error || choice.finish_reason === "length" || candidate.finishReason === "MAX_TOKENS" || record(payload.promptFeedback).blockReason || payload.stop_reason === "max_tokens") throw new StageError("provider_output_error");
-        const raw = provider === "anthropic-claude" ? list(payload.content).map((p) => string(record(p).text) ?? "").join("\n") : provider === "google-gemini" ? list(record(candidate.content).parts).map((p) => string(record(p).text) ?? "").join("\n") : string(record(choice.message).content);
+        if (payload.error || choice.finish_reason === "length" || candidate.finishReason === "MAX_TOKENS" || record(payload.promptFeedback).blockReason || (provider === "anthropic-claude" && anthropicAnswer(payload) === null)) throw new StageError("provider_output_error");
+        const raw = provider === "anthropic-claude" ? anthropicAnswer(payload) : provider === "google-gemini" ? list(record(candidate.content).parts).map((p) => string(record(p).text) ?? "").join("\n") : string(record(choice.message).content);
         if (!raw) throw new StageError("missing_output");
         try { return JSON.parse(raw) as unknown; } catch { throw new StageError("invalid_output_json"); }
       }

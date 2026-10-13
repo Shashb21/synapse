@@ -69,15 +69,26 @@ function canonical(value: unknown): string {
     return JSON.stringify(value);
 }
 /** Reject duplicated identities instead of hiding output counts. */
-function unique(ids: string[]): void { if (new Set(ids).size !== ids.length)
-    throw new Error('Duplicate identity'); }
+function unique(ids: string[]): void {
+    if (new Set(ids).size !== ids.length) {
+        throw new Error('Duplicate identity');
+    }
+}
 /** Create the identity a human signs; rejects invalid stages and repeated output IDs.
  * Hash binds every normalized finding field, including citations and identifying details.
  */
 export function scoringIdentity(pack: FrozenReferencePack, stage: ScoringStage, findings: ExtractFinding[]): ScoringIdentity {
     z.enum(['need_extract', 'inventory_extract']).parse(stage);
     unique(findings.map(f => identityText.parse(f.id)));
-    return { packId: pack.packId, sourceHash: pack.sourceHash, referenceHash: pack.referenceHash, packHash: pack.packHash, referenceVersion: pack.referenceVersion, stage, outputHash: createHash('sha256').update(canonical(findings)).digest('hex') };
+    return {
+        packId: pack.packId,
+        sourceHash: pack.sourceHash,
+        referenceHash: pack.referenceHash,
+        packHash: pack.packHash,
+        referenceVersion: pack.referenceVersion,
+        stage,
+        outputHash: createHash('sha256').update(canonical(findings)).digest('hex'),
+    };
 }
 /** Score explicit signed decisions only. Throws on stale identities, invalid evidence,
  * unsigned judgments, repeated credit, unknown IDs or duplicate chains. Pending gold
@@ -107,8 +118,16 @@ export function scoreStage(pack: FrozenReferencePack, stage: ScoringStage, findi
     const byGold = new Map(gold.items.map(g => [g.id, g]));
     const byReview = new Map(records.map(r => [r.findingId, r]));
     /** Verify literal evidence at the original source/block boundary. */
-    function evidenceValid(span: z.infer<typeof provenanceSpanSchema>): boolean { const b = pack.source.blocks.find(b => b.id === span.block_id); return span.source_file_id === pack.packId && !!b && validateQuoteAgainstBlock({ block: b, quote: span.quote }).ok; }
-    const citationValid = new Map(findings.map(f => [f.id, f.citation.valid && f.provenance.length > 0 && f.provenance.every(evidenceValid)]));
+    function evidenceValid(span: z.infer<typeof provenanceSpanSchema>): boolean {
+        const block = pack.source.blocks.find(block => block.id === span.block_id);
+        return span.source_file_id === pack.packId
+            && !!block
+            && validateQuoteAgainstBlock({ block, quote: span.quote }).ok;
+    }
+    const citationValid = new Map(findings.map(f => [
+        f.id,
+        f.citation.valid && f.provenance.length > 0 && f.provenance.every(evidenceValid),
+    ]));
     const recovered: StageScore['recovered'] = [];
     const credited = new Set<string>();
     for (const r of records) {
@@ -145,8 +164,20 @@ export function scoreStage(pack: FrozenReferencePack, stage: ScoringStage, findi
     const ratio = (numerator: number, denominator: number): ScoreRatio => ({ numerator, denominator, percent: denominator ? numerator / denominator * 100 : null });
     const pending = findings.filter(f => !byReview.has(f.id)).map(f => f.id);
     const ids = (outcome: HumanJudgment['outcome']) => records.filter(r => r.outcome === outcome).map(r => r.findingId);
-    return structuredClone({ identity, provisional: gold.review.status !== 'approved' || pending.length > 0,
-        contentRecall: ratio(recovered.length, gold.items.length), citationValidity: ratio([...citationValid.values()].filter(Boolean).length, findings.length), contentWithCitation: ratio(recovered.filter(r => r.citationValid).length, gold.items.length),
-        omissions: gold.items.filter(g => !credited.has(g.id)).map(g => g.id), parsingLossIds: gold.parsingLossIds, pending, duplicates: ids('duplicate'), additions: ids('addition'), unsupported: ids('unsupported'), specificityFailures: records.filter(r => r.outcome === 'specificity_failure'),
-        items: findings.map(f => ({ findingId: f.id, citationValid: citationValid.get(f.id)!, judgment: byReview.get(f.id) ?? null })), recovered });
+    return structuredClone({
+        identity,
+        provisional: gold.review.status !== 'approved' || pending.length > 0,
+        contentRecall: ratio(recovered.length, gold.items.length),
+        citationValidity: ratio([...citationValid.values()].filter(Boolean).length, findings.length),
+        contentWithCitation: ratio(recovered.filter(r => r.citationValid).length, gold.items.length),
+        omissions: gold.items.filter(g => !credited.has(g.id)).map(g => g.id),
+        parsingLossIds: gold.parsingLossIds,
+        pending,
+        duplicates: ids('duplicate'),
+        additions: ids('addition'),
+        unsupported: ids('unsupported'),
+        specificityFailures: records.filter(r => r.outcome === 'specificity_failure'),
+        items: findings.map(f => ({ findingId: f.id, citationValid: citationValid.get(f.id)!, judgment: byReview.get(f.id) ?? null })),
+        recovered,
+    });
 }

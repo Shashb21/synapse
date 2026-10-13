@@ -1,4 +1,5 @@
 /** Explicit local CLI. No production routing, environment loader or DB imports. */
+import { anthropicSampling, anthropicAnswer } from '../anthropic-protocol';
 import { z } from 'zod';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -232,7 +233,7 @@ function auditTransport(runtime: Runtime, secrets: ReadonlyMap<string, string>, 
     }
     if (provider === 'anthropic-claude') {
       url = `${base}/v1/messages`; headers = { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' };
-      body = { model: request.route.requestedModel, ...request.settings, system: request.system, messages: [{ role: 'user', content: request.user }] };
+      body = { model: request.route.requestedModel, max_tokens: request.settings.max_tokens, ...anthropicSampling(request.route.requestedModel, request.settings.temperature), system: request.system, messages: [{ role: 'user', content: request.user }] };
     } else if (provider === 'google-gemini') {
       url = `${base}/models/${encodeURIComponent(request.route.requestedModel)}:generateContent`;
       headers = { 'content-type': 'application/json', 'x-goog-api-key': key };
@@ -248,8 +249,8 @@ function auditTransport(runtime: Runtime, secrets: ReadonlyMap<string, string>, 
     const model = payload.model ?? payload.modelVersion;
     const choice = record((payload.choices as unknown[] | undefined)?.[0]);
     const candidate = record((payload.candidates as unknown[] | undefined)?.[0]);
-    const value = provider === 'anthropic-claude' ? (payload.content as unknown[] | undefined)?.map(p => record(p).text).join('\n') : provider === 'google-gemini' ? (record(candidate.content).parts as unknown[] | undefined)?.map(p => record(p).text).join('\n') : record(choice.message).content;
-    if (typeof model !== 'string' || typeof value !== 'string' || choice.finish_reason === 'length' || payload.stop_reason === 'max_tokens' || candidate.finishReason === 'MAX_TOKENS' || payload.error) throw { temporary: false, httpStatus: response.status, raw: payload, usage };
+    const value = provider === 'anthropic-claude' ? anthropicAnswer(payload) : provider === 'google-gemini' ? (record(candidate.content).parts as unknown[] | undefined)?.map(p => record(p).text).join('\n') : record(choice.message).content;
+    if (typeof model !== 'string' || typeof value !== 'string' || choice.finish_reason === 'length' || (provider === 'anthropic-claude' && anthropicAnswer(payload) === null) || candidate.finishReason === 'MAX_TOKENS' || payload.error) throw { temporary: false, httpStatus: response.status, raw: payload, usage };
     let verdicts: unknown;
     try { verdicts = JSON.parse(value); } catch { throw { temporary: false, httpStatus: response.status, raw: payload, usage }; }
     return { raw: { ...record(verdicts), providerResponse: payload }, providerId: provider, model, settingsHash: artifactDigest(request.settings), usage };

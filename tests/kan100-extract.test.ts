@@ -17,6 +17,43 @@ function transport(replies: unknown[]): ExtractTransport {
   return { apiKey: "secret-test-key", fetch: vi.fn(async () => new Response(JSON.stringify(replies.shift()), { status: 200 })), beforeAttempt: vi.fn(async () => {}), checkpoint: vi.fn(async () => {}) };
 }
 describe("complete source extraction", () => {
+  it.each(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5', 'claude-mythos-5', 'claude-opus-4-7', 'claude-opus-4-8', 'claude-haiku-4-5-20251001'])('uses native Anthropic parameters for %s and continuous text only', async model => {
+    const r = request('baseline');
+    r.route.providerId = r.baseline!.snapshot.provider_id = 'anthropic-claude';
+    r.route.requestedModel = r.baseline!.snapshot.model = model;
+    r.baseline!.baseUrl = 'https://api.anthropic.com';
+    r.baseline!.shallowCycle = false;
+    const json = JSON.stringify({ gaps: [gap] });
+    const split = json.indexOf('concrete') + 3;
+    const t = transport([{ model, stop_reason: 'end_turn', content: [{ type: 'thinking', text: 'ignore' }, { type: 'text', text: json.slice(0, split) }, { type: 'tool_use', text: 'ignore' }, { type: 'text', text: json.slice(split) }], usage: { input_tokens: 7, output_tokens: 2 } }]);
+    const result = await extractStage(r, t);
+    expect(result.status).toBe('completed');
+    expect(result.findings[0].statement).toBe(gap.statement);
+    expect(result.actualRoute.model).toBe(model);
+    expect(result.usage).toMatchObject({ input_tokens: 7, output_tokens: 2 });
+    const [url, init] = vi.mocked(t.fetch).mock.calls[0];
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    expect(new Headers(init?.headers).get('x-api-key')).toBe('secret-test-key');
+    const body = JSON.parse(init!.body as string);
+    if (model.includes('haiku')) expect(body.temperature).toBe(0.12);
+    else expect(body).not.toHaveProperty('temperature');
+    expect(r.baseline!.snapshot.params.temperature).toBe(0.12);
+    expect(t.fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each(['refusal', 'max_tokens'])('rejects Anthropic %s despite valid JSON and retains usage', async stop_reason => {
+    const r = request('baseline');
+    r.route.providerId = r.baseline!.snapshot.provider_id = 'anthropic-claude';
+    r.baseline!.baseUrl = 'https://api.anthropic.com';
+    r.baseline!.shallowCycle = false;
+    const t = transport([{ model: 'frozen-model', stop_reason, content: [{ type: 'text', text: '{"gaps":[]}' }], usage: { input_tokens: 7, output_tokens: 2 } }]);
+    const result = await extractStage(r, t);
+    expect(result.status).toBe('failed');
+    expect(result.error?.code).toBe('provider_output_error');
+    expect(result.attempts[0].usage).toMatchObject({ input_tokens: 7, output_tokens: 2 });
+    expect(result.rawOutputs).toHaveLength(1);
+    expect(t.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("uploads all >80 blocks without gold and preserves job/cost/citations", async () => {
     const r = request(); Object.assign(r.pack, { gold: { needs: "DO_NOT_SEND_GOLD" } });
     const t = transport([{ id: "dfl-1" }, { id: "ext-1", status: "PENDING" }, job()]);

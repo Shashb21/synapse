@@ -18,6 +18,23 @@ function fixture() {
   return { result, packs, ceilingUsd: 10, evidenceKind: 'synthetic' as const };
 }
 describe('readable benchmark report', () => {
+  it('averages measured runs only, including genuine zero and completed zero-work audits', () => {
+    const f = fixture();
+    f.result.runs = f.result.runs.slice(0, 3);
+    f.result.runs[0].extractionElapsedMs = 900;
+    for (const run of f.result.runs.slice(1)) {
+      run.extraction = undefined;
+      run.extractionElapsedMs = 0;
+      run.audit = undefined;
+    }
+    expect(renderBenchmarkReport(f).markdown).toContain('extraction 900.00 ms (n=1), audit 0.00 ms (n=1)');
+    f.result.runs[0].extractionElapsedMs = 0;
+    expect(renderBenchmarkReport(f).markdown).toContain('extraction 0.00 ms (n=1)');
+    f.result.runs[0].extraction = undefined;
+    f.result.runs[0].audit = undefined;
+    expect(renderBenchmarkReport(f).markdown).toContain('extraction unknown ms (n=0), audit unknown ms (n=0)');
+  });
+
   it('reports complete software matrix separately from synthetic empirical evidence', () => { const r = renderBenchmarkReport(fixture()); expect(r.status).toBe('incomplete'); expect(r.markdown).toContain('Synthetic'); expect(r.markdown).toContain('1/3 (33.33%)'); expect(r.markdown).toContain('Citation validity'); expect(r.markdown).toContain('Content with valid citation'); expect(r.markdown).toContain('Human decides adoption'); });
   it('allows completed live evidence with all judgments and matrix retained', () => { const r = renderBenchmarkReport({ ...fixture(), evidenceKind: 'live' }); expect(r.status).toBe('completed'); expect(r.markdown).toContain('24/24'); expect(r.markdown).toContain('reference decks'); });
   it('preserves exact missing runs and provisional review blockers', () => { const f = fixture(); f.result.runs.pop(); f.result.runs[0].score!.provisional = true; const r = renderBenchmarkReport({ ...f, evidenceKind: 'live', blockers: ['Tislelizumab: manifest 59 versus XML 91; human completeness review pending'] }); expect(r.status).toBe('incomplete'); expect(r.blockers).toContain('Missing run: synthetic-b / inventory_extract / extract / repeat 3'); expect(r.markdown).toContain('human review pending'); expect(r.markdown).toContain('manifest 59 versus XML 91'); });
