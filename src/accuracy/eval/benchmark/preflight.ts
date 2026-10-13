@@ -1,6 +1,9 @@
 import { benchmarkConfigSchema, type PreflightResult } from "./contracts";
 
-/** Pure gate. Caller supplies environment NAMES, never environment values. No I/O. */
+/** Initial full-experiment readiness gate, not a resume or per-attempt budget gate.
+ * Caller supplies environment NAMES, never values. No I/O.
+ * The downstream batch must enforce remaining budget before every paid attempt.
+ */
 export function checkPreflight(config: unknown, envNames: readonly string[]): PreflightResult {
   const parsed = benchmarkConfigSchema.safeParse(config);
   if (!parsed.success) {
@@ -18,6 +21,12 @@ export function checkPreflight(config: unknown, envNames: readonly string[]): Pr
   require(c.blockCap === null, "Primary comparison must preserve full input without a block cap.");
   require(c.maxTemporaryRetries <= 1, "At most one temporary-service retry is permitted.");
   require(new Set(c.sources.map(s => s.packId)).size === c.sources.length, "Keep source packs separate with unique pack identities.");
+  const syntheticOnly = c.sources.every(source => source.synthetic);
+  const agreedPacks = ["beone-bgb-58067-prmt5i", "beone-tislelizumab-iegp"];
+  require(syntheticOnly || (c.sources.length === agreedPacks.length &&
+    c.sources.every(source => !source.synthetic) &&
+    agreedPacks.every(packId => c.sources.some(source => source.packId === packId))),
+  "Nonsynthetic experiments require exactly both agreed real BeOne packs; mixed real/synthetic plans are not the agreed experiment.");
   for (const source of c.sources) {
     require(source.complete, `${source.packId}: frozen complete parsed source required.`);
     require(source.inputTokens !== null, `${source.packId}: actual input token size is unknown.`);
@@ -37,17 +46,19 @@ export function checkPreflight(config: unknown, envNames: readonly string[]): Pr
       require(r.version === "2.5", `${label}: fixed Extract version 2.5 required.`);
       require(r.lowestCostSuitableTierVerified, `${label}: lowest-cost suitable tier verification pending.`);
     }
-    require(c.sources.every(s => s.synthetic) || Boolean(r.authorizationEvidence), `${label}: vendor-specific BeOne processing authorization pending.`);
+    require(syntheticOnly || Boolean(r.authorizationEvidence), `${label}: vendor-specific BeOne processing authorization pending.`);
   }
   const b = c.budget;
   const plannedCalls = c.routes.length * c.sources.length * c.repetitions * (1 + c.maxTemporaryRetries);
   require(b.calls.reduce((sum, call) => sum + call.count, 0) >= plannedCalls, "Cost plan must cover all decks, routes, repetitions and permitted retries; setup and tuning are additional reserves.");
   const known = b.spentUsd !== null && b.setupUsd !== null && b.tuningUsd !== null && !b.pendingCost && b.calls.every(call => call.maxUsd !== null);
-  const estimatedTotalUsd = known
-    ? Math.round(((b.spentUsd ?? 0) + (b.setupUsd ?? 0) + (b.tuningUsd ?? 0) + b.calls.reduce((sum, call) => sum + call.count * (call.maxUsd ?? 0), 0)) * 1e9) / 1e9
+  const unroundedTotalUsd = known
+    ? (b.spentUsd ?? 0) + (b.setupUsd ?? 0) + (b.tuningUsd ?? 0) + b.calls.reduce((sum, call) => sum + call.count * (call.maxUsd ?? 0), 0)
     : null;
+  // Display rounds upward; admission compares the unrounded total, never the display.
+  const estimatedTotalUsd = unroundedTotalUsd === null ? null : Math.ceil(unroundedTotalUsd * 1e9) / 1e9;
   require(known, "Unknown or pending costs block paid execution; unknown is not zero.");
-  require(estimatedTotalUsd !== null && estimatedTotalUsd <= b.ceilingUsd, "Conservative whole-experiment estimate must fit the remaining US$10 ceiling.");
+  require(unroundedTotalUsd !== null && unroundedTotalUsd <= b.ceilingUsd, "Conservative whole-experiment estimate must fit the whole-experiment US$10 ceiling.");
   require(b.sizeBasisHash === c.sources.map(s => s.hash).join(","), "Cost estimate must identify the exact frozen source hashes in source order.");
   return { ready: blockers.length === 0, blockers, estimatedTotalUsd };
 }

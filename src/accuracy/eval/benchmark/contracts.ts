@@ -14,18 +14,23 @@ const routeSchema = z.strictObject({
   credentialEnvName: z.string().regex(/^[A-Z][A-Z0-9_]*$/), fallbackAllowed: z.boolean(),
 });
 
-/** Explicit metadata only: never put keys, source text, or DB connection strings here. */
+/** Initial full-experiment plan, not a resume plan. Explicit metadata only:
+ * never put keys, source text, or DB connection strings here.
+ */
 export const benchmarkConfigSchema = z.strictObject({
   batchId: text, sourceCodeVersion: text, referenceVersion: text,
   goldReviewed: z.boolean(), repetitions: z.number().int().positive(),
   blockCap: z.number().int().positive().nullable(),
   storage: z.strictObject({ path: text, isolated: z.boolean(), gitIgnored: z.boolean(), exclusionEvidence: text.nullable() }),
+  // All-synthetic fixtures are flexible; real runs require exactly both agreed BeOne packs.
   sources: z.array(z.strictObject({
     packId: text, hash: text, blocks: z.number().int().positive(),
     inputTokens: z.number().int().positive().nullable(), complete: z.boolean(), synthetic: z.boolean(),
   })).min(1),
   baselineSnapshot: text.nullable(), schemaHash: text, promptsHash: text, auditProcessHash: text,
   routes: z.array(routeSchema).min(1),
+  // calls covers the full initial experiment including retries; spentUsd is prior incurred cost.
+  // setupUsd/tuningUsd reserve additional costs. Downstream enforces remaining budget per attempt.
   budget: z.strictObject({
     ceilingUsd: z.number().finite().positive().max(10), spentUsd: money,
     pendingCost: z.boolean(), setupUsd: money, tuningUsd: money,
@@ -42,5 +47,6 @@ export type BaselineRouteSnapshot = Pick<ResolvedAccuracyRoute,
 export type PreflightResult = {
   ready: boolean;
   blockers: string[];
+  /** Conservative display total rounded upward to nine decimals; admission uses unrounded total. */
   estimatedTotalUsd: number | null;
 };
