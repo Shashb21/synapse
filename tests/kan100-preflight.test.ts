@@ -12,8 +12,10 @@ function config(): BenchmarkConfig {
     schemaHash: "schema-v1", promptsHash: "prompts-v1", auditProcessHash: "audit-v1",
     routes: ["baseline", "extract"].flatMap(configuration =>
       (["need_extract", "inventory_extract", "completeness_audit"] as const).map(stage => ({
-        configuration: configuration as "baseline" | "extract", stage, providerId: configuration,
-        requestedModel: "fixed-model", actualModel: "fixed-model", version: configuration === "extract" ? "2.5" : "fixed",
+        configuration: configuration as "baseline" | "extract", stage,
+        providerId: stage === "completeness_audit" ? "audit-provider" : configuration,
+        requestedModel: "fixed-model", actualModel: "fixed-model",
+        version: stage !== "completeness_audit" && configuration === "extract" ? "2.5" : "fixed",
         tier: "lowest", lowestCostSuitableTierVerified: true, accountVerified: true, versionVerified: true,
         citationsVerified: true, citationsEnabled: true, authorizationEvidence: null,
         settingsHash: "settings-v1", credentialEnvName: "BENCHMARK_KEY", fallbackAllowed: false,
@@ -28,6 +30,36 @@ function config(): BenchmarkConfig {
 describe("isolated benchmark preflight", () => {
   it("accepts a complete synthetic plan beyond 80 blocks", () => {
     expect(checkPreflight(config(), ["BENCHMARK_KEY"])).toMatchObject({ ready: true, blockers: [], estimatedTotalUsd: 3.7 });
+  });
+  it.each(["providerId", "requestedModel", "actualModel", "version", "tier", "settingsHash"] as const)(
+    "blocks mismatched audit %s across configurations", field => {
+      const c = config();
+      const audit = c.routes.find(route => route.configuration === "extract" && route.stage === "completeness_audit")!;
+      audit[field] = "different";
+      // Keep model verification valid so the shared-audit gate is exercised alone.
+      if (field === "requestedModel" || field === "actualModel") {
+        audit.requestedModel = audit.actualModel = "different";
+      }
+      expect(checkPreflight(c, ["BENCHMARK_KEY"])).toMatchObject({
+        ready: false,
+        blockers: ["Both configurations require the same frozen audit provider/model/version/tier/settings and process."],
+      });
+    },
+  );
+  it("accepts an identical non-Extract audit route for both configurations", () => {
+    const c = config();
+    const audits = c.routes.filter(route => route.stage === "completeness_audit");
+    expect(audits.map(route => [route.providerId, route.version])).toEqual([
+      ["audit-provider", "fixed"], ["audit-provider", "fixed"],
+    ]);
+    expect(checkPreflight(c, ["BENCHMARK_KEY"])).toMatchObject({ ready: true, blockers: [] });
+  });
+  it.each(["need_extract", "inventory_extract"] as const)("blocks wrong Extract version for %s", stage => {
+    const c = config();
+    c.routes.find(route => route.configuration === "extract" && route.stage === stage)!.version = "2.4";
+    expect(checkPreflight(c, ["BENCHMARK_KEY"])).toMatchObject({
+      ready: false, blockers: [`extract/${stage}: fixed Extract version 2.5 required.`],
+    });
   });
   function realConfig(packIds: string[]): BenchmarkConfig {
     const c = config();

@@ -42,12 +42,19 @@ export function checkPreflight(config: unknown, envNames: readonly string[]): Pr
     require(r.accountVerified && r.versionVerified, `${label}: account/version verification pending.`);
     require(r.citationsEnabled && r.citationsVerified, `${label}: citation support verification pending.`);
     require(r.actualModel === r.requestedModel && !r.fallbackAllowed, `${label}: responding model must match the fixed request; fallback results need a separate label.`);
-    if (r.configuration === "extract") {
+    if (r.configuration === "extract" && r.stage !== "completeness_audit") {
       require(r.version === "2.5", `${label}: fixed Extract version 2.5 required.`);
       require(r.lowestCostSuitableTierVerified, `${label}: lowest-cost suitable tier verification pending.`);
     }
     require(syntheticOnly || Boolean(r.authorizationEvidence), `${label}: vendor-specific BeOne processing authorization pending.`);
   }
+  const audits = c.routes.filter(r => r.stage === "completeness_audit");
+  const auditIdentity = (r: typeof audits[number]) => JSON.stringify({
+    provider: r.providerId, model: r.requestedModel, actual: r.actualModel,
+    version: r.version, tier: r.tier, settings: r.settingsHash,
+  });
+  require(audits.length === 2 && auditIdentity(audits[0]) === auditIdentity(audits[1]),
+    "Both configurations require the same frozen audit provider/model/version/tier/settings and process.");
   const b = c.budget;
   const plannedCalls = c.routes.length * c.sources.length * c.repetitions * (1 + c.maxTemporaryRetries);
   require(b.calls.reduce((sum, call) => sum + call.count, 0) >= plannedCalls, "Cost plan must cover all decks, routes, repetitions and permitted retries; setup and tuning are additional reserves.");
