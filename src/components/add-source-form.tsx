@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { FileText, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RerunMappingButton } from "@/components/platform/rerun-mapping-button";
@@ -12,7 +12,7 @@ import {
   SOURCE_TYPES,
 } from "@/lib/iegp/enums";
 import { MAX_UPLOAD_BYTES, TOO_LARGE, UPLOAD_ACCEPT, UPLOAD_FORMATS_LABEL, uploadKindOf } from "@/lib/ingest/upload-formats";
-import { postJson } from "@/lib/post-json";
+import { postIngest } from "@/lib/ingest/post-ingest";
 
 const FIELD = "h-8 w-full rounded-lg border border-input bg-card px-2.5 text-[12px] text-foreground";
 const LABEL = "grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -45,6 +45,9 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
   const [mappingFailed, setMappingFailed] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [progress, setProgress] = useState("");
+  const ingestRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => ingestRequest.current?.abort(), []);
 
   async function pickFile(file: File | undefined) {
     if (!file) return;
@@ -86,8 +89,10 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
       setError("Choose a file or paste the source text.");
       return;
     }
+    if (ingestRequest.current && !ingestRequest.current.signal.aborted && pending) return;
     setPending(true);
-    const res = await postJson("/api/iegp", {
+    ingestRequest.current = new AbortController();
+    const res = await postIngest({
         action: "ingest",
         note: "",
         title: title.trim(),
@@ -95,7 +100,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         ...(binary ?? { text }),
         source_type: String(data.get("source_type") ?? ""),
         stakeholder_function: String(data.get("stakeholder_function") ?? ""),
-      });
+      }, setProgress, ingestRequest.current.signal);
     const json = res.json as { error?: string; stage?: string };
     setPending(false);
     if (!res.ok) {
@@ -103,7 +108,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
       setMappingFailed(json.stage === "S4");
       return;
     }
-    setDone(`Read “${title.trim()}”. Its gaps and tactics are on Evidence Inventory.`);
+    setDone(`Processed “${title.trim()}”. Review its results on Evidence Inventory.`);
     setTitle("");
     setText("");
     clearFile();
@@ -219,6 +224,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
             ) : null}
           </div>
         ) : null}
+        {pending ? <p role="status" className="text-[12px] text-muted-foreground">{progress}</p> : null}
         {done ? (
           <p role="status" className="text-[12px] text-[var(--known-foreground)]">
             {done}
@@ -227,7 +233,7 @@ export function AddSourceForm({ demoFiles = false }: { demoFiles?: boolean }) {
         <div>
           <Button type="submit" disabled={pending}>
             {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            {pending ? "Reading…" : "Add and read source"}
+            {pending ? "Processing…" : "Add and read source"}
           </Button>
         </div>
       </form>

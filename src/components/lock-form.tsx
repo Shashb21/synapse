@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { postIngest } from "@/lib/ingest/post-ingest";
 import { postJson } from "@/lib/post-json";
 
 /** The optional note a dialog collects. Only actions that store a note pass one. */
@@ -111,16 +112,20 @@ export function LockForm({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [progress, setProgress] = useState("");
+  const ingestRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => ingestRequest.current?.abort(), []);
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
       setError(null);
-      setPending(false);
+      // Reopening a dialog does not cancel its active request.
     }
   }
 
   async function onSubmit(form: HTMLFormElement) {
+    if (pending || refreshing) return;
     const formData = new FormData(form);
     setError(null);
     const missing = missingRequired(form);
@@ -151,7 +156,11 @@ export function LockForm({
       if (k === "note") continue;
       payload[k] = v;
     }
-    const res = await postJson("/api/iegp", payload);
+    const isIngest = action === "ingest" || action === "ingest_demo";
+    ingestRequest.current = new AbortController();
+    const res = isIngest
+      ? await postIngest(payload, setProgress, ingestRequest.current.signal)
+      : await postJson("/api/iegp", payload);
     const json = res.json as { error?: string };
     setPending(false);
     if (!res.ok) {
@@ -196,6 +205,7 @@ export function LockForm({
                 />
               </label>
             ) : null}
+            {pending && progress ? <p role="status" className="text-[12px] text-muted-foreground">{progress}</p> : null}
             {error ? (
               <p role="alert" className="text-[12px] text-destructive">
                 {error}
@@ -204,7 +214,7 @@ export function LockForm({
           </div>
           <DialogFooter>
             <Button type="submit" size="sm" disabled={pending || refreshing}>
-              {pending || refreshing ? "Saving…" : confirmLabel ?? "Lock"}
+              {refreshing ? "Updating…" : pending ? (progress ? "Processing…" : "Saving…") : confirmLabel ?? "Lock"}
             </Button>
           </DialogFooter>
         </form>

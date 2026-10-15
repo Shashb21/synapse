@@ -1,3 +1,4 @@
+import { INGESTION_JOBS_DDL } from "@/lib/ingest/schema";
 import { SOURCE_FILES_DDL } from "@/modules/stages/s0-upload/schema";
 import { PARSED_DOCUMENTS_DDL } from "@/modules/stages/s1-parse/schema";
 import { GAP_CANDIDATES_DDL } from "@/modules/stages/s2-gap-extract/schema";
@@ -16,7 +17,8 @@ function split(ddl: string): string[] {
 }
 
 /** Kernel-owned workspace tables: run history, edits, hillclimb, S8–S10 artifacts, plans. */
-export const KERNEL_WORKSPACE_DDL = `
+export const KERNEL_WORKSPACE_DDL = `${INGESTION_JOBS_DDL};
+
 CREATE TABLE IF NOT EXISTS module_runs (
   id text PRIMARY KEY, workspace_id text NOT NULL, stage text NOT NULL,
   module_id text NOT NULL, module_version text NOT NULL, status text NOT NULL,

@@ -116,6 +116,7 @@ export function forgetModuleDdl(schema?: string) {
  * signals are configuration or learning, so they survive a reset.
  */
 const WORKSPACE_TABLES = [
+  "ingestion_jobs",
   "source_files",
   "parsed_documents",
   "gap_candidates",
@@ -149,6 +150,7 @@ export async function wipePlatform(moduleTables: string[] = []) {
   const d = db();
   const tables = [
     "module_runs",
+    "ingestion_jobs",
     "edit_records",
     "hillclimb_signals",
     "eval_runs",

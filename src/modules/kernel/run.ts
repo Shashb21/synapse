@@ -1,7 +1,10 @@
+import { sql } from "drizzle-orm";
+import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { ApiGuardError } from "@/modules/auth/api-guard";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import { activeRevisionPointer, getPromptRevision } from "./prompt-revisions";
 import { activePromptVersion, scopedPromptRevision, revisionCompletion } from "./prompt-variant";
-import { ensurePlatformSchema } from "./db";
+import { db, ensurePlatformSchema } from "./db";
 import { RunRecorder, closeRun, openRun } from "./observability";
 import { activeModule } from "./registry";
 import { completionFor, resolveRoute, routeConfig, stageLabel } from "./routing";
@@ -195,7 +198,7 @@ export async function runStage<O = unknown>(args: {
     ai,
   };
 
-  try {
+  const execute = async (): Promise<StageRunResult<O>> => {
     const pointer = await activeRevisionPointer(workspace_id, args.stage);
     const revision = pointer.revision_id ? await getPromptRevision(pointer.revision_id, workspace_id) : null;
     const selected = scopedPromptRevision() ?? { id: revision?.id ?? null, instruction: revision?.instruction_text ?? "" };
@@ -248,7 +251,24 @@ export async function runStage<O = unknown>(args: {
       output: parsedOutput.data as O,
       evals,
     };
+  };
+
+  try {
+    if (["S0", "S1", "S2", "S3", "S4"].includes(args.stage)) {
+      // Freeze facts and every live ingestion write share clear's lock. The
+      // pipeline already owns this lock: transaction locks are reentrant on
+      // that connection, and nesting here creates a savepoint, not a new owner.
+      const schema = await currentSchemaName();
+      return await withWorkspaceTransaction(async () => {
+        const locked = await db().execute(sql`select pg_try_advisory_xact_lock(hashtextextended(${`ingest:${schema}`}, 0)) as locked`);
+        if (!locked[0]?.locked) throw new ApiGuardError(409, "ingest_busy", "An ingestion step or clear is still running. Wait for it to finish, then retry.");
+        return execute();
+      });
+    }
+    return await execute();
   } catch (error) {
+    // Standalone failures roll back current state before persisting their run
+    // error. An outer pipeline transaction still owns its checkpoint and trace.
     const message = error instanceof Error ? error.message : String(error);
     await closeRun({ recorder, status: "error", error: message, route });
     // So the response can say which step failed (and offer to re-run mapping, KAN-68).

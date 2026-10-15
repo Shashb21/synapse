@@ -1,15 +1,20 @@
 import Link from "next/link";
+import { ClearIngestedFiles } from "@/components/clear-ingested-files";
+import { currentSession } from "@/modules/auth/session";
+import { can } from "@/modules/auth/roles";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
 import { loadState } from "@/lib/iegp/store";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
-import { currentWorkspaceIsDemo } from "@/modules/workspaces/session";
+import { currentWorkspace, currentWorkspaceIsDemo } from "@/modules/workspaces/session";
 import { plural } from "@/lib/plural";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const state = await loadState();
+  const [workspace, session] = await Promise.all([currentWorkspace(), currentSession()]);
+  const mayClear = workspace?.role === "owner" && session && can(session.role, "reset_workspace");
   const ai = await aiSectionEnabled("ingestion").catch(() => false);
   // Demo source files are offered only in a workspace that holds the Velmara demo.
   const demo = await currentWorkspaceIsDemo();
@@ -40,6 +45,8 @@ export default async function SourcesPage() {
           .
         </PageIntro>
       )}
+
+      {mayClear ? <div className="mt-4"><ClearIngestedFiles /></div> : null}
 
       <section className="mt-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="source-blocks">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

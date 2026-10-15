@@ -1,0 +1,3 @@
+/** Public confirmation wording, safe to share with the source inventory UI. */
+/** Confirmation shown before clearing; retained history means this is not complete erasure. */
+export const CLEAR_INGESTED_FILES_DESCRIPTION = "Remove all current sources (uploaded and typed), their extracted gaps and tactics, and related current plan data from this workspace. Keep manually added gaps, tactics and their authored statements, workspace setup and settings. Records with uncertain creation history are kept. Historical audit records, run traces, saved plans and saved learning evidence remain. This cannot be undone.";

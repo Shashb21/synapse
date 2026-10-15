@@ -26,6 +26,8 @@ const inputSchema = z.object({
   files: z.array(fileInput).default([]),
   /** Ids from the bundled demo pack, uploaded as if the user had picked them. */
   demo_ids: z.array(z.string()).default([]),
+  /** The ingestion orchestrator may resume an already stored upload. */
+  reuse_existing: z.boolean().default(false),
 });
 
 const outputSchema = z.object({
@@ -83,6 +85,25 @@ function withoutContent(row: typeof sourceFiles.$inferSelect): SourceFileRecord 
     parsed_at: row.parsed_at,
     source_id: row.source_id,
     note: row.note,
+  };
+}
+
+/** The upload contract deliberately excludes stored document content. */
+function uploadMetadata(
+  row: typeof sourceFiles.$inferSelect,
+  duplicate_of: string | null = null,
+): UploadOutput["files"][number] {
+  return {
+    id: row.id,
+    filename: row.filename,
+    title: row.title,
+    source_type: row.source_type,
+    stakeholder_function: row.stakeholder_function,
+    mime: row.mime,
+    bytes: row.bytes,
+    checksum: row.checksum,
+    uploaded_at: row.uploaded_at,
+    duplicate_of,
   };
 }
 
@@ -177,6 +198,11 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
       }
       const checksum = checksumOf(buffer);
       const duplicate = existing.find((row) => row.checksum === checksum);
+      if (duplicate && input.reuse_existing) {
+        accepted.push(uploadMetadata(duplicate, duplicate.id));
+        ctx.run.note("file:reused", { id: duplicate.id });
+        continue;
+      }
       if (duplicate) {
         skipped.push({ filename: file.filename, reason: `identical to ${duplicate.id}` });
         continue;
@@ -202,18 +228,7 @@ export const uploadModule: SynapseModule<UploadInput, UploadOutput> = {
         note: null,
       };
       await db().insert(sourceFiles).values(record).onConflictDoNothing();
-      accepted.push({
-        id,
-        filename: record.filename,
-        title: record.title,
-        source_type: record.source_type,
-        stakeholder_function: record.stakeholder_function,
-        mime: record.mime,
-        bytes: record.bytes,
-        checksum,
-        uploaded_at,
-        duplicate_of: null,
-      });
+      accepted.push(uploadMetadata(record));
       ctx.run.note("file:accepted", { id, bytes: buffer.length, mime: record.mime });
     }
 

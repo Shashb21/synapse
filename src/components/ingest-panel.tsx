@@ -1,3 +1,4 @@
+import { completedIngestSourceIds } from "@/lib/ingest/status";
 import { LockForm } from "@/components/lock-form";
 import { AddSourceForm } from "@/components/add-source-form";
 import {
@@ -11,7 +12,7 @@ import type { SourceDocument } from "@/lib/iegp/types";
  * Upload: add a source of your own, plus the Velmara demo source files in a demo
  * workspace only. A team's own workspace never offers demo content unasked.
  */
-export function IngestPanel({
+export async function IngestPanel({
   sources,
   compact,
   demoFiles = false,
@@ -21,7 +22,9 @@ export function IngestPanel({
   /** The workspace holds the Velmara demo: offer its demo source files. */
   demoFiles?: boolean;
 }) {
-  const ingestedTitles = new Set(sources.map((s) => s.title));
+  const completed = await completedIngestSourceIds();
+  const ingestedTitles = new Set(sources.filter((source) => completed.has(source.id)).map((source) => source.title));
+  const savedTitles = new Set(sources.map((source) => source.title));
 
   return (
     <div>
@@ -43,7 +46,7 @@ export function IngestPanel({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-[13px] text-foreground">{file.title}</p>
                   <span className="text-[11px] text-muted-foreground">
-                    {ingested ? "Ingested" : "Not ingested"}
+                    {ingested ? "Ingested" : savedTitles.has(file.title) ? "Source saved · ingest to finish extraction" : "Not ingested"}
                   </span>
                 </div>
                 <p className="mt-1 text-[12px] text-muted-foreground">
@@ -83,7 +86,7 @@ export function IngestPanel({
 
       {compact ? null : (
         <>
-          <h2 className="mb-3 mt-8 text-[13px] text-foreground">Ingested sources</h2>
+          <h2 className="mb-3 mt-8 text-[13px] text-foreground">Saved sources</h2>
           {sources.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">None yet.</p>
           ) : (
