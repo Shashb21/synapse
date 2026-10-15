@@ -78,3 +78,22 @@ The AI-off test reproduces independently (exit1, one failed,10 skipped): `node n
 No further full-suite run is claimed: an independently reproduced failure remains and only one of the11 timed-out benchmark cases has been rerun with the longer limit. The earlier full result remains the full-suite result. Product UI checks are passing, but parent KAN-113 remains In Progress. No Done transition, next-ticket handoff, merge or push is appropriate while required verification remains unresolved. All scratch evidence remains preserved while this work is open.
 
 Independent read-only review of the three-file verification reconciliation approved specification compliance and code quality, with no findings. It confirmed the URL/refresh/confirmation guarantees remain covered and the collapsed-row source assertion is stronger. No additional tests were run by the reviewer.
+
+## Resumed verification repair
+
+The owner authorized resolving the remaining verification blockers and requested a live preview before merge. The AI-off fixture now uses the existing `heor-interview` demo, retaining409 `ai_off` assertions for valid demo and typed ingestion. A separate unknown-demo test asserts400 `invalid_request` and no new run. Production validation order is unchanged. The entire AI-off test file passed:12 tests, exit0; ESLint, TypeScript and whitespace checks exited0. Independent scoped review approved specification compliance and code quality with no findings.
+
+Additional ruling: use a valid demo fixture for the AI-off check and separately test invalid input, rather than changing production validation order. Reason: the reproduced failure came from an unknown fixture ID. Cost if wrong: revisit the API contract and test expectations.
+
+The earlier open-verification disposition above is historical; a final full run with `--testTimeout=120000` is in progress. The result below, when present, supersedes it.
+
+## Final successful verification
+
+```bash
+DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55413/synapse_kan113_test \
+node node_modules/vitest/vitest.mjs run --testTimeout=120000
+```
+
+Result: exit0;175/175 test files and1542/1542 tests passed in889.96seconds. All21 CLI benchmark tests passed (415.348seconds for that file). The test-timeout override is limited to the command; project configuration is unchanged. Log: `/private/tmp/kan113-final-full-vitest.log`.
+
+Together with the eight combined Chromium checks on the unchanged product implementation, this resolves the required verification blockers. The final incremental changes are test fixtures and documentation only. Lint/type/whitespace checks passed for those edits, and independent review approved them. The owner requested a live branch preview before merge; no merge or push is authorized by that request.
