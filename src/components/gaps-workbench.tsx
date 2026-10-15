@@ -3,6 +3,7 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
+import { InventoryReadiness } from "@/components/inventory-readiness";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
 import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
@@ -430,8 +431,6 @@ export function GapsWorkbench({
   const [openId, setOpenId] = useState<string | null>(null);
   const expandedId = openId;
   const [focusTask, setFocusTask] = useState<{ label: string; sequence: number } | null>(null);
-  const partials = counts.partial;
-  const unvalidated = cards.filter((card) => !card.human_validated).length;
   const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
 
   function resetFilters() {
@@ -658,12 +657,13 @@ export function GapsWorkbench({
         <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
+      <InventoryReadiness cards={cards} readyForPrioritize={readyForPrioritize} />
       <div className="rounded-lg border border-border bg-card p-4">
         {readyForPrioritize ? (
           <>
             <h2 className="text-[13px] font-semibold">Continue to prioritize</h2>
             <p className="mt-1 mb-3 text-[12px] text-muted-foreground">
-              Every live gap is confirmed. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
+              Every live gap has a confirmed status assessment. Check outstanding review work above. Open gaps go to the Prioritization Matrix, then Tactic Ideation.
             </p>
             <LockForm
               label="Continue to prioritize"
@@ -683,10 +683,9 @@ export function GapsWorkbench({
           </>
         ) : (
           <>
-            <h2 className="text-[13px] font-semibold">Not ready for Prioritize yet</h2>
+            <h2 className="text-[13px] font-semibold">Review outstanding gap assessments</h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              {unvalidated} gap{unvalidated === 1 ? "" : "s"} still unconfirmed
-              {partials ? ` · ${partials} partial must be split or rewritten` : ""}. You can open the
+              You can open the
               Prioritization Matrix now, but it only has the gaps already validated as Open.
             </p>
           </>

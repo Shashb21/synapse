@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
 import { IngestPanel } from "@/components/ingest-panel";
+import { InventoryReadiness } from "@/components/inventory-readiness";
 import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { pendingSuggestionCards } from "@/lib/iegp/gap-suggestion-cards";
@@ -23,7 +24,6 @@ import {
   gapsReadyForPrioritize,
   isPlanPlace,
   planGates,
-  reviewGapFilterCounts,
   REVIEW_GAP_FILTERS,
   settingOptions,
   type PlanPlace,
@@ -119,7 +119,6 @@ export default async function HomePage({
 
   let pane: ReactNode;
   if (place === "upload") {
-    const readiness = reviewGapFilterCounts(workspace.review);
     pane = (
       <>
         {/* Upload follows the admin's ingestion switch (KAN-53); with it off the plan starts by hand. */}
@@ -138,21 +137,7 @@ export default async function HomePage({
           />
           <IngestPanel sources={state.sources} demoFiles={demo} />
         </AiOnly>
-        {workspace.review.length > 0 ? (
-          <section className="mt-8 border border-border bg-card p-4 rounded-lg" aria-labelledby="upload-readiness">
-            <h2 id="upload-readiness" className="text-[12px] font-semibold text-foreground">
-              Prep readiness
-            </h2>
-            <ul className="mt-2 grid gap-1 text-[12px] text-muted-foreground">
-              <li>{readiness.all} gap{readiness.all === 1 ? "" : "s"} so far</li>
-              <li>{readiness.partial} partial — must resolve before Prioritize</li>
-              <li>{readiness.needs_validation} unconfirmed</li>
-            </ul>
-            <p className="mt-2 text-[12px] text-foreground">
-              {ready ? "Ready for Prioritize." : "Not ready for Prioritize yet — resolve Partial and confirm every gap on Gaps."}
-            </p>
-          </section>
-        ) : null}
+        <InventoryReadiness cards={workspace.review} readyForPrioritize={ready} />
       </>
     );
   } else if (place === "gaps") {
