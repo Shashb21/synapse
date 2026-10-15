@@ -448,13 +448,7 @@ export function GapsWorkbench({
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <CreateOpenGap />
-        <CreateAddressedGap tactics={availableTactics} />
-        <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
-      </div>
-      <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
-      <p className="text-[11px] text-muted-foreground">Pending source suggestions: {suggestions.length}</p>
+      {suggestions.length === 0 ? <p className="text-[11px] text-muted-foreground">Pending source suggestions: 0</p> : null}
       <GapSuggestions suggestions={suggestions} />
       {cards.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">
@@ -596,6 +590,16 @@ export function GapsWorkbench({
                               {card.new_source ? <NewSourcePill /> : null}
                             </span>
                           </button>
+                          {suggestions.some((suggestion) => suggestion.gap_id === card.gap_id) ? (
+                            <button type="button" className="mt-1 text-[11px] text-primary underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => {
+                              const panel = document.getElementById("source-suggestions") as HTMLDetailsElement | null;
+                              const suggestion = suggestions.find((item) => item.gap_id === card.gap_id);
+                              if (panel && suggestion) {
+                                panel.open = true;
+                                document.getElementById(`source-suggestion-${suggestion.id}`)?.focus();
+                              }
+                            }}>Source suggestions ({suggestions.filter((suggestion) => suggestion.gap_id === card.gap_id).length})</button>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">{DOMAIN_LABELS[card.domain]}</td>
                         <td className="px-3 py-2 align-top">
@@ -648,6 +652,12 @@ export function GapsWorkbench({
           </div>
         </>
       )}
+      <div className="flex flex-wrap items-center gap-2">
+        <CreateOpenGap />
+        <CreateAddressedGap tactics={availableTactics} />
+        <AddTacticsButton variant="outline" inUse={customTypesInUse(availableTactics)} />
+      </div>
+      <p className="-mt-2 text-[11px] text-muted-foreground">{GAPS_TACTIC_HELPER}</p>
       <div className="rounded-lg border border-border bg-card p-4">
         {readyForPrioritize ? (
           <>

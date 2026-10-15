@@ -25,8 +25,8 @@ import type { ReviewGapCard } from "@/lib/iegp/engine";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
 /**
- * KAN-74/75 on the Gaps place: pending overlaps show above the table with both
- * proposals side by side, and a validated gap a new source joined carries a
+ * KAN-74/75/117: pending overlaps expand inline above the inventory, and a
+ * validated gap a new source joined carries a
  * "New source added" pill.
  */
 
@@ -99,17 +99,28 @@ describe("Gaps place, KAN-74/75", () => {
   it("shows pending overlaps with both proposals and their actions", () => {
     render({ cards: [card()], suggestions: [suggestion] });
     const section = container.querySelector('[data-testid="gap-suggestions"]')!;
-    expect(section.textContent).toContain("Suggested changes (1)");
+    expect(section.querySelector("details")?.open).toBe(false);
+    act(() => { section.querySelector("details")!.open = true; });
+    expect(section.textContent).toContain("Pending source suggestions: 1");
     expect(section.textContent).toContain("KOL interviews and 1 more saying the same");
     expect(section.textContent).toContain(suggestion.merged_statement);
     expect(section.textContent).toContain(suggestion.split_statement);
     const buttons = [...section.querySelectorAll("button")].map((button) => button.textContent?.trim());
-    expect(buttons).toEqual(expect.arrayContaining(["Accept merge", "Accept split", "Reject"]));
+    expect(buttons).toEqual(expect.arrayContaining(["Merge into existing gap", "Create separate gap", "Reject suggestion"]));
+  });
+
+  it("opens suggestions from the affected gap and moves focus to its proposal", () => {
+    render({ cards: [card()], suggestions: [suggestion] });
+    const button = [...container.querySelectorAll("tr[data-gap-id] button")].find((b) => b.textContent?.includes("Source suggestions"))!;
+    act(() => (button as HTMLButtonElement).click());
+    expect(container.querySelector("details")?.open).toBe(true);
+    expect(document.activeElement?.getAttribute("data-suggestion-id")).toBe(suggestion.id);
   });
 
   it("shows nothing when no suggestion is pending", () => {
     render({ cards: [card()] });
     expect(container.querySelector('[data-testid="gap-suggestions"]')).toBeNull();
+    expect(container.textContent).toContain("Pending source suggestions: 0");
   });
 
   it("marks a gap a new source joined after it was validated", () => {
