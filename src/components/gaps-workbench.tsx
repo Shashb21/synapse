@@ -10,7 +10,7 @@ import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-statu
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { GapDetailsEditor } from "@/components/gap-metadata";
-import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { compareGapNumbers, gapNumberLabel } from "@/lib/iegp/gap-number";
 import { GapSuggestions, NewSourceNote, NewSourcePill } from "@/components/gap-suggestions";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
 
@@ -403,10 +403,10 @@ export function GapsWorkbench({
       return true;
     });
     if (!sort) return rows;
+    if (sort.key === "id") return [...rows].sort((a, b) => compareGapNumbers(a, b, sort.dir));
+    const sortKey = sort.key;
     const value = (card: ReviewGapCard): string | number => {
-      switch (sort.key) {
-        case "id":
-          return card.gap_id;
+      switch (sortKey) {
         case "name":
           return card.gap_name.toLowerCase();
         case "domain":
