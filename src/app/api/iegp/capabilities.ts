@@ -8,6 +8,7 @@ import type { Capability } from "@/modules/auth/roles";
  */
 export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   reset: "reset_workspace",
+  clear_ingested_files: "reset_workspace",
   load_demo: "reset_workspace",
   ingest: "upload",
   ingest_demo: "upload",

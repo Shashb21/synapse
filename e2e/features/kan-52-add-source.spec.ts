@@ -50,7 +50,7 @@ test.describe("add a source", () => {
       "KOLs need to know intracranial outcomes. Limited evidence on CNS response and duration in patients with brain metastases.",
     );
     await form.getByRole("button", { name: /add and read source/i }).click();
-    await expect(form.getByRole("status")).toContainText("Read “KOL interview notes”", { timeout: 90_000 });
+    await expect(form.getByRole("status")).toContainText("Processed “KOL interview notes”", { timeout: 90_000 });
   });
 });
 

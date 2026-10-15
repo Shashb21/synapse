@@ -36,8 +36,17 @@ test.describe("S1 file parse", () => {
 
   test("parses from the pipeline page into blocks with quality signals", async ({ page, request }) => {
     await page.goto("/pipeline");
+    // A previous run summary can already be visible. Wait for this request to
+    // finish before starting another stage that needs the same workspace lock.
+    const parsed = page.waitForResponse((response) =>
+      /\/api\/(?:admin\/)?modules$/.test(response.url()) &&
+      response.request().method() === "POST" &&
+      response.request().postDataJSON()?.stage === "S1",
+    );
     await page.getByRole("button", { name: /^run s1$/i }).click();
-    await expect(page.getByText(/documents? parsed, 0 failed/)).toBeVisible({ timeout: 30_000 });
+    const response = await parsed;
+    expect(response.ok(), await response.text()).toBeTruthy();
+    await expect(page.getByText(/^\d+ documents? parsed, 0 failed · no model call$/)).toBeVisible({ timeout: 30_000 });
 
     const state = await runStage<ParseOutput>(request, "S1", { dry_run: true });
     expect(state.output.documents.length).toBeGreaterThan(0);

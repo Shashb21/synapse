@@ -55,6 +55,8 @@ import {
 import type { ActorFunction, EvidenceDomain } from "@/lib/iegp/enums";
 import { EVIDENCE_DOMAINS } from "@/lib/iegp/enums";
 import { COVERAGE_DIMENSIONS, type CoverageDimension, type DimensionValue, type OverallCoverage } from "@/lib/iegp/enums";
+import { clearIngestedFiles } from "@/modules/workspaces/clear-ingested-files";
+import { recordAudit } from "@/modules/kernel/audit";
 import { replaceContents } from "@/modules/workspaces/contents";
 import { recordEdit, requireRationale, type EditAction } from "@/modules/kernel/edit-records";
 import { recordDenied } from "@/modules/kernel/audit";
@@ -77,7 +79,7 @@ import {
 } from "@/lib/iegp/restore";
 import type { SourceType } from "@/lib/iegp/enums";
 import type { IegpState } from "@/lib/iegp/types";
-import { ingestThroughStages, type IngestPayload } from "./ingest-pipeline";
+import { advanceIngest, ingestThroughStages, type IngestPayload } from "./ingest-pipeline";
 import { MAX_UPLOAD_BYTES, TOO_LARGE, uploadKindOf } from "@/lib/ingest/upload-formats";
 import { promoteGapCandidate, promoteTacticCandidate } from "./promote-candidates";
 import {
@@ -89,7 +91,7 @@ import {
 export const runtime = "nodejs";
 
 /** Actions that replace the whole workspace: its owner only, on top of the reset_workspace capability. */
-const WORKSPACE_OWNER_ACTIONS = new Set(["reset", "load_demo"]);
+const WORKSPACE_OWNER_ACTIONS = new Set(["reset", "load_demo", "clear_ingested_files"]);
 
 function idList(...values: (string | undefined)[]): string[] {
   return [
@@ -246,7 +248,7 @@ async function fileGateEdit(
 
 /**
  * Actions that run the stage pipeline (model calls). Their stages record their
- * own runs as they go, so no transaction is held open across them.
+ * own per-stage transactions and checkpoints, so no transaction spans the whole pipeline.
  */
 const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo"]);
 
@@ -327,6 +329,11 @@ async function handleAction(request: Request): Promise<Response> {
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
+      case "clear_ingested_files":
+        if (body.confirmation !== "clear_ingested_files") return NextResponse.json({ error: "Confirm clearing all current ingested files first.", code: "invalid_request" }, { status: 400 });
+        await clearIngestedFiles();
+        await recordAudit({ category: "workspace", action: "workspace.clear_ingested_files", entity_type: "workspace", entity_id: identity.workspace?.id ?? null, workspace_id: identity.workspace?.id ?? null });
+        break;
       case "reset":
         // Reset to blank: empties the plan and clears the workspace's demo flag.
         await replaceContents(identity.workspace?.id ?? null, "blank", identity.actor);
@@ -887,9 +894,11 @@ async function handleAction(request: Request): Promise<Response> {
       // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the
       // error says so. There is no rule-based ingest.
       case "ingest": {
-        const title = (body.title || "").trim();
-        await ingestThroughStages({
-          files: [
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        const ingest = body.incremental === "true" ? advanceIngest : ingestThroughStages;
+        const result = await ingest({
+          ...(body.ingest_job_id ? { job_id: body.ingest_job_id } : {}),
+          files: body.ingest_job_id ? [] : [
             {
               title,
               source_type: body.source_type as SourceType,
@@ -900,14 +909,18 @@ async function handleAction(request: Request): Promise<Response> {
           actor: identity.actor,
           role: identity.role,
         });
+        if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;
       }
       case "ingest_demo": {
-        await ingestThroughStages({
-          demo_ids: [body.demo_id],
+        const ingest = body.incremental === "true" ? advanceIngest : ingestThroughStages;
+        const result = await ingest({
+          ...(body.ingest_job_id ? { job_id: body.ingest_job_id } : {}),
+          demo_ids: body.ingest_job_id ? [] : [body.demo_id],
           actor: identity.actor,
           role: identity.role,
         });
+        if (body.incremental === "true") return NextResponse.json({ ok: true, ...result });
         break;
       }
       case "create_breakout_group": {
@@ -1011,11 +1024,15 @@ function ingestPayloadOf(body: Record<string, string>, title: string): IngestPay
       throw new Error(`${filename} does not match its type (${body.mime}).`);
     }
     const content_base64 = body.content_base64.replaceAll(/\s+/g, "");
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content_base64)) throw new Error("The file is not valid base64.");
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/.test(content_base64)) {
+      throw new Error("The file is not valid base64.");
+    }
     if (Buffer.byteLength(content_base64, "base64") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
     return { filename, content_base64, mime: kind.mime };
   }
-  if (filename && uploadKindOf(filename).kind === "binary") {
+  const textKind = filename ? uploadKindOf(filename) : null;
+  if (textKind?.kind === "refused") throw new Error(textKind.reason);
+  if (textKind?.kind === "binary") {
     throw new Error(`Send ${filename} as content_base64, not text.`);
   }
   if (hasText && Buffer.byteLength(body.text, "utf8") > MAX_UPLOAD_BYTES) throw new Error(TOO_LARGE);
