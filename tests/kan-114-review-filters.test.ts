@@ -22,7 +22,10 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import type { GapSuggestionCard } from "@/lib/iegp/gap-suggestion-cards";
-import type { ReviewGapCard } from "@/lib/iegp/engine";
+import { buildPlanWorkspace, filterReviewGapCards, gapEligibleForMapping, gapsReadyForPrioritize, planGates, planNavCounts, reviewGapFilterCounts, type ReviewGapCard } from "@/lib/iegp/engine";
+import { buildSeed } from "@/lib/iegp/seed";
+import { PlanChrome } from "@/components/plan-chrome";
+import { InventoryReadiness } from "@/components/inventory-readiness";
 
 /** KAN-114: evidence coverage and outstanding review are independent. */
 
@@ -148,4 +151,64 @@ it("keeps confirmed Addressed gaps with later source and mapping flags in Needs 
   act(() => button("Addressed (3)").click());
   expect(rows().sort()).toEqual(["mapping", "source"]);
   expect(container.querySelector('tr[data-gap-id="mapping"]')?.textContent).toContain("Assessment confirmed");
+});
+
+it("labels the real combined strip count accurately for a human-confirmed Partial gap", () => {
+  const state = buildSeed();
+  state.gaps = state.gaps.filter(gap => !gap.retired).slice(0, 1);
+  const gap = state.gaps[0];
+  gap.status = "validated_partial";
+  gap.computed_status = "validated_partial";
+  gap.status_override = null;
+  gap.human_validated = true;
+  state.asset.wizard_complete = true;
+  state.asset.tactics_unlocked = true;
+  const workspace = buildPlanWorkspace(state);
+  const counts = planNavCounts(workspace);
+  const filters = reviewGapFilterCounts(workspace.review);
+  const gates = planGates(state);
+  expect(counts).toEqual({ gaps: 1, unvalidated: 1 });
+  expect(filters.partial).toBe(1);
+  expect(filters.needs_attention).toBe(1);
+  expect(filterReviewGapCards(workspace.review, "needs_validation")).toHaveLength(1);
+  expect(gapsReadyForPrioritize(state)).toBe(false);
+  expect(gates).toEqual({ hasSources: true, gapsUnlocked: true, planUnlocked: true, tacticsUnlocked: true });
+  expect(gapEligibleForMapping(workspace.review[0].gap_status)).toBe(true);
+  const nav = {
+    gapsCount: counts.gaps, unvalidatedCount: counts.unvalidated,
+    partialCount: filters.partial, inventoryAttentionCount: filters.needs_attention,
+    ...gates, setupComplete: true, readyForPrioritize: gapsReadyForPrioritize(state),
+  };
+  const chromeProps = {
+    active: "gaps" as const,
+    nav,
+    children: createElement(InventoryReadiness, { cards: workspace.review, readyForPrioritize: nav.readyForPrioritize }),
+  };
+  act(() => root.render(createElement(PlanChrome, chromeProps)));
+  expect(container.textContent).toContain("0 gaps with unconfirmed status");
+  const strip = container.querySelector('[aria-label="Prep readiness"]')!;
+  expect(strip.querySelector('a[href*="gap_filter=needs_validation"]')?.textContent).toBe("Unconfirmed or partial 1");
+  expect(strip.textContent).toContain("Partial 1");
+  expect(strip.textContent).toContain("Inventory review: 1 gaps needing attention");
+  expect(strip.textContent).toContain("Tactics open");
+  render(workspace.review, "needs_attention");
+  expect(rows()).toEqual([gap.id]);
+  expect(container.querySelector("tr[data-gap-id]")?.textContent).toContain("Assessment confirmed");
+  expect(planGates(state)).toEqual(gates);
+});
+
+it("includes a confirmed gap when only a mapped tactic requires review", () => {
+  render([
+    card({ gap_id: "tactic-only", needs_review: false, tactics: [{
+      id: "TAC-001", name: "Comparative study", type: "rwe_study", custom_type: null,
+      status: "planned", overall: null, stale: false, needs_review: true,
+      counts_toward_addressing: false, dimensions: null,
+    }] }),
+    card({ gap_id: "done" }),
+  ]);
+  act(() => button("Needs attention (1)").click());
+  expect(rows()).toEqual(["tactic-only"]);
+  const row = container.querySelector('tr[data-gap-id="tactic-only"]')!;
+  expect(row.textContent).toContain("Assessment confirmed");
+  expect(row.textContent).toContain("Review tactic mappings");
 });

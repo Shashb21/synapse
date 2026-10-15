@@ -23,11 +23,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
 
-/**
- * KAN-74/75 on the Gaps place: pending overlaps show above the table with both
- * proposals side by side, and a validated gap a new source joined carries a
- * "New source added" pill.
- */
+/** KAN-115: next actions follow review-task priority and retain remaining work. */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

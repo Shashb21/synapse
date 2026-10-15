@@ -437,7 +437,7 @@ export function PlanChrome({
 
 /**
  * Always-visible strip so the facilitator can answer "can we start the workshop?"
- * in a glance. Partial/Unconfirmed link straight into Gaps with the matching
+ * in a glance. Partial and Unconfirmed or partial link into Gaps with the matching
  * filter chip selected. See docs/consultant-ux-spec.md §5.
  */
 function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
@@ -467,7 +467,7 @@ function ReadinessStrip({ nav }: { nav: PlanNavModel }) {
         href="/?place=gaps&gap_filter=needs_validation"
         className="text-inherit no-underline hover:underline"
       >
-        Unconfirmed {nav.unvalidatedCount}
+        Unconfirmed or partial {nav.unvalidatedCount}
       </Link>
       <span className="font-medium">
         {readinessText(nav)}

@@ -24,11 +24,7 @@ import { GapsWorkbench } from "@/components/gaps-workbench";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
 import { GapSettingsEditor } from "@/components/gap-settings-editor";
 
-/**
- * KAN-74/75 on the Gaps place: pending overlaps show above the table with both
- * proposals side by side, and a validated gap a new source joined carries a
- * "New source added" pill.
- */
+/** KAN-116: evidence precedes tactics and actions; failed settings saves retain input. */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

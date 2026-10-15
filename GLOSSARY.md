@@ -13,5 +13,5 @@ The state of human review of a gap's evidence assessment. Confirmation means a p
 _Avoid_: Addressed when referring only to human confirmation
 
 **Inventory readiness**:
-Whether every live gap has been confirmed and every Partially Addressed gap resolved by splitting or rewriting. Outstanding inventory work can coexist with continued work on eligible gaps in later planning stages.
+Initial preparation eligibility requires every live gap to have a confirmed assessment and every Partially Addressed gap to be resolved by splitting or rewriting. Outstanding inventory review also includes tactic mappings and new sources flagged for review, even after an assessment is confirmed. This later review work can coexist with continued work on eligible gaps in previously unlocked planning stages.
 _Avoid_: Priority progress when referring to inventory readiness
