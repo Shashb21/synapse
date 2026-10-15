@@ -66,6 +66,8 @@ export function GapStatusOverride({
   const { refreshing, refresh } = usePageRefresh();
   const reasonId = useId();
   const statusId = useId();
+  const reasonErrorId = useId();
+  const saveErrorId = useId();
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +169,8 @@ export function GapStatusOverride({
               Status
               <select
                 id={statusId}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? saveErrorId : undefined}
                 name="status"
                 value={nextStatus}
                 onChange={(e) => setNextStatus(e.target.value as MappedGapStatus)}
@@ -190,6 +194,7 @@ export function GapStatusOverride({
                 rows={3}
                 required
                 value={reason}
+                aria-describedby={reasonError ? reasonErrorId : undefined}
                 aria-required="true"
                 aria-invalid={reasonError ? true : undefined}
                 placeholder="Why should this differ from the computed status?"
@@ -199,12 +204,12 @@ export function GapStatusOverride({
                 }}
               />
               {reasonError ? (
-                <p className="text-[12px] text-destructive">{reasonError}</p>
+                <p id={reasonErrorId} role="alert" className="text-[12px] text-destructive">{reasonError}</p>
               ) : (
                 <p className="text-[11px] text-muted-foreground">Required. Empty reason does not save.</p>
               )}
             </div>
-            {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+            {error ? <p id={saveErrorId} role="alert" className="text-[12px] text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>
             <DialogClose render={<Button type="button" size="sm" variant="outline" />}>

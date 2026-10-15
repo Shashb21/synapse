@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CoverageBadge, GapBadge, NeedsReviewFlag, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
@@ -163,16 +163,26 @@ function GapDetailPane({
   availableTactics,
   settingOptions,
   inline = false,
+  focusTask,
 }: {
   card: ReviewGapCard;
   availableTactics: TacticLibraryItem[];
   settingOptions: string[];
   /** Opened inside its table row: the row already shows the id and title. */
   inline?: boolean;
+  focusTask?: { label: string; sequence: number } | null;
 }) {
+  const paneRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (!focusTask) return;
+    const target = Array.from(paneRef.current?.querySelectorAll<HTMLElement>("[data-review-task]") ?? [])
+      .find((element) => element.dataset.reviewTask === focusTask.label);
+    (target?.querySelector<HTMLElement>("button, a") ?? target)?.focus();
+  }, [focusTask]);
+  const tasks = reviewGapTasks(card);
   const isPartial = card.gap_status === "validated_partial";
   return (
-    <article data-gap-id={card.gap_id} className="rounded-md border border-border bg-card p-4">
+    <article ref={paneRef} data-gap-id={card.gap_id} className="rounded-md border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className={cn("font-mono text-[11px] text-muted-foreground", inline && "sr-only")}>{gapNumberLabel(card.number)}</p>
         <Link
@@ -220,7 +230,8 @@ function GapDetailPane({
           ))}
         </p>
       ) : null}
-      {card.new_source ? <NewSourceNote gapId={card.gap_id} newSource={card.new_source} /> : null}
+      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
+      {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
       <div className="mt-4">
         {/* Keyed by gap so switching the selected gap resets the editor's local tags. */}
         <GapSettingsEditor
@@ -234,7 +245,9 @@ function GapDetailPane({
         {/* Keyed by gap so switching rows starts from that gap's own details. */}
         <GapDetailsEditor key={card.gap_id} gapId={card.gap_id} metadata={card.metadata} />
       </div>
-      <div className="mt-4">
+      <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
+        <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
+        {tasks.includes("Review tactic mappings") ? <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link> : null}
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tactics</p>
         <ul className="mt-1 grid gap-1.5">
           {card.tactics.length === 0 ? (
@@ -245,7 +258,7 @@ function GapDetailPane({
         </ul>
       </div>
       {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
         {isPartial ? (
           <SplitGapDialog
             gapId={card.gap_id}
@@ -451,6 +464,7 @@ export function GapsWorkbench({
   // Every row starts collapsed (owner feedback, KAN-56).
   const [openId, setOpenId] = useState<string | null>(null);
   const expandedId = openId;
+  const [focusTask, setFocusTask] = useState<{ label: string; sequence: number } | null>(null);
   const partials = counts.partial;
   const unvalidated = cards.filter((card) => !card.human_validated).length;
   const extraFilters = [query, domain, setting, priority].filter(Boolean).length;
@@ -568,6 +582,7 @@ export function GapsWorkbench({
                   <SortHeader label="Domain" column="domain" sort={sort} onSort={onSort} className="w-[150px]" />
                   <SortHeader label="Evidence status" column="status" sort={sort} onSort={onSort} className="w-[160px]" />
                   <th scope="col" className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Review state</th>
+                  <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Next action</th>
                   <SortHeader label="Priority" column="priority" sort={sort} onSort={onSort} className="w-[110px]" />
                   <th scope="col" className="w-[130px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Setting
@@ -578,7 +593,7 @@ export function GapsWorkbench({
               <tbody>
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-8 text-center text-[12px] text-muted-foreground">
                       No gaps match these filters.
                     </td>
                   </tr>
@@ -607,7 +622,7 @@ export function GapsWorkbench({
                             type="button"
                             aria-expanded={open}
                             data-testid="gap-row-toggle"
-                            onClick={() => setOpenId(open ? null : card.gap_id)}
+                            onClick={() => { setFocusTask(null); setOpenId(open ? null : card.gap_id); }}
                             className="flex w-full items-start gap-1.5 text-left"
                           >
                             <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">{open ? "▾" : "▸"}</span>
@@ -626,6 +641,17 @@ export function GapsWorkbench({
                           {tasks.length ? <span className="text-amber-700 dark:text-amber-300">{tasks.join(" · ")}</span> : <span className="text-muted-foreground">No outstanding review</span>}
                         </td>
                         <td className="px-3 py-2 align-top">
+                          <div data-next-action>
+                            {tasks[0] ? <>
+                              <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => {
+                                setOpenId(card.gap_id);
+                                setFocusTask((previous) => ({ label: tasks[0], sequence: (previous?.sequence ?? 0) + 1 }));
+                              }}>{tasks[0]}</Button>
+                              {tasks.length > 1 ? <span className="mt-1 block text-[11px] text-muted-foreground">+{tasks.length - 1} additional tasks</span> : null}
+                            </> : <span className="text-[11px] text-muted-foreground">No outstanding review</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
                           <PriorityChip priority={priorities[card.gap_id]} />
                         </td>
                         <td className="px-3 py-2 align-top">
@@ -638,12 +664,13 @@ export function GapsWorkbench({
                       </tr>
                       {open ? (
                         <tr className="border-b border-border">
-                          <td colSpan={8} className="bg-muted/30 px-3 py-3">
+                          <td colSpan={9} className="bg-muted/30 px-3 py-3">
                             <GapDetailPane
                               card={card}
                               availableTactics={availableTactics}
                               settingOptions={settingOptions}
                               inline
+                              focusTask={focusTask}
                             />
                           </td>
                         </tr>

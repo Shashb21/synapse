@@ -310,7 +310,7 @@ export default async function GapDetailPage({
         </div>
       </section>
 
-      <section className="mb-8">
+      <section id="mapped-tactics" className="mb-8">
         <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Tactic mappings (many-to-many, dimensional)
         </h2>
