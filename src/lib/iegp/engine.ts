@@ -1282,13 +1282,28 @@ export const REVIEW_GAP_FILTERS = [
   "open",
   "addressed",
   "needs_validation",
+  "needs_attention",
 ] as const;
 export type ReviewGapFilter = (typeof REVIEW_GAP_FILTERS)[number];
 
-export function filterReviewGapCards<T extends Pick<ReviewGapCard, "gap_status" | "human_validated">>(
+type ReviewGapAssessment = Pick<ReviewGapCard, "gap_status" | "human_validated"> &
+  Partial<Pick<ReviewGapCard, "needs_review" | "new_source" | "tactics">>;
+
+/** Outstanding human work is independent of the evidence assessment. */
+export function reviewGapTasks(card: ReviewGapAssessment): string[] {
+  const tasks: string[] = [];
+  if (card.gap_status === "validated_partial") tasks.push("Resolve partial gap");
+  if (card.needs_review || card.tactics?.some((tactic) => tactic.needs_review)) tasks.push("Review tactic mappings");
+  if (card.new_source) tasks.push("Review new source");
+  if (!card.human_validated) tasks.push("Confirm status");
+  return tasks;
+}
+
+export function filterReviewGapCards<T extends ReviewGapAssessment>(
   cards: T[],
   filter: ReviewGapFilter,
 ): T[] {
+  if (filter === "needs_attention") return cards.filter((card) => reviewGapTasks(card).length > 0);
   if (filter === "partial") return cards.filter((c) => c.gap_status === "validated_partial");
   if (filter === "open") return cards.filter((c) => c.gap_status === "validated_open");
   if (filter === "addressed") return cards.filter((c) => c.gap_status === "validated_addressed");
@@ -1298,12 +1313,13 @@ export function filterReviewGapCards<T extends Pick<ReviewGapCard, "gap_status" 
   return cards;
 }
 
-export function reviewGapFilterCounts(cards: Pick<ReviewGapCard, "gap_status" | "human_validated">[]): Record<
+export function reviewGapFilterCounts(cards: ReviewGapAssessment[]): Record<
   ReviewGapFilter,
   number
 > {
   return {
     all: cards.length,
+    needs_attention: filterReviewGapCards(cards, "needs_attention").length,
     partial: cards.filter((c) => c.gap_status === "validated_partial").length,
     open: cards.filter((c) => c.gap_status === "validated_open").length,
     addressed: cards.filter((c) => c.gap_status === "validated_addressed").length,

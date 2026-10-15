@@ -91,7 +91,7 @@ function PlaceIntro({
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ place?: string; gap_filter?: string; setting?: string }>;
+  searchParams: Promise<{ place?: string; gap_filter?: string; gap_attention?: string; setting?: string }>;
 }) {
   const state = await loadState();
   const workspace = buildPlanWorkspace(state);
@@ -177,6 +177,7 @@ export default async function HomePage({
           availableTactics={workspace.availableTactics}
           readyForPrioritize={ready}
           initialFilter={gapFilter}
+          initialAttention={params.gap_attention === "needs_attention"}
           settingOptions={settingOptions(state)}
           priorities={priorities}
           suggestions={pendingSuggestionCards(state)}
