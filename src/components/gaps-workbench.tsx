@@ -43,15 +43,6 @@ import { Button } from "@/components/ui/button";
 import { AddTacticsButton } from "@/components/plan-cards";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-
 const FILTER_CHIPS: { id: ReviewGapFilter; label: string }[] = [
   { id: "all", label: "All evidence statuses" },
   { id: "partial", label: "Partially Addressed" },
@@ -103,41 +94,25 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
   );
 }
 
-function ConstituentNeedsButton({ card }: { card: ReviewGapCard }) {
-  const count = card.needs.length;
+function SupportingEvidence({ card }: { card: ReviewGapCard }) {
   return (
-    <Dialog>
-      <DialogTrigger render={<Button type="button" size="sm" variant="outline" />}>
-        View constituent needs{count ? ` (${count})` : ""}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Where this gap comes from</DialogTitle>
-          <DialogDescription>
-            Constituent needs are the sourced statements this gap stands for — the document or
-            interview it was extracted from. If several sources identified the same gap, every
-            source is listed. Many needs can join one gap.
-          </DialogDescription>
-        </DialogHeader>
-        {card.needs.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
-            No source yet. This gap was added on Gaps, not from ingest.
-          </p>
-        ) : (
-          <ul className="grid gap-2">
-            {card.needs.map((need) => (
-              <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
-                <p className="text-[11px] text-muted-foreground">
-                  {need.source_title || "Unknown source"}
-                  {need.role ? ` · ${need.role}` : ""}
-                </p>
-                <p className="mt-1">{need.statement}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </DialogContent>
-    </Dialog>
+    <section className="mt-4 min-w-0 break-words" aria-label="Sources and supporting statements">
+      <h3 className="text-[12px] font-medium">Sources and supporting statements</h3>
+      <p className="mt-1 text-[12px] text-muted-foreground">The sourced statements this gap stands for, extracted from documents or interviews. Several statements can join one gap; every linked source is listed below.</p>
+      {card.needs.length === 0 ? (
+        <p className="mt-2 text-[12px] text-muted-foreground">No source yet. This gap was added on Gaps, not from ingest.</p>
+      ) : (
+        <ul className="mt-2 grid gap-2">
+          {card.needs.map((need) => (
+            <li key={need.id} className="border border-border bg-card/40 p-3 text-[13px]">
+              <p className="text-[11px] text-muted-foreground">{need.source_title || "Unknown source"}{need.role ? ` · ${need.role}` : ""}</p>
+              <p className="mt-1">{need.statement}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Link href={`/gaps/${card.gap_id}`} className="mt-2 inline-block text-[12px] underline focus-visible:outline-2 focus-visible:outline-ring">Open full gap and evidence record</Link>
+    </section>
   );
 }
 
@@ -185,12 +160,6 @@ function GapDetailPane({
     <article ref={paneRef} data-gap-id={card.gap_id} className="rounded-md border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className={cn("font-mono text-[11px] text-muted-foreground", inline && "sr-only")}>{gapNumberLabel(card.number)}</p>
-        <Link
-          href={`/gaps/${card.gap_id}`}
-          className="ml-auto text-[11px] text-muted-foreground no-underline hover:underline"
-        >
-          Open full page ↗
-        </Link>
       </div>
       <h2 className={cn("mt-1 text-[16px] font-medium leading-6 text-foreground", inline && "sr-only")}>{card.gap_name}</h2>
       <div className={cn("flex flex-wrap items-center gap-2", inline ? "-mt-4" : "mt-2")}>
@@ -217,6 +186,7 @@ function GapDetailPane({
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
       <p className="mt-3 text-[13px] leading-5 text-muted-foreground">{card.statement}</p>
+      <SupportingEvidence card={card} />
       {card.related.length > 0 ? (
         <p className="mt-2 text-[12px] text-muted-foreground">
           Related:{" "}
@@ -230,21 +200,6 @@ function GapDetailPane({
           ))}
         </p>
       ) : null}
-      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
-      {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
-      <div className="mt-4">
-        {/* Keyed by gap so switching the selected gap resets the editor's local tags. */}
-        <GapSettingsEditor
-          key={card.gap_id}
-          gapId={card.gap_id}
-          settings={card.settings}
-          options={settingOptions}
-        />
-      </div>
-      <div className="mt-4">
-        {/* Keyed by gap so switching rows starts from that gap's own details. */}
-        <GapDetailsEditor key={card.gap_id} gapId={card.gap_id} metadata={card.metadata} />
-      </div>
       <div className="mt-4" data-review-task="Review tactic mappings" tabIndex={-1}>
         <p className="text-[12px] text-muted-foreground">Review tactic mappings: check this gap’s coverage and confirm or edit each flagged mapping.</p>
         {tasks.includes("Review tactic mappings") ? <Link href={`/gaps/${card.gap_id}#mapped-tactics`} className="text-[12px] text-foreground underline">Review coverage on gap page</Link> : null}
@@ -257,6 +212,8 @@ function GapDetailPane({
           )}
         </ul>
       </div>
+      {tasks.length > 1 ? <p className="mt-3 text-[12px] text-muted-foreground">Additional tasks ({tasks.length - 1}): {tasks.slice(1).join(" · ")}</p> : null}
+      {card.new_source ? <div data-review-task="Review new source"><NewSourceNote gapId={card.gap_id} newSource={card.new_source} /></div> : null}
       {/* Hero action first: Resolve (Partial) or Confirm (everything else still unconfirmed) stand apart from the secondary actions below. */}
       <div className="mt-4 flex flex-wrap items-center gap-2" data-review-task={isPartial ? "Resolve partial gap" : "Confirm status"}>
         {isPartial ? (
@@ -278,7 +235,6 @@ function GapDetailPane({
         ) : null}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <ConstituentNeedsButton card={card} />
         <MapExistingTactic
           gapId={card.gap_id}
           availableTactics={availableTactics}
@@ -286,6 +242,15 @@ function GapDetailPane({
         />
         <RecordMissedTactic gapId={card.gap_id} />
       </div>
+      <details className="mt-4">
+        <summary className="cursor-pointer text-[12px] font-medium focus-visible:outline-2 focus-visible:outline-ring">Edit gap details</summary>
+        <div className="mt-3">
+          <GapSettingsEditor key={card.gap_id} gapId={card.gap_id} settings={card.settings} options={settingOptions} />
+        </div>
+        <div className="mt-4">
+          <GapDetailsEditor key={card.gap_id} gapId={card.gap_id} metadata={card.metadata} />
+        </div>
+      </details>
     </article>
   );
 }
@@ -623,7 +588,7 @@ export function GapsWorkbench({
                             aria-expanded={open}
                             data-testid="gap-row-toggle"
                             onClick={() => { setFocusTask(null); setOpenId(open ? null : card.gap_id); }}
-                            className="flex w-full items-start gap-1.5 text-left"
+                            className="flex w-full items-start gap-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
                           >
                             <span aria-hidden className="mt-0.5 text-[10px] text-muted-foreground">{open ? "▾" : "▸"}</span>
                             <span className="min-w-0">
