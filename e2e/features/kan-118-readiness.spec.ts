@@ -18,6 +18,9 @@ test.describe("KAN-118 inventory readiness", () => {
     await expect(readiness).toContainText("2 live gaps · 1 gaps needing attention");
     await expect(readiness).toContainText("1 gaps with unconfirmed status");
     await expect(readiness).toContainText("Previously unlocked stages remain available for eligible work.");
+    const strip = page.getByRole("status", { name: "Prep readiness" });
+    await expect(strip).toContainText("Inventory review: 1 gaps needing attention");
+    await expect(strip).toContainText("1 of 2 Open gaps with validated priority · Tactics open");
     await page.goto("/?place=plan");
     await expect(page.getByText("1 of 2 Open gaps with validated priority across all settings")).toBeVisible();
     await expect(page.getByText("Tactics is unlocked. You can keep adjusting priorities here.")).toBeVisible();

@@ -18,6 +18,7 @@ export function InventoryReadiness({ cards, readyForPrioritize }: {
       </p>
       {cards.length > 0 ? <p className="mt-1 text-[12px] text-muted-foreground">
         {`${unconfirmed} gaps with unconfirmed status · ${partial} partial gaps to resolve · ${mappings} gaps needing tactic mapping review · ${sources} gaps needing new source review`}
+        {". Review categories can overlap; each gap counts once in gaps needing attention."}
       </p> : null}
       <p className="mt-1 text-[12px] text-muted-foreground">
         {attention ? "Inventory review work remains. " : cards.length ? "Inventory review is complete. " : "Add gaps to begin review. "}
