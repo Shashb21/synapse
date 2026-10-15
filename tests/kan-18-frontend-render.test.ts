@@ -95,7 +95,7 @@ const card = (overrides: Partial<ReviewGapCard> = {}): ReviewGapCard => ({
 
 describe("the Gaps filter follows the URL", () => {
   const pressed = () =>
-    [...container.querySelectorAll('[aria-label="Filter gaps"] button')]
+    [...container.querySelectorAll('[aria-label="Evidence status"] button')]
       .filter((button) => button.getAttribute("aria-pressed") === "true")
       .map((button) => button.textContent?.replace(/\s*\(\d+\)$/, ""));
   const render = (initialFilter?: ReviewGapFilter) =>
@@ -108,18 +108,25 @@ describe("the Gaps filter follows the URL", () => {
   it("a new gap_filter on the same page changes the chip, and a chip writes the URL", () => {
     window.history.replaceState(null, "", "/?place=gaps");
     render(undefined);
-    expect(pressed()).toEqual(["All"]);
-    render("needs_validation");
-    expect(pressed()).toHaveLength(1);
-    expect(pressed()[0]).not.toBe("All");
+    expect(pressed()).toEqual(["All evidence statuses"]);
+    render("open");
+    expect(pressed()).toEqual(["Open"]);
 
-    const chips = [...container.querySelectorAll('[aria-label="Filter gaps"] button')] as HTMLButtonElement[];
-    const other = chips.find((chip) => chip.getAttribute("aria-pressed") !== "true" && !/^All/.test(chip.textContent ?? ""))!;
+    const chips = [...container.querySelectorAll('[aria-label="Evidence status"] button')] as HTMLButtonElement[];
+    const other = chips.find((chip) => chip.getAttribute("aria-pressed") !== "true" && /^Partially Addressed/.test(chip.textContent ?? ""))!;
     act(() => other.click());
-    expect(new URL(window.location.href).searchParams.get("gap_filter")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("gap_filter")).toBe("partial");
     expect(new URL(window.location.href).searchParams.get("place")).toBe("gaps");
+    const attention = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Review state"] button')]
+      .find((button) => button.textContent?.startsWith("Needs attention"))!;
+    act(() => attention.click());
+    expect(new URL(window.location.href).searchParams.get("gap_attention")).toBe("needs_attention");
+    expect(new URL(window.location.href).searchParams.get("gap_filter")).toBe("partial");
     act(() => chips.find((chip) => /^All/.test(chip.textContent ?? ""))!.click());
     expect(new URL(window.location.href).searchParams.has("gap_filter")).toBe(false);
+    expect(new URL(window.location.href).searchParams.get("gap_attention")).toBe("needs_attention");
+    act(() => attention.click());
+    expect(new URL(window.location.href).searchParams.has("gap_attention")).toBe(false);
   });
 });
 

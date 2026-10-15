@@ -87,8 +87,8 @@ function card(id: string, number: number, overrides: Partial<ReviewGapCard> = {}
   };
 }
 
-function chipText() {
-  return container.querySelector('[aria-label="Filter gaps"]')?.textContent ?? "";
+function chipText(group: "Review state" | "Evidence status") {
+  return container.querySelector(`[aria-label="${group}"]`)?.textContent ?? "";
 }
 
 describe("Evidence Inventory follows the refreshed cards", () => {
@@ -104,37 +104,40 @@ describe("Evidence Inventory follows the refreshed cards", () => {
 
   it("shows the new counts and rows, not the retired gap", () => {
     render(workbench(before));
-    expect(chipText()).toContain("Partial (1)");
-    expect(chipText()).toContain("Unconfirmed (2)");
+    expect(chipText("Evidence status")).toContain("Partially Addressed (1)");
+    expect(chipText("Review state")).toContain("Needs attention (2)");
     expect(container.textContent).toContain("Gap GAP-001");
 
     render(workbench(after));
-    expect(chipText()).toContain("All (2)");
-    expect(chipText()).toContain("Partial (0)");
-    expect(chipText()).toContain("Unconfirmed (1)");
+    expect(chipText("Review state")).toContain("All gaps (2)");
+    expect(chipText("Evidence status")).toContain("Partially Addressed (0)");
+    expect(chipText("Review state")).toContain("Needs attention (1)");
     expect(container.textContent).not.toContain("Gap GAP-001");
     expect(container.textContent).toContain("Gap GAP-003");
   });
 
   it("keeps the person's filter across the refresh", () => {
     render(workbench(before));
-    const unconfirmed = [...container.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Unconfirmed ("))!;
-    act(() => unconfirmed.click());
-    expect(unconfirmed.getAttribute("aria-pressed")).toBe("true");
+    const needsAttention = [...container.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Needs attention ("))!;
+    act(() => needsAttention.click());
+    expect(needsAttention.getAttribute("aria-pressed")).toBe("true");
 
     render(workbench(after));
-    const chip = [...container.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Unconfirmed ("))!;
+    const chip = [...container.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Needs attention ("))!;
     expect(chip.getAttribute("aria-pressed")).toBe("true");
     // Only the one gap still unconfirmed is listed.
     expect(container.textContent).toContain("Gap GAP-002");
     expect(container.textContent).not.toContain("Gap GAP-003");
   });
 
-  it("drops 'Unconfirmed' from a row once the refreshed card is confirmed", () => {
+  it("updates assessment and next action once the refreshed card is confirmed", () => {
     render(workbench([open]));
-    expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).toContain("Unconfirmed");
+    expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).toContain("Assessment unconfirmed");
+    expect(container.querySelector('[data-gap-id="GAP-002"] [data-next-action]')?.textContent).toBe("Confirm status");
     render(workbench([{ ...open, human_validated: true }]));
-    expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).not.toContain("Unconfirmed");
+    expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).not.toContain("Assessment unconfirmed");
+    expect(container.querySelector('[data-gap-id="GAP-002"]')?.textContent).toContain("Assessment confirmed");
+    expect(container.querySelector('[data-gap-id="GAP-002"] [data-next-action]')?.textContent).toBe("No outstanding review");
   });
 });
 
