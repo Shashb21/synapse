@@ -1,3 +1,6 @@
+import { GapBadge, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
+import { GapStatusDisagreement } from "@/components/gap-status-override";
+import { GAP_STATUS_DEFINITIONS } from "@/lib/iegp/enums";
 import { SuggestionReferences } from "@/components/prioritize/suggestion-references";
 import Link from "next/link";
 import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
@@ -34,6 +37,44 @@ function GapLink({ gap }: { gap: { id: string; name: string; number: number } })
   );
 }
 
+/** One saved coverage/status/confirmation readback for the full record and shared panel. */
+export function GapCoverageContext({ record }: { record: GapRecord }) {
+  const { confirmation, gap, origin, coverage_status } = record;
+  const nextAction = gap.retired ? "Open full record" : coverage_status.shown === "validated_partial" ? "Resolve — split or rewrite" : !confirmation.confirmed ? "Confirm evidence coverage" : "Review evidence coverage and mappings";
+  return <section className={CARD} aria-label="Evidence coverage" data-testid="gap-coverage-context">
+    <div className="mb-2 flex flex-wrap items-center gap-2">
+      <GapBadge status={coverage_status.shown} />
+      <NeedsReviewFlag needsReview={coverage_status.needs_review} />
+      {gap.parked_at ? <ParkedFlag reason={gap.parked_reason} /> : null}
+      {gap.retired ? <span>Retired gap</span> : null}
+    </div>
+    <p className="mb-2 text-muted-foreground">{GAP_STATUS_DEFINITIONS[coverage_status.shown]}</p>
+    <GapStatusDisagreement computedStatus={coverage_status.computed} override={gap.status_override} />
+
+    <p className="text-[12px] font-medium text-muted-foreground">Evidence coverage review</p>
+    {confirmation.confirmed && confirmation.by ? (
+      <p className="mt-1">
+        Confirmed by <span className="font-medium">{confirmation.by.name}</span>
+        {confirmation.by.principal && confirmation.by.principal !== "anonymous" ? ` (${confirmation.by.principal})` : null}
+        {" · "}
+        {when(confirmation.at)}
+        {confirmation.rationale ? <span className="block text-muted-foreground">“{confirmation.rationale}”</span> : null}
+      </p>
+    ) : confirmation.confirmed ? (
+      <p className="mt-1">Confirmed (before who confirmed was recorded).</p>
+    ) : (
+      <p className="mt-1 text-muted-foreground">Not confirmed yet. Validate the gap to confirm it.</p>
+    )}
+    {origin ? (
+      <p className="mt-2 text-[12px] text-muted-foreground">
+        Taken from <GapLink gap={origin} /> by an accepted split suggestion.
+      </p>
+    ) : null}
+
+    <Link href={`/gaps/${encodeURIComponent(gap.id)}#gap-coverage-actions`} className="mt-3 inline-block underline">{nextAction}</Link>
+  </section>;
+}
+
 /**
  * Who confirmed the gap and which objective it serves (KAN-97). The objective
  * can be changed here; the change is on the gap's history.
@@ -47,30 +88,10 @@ export function GapConfirmationAndObjective({
   objectives: { id: string; name: string }[];
   identity: ActionIdentity;
 }) {
-  const { confirmation, objective, gap, origin } = record;
+  const { objective, gap } = record;
   return (
     <div className="mb-4 grid gap-3 sm:grid-cols-2" data-testid="gap-confirmation">
-      <div className={CARD}>
-        <p className="text-[12px] font-medium text-muted-foreground">Evidence coverage review</p>
-        {confirmation.confirmed && confirmation.by ? (
-          <p className="mt-1">
-            Confirmed by <span className="font-medium">{confirmation.by.name}</span>
-            {confirmation.by.principal && confirmation.by.principal !== "anonymous" ? ` (${confirmation.by.principal})` : null}
-            {" · "}
-            {when(confirmation.at)}
-            {confirmation.rationale ? <span className="block text-muted-foreground">“{confirmation.rationale}”</span> : null}
-          </p>
-        ) : confirmation.confirmed ? (
-          <p className="mt-1">Confirmed (before who confirmed was recorded).</p>
-        ) : (
-          <p className="mt-1 text-muted-foreground">Not confirmed yet. Validate the gap to confirm it.</p>
-        )}
-        {origin ? (
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            Taken from <GapLink gap={origin} /> by an accepted split suggestion.
-          </p>
-        ) : null}
-      </div>
+      <GapCoverageContext record={record} />
       <div className={CARD} data-testid="gap-objective">
         <p className="text-[12px] font-medium text-muted-foreground">Objective it serves</p>
         <p className="mt-1">{objective ? `${objective.id} · ${objective.name}` : "No objective linked yet."}</p>

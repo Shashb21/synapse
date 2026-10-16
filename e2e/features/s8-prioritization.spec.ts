@@ -227,7 +227,7 @@ test.describe("KAN-128 priority context and next actions", () => {
 
     await page.goto("/?place=plan&setting=all");
     await page.getByTestId("unplaced-gap").filter({ hasText: "Comparative persistence" }).click();
-    const detail = page.locator("article").filter({ hasText: "Comparative persistence" });
+    const detail = page.getByRole("dialog", { name: "Gap details", exact: true });
     await expect(detail).toContainText("Evidence needed");
     await expect(detail).toContainText("Comparative persistence evidence is missing.");
     await expect(detail).toContainText("Support access");
@@ -238,7 +238,7 @@ test.describe("KAN-128 priority context and next actions", () => {
     const setPriority = detail.getByRole("button", { name: "Set priority", exact: true });
     await setPriority.focus();
     await page.keyboard.press("Enter");
-    const dialog = page.getByRole("dialog");
+    const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
     await expect(dialog).toBeVisible();
     await dialog.locator('input[name="x_score"]').fill("82");
     await dialog.locator('input[name="y_score"]').fill("76");

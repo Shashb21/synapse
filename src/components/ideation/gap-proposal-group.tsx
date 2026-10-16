@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { GapRecordLink } from "@/components/gap-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
@@ -79,12 +79,12 @@ export function GapProposalGroupCard({
             {plural(group.mapped_tactic_count, "mapped tactic")}
           </span>
         </div>
-        <Link
-          href={`/gaps/${group.gap_id}`}
+        <GapRecordLink
+          gapId={group.gap_id}
           className="text-[13px] leading-5 text-foreground no-underline hover:underline"
         >
           {group.gap_name}
-        </Link>
+        </GapRecordLink>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
           {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted

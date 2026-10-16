@@ -1,16 +1,12 @@
 "use client";
 
-import { SuggestionReferences } from "./suggestion-references";
 import type { JudgementReference } from "@/lib/iegp/judgement-references";
-import Link from "next/link";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
-import { EvidenceDecisionContext, PriorityJudgementDetails, priorityNextAction, type PriorityObjective } from "@/components/prioritize/priority-context";
-import { SettingChips } from "@/components/gap-settings-editor";
-import { placementGapError, scoreError } from "@/components/prioritize/score-input";
-import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
+import { priorityNextAction, type PriorityObjective } from "@/components/prioritize/priority-context";
+import { BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
 import { cn } from "@/lib/utils";
 import { useAiEnabled } from "@/components/platform/ai-status";
 import {
@@ -21,6 +17,7 @@ import {
   unfavourableLabel,
   type PriorityAxis,
 } from "@/modules/stages/s8-prioritization/axis-math";
+import { GapPanel } from "@/components/gap-panel";
 import { postJson } from "@/lib/post-json";
 import { isPresenting } from "@/lib/room/presenting";
 
@@ -317,166 +314,6 @@ function QuadrantBackdrop() {
   );
 }
 
-function GapDetail({
-  gap,
-  xAxis,
-  yAxis,
-  identity,
-  mayPrioritize,
-  tacticsUnlocked,
-}: {
-  gap: PrioritizeGap;
-  xAxis: PriorityAxis;
-  yAxis: PriorityAxis;
-  identity: ActionIdentity;
-  mayPrioritize: boolean;
-  tacticsUnlocked: boolean;
-}) {
-  const ai = useAiEnabled("prioritization");
-  const point = pointOf(gap, xAxis, yAxis);
-  const band = gap.band ?? gap.suggested_band;
-  const quadrant = point ? bandAt(point, xAxis, yAxis) : null;
-  return (
-    <article className="grid gap-3 border border-border bg-background p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {band ? <BandChip band={band} validated={gap.validated} /> : null}
-        <Link href={`/gaps/${gap.gap_id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
-          Gap dossier ↗
-        </Link>
-      </div>
-      <h3 className="text-[14px] font-medium leading-5 text-foreground">{gap.gap_name}</h3>
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span>{gap.domain_label}</span>
-        <span>·</span>
-        <span>
-          {gap.tactic_count} tactic{gap.tactic_count === 1 ? "" : "s"}
-        </span>
-        <SettingChips settings={gap.settings} />
-      </div>
-      <EvidenceDecisionContext statement={gap.statement} objective={gap.objective} />
-      <PriorityJudgementDetails priority={{ ...gap, band }} axes={[yAxis, xAxis]} />
-      {ai && gap.suggested_band && (gap.run_id || gap.suggested_rationale) ? (
-        <p className="text-[11px] leading-4 text-muted-foreground">
-          <span className="text-foreground">Model suggested {BAND_LABELS[gap.suggested_band]}.</span>{" "}
-          {gap.suggested_rationale || "Reason not recorded"}
-        </p>
-      ) : null}
-      {ai && gap.suggested_band && (gap.run_id || gap.suggested_rationale) ? <SuggestionReferences key={`${gap.gap_id}-${gap.version}`} gapId={gap.gap_id} version={gap.version ?? null} references={gap.support_status === "supported" ? gap.suggested_references : []} /> : null}
-      {ai && band && mayPrioritize && !gap.validated && !gap.needs_review && !gap.human_band && !gap.human_axes?.length && gap.support_status === "supported" ? (
-        <ActionDialog endpoint="/api/plan"
-          payload={{ action: "accept_priority_suggestion", gap_id: gap.gap_id, band: gap.suggested_band, expected_version: gap.version ?? null }}
-          label="Accept supported AI suggestion" title={`Accept AI priority for ${gap.gap_name}`}
-          description="Inspect the supporting records before accepting this suggestion. Your reason and its references will be retained in history."
-          confirmLabel="Accept supported AI suggestion" requireRationale rationaleFieldName="reason" rationaleLabel="Reason for acceptance (required)" identity={identity} />
-      ) : null}
-      {quadrant && band && quadrant !== band ? (
-        <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-          Its band ({BAND_LABELS[band]}) differs from the quadrant it sits in here ({BAND_LABELS[quadrant]}). Drag
-          it, or edit its scores or band, to match.
-        </p>
-      ) : null}
-      {gap.validated ? (
-        <div className="grid gap-1 text-[12px]">
-          {band === "high" && tacticsUnlocked ? (
-            <Link href="/?place=tactics">Continue to tactics</Link>
-          ) : !tacticsUnlocked ? (
-            <Link href="/?place=plan&setting=all">Review remaining plan-wide priorities</Link>
-          ) : (
-            <Link href={`/gaps/${gap.gap_id}`}>Map a tactic from the library</Link>
-          )}
-        </div>
-      ) : null}
-      {mayPrioritize ? (
-        <ActionDialog
-          endpoint="/api/plan"
-          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
-          fields={[
-            { name: "rationale", label: "Priority rationale (optional)", type: "textarea", defaultValue: gap.rationale ?? "", hint: "Why this priority is appropriate. Kept separately from the reason for this change." },
-            {
-              name: "y_score",
-              label: `${yAxis.label} score (0–100)`,
-              defaultValue:
-                typeof gap.axis_scores?.[yAxis.id] === "number" ? String(gap.axis_scores[yAxis.id]) : "",
-              placeholder: "0–100",
-              hint: `0 = ${yAxis.low_label}, 100 = ${yAxis.high_label}. Leave empty to keep it unscored.`,
-              validate: (value) => scoreError(yAxis.label, value),
-            },
-            {
-              name: "x_score",
-              label: `${xAxis.label} score (0–100)`,
-              defaultValue:
-                typeof gap.axis_scores?.[xAxis.id] === "number" ? String(gap.axis_scores[xAxis.id]) : "",
-              placeholder: "0–100",
-              hint: `0 = ${xAxis.low_label}, 100 = ${xAxis.high_label}. Leave empty to keep it unscored.`,
-              validate: (value) => scoreError(xAxis.label, value),
-            },
-            {
-              name: "band",
-              label: "Band",
-              type: "select",
-              defaultValue: "",
-              options: [
-                { value: "", label: point ? "The quadrant the scores fall in" : "The quadrant (needs both scores)" },
-                ...BANDS.map((value) => ({ value, label: BAND_LABELS[value] })),
-              ],
-              // Customers aren't told about AI when it is off (KAN-53).
-              hint: ai
-                ? "A band you set here is yours: a later model run keeps it and only updates its own suggestion."
-                : "A band you set here is kept until you change it.",
-            },
-            {
-              name: "validate",
-              label: "Confirm priority now",
-              type: "select",
-              defaultValue: "no",
-              options: [
-                { value: "no", label: "No — keep it as a draft" },
-                { value: "yes", label: "Yes — confirm priority" },
-              ],
-            },
-          ]}
-          validateForm={(values) =>
-            placementGapError({
-              x: { label: xAxis.label, typed: values.x_score ?? "", saved: gap.axis_scores?.[xAxis.id] },
-              y: { label: yAxis.label, typed: values.y_score ?? "", saved: gap.axis_scores?.[yAxis.id] },
-              band: values.band ?? "",
-            })
-          }
-          label={band ? "Edit scores" : "Set priority"}
-          title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
-          description={
-            ai
-              ? "Type the exact axis scores and, if you want, the band. No model run is needed; what you set is kept across re-runs."
-              : "Type the exact axis scores and, if you want, the band."
-          }
-          confirmLabel="Save placement"
-          requireRationale
-          rationaleFieldName="reason"
-          rationaleLabel="Reason for change (required)"
-          identity={identity}
-          variant="outline"
-          size="sm"
-        />
-      ) : null}
-      {band && mayPrioritize ? (
-        <ActionDialog
-          endpoint="/api/plan"
-          payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
-          label={gap.needs_review ? "Review changed context and reconfirm" : gap.validated ? "Review or change priority" : ai && (gap.run_id || gap.suggested_rationale) && !gap.human_band ? "Make manual judgement" : "Review and confirm priority"}
-          title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
-          description="Make an explicit manual judgement across all settings and record your own reason. Supporting references are not required for a manual judgement, including when you retain the same band and scores."
-          confirmLabel="Confirm priority"
-          requireRationale
-          rationaleFieldName="reason"
-          rationaleLabel="Reason for change (required)"
-          identity={identity}
-          variant={gap.validated ? "outline" : "default"}
-          size="sm"
-        />
-      ) : null}
-    </article>
-  );
-}
 
 /**
  * The Prioritize matrix. Gaps sit where their two axis scores put them; drag
@@ -516,6 +353,8 @@ export function PrioritizeMatrix({
   } | null>(null);
   const [pendingMove, setPendingMove] = useState<{ gapId: string; point: Point; version: string | null; contextVersion: string | null } | null>(null);
   const autoPlaced = useRef(false);
+  const suppressGapClick = useRef(false);
+  const gapTriggerRef = useRef<HTMLElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -562,8 +401,6 @@ export function PrioritizeMatrix({
     return { gap, point, band, validated: gap.validated };
   });
   const placed = view.filter((row) => row.point);
-  const selected = gaps.find((gap) => gap.gap_id === selectedId) ?? null;
-  const selectedView = view.find((row) => row.gap.gap_id === selectedId);
   const validatedCount = view.filter((row) => row.validated).length;
   // The design's priority chips: each counts its gaps and highlights them on the canvas.
   const [highlight, setHighlight] = useState<Band | null>(null);
@@ -660,15 +497,14 @@ export function PrioritizeMatrix({
     dragRef.current = null;
     if (!drag) return;
     if (!drag.moved) {
-      setSelectedId(drag.gapId);
       return;
     }
+    suppressGapClick.current = true;
     // Dropped back outside the matrix: nothing is placed and nothing is selected.
     if (drag.fromList && !overPlot(event)) {
       dropPosition(drag.gapId);
       return;
     }
-    setSelectedId(drag.gapId);
     const point = pointFromEvent(event);
     if (point) requestMove(drag.gapId, point);
   }
@@ -689,7 +525,6 @@ export function PrioritizeMatrix({
       x: Math.max(0, Math.min(100, point.x + move.x)),
       y: Math.max(0, Math.min(100, point.y + move.y)),
     };
-    setSelectedId(gapId);
     setPositions((current) => ({ ...current, [gapId]: next }));
     requestMove(gapId, next);
   }
@@ -829,7 +664,7 @@ export function PrioritizeMatrix({
       ) : null}
 
       {pendingMove ? (
-        <ActionDialog
+        <ActionDialog protectUnsavedChanges
           key={pendingMove.gapId}
           endpoint="/api/plan"
           payload={{ action: "move_placement", gap_id: pendingMove.gapId,
@@ -884,7 +719,7 @@ export function PrioritizeMatrix({
                     onPointerUp={onPointerUp}
                     onPointerCancel={() => { dragRef.current = null; dropPosition(gap.gap_id); }}
                     onKeyDown={(event) => onKeyDown(event, gap.gap_id, point!)}
-                    onClick={() => setSelectedId(gap.gap_id)}
+                    onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                     aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority confirmed" : ", priority not confirmed"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
@@ -932,20 +767,10 @@ export function PrioritizeMatrix({
         </div>
 
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:sticky lg:top-5">
-          {selected && selectedView ? (
-            <GapDetail
-              gap={{ ...selected, band: selectedView.band, validated: selectedView.validated }}
-              xAxis={xAxis}
-              yAxis={yAxis}
-              identity={identity}
-              mayPrioritize={mayPrioritize}
-              tacticsUnlocked={tacticsUnlocked}
-            />
-          ) : (
-            <p className="border border-dashed border-border p-4 text-[12px] text-muted-foreground">
-              Select a gap on the matrix to review its evidence, decision context and priority.
-            </p>
-          )}
+          <GapPanel gapId={selectedId} onClose={() => setSelectedId(null)}
+            returnFocusRef={gapTriggerRef}
+            refreshVersion={JSON.stringify([gaps.find(gap => gap.gap_id === selectedId)?.version, gaps.find(gap => gap.gap_id === selectedId)?.context_version, tacticsUnlocked])}
+            priorityEditor={{ xAxis, yAxis, identity, mayPrioritize }} />
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
             {unplaced.length > 0 && !busy ? (
               <section aria-label="Gaps not placed yet">
@@ -965,7 +790,7 @@ export function PrioritizeMatrix({
                         data-testid="unplaced-gap"
                         data-gap-id={gap.gap_id}
                         onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
-                        onClick={() => setSelectedId(gap.gap_id)}
+                        onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                         aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}
                         className={cn(
                           "flex w-full touch-none select-none items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
@@ -1008,7 +833,7 @@ export function PrioritizeMatrix({
                         <li key={gap.gap_id}>
                           <button
                             type="button"
-                            onClick={() => setSelectedId(gap.gap_id)}
+                            onClick={(event) => { if (suppressGapClick.current) { suppressGapClick.current = false; return; } gapTriggerRef.current = event.currentTarget; setSelectedId(gap.gap_id); }}
                             className={cn(
                               "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] hover:bg-muted",
                               gap.gap_id === selectedId && "bg-muted",

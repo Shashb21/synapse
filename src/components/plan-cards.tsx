@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GapRecordLink } from "@/components/gap-panel";
 import { CoverageBadge, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
@@ -403,12 +404,12 @@ export function GapPlanCard({
         />
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
-      <Link
-        href={`/gaps/${card.gap_id}`}
+      <GapRecordLink
+        gapId={card.gap_id}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
         {card.gap_name}
-      </Link>
+      </GapRecordLink>
       <GapTacticsBlock
         gapId={card.gap_id}
         tactics={card.tactics}

@@ -71,7 +71,9 @@ export function ActionDialog({
   className,
   trigger,
   validateForm,
+  protectUnsavedChanges = false,
 }: {
+  protectUnsavedChanges?: boolean;
   endpoint: string;
   payload: Record<string, unknown>;
   fields?: ActionField[];
@@ -102,6 +104,7 @@ export function ActionDialog({
     setLocalOpen(value);
     controlledOnOpenChange?.(value);
   }
+  const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actorName, setActorName] = useState(identity.signed_in ? identity.actor_name : "");
@@ -165,11 +168,13 @@ export function ActionDialog({
   function onOpenChange(next: boolean) {
     // Each opening starts clean: an error from an earlier attempt does not linger.
     if (next) {
+      setDirty(false);
       setOpenedPayload(payload);
       setOpenedFields(fields);
       setError(null);
       setPending(false);
     }
+    if (!next && protectUnsavedChanges && (pending || refreshing || (dirty && !window.confirm("Discard unsaved changes?")))) return;
     setOpen(next);
   }
 
@@ -185,6 +190,7 @@ export function ActionDialog({
         <form
           id={formId}
           noValidate
+          onChange={() => setDirty(true)}
           onSubmit={(event) => {
             event.preventDefault();
             void submit(event.currentTarget);

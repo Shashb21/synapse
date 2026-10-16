@@ -7,14 +7,14 @@ import { GapDetailsEditor } from "@/components/gap-metadata";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
 import { RestoreGapButton, UnparkGapButton } from "@/components/restore-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
 import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
-import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
+import { GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { NewSourceNote } from "@/components/gap-suggestions";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
@@ -29,7 +29,6 @@ import {
   DIMENSION_VALUES,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
-  GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
   ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
@@ -39,9 +38,7 @@ import { EntityHistory } from "@/components/entity-history";
 import { GapConfirmationAndObjective, GapRecordSections, NeedProvenance } from "@/components/gap-record-sections";
 import {
   buildTacticLibrary,
-  computeGapStatus,
   coverageDimensionValues,
-  displayedGapStatus,
   liveGapsMappedToTactic,
   mappedTactics,
   persistedResidualGaps,
@@ -79,14 +76,7 @@ export default async function GapDetailPage({
   const history = record.history;
   const provenanceByNeed = new Map(record.needs.map((entry) => [entry.need.id, entry]));
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
-  const computed = computeGapStatus(coverages, state.tactics, {
-    hasAcceptedChild: children.length > 0,
-    expansions: state.expansions,
-  });
-  const shown = displayedGapStatus({
-    ...gap,
-    computed_status: gap.computed_status ?? computed,
-  });
+  const { computed, shown } = record.coverage_status;
   // Only a leftover a person saved is shown; drafts come from S6 on demand.
   const leftover = persistedResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const tactics = mappedTactics(state, gap.id);
@@ -108,7 +98,7 @@ export default async function GapDetailPage({
   return (
     <AppShell active="gaps">
       <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div id="gap-coverage-actions" className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>
             <GapBadge status={shown} />
@@ -129,7 +119,10 @@ export default async function GapDetailPage({
         ) : (
           <GapBadge status={shown} />
         )}
-        {gap.parked_at ? <ParkedFlag reason={gap.parked_reason} /> : null}
+        {!gap.retired && !gap.human_validated && shown !== "validated_partial" ? (
+          <LockForm label="Confirm status" action="validate_gap" extra={{ gap_id: gap.id }}
+            note={{ label: "Note (optional)" }} confirmLabel={`Confirm ${GAP_STATUS_LABELS[shown]}`} variant="default" />
+        ) : null}
         {mapped && !gap.status_override ? (
           <span className="text-[11px] text-muted-foreground">
             Engine computed {GAP_STATUS_LABELS[computed]}
@@ -138,7 +131,6 @@ export default async function GapDetailPage({
           <LockMeta lock={gap.status_lock} />
         )}
       </div>
-      <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
       {gap.new_source_at ? (
         <div className="mb-4">
           <NewSourceNote gapId={gap.id} newSource={newSourceOf(state, gap.new_source_at, gap.new_source_need_id ?? null)} />
@@ -201,13 +193,6 @@ export default async function GapDetailPage({
         objectives={state.objectives.map((o) => ({ id: o.id, name: o.name }))}
         identity={identity}
       />
-      <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
-        {GAP_STATUS_DEFINITIONS[shown]}{" "}
-        {shown === "validated_partial"
-          ? "Click Partially Addressed to split (Addressed + tactic on the left, Open leftover on the right) or rewrite the original. Partial cannot stay."
-          : "Click Open or Addressed to override with a required reason. Cancel does not change status."}
-      </p>
-
       <section className="mb-8">
         <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
@@ -604,7 +589,7 @@ export default async function GapDetailPage({
         record={record}
         axes={priorityAxes.axes}
         tacticsUnlocked={state.asset.tactics_unlocked}
-        open={!gap.retired && !gap.parked_at && shown === "validated_open"}
+        open={record.open}
       />
 
       {record.versions.length > 0 ? (

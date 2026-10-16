@@ -30,6 +30,15 @@ function changeText(value: string | null, field: string | null): string | null {
   }
 }
 
+function hasSuggestion(entry: HistoryEntry): boolean {
+  if (/suggest|model|(?:^|[._])ai(?:[._]|$)/.test(entry.action)) return true;
+  if (entry.field !== "placement" || !entry.after) return false;
+  try {
+    const saved = JSON.parse(entry.after);
+    return Boolean(saved.suggested_rationale || saved.decision_origin === "supported_ai");
+  } catch { return false; }
+}
+
 /**
  * A gap's or tactic's History (KAN-90): who did what, in which role, when,
  * before → after and why, newest first.
@@ -43,6 +52,7 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
       >
         History
       </h2>
+      <p className="mb-2 text-[12px] text-muted-foreground">Read-only, newest first. Up to 200 recorded changes are shown; older changes may be omitted. Corrections use the authorised editors and append history.</p>
       {entries.length === 0 ? (
         <p className="rounded-lg border border-border bg-card p-3 text-[13px] text-muted-foreground">{empty}</p>
       ) : (
@@ -63,7 +73,7 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                   {entry.shared_context ? <span className="font-medium">Shared context · </span> : null}
                   <span className="font-medium">{label(entry.action)}</span>
                   {entry.field ? ` ${label(entry.field)}` : ""}
-                  {entry.entity_type !== "gap" && entry.entity_type !== "tactic" ? ` · ${label(entry.entity_type)} ${entry.entity_id}` : ""}
+                  {` · ${label(entry.entity_type)} ${entry.entity_id}`}
                 </p>
                 {entry.kind === "edit" && (entry.before !== null || entry.after !== null) ? (
                   <p className="mt-1 break-words" data-testid="history-change">
@@ -86,6 +96,7 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                     {reference.target ? <Link href={reference.target.href}>{reference.target.title} ({label(reference.entity_type)} {reference.entity_id})</Link> : <span>Reference unavailable ({label(reference.entity_type)} {reference.entity_id})</span>}: {reference.reason}
                   </li>)}
                 </ul> : null}
+                {!entry.supporting_references?.length && hasSuggestion(entry) ? <p className="mt-1 text-muted-foreground">Supporting references not recorded for this suggestion</p> : null}
                 <p className="mt-1 text-muted-foreground">
                   {entry.rationale ? `“${entry.rationale}”` : "Reason not recorded"}
                 </p>

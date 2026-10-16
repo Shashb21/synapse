@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { GapRecordLink } from "@/components/gap-panel";
 import { useMemo, useState } from "react";
 import { AddIdeaDialog } from "@/components/ideation/gap-proposal-group";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
@@ -160,9 +161,9 @@ function GapIdeationCard({
               <GapMetadataView metadata={card.metadata} compact className="block" />
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/gaps/${card.gap_id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
+              <GapRecordLink gapId={card.gap_id} className="text-[11px] text-muted-foreground no-underline hover:underline">
                 Open gap ↗
-              </Link>
+              </GapRecordLink>
               <AssignTacticButton gapId={card.gap_id} tactics={assignable} />
               <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} inUse={customTypesInUse(library)} />
             </div>
@@ -312,14 +313,14 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
                   ) : (
                     <span className="flex flex-wrap items-center gap-1">
                       {item.gaps.map((gap) => (
-                        <Link
+                        <GapRecordLink
                           key={gap.id}
-                          href={`/gaps/${gap.id}`}
+                          gapId={gap.id}
                           title={gap.name}
                           className="rounded-sm bg-primary/10 px-1.5 py-px font-mono text-[10px] text-indigo-800 no-underline hover:underline dark:text-indigo-300"
                         >
                           {gap.id}
-                        </Link>
+                        </GapRecordLink>
                       ))}
                     </span>
                   )}

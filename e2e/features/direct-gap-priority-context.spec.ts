@@ -30,7 +30,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   test.setTimeout(120_000);
   await page.goto(`/gaps/${visibleGap}`);
   await page.getByRole("button", { name: /^Edit GAP-/ }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
   await expect(dialog).toContainText("Changing Evidence needed requires priority review again");
   await dialog.getByLabel("Name", { exact: true }).fill("Clearer comparative evidence name");
   await dialog.getByLabel("Rationale (required)").fill("Clarify the display name only");

@@ -7,7 +7,10 @@ import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import { loadState } from "./store";
 import { gapVersionsFor, lastResetAt } from "./gap-history";
 import { entityHistory, type HistoryEntry } from "./entity-history";
-import { isLiveGap } from "./engine";
+import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
+import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
+import { computeGapStatus, displayedGapStatus, isLiveGap } from "./engine";
+import type { GapStatus, MappedGapStatus } from "./enums";
 import type { IegpState } from "./types";
 
 type Gap = IegpState["gaps"][0];
@@ -22,6 +25,7 @@ type Gap = IegpState["gaps"][0];
 export type GapRecord = {
   gap: Gap;
   objective: IegpState["objectives"][0] | null;
+  coverage_status: { computed: MappedGapStatus; shown: GapStatus; needs_review: boolean };
   confirmation: {
     confirmed: boolean;
     by: Gap["validated_by"];
@@ -47,7 +51,7 @@ export type GapRecord = {
   })[];
   expansions: IegpState["expansions"];
   mapping_rejections: IegpState["mapping_suggestions"];
-  priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string }) | null;
+  priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string; human_axes?: string[]; human_band?: boolean }) | null;
   ideas: (typeof kernel.ideationProposals.$inferSelect)[];
   timeline: (typeof kernel.timelineActivities.$inferSelect)[];
   breakout_groups: IegpState["breakout_groups"];
@@ -55,6 +59,9 @@ export type GapRecord = {
   residuals: IegpState["residuals"];
   versions: IegpState["gap_versions"];
   history: HistoryEntry[];
+  priority_axes?: PriorityAxis[];
+  tactics_unlocked?: boolean;
+  open?: boolean;
 };
 
 const brief = (gap: Gap | undefined) => (gap ? { id: gap.id, name: gap.name, number: gap.number } : null);
@@ -68,7 +75,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   const needIds = links.map((link) => link.need_id);
   const candidateRowIds = state.needs.filter((n) => needIds.includes(n.id) && n.candidate_row_id).map((n) => n.candidate_row_id!);
   const d = db();
-  const [priority, ideas, timeline, candidates] = await Promise.all([
+  const [priority, ideas, timeline, candidates, axes] = await Promise.all([
     readPlacementSnapshot(gap.id),
     d.select().from(kernel.ideationProposals).where(sql`${kernel.ideationProposals.gap_id} = ${gap.id}`),
     d.select().from(kernel.timelineActivities).where(sql`${kernel.timelineActivities.gap_ids} @> ${JSON.stringify([gap.id])}::jsonb`),
@@ -77,9 +84,14 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
         ? sql`${gapCandidates.committed_gap_id} = ${gap.id} OR ${inArray(gapCandidates.id, candidateRowIds)}`
         : sql`${gapCandidates.committed_gap_id} = ${gap.id}`,
     ),
+    loadAxes(),
   ]);
   const candidateById = new Map(candidates.map((row) => [row.id, row]));
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+  const computed = computeGapStatus(coverages, state.tactics, {
+    hasAcceptedChild: state.gaps.some(row => row.parent_gap_id === gap.id), expansions: state.expansions,
+  });
+  const shown = displayedGapStatus({ ...gap, computed_status: gap.computed_status ?? computed });
   const residuals = state.residuals.filter((r) => r.gap_id === gap.id);
   const groupIds = new Set(state.breakout_group_gaps.filter((row) => row.gap_id === gap.id).map((row) => row.group_id));
   const history = await entityHistory(
@@ -88,6 +100,10 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   );
   return {
     gap,
+    priority_axes: axes.axes,
+    tactics_unlocked: state.asset.tactics_unlocked,
+    open: !gap.retired && !gap.parked_at && shown === "validated_open",
+    coverage_status: { computed, shown, needs_review: coverages.some(row => row.needs_review) },
     objective: state.objectives.find((o) => o.id === gap.objective_id) ?? null,
     confirmation: {
       confirmed: gap.human_validated,
