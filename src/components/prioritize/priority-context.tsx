@@ -1,3 +1,4 @@
+import { objectiveDateWarnings } from "@/lib/iegp/planning-context";
 import type { StrategicObjective } from "@/lib/iegp/types";
 import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
 import { BAND_LABELS, type Band } from "@/components/matrix/bands";
@@ -15,26 +16,31 @@ export function EvidenceDecisionContext({ statement, objective }: {
   objective?: PriorityObjective | null;
 }) {
   return (
-    <dl className="grid min-w-0 gap-3 text-[13px] sm:grid-cols-2">
-      {[
-        ["Evidence needed", statement],
-        ["Objective", objective?.name],
-        ["Affected decision", objective?.key_decision],
-        ["Evidence needed by", objective?.evidence_needed_by],
-        ["Decision date", objective?.decision_date],
-      ].map(([label, value]) => (
-        <div key={label} className={label === "Evidence needed" ? "min-w-0 sm:col-span-2" : "min-w-0"}>
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className="mt-0.5 break-words text-foreground">{value?.trim() || "Unknown"}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="grid gap-2">
+      <dl className="grid min-w-0 gap-3 text-[13px] sm:grid-cols-2">
+        {[
+          ["Evidence needed", statement],
+          ["Objective", objective?.name],
+          ["Affected decision", objective?.key_decision],
+          ["Evidence needed by", objective?.evidence_needed_by],
+          ["Decision date", objective?.decision_date],
+        ].map(([label, value]) => (
+          <div key={label} className={label === "Evidence needed" ? "min-w-0 sm:col-span-2" : "min-w-0"}>
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="mt-0.5 break-words text-foreground">{value?.trim() || "Unknown"}</dd>
+          </div>
+        ))}
+      </dl>
+      {objective ? objectiveDateWarnings(objective).map(warning => <p key={warning} role="status" className="text-[12px] text-amber-700 dark:text-amber-300">{warning}</p>) : null}
+    </div>
   );
 }
 
 export type PriorityJudgement = {
   band: Band | null;
   validated: boolean;
+  needs_review?: boolean;
+  review_reason?: string | null;
   axis_scores: Record<string, number> | null;
   human_axes?: string[];
   rationale: string | null;
@@ -42,14 +48,16 @@ export type PriorityJudgement = {
   at: string | null;
 };
 
-/** Describes current priority states only; changed-context review is added by its owning slice. */
-export function priorityNextAction({ band, validated, tacticsUnlocked, open = true }: {
+/** Next action for the current judgement, including changed context. */
+export function priorityNextAction({ band, validated, needs_review, tacticsUnlocked, open = true }: {
   band: Band | null;
   validated: boolean;
   tacticsUnlocked: boolean;
+  needs_review?: boolean;
   open?: boolean;
 }): string {
   if (!band) return "Set priority";
+  if (needs_review) return "Review changed context and reconfirm";
   if (!validated) return "Review and confirm priority";
   if (band === "high" && open && tacticsUnlocked) return "Continue to tactics";
   return "Priority confirmed";
@@ -62,6 +70,7 @@ export function PriorityJudgementDetails({ priority, axes }: {
   return (
     <div className="grid gap-2 text-[13px]">
       <p>Priority applies across all settings</p>
+      {priority?.needs_review ? <p role="status">Needs priority review · Review changed context and reconfirm{priority.review_reason ? `: ${priority.review_reason}` : ""}</p> : null}
       <p>
         <span className="font-medium">{priority?.band ? BAND_LABELS[priority.band] : "No band yet"}</span>
         {" · "}{priority?.validated ? "Priority confirmed" : "Priority not confirmed"}

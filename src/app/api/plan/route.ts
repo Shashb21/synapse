@@ -67,7 +67,8 @@ export async function GET() {
   // What must be resolved before a final save: the roadmap (KAN-85) and the gap inventory (KAN-86).
   const timeline_issues = planIssues(timeline);
   const final_blockers = await finalPlanBlockers();
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
+  const priority_context_versions = Object.fromEntries(state.gaps.map(gap => [gap.id, gap.priority_context_version ?? null]));
+  return NextResponse.json({ placements, priority_context_versions, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -173,6 +174,7 @@ export async function POST(request: Request) {
         const placement = await validatePlacement({
           reason: typeof body.reason === "string" ? body.reason : "",
           expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           band: field(bandSchema, body.band, "band"),
           rationale: typeof body.rationale === "string" ? body.rationale : undefined,
@@ -185,6 +187,7 @@ export async function POST(request: Request) {
         const placement = await movePlacement({
           reason: typeof body.reason === "string" ? body.reason : "",
           expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           x_axis: String(body.x_axis ?? ""),
           y_axis: String(body.y_axis ?? ""),
@@ -224,6 +227,7 @@ export async function POST(request: Request) {
         const placement = await setPlacement({
           reason: typeof body.reason === "string" ? body.reason : "",
           expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           axis_scores,
           x_axis: xAxis,

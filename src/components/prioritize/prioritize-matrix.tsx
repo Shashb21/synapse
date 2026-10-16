@@ -25,6 +25,7 @@ import { isPresenting } from "@/lib/room/presenting";
 export type PrioritizeGap = {
   gap_id: string;
   version?: string | null;
+  context_version?: string | null;
   gap_name: string;
   statement: string;
   objective?: PriorityObjective | null;
@@ -35,6 +36,8 @@ export type PrioritizeGap = {
   axis_scores: Record<string, number> | null;
   band: Band | null;
   validated: boolean;
+  needs_review?: boolean;
+  review_reason?: string | null;
   suggested_band: Band | null;
   suggested_rationale: string | null;
   /** Axis ids a person set; a model re-run keeps their scores. */
@@ -373,7 +376,7 @@ function GapDetail({
       {mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
-          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null }}
+          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
           fields={[
             { name: "rationale", label: "Priority rationale (optional)", type: "textarea", defaultValue: gap.rationale ?? "", hint: "Why this priority is appropriate. Kept separately from the reason for this change." },
             {
@@ -445,8 +448,8 @@ function GapDetail({
       {band && mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
-          payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null }}
-          label={gap.validated ? "Review or change priority" : "Review and confirm priority"}
+          payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
+          label={gap.needs_review ? "Review changed context and reconfirm" : gap.validated ? "Review or change priority" : "Review and confirm priority"}
           title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
           description="Confirms this priority across all settings and records your reason, including when you retain the same band and scores. Edit scores or drag the gap to change the band."
           confirmLabel="Confirm priority"
@@ -498,7 +501,7 @@ export function PrioritizeMatrix({
     /** Dragged in from the "Not placed yet" list: a drop outside the matrix places nothing. */
     fromList: boolean;
   } | null>(null);
-  const [pendingMove, setPendingMove] = useState<{ gapId: string; point: Point; version: string | null } | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ gapId: string; point: Point; version: string | null; contextVersion: string | null } | null>(null);
   const autoPlaced = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
@@ -574,7 +577,7 @@ export function PrioritizeMatrix({
       return;
     }
     // Preview only. Nothing is sent on cancellation, navigation or pagehide.
-    setPendingMove({ gapId, point: rounded, version: gap.version ?? null });
+    setPendingMove({ gapId, point: rounded, version: gap.version ?? null, contextVersion: gap.context_version ?? null });
   }
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
@@ -818,7 +821,7 @@ export function PrioritizeMatrix({
           endpoint="/api/plan"
           payload={{ action: "move_placement", gap_id: pendingMove.gapId,
             x_axis: xAxis.id, y_axis: yAxis.id, x: pendingMove.point.x, y: pendingMove.point.y,
-            expected_version: pendingMove.version }}
+            expected_version: pendingMove.version, expected_context_version: pendingMove.contextVersion }}
           open
           onOpenChange={(open) => {
             if (!open) {
@@ -966,7 +969,7 @@ export function PrioritizeMatrix({
                             {gap.band ? BAND_LABELS[gap.band] : "No band yet"} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
                           </span>
                           <span className="block text-[11px] text-muted-foreground">
-                            {priorityNextAction({ band: gap.band ?? gap.suggested_band, validated: gap.validated, tacticsUnlocked })}
+                            {priorityNextAction({ band: gap.band ?? gap.suggested_band, validated: gap.validated, needs_review: gap.needs_review, tacticsUnlocked })}
                           </span>
                         </span>
                       </button>
@@ -1004,7 +1007,7 @@ export function PrioritizeMatrix({
                                 {BAND_LABELS[band]} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
                               </span>
                               <span className="block text-[11px] text-muted-foreground">
-                                {priorityNextAction({ band, validated, tacticsUnlocked })}
+                                {priorityNextAction({ band, validated, needs_review: gap.needs_review, tacticsUnlocked })}
                               </span>
                             </span>
                           </button>

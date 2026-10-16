@@ -81,7 +81,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   const residuals = state.residuals.filter((r) => r.gap_id === gap.id);
   const groupIds = new Set(state.breakout_group_gaps.filter((row) => row.gap_id === gap.id).map((row) => row.group_id));
   const history = await entityHistory(
-    [gap.id, ...coverages.map((c) => c.id), ...residuals.map((r) => r.id)],
+    [gap.id, gap.objective_id, ...coverages.map((c) => c.id), ...residuals.map((r) => r.id)],
     { since: lastResetAt(state) },
   );
   return {
@@ -129,7 +129,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     pending_suggestions: state.gap_suggestions.filter((row) => row.gap_id === gap.id && row.status === "pending"),
     residuals,
     versions: gapVersionsFor(state, gap.id),
-    history,
+    history: history.map(entry => entry.entity_type === "objective" ? { ...entry, shared_context: true } : entry),
   };
 }
 

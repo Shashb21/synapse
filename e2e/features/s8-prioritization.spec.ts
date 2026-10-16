@@ -199,7 +199,7 @@ test.describe("KAN-128 priority context and next actions", () => {
         action: "create_gap", name: "Unlinked evidence need", statement: "Caregiver burden evidence is missing.", domain: "unmet_need", settings: "2L",
       });
       unknownGap = String(unknown.id);
-      await iegpAction(request, { action: "save_product_setup", context: {
+      await iegpAction(request, { action: "save_product_setup", reason: "Record decision context", context: {
         asset_name: "Context test", objectives: [{ name: "Support access", key_decision: "Submit the reimbursement dossier", decision_date: "2027-06-20" }],
       } });
       const known = await iegpAction(request, {

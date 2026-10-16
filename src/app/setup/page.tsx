@@ -2,6 +2,7 @@ import { AppShell, PageIntro } from "@/components/app-shell";
 import { SetupWizard } from "@/components/setup/setup-wizard";
 import { buildBlankWorkspace } from "@/lib/iegp/blank";
 import { setupContextFromState } from "@/lib/iegp/planning-context";
+import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { loadState } from "@/lib/iegp/store";
 import { sessionContext, type SessionContext } from "@/modules/auth/session";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
@@ -57,6 +58,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
       <SetupWizard
         key={state.asset.id}
         initial={initial}
+        linkedGaps={state.gaps.filter(isLiveGap).map(gap => ({ id: gap.id, name: gap.name, objective_id: gap.objective_id, open: displayedGapStatus(gap) === "validated_open", settings: gap.settings ?? [] }))}
         actorName={identity.actor.name}
         actorFunction={identity.actor.function}
         setupComplete={state.asset.setup_complete}

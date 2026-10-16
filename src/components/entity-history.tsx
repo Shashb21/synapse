@@ -59,6 +59,7 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                   {entry.actor_role ? ` · ${(ROLE_LABELS as Record<string, string>)[entry.actor_role] ?? label(entry.actor_role)}` : ""}
                 </p>
                 <p className="mt-1">
+                  {entry.shared_context ? <span className="font-medium">Shared context · </span> : null}
                   <span className="font-medium">{label(entry.action)}</span>
                   {entry.field ? ` ${label(entry.field)}` : ""}
                   {entry.entity_type !== "gap" && entry.entity_type !== "tactic" ? ` · ${label(entry.entity_type)} ${entry.entity_id}` : ""}

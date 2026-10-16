@@ -39,6 +39,7 @@ import {
   StakeholdersStep,
   type StepProps,
 } from "./setup-steps";
+import { TextField } from "./setup-fields";
 import { postJson } from "@/lib/post-json";
 
 type StepId = "welcome" | SetupSection | "models" | "review";
@@ -98,6 +99,7 @@ export function SetupWizard({
   setupComplete,
   isNew = false,
   workspaceName,
+  linkedGaps = [],
 }: {
   initial: PlanningContext;
   actorName: string;
@@ -106,11 +108,15 @@ export function SetupWizard({
   /** Just created this workspace (/setup?new=1): open on the welcome step. */
   isNew?: boolean;
   workspaceName?: string;
+  /** All linked gaps from the authorised workspace, independent of current filters. */
+  linkedGaps?: { id: string; name: string; objective_id: string; open: boolean; settings: string[] }[];
 }) {
   const router = useRouter();
   const ai = useAiEnabled("ingestion");
   const steps = useMemo(() => wizardSteps({ ai, isNew }), [ai, isNew]);
   const [form, setForm] = useState<PlanningContext>(initial);
+  const [baseline, setBaseline] = useState<PlanningContext>(initial);
+  const [reason, setReason] = useState("");
   const [complete, setComplete] = useState(setupComplete);
   const [index, setIndex] = useState(() => {
     if (setupComplete) return steps.length - 1;
@@ -130,12 +136,23 @@ export function SetupWizard({
   const parsed = useMemo(() => parsePlanningContext(form), [form]);
   const { bySection, byField } = useMemo(() => issuesBySection(parsed), [parsed]);
   const progress = ((index + 1) / steps.length) * 100;
+  const objectiveChanges = JSON.stringify(parsed.objectives) !== JSON.stringify(baseline.objectives) ||
+    (parsed.objectives.length > 0 && ["lifecycle_stage", "indication", "geography"].some(key => parsed[key as keyof PlanningContext] !== baseline[key as keyof PlanningContext]));
+  const changedContextIds = new Set(parsed.objectives.filter(objective => {
+    const previous = baseline.objectives.find(row => row.id === objective.id);
+    return previous && ["key_decision", "decision_date", "evidence_needed_by"].some(key => (objective[key as keyof typeof objective] || "") !== (previous[key as keyof typeof previous] || ""));
+  }).map(objective => objective.id));
+  const affectedGaps = linkedGaps.filter(gap => gap.open && changedContextIds.has(gap.objective_id));
 
   const set: StepProps["set"] = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   async function save(markComplete: boolean): Promise<boolean> {
-    setBusy(true);
     setError(null);
+    if (objectiveChanges && reason.trim().length < 3) {
+      setError("Give a meaningful reason for the objective changes. Your answers are still here.");
+      return false;
+    }
+    setBusy(true);
     try {
       const res = await postJson("/api/iegp", {
           action: "save_product_setup",
@@ -143,6 +160,7 @@ export function SetupWizard({
           actor_function: actorFunction,
           mark_complete: markComplete,
           context: form,
+          reason,
         });
       const json = res.json as { error?: string; context?: PlanningContext };
       if (!res.ok) {
@@ -152,6 +170,8 @@ export function SetupWizard({
       // New objectives get their ids on save; keep them so the next save updates, not duplicates.
       if (json.context) {
         setForm(json.context);
+        setBaseline(json.context);
+        setReason("");
         setSavedAt(json.context.saved_at || new Date().toISOString());
       }
       if (markComplete) setComplete(true);
@@ -384,6 +404,23 @@ export function SetupWizard({
             </div>
           </div>
           <SetupSummary form={parsed} onEdit={jump} issues={attempted.has("review") ? bySection : {}} />
+        </section>
+      ) : null}
+
+      {objectiveChanges ? (
+        <section aria-label="Objective change impact" className="grid gap-3 rounded-lg border border-border bg-card p-4">
+          <h3 className="text-[13px] font-semibold">Shared objective context</h3>
+          {changedContextIds.size ? (
+            <>
+              <p className="text-[12px]" role="status">{affectedGaps.length} linked Open gap{affectedGaps.length === 1 ? "" : "s"} will need priority review across all settings.</p>
+              <ul className="list-inside list-disc text-[12px]">
+                {affectedGaps.map(gap => <li key={gap.id}>{gap.name} · {gap.settings.join(", ") || "All settings"}</li>)}
+              </ul>
+              <p className="text-[12px] text-muted-foreground">Previous bands, scores, rationale and history are retained. The server checks all linked gaps again when you save.</p>
+            </>
+          ) : <p className="text-[12px] text-muted-foreground">These objective edits will be recorded with your reason. Name and note changes retain priority confirmation.</p>}
+          <TextField label="Reason for objective changes" required multiline value={reason} onChange={setReason} hint="Explain why this context is changing. A manual edit does not need a supporting reference." />
+          <Button type="button" variant="ghost" className="w-fit" disabled={busy} onClick={() => { setForm(baseline); setReason(""); setError(null); }}>Cancel changes</Button>
         </section>
       ) : null}
 

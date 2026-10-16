@@ -260,7 +260,7 @@ describe("the full gap record priority", () => {
   });
   const priority: NonNullable<GapRecord["priority"]> = {
     gap_id: seed.gaps[0]!.id, band: null, suggested_band: "high", suggested_rationale: "Suggested for the dossier",
-    axis_scores: { impact: 82, urgency: 76 }, validated: false, rationale: null,
+    axis_scores: { impact: 82, urgency: 76 }, validated: false, rationale: null, needs_review: false, review_reason: null, review_event_id: null,
     actor_name: "Reviewer", actor_function: "medical_affairs", at: "2026-10-16T13:00:00Z",
   };
 

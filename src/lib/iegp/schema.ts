@@ -30,6 +30,7 @@ export const objectives = pgTable("objectives", {
   strategic_importance: integer("strategic_importance").notNull(),
   key_decision: text("key_decision").notNull(),
   decision_date: text("decision_date").notNull(),
+  evidence_needed_by: text("evidence_needed_by"),
   owner: text("owner").notNull(),
 });
 
@@ -82,6 +83,7 @@ export const gaps = pgTable("gaps", {
   statement: text("statement").notNull(),
   domain: text("domain").notNull(),
   objective_id: text("objective_id").notNull(),
+  priority_context_version: text("priority_context_version"),
   status: text("status").notNull(),
   exclusion_reason: text("exclusion_reason"),
   exclusion_note: text("exclusion_note"),

@@ -274,11 +274,11 @@ describe("KAN-97 settings, metadata and objective edits", () => {
     const state = await loadState();
     const other = state.objectives.find((o) => o.id !== state.gaps.find((g) => g.id === gapId)!.objective_id);
     if (other) {
-      await setGapObjective({ gap_id: gapId, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
+      await setGapObjective({ gap_id: gapId, expected_objective_id: state.gaps.find(gap => gap.id === gapId)!.objective_id, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
       expect((await loadState()).gaps.find((g) => g.id === gapId)!.objective_id).toBe(other.id);
       expect((await listEdits({ entity_id: gapId })).find((row) => row.field === "objective")).toMatchObject({ rationale: "Serves the HTA decision" });
     }
-    await expect(setGapObjective({ gap_id: gapId, objective_id: "OBJ-NOPE", ...who })).rejects.toThrow(/objectives/);
+    await expect(setGapObjective({ gap_id: gapId, expected_objective_id: "", objective_id: "OBJ-NOPE", ...who })).rejects.toThrow(/objectives/);
   });
 
   it("history is scoped to after the workspace's last reset", async () => {

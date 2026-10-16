@@ -76,12 +76,14 @@ export function GapConfirmationAndObjective({
           <div className="mt-2">
             <ActionDialog
               endpoint="/api/iegp"
-              payload={{ action: "set_gap_objective", gap_id: gap.id }}
+              payload={{ action: "set_gap_objective", gap_id: gap.id, expected_objective_id: gap.objective_id }}
               identity={identity}
               label="Change objective"
               title={`Objective for ${gapNumberLabel(gap.number)}`}
-              description="The plan objective whose decision this gap's evidence serves. The change is kept on the gap's history."
+              description="Choose the objective whose decision this evidence serves and give a meaningful reason. Open gaps need priority review again; their previous judgement is retained. No supporting reference is required."
               confirmLabel="Save objective"
+              requireRationale
+              rationaleLabel="Reason for objective change (required)"
               fields={[
                 {
                   name: "objective_id",
@@ -91,7 +93,6 @@ export function GapConfirmationAndObjective({
                   options: objectives.map((o) => ({ value: o.id, label: `${o.id} · ${o.name}` })),
                   required: true,
                 },
-                { name: "rationale", label: "Why (optional)", type: "textarea" },
               ]}
             />
           </div>
@@ -148,7 +149,7 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           ) : null}
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
             <Link href={priority?.validated && band === "high" && open && tacticsUnlocked ? "/?place=tactics" : "/?place=plan&setting=all"}>
-              {priorityNextAction({ band, validated: priority?.validated ?? false, tacticsUnlocked, open })}
+              {priorityNextAction({ band, validated: priority?.validated ?? false, needs_review: priority?.needs_review, tacticsUnlocked, open })}
             </Link>
             {priority?.validated ? (
               <Link href="/?place=plan&setting=all">

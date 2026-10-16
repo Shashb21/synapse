@@ -14,8 +14,9 @@ import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contr
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
 import { prioritizationContextFromState } from "@/lib/iegp/planning-context";
+import { gaps } from "@/lib/iegp/schema";
 import { loadState } from "@/lib/iegp/store";
-import type { IegpState } from "@/lib/iegp/types";
+import type { EvidenceGap, IegpState } from "@/lib/iegp/types";
 import {
   loadAxes,
   quadrantBand,
@@ -42,6 +43,9 @@ const placementsTable = pgTable("priority_placements", {
   suggested_rationale: text("suggested_rationale").notNull(),
   band: text("band"),
   validated: boolean("validated").notNull().default(false),
+  needs_review: boolean("needs_review").notNull().default(false),
+  review_reason: text("review_reason"),
+  review_event_id: text("review_event_id"),
   rationale: text("rationale"),
   actor_name: text("actor_name"),
   actor_function: text("actor_function"),
@@ -446,7 +450,7 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
           await tx.execute(sql`SELECT id FROM gaps WHERE id = ${placement.gap_id} FOR UPDATE`);
           const current = await currentPlacement(placement.gap_id);
           const currentScores = (current?.axis_scores as Record<string, number> | undefined) ?? {};
-          const locked = current?.validated ?? false;
+          const locked = Boolean(current?.validated || current?.needs_review);
           const humanAxes = humanAxesOf(current);
           const humanBand = current?.human_band ?? false;
           const placedAlready =
@@ -473,7 +477,10 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
                 suggested_band: current!.suggested_band,
                 suggested_rationale: current!.suggested_rationale,
                 band: current!.band,
-                validated: true,
+                validated: current!.validated,
+                needs_review: current!.needs_review,
+                review_reason: current!.review_reason,
+                review_event_id: current!.review_event_id,
                 rationale: current!.rationale,
                 actor_name: current!.actor_name,
                 actor_function: current!.actor_function,
@@ -602,6 +609,9 @@ export type PlacementRecord = {
   /** "defer" is a deliberate, validated choice to leave the gap out of this cycle. */
   band: MatrixBand | null;
   validated: boolean;
+  needs_review?: boolean;
+  review_reason?: string | null;
+  review_event_id?: string | null;
   rationale: string | null;
   actor_name: string | null;
   at: string;
@@ -623,6 +633,9 @@ function toRecord(row: PlacementRow): PlacementRecord {
     suggested_rationale: row.suggested_rationale,
     band: (row.band as Band | null) ?? null,
     validated: row.validated,
+    needs_review: row.needs_review,
+    review_reason: row.review_reason,
+    review_event_id: row.review_event_id,
     rationale: row.rationale,
     actor_name: row.actor_name,
     at: row.at,
@@ -649,6 +662,44 @@ export async function resetPlacementValidation(gapId: string): Promise<boolean> 
   if (!current?.validated) return false;
   await db().update(placementsTable).set({ validated: false, at: nowIso() }).where(eq(placementsTable.gap_id, gapId));
   return true;
+}
+
+/**
+ * Consequence of an audited context edit. Join its transaction, lock the same
+ * gap as manual reviews/S8, and re-read its live status before withdrawing
+ * confirmation. Gap statement/assignment edits reuse this owner.
+ */
+export async function requirePriorityContextReview(args: {
+  gap_id: string; reason: string; actor: Actor; event_id: string;
+}): Promise<boolean> {
+  await ensurePlacementSchema();
+  return db().transaction(async tx => {
+    const [gap] = await tx.select().from(gaps).where(eq(gaps.id, args.gap_id)).for("update");
+    if (!gap) return false;
+    const context = {
+      status: gap.status as EvidenceGap["status"], retired: gap.retired, parked_at: gap.parked_at,
+      computed_status: gap.computed_status as EvidenceGap["computed_status"],
+      status_override: gap.status_override as EvidenceGap["status_override"],
+    };
+    if (!isLiveGap(context) || displayedGapStatus(context) !== "validated_open") return false;
+    // The audited context revision exists independently of a judgement. An
+    // unplaced gap must reject an old first decision without creating a fake placement.
+    await tx.update(gaps).set({ priority_context_version: args.event_id }).where(eq(gaps.id, args.gap_id));
+    const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
+    if (!current) return false;
+    const at = new Date(Math.max(Date.now(), Date.parse(current.at) + 1)).toISOString();
+    await tx.update(placementsTable).set({
+      validated: false, needs_review: true, review_reason: args.reason,
+      review_event_id: args.event_id, at,
+    }).where(eq(placementsTable.gap_id, args.gap_id));
+    await recordEdit({
+      stage: "S8", entity_type: "gap", entity_id: args.gap_id, field: "priority_context", action: "edit",
+      before: current.validated ? "Priority confirmed" : current.needs_review ? "Needs priority review" : "Priority not confirmed",
+      after: `Needs priority review · context change ${args.event_id}`,
+      rationale: args.reason, actor: args.actor,
+    }, tx);
+    return true;
+  });
 }
 
 /** Gaps whose band a person validated: a new source on one is flagged for a look (KAN-74). */
@@ -680,6 +731,7 @@ async function requireOpenGap(gapId: string) {
   if (displayedGapStatus(gap) !== "validated_open") {
     throw new Error(`${gapId} is not an Open gap; only Open gaps are prioritized.`);
   }
+  return gap;
 }
 
 /** A snapshot token also changes when a model supplies new scores on other axes. */
@@ -696,6 +748,8 @@ type ManualDecision = {
   /** Separate from the retained priority rationale. Required for every decision. */
   reason: string;
   expected_version: string | null;
+  /** For a first decision, the gap's context snapshot. Null means context never changed. */
+  expected_context_version?: string | null;
   /** Omit to retain the priority rationale; an explicit empty value clears it. */
   rationale?: string;
 };
@@ -715,10 +769,13 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
   const result = await db().transaction(async (tx) => {
     // Lock the gap even when it has no placement yet. S8 reruns use this same lock.
     await tx.execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
-    await requireOpenGap(args.gap_id);
+    const gap = await requireOpenGap(args.gap_id);
     const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
     if (args.expected_version === undefined || args.expected_version !== (current ? placementVersion(current) : null)) {
       throw new Error("Priority changed or its version is missing. Your values and reason have not been saved. Close this dialog, refresh the page and review the latest priority, then retry with your reason.");
+    }
+    if (!current && (args.expected_context_version ?? null) !== (gap.priority_context_version ?? null)) {
+      throw new Error("Priority context changed. Your values and reason have not been saved. Close this dialog, refresh the page and review the current context before making the first priority decision.");
     }
     const decision = decide(current);
     const rationale = args.rationale === undefined ? current?.rationale ?? null : args.rationale.trim() || null;
@@ -732,6 +789,9 @@ async function saveManualDecision(args: ManualDecision, decide: (current: Placem
       suggested_band: current?.suggested_band ?? decision.band,
       suggested_rationale: current?.suggested_rationale ?? "",
       ...decision, rationale, human_band: true,
+      needs_review: confirm ? false : current?.needs_review ?? false,
+      review_reason: confirm ? null : current?.review_reason ?? null,
+      review_event_id: confirm ? null : current?.review_event_id ?? null,
       actor_name: args.actor.name, actor_function: args.actor.function, at: nowIso(),
     };
     // Every intentional confirmation must change its concurrency token, even in the same millisecond.

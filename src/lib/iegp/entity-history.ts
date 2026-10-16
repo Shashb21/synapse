@@ -24,6 +24,8 @@ export type HistoryEntry = {
   actor_principal: string | null;
   actor_role: string | null;
   request_id: string | null;
+  /** A linked objective event, rather than a direct edit to this gap. */
+  shared_context?: boolean;
 };
 
 const LIMIT = 200;

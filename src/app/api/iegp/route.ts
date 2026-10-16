@@ -452,6 +452,7 @@ async function handleAction(request: Request): Promise<Response> {
         await setGapObjective({
           gap_id: body.gap_id,
           objective_id: body.objective_id,
+          expected_objective_id: body.expected_objective_id,
           rationale: body.rationale || body.note || null,
           actor_name,
           actor_function,
@@ -813,6 +814,7 @@ async function handleAction(request: Request): Promise<Response> {
           actor_name,
           actor_function,
           mark_complete: String(body.mark_complete) === "true",
+          reason: typeof body.reason === "string" ? body.reason : rationaleOf(body),
         });
         return NextResponse.json({ ok: true, context: saved });
       }

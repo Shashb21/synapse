@@ -7,7 +7,7 @@ import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { attributedActor, currentAttribution, recordAuditVia } from "@/modules/kernel/audit";
 import type { PlanningContext, SetupObjective } from "./planning-context";
-import { parsePlanningContext, setupIssues } from "./planning-context";
+import { normalizeLifecycle, parsePlanningContext, setupIssues } from "./planning-context";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type {
   GapConfirmer,
@@ -1587,36 +1587,48 @@ export async function setGapMetadata(args: {
 export async function setGapObjective(args: {
   gap_id: string;
   objective_id: string;
+  /** Assignment reviewed when this edit was opened, including empty/unlinked. */
+  expected_objective_id: string;
   rationale?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
 }): Promise<string> {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("A retired gap cannot be edited. Edit the live gap.");
-  const objective = state.objectives.find((o) => o.id === args.objective_id);
-  if (!objective) throw new Error("Choose one of the plan's objectives.");
-  if (gap.objective_id === objective.id) throw new Error("The gap already serves that objective.");
-  const label = (id: string) => {
-    const found = state.objectives.find((o) => o.id === id);
-    return found ? `${found.id} · ${found.name}` : id || null;
-  };
-  await db().update(t.gaps).set({ objective_id: objective.id }).where(eq(t.gaps.id, gap.id));
-  await recordEdit({
-    stage: "S2",
-    entity_type: "gap",
-    entity_id: gap.id,
-    field: "objective",
-    action: "edit",
-    before: label(gap.objective_id),
-    after: label(objective.id),
-    rationale: args.rationale ?? null,
-    rationale_optional: true,
-    actor: { name: args.actor_name, function: args.actor_function },
+  await ensureSchema();
+  return withWorkspaceTransaction(async () => {
+    await lockObjectiveContext();
+    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const state = await readState();
+    const gap = state.gaps.find((g) => g.id === args.gap_id);
+    if (!gap) throw new Error("Gap not found");
+    if (gap.retired) throw new Error("A retired gap cannot be edited. Edit the live gap.");
+    const objective = state.objectives.find((o) => o.id === args.objective_id);
+    if (!objective) throw new Error("Choose one of the plan's objectives.");
+    if (typeof args.expected_objective_id !== "string" || args.expected_objective_id !== gap.objective_id) {
+      throw new Error("Objective assignment changed or its snapshot is missing. Your selected objective and reason have not been saved. Close this dialog, reload the latest assignment and retry.");
+    }
+    if (gap.objective_id === objective.id) throw new Error("The gap already serves that objective.");
+    const reason = requireRationale(args.rationale);
+    const label = (id: string) => {
+      const found = state.objectives.find((o) => o.id === id);
+      return found ? `${found.id} · ${found.name}` : id || null;
+    };
+    await db().update(t.gaps).set({ objective_id: objective.id }).where(eq(t.gaps.id, gap.id));
+    const edit = await recordEdit({
+      stage: "S2",
+      entity_type: "gap",
+      entity_id: gap.id,
+      field: "objective",
+      action: "edit",
+      before: label(gap.objective_id),
+      after: label(objective.id),
+      rationale: reason,
+      actor: { name: args.actor_name, function: args.actor_function },
+    });
+    await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "set_objective", objective.id);
+    const { requirePriorityContextReview } = await import("@/modules/stages/s8-prioritization/module");
+    await requirePriorityContextReview({ gap_id: gap.id, reason, actor: { name: args.actor_name, function: args.actor_function }, event_id: edit.id });
+    return objective.id;
   });
-  await appendAudit(args.actor_name, args.actor_function, "gap", gap.id, "set_objective", objective.id);
-  return objective.id;
 }
 
 export async function unparkGap(args: {
@@ -2819,7 +2831,14 @@ export async function createGap(args: {
   origin_gap_id?: string | null;
   /** Provenance of the need made from source_id/source_quote (KAN-97). */
   need_provenance?: NeedProvenance;
-}, transaction?: StoreTransaction) {
+}, transaction?: StoreTransaction): Promise<string> {
+  if (!inWorkspaceTransaction()) {
+    await loadState();
+    return withWorkspaceTransaction(() => createGap(args, transaction));
+  }
+  await ensureSchema();
+  // Wait for any shared context save before reading the objective assignment.
+  await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
   // The description is what evidence is missing; a person may give only the title (KAN-52).
   const statement = (args.statement ?? "").trim() || (args.name ?? "").trim();
   if (!statement) throw new Error("Give the gap a title or a description.");
@@ -2827,6 +2846,9 @@ export async function createGap(args: {
   const state = transaction ? await readState(transaction) : await loadState();
   // Linked to the first objective once setup has named one; a blank plan has none yet.
   const obj = state.objectives[0];
+  if (args.objective_id && !state.objectives.some(objective => objective.id === args.objective_id)) {
+    throw new Error("Choose one of the plan's objectives.");
+  }
   // Split and rewrite children carry the parent's settings through.
   let settings = normalizeSettings(args.settings ?? []);
   let metadata = normalizeGapMetadata(args.metadata ?? {});
@@ -3832,81 +3854,120 @@ export async function saveProductSetup(args: {
   actor_name: string;
   actor_function: ActorFunction;
   mark_complete?: boolean;
+  reason?: string;
 }) {
-  const state = await loadState();
-  const ctx = parsePlanningContext(args.context);
-  const issues = setupIssues(ctx, { required: Boolean(args.mark_complete) });
-  if (issues.length > 0) throw new Error(issues[0]!.message);
-
-  const objectives = await syncSetupObjectives(state, ctx);
-  const saved: PlanningContext = parsePlanningContext({ ...ctx, objectives, saved_at: nowIso() });
-  const complete = Boolean(args.mark_complete) || state.asset.setup_complete;
-  await db()
-    .update(t.assets)
-    .set({
+  // Initialise a new blank workspace before taking its asset lock.
+  await loadState();
+  return withWorkspaceTransaction(async () => {
+    // Setup owns this asset snapshot; objective assignments lock objectives
+    // before gaps too. Re-read only after these locks, never from a stale load.
+    // Protect the membership predicate as well as existing rows: no gap may
+    // be created, reassigned, retired or confirmed between discovery and commit.
+    // Ordinary readers continue; priority saves/S8 wait on their gap row locks.
+    await db().execute(sql`LOCK TABLE gaps IN EXCLUSIVE MODE`);
+    await db().execute(sql`SELECT id FROM assets ORDER BY id FOR UPDATE`);
+    await lockObjectiveContext();
+    const state = await readState();
+    const ctx = parsePlanningContext(args.context);
+    const previous = parsePlanningContext(state.asset.planning_context);
+    if (ctx.saved_at !== previous.saved_at) {
+      throw new Error("Setup context changed. Your answers and reason are still here. Reload the latest context before retrying.");
+    }
+    const issues = setupIssues(ctx, { required: Boolean(args.mark_complete) });
+    if (issues.length > 0) throw new Error(issues[0]!.message);
+    const objectives = await syncSetupObjectives(state, ctx, args);
+    const content = parsePlanningContext({ ...ctx, objectives, saved_at: previous.saved_at });
+    const complete = Boolean(args.mark_complete) || state.asset.setup_complete;
+    if (JSON.stringify(content) === JSON.stringify(previous) && complete === state.asset.setup_complete) return content;
+    const at = new Date(Math.max(Date.now(), Date.parse(previous.saved_at || "1970-01-01") + 1)).toISOString();
+    const saved: PlanningContext = { ...content, saved_at: at };
+    await db().update(t.assets).set({
       name: saved.asset_name || state.asset.name,
       inn: saved.inn || state.asset.inn,
       indication: saved.indication || state.asset.indication,
       geography: saved.geography || state.asset.geography,
-      planning_context: saved,
-      setup_complete: complete,
-    })
-    .where(eq(t.assets.id, state.asset.id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "plan",
-    state.asset.id,
-    args.mark_complete ? "complete_setup" : "save_setup",
-    args.mark_complete
-      ? "Setup wizard complete: IEGP context saved."
-      : "Saved IEGP context from the setup wizard.",
-  );
-  return saved;
+      planning_context: saved, setup_complete: complete,
+    }).where(eq(t.assets.id, state.asset.id));
+    await appendAudit(args.actor_name, args.actor_function, "plan", state.asset.id,
+      args.mark_complete ? "complete_setup" : "save_setup",
+      args.mark_complete ? "Setup wizard complete: IEGP context saved." : "Saved IEGP context from the setup wizard.");
+    return saved;
+  });
 }
 
-/**
- * Makes the objectives table match the wizard's list: rows are updated by id,
- * new ones inserted, and ones removed from the list deleted, unless a gap or
- * need still points at them. An empty list leaves the table alone (a draft
- * saved before objectives were entered must not wipe them).
+/** Context mutations lock objectives before gaps; priority decisions lock gaps.
+ * Reassignment must use this order so Setup sees its final linked-gap set.
+ * Call only within the responsible mutation's workspace transaction.
  */
-async function syncSetupObjectives(state: IegpState, ctx: PlanningContext): Promise<SetupObjective[]> {
-  const listed = ctx.objectives.filter((objective) => objective.name);
-  if (listed.length === 0) return ctx.objectives;
-  const existing = new Map(state.objectives.map((objective) => [objective.id, objective]));
+export async function lockObjectiveContext() {
+  // Take the membership lock before objective/gap rows, matching Setup.
+  await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+  await db().execute(sql`SELECT id FROM objectives ORDER BY id FOR UPDATE`);
+}
+
+const OBJECTIVE_FIELDS = ["name", "description", "lifecycle_stage", "indication", "geography", "strategic_importance", "key_decision", "decision_date", "evidence_needed_by", "owner"] as const;
+const PRIORITY_CONTEXT_FIELDS = new Set<string>(["key_decision", "decision_date", "evidence_needed_by"]);
+
+/** Same objective records and audit store; no per-gap copy of decision dates. */
+async function syncSetupObjectives(state: IegpState, ctx: PlanningContext, args: {
+  reason?: string; actor_name: string; actor_function: ActorFunction;
+}): Promise<SetupObjective[]> {
+  const listed = ctx.objectives.filter(objective => objective.name);
+  // An unfinished draft with no list must not remove an existing plan's objectives.
+  if (listed.length === 0) return parsePlanningContext({ objectives: state.objectives }).objectives;
+  const existing = new Map(state.objectives.map(objective => [objective.id, objective]));
+  const seen = new Set<string>();
+  for (const objective of listed) {
+    if (objective.id && (!existing.has(objective.id) || seen.has(objective.id))) throw new Error("Objective context changed. Reload Setup and review the latest objectives.");
+    if (objective.id) seen.add(objective.id);
+  }
+  const actor = { name: args.actor_name, function: args.actor_function };
   const out: SetupObjective[] = [];
   for (const objective of listed) {
+    const old = existing.get(objective.id);
     const row = {
-      name: objective.name,
-      description: objective.description,
-      lifecycle_stage: ctx.lifecycle_stage || existing.get(objective.id)?.lifecycle_stage || "",
+      name: objective.name, description: objective.description,
+      lifecycle_stage: ctx.lifecycle_stage && normalizeLifecycle(old?.lifecycle_stage) !== ctx.lifecycle_stage
+        ? ctx.lifecycle_stage : old?.lifecycle_stage || ctx.lifecycle_stage,
       indication: ctx.indication || state.asset.indication,
       geography: ctx.geography || state.asset.geography,
       strategic_importance: objective.strategic_importance,
-      key_decision: objective.key_decision,
-      decision_date: objective.decision_date,
-      owner: objective.owner,
+      key_decision: objective.key_decision, decision_date: objective.decision_date,
+      evidence_needed_by: objective.evidence_needed_by || null, owner: objective.owner,
     };
-    if (objective.id && existing.has(objective.id)) {
-      await db().update(t.objectives).set(row).where(eq(t.objectives.id, objective.id));
-      out.push(objective);
-    } else {
-      const id = newId("OBJ");
-      await db().insert(t.objectives).values({ id, ...row });
-      out.push({ ...objective, id });
+    const fields = OBJECTIVE_FIELDS.filter(field => (old?.[field] ?? null) !== row[field]);
+    const id = old?.id ?? newId("OBJ");
+    if (fields.length) {
+      const reason = requireRationale(args.reason);
+      if (old) await db().update(t.objectives).set(row).where(eq(t.objectives.id, id));
+      else await db().insert(t.objectives).values({ id, ...row });
+      let contextEvent: string | null = null;
+      for (const field of fields) {
+        const edit = await recordEdit({ stage: "S8", entity_type: "objective", entity_id: id,
+          field, action: old ? "edit" : "add", before: old?.[field] == null ? null : String(old[field]),
+          after: row[field] == null ? null : String(row[field]), rationale: reason, actor });
+        if (old && PRIORITY_CONTEXT_FIELDS.has(field)) contextEvent = edit.id;
+      }
+      if (contextEvent) {
+        const { requirePriorityContextReview } = await import("@/modules/stages/s8-prioritization/module");
+        // Assignments cannot cross the objective lock. Lock gaps in a stable
+        // order, then let S8 recheck Open status and the current judgement.
+        const linked = await db().select({ id: t.gaps.id }).from(t.gaps)
+          .where(eq(t.gaps.objective_id, id)).orderBy(t.gaps.id).for("update");
+        for (const gap of linked) await requirePriorityContextReview({ gap_id: gap.id, reason, actor, event_id: contextEvent });
+      }
     }
+    out.push({ ...objective, id });
   }
-  const kept = new Set(out.map((objective) => objective.id));
+  const kept = new Set(out.map(objective => objective.id));
   for (const objective of state.objectives) {
     if (kept.has(objective.id)) continue;
-    const inUse =
-      state.gaps.some((gap) => gap.objective_id === objective.id) ||
-      state.needs.some((need) => need.objective_id === objective.id);
-    if (inUse) {
-      throw new Error(`“${objective.name}” is linked to gaps or needs in this plan. Keep it in the list, or move those first.`);
-    }
+    const inUse = state.gaps.some(gap => gap.objective_id === objective.id) || state.needs.some(need => need.objective_id === objective.id);
+    if (inUse) throw new Error(`“${objective.name}” is linked to gaps or needs in this plan. Keep it in the list, or move those first.`);
+    const reason = requireRationale(args.reason);
     await db().delete(t.objectives).where(eq(t.objectives.id, objective.id));
+    await recordEdit({ stage: "S8", entity_type: "objective", entity_id: objective.id,
+      field: "objective", action: "edit", before: JSON.stringify(objective), after: null, rationale: reason, actor });
   }
   return out;
 }

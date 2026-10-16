@@ -75,7 +75,7 @@ async function saveSetup(ctx: PlanningContext, markComplete: boolean) {
     new Request("http://localhost/api/iegp", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...ACTOR, action: "save_product_setup", mark_complete: markComplete, context: ctx }),
+      body: JSON.stringify({ ...ACTOR, action: "save_product_setup", reason: "Update objectives for planning", mark_complete: markComplete, context: ctx }),
     }),
   );
   return { status: res.status, json: (await res.json()) as { error?: string; context?: PlanningContext } };
@@ -206,7 +206,7 @@ describe("setup context: saved per workspace", () => {
     const others = setupContextFromState(seeded).objectives.filter((objective) => objective.id !== used.id);
     await expect(
       withWorkspace(ws.id, () =>
-        saveProductSetup({ context: context({ objectives: others }), actor_name: ACTOR.actor_name, actor_function: ACTOR.actor_function }),
+        saveProductSetup({ context: context({ objectives: others }), actor_name: ACTOR.actor_name, actor_function: ACTOR.actor_function, reason: "Remove unused objectives" }),
       ),
     ).rejects.toThrow(/linked to gaps or needs/);
   }, 60_000);

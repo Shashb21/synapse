@@ -124,6 +124,9 @@ export const WALKTHROUGH_DDL = [
 
 /** Columns S8 added to priority_placements for hand-set axes and bands. */
 export const S8_PLACEMENT_COLUMNS_DDL = [
+  "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
+  "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS review_reason text",
+  "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS review_event_id text",
   "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_axes jsonb NOT NULL DEFAULT '[]'::jsonb",
   "ALTER TABLE priority_placements ADD COLUMN IF NOT EXISTS human_band boolean NOT NULL DEFAULT false",
 ];
@@ -144,6 +147,8 @@ export function workspaceTableStatements(): string[] {
   return [
     ...split(KERNEL_WORKSPACE_DDL),
     ...S8_PLACEMENT_COLUMNS_DDL,
+    "ALTER TABLE objectives ADD COLUMN IF NOT EXISTS evidence_needed_by text",
+    "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS priority_context_version text",
     ...SOURCE_BLOCKS_DDL,
     ...ROOM_DDL,
     ...WALKTHROUGH_DDL,

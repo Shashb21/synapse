@@ -99,8 +99,9 @@ export async function runStageExpectingError(
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
   if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
-    const current = (await planState(request)).placements.find((row) => row.gap_id === body.gap_id);
-    body = { expected_version: current?.version ?? null, reason: body.rationale, ...body };
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
   }
   return postJson(request, "/api/plan", body);
 }
@@ -110,8 +111,9 @@ export async function planActionExpectingError(
   body: Record<string, unknown>,
 ): Promise<{ status: number; error: string }> {
   if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
-    const current = (await planState(request)).placements.find((row) => row.gap_id === body.gap_id);
-    body = { expected_version: current?.version ?? null, reason: body.rationale, ...body };
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
   }
   const response = await request.post("/api/plan", {
     headers: { "content-type": "application/json" },
@@ -145,6 +147,7 @@ export async function planState(request: APIRequestContext) {
   const response = await request.get("/api/plan");
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
+    priority_context_versions: Record<string, string | null>;
     placements: {
       gap_id: string;
       version: string;

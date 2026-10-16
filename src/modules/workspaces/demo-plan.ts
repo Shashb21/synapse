@@ -1,3 +1,4 @@
+import { loadState } from "@/lib/iegp/store";
 import type { Actor } from "@/modules/kernel/contracts";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import {
@@ -26,7 +27,8 @@ export async function loadDemoPlan(workspaceId?: string): Promise<void> {
   const common = { rationale: WHY, actor: DEMO_ACTOR, workspace_id: workspaceId };
   for (const { gap_id, band } of DEMO_BANDS) {
     const current = (await listPlacements()).find((row) => row.gap_id === gap_id);
-    await validatePlacement({ gap_id, band, ...common, reason: WHY, expected_version: current?.version ?? null });
+    const contextVersion = (await loadState()).gaps.find(gap => gap.id === gap_id)?.priority_context_version ?? null;
+    await validatePlacement({ gap_id, band, ...common, reason: WHY, expected_version: current?.version ?? null, expected_context_version: contextVersion });
   }
   // Mapped tactics, dated from their start to when evidence is available.
   const claims = await addTimelineActivity({
