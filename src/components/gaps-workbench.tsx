@@ -64,6 +64,7 @@ function CreateAddressedGap({ tactics }: { tactics: TacticLibraryItem[] }) {
     <LockForm
       label="Add addressed gap"
       action="create_addressed_gap"
+      note={{ label: "Reason (required)", required: true }}
       confirmLabel="Add addressed gap"
       size="lg"
       description="A gap an existing study already answers. Name the study below."

@@ -62,12 +62,12 @@ export function RestoreTacticButton({ tacticId }: { tacticId: string }) {
   );
 }
 
-export function RestoreMappingButton({ gapId, tacticId }: { gapId: string; tacticId: string }) {
+export function RestoreMappingButton({ gapId, tacticId, expectedRelationship }: { gapId: string; tacticId: string; expectedRelationship: string }) {
   return (
     <LockForm
       label="Restore"
       action="restore_mapping"
-      extra={{ gap_id: gapId, tactic_id: tacticId }}
+      extra={{ gap_id: gapId, tactic_id: tacticId, expected_relationship: expectedRelationship }}
       confirmLabel="Lift rejection"
       description="Lifts the rejection. The pair is not mapped: map it by hand, or a later mapping run may propose it again for you to decide."
       note={RATIONALE}
@@ -168,6 +168,7 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
 }
 
 export type RejectedMappingRow = {
+  relationship_version: string;
   gap_id: string;
   tactic_id: string;
   gap_name: string;
@@ -217,7 +218,7 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
                   {row.note ? ` · “${row.note}”` : ""}
                 </p>
               </div>
-              <RestoreMappingButton gapId={row.gap_id} tacticId={row.tactic_id} />
+              <RestoreMappingButton gapId={row.gap_id} tacticId={row.tactic_id} expectedRelationship={row.relationship_version} />
             </li>
           ))}
         </ul>

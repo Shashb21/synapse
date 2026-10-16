@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "./relationship-version";
 import { readPlacementSnapshot } from "@/modules/stages/s8-prioritization/module";
 import { inspectJudgementReferences } from "./judgement-references";
 import { inArray, sql } from "drizzle-orm";
@@ -23,6 +24,7 @@ type Gap = IegpState["gaps"][0];
  * history. The gap page reads it, and GET /api/gaps/[id] exports it.
  */
 export type GapRecord = {
+  resolution_version?: string;
   gap: Gap;
   objective: IegpState["objectives"][0] | null;
   coverage_status: { computed: MappedGapStatus; shown: GapStatus; needs_review: boolean };
@@ -99,6 +101,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     { since: lastResetAt(state) },
   );
   return {
+    resolution_version: gapResolutionVersion(state, gap.id),
     gap,
     priority_axes: axes.axes,
     tactics_unlocked: state.asset.tactics_unlocked,

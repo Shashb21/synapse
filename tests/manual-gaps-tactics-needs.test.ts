@@ -172,6 +172,7 @@ describe("manual tactic create and edit", () => {
       function: "heor",
       residual_ids: [],
       gap_id: gapId,
+      rationale: "Claims study answers the health resource evidence need",
       ...who,
     });
     const state = await loadState();
@@ -376,6 +377,7 @@ describe("leftovers and rejected AI candidates", () => {
 
     const tacticId = await promoteTacticCandidate({ candidate_id: "tc-1", gap_id: gapId, rationale: "Real study", ...who });
     const tactic = (await loadState()).tactics.find((x) => x.id === tacticId)!;
+    expect((await listEdits({ entity_id: `${gapId}::${tacticId}` })).find(row => row.rationale === "Real study")).toBeDefined();
     expect(tactic.source_quote).toBe("Evidence on elderly patients is missing.");
     expect(tactic.data_source).toBe("HTA briefing");
     expect((await listRejectedTacticCandidates())[0]!.promoted_tactic_id).toBe(tacticId);

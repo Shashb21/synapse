@@ -1,3 +1,4 @@
+import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { entityHistory } from "./entity-history";
 import { lastResetAt } from "./gap-history";
 import { loadState } from "./store";
@@ -21,7 +22,7 @@ export async function tacticRecord(id: string, preloaded?: IegpState) {
     tactic,
     version: tacticEditVersion(tactic),
     custom_types: state.tactics.flatMap(row => row.custom_type ? [row.custom_type] : []),
-    coverages: coverages.map(row => ({ ...row, gap: state.gaps.find(gap => gap.id === row.gap_id) ?? null })),
+    coverages: coverages.map(row => ({ ...row, relationship_version: relationshipVersion(relationshipSnapshot(state, row.gap_id, row.tactic_id)), gap: state.gaps.find(gap => gap.id === row.gap_id) ?? null })),
     expansions,
     source_references: references.flatMap(reference => {
       const source = state.sources.find(row => row.id === reference.source_id);

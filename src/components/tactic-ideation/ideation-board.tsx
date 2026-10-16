@@ -164,7 +164,7 @@ function GapIdeationCard({
               <GapRecordLink gapId={card.gap_id} className="text-[11px] text-muted-foreground no-underline hover:underline">
                 Open gap ↗
               </GapRecordLink>
-              <AssignTacticButton gapId={card.gap_id} tactics={assignable} />
+              <AssignTacticButton gapId={card.gap_id} tactics={assignable} expectedRelationships={JSON.stringify(card.relationship_versions ?? {})} />
               <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} inUse={customTypesInUse(library)} />
             </div>
           </div>

@@ -15,6 +15,7 @@ type SplitOutput = {
   mode: string;
   proposal: {
     parent_gap_id: string;
+    expected_resolution: string;
     addressed_name: string;
     addressed_statement: string;
     addressed_tactic_ids: string[];
@@ -142,6 +143,7 @@ test.describe("S6 partial gap split", () => {
     const applied = await runStage<SplitOutput>(request, "S6", {
       gap_id: partial.gap_id,
       apply: {
+        expected_resolution: proposal.expected_resolution,
         addressed_name: proposal.addressed_name,
         addressed_statement: proposal.addressed_statement,
         open_name: proposal.open_name,

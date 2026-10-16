@@ -18,7 +18,19 @@ function short(value: string | null): string {
 
 /** S8 stores the full judgement, separately from the change reason on the entry. */
 function changeText(value: string | null, field: string | null): string | null {
-  if (!value || field !== "placement") return value;
+  if (!value) return value;
+  if (field === "relationship" || field === "model_relationship") {
+    try {
+      const snapshot = JSON.parse(value);
+      const coverages = snapshot.coverages as { id: string; expansion_id?: string; overall: string; overall_lock: { locked: boolean }; needs_review: boolean; dimensions: Record<string, { value: string; lock: { locked: boolean } }> }[];
+      const coverage = coverages.map(row => {
+        const dimensions = Object.entries(row.dimensions).filter(([, cell]) => cell.value !== "unknown" || cell.lock.locked).map(([name, cell]) => `${label(name)}: ${cell.value}${cell.lock.locked ? " (human confirmed)" : ""}`).join(", ");
+        return `${row.expansion_id ? `Expansion ${row.expansion_id}: ` : ""}Coverage: ${label(row.overall)}${row.overall_lock.locked ? " (human confirmed)" : ""}${row.needs_review ? "; coverage review required" : ""}${dimensions ? `. Dimensions: ${dimensions}` : ""}`;
+      }).join("; ") || "Not linked";
+      return `${coverage}. Relationship decision: ${snapshot.decision?.status ?? "not recorded"}.`;
+    } catch { return value; }
+  }
+  if (field !== "placement") return value;
   try {
     const snapshot = JSON.parse(value);
     if (!snapshot || typeof snapshot !== "object" || !("confirmed" in snapshot)) return value;
@@ -31,6 +43,7 @@ function changeText(value: string | null, field: string | null): string | null {
 }
 
 function hasSuggestion(entry: HistoryEntry): boolean {
+  if (entry.field === "model_relationship") return true;
   if (/suggest|model|(?:^|[._])ai(?:[._]|$)/.test(entry.action)) return true;
   if (entry.field !== "placement" || !entry.after) return false;
   try {
@@ -76,6 +89,9 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                 </p>
                 {entry.counterpart_gaps?.length ? <p className="mt-1">Gap: {entry.counterpart_gaps.map((gap, index) => <span key={gap.id}>
                   {index ? ", " : ""}<Link href={`/gaps/${encodeURIComponent(gap.id)}`}>{gap.name} ({gap.id})</Link>
+                </span>)}</p> : null}
+                {entry.counterpart_tactics?.length ? <p className="mt-1">Tactic: {entry.counterpart_tactics.map((tactic, index) => <span key={tactic.id}>
+                  {index ? ", " : ""}<Link href={`/tactics/${encodeURIComponent(tactic.id)}`}>{tactic.name} ({tactic.id})</Link>
                 </span>)}</p> : null}
                 {entry.kind === "edit" && (entry.before !== null || entry.after !== null) ? (
                   <p className="mt-1 break-words" data-testid="history-change">

@@ -110,6 +110,7 @@ export function LockForm({
   const { refreshing, refresh, navigate } = usePageRefresh();
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
+  const openedExtra = useRef(extra);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [progress, setProgress] = useState("");
@@ -119,6 +120,7 @@ export function LockForm({
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
+      openedExtra.current = extra;
       setError(null);
       // Reopening a dialog does not cancel its active request.
     }
@@ -150,11 +152,16 @@ export function LockForm({
     const payload: Record<string, unknown> = {
       action,
       note: String(formData.get("note") || ""),
-      ...extra,
+      ...openedExtra.current,
     };
     for (const [k, v] of formData.entries()) {
       if (k === "note") continue;
       payload[k] = v;
+    }
+    if (action === "assign_tactic" && openedExtra.current?.expected_relationships) {
+      const snapshots = JSON.parse(openedExtra.current.expected_relationships) as Record<string, string>;
+      payload.expected_relationship = snapshots[String(payload.tactic_id)] ?? "";
+      delete payload.expected_relationships;
     }
     const isIngest = action === "ingest" || action === "ingest_demo";
     ingestRequest.current = new AbortController();
@@ -177,7 +184,7 @@ export function LockForm({
       <DialogTrigger render={<Button size="sm" variant={variant} />} aria-label={triggerName}>
         {label}
       </DialogTrigger>
-      <DialogContent className={size === "lg" ? "z-[60] sm:max-w-2xl" : "z-[60] sm:max-w-md"} initialFocus={note ? noteRef : undefined}>
+      <DialogContent aria-label={label} className={size === "lg" ? "z-[60] sm:max-w-2xl" : "z-[60] sm:max-w-md"} initialFocus={note ? noteRef : undefined}>
         <form
           noValidate
           onSubmit={(e) => {

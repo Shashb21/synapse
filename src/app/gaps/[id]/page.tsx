@@ -1,3 +1,4 @@
+import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
 import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import Link from "next/link";
 import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
@@ -105,6 +106,7 @@ export default async function GapDetailPage({
             <GapBadge status={shown} />
             <SplitGapDialog
               gapId={gap.id}
+              resolutionVersion={record.resolution_version}
               gapName={gap.name}
               residualName={leftover?.statement || gap.name}
               tactics={tactics}
@@ -122,7 +124,7 @@ export default async function GapDetailPage({
         )}
         {!gap.retired && !gap.human_validated && shown !== "validated_partial" ? (
           <LockForm label="Confirm status" action="validate_gap" extra={{ gap_id: gap.id }}
-            note={{ label: "Note (optional)" }} confirmLabel={`Confirm ${GAP_STATUS_LABELS[shown]}`} variant="default" />
+            note={{ label: "Reason (required)", required: true }} confirmLabel={`Confirm ${GAP_STATUS_LABELS[shown]}`} variant="default" />
         ) : null}
         {mapped && !gap.status_override ? (
           <span className="text-[11px] text-muted-foreground">
@@ -313,11 +315,13 @@ export default async function GapDetailPage({
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
+            expectedRelationships={JSON.stringify(Object.fromEntries(library.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))])))}
           />
           <AssignTacticWithCoverage
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
+            expectedRelationships={JSON.stringify(Object.fromEntries(library.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))])))}
           />
           <RecordMissedTactic gapId={gap.id} />
         </div>
@@ -336,7 +340,7 @@ export default async function GapDetailPage({
                   overall={c.overall}
                   dimensions={coverageDimensionValues(c.dimensions)}
                 />
-                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} />
+                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} expectedRelationship={relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id))} />
               </div>
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">
@@ -368,9 +372,9 @@ export default async function GapDetailPage({
                   <LockForm
                     label="Confirm coverage"
                     action="confirm_coverage_review"
-                    extra={{ coverage_id: c.id }}
+                    extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id }}
                     confirmLabel="Confirm coverage"
-                    note={{ label: "Note (optional)" }}
+                    note={{ label: "Reason (required)", required: true }}
                     description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
                   />
                 </div>
@@ -401,7 +405,7 @@ export default async function GapDetailPage({
                             <LockForm
                               label="Change dimension"
                               action="lock_dimension"
-                              extra={{ coverage_id: c.id, dimension: dim }}
+                              extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, dimension: dim }}
                               confirmLabel="Change dimension"
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
@@ -446,7 +450,7 @@ export default async function GapDetailPage({
                 <LockForm
                   label="Change overall coverage"
                   action="lock_overall"
-                  extra={{ coverage_id: c.id }}
+                  extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id }}
                   confirmLabel="Change overall coverage"
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >

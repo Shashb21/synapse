@@ -1,3 +1,5 @@
+import { gapResolutionVersion } from "./relationship-version";
+import { relationshipVersionsForGap } from "./relationship-version";
 import {
   COVERAGE_DIMENSIONS,
   DOMAIN_LABELS,
@@ -883,6 +885,7 @@ export type PlanTactic = {
 };
 
 export type PlanGapCard = {
+  relationship_versions?: Record<string, string>;
   gap_id: string;
   gap_name: string;
   statement: string;
@@ -911,6 +914,7 @@ export type ReviewNeedSnippet = {
 };
 
 export type ReviewGapCard = {
+  resolution_version?: string;
   gap_id: string;
   gap_name: string;
   statement: string;
@@ -939,6 +943,7 @@ export type ReviewGapCard = {
 };
 
 export type OpenGapCard = {
+  relationship_versions?: Record<string, string>;
   gap_id: string;
   gap_name: string;
   statement: string;
@@ -1098,6 +1103,7 @@ export function buildPlanWorkspace(state: IegpState): {
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const linkedNeeds = needsForReviewCard(state, gap.id);
     review.push({
+      resolution_version: gapResolutionVersion(state, gap.id),
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
@@ -1133,6 +1139,7 @@ export function buildPlanWorkspace(state: IegpState): {
     const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
     const computed = computedForGap(state, gap, children);
     openGaps.push({
+      relationship_versions: relationshipVersionsForGap(state, gap.id),
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
@@ -1169,6 +1176,7 @@ export function buildPlanWorkspace(state: IegpState): {
     const residual = state.residuals.find((r) => r.gap_id === gap.id);
     const computed = computedForGap(state, gap, children);
     addressed.push({
+      relationship_versions: relationshipVersionsForGap(state, gap.id),
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,

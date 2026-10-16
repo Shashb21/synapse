@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it, vi } from "vitest";
 import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
 import { isLiveGap, gapsReadyForPrioritize } from "@/lib/iegp/engine";
@@ -524,6 +525,7 @@ describe("IEGP postgres store", () => {
       function: "heor",
       residual_ids: [],
       gap_id: gapId,
+      rationale: "Chart review answers the observed community outcome slice",
       actor_name: "A. Rao",
       actor_function: "heor",
     });
@@ -553,6 +555,8 @@ describe("IEGP postgres store", () => {
     expect(cancelled.status_override).toBeNull();
 
     const liveId = await rewritePartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId),
+      note: "Retain only the unanswered white-space evidence need",
       gap_id: gapId,
       name: "White-space leftover after mapping",
       status: "validated_open",

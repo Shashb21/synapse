@@ -346,6 +346,7 @@ function RoomGapCard({
         {isPartial ? (
           <SplitGapDialog
             gapId={card.gap_id}
+            resolutionVersion={card.resolution_version}
             gapName={card.gap_name}
             residualName={card.residual?.statement || card.gap_name}
             tactics={card.tactics}

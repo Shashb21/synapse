@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules";
 import { wipePlatform } from "@/modules/kernel/db";
@@ -85,6 +86,7 @@ async function makePartialGap() {
     function: ACTOR.function,
     residual_ids: [],
     gap_id: gapId,
+    rationale: "Chart review addresses the elderly outcome slice",
     actor_name: ACTOR.name,
     actor_function: ACTOR.function,
   });
@@ -268,6 +270,7 @@ describe("S6 on the model path", () => {
       partialSplitModule.inputSchema.parse({
         gap_id: gapId,
         apply: {
+          expected_resolution: gapResolutionVersion(await loadState(), gapId),
           addressed_name: "Elderly outcomes on Velmara",
           open_name: "Comparator evidence versus regional SoC",
           addressed_tactic_ids: [tacticId],
@@ -295,7 +298,7 @@ describe("S6 on the model path", () => {
     const result = await partialSplitModule.run(input(), ctx);
     await closeRun({ recorder, status: "ok", output: result.output, route: ctx.route });
     const proposal = result.output.proposal!;
-    const payload = splitPayload({ gapId, addressedName: proposal.addressed_name, addressedStatement: proposal.addressed_statement, openName: proposal.open_name, openStatement: decision === "edit" ? "A narrower unanswered comparison question." : proposal.open_statement, addressedTacticIds: proposal.addressed_tactic_ids, openTacticIds: [], originatingRunId: recorder.id });
+    const payload = splitPayload({ gapId, expectedResolution: proposal.expected_resolution, addressedName: proposal.addressed_name, addressedStatement: proposal.addressed_statement, openName: proposal.open_name, openStatement: decision === "edit" ? "A narrower unanswered comparison question." : proposal.open_statement, addressedTacticIds: proposal.addressed_tactic_ids, openTacticIds: [], originatingRunId: recorder.id });
     process.env.SYNAPSE_TEST_STUB_LLM = "1"; // API-only anonymous test identity; proposal above used the model path.
     const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...payload, ...(decision === "reject" ? { action: "reject_split_proposal" } : {}), note: "Reviewer decision rationale", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
     expect(res.status).toBe(200);
@@ -309,10 +312,30 @@ describe("S6 on the model path", () => {
     expect(Boolean(parent.retired)).toBe(decision !== "reject");
   });
 
+  it("rejects a saved S6 proposal after relationship changes even with a fresh form token", async () => {
+    const { POST } = await import("@/app/api/iegp/route");
+    const { RunRecorder, openRun, closeRun } = await import("@/modules/kernel/observability");
+    const { lockCoverageOverall } = await import("@/lib/iegp/store");
+    const recorder = new RunRecorder({ workspace_id: "default", stage: "S6", module_id: partialSplitModule.manifest.id, module_version: partialSplitModule.manifest.version, actor: ACTOR, input: { gap_id: gapId } });
+    await openRun(recorder);
+    const { ctx } = context(call => role(call) === "split-proposer" ? split() : role(call) === "split-critic" ? keep : accept);
+    const result = await partialSplitModule.run(input(), ctx);
+    const opening = gapResolutionVersion(await loadState(), gapId);
+    expect(result.output.proposal!.expected_resolution).toBe(opening);
+    await closeRun({ recorder, status: "ok", output: result.output });
+    const coverage = (await loadState()).coverages.find(row => row.gap_id === gapId)!;
+    await lockCoverageOverall({ coverage_id: coverage.id, overall: "limited", rationale: "Revised evidence judgement after proposal", actor_name: ACTOR.name, actor_function: ACTOR.function });
+    const before = await loadState();
+    process.env.SYNAPSE_TEST_STUB_LLM = "1";
+    const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, expected_resolution: gapResolutionVersion(before, gapId), originating_run_id: recorder.id, addressed_name: "Reviewed covered slice", open_name: "Reviewed remaining comparison", tactic_ids: tacticId, note: "Keep my reviewed proposal and reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("scope changed");
+    expect(await loadState()).toEqual(before);
+  });
   it("refuses an unproven S6 reference before changing the parent", async () => {
     const { POST } = await import("@/app/api/iegp/route");
     process.env.SYNAPSE_TEST_STUB_LLM = "1";
-    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, originating_run_id: "missing-run", addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Reviewer reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", expected_resolution: gapResolutionVersion(await loadState(), gapId), parent_gap_id: gapId, originating_run_id: "missing-run", addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Reviewer reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(Boolean((await loadState()).gaps.find((row) => row.id === gapId)!.retired)).toBe(false);
   });
@@ -323,7 +346,7 @@ describe("S6 on the model path", () => {
     const { sql } = await import("drizzle-orm");
     const before = await sharedDb().execute(sql`select id from decision_examples where workspace_id = 'default' and stage = 'S6' and subject_id = ${gapId}`);
     process.env.SYNAPSE_TEST_STUB_LLM = "1";
-    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, addressed_name: "Manual addressed population", open_name: "Manual unanswered question", tactic_ids: tacticId, actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+    const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", expected_resolution: gapResolutionVersion(await loadState(), gapId), parent_gap_id: gapId, addressed_name: "Manual addressed population", open_name: "Manual unanswered question", tactic_ids: tacticId, note: "Human reviewed the manual split", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
     expect(res.status).toBe(200);
     expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = 'default' and stage = 'S6' and subject_id = ${gapId}`)).toEqual(before);
     expect(Boolean((await loadState()).gaps.find(row => row.id === gapId)!.retired)).toBe(true);
@@ -337,7 +360,7 @@ describe("S6 on the model path", () => {
     for (const mismatch of ["workspace", "gap", "failed", "stub", "stage", "version"]) {
       const recorder = new RunRecorder({ workspace_id: mismatch === "workspace" ? "another-workspace" : "default", stage: mismatch === "stage" ? "S9" : "S6", module_id: partialSplitModule.manifest.id, module_version: mismatch === "version" ? "2.0.0" : partialSplitModule.manifest.version, actor: ACTOR, input: { gap_id: mismatch === "gap" ? "another-gap" : gapId } });
       await openRun(recorder); await closeRun({ recorder, status: mismatch === "failed" ? "error" : "ok", output: { ...result.output, mode: mismatch === "stub" ? "deterministic" : "llm" } });
-      const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", parent_gap_id: gapId, originating_run_id: recorder.id, addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Review reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
+      const res = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "split_partial_gap", expected_resolution: gapResolutionVersion(await loadState(), gapId), parent_gap_id: gapId, originating_run_id: recorder.id, addressed_name: "Addressed population", open_name: "Unanswered comparison", tactic_ids: tacticId, note: "Review reason", actor_name: ACTOR.name, actor_function: ACTOR.function }) }));
       expect(res.status, mismatch).toBeGreaterThanOrEqual(400);
       expect(Boolean((await loadState()).gaps.find(row => row.id === gapId)!.retired), mismatch).toBe(false);
     }

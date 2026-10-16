@@ -1,3 +1,4 @@
+import { entityHistory } from "@/lib/iegp/entity-history";
 import { priorityDecision } from "./support/priority-decision";
 /** Behavioral S9 expansion source gate: edits, acceptance, stale targets and priority. */
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -32,6 +33,10 @@ describe('S9 expansion source gate', () => {
         expect(after.expansions).toHaveLength(1);
         expect(after.expansions[0]).toMatchObject({ tactic_id: targetId, status: 'proposed', scope: { cost_effort: 'One analyst month' } });
         expect(after.coverages.find(c => c.expansion_id === after.expansions[0].id)?.overall).toBe('unassessed');
+        const fromGap = (await entityHistory([gapId])).filter(entry => entry.entity_type === 'gap_tactic' && entry.rationale === 'Suitable existing data');
+        const fromTactic = (await entityHistory([targetId])).filter(entry => entry.entity_type === 'gap_tactic' && entry.rationale === 'Suitable existing data');
+        expect(fromGap).toHaveLength(1);
+        expect(fromTactic.map(entry => entry.id)).toEqual(fromGap.map(entry => entry.id));
         expect((await listIdeationProposals()).find(p => p.id === proposal.id)).toMatchObject({ status: 'accepted', tactic_id: targetId, expansion_id: after.expansions[0].id });
     });
     it('preserves edited child design, reconciles one-sided fields and rejects conflicting edits', async()=>{

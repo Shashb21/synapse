@@ -1,3 +1,4 @@
+import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -1425,7 +1426,7 @@ export async function decideIdeationProposal(args: {
 }> {
     await ensurePlatformSchema();
     const rationale = requireRationale(args.rationale);
-    const result = await db().transaction(async (tx) => {
+    const result = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async (tx) => {
         const [pending] = await tx.select().from(t.ideationProposals).where(eq(t.ideationProposals.id, args.id)).for("update");
         if (!pending)
             throw new Error(`Unknown proposal ${args.id}`);
@@ -1466,7 +1467,7 @@ export async function decideIdeationProposal(args: {
         await tx.update(t.ideationProposals).set({ status: args.decision === "accept" ? "accepted" : "rejected", decided_by: args.actor.name, decided_at: nowIso(), decision_rationale: rationale, tactic_id, expansion_id }).where(eq(t.ideationProposals.id, args.id));
         const edit = await recordEdit({ workspace_id: args.workspace_id, stage: "S9", entity_type: "ideation_proposal", entity_id: args.id, field: "status", action: args.decision, before: "proposed", after: args.decision === "accept" ? "accepted" : "rejected", rationale, actor: args.actor }, tx);
         return { tactic_id, expansion_id, proposal, originalMeta, original, edit, gap: state.gaps.find(g => g.id === proposal.gap_id) };
-    });
+    }));
     // Shared learning storage runs after the workspace commit, never while its connection is held.
     if (result.originalMeta.origin !== "human" && !result.original)
         console.warn("[learning] S9 decision omitted: immutable original AI baseline unavailable", args.id);

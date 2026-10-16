@@ -24,6 +24,7 @@ test.describe("tactic side panel", () => {
         origin: "tactics",
         gap_id: gap.gap_id,
         name: "Panel test registry study",
+        rationale: "Record the study relationship for shared panel review",
         type: "registry",
         evidence_question: "What is 12-month persistence in routine care?",
         status: "proposed",
@@ -538,6 +539,30 @@ test.describe("tactic side panel", () => {
     page.once("dialog", dialog => dialog.accept());
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+  });
+
+  test("board library links require a reason and retain the shared relationship event", async ({ page, request }) => {
+    const created = await iegpAction(request, { action: "record_missed_tactic", name: "Board reuse cohort", type: "rwe_study", status: "ongoing", evidence_question: "What is persistence in routine care?" });
+    await page.goto("/?place=tactics");
+    const card = await openIdeationCard(page, gapId);
+    await card.getByRole("button", { name: "+ Custom tactic", exact: true }).click();
+    const custom = page.getByRole("dialog", { name: "+ Custom tactic", exact: true });
+    await expect(custom.getByRole("textbox", { name: "Reason (required)", exact: true })).toHaveAttribute("required", "");
+    await page.keyboard.press("Escape");
+    await card.getByRole("button", { name: "Assign from library", exact: true }).click();
+    const assign = page.getByRole("dialog", { name: "Assign from library", exact: true });
+    await assign.getByRole("combobox").selectOption(String(created.id));
+    await assign.getByRole("button", { name: "Assign", exact: true }).click();
+    await expect(assign.getByRole("alert")).toContainText("Reason");
+    await assign.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("Review the existing cohort against this distinct evidence need");
+    await assign.getByRole("button", { name: "Assign", exact: true }).click();
+    await expect(assign).toBeHidden();
+    const gap = await (await request.get(`/api/gaps/${gapId}`)).json();
+    const tactic = await (await request.get(`/api/tactics/${created.id}`)).json();
+    const event = gap.history.find((entry: { entity_type: string; rationale: string }) => entry.entity_type === "gap_tactic" && entry.rationale === "Review the existing cohort against this distinct evidence need");
+    expect(event).toBeTruthy();
+    expect(tactic.history.find((entry: { id: string }) => entry.id === event.id)).toBeTruthy();
+    expect(tactic.coverages.find((row: { gap_id: string }) => row.gap_id === gapId).overall).toBe("unassessed");
   });
 
 });

@@ -1005,6 +1005,7 @@ export async function createTimelineActivity(args: {
   const gap = state.gaps.find((row) => row.id === args.gap_id);
   if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);
   const tacticId = await createProposedTactic({
+    rationale,
     name: args.name.trim(),
     type: args.type as Tactic["type"],
     description: args.name.trim(),

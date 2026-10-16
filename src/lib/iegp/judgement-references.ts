@@ -7,6 +7,9 @@ export const judgementReferenceSchema = z.object({
   entity_id: z.string().trim().min(1),
   reason: z.string().trim().min(3),
 }).strict();
+export const suppliedJudgementRecordSchema = judgementReferenceSchema.omit({ reason: true }).extend({
+  title: z.string(), excerpt: z.string(), href: z.string(),
+});
 export type JudgementReference = z.infer<typeof judgementReferenceSchema>;
 export type InspectableReference = JudgementReference & { title: string; excerpt: string; href: string };
 

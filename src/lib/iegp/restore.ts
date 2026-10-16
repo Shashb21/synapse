@@ -1,3 +1,5 @@
+import { withRelationshipChange } from "./relationship-change";
+import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
 import * as t from "./schema";
@@ -153,6 +155,7 @@ export async function listRejectedMappings() {
   return state.mapping_suggestions
     .filter((m) => m.status === "rejected" && !isMappingRowKey(m.tactic_id))
     .map((m) => ({
+      relationship_version: relationshipVersion(relationshipSnapshot(state, m.gap_id, m.tactic_id)),
       gap_id: m.gap_id,
       tactic_id: m.tactic_id,
       gap_name: state.gaps.find((g) => g.id === m.gap_id)?.name ?? m.gap_id,
@@ -168,8 +171,8 @@ export async function listRejectedMappings() {
  * it is simply no longer blocked, so it can be mapped by hand or proposed by
  * a later mapping run for a person to decide again.
  */
-export async function restoreRejectedMapping(args: RestoreActor & { gap_id: string; tactic_id: string }) {
-  const rationale = requireRationale(args.rationale);
+async function restoreRejectedMappingChange(args: RestoreActor & { gap_id: string; tactic_id: string }) {
+  requireRationale(args.rationale);
   const state = await loadState();
   const row = state.mapping_suggestions.find(
     (m) => m.gap_id === args.gap_id && m.tactic_id === args.tactic_id && m.status === "rejected",
@@ -178,18 +181,8 @@ export async function restoreRejectedMapping(args: RestoreActor & { gap_id: stri
   await db()
     .delete(t.mappingSuggestions)
     .where(and(eq(t.mappingSuggestions.gap_id, args.gap_id), eq(t.mappingSuggestions.tactic_id, args.tactic_id)));
-  await fileRestore({
-    stage: "S4",
-    entity_type: "gap",
-    entity_id: args.gap_id,
-    field: "mapping",
-    before: `rejected ${args.tactic_id}`,
-    after: `not decided ${args.tactic_id}`,
-    rationale,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    audit_entity: "mapping",
-    audit_entity_id: `${args.gap_id}::${args.tactic_id}`,
-    audit_action: "restore_mapping",
-  });
+}
+
+export function restoreRejectedMapping(args: Parameters<typeof restoreRejectedMappingChange>[0]) {
+  return withRelationshipChange(args, () => restoreRejectedMappingChange(args));
 }
