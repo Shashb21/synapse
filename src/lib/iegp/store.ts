@@ -1782,6 +1782,7 @@ export async function lockCoverageOverall(args: {
     .update(t.coverages)
     .set({
       overall: args.overall,
+      assessment_origin: "human",
       overall_rationale: rationale,
       overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
       confirmed_requirement_basis: basis,
@@ -2214,6 +2215,8 @@ export async function assignTacticToGap(args: {
   human?: boolean;
   /** Human only: confirms the overall verdict; dimension confirmations remain separate. */
   lock_coverage?: boolean;
+  /** Set by the owning model/workflow, never accepted from a customer request body. */
+  assessment_origin?: IegpState["coverages"][0]["assessment_origin"];
 }): Promise<string> {
   if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => assignTacticToGap(args));
   await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
@@ -2259,6 +2262,7 @@ export async function assignTacticToGap(args: {
   const coverageId = existing?.id ?? (await allocateId("COV", state.coverages.map((c) => c.id)));
   const row = {
     id: coverageId,
+    assessment_origin: overall === "unassessed" ? null : args.human ? "human" : args.assessment_origin ?? null,
     confirmed_requirement_basis: confirmedBasis,
     review_version: newId("coverage"),
     gap_id: args.gap_id,
@@ -4257,6 +4261,7 @@ async function insertProvisionalClosingCoverage(args: {
       .update(t.coverages)
       .set({
         overall: "full",
+        assessment_origin: "workflow",
         overall_rationale: args.note,
         overall_lock: unlocked(),
         confirmed_requirement_basis: null,
@@ -4275,6 +4280,7 @@ async function insertProvisionalClosingCoverage(args: {
     expansion_id: args.expansion_id ?? null,
     dimensions: args.source?.dimensions ?? emptyDimensions(),
     overall: "full",
+    assessment_origin: "workflow",
     overall_rationale: args.note,
     overall_lock: unlocked(),
     confirmed_requirement_basis: null,

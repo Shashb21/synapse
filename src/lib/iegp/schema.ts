@@ -221,6 +221,7 @@ export const tacticExpansions = pgTable("tactic_expansions", {
 });
 
 export const coverages = pgTable("coverages", {
+  assessment_origin: text("assessment_origin").$type<"human" | "ai" | "workflow">(),
   confirmed_requirement_basis: jsonb("confirmed_requirement_basis").$type<import("./types").RequirementBasis>(),
   review_version: text("review_version"),
   expansion_id: text("expansion_id"),

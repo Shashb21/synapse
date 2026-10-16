@@ -6,7 +6,7 @@ import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import { loadState } from "./store";
 import { gapVersionsFor, lastResetAt } from "./gap-history";
 import { entityHistory, type HistoryEntry } from "./entity-history";
-import { isLiveGap } from "./engine";
+import { isLiveGap, relationshipFit, type RelationshipFitModel } from "./engine";
 import type { IegpState } from "./types";
 
 type Gap = IegpState["gaps"][0];
@@ -42,6 +42,7 @@ export type GapRecord = {
   /** S2 candidate rows that became or joined this gap. */
   candidates: (typeof gapCandidates.$inferSelect)[];
   coverages: (IegpState["coverages"][0] & {
+    fit: RelationshipFitModel | null;
     requirement_review: ReturnType<typeof getRequirementBasisReview>;
     tactic: Pick<IegpState["tactics"][0], "id" | "name" | "type" | "status"> | null;
     expansion: Pick<IegpState["expansions"][0], "id" | "status" | "scope"> | null;
@@ -120,6 +121,8 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
       const expansion = c.expansion_id ? state.expansions.find((e) => e.id === c.expansion_id) : undefined;
       return {
         ...c,
+        fit: tactic && (!c.expansion_id || (expansion && expansion.tactic_id === tactic.id && expansion.gap_ids.includes(gap.id)))
+          ? relationshipFit(state, gap.id, tactic.id, c.expansion_id) : null,
         requirement_review: getRequirementBasisReview(state, gap.id, c),
         tactic: tactic ? { id: tactic.id, name: tactic.name, type: tactic.type, status: tactic.status } : null,
         expansion: expansion ? { id: expansion.id, status: expansion.status, scope: expansion.scope } : null,

@@ -1,3 +1,5 @@
+import { TacticFitSelect } from "@/components/tactic-fit-select";
+import { RelationshipFit } from "@/components/relationship-fit";
 import Link from "next/link";
 import { CoverageBadge, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
@@ -10,6 +12,7 @@ import type {
   PlanGapCard,
   PlanTactic,
   TacticLibraryItem,
+  RelationshipFitModel,
 } from "@/lib/iegp/engine";
 import {
   CATCH_UP_TACTIC_STATUSES,
@@ -81,27 +84,16 @@ export function CustomTacticButton({
 export function AssignTacticButton({
   gapId,
   tactics,
+  previews,
 }: {
   gapId: string;
   tactics: TacticLibraryItem[];
+  previews?: Record<string, RelationshipFitModel>;
 }) {
   if (tactics.length === 0) return null;
   return (
     <LockForm label="Assign from library" action="assign_tactic" extra={{ gap_id: gapId }} confirmLabel="Assign">
-      <label className="grid gap-1 text-[12px] text-muted-foreground">
-        From tactic library
-        <select
-          name="tactic_id"
-          required
-          className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-        >
-          {tactics.map((tactic) => (
-            <option key={tactic.id} value={tactic.id}>
-              {tacticOptionLabel(tactic)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <TacticFitSelect tactics={tactics} previews={previews} />
     </LockForm>
   );
 }
@@ -348,6 +340,7 @@ function GapTacticsBlock({
                 <TacticBadge status={tactic.status} />
                 {tactic.overall ? <CoverageBadge overall={tactic.overall} /> : null}
               </Link>
+              {tactic.fit ? <RelationshipFit fit={tactic.fit} tacticName={tactic.name} /> : null}
             </li>
           ))}
         </ul>

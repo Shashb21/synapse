@@ -1,3 +1,4 @@
+import { RelationshipFit } from "@/components/relationship-fit";
 import { RequirementBasisReview } from "@/components/requirement-basis-review";
 import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import Link from "next/link";
@@ -338,6 +339,7 @@ export default async function GapDetailPage({
         {coverages.map((c) => {
           const review = getRequirementBasisReview(state, gap.id, c);
           const tactic = state.tactics.find((t) => t.id === c.tactic_id);
+          const relationship = record.coverages.find(row => row.id === c.id);
           const siblings = liveGapsMappedToTactic(state, c.tactic_id, gap.id);
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
@@ -353,6 +355,9 @@ export default async function GapDetailPage({
                 />
                 <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} />
               </div>
+              {relationship?.fit ? (
+                <RelationshipFit fit={relationship.fit} tacticName={relationship.expansion?.scope.name ?? tactic?.name ?? c.tactic_id} />
+              ) : null}
               {review.legacy_unsupported_full ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">Historical Full needs review: no confirmed requirement basis was recorded. It does not provide verified current Full coverage.</p> : null}
               {siblings.length > 0 ? (
                 <div className="mt-3 border border-amber-500/30 bg-amber-500/10 p-3">

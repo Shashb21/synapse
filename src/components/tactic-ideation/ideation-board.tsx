@@ -1,5 +1,6 @@
 "use client";
 
+import { RelationshipFit } from "@/components/relationship-fit";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AddIdeaDialog } from "@/components/ideation/gap-proposal-group";
@@ -80,6 +81,7 @@ function LinkedTacticRow({ tactic, onEdit }: { tactic: PlanTactic; onEdit?: () =
           {body}
         </Link>
       )}
+      {tactic.fit ? <RelationshipFit fit={tactic.fit} tacticName={tactic.name} /> : null}
     </li>
   );
 }
@@ -163,7 +165,7 @@ function GapIdeationCard({
               <Link href={`/gaps/${card.gap_id}`} className="text-[11px] text-muted-foreground no-underline hover:underline">
                 Open gap ↗
               </Link>
-              <AssignTacticButton gapId={card.gap_id} tactics={assignable} />
+              <AssignTacticButton gapId={card.gap_id} tactics={assignable} previews={card.fit_previews} />
               <CustomTacticButton gapId={card.gap_id} gapName={card.gap_name} inUse={customTypesInUse(library)} />
             </div>
           </div>

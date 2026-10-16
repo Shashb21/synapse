@@ -403,6 +403,8 @@ export type TacticExpansion = {
 };
 
 export type GapTacticCoverage = {
+  /** Author of the current overall judgement, not the reviewer or relationship creator. Null for unrecorded history. */
+  assessment_origin?: "human" | "ai" | "workflow" | null;
   /** Exact reviewed basis supporting an explicit overall confirmation; absent on historical rows. */
   confirmed_requirement_basis?: RequirementBasis | null;
   review_version?: string | null;

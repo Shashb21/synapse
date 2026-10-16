@@ -422,6 +422,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS requirement_basis jsonb",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS confirmed_requirement_basis jsonb",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS review_version text",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessment_origin text",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS planning_context jsonb NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS parked_at text",
