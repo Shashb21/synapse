@@ -19,11 +19,14 @@ export function CustomTypeFields({
   initial = null,
   inUse = [],
   clearable = false,
+  onChange,
 }: {
   initial?: CustomTacticType | null;
   inUse?: CustomTacticType[];
   /** Editing an existing tactic: turning it off posts a blank name, which clears the custom type. */
   clearable?: boolean;
+  /** Include button-driven colour/type changes in the containing editor’s draft guard. */
+  onChange?: () => void;
 }) {
   const listId = useId();
   const [on, setOn] = useState(Boolean(initial));
@@ -33,6 +36,7 @@ export function CustomTypeFields({
 
   function pickLabel(next: string) {
     setLabel(next);
+    onChange?.();
     const known = inUse.find((row) => row.label.toLowerCase() === next.trim().toLowerCase());
     if (known) setColor(known.color);
   }
@@ -43,7 +47,7 @@ export function CustomTypeFields({
         {clearable && initial ? <input type="hidden" name="custom_type_label" value="" /> : null}
         <button
           type="button"
-          onClick={() => setOn(true)}
+          onClick={() => { setOn(true); onChange?.(); }}
           className="justify-self-start rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
         >
           + Custom type
@@ -77,7 +81,7 @@ export function CustomTypeFields({
         </datalist>
         <button
           type="button"
-          onClick={() => setOn(false)}
+          onClick={() => { setOn(false); onChange?.(); }}
           className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-indigo-800 dark:text-indigo-300"
         >
           ← Standard type
@@ -91,7 +95,7 @@ export function CustomTypeFields({
             role="radio"
             aria-checked={color.toLowerCase() === swatch}
             aria-label={swatch}
-            onClick={() => setColor(swatch)}
+            onClick={() => { setColor(swatch); onChange?.(); }}
             className={cn(
               "size-[18px] rounded border-2",
               color.toLowerCase() === swatch ? "border-foreground" : "border-transparent",
@@ -102,7 +106,7 @@ export function CustomTypeFields({
         <input
           aria-label="Custom type colour (hex)"
           value={color}
-          onChange={(event) => setColor(event.target.value.trim())}
+          onChange={(event) => { setColor(event.target.value.trim()); onChange?.(); }}
           className={cn(
             "ml-1 h-6 w-20 rounded border bg-card px-1.5 font-mono text-[11px]",
             validColor ? "border-input" : "border-destructive",

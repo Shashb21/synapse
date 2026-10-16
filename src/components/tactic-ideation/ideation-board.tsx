@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { GapRecordLink } from "@/components/gap-panel";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AddIdeaDialog } from "@/components/ideation/gap-proposal-group";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
 import { AssignTacticButton, CustomTacticButton, CreateTacticButton } from "@/components/plan-cards";
@@ -370,9 +370,11 @@ export function IdeationBoard({
   tactics?: Record<string, TacticEditModel>;
 }) {
   const ai = useAiEnabled("ideation");
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const openEditor = (tacticId: string) => {
     if (!tactics[tacticId]) return false;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setEditingId(tacticId);
     return true;
   };
@@ -527,6 +529,7 @@ export function IdeationBoard({
         identity={identity}
         inUse={inUse}
         onClose={() => setEditingId(null)}
+        returnFocusRef={returnFocusRef}
       />
     </div>
   );

@@ -791,6 +791,8 @@ async function handleAction(request: Request): Promise<Response> {
       case "modify_tactic":
         await modifyTactic({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic,
+          status: typeof body.status === "string" ? body.status : undefined,
           fields: tacticFieldsOf(body),
           custom_type: customTypeOf(body),
           rationale: rationaleOf(body),

@@ -1,3 +1,4 @@
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import Link from "next/link";
 import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
 import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
@@ -326,9 +327,9 @@ export default async function GapDetailPage({
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
               <div className="flex flex-wrap items-center gap-2">
-                <Link href={`/tactics/${c.tactic_id}`} className="text-[13px] text-foreground">
+                <TacticRecordLink tacticId={c.tactic_id} className="text-[13px] text-foreground">
                   {tactic?.name}
-                </Link>
+                </TacticRecordLink>
                 <CoverageBadge overall={c.overall} />
                 <NeedsReviewFlag needsReview={c.needs_review} />
                 <CoverageDimensionsMenu

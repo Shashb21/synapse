@@ -72,8 +72,11 @@ export function ActionDialog({
   trigger,
   validateForm,
   protectUnsavedChanges = false,
+  onSuccess,
 }: {
   protectUnsavedChanges?: boolean;
+  /** Revalidate a containing record after a successful save, retaining its open drafts. */
+  onSuccess?: () => void;
   endpoint: string;
   payload: Record<string, unknown>;
   fields?: ActionField[];
@@ -162,7 +165,7 @@ export function ActionDialog({
     }
     setError(null);
     // The dialog closes as the refreshed data arrives, so the page never shows the old value.
-    refresh(() => setOpen(false));
+    refresh(() => { setOpen(false); onSuccess?.(); });
   }
 
   function onOpenChange(next: boolean) {

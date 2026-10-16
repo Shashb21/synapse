@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
 import type { OpenGapCard } from "@/lib/iegp/engine";
@@ -52,6 +53,7 @@ export async function loadTacticIdeation(openGaps: OpenGapCard[]): Promise<Tacti
         tactic.id,
         {
           id: tactic.id,
+          version: tacticEditVersion(tactic),
           name: tactic.name,
           type: tactic.type,
           custom_type: tactic.custom_type ?? null,

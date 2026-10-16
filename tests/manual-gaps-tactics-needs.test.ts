@@ -388,7 +388,7 @@ describe("leftovers and rejected AI candidates", () => {
     for (const action of ["modify_gap", "edit_need", "move_need", "unlink_need", "create_need", "accept_residual_gap", "modify_residual_gap", "reject_residual_gap"]) {
       expect(gapPage).toContain(`action: "${action}"`);
     }
-    const tacticPage = read("src/app/tactics/[id]/page.tsx");
+    const tacticPage = read("src/components/tactic-ideation/tactic-editor.tsx") + read("src/components/tactic-record-content.tsx");
     expect(tacticPage).toContain('action: "modify_tactic"');
     expect(tacticPage).toContain('action: "lock_tactic_review"');
     expect(read("src/app/needs/page.tsx")).toContain('action: "promote_gap_candidate"');

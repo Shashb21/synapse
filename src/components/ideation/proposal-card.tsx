@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { TACTIC_TYPE_LABELS, type TacticType } from "@/lib/iegp/enums";
@@ -127,12 +127,12 @@ export function ProposalCard({
             {proposal.decision_rationale ? ` — ${proposal.decision_rationale}` : ""}
           </p>
           {proposal.tactic_id ? (
-            <Link
-              href={`/tactics/${proposal.tactic_id}`}
+            <TacticRecordLink
+              tacticId={proposal.tactic_id}
               className="text-[11px] text-[color:var(--known-foreground)] no-underline hover:underline"
             >
               {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
-            </Link>
+            </TacticRecordLink>
           ) : null}
           {proposal.status === "rejected" && mayIdeate ? (
             <div>

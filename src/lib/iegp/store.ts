@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "./tactic-edit-version";
 import { and, eq, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
@@ -46,6 +47,7 @@ import {
   EVIDENCE_DOMAINS,
   OVERALL_COVERAGE,
   TACTIC_TYPES,
+  TACTIC_STATUSES,
   ACTOR_FUNCTIONS,
 } from "./enums";
 import {
@@ -3782,6 +3784,8 @@ const TACTIC_DATE_FIELDS = new Set<TacticEditField>(["start_date", "evidence_ava
  */
 export async function modifyTactic(args: {
   tactic_id: string;
+  expected_tactic?: unknown;
+  status?: string;
   fields?: Partial<Record<TacticEditField, string | null>>;
   /** Legacy shape: name and evidence question at the top level. */
   name?: string;
@@ -3794,85 +3798,99 @@ export async function modifyTactic(args: {
   note?: string;
 }) {
   const rationale = requireRationale(args.rationale ?? args.note);
-  const state = await loadState();
-  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
-  const draft: Partial<Record<TacticEditField, string | null>> = {
-    ...(args.name !== undefined ? { name: args.name } : {}),
-    ...(args.evidence_question !== undefined ? { evidence_question: args.evidence_question } : {}),
-    ...(args.fields ?? {}),
-  };
-  const clean: Record<string, string | null> = {};
-  for (const field of TACTIC_EDIT_FIELDS) {
-    const raw = draft[field];
-    if (raw === undefined) continue;
-    const value = (raw ?? "").trim();
-    if (TACTIC_DATE_FIELDS.has(field)) {
-      clean[field] = optionalTacticDate(field as TacticDateField, value);
-      continue;
+  await loadState();
+  return withWorkspaceTransaction(async () => {
+    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const state = await readState();
+    const tactic = state.tactics.find((x) => x.id === args.tactic_id);
+    if (!tactic) throw new Error("Tactic not found");
+    if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
+      throw new Error("Tactic changed since you opened it. Your values and reason have not been saved. Keep your draft or close and reopen the latest record before retrying.");
     }
-    if ((field === "name" || field === "evidence_question") && !value) {
-      throw new Error(field === "name" ? "Tactic name is required." : "Evidence question is required.");
+    const draft: Partial<Record<TacticEditField, string | null>> = {
+      ...(args.name !== undefined ? { name: args.name } : {}),
+      ...(args.evidence_question !== undefined ? { evidence_question: args.evidence_question } : {}),
+      ...(args.fields ?? {}),
+    };
+    const clean: Record<string, string | null> = {};
+    for (const field of TACTIC_EDIT_FIELDS) {
+      const raw = draft[field];
+      if (raw === undefined) continue;
+      const value = (raw ?? "").trim();
+      if (TACTIC_DATE_FIELDS.has(field)) {
+        clean[field] = optionalTacticDate(field as TacticDateField, value);
+        continue;
+      }
+      if ((field === "name" || field === "evidence_question") && !value) {
+        throw new Error(field === "name" ? "Tactic name is required." : "Evidence question is required.");
+      }
+      if (field === "type" && !TACTIC_TYPES.includes(value as IegpState["tactics"][0]["type"])) {
+        throw new Error("Tactic type is required.");
+      }
+      if (field === "function" && !ACTOR_FUNCTIONS.includes(value as ActorFunction)) {
+        throw new Error("Lead function must be one of the listed functions.");
+      }
+      if (field === "owner" && !value) throw new Error("Lead (owner) is required.");
+      if (field === "budget") {
+        if (value.length > 60) throw new Error("Budget can be at most 60 characters.");
+        clean[field] = value || null;
+        continue;
+      }
+      clean[field] = value;
     }
-    if (field === "type" && !TACTIC_TYPES.includes(value as IegpState["tactics"][0]["type"])) {
-      throw new Error("Tactic type is required.");
+    // The pair is checked as it will stand: an edited date against the other, saved one.
+    assertTacticDateOrder(
+      "start_date" in clean ? clean.start_date : tactic.start_date,
+      "evidence_available" in clean ? clean.evidence_available : tactic.evidence_available,
+    );
+    if (args.status !== undefined) {
+      if (!(TACTIC_STATUSES as readonly string[]).includes(args.status)) throw new Error("Choose a valid tactic status.");
+      clean.status = args.status;
     }
-    if (field === "function" && !ACTOR_FUNCTIONS.includes(value as ActorFunction)) {
-      throw new Error("Lead function must be one of the listed functions.");
+    const changes = diffFields(tactic, clean);
+    const customLabel = (value: CustomTacticType | null | undefined) =>
+      value ? `${value.label} (${value.color})` : null;
+    const customChanged =
+      args.custom_type !== undefined && customLabel(args.custom_type) !== customLabel(tactic.custom_type);
+    if (customChanged) {
+      changes.push({ field: "custom_type", before: customLabel(tactic.custom_type), after: customLabel(args.custom_type) });
     }
-    if (field === "owner" && !value) throw new Error("Lead (owner) is required.");
-    if (field === "budget") {
-      if (value.length > 60) throw new Error("Budget can be at most 60 characters.");
-      clean[field] = value || null;
-      continue;
+    if (changes.length === 0) throw new Error("Nothing changed.");
+    const set: Record<string, unknown> = {};
+    for (const change of changes) if (change.field !== "custom_type" && change.field !== "status") set[change.field] = change.after;
+    if (customChanged) set.custom_type = args.custom_type ?? null;
+    await db()
+      .update(t.tactics)
+      .set({ ...set, lock: makeLock(args.actor_name, args.actor_function, rationale) })
+      .where(eq(t.tactics.id, args.tactic_id));
+    if (customChanged) await applyCustomTypeColour(args.custom_type ?? null, state, args.tactic_id);
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "tactic",
+      args.tactic_id,
+      "modify",
+      `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
+    );
+    await recordFieldEdits({
+      stage: "S3",
+      entity_type: "tactic",
+      entity_id: args.tactic_id,
+      changes,
+      rationale,
+      actor_name: args.actor_name,
+      actor_function: args.actor_function,
+    });
+    if (changes.some(change => change.field === "status")) {
+      // Reuse the lifecycle owner for residual unlocking and related gap recomputation.
+      await lockTactic({ tactic_id: tactic.id, status: args.status as IegpState["tactics"][0]["status"],
+        actor_name: args.actor_name, actor_function: args.actor_function, note: rationale });
+    } else if (changes.some(change => change.field === "type")) {
+      const gapIds = new Set(state.coverages.filter(c => c.tactic_id === tactic.id).map(c => c.gap_id));
+      for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
     }
-    clean[field] = value;
-  }
-  // The pair is checked as it will stand: an edited date against the other, saved one.
-  assertTacticDateOrder(
-    "start_date" in clean ? clean.start_date : tactic.start_date,
-    "evidence_available" in clean ? clean.evidence_available : tactic.evidence_available,
-  );
-  const changes = diffFields(tactic, clean);
-  const customLabel = (value: CustomTacticType | null | undefined) =>
-    value ? `${value.label} (${value.color})` : null;
-  const customChanged =
-    args.custom_type !== undefined && customLabel(args.custom_type) !== customLabel(tactic.custom_type);
-  if (customChanged) {
-    changes.push({ field: "custom_type", before: customLabel(tactic.custom_type), after: customLabel(args.custom_type) });
-  }
-  if (changes.length === 0) throw new Error("Nothing changed.");
-  const set: Record<string, unknown> = {};
-  for (const change of changes) if (change.field !== "custom_type") set[change.field] = change.after;
-  if (customChanged) set.custom_type = args.custom_type ?? null;
-  await db()
-    .update(t.tactics)
-    .set({ ...set, lock: makeLock(args.actor_name, args.actor_function, rationale) })
-    .where(eq(t.tactics.id, args.tactic_id));
-  if (customChanged) await applyCustomTypeColour(args.custom_type ?? null, state, args.tactic_id);
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "tactic",
-    args.tactic_id,
-    "modify",
-    `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
-  );
-  await recordFieldEdits({
-    stage: "S3",
-    entity_type: "tactic",
-    entity_id: args.tactic_id,
-    changes,
-    rationale,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+    return changes;
   });
-  if (changes.some((c) => c.field === "type")) {
-    // Coverage status depends on tactic type; recompute the gaps this tactic maps to.
-    const gapIds = new Set(state.coverages.filter((c) => c.tactic_id === args.tactic_id).map((c) => c.gap_id));
-    for (const gapId of gapIds) await syncComputedGapStatuses(gapId);
-  }
-  return changes;
 }
 
 /**

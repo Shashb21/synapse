@@ -45,9 +45,8 @@ function hasSuggestion(entry: HistoryEntry): boolean {
  */
 export function EntityHistory({ entries, empty = "No changes recorded yet." }: { entries: HistoryEntry[]; empty?: string }) {
   return (
-    <section className="mb-8" data-testid="entity-history" aria-labelledby="entity-history-heading">
+    <section className="mb-8" data-testid="entity-history" aria-label="Recorded changes">
       <h2
-        id="entity-history-heading"
         className="mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
       >
         History
@@ -75,6 +74,9 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                   {entry.field ? ` ${label(entry.field)}` : ""}
                   {` · ${label(entry.entity_type)} ${entry.entity_id}`}
                 </p>
+                {entry.counterpart_gaps?.length ? <p className="mt-1">Gap: {entry.counterpart_gaps.map((gap, index) => <span key={gap.id}>
+                  {index ? ", " : ""}<Link href={`/gaps/${encodeURIComponent(gap.id)}`}>{gap.name} ({gap.id})</Link>
+                </span>)}</p> : null}
                 {entry.kind === "edit" && (entry.before !== null || entry.after !== null) ? (
                   <p className="mt-1 break-words" data-testid="history-change">
                     <span className="text-muted-foreground line-through" title={before ?? undefined}>

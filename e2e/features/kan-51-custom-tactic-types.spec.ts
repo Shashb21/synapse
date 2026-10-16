@@ -53,7 +53,13 @@ test.describe("custom tactic types", () => {
     await row.click();
     const panel = page.getByTestId("tactic-panel");
     await expect(panel.getByLabel("Custom type name")).toHaveValue("Advisory board");
-    await panel.getByRole("link", { name: /open full page/i }).click();
+    // Colour buttons do not emit a native form change; they still create a protected draft.
+    await panel.getByRole("radio", { name: "#4f46e5" }).click();
+    page.once("dialog", dialog => dialog.dismiss());
+    await page.keyboard.press("Escape");
+    await expect(panel.getByLabel("Custom type colour (hex)")).toHaveValue("#4f46e5");
+    page.once("dialog", dialog => dialog.accept());
+    await panel.getByRole("link", { name: "Open full record", exact: true }).click();
     await expect(page.getByText(/Advisory board · counts as Patient \/ caregiver survey/i)).toBeVisible();
   });
 });

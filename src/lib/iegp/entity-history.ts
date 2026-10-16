@@ -27,6 +27,8 @@ export type HistoryEntry = {
   request_id: string | null;
   /** A linked objective event, rather than a direct edit to this gap. */
   shared_context?: boolean;
+  /** The other endpoint of a supplied tactic relationship event. */
+  counterpart_gaps?: { id: string; name: string }[];
   supporting_references?: ReturnType<typeof recordedJudgementReferences>;
 };
 
