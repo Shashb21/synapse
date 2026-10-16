@@ -1,0 +1,88 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. No real patients, studies, organisations or people are described.
+
+VELMARA (velmaratinib) — CLINICAL DEVELOPMENT PLAN
+Excerpt for integrated evidence planning: second-line EGFR-mutant NSCLC
+Version 4.0, July 2026
+Owner: Clinical Development, Thoracic Oncology
+Status: Confidential, internal
+
+1. PRODUCT SUMMARY
+
+Velmaratinib (Velmara) is an oral, once-daily, CNS-penetrant EGFR tyrosine kinase inhibitor with activity against common sensitising EGFR mutations and acquired resistance mutations that emerge after osimertinib. The lead indication is adults with EGFR-mutant locally advanced or metastatic NSCLC whose disease has progressed on or after osimertinib.
+
+Target regulatory submissions: US and EU in Q2 2027, after the VEL-301 primary analysis.
+
+2. ONGOING AND PLANNED STUDIES
+
+2.1 VEL-301 (pivotal Phase III)
+
+Design: randomised (1:1), open-label, multicentre Phase III study of velmaratinib 160 mg once daily versus osimertinib re-challenge or investigator's choice of platinum-based chemotherapy.
+Population: adults with EGFR-mutant advanced NSCLC with documented progression on osimertinib; ECOG performance status 0 or 1; stable treated or untreated asymptomatic brain metastases allowed.
+Sample size: 620 patients, approximately 180 sites in North America, Europe and Asia-Pacific.
+Stratification: presence of brain metastases (yes or no); region; age (under 65 versus 65 and over).
+Primary endpoint: progression-free survival (PFS) by blinded independent central review.
+Key secondary endpoints: overall survival (OS); objective response rate; duration of response; intracranial objective response rate in patients with measurable brain metastases at baseline; safety; patient-reported outcomes (EORTC QLQ-C30 and QLQ-LC13).
+Status: enrolment completed in May 2026 (n=624). Primary PFS analysis expected Q4 2026. OS at the primary analysis is expected to be immature (around 35 percent of events).
+
+Pre-specified subgroups include age (under 65 versus 65 and over; under 75 versus 75 and over). The protocol notes that the age subgroups are not powered for formal comparison. Approximately 31 percent of enrolled patients are aged 65 and over, and 7 percent are aged 75 and over.
+
+Note for evidence planning: the VEL-301 elderly subgroup is descriptive. It compares velmaratinib with the trial comparator, not with regional standard of care for elderly patients. It is not designed to answer the comparative-effectiveness question raised by HTA bodies for elderly and frail patients.
+
+2.2 VEL-301 CNS sub-study
+
+Population: patients in VEL-301 with measurable brain metastases at baseline by central neuroradiology review.
+Expected size: around 140 patients (both arms).
+Endpoints: intracranial objective response rate (primary for the sub-study); duration of intracranial response; intracranial PFS; time to radiotherapy for new brain lesions.
+Status: ongoing. Readout with the primary analysis.
+Limitation: with around 70 patients per arm, estimates of duration of intracranial response will be imprecise. Clinical Development recommends that Medical and HEOR consider supplementary CNS evidence.
+
+2.3 VEL-301 long-term follow-up
+
+All patients are followed for OS until 70 percent of events or five years after the last patient is randomised, whichever is first. A final OS analysis is projected for Q3 2029. An interim OS update is planned for Q4 2027.
+
+2.4 VEL-201 (Phase II, completed)
+
+Single-arm Phase II in 112 patients after osimertinib. ORR 38 percent; median duration of response 9.7 months. Intracranial ORR 52 percent in 29 patients with measurable brain metastases. Used to support the VEL-301 design. Published in 2025.
+
+2.5 VEL-105 (clinical pharmacology, completed)
+
+Dedicated QT study in healthy volunteers and patients. Mean QTcF increase of around 8 ms at steady state. No patient had QTcF above 500 ms. Labelling is expected to recommend baseline and periodic ECG monitoring.
+
+3. SAFETY PROFILE AND RISK MANAGEMENT
+
+Across VEL-201 and the blinded VEL-301 safety database (as of the June 2026 data cut):
+- Interstitial lung disease or pneumonitis: 2.6 percent all grades, 0.9 percent grade 3 or above. Median time to onset 2.8 months.
+- QT prolongation: QTcF above 480 ms in 3.1 percent; no torsades de pointes.
+- Most common adverse events: diarrhoea, rash, stomatitis, fatigue.
+
+The risk management plan will include:
+- Healthcare professional education on ILD recognition and management.
+- ECG monitoring guidance.
+- A post-authorisation safety study (PASS) to characterise ILD and QT incidence in routine care, including community oncology practices. The design is to be agreed with Medical Affairs and Pharmacovigilance.
+
+4. LIFECYCLE CONSIDERATIONS
+
+- First-line combination study (VEL-401) under discussion; not part of this plan.
+- Earlier-line or adjuvant studies are out of scope for the 2026 to 2028 plan.
+
+5. EVIDENCE NEEDS THAT THE CLINICAL PROGRAMME DOES NOT ADDRESS
+
+Clinical Development has flagged the following questions as outside the scope of the registrational programme. They need to be addressed through medical, HEOR or real-world evidence activities:
+1. Comparative effectiveness versus regional standard of care in elderly and frail patients.
+2. Real-world treatment sequencing after osimertinib, including the position relative to NX-441.
+3. Real-world duration of therapy, persistence and discontinuation.
+4. Healthcare resource utilisation and costs after recurrence.
+5. Quality of life in routine care and in frail patients; caregiver burden.
+6. ILD and QT incidence in routine care outside academic centres (to be addressed partly by the PASS).
+7. More precise estimates of duration of intracranial response (beyond the CNS sub-study).
+
+6. KEY DATES
+
+- VEL-301 primary PFS analysis: Q4 2026 (database lock target: 15 November 2026).
+- Topline results internally: early December 2026.
+- Primary manuscript submission: Q1 2027.
+- Regulatory submissions: Q2 2027.
+- Interim OS update: Q4 2027.
+- Final OS analysis: Q3 2029.
+
+END OF DOCUMENT

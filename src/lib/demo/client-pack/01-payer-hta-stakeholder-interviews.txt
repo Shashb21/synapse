@@ -1,0 +1,98 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. No real patients, studies, organisations or people are described.
+
+VELMARA (velmaratinib) — PAYER AND HTA STAKEHOLDER INTERVIEWS
+Second-line EGFR-mutant non-small cell lung cancer (NSCLC)
+Interview programme summary and selected transcript excerpts
+Prepared by: Global HEOR, with Market Access Insights
+Fieldwork: June to August 2026
+Status: Internal, for evidence planning only
+
+1. PURPOSE AND METHOD
+
+This programme was commissioned to understand what US national payers, integrated delivery network (IDN) pathway committees and EU5 health technology assessment (HTA) advisers will need to see before the planned US payer P&T reviews and EU5 HTA submissions, which are expected to conclude by 31 March 2027.
+
+We completed twelve 60-minute, double-blinded telephone interviews using a semi-structured discussion guide. Respondents were recruited through an independent fieldwork agency and paid fair-market-value honoraria. All quotations below are anonymised and lightly edited for readability.
+
+Respondent mix:
+- R1 to R4: US national and regional payers (pharmacy directors and medical directors, commercial and Medicare Advantage).
+- R5 and R6: US IDN oncology pathway leads.
+- R7 to R10: EU5 HTA advisers and former HTA committee members (two in Germany, one in France, one in England).
+- R11 and R12: health economists who regularly build cost-effectiveness and budget-impact models for oncology submissions.
+
+Stimulus: respondents saw a one-page product profile (VEL-301 Phase III design versus osimertinib, expected primary PFS readout, CNS sub-study, safety monitoring plan) and a draft value story. They did not see any unpublished data.
+
+2. EXECUTIVE SUMMARY
+
+Across the twelve interviews, five themes recurred. They are ordered by how often respondents raised them without prompting.
+
+Theme A. The economic burden of recurrence is poorly characterised. Every payer and both health economists said that the model will hinge on what happens after progression on velmaratinib: repeat imaging and biopsies, subsequent lines of therapy, hospitalisations and emergency department visits. Nobody could point to good routine-practice data on the direct costs of repeat procedures in this population.
+
+Theme B. Comparative effectiveness in elderly patients is the most likely HTA sticking point. All four EU5 advisers expect an HTA committee to ask how Velmara performs against the regional standard of care in patients aged 65 and over, and specifically in frail patients. The single-arm chart review currently running in two EU5 centres was seen as helpful context but "not an answer to the comparative question".
+
+Theme C. US payers will look hard at persistence and real-world duration of therapy. Three of four US payers said six-month discontinuation and persistence in routine care is a standard question at P&T for oral oncolytics and that trial persistence is not trusted.
+
+Theme D. Budget impact under the Inflation Reduction Act (IRA) negotiated-price scenarios is now a routine request. Payers want to see budget impact under plausible IRA net-price scenarios for the class, not only at list price.
+
+Theme E. Treatment sequencing after osimertinib is unclear to payers and pathway committees. IDN leads want to understand where Velmara sits relative to NX-441 and platinum-based chemotherapy after osimertinib failure, and whether real-world sequencing data exist.
+
+Lower-frequency themes: caregiver burden and patient-reported outcomes in frail patients (raised by two EU5 advisers); intracranial efficacy as a driver of value for patients with brain metastases (raised by both IDN leads); long-term overall survival maturity (raised by all HTA advisers, but as an expected limitation rather than a blocker).
+
+3. THEME A — ECONOMIC BURDEN OF RECURRENCE
+
+R11 (health economist): "When I build the model for a second-line EGFR agent, the post-progression health state is where I have the least to go on. I have trial-based utilities, but I do not have good costs for what actually happens after recurrence in routine practice: the repeat CT and MRI, the second biopsy or liquid biopsy, the radiotherapy for new brain lesions, and the next line of treatment. Right now I would be using assumptions from older chemotherapy-era studies, and a committee will see straight through that."
+
+R12 (health economist): "The burden of recurrence is the single biggest driver of incremental cost in my experience. If you can give me real-world data on the cost of recurrence after a third-generation TKI, broken down by procedure, you remove my largest source of uncertainty."
+
+R2 (US national payer, medical director): "We see a lot of downstream utilisation after progression: admissions, ED visits for symptom control, and imaging. We do not have that broken out for this population. If the manufacturer can show it, it helps the conversation."
+
+Interviewer note: when probed, no respondent was aware of a published routine-practice study of healthcare resource utilisation (HCRU) after EGFR TKI recurrence that separates hospitalisations, ED use and outpatient burden. Two mentioned small single-centre audits that they considered not generalisable.
+
+4. THEME B — ELDERLY AND FRAIL PATIENTS
+
+R7 (German HTA adviser): "The committee will ask about patients over 65. The trial population is younger than the patients we see. If the elderly subgroup in VEL-301 is small and not powered, it will be described as exploratory. That is fine, but then you need something else that compares Velmara with what we actually give these patients, which in many centres is still platinum doublet chemotherapy or best supportive care for the frail."
+
+R8 (German HTA adviser): "A single-arm chart review in elderly patients tells me what happened to patients on your drug. It does not tell me what would have happened on the comparator. For the benefit assessment I need a comparison, even an indirect one, done properly."
+
+R9 (French HTA adviser): "In France the question will be the place in therapy for the older patient. Please do not present the elderly subgroup of the pivotal trial as if it answers the question against regional standard of care. It does not, and the committee will say so."
+
+R10 (English HTA adviser): "Frailty matters as much as age. If you have anything on quality of life and patient-reported outcomes in frail patients, or on caregiver burden, it strengthens the case. At the moment that evidence is essentially absent for this class."
+
+Interviewer note: all four EU5 advisers distinguished between (a) the VEL-301 elderly subgroup, which they regarded as descriptive, and (b) a powered or properly adjusted comparison of Velmara against regional standard of care in elderly patients, which none of them believed currently exists.
+
+5. THEME C — PERSISTENCE AND DURATION OF THERAPY
+
+R1 (US regional payer, pharmacy director): "For any oral oncolytic we ask about six-month persistence. Trials keep patients on drug in a way routine practice does not. Give me claims-based persistence and discontinuation, and the reasons if you can get them."
+
+R3 (US national payer, Medicare Advantage): "Discontinuation for toxicity drives waste. If there is an ILD or QT signal that leads to stopping, I want to know how often it happens outside academic centres."
+
+R4 (US national payer, commercial): "We will review this at P&T within about six months of launch. If you have early real-world persistence by then, it matters. If you do not, we will default to a step edit behind osimertinib progression and NX-441."
+
+6. THEME D — BUDGET IMPACT UNDER IRA
+
+R2: "Every oncology budget-impact model we see now needs IRA net-price scenarios for the class. Show us the budget impact at list price and under two or three plausible negotiated-price scenarios. We know nobody has the final numbers."
+
+R12: "I would build the budget-impact model with IRA scenarios as a structural feature rather than a sensitivity analysis. Payers will ask, and it is easier to have it built in."
+
+7. THEME E — SEQUENCING AFTER OSIMERTINIB
+
+R5 (IDN pathway lead): "Our pathway committee needs to place Velmara after osimertinib failure. The question is: before or after NX-441, and what about patients who go to chemotherapy first? We have no real-world sequencing data for this space, and the trials do not answer it."
+
+R6 (IDN pathway lead): "For patients with brain metastases the intracranial response and how long it lasts would change our pathway. If the CNS data are strong, that becomes the differentiator for us."
+
+8. IMPLICATIONS FOR THE EVIDENCE PLAN (PROGRAMME TEAM VIEW)
+
+The programme team's synthesis, for discussion at the evidence-planning workshop:
+
+- Highest priority: generate routine-practice evidence on the economic and clinical burden of recurrence (procedure-level direct costs, HCRU including hospitalisations and ED use), to feed the cost-effectiveness model against osimertinib before the CEA and budget-impact input freeze on 30 November 2026.
+- Highest priority: design a comparative-effectiveness approach for elderly patients against regional standard of care, distinct from the VEL-301 elderly subgroup and from the existing single-arm chart review, in time for the HTA elderly subgroup package due 15 January 2027.
+- High priority: a US claims-based persistence and six-month discontinuation study, ideally with early read-outs available for P&T.
+- Medium priority: build IRA negotiated-price scenarios into the budget-impact model.
+- Medium priority: real-world treatment sequencing after osimertinib, including Velmara versus NX-441.
+- To explore: PROs and quality of life in frail patients, and caregiver burden.
+
+Open questions for the workshop:
+1. Can the existing EU5 single-arm chart review be extended with an external comparator arm, or is a new study needed?
+2. Which US data source gives the fastest credible persistence estimate after launch?
+3. Is the CNS sub-study large enough to support an intracranial claim with payers, or only with clinicians?
+
+END OF DOCUMENT

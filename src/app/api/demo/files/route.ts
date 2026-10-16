@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import "@/modules";
 import { apiErrorResponse, requireCustomerContext } from "@/modules/auth/api-guard";
-import { DEMO_PACK } from "@/lib/iegp/demo-pack";
+import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export async function GET() {
   try {
     await requireCustomerContext();
     const zip = new JSZip();
-    for (const file of DEMO_PACK) zip.file(file.filename, file.text);
+    for (const file of CLIENT_DEMO_PACK) zip.file(file.filename, file.text);
     const body = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
     return new Response(body, {
       headers: {

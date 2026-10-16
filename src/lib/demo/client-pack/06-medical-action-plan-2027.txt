@@ -1,0 +1,83 @@
+FICTIONAL DEMONSTRATION DOCUMENT. Velmara (velmaratinib) and NX-441 are invented products. No real patients, studies, organisations or people are described.
+
+VELMARA (velmaratinib) — MEDICAL ACTION PLAN 2027
+Thoracic Oncology, Global and US Medical Affairs
+Version 0.9 (draft for workshop), September 2026
+
+1. MEDICAL STRATEGY ON A PAGE
+
+Vision: Velmara becomes the evidence-based standard for patients with EGFR-mutant NSCLC progressing on osimertinib, including patients with brain metastases and older patients.
+
+Strategic imperatives for 2027:
+1. Establish the clinical value of Velmara after osimertinib, based on VEL-301.
+2. Lead the scientific conversation on CNS disease in EGFR-mutant NSCLC.
+3. Close the evidence gaps for older and frail patients.
+4. Support appropriate patient selection, sequencing and safe use in routine care.
+
+2. IMPERATIVE 1 — CLINICAL VALUE AFTER OSIMERTINIB
+
+Tactics:
+- VEL-301 primary manuscript: submission in Q1 2027 to a high-impact general oncology journal.
+- Late-breaking presentation of VEL-301 at a major international oncology congress, H1 2027.
+- MSL education programme on VEL-301 results for academic and community oncologists.
+- Plain-language summary of VEL-301 for patients and advocacy groups.
+
+KPIs: manuscript accepted by Q3 2027; 80 percent of priority accounts reached by MSLs within 90 days of data release.
+
+3. IMPERATIVE 2 — CNS LEADERSHIP
+
+Tactics:
+- VEL-301 CNS sub-study: abstract and manuscript, including duration of intracranial response and time to radiotherapy for new brain lesions.
+- Neuro-oncology congress encore presentation.
+- CNS expert input forum (twice a year).
+
+Evidence ask: the CNS sub-study will report around 140 patients. Field medical and the advisory board say clinicians want more robust data on duration of intracranial response. Consider a supplementary CNS real-world cohort within the registry, or a pooled analysis with VEL-201.
+
+4. IMPERATIVE 3 — OLDER AND FRAIL PATIENTS
+
+Tactics:
+- Present the VEL-301 elderly subgroup, positioned as descriptive and not as a comparison with regional standard of care.
+- Publish the EU5 chart review in patients aged 65 and over, once complete.
+- Proposed: patient and caregiver survey on quality of life, treatment burden and caregiver burden in older and frail patients on oral EGFR TKIs.
+
+Evidence ask: medical and HEOR agree that a comparison against regional standard of care in elderly patients is needed for HTA and for clinicians. This is the most important unresolved evidence gap for this imperative.
+
+5. IMPERATIVE 4 — SEQUENCING AND SAFE USE
+
+Tactics:
+- Sequencing narrative for medical communications (due 1 June 2027). Today this is supported only by expert opinion; real-world sequencing evidence after osimertinib, including Velmara versus NX-441, is needed.
+- ILD and QT safe-use toolkit for community practices: monitoring algorithm, ECG guidance and an ILD recognition guide.
+- Support the post-authorisation safety study (PASS) design, including community sites.
+
+6. CONGRESS AND PUBLICATION PLAN 2027 (SUMMARY)
+
+- Primary VEL-301 results: H1 2027.
+- CNS sub-study: H2 2027.
+- Elderly subgroup (descriptive): H2 2027.
+- EU5 chart review in patients aged 65 and over: H2 2027.
+- HCRU after recurrence (HEOR-led): when available.
+- Interim OS update: Q4 2027 (publication 2028).
+
+Internal discussion point: the commercial team has asked for a bigger congress presence in 2027 (more symposia and booth activity). Medical leadership's view is that this is a dissemination and brand question rather than an evidence gap. It should not be treated as an evidence-generation priority.
+
+7. FIELD MEDICAL PRIORITIES
+
+- Gather insights on sequencing decisions after osimertinib.
+- Gather insights on monitoring practices for ILD and QT in community settings.
+- Identify sites for the prospective registry.
+- Report unsolicited questions about elderly patients and brain metastases.
+
+8. BUDGET AND RESOURCES (INDICATIVE)
+
+- Publications and congresses: 38 percent.
+- Evidence generation (medical-led): 34 percent, including the survey and CNS real-world cohort if approved.
+- Field medical programmes: 20 percent.
+- Advisory boards and expert input: 8 percent.
+
+9. DEPENDENCIES
+
+- VEL-301 topline (December 2026) drives the whole communications timeline.
+- HEOR HCRU and natural-history studies feed medical narratives on the burden of recurrence.
+- RWE registry first patient in (Q2 2027) is needed for real-world PROs and sequencing.
+
+END OF DOCUMENT

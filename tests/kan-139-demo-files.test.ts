@@ -15,7 +15,9 @@ vi.mock("@/modules/auth/api-guard", async (importOriginal) => {
 });
 
 import { GET } from "@/app/api/demo/files/route";
-import { DEMO_PACK } from "@/lib/iegp/demo-pack";
+import { CLIENT_DEMO_PACK } from "@/lib/demo/client-pack";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 /** KAN-139: the demo's input documents download as one ZIP. */
 describe("GET /api/demo/files", () => {
@@ -26,8 +28,8 @@ describe("GET /api/demo/files", () => {
     expect(res.headers.get("content-type")).toBe("application/zip");
     expect(res.headers.get("content-disposition")).toContain('filename="velmara-demo-files.zip"');
     const zip = await JSZip.loadAsync(await res.arrayBuffer());
-    expect(Object.keys(zip.files).sort()).toEqual(DEMO_PACK.map((f) => f.filename).sort());
-    for (const file of DEMO_PACK) expect(await zip.file(file.filename)!.async("string")).toBe(file.text);
+    expect(Object.keys(zip.files).sort()).toEqual(CLIENT_DEMO_PACK.map((f) => f.filename).sort());
+    for (const file of CLIENT_DEMO_PACK) expect(await zip.file(file.filename)!.async("string")).toBe(file.text);
   });
 
   it("is refused when signed out", async () => {
@@ -35,5 +37,17 @@ describe("GET /api/demo/files", () => {
     const res = await GET();
     expect(res.status).not.toBe(200);
     expect(res.headers.get("content-type")).not.toBe("application/zip");
+  });
+});
+
+describe("client demo pack", () => {
+  it("matches the source documents on disk (rerun scripts/build-client-demo-pack.mjs after editing them)", () => {
+    expect(CLIENT_DEMO_PACK).toHaveLength(7);
+    for (const file of CLIENT_DEMO_PACK) {
+      const onDisk = readFileSync(path.join(process.cwd(), "src/lib/demo/client-pack", file.filename), "utf8").replace(/\r\n/g, "\n").trimEnd();
+      expect(file.text, file.filename).toBe(onDisk);
+      expect(file.text.length, `${file.filename} is a full document`).toBeGreaterThan(4000);
+      expect(file.text.startsWith("FICTIONAL DEMONSTRATION DOCUMENT"), file.filename).toBe(true);
+    }
   });
 });
