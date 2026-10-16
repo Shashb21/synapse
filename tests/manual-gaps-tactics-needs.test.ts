@@ -84,6 +84,7 @@ describe("manual gap edits", () => {
     ).rejects.toThrow(/domain/i);
     const changes = await modifyGap({
       gap_id: gapId,
+      expected_gap: (await loadState()).gaps.find(gap => gap.id === gapId),
       name: "Human name",
       statement: "Human statement.",
       domain: "safety",
@@ -114,7 +115,7 @@ describe("manual gap edits", () => {
     const src = await source();
     const first = await commitGap(src.source_id, null);
     const gapId = first.gap_ids[0]!;
-    await modifyGap({ gap_id: gapId, name: "Human name", statement: "Human statement.", rationale: "Human wording", ...who });
+    await modifyGap({ gap_id: gapId, expected_gap: (await loadState()).gaps.find(gap => gap.id === gapId), name: "Human name", statement: "Human statement.", rationale: "Human wording", ...who });
     const src2 = await source("KOL interview");
     const rerun = await commitGap(src2.source_id, gapId);
     expect(rerun.merged_gap_ids).toEqual([gapId]);

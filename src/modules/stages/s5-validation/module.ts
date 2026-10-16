@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { gapEditSnapshotSchema } from "@/lib/iegp/gap-edit";
+import { inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { registerModule } from "@/modules/kernel/registry";
 import { recordEdit } from "@/modules/kernel/edit-records";
 import type { SynapseModule } from "@/modules/kernel/contracts";
@@ -26,6 +28,7 @@ const inputSchema = z.object({
     "reject_mapping",
   ]),
   gap_id: z.string().optional(),
+  expected_gap: gapEditSnapshotSchema.optional(),
   tactic_id: z.string().optional(),
   status: z.enum(MAPPED_GAP_STATUSES).optional(),
   name: z.string().optional(),
@@ -61,6 +64,11 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
   inputSchema,
   outputSchema,
   async run(input, ctx) {
+    // A direct edit includes the gate history as well as the gap's field history.
+    // Re-enter once inside the ambient transaction, matching the store's mutations.
+    if (input.action === "edit_gap" && !inWorkspaceTransaction()) {
+      return withWorkspaceTransaction(() => validationModule.run(input, ctx));
+    }
     const before = await loadState();
     const gap = input.gap_id ? before.gaps.find((row) => row.id === input.gap_id) : undefined;
     const tactic = input.tactic_id
@@ -108,6 +116,7 @@ export const validationModule: SynapseModule<ValidationInput, ValidationOutput> 
         if (!input.gap_id) throw new Error("gap_id is required.");
         await modifyGap({
           gap_id: input.gap_id,
+          expected_gap: input.expected_gap,
           name: input.name ?? gap?.name ?? "",
           statement: input.statement ?? gap?.statement ?? "",
           actor_name: ctx.actor.name,

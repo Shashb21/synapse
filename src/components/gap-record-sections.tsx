@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
 import type { ReactNode } from "react";
 import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
 import { PriorityJudgementDetails, priorityNextAction } from "@/components/prioritize/priority-context";
@@ -76,7 +77,7 @@ export function GapConfirmationAndObjective({
           <div className="mt-2">
             <ActionDialog
               endpoint="/api/iegp"
-              payload={{ action: "set_gap_objective", gap_id: gap.id, expected_objective_id: gap.objective_id }}
+              payload={{ action: "set_gap_objective", gap_id: gap.id, expected_objective_id: gap.objective_id, expected_gap: gapEditSnapshot(gap) }}
               identity={identity}
               label="Change objective"
               title={`Objective for ${gapNumberLabel(gap.number)}`}

@@ -40,6 +40,8 @@ describe("gap metadata (KAN-49)", () => {
   it("saves stakeholders, geography, regional nuances and notes, and audits the change", async () => {
     const saved = await setGapMetadata({
       gap_id: gapId,
+      expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata,
+      rationale: "Record the interview details",
       metadata: { stakeholders: ["Payers", "G-BA"], geography: "DE", regional_nuances: "AMNOG dossier due Q3", notes: "Ask HEOR" },
       ...ACTOR,
     });

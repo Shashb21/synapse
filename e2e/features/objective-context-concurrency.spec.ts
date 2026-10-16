@@ -27,7 +27,7 @@ async function newGap(request: APIRequestContext, name: string) {
   await iegpAction(request, { action: "validate_gap", gap_id: id });
   const record = await (await request.get(`/api/gaps/${id}`)).json();
   if (record.gap.objective_id !== objectiveIds[0]) {
-    await iegpAction(request, { action: "set_gap_objective", gap_id: id, expected_objective_id: record.gap.objective_id, objective_id: objectiveIds[0], rationale: "This test gap serves the first objective" });
+    await iegpAction(request, { action: "set_gap_objective", gap_id: id, expected_gap: record.gap, expected_objective_id: record.gap.objective_id, objective_id: objectiveIds[0], rationale: "This test gap serves the first objective" });
   }
   return id;
 }
@@ -75,7 +75,8 @@ test("objective reassignment requires a reason and retains the selected objectiv
   await expect(dialog.locator('select[name="objective_id"]')).toHaveValue(objectiveIds[1]!);
   expect((await (await request.get(`/api/gaps/${gapId}`)).json()).gap.objective_id).toBe(objectiveIds[0]);
   await reason.fill("Evidence now serves the second objective");
-  await iegpAction(request, { action: "set_gap_objective", gap_id: gapId, objective_id: objectiveIds[2], expected_objective_id: objectiveIds[0], rationale: "Another editor assigned the third objective" });
+  const concurrentGap = (await (await request.get(`/api/gaps/${gapId}`)).json()).gap;
+  await iegpAction(request, { action: "set_gap_objective", gap_id: gapId, expected_gap: concurrentGap, objective_id: objectiveIds[2], expected_objective_id: objectiveIds[0], rationale: "Another editor assigned the third objective" });
   await dialog.getByRole("button", { name: "Save objective", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Objective assignment changed");
   await expect(dialog.locator('select[name="objective_id"]')).toHaveValue(objectiveIds[1]!);
@@ -94,4 +95,38 @@ test("objective reassignment requires a reason and retains the selected objectiv
   const history = record.history.filter((entry: { field: string }) => entry.field === "objective");
   expect(history).toHaveLength(initialHistory + 2);
   expect(history.some((entry: { rationale: string }) => entry.rationale === "Reviewed the current assignment; choose the second objective")).toBe(true);
+});
+
+
+test("objective reassignment retains the selected objective and reason when linked decision context becomes stale", async ({ page, request }) => {
+  const gapId = await newGap(request, "Linked context assignment snapshot");
+  await page.goto(`/gaps/${gapId}`);
+  await page.getByRole("button", { name: "Change objective", exact: true }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.locator('select[name="objective_id"]').selectOption(objectiveIds[1]!);
+  await dialog.getByLabel(/^Reason for objective change \(required\)/).fill("Evidence should now serve the second committee");
+  const changed = structuredClone(setup);
+  changed.objectives[0]!.evidence_needed_by = "2031-05-01";
+  setup = (await iegpAction(request, { action: "save_product_setup", context: changed, reason: "Change the linked committee evidence deadline" })).context as PlanningContext;
+  const before = await (await request.get(`/api/gaps/${gapId}`)).json();
+  await dialog.getByRole("button", { name: "Save objective", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("linked objective context changed");
+  await expect(dialog.locator('select[name="objective_id"]')).toHaveValue(objectiveIds[1]!);
+  await expect(dialog.getByLabel(/^Reason for objective change \(required\)/)).toHaveValue("Evidence should now serve the second committee");
+  const refused = await (await request.get(`/api/gaps/${gapId}`)).json();
+  expect(refused.gap.objective_id).toBe(objectiveIds[0]);
+  expect(refused.history).toEqual(before.history);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Change objective", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.locator('select[name="objective_id"]').selectOption(objectiveIds[1]!);
+  await dialog.getByLabel(/^Reason for objective change \(required\)/).fill("Reviewed the new deadline; choose the second committee");
+  await dialog.getByRole("button", { name: "Save objective", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const saved = await (await request.get(`/api/gaps/${gapId}`)).json();
+  expect(saved.gap.objective_id).toBe(objectiveIds[1]);
+  const assignments = saved.history.filter((entry: { field: string }) => entry.field === "objective");
+  expect(assignments).toHaveLength(before.history.filter((entry: { field: string }) => entry.field === "objective").length + 1);
+  expect(assignments.some((entry: { rationale: string }) => entry.rationale === "Reviewed the new deadline; choose the second committee")).toBe(true);
 });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
 import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
 import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
@@ -166,15 +167,15 @@ export default async function GapDetailPage({
           {gap.retired ? null : (
             <ActionDialog
               endpoint="/api/iegp"
-              payload={{ action: "modify_gap", gap_id: gap.id }}
+              payload={{ action: "modify_gap", gap_id: gap.id, expected_gap: gapEditSnapshot(gap) }}
               identity={identity}
               label="Edit gap"
               title={`Edit ${gap.id}`}
-              description="Your wording replaces the current name, statement and domain. It is locked to you and kept on every later AI run; the AI only adds needs to a gap, it never rewrites one."
+              description="Changing Evidence needed requires priority review again if this gap is Open. Its previous band, scores and priority rationale remain available. Name-only or domain-only changes retain priority confirmation. Give a meaningful reason; no supporting reference is required. Your wording is retained on later AI runs."
               confirmLabel="Save edit"
               fields={[
                 { name: "name", label: "Name", defaultValue: gap.name, required: true },
-                { name: "statement", label: "Statement", type: "textarea", defaultValue: gap.statement, required: true },
+                { name: "statement", label: "Evidence needed", type: "textarea", defaultValue: gap.statement, required: true },
                 {
                   name: "domain",
                   label: "Domain",

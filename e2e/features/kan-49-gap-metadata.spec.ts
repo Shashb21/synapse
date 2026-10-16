@@ -27,6 +27,7 @@ test.describe("gap details", () => {
     }).toPass({ timeout: 30_000 });
     await details.getByLabel("Geography").fill("US, EU5");
     await details.getByLabel("Regional nuances").fill("Germany: G-BA wants a head-to-head comparator.");
+    await details.getByLabel("Reason for details change (required)").fill("Record the payer interview details");
     await save.click();
     await expect(details.getByRole("status")).toHaveText("Details saved.");
     // Case-insensitive duplicates collapse to the first spelling.

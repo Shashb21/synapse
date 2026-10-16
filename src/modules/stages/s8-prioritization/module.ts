@@ -675,16 +675,17 @@ export async function requirePriorityContextReview(args: {
   await ensurePlacementSchema();
   return db().transaction(async tx => {
     const [gap] = await tx.select().from(gaps).where(eq(gaps.id, args.gap_id)).for("update");
-    if (!gap) return false;
+    if (!gap || gap.retired) return false;
+    // Every editable gap needs a fresh edit snapshot after a context change,
+    // even when its current status makes it ineligible for priority review.
+    // The revision exists without a placement or a priority-history entry.
+    await tx.update(gaps).set({ priority_context_version: args.event_id }).where(eq(gaps.id, args.gap_id));
     const context = {
       status: gap.status as EvidenceGap["status"], retired: gap.retired, parked_at: gap.parked_at,
       computed_status: gap.computed_status as EvidenceGap["computed_status"],
       status_override: gap.status_override as EvidenceGap["status_override"],
     };
     if (!isLiveGap(context) || displayedGapStatus(context) !== "validated_open") return false;
-    // The audited context revision exists independently of a judgement. An
-    // unplaced gap must reject an old first decision without creating a fake placement.
-    await tx.update(gaps).set({ priority_context_version: args.event_id }).where(eq(gaps.id, args.gap_id));
     const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
     if (!current) return false;
     const at = new Date(Math.max(Date.now(), Date.parse(current.at) + 1)).toISOString();

@@ -253,6 +253,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const settings = await setGapSettings({
           gap_id: String(body.gap_id ?? ""),
+          expected_settings: body.expected_settings,
           settings: Array.isArray(body.settings) ? body.settings.map(String) : [],
           rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
@@ -264,6 +265,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const metadata = await setGapMetadata({
           gap_id: String(body.gap_id ?? ""),
+          expected_metadata: body.expected_metadata,
           // A metadata object, or the flat fields a dialog form posts (stakeholders comma-separated).
           metadata:
             body.metadata && typeof body.metadata === "object"

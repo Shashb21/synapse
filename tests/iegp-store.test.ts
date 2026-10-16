@@ -146,6 +146,7 @@ describe("IEGP postgres store", () => {
     expect(gap).toBeTruthy();
     await modifyGap({
       gap_id: gap!.id,
+      expected_gap: gap,
       name: "Routine-care ILD / QT",
       statement: "Need ILD and QT characterisation in routine US care, not only the label.",
       rationale: "Tighter wording for the plan.",

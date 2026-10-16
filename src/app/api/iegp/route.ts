@@ -453,6 +453,7 @@ async function handleAction(request: Request): Promise<Response> {
           gap_id: body.gap_id,
           objective_id: body.objective_id,
           expected_objective_id: body.expected_objective_id,
+          expected_gap: body.expected_gap,
           rationale: body.rationale || body.note || null,
           actor_name,
           actor_function,
@@ -769,6 +770,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "modify_gap":
         await modifyGap({
           gap_id: body.gap_id,
+          expected_gap: body.expected_gap,
           name: typeof body.name === "string" ? body.name : undefined,
           statement: typeof body.statement === "string" ? body.statement : undefined,
           domain: body.domain || undefined,

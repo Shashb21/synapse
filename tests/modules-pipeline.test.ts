@@ -136,6 +136,7 @@ describe("modular pipeline, S0 to S10", () => {
       input: {
         action: "edit_gap",
         gap_id: gap.id,
+        expected_gap: gap,
         name: gap.name,
         statement: `${gap.statement} Restated for the HTA submission.`,
         rationale: "Sharpened for the HTA submission question",

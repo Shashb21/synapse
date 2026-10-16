@@ -95,6 +95,8 @@ export function GapDetailsEditor({
   };
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(initial);
+  const [reason, setReason] = useState("");
+  const [savedMetadata, setSavedMetadata] = useState(metadata);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
   const dirty = (Object.keys(form) as (keyof typeof form)[]).some((key) => form[key] !== saved[key]);
@@ -104,11 +106,17 @@ export function GapDetailsEditor({
   };
 
   async function save() {
+    if (reason.trim().length < 3) {
+      setMessage({ tone: "error", text: "A meaningful reason is required for the details change." });
+      return;
+    }
     setPending(true);
     setMessage(null);
     const res = await postJson("/api/plan", {
         action: "set_gap_metadata",
         gap_id: gapId,
+        expected_metadata: savedMetadata,
+        rationale: reason,
         metadata: {
           stakeholders: form.stakeholders.split(/[,\n]/),
           geography: form.geography,
@@ -130,6 +138,8 @@ export function GapDetailsEditor({
     };
     setForm(next);
     setSaved(next);
+    setSavedMetadata(json.metadata);
+    setReason("");
     setMessage({ tone: "ok", text: "Details saved." });
     router.refresh();
   }
@@ -171,12 +181,18 @@ export function GapDetailsEditor({
         </label>
       </div>
       {readOnly ? null : (
+        <label className={label}>
+          Reason for details change (required)
+          <textarea rows={2} value={reason} onChange={event => setReason(event.target.value)} disabled={pending} className={area} />
+        </label>
+      )}
+      {readOnly ? null : (
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" disabled={!dirty || pending} onClick={() => void save()}>
             {pending ? "Saving…" : "Save details"}
           </Button>
           {dirty ? (
-            <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => setForm(saved)}>
+            <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => { setForm(saved); setReason(""); setMessage(null); }}>
               Discard
             </Button>
           ) : null}

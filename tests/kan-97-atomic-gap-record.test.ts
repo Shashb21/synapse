@@ -188,7 +188,7 @@ describe("KAN-97 confirmation", () => {
     expect(gap.validated_by).toMatchObject({ name: ACTOR.name, function: "heor" });
     expect(gap.validation_rationale).toBe("Both sources agree");
     const confirmedAt = gap.validated_at;
-    await modifyGap({ gap_id: gapId, domain: "unmet_need", rationale: "Better fit", ...who });
+    await modifyGap({ gap_id: gapId, expected_gap: gap, domain: "unmet_need", rationale: "Better fit", ...who });
     gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
     expect(gap.validated_at).toBe(confirmedAt);
 
@@ -238,8 +238,8 @@ describe("KAN-97 S2 provenance and split suggestions", () => {
     expect(need.source_quote).toBe(longQuote);
     expect(need).toMatchObject({ run_id: "kan97-s2", candidate_row_id: "gc-1", block_id: "blk-1" });
 
-    await setGapSettings({ gap_id: gapId, settings: ["2L"], ...who });
-    await setGapMetadata({ gap_id: gapId, metadata: { stakeholders: ["Payers"], geography: "EU5" }, ...who, rationale: "From the interview" });
+    await setGapSettings({ gap_id: gapId, expected_settings: (await loadState()).gaps.find(gap => gap.id === gapId)!.settings, settings: ["2L"], rationale: "Correct the setting", ...who });
+    await setGapMetadata({ gap_id: gapId, expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata, metadata: { stakeholders: ["Payers"], geography: "EU5" }, ...who, rationale: "From the interview" });
     const overlap = await commitExtractedRecords({
       source_id: SOURCE, title: "KAN-97 interview", stakeholder_function: "heor", ...who, needs: [], gaps: [], tactics: [],
       overlaps: [{
@@ -265,16 +265,16 @@ describe("KAN-97 settings, metadata and objective edits", () => {
   it("each change is an edit record with before and after; the objective can be changed", async () => {
     await resetDemoSetup();
     const gapId = await createGap({ name: "Burden", statement: "Burden of illness is unknown.", domain: "disease_burden", ...who });
-    await setGapSettings({ gap_id: gapId, settings: ["1L", "Perioperative"], rationale: "Both settings", ...who });
-    await setGapMetadata({ gap_id: gapId, metadata: { notes: "Ask the payer advisors" }, ...who });
+    await setGapSettings({ gap_id: gapId, expected_settings: (await loadState()).gaps.find(gap => gap.id === gapId)!.settings, settings: ["1L", "Perioperative"], rationale: "Both settings", ...who });
+    await setGapMetadata({ gap_id: gapId, expected_metadata: (await loadState()).gaps.find(gap => gap.id === gapId)!.metadata, metadata: { notes: "Ask the payer advisors" }, rationale: "Record payer follow-up", ...who });
     const edits = await listEdits({ entity_id: gapId });
     expect(edits.find((row) => row.field === "settings")).toMatchObject({ before: null, after: "1L, Perioperative", rationale: "Both settings" });
-    expect(edits.find((row) => row.field === "metadata.notes")).toMatchObject({ before: null, after: "Ask the payer advisors", rationale: null });
+    expect(edits.find((row) => row.field === "metadata.notes")).toMatchObject({ before: null, after: "Ask the payer advisors", rationale: "Record payer follow-up" });
 
     const state = await loadState();
     const other = state.objectives.find((o) => o.id !== state.gaps.find((g) => g.id === gapId)!.objective_id);
     if (other) {
-      await setGapObjective({ gap_id: gapId, expected_objective_id: state.gaps.find(gap => gap.id === gapId)!.objective_id, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
+      await setGapObjective({ gap_id: gapId, expected_gap: state.gaps.find(gap => gap.id === gapId), expected_objective_id: state.gaps.find(gap => gap.id === gapId)!.objective_id, objective_id: other.id, rationale: "Serves the HTA decision", ...who });
       expect((await loadState()).gaps.find((g) => g.id === gapId)!.objective_id).toBe(other.id);
       expect((await listEdits({ entity_id: gapId })).find((row) => row.field === "objective")).toMatchObject({ rationale: "Serves the HTA decision" });
     }

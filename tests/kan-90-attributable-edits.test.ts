@@ -216,7 +216,7 @@ describe("KAN-90 attributable plan edits", () => {
   }, 15_000);
 
   it("plan-route actions (gap settings) are audited and mirrored too", async () => {
-    const res = await call(planPost, "/api/plan", { action: "set_gap_settings", gap_id: gapId, settings: ["hospital"] });
+    const res = await call(planPost, "/api/plan", { action: "set_gap_settings", gap_id: gapId, expected_settings: (await inWorkspace(loadState)).gaps.find(gap => gap.id === gapId)!.settings, settings: ["hospital"], rationale: "Correct the care setting" });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const events = await eventsFor(res.request_id);
     expect(events.some((event) => event.category === "plan" && event.entity_id === gapId && event.actor_principal === OWNER)).toBe(true);

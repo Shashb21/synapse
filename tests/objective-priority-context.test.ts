@@ -58,7 +58,7 @@ async function fixture() {
     for (const settings of [["1L"], ["2L"], ["1L"], ["2L"]]) {
       ids.push(await createGap({ ...auditActor, statement: `Missing evidence ${ids.length}`, settings, objective_id: ctx.objectives[0]!.id }));
     }
-    await setGapObjective({ ...auditActor, gap_id: ids[3]!, expected_objective_id: ctx.objectives[0]!.id, objective_id: ctx.objectives[1]!.id, rationale: "Unrelated objective" });
+    await setGapObjective({ ...auditActor, gap_id: ids[3]!, expected_gap: (await loadState()).gaps.find(gap => gap.id === ids[3]), expected_objective_id: ctx.objectives[0]!.id, objective_id: ctx.objectives[1]!.id, rationale: "Unrelated objective" });
     await db().execute(sql`UPDATE gaps SET computed_status = 'validated_open', status = 'validated_open', human_validated = true`);
     for (const gap_id of ids) await setPlacement({ gap_id, actor, band: "high", validate: true, axis_scores: { decision_impact: 80, time_pressure: 70 }, rationale: "Retain original judgement", ...await priorityDecision(gap_id, "Initial priority review") });
     await db().execute(sql`UPDATE gaps SET computed_status = 'addressed', status = 'addressed' WHERE id = ${ids[2]!}`);
@@ -159,9 +159,10 @@ describe("objective dates and shared priority review", () => {
     expect([200, 400]).toContain(review.status);
     expect((await placements()).find(p => p.gap_id === latest.gap_id)!.validated).toBe(false);
     const next = await context(); next.objectives[1]!.decision_date = "2029-01-01";
+    const assignmentGap = (await scoped(loadState)).gaps.find(gap => gap.id === ids[1])!;
     await Promise.all([
       post({ action: "save_product_setup", context: next, reason: "Reschedule the other decision" }),
-      scoped(() => setGapObjective({ ...auditActor, gap_id: ids[1]!, expected_objective_id: next.objectives[0]!.id, objective_id: next.objectives[1]!.id, rationale: "Evidence now serves the other decision" })),
+      scoped(() => setGapObjective({ ...auditActor, gap_id: ids[1]!, expected_gap: assignmentGap, expected_objective_id: next.objectives[0]!.id, objective_id: next.objectives[1]!.id, rationale: "Evidence now serves the other decision" })),
     ]);
     expect((await placements()).find(p => p.gap_id === ids[1])!.validated).toBe(false);
   });
@@ -274,11 +275,12 @@ describe("objective dates and shared priority review", () => {
   it("refuses competing objective reassignments based on the same prior assignment", async () => {
     const { ids, ctx } = await fixture();
     const prior = ctx.objectives[0]!.id;
-    const missingReason = await post({ action: "set_gap_objective", gap_id: ids[0], objective_id: ctx.objectives[1]!.id, expected_objective_id: prior });
+    const expectedGap = (await scoped(loadState)).gaps.find(gap => gap.id === ids[0])!;
+    const missingReason = await post({ action: "set_gap_objective", gap_id: ids[0], expected_gap: expectedGap, objective_id: ctx.objectives[1]!.id, expected_objective_id: prior });
     expect(missingReason.status).toBe(400);
     expect(missingReason.body.error).toMatch(/rationale is required/i);
     const results = await Promise.all(ctx.objectives.slice(1, 3).map(objective => post({
-      action: "set_gap_objective", gap_id: ids[0], objective_id: objective.id,
+      action: "set_gap_objective", gap_id: ids[0], expected_gap: expectedGap, objective_id: objective.id,
       expected_objective_id: prior, rationale: `Evidence now serves ${objective.name}`,
     })));
     expect(results.map(result => result.status).sort()).toEqual([200, 400]);
@@ -317,9 +319,15 @@ describe("objective dates and shared priority review", () => {
     ];
     for (const [index, item] of cases.entries()) {
       await scoped(() => db().execute(sql`UPDATE gaps SET status = ${item.status}, computed_status = ${item.status}, retired = ${item.retired}, parked_at = ${item.parked} WHERE id = ${id}`));
+      const previousGap = (await scoped(loadState)).gaps.find(gap => gap.id === id)!;
+      const history = await scoped(() => entityHistory([id]));
       const ctx = await context(); ctx.objectives[0]!.evidence_needed_by = `2028-06-${10 + index}`;
       expect((await post({ action: "save_product_setup", context: ctx, reason: "Update the shared deadline" })).status).toBe(200);
       expect((await placements()).find(row => row.gap_id === id)).toEqual(prior);
+      const revisedGap = (await scoped(loadState)).gaps.find(gap => gap.id === id)!;
+      if (item.retired) expect(revisedGap.priority_context_version).toBe(previousGap.priority_context_version);
+      else expect(revisedGap.priority_context_version).not.toBe(previousGap.priority_context_version);
+      expect(await scoped(() => entityHistory([id]))).toEqual(history);
     }
   });
 

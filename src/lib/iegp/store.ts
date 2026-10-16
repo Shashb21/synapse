@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
+import { requireGapEditSnapshot } from "./gap-edit";
 import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { WORKSPACE_RESET_ACTION } from "./gap-history";
@@ -1490,18 +1491,28 @@ export async function parkGap(args: {
 export async function setGapSettings(args: {
   gap_id: string;
   settings: string[];
+  expected_settings?: unknown;
   actor_name: string;
   actor_function: ActorFunction;
-  /** Optional: why the settings changed (KAN-97). */
+  /** Reason for a changed setting; one priority still applies across settings. */
   rationale?: string | null;
 }): Promise<string[]> {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
-  const settings = normalizeSettings(args.settings);
-  await db().update(t.gaps).set({ settings }).where(eq(t.gaps.id, args.gap_id));
-  if (settings.join("|") !== gap.settings.join("|")) {
+  await ensureSchema();
+  return withWorkspaceTransaction(async () => {
+    // Join Setup's gap membership lock before taking a row lock.
+    await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const state = await readState();
+    const gap = state.gaps.find((g) => g.id === args.gap_id);
+    if (!gap) throw new Error("Gap not found");
+    if (gap.retired) throw new Error("A retired gap cannot be re-tagged.");
+    const settings = normalizeSettings(args.settings);
+    if (!Array.isArray(args.expected_settings) || JSON.stringify(args.expected_settings) !== JSON.stringify(gap.settings)) {
+      throw new Error("Gap settings changed or their snapshot is missing. Your settings and reason have not been saved. Reload the latest settings and retry.");
+    }
+    if (JSON.stringify(settings) === JSON.stringify(gap.settings)) return settings;
+    const reason = requireRationale(args.rationale);
+    await db().update(t.gaps).set({ settings }).where(eq(t.gaps.id, args.gap_id));
     await recordEdit({
       stage: "S2",
       entity_type: "gap",
@@ -1510,74 +1521,84 @@ export async function setGapSettings(args: {
       action: "edit",
       before: gap.settings.join(", ") || null,
       after: settings.join(", ") || null,
-      rationale: args.rationale ?? null,
-      rationale_optional: true,
+      rationale: reason,
       actor: { name: args.actor_name, function: args.actor_function },
     });
-  }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "gap",
-    args.gap_id,
-    "set_settings",
-    settings.length ? settings.join(", ") : "No setting",
-  );
-  return settings;
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "gap",
+      args.gap_id,
+      "set_settings",
+      settings.length ? settings.join(", ") : "No setting",
+    );
+    return settings;
+  });
 }
 
 /** The design's gap metadata (KAN-49), edited by a person and kept on the audit trail. */
 export async function setGapMetadata(args: {
   gap_id: string;
   metadata: unknown;
+  expected_metadata?: unknown;
   actor_name: string;
   actor_function: ActorFunction;
-  /** Optional: why the details changed (KAN-97). */
+  /** Reason for each changed detail; references are optional for manual edits. */
   rationale?: string | null;
 }): Promise<GapMetadata> {
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("A retired gap cannot be edited.");
-  const metadata = normalizeGapMetadata(args.metadata);
-  await db().update(t.gaps).set({ metadata }).where(eq(t.gaps.id, args.gap_id));
-  // Each changed field is its own edit record, with the full before and after text.
-  const fieldText = (m: GapMetadata, key: keyof GapMetadata) => {
-    const value = m[key];
-    return (Array.isArray(value) ? value.join(", ") : String(value ?? "")).trim() || null;
-  };
-  for (const key of ["stakeholders", "geography", "regional_nuances", "notes"] as const) {
-    const before = fieldText(gap.metadata, key);
-    const after = fieldText(metadata, key);
-    if (before === after) continue;
-    await recordEdit({
-      stage: "S2",
-      entity_type: "gap",
-      entity_id: gap.id,
-      field: `metadata.${key}`,
-      action: "edit",
-      before,
-      after,
-      rationale: args.rationale ?? null,
-      rationale_optional: true,
-      actor: { name: args.actor_name, function: args.actor_function },
-    });
-  }
-  const summary = [
-    metadata.stakeholders.length ? `Stakeholders: ${metadata.stakeholders.join(", ")}` : null,
-    metadata.geography ? `Geography: ${metadata.geography}` : null,
-    metadata.regional_nuances ? "Regional nuances set" : null,
-    metadata.notes ? "Notes set" : null,
-  ].filter(Boolean);
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "gap",
-    args.gap_id,
-    "set_metadata",
-    summary.length ? summary.join(" · ") : "Metadata cleared",
-  );
-  return metadata;
+  await ensureSchema();
+  return withWorkspaceTransaction(async () => {
+    // Join Setup's gap membership lock before taking a row lock.
+    await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const state = await readState();
+    const gap = state.gaps.find((g) => g.id === args.gap_id);
+    if (!gap) throw new Error("Gap not found");
+    if (gap.retired) throw new Error("A retired gap cannot be edited.");
+    const metadata = normalizeGapMetadata(args.metadata);
+    if (!args.expected_metadata || JSON.stringify(normalizeGapMetadata(args.expected_metadata)) !== JSON.stringify(gap.metadata)) {
+      throw new Error("Gap details changed or their snapshot is missing. Your values and reason have not been saved. Reload the latest details and retry.");
+    }
+    if (JSON.stringify(metadata) === JSON.stringify(gap.metadata)) return metadata;
+    const reason = requireRationale(args.rationale);
+    await db().update(t.gaps).set({ metadata }).where(eq(t.gaps.id, args.gap_id));
+    // Each changed field is its own edit record, with the full before and after text.
+    const fieldText = (m: GapMetadata, key: keyof GapMetadata) => {
+      const value = m[key];
+      return (Array.isArray(value) ? value.join(", ") : String(value ?? "")).trim() || null;
+    };
+    for (const key of ["stakeholders", "geography", "regional_nuances", "notes"] as const) {
+      const before = fieldText(gap.metadata, key);
+      const after = fieldText(metadata, key);
+      if (JSON.stringify(gap.metadata[key]) === JSON.stringify(metadata[key])) continue;
+      await recordEdit({
+        stage: "S2",
+        entity_type: "gap",
+        entity_id: gap.id,
+        field: `metadata.${key}`,
+        action: "edit",
+        before,
+        after,
+        rationale: reason,
+        actor: { name: args.actor_name, function: args.actor_function },
+      });
+    }
+    const summary = [
+      metadata.stakeholders.length ? `Stakeholders: ${metadata.stakeholders.join(", ")}` : null,
+      metadata.geography ? `Geography: ${metadata.geography}` : null,
+      metadata.regional_nuances ? "Regional nuances set" : null,
+      metadata.notes ? "Notes set" : null,
+    ].filter(Boolean);
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "gap",
+      args.gap_id,
+      "set_metadata",
+      summary.length ? summary.join(" · ") : "Metadata cleared",
+    );
+    return metadata;
+  });
 }
 
 /**
@@ -1589,6 +1610,8 @@ export async function setGapObjective(args: {
   objective_id: string;
   /** Assignment reviewed when this edit was opened, including empty/unlinked. */
   expected_objective_id: string;
+  /** Gap and linked context reviewed when the assignment editor opened. */
+  expected_gap?: unknown;
   rationale?: string | null;
   actor_name: string;
   actor_function: ActorFunction;
@@ -1606,6 +1629,7 @@ export async function setGapObjective(args: {
     if (typeof args.expected_objective_id !== "string" || args.expected_objective_id !== gap.objective_id) {
       throw new Error("Objective assignment changed or its snapshot is missing. Your selected objective and reason have not been saved. Close this dialog, reload the latest assignment and retry.");
     }
+    requireGapEditSnapshot(gap, args.expected_gap);
     if (gap.objective_id === objective.id) throw new Error("The gap already serves that objective.");
     const reason = requireRationale(args.rationale);
     const label = (id: string) => {
@@ -2918,6 +2942,8 @@ export async function createGap(args: {
  */
 export async function modifyGap(args: {
   gap_id: string;
+  /** Snapshot captured when the editor opened; required at the save boundary. */
+  expected_gap?: unknown;
   name?: string;
   statement?: string;
   domain?: EvidenceDomain | string;
@@ -2927,47 +2953,54 @@ export async function modifyGap(args: {
   note?: string;
 }) {
   const rationale = requireRationale(args.rationale ?? args.note);
-  const state = await loadState();
-  const gap = state.gaps.find((g) => g.id === args.gap_id);
-  if (!gap) throw new Error("Gap not found");
-  if (gap.retired) throw new Error("This gap was retired by a split or rewrite. Edit the live gap.");
-  const name = args.name === undefined ? undefined : args.name.trim();
-  const statement = args.statement === undefined ? undefined : args.statement.trim();
-  if (name !== undefined && !name) throw new Error("Gap name is required.");
-  if (statement !== undefined && !statement) throw new Error("Statement is required.");
-  const domain = args.domain === undefined || args.domain === "" ? undefined : args.domain;
-  if (domain !== undefined && !EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
-    throw new Error("Unknown evidence domain.");
-  }
-  const changes = diffFields(gap, { name, statement, domain });
-  if (changes.length === 0) throw new Error("Nothing changed.");
-  await db()
-    .update(t.gaps)
-    .set({
-      ...(name !== undefined ? { name } : {}),
-      ...(statement !== undefined ? { statement } : {}),
-      ...(domain !== undefined ? { domain: domain as EvidenceDomain } : {}),
-      lock: makeLock(args.actor_name, args.actor_function, rationale),
-    })
-    .where(eq(t.gaps.id, args.gap_id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "gap",
-    args.gap_id,
-    "modify",
-    `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
-  );
-  await recordFieldEdits({
-    stage: "S2",
-    entity_type: "gap",
-    entity_id: args.gap_id,
-    changes,
-    rationale,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
+  await ensureSchema();
+  return withWorkspaceTransaction(async () => {
+    await lockObjectiveContext();
+    await db().execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
+    const state = await readState();
+    const gap = state.gaps.find((g) => g.id === args.gap_id);
+    if (!gap) throw new Error("Gap not found");
+    if (gap.retired) throw new Error("This gap was retired by a split or rewrite. Edit the live gap.");
+    const name = args.name === undefined ? undefined : args.name.trim();
+    const statement = args.statement === undefined ? undefined : args.statement.trim();
+    if (name !== undefined && !name) throw new Error("Gap name is required.");
+    if (statement !== undefined && !statement) throw new Error("Statement is required.");
+    const domain = args.domain === undefined || args.domain === "" ? undefined : args.domain;
+    if (domain !== undefined && !EVIDENCE_DOMAINS.includes(domain as EvidenceDomain)) {
+      throw new Error("Unknown evidence domain.");
+    }
+    requireGapEditSnapshot(gap, args.expected_gap);
+    const changes = diffFields(gap, { name, statement, domain });
+    if (changes.length === 0) throw new Error("Nothing changed.");
+    await db()
+      .update(t.gaps)
+      .set({
+        ...(name !== undefined ? { name } : {}),
+        ...(statement !== undefined ? { statement } : {}),
+        ...(domain !== undefined ? { domain: domain as EvidenceDomain } : {}),
+        lock: makeLock(args.actor_name, args.actor_function, rationale),
+      })
+      .where(eq(t.gaps.id, args.gap_id));
+    await appendAudit(
+      args.actor_name,
+      args.actor_function,
+      "gap",
+      args.gap_id,
+      "modify",
+      `${changes.map((c) => c.field).join(", ")}: ${rationale}`,
+    );
+    for (const change of changes) {
+      const edit = await recordEdit({
+        stage: "S2", entity_type: "gap", entity_id: gap.id, ...change, action: "edit",
+        rationale, actor: { name: args.actor_name, function: args.actor_function },
+      });
+      if (change.field === "statement") {
+        const { requirePriorityContextReview } = await import("@/modules/stages/s8-prioritization/module");
+        await requirePriorityContextReview({ gap_id: gap.id, reason: rationale, actor: { name: args.actor_name, function: args.actor_function }, event_id: edit.id });
+      }
+    }
+    return changes;
   });
-  return changes;
 }
 
 export async function lockTactic(args: {
