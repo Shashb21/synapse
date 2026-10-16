@@ -1,7 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
+import { PriorityJudgementDetails, priorityNextAction } from "@/components/prioritize/priority-context";
+import type { Band } from "@/components/matrix/bands";
 import type { GapRecord } from "@/lib/iegp/gap-record";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { AiOnly } from "@/components/platform/ai-status";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 
 const HEADING = "mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -45,7 +49,7 @@ export function GapConfirmationAndObjective({
   return (
     <div className="mb-4 grid gap-3 sm:grid-cols-2" data-testid="gap-confirmation">
       <div className={CARD}>
-        <p className="text-[12px] font-medium text-muted-foreground">Confirmation</p>
+        <p className="text-[12px] font-medium text-muted-foreground">Evidence coverage review</p>
         {confirmation.confirmed && confirmation.by ? (
           <p className="mt-1">
             Confirmed by <span className="font-medium">{confirmation.by.name}</span>
@@ -119,28 +123,40 @@ export function NeedProvenance({ entry }: { entry: GapRecord["needs"][number] })
 }
 
 /** Priority, ideas, timeline, groups and waiting suggestions: the rest of the gap's record (KAN-97). */
-export function GapRecordSections({ record }: { record: GapRecord }) {
+export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, open = false }: {
+  record: GapRecord;
+  axes?: PriorityAxis[];
+  tacticsUnlocked?: boolean;
+  open?: boolean;
+}) {
   const { priority, ideas, timeline, breakout_groups, pending_suggestions } = record;
+  const band = (priority?.band ?? priority?.suggested_band ?? null) as Band | null;
   return (
     <>
       <Section title="Priority" testId="gap-priority">
-        {priority ? (
-          <div className={CARD}>
-            <p>
-              {priority.band ? <span className="font-medium capitalize">{priority.band}</span> : "No band yet"}
-              {" · "}
-              {priority.validated ? "validated" : "not validated"}
-              {priority.actor_name ? ` · ${priority.actor_name}` : null}
-              {" · "}
-              {when(priority.at)}
-            </p>
-            {priority.rationale || priority.suggested_rationale ? (
-              <p className="mt-1 text-muted-foreground">{priority.rationale || priority.suggested_rationale}</p>
+        <div className={CARD}>
+          <PriorityJudgementDetails
+            priority={priority ? { ...priority, band, axis_scores: priority.axis_scores as Record<string, number> | null } : null}
+            axes={axes}
+          />
+          {priority?.suggested_band && priority.suggested_rationale ? (
+            <AiOnly section="prioritization">
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                Model suggested {priority.suggested_band}: {priority.suggested_rationale}
+              </p>
+            </AiOnly>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+            <Link href={priority?.validated && band === "high" && open && tacticsUnlocked ? "/?place=tactics" : "/?place=plan&setting=all"}>
+              {priorityNextAction({ band, validated: priority?.validated ?? false, tacticsUnlocked, open })}
+            </Link>
+            {priority?.validated ? (
+              <Link href="/?place=plan&setting=all">
+                {tacticsUnlocked ? "Review or change priority" : "Review remaining plan-wide priorities"}
+              </Link>
             ) : null}
           </div>
-        ) : (
-          <p className={`${CARD} text-muted-foreground`}>Not on the prioritization matrix yet.</p>
-        )}
+        </div>
       </Section>
       <Section title="Ideas" testId="gap-ideas">
         {ideas.length === 0 ? (

@@ -1,0 +1,3 @@
+# Keep evidence deadlines distinct from decision dates on objectives
+
+An objective owns the affected decision and decision date, but usable evidence may be needed earlier, such as for advance committee papers. For KAN-120, store a separate optional evidence-needed-by date on the objective and share it across linked gaps; leave it unknown for existing objectives rather than inferring it from the decision date. This preserves the meaning of historical dates and keeps decision timing together, accepting that independently dated evidence needs would require revisiting the model rather than adding per-gap overrides now.

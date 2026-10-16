@@ -107,6 +107,7 @@ export async function PrioritizePlace({
       gap_id: gap.id,
       gap_name: gap.name,
       statement: gap.statement,
+      objective: state.objectives.find((objective) => objective.id === gap.objective_id) ?? null,
       domain_label: DOMAIN_LABELS[gap.domain],
       settings: gap.settings ?? [],
       tactic_count: mappedTactics(state, gap.id).length,
@@ -169,14 +170,21 @@ export async function PrioritizePlace({
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-semibold text-foreground">
-              {allCounts.validated} of {allCounts.open} Open gaps validated across all settings
+              {allCounts.validated} of {allCounts.open} Open gaps with priority confirmed across all settings
             </p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[12px] text-muted-foreground">Priority applies across all settings</p>
+            {scope !== ALL_SETTINGS_SCOPE ? (
+              <p className="text-[12px] text-muted-foreground">
+                In {scopeLabel}: {validatedIn(scopeGaps)} of {scopeGaps.length} priorities confirmed.
+                {" "}{allCounts.open - allCounts.validated} remaining across the whole plan.
+              </p>
+            ) : null}
+            <p className="text-[12px] text-muted-foreground">
               {state.asset.tactics_unlocked
                 ? "Tactics is unlocked. You can keep adjusting priorities here."
                 : allCounts.validated === allCounts.open && allCounts.open > 0
-                  ? "Every Open gap has a validated priority."
-                  : "Drag each gap to its place, then validate its priority to continue to Tactics."}
+                  ? "Every Open gap has a confirmed priority. Continue below to unlock Tactics."
+                  : "Set and confirm priority for every Open gap across the whole plan to unlock Tactics. Unknown context does not block confirmation."}
             </p>
           </div>
           {unlockTactics}
@@ -194,6 +202,7 @@ export async function PrioritizePlace({
           yAxis={yAxis}
           identity={identity}
           mayPrioritize={mayPrioritize}
+          tacticsUnlocked={state.asset.tactics_unlocked}
         />
       ) : (
         <AxisChooser

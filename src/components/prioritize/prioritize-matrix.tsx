@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { Loader2 } from "lucide-react";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
+import { EvidenceDecisionContext, PriorityJudgementDetails, priorityNextAction, type PriorityObjective } from "@/components/prioritize/priority-context";
 import { SettingChips } from "@/components/gap-settings-editor";
 import { placementGapError, scoreError } from "@/components/prioritize/score-input";
 import { BandChip, BAND_LABELS, BAND_TOKENS, BANDS, QUADRANT_NAMES, type Band } from "@/components/matrix/bands";
@@ -25,6 +26,7 @@ export type PrioritizeGap = {
   gap_id: string;
   gap_name: string;
   statement: string;
+  objective?: PriorityObjective | null;
   domain_label: string;
   settings: string[];
   tactic_count: number;
@@ -312,12 +314,14 @@ function GapDetail({
   yAxis,
   identity,
   mayPrioritize,
+  tacticsUnlocked,
 }: {
   gap: PrioritizeGap;
   xAxis: PriorityAxis;
   yAxis: PriorityAxis;
   identity: ActionIdentity;
   mayPrioritize: boolean;
+  tacticsUnlocked: boolean;
 }) {
   const ai = useAiEnabled("prioritization");
   const point = pointOf(gap, xAxis, yAxis);
@@ -340,25 +344,9 @@ function GapDetail({
         </span>
         <SettingChips settings={gap.settings} />
       </div>
-      <p className="text-[12px] leading-5 text-muted-foreground">{gap.statement}</p>
-      {point && gap.axis_scores ? (
-        <dl className="grid grid-cols-2 gap-2 text-[11px]">
-          {[yAxis, xAxis].map((axis) => (
-            <div key={axis.id} className="grid gap-0.5">
-              <dt className="text-muted-foreground">{axis.label}</dt>
-              <dd className="text-foreground">
-                {gap.axis_scores?.[axis.id]} / 100
-                {gap.human_axes?.includes(axis.id) ? <span className="text-muted-foreground"> · set by hand</span> : null}
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {(gap.axis_scores?.[axis.id] ?? 0) >= 50 ? axis.high_label : axis.low_label}
-                </span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {gap.suggested_band && gap.suggested_rationale ? (
+      <EvidenceDecisionContext statement={gap.statement} objective={gap.objective} />
+      <PriorityJudgementDetails priority={{ ...gap, band }} axes={[yAxis, xAxis]} />
+      {ai && gap.suggested_band && gap.suggested_rationale ? (
         <p className="text-[11px] leading-4 text-muted-foreground">
           <span className="text-foreground">Model suggested {BAND_LABELS[gap.suggested_band]}.</span>{" "}
           {gap.suggested_rationale}
@@ -371,16 +359,16 @@ function GapDetail({
         </p>
       ) : null}
       {gap.validated ? (
-        <p className="text-[11px] leading-4" style={{ color: band ? BAND_TOKENS[band] : undefined }}>
-          Validated {band ? BAND_LABELS[band] : ""} by {gap.actor_name ?? "unknown"}
-          {gap.at ? ` · ${gap.at.slice(0, 10)}` : ""}
-          {gap.rationale ? ` — ${gap.rationale}` : ""}
-        </p>
-      ) : (
-        <p className="text-[11px] text-muted-foreground">
-          Not validated. Drag the gap to the right quadrant or edit its scores, then validate it.
-        </p>
-      )}
+        <div className="grid gap-1 text-[12px]">
+          {band === "high" && tacticsUnlocked ? (
+            <Link href="/?place=tactics">Continue to tactics</Link>
+          ) : !tacticsUnlocked ? (
+            <Link href="/?place=plan&setting=all">Review remaining plan-wide priorities</Link>
+          ) : (
+            <Link href={`/gaps/${gap.gap_id}`}>Map a tactic from the library</Link>
+          )}
+        </div>
+      ) : null}
       {mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
@@ -420,12 +408,12 @@ function GapDetail({
             },
             {
               name: "validate",
-              label: "Validate the band now",
+              label: "Confirm priority now",
               type: "select",
               defaultValue: "no",
               options: [
                 { value: "no", label: "No — keep it as a draft" },
-                { value: "yes", label: "Yes — lock it as validated" },
+                { value: "yes", label: "Yes — confirm priority" },
               ],
             },
           ]}
@@ -436,7 +424,7 @@ function GapDetail({
               band: values.band ?? "",
             })
           }
-          label={point ? "Edit scores" : "Type scores"}
+          label={band ? "Edit scores" : "Set priority"}
           title={`${point ? "Edit the placement of" : "Place"} ${gap.gap_name}`}
           description={
             ai
@@ -454,10 +442,10 @@ function GapDetail({
         <ActionDialog
           endpoint="/api/plan"
           payload={{ action: "validate_band", gap_id: gap.gap_id, band }}
-          label={gap.validated ? `Re-validate ${BAND_LABELS[band]}` : `Validate ${BAND_LABELS[band]}`}
-          title={`Validate ${BAND_LABELS[band]} for ${gap.gap_name}`}
+          label={gap.validated ? "Review or change priority" : "Review and confirm priority"}
+          title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
           description="Locks this priority band for the gap in every setting. To change the band, drag the gap to another quadrant first."
-          confirmLabel={`Validate ${BAND_LABELS[band]}`}
+          confirmLabel="Confirm priority"
           requireRationale
           identity={identity}
           variant={gap.validated ? "outline" : "default"}
@@ -481,6 +469,7 @@ export function PrioritizeMatrix({
   yAxis,
   identity,
   mayPrioritize,
+  tacticsUnlocked = false,
 }: {
   scope: string;
   gaps: PrioritizeGap[];
@@ -489,6 +478,7 @@ export function PrioritizeMatrix({
   yAxis: PriorityAxis;
   identity: ActionIdentity;
   mayPrioritize: boolean;
+  tacticsUnlocked?: boolean;
 }) {
   const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
@@ -854,7 +844,7 @@ export function PrioritizeMatrix({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {busy ? (
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span role="status" className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Loader2 className="size-3 animate-spin" aria-hidden />
               {busy}
             </span>
@@ -910,7 +900,7 @@ export function PrioritizeMatrix({
                     onPointerCancel={() => (dragRef.current = null)}
                     onKeyDown={(event) => onKeyDown(event, gap.gap_id, point!)}
                     onClick={() => setSelectedId(gap.gap_id)}
-                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", validated" : ", not validated"}. Arrow keys move it.`}
+                    aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority confirmed" : ", priority not confirmed"}. Arrow keys move it.`}
                     aria-pressed={isSelected}
                     className={cn(
                       "absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/95 px-2 py-0.5 text-[11px] leading-4 text-foreground shadow-sm transition-opacity",
@@ -952,7 +942,7 @@ export function PrioritizeMatrix({
           </div>
           <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
-            steps). A dashed edge means the band is not validated yet.
+            steps). A dashed edge means the priority is not confirmed yet.
           </p>
         </div>
 
@@ -964,10 +954,11 @@ export function PrioritizeMatrix({
               yAxis={yAxis}
               identity={identity}
               mayPrioritize={mayPrioritize}
+              tacticsUnlocked={tacticsUnlocked}
             />
           ) : (
             <p className="border border-dashed border-border p-4 text-[12px] text-muted-foreground">
-              Select a gap on the matrix to see why it sits there and validate its band.
+              Select a gap on the matrix to review its evidence, decision context and priority.
             </p>
           )}
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
@@ -999,9 +990,14 @@ export function PrioritizeMatrix({
                         <span aria-hidden className="text-muted-foreground">
                           ⠿
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {gap.band ? `${BAND_LABELS[gap.band]}${gap.validated ? " · validated" : ""}` : "Unplaced"}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-foreground">{gap.gap_name}</span>
+                          <span className="block text-[11px] text-muted-foreground">
+                            {gap.band ? BAND_LABELS[gap.band] : "No band yet"} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
+                          </span>
+                          <span className="block text-[11px] text-muted-foreground">
+                            {priorityNextAction({ band: gap.band ?? gap.suggested_band, validated: gap.validated, tacticsUnlocked })}
+                          </span>
                         </span>
                       </button>
                     </li>
@@ -1032,9 +1028,14 @@ export function PrioritizeMatrix({
                               gap.gap_id === selectedId && "bg-muted",
                             )}
                           >
-                            <span className="min-w-0 flex-1 truncate text-foreground">{gap.gap_name}</span>
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {validated ? "Validated" : "Draft"}
+                            <span className="min-w-0 flex-1">
+                              <span className="block break-words text-foreground">{gap.gap_name}</span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {BAND_LABELS[band]} · Evidence needed by: {gap.objective?.evidence_needed_by || "Unknown"}
+                              </span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {priorityNextAction({ band, validated, tacticsUnlocked })}
+                              </span>
                             </span>
                           </button>
                         </li>

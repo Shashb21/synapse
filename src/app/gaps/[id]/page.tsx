@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
+import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { GapDetailsEditor } from "@/components/gap-metadata";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
@@ -53,10 +55,11 @@ export default async function GapDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [state, session, ai] = await Promise.all([
+  const [state, session, ai, priorityAxes] = await Promise.all([
     loadState(),
     sessionContext(),
     aiSectionEnabled("partial_split").catch(() => false),
+    loadAxes(),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
@@ -141,7 +144,7 @@ export default async function GapDetailPage({
         </div>
       ) : null}
       <div className="mb-4 border border-border bg-card p-3 rounded-lg">
-        <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
+        <EvidenceDecisionContext statement={gap.statement} objective={record.objective} />
         {(gap.related_gap_ids ?? []).length > 0 ? (
           <p className="mt-2 text-[12px] text-muted-foreground" data-testid="related-gaps">
             Related:{" "}
@@ -596,7 +599,12 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      <GapRecordSections record={record} />
+      <GapRecordSections
+        record={record}
+        axes={priorityAxes.axes}
+        tacticsUnlocked={state.asset.tactics_unlocked}
+        open={!gap.retired && !gap.parked_at && shown === "validated_open"}
+      />
 
       {record.versions.length > 0 ? (
         <section className="mb-8">

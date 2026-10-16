@@ -49,7 +49,7 @@ test.describe("Place by hand", () => {
     const first = unplaced.getByRole("listitem").first();
     const gapName = (await first.locator(".truncate").first().innerText()).trim();
 
-    const trigger = page.getByRole("button", { name: "Type scores" });
+    const trigger = page.getByRole("button", { name: "Set priority", exact: true });
     const dialog = page.getByRole("dialog");
     await expect(async () => {
       await first.getByRole("button").click();
@@ -105,7 +105,7 @@ test.describe("Place by hand", () => {
     await expect(unplaced.getByRole("listitem")).toHaveCount(1);
     const row = unplaced.getByRole("listitem").first();
     const gapName = (await row.locator(".truncate").first().innerText()).trim();
-    const trigger = page.getByRole("button", { name: "Type scores" });
+    const trigger = page.getByRole("button", { name: "Set priority", exact: true });
     const dialog = page.getByRole("dialog");
     const open = async () =>
       expect(async () => {
