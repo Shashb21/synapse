@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { makeFinalReady } from "./support/final-ready";
 import { beforeAll, describe, expect, it } from "vitest";
 import "@/modules";
@@ -177,7 +178,7 @@ describe("modular pipeline, S0 to S10", () => {
     expect(suggested.output.axes.length).toBeGreaterThanOrEqual(2);
 
     const target = suggested.output.placements[0]!;
-    await validatePlacement({
+    await validatePlacement({ ...await priorityDecision(target.gap_id, "Blocks the reimbursement submission"),
       gap_id: target.gap_id,
       band: "high",
       rationale: "Blocks the reimbursement submission",

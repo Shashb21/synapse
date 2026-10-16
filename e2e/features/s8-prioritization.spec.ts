@@ -243,10 +243,11 @@ test.describe("KAN-128 priority context and next actions", () => {
     await dialog.locator('input[name="x_score"]').fill("82");
     await dialog.locator('input[name="y_score"]').fill("76");
     await dialog.locator('textarea[name="rationale"]').fill("Human placement for the dossier");
+    await dialog.getByLabel("Reason for change (required)").fill("Initial manual priority assessment");
     await dialog.getByRole("button", { name: "Save placement", exact: true }).click();
     await expect(dialog).toBeHidden();
     await detail.getByRole("button", { name: "Review and confirm priority", exact: true }).click();
-    await dialog.locator('textarea[name="rationale"]').fill("Blocks reimbursement briefing papers");
+    await dialog.getByLabel("Reason for change (required)").fill("Blocks reimbursement briefing papers");
     await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(detail).toContainText("Priority confirmed");
@@ -273,11 +274,12 @@ test.describe("KAN-128 priority context and next actions", () => {
     await expect(priority).toContainText("Priority confirmed");
     await expect(priority).toContainText("82 / 100");
     await expect(priority).toContainText("76 / 100");
-    await expect(priority).toContainText("Blocks reimbursement briefing papers");
+    await expect(priority).toContainText("Human placement for the dossier");
+    await expect(page.getByTestId("entity-history")).toContainText("Blocks reimbursement briefing papers");
     await expect(priority.getByRole("link", { name: "Continue to tactics", exact: true })).toBeVisible();
     await expect(page.locator("dt").filter({ hasText: /^Evidence needed by$/ }).locator("..").locator("dd")).toHaveText("Unknown");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const retained = (await planState(request)).placements.find((row) => row.gap_id === knownGap)!;
-    expect(retained).toMatchObject({ validated: true, band: "high", axis_scores: { decision_impact: 82, time_pressure: 76 }, rationale: "Blocks reimbursement briefing papers" });
+    expect(retained).toMatchObject({ validated: true, band: "high", axis_scores: { decision_impact: 82, time_pressure: 76 }, rationale: "Human placement for the dossier" });
   });
 });

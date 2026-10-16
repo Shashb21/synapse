@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /** A request cookie jar the route handlers read and createSession writes. */
@@ -144,7 +145,7 @@ describe("KAN-86: the final plan is the complete, frozen IEGP", () => {
     await workspaceDb().update(iegp.gaps).set({ statement: "Edited after the final was saved." }).where(eq(iegp.gaps.id, gap.id));
     await workspaceDb().update(iegp.tactics).set({ owner: "Someone new" }).where(eq(iegp.tactics.id, tactic.id));
     const band = (await listPlacements()).find((p) => p.gap_id === gap.id)!.band === "high" ? "low" : "high";
-    await validatePlacement({ gap_id: gap.id, band, rationale: "Re-banded after the review", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(gap.id, "Re-banded after the review"), gap_id: gap.id, band, rationale: "Re-banded after the review", actor: ACTOR });
 
     const reread = await planVersion(latest!.version);
     expect(canonicalJson(reread!.snapshot)).toBe(before);

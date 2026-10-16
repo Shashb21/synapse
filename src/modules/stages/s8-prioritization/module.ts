@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { ensureCurrentSchemaTables } from "@/lib/iegp/db";
 import { boolean, jsonb, pgTable, text } from "drizzle-orm/pg-core";
@@ -8,7 +9,7 @@ import { registerModule } from "@/modules/kernel/registry";
 import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle } from "@/modules/kernel/agentic";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
-import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
+import { recordEdit } from "@/modules/kernel/edit-records";
 import type { Actor, ModuleContext, SynapseModule } from "@/modules/kernel/contracts";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { enteredAssetDetails } from "@/lib/iegp/asset";
@@ -440,70 +441,72 @@ export const prioritizationModule: SynapseModule<PrioritizationInput, Prioritiza
 
     if (!ctx.replay?.evaluation && !input.dry_run) {
       await ensurePlacementSchema();
-      const existing = await db().select().from(placementsTable);
       for (const placement of outcome.accepted) {
-        const current = existing.find((row) => row.gap_id === placement.gap_id);
-        const currentScores = (current?.axis_scores as Record<string, number> | undefined) ?? {};
-        const locked = current?.validated ?? false;
-        const humanAxes = humanAxesOf(current);
-        const humanBand = current?.human_band ?? false;
-        const placedAlready =
-          typeof currentScores[xAxis.id] === "number" && typeof currentScores[yAxis.id] === "number";
-        if (current && input.only_missing && placedAlready) continue;
-        // Once a human has validated a band, the suggestion they judged is kept:
-        // losing it would erase the suggestion-versus-validation delta. A
-        // validated gap only gains scores on axes it was never placed on, so it
-        // has a spot on a matrix drawn on new axes. The new suggestion is still
-        // in this run's output and trace.
-        //
-        // An unvalidated gap takes the new suggestion, except where a person
-        // already put it: axes they set keep their score, and a band they set
-        // stays the working band. The model's own suggested band and rationale
-        // are refreshed either way, so the delta stays visible.
-        const humanScores = Object.fromEntries(
-          humanAxes.filter((id) => typeof currentScores[id] === "number").map((id) => [id, currentScores[id]!]),
-        );
-        const values = locked
-          ? {
-              gap_id: placement.gap_id,
-              run_id: current?.run_id ?? null,
-              axis_scores: { ...placement.axis_scores, ...currentScores },
-              suggested_band: current!.suggested_band,
-              suggested_rationale: current!.suggested_rationale,
-              band: current!.band,
-              validated: true,
-              rationale: current!.rationale,
-              actor_name: current!.actor_name,
-              actor_function: current!.actor_function,
-              at: current!.at,
-              human_axes: humanAxes,
-              human_band: humanBand,
-            }
-          : {
-              gap_id: placement.gap_id,
-              run_id: ctx.run.id,
-              axis_scores: { ...currentScores, ...placement.axis_scores, ...humanScores },
-              suggested_band: placement.suggested_band,
-              suggested_rationale: placement.rationale,
-              // The working band: the quadrant until someone drags, sets or validates it.
-              band:
-                humanBand && current?.band
-                  ? current.band
-                  : pairChosen
-                    ? placement.suggested_band
-                    : (current?.band ?? null),
-              validated: false,
-              rationale: humanBand ? (current?.rationale ?? null) : null,
-              actor_name: humanBand ? (current?.actor_name ?? null) : null,
-              actor_function: humanBand ? (current?.actor_function ?? null) : null,
-              at: humanBand && current ? current.at : nowIso(),
-              human_axes: humanAxes,
-              human_band: humanBand && Boolean(current?.band),
-            };
-        await db()
-          .insert(placementsTable)
-          .values(values)
-          .onConflictDoUpdate({ target: placementsTable.gap_id, set: values });
+        await db().transaction(async (tx) => {
+          await tx.execute(sql`SELECT id FROM gaps WHERE id = ${placement.gap_id} FOR UPDATE`);
+          const current = await currentPlacement(placement.gap_id);
+          const currentScores = (current?.axis_scores as Record<string, number> | undefined) ?? {};
+          const locked = current?.validated ?? false;
+          const humanAxes = humanAxesOf(current);
+          const humanBand = current?.human_band ?? false;
+          const placedAlready =
+            typeof currentScores[xAxis.id] === "number" && typeof currentScores[yAxis.id] === "number";
+          if (current && input.only_missing && placedAlready) return;
+          // Once a human has validated a band, the suggestion they judged is kept:
+          // losing it would erase the suggestion-versus-validation delta. A
+          // validated gap only gains scores on axes it was never placed on, so it
+          // has a spot on a matrix drawn on new axes. The new suggestion is still
+          // in this run's output and trace.
+          //
+          // An unvalidated gap takes the new suggestion, except where a person
+          // already put it: axes they set keep their score, and a band they set
+          // stays the working band. The model's own suggested band and rationale
+          // are refreshed either way, so the delta stays visible.
+          const humanScores = Object.fromEntries(
+            humanAxes.filter((id) => typeof currentScores[id] === "number").map((id) => [id, currentScores[id]!]),
+          );
+          const values = locked
+            ? {
+                gap_id: placement.gap_id,
+                run_id: current?.run_id ?? null,
+                axis_scores: { ...placement.axis_scores, ...currentScores },
+                suggested_band: current!.suggested_band,
+                suggested_rationale: current!.suggested_rationale,
+                band: current!.band,
+                validated: true,
+                rationale: current!.rationale,
+                actor_name: current!.actor_name,
+                actor_function: current!.actor_function,
+                at: current!.at,
+                human_axes: humanAxes,
+                human_band: humanBand,
+              }
+            : {
+                gap_id: placement.gap_id,
+                run_id: ctx.run.id,
+                axis_scores: { ...currentScores, ...placement.axis_scores, ...humanScores },
+                suggested_band: placement.suggested_band,
+                suggested_rationale: placement.rationale,
+                // The working band: the quadrant until someone drags, sets or validates it.
+                band:
+                  humanBand && current?.band
+                    ? current.band
+                    : pairChosen
+                      ? placement.suggested_band
+                      : (current?.band ?? null),
+                validated: false,
+                rationale: humanBand ? (current?.rationale ?? null) : null,
+                actor_name: humanBand ? (current?.actor_name ?? null) : null,
+                actor_function: humanBand ? (current?.actor_function ?? null) : null,
+                at: humanBand && current ? current.at : nowIso(),
+                human_axes: humanAxes,
+                human_band: humanBand && Boolean(current?.band),
+              };
+          await db()
+            .insert(placementsTable)
+            .values(values)
+            .onConflictDoUpdate({ target: placementsTable.gap_id, set: values });
+        });
       }
     }
 
@@ -590,6 +593,8 @@ registerModule(prioritizationModule);
 
 export type PlacementRecord = {
   gap_id: string;
+  /** Opaque snapshot token; send null only for a previously unset judgement. */
+  version: string;
   axis_scores: Record<string, number>;
   suggested_band: MatrixBand;
   /** Empty when no model has suggested a placement (a hand-placed gap). */
@@ -612,6 +617,7 @@ type PlacementRow = typeof placementsTable.$inferSelect;
 function toRecord(row: PlacementRow): PlacementRecord {
   return {
     gap_id: row.gap_id,
+    version: placementVersion(row),
     axis_scores: (row.axis_scores as Record<string, number>) ?? {},
     suggested_band: row.suggested_band as Band,
     suggested_rationale: row.suggested_rationale,
@@ -676,95 +682,86 @@ async function requireOpenGap(gapId: string) {
   }
 }
 
-/**
- * A row for a gap no model has placed. There is no suggestion yet, so the
- * suggested band mirrors the person's band and the suggested rationale stays
- * empty until a model run fills it in.
- */
-async function insertManualPlacement(values: {
-  gap_id: string;
-  axis_scores: Record<string, number>;
-  band: Band;
-  validated: boolean;
-  rationale: string | null;
-  actor: Actor | null;
-  human_axes: string[];
-}): Promise<PlacementRow> {
-  const row = {
-    gap_id: values.gap_id,
-    run_id: null,
-    axis_scores: values.axis_scores,
-    suggested_band: values.band,
-    suggested_rationale: "",
-    band: values.band,
-    validated: values.validated,
-    rationale: values.rationale,
-    actor_name: values.actor?.name ?? null,
-    actor_function: values.actor?.function ?? null,
-    at: nowIso(),
-    human_axes: values.human_axes,
-    human_band: true,
-  };
-  await db().insert(placementsTable).values(row);
-  return row;
+/** A snapshot token also changes when a model supplies new scores on other axes. */
+function placementVersion(row: PlacementRow): string {
+  return createHash("sha256").update(JSON.stringify(Object.entries({
+    ...row, axis_scores: Object.entries((row.axis_scores ?? {}) as Record<string, number>).sort(([a], [b]) => a.localeCompare(b)),
+  }).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
 }
 
-/**
- * The S8 human gate: the user accepts or changes the suggested band with a
- * rationale, which is both the audit record and a hillclimb signal. A gap no
- * model has placed can be validated straight away: the person's band is the
- * placement.
- */
-export async function validatePlacement(args: {
+type ManualDecision = {
   gap_id: string;
-  band: Band;
-  rationale: string;
   actor: Actor;
   workspace_id?: string;
-}): Promise<PlacementRecord> {
+  /** Separate from the retained priority rationale. Required for every decision. */
+  reason: string;
+  expected_version: string | null;
+  /** Omit to retain the priority rationale; an explicit empty value clears it. */
+  rationale?: string;
+};
+
+function requireDecisionReason(reason: string | undefined): string {
+  const value = (reason ?? "").trim();
+  if (value.length < 3) throw new Error("A meaningful reason is required for every priority decision.");
+  return value;
+}
+
+/** The shared save owner for scores, overrides, drags and intentional reconfirmations. */
+async function saveManualDecision(args: ManualDecision, decide: (current: PlacementRow | undefined) => {
+  band: Band; axis_scores: Record<string, number>; human_axes: string[]; validated: boolean;
+}, confirm: boolean): Promise<PlacementRecord> {
+  const reason = requireDecisionReason(args.reason);
   await ensurePlacementSchema();
-  // Rationale first: a band must not move before the reason for it is known good.
-  const rationale = requireRationale(args.rationale);
-  const current = await currentPlacement(args.gap_id);
-  let row: PlacementRow;
-  if (!current) {
+  const result = await db().transaction(async (tx) => {
+    // Lock the gap even when it has no placement yet. S8 reruns use this same lock.
+    await tx.execute(sql`SELECT id FROM gaps WHERE id = ${args.gap_id} FOR UPDATE`);
     await requireOpenGap(args.gap_id);
-    row = await insertManualPlacement({
-      gap_id: args.gap_id,
-      axis_scores: {},
-      band: args.band,
-      validated: true,
-      rationale,
-      actor: args.actor,
-      human_axes: [],
-    });
-  } else {
-    const values = {
-      band: args.band,
-      validated: true,
-      rationale,
-      actor_name: args.actor.name,
-      actor_function: args.actor.function,
-      at: nowIso(),
-      human_band: true,
+    const [current] = await tx.select().from(placementsTable).where(eq(placementsTable.gap_id, args.gap_id)).for("update");
+    if (args.expected_version === undefined || args.expected_version !== (current ? placementVersion(current) : null)) {
+      throw new Error("Priority changed or its version is missing. Your values and reason have not been saved. Close this dialog, refresh the page and review the latest priority, then retry with your reason.");
+    }
+    const decision = decide(current);
+    const rationale = args.rationale === undefined ? current?.rationale ?? null : args.rationale.trim() || null;
+    // Saving the same scores/band/rationale is not a decision. Explicit confirmation always is.
+    const sameScores = current && JSON.stringify(Object.entries(current.axis_scores as Record<string, number>).sort()) === JSON.stringify(Object.entries(decision.axis_scores).sort());
+    if (!confirm && current && sameScores && current.band === decision.band && current.rationale === rationale && current.validated === decision.validated) {
+      return { row: current, current, eventId: null };
+    }
+    const row: PlacementRow = {
+      gap_id: args.gap_id, run_id: current?.run_id ?? null,
+      suggested_band: current?.suggested_band ?? decision.band,
+      suggested_rationale: current?.suggested_rationale ?? "",
+      ...decision, rationale, human_band: true,
+      actor_name: args.actor.name, actor_function: args.actor.function, at: nowIso(),
     };
-    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
-    row = { ...current, ...values };
-  }
-  const decisionEdit = await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S8",
-    entity_type: "gap",
-    entity_id: args.gap_id,
-    field: "priority_band",
-    action: !current ? "add" : current.suggested_band === args.band ? "accept" : "edit",
-    before: current?.suggested_band ?? null,
-    after: args.band,
-    rationale,
-    actor: args.actor,
+    // Every intentional confirmation must change its concurrency token, even in the same millisecond.
+    if (current && Date.parse(row.at) <= Date.parse(current.at)) row.at = new Date(Date.parse(current.at) + 1).toISOString();
+    await tx.insert(placementsTable).values(row).onConflictDoUpdate({ target: placementsTable.gap_id, set: row });
+    const snapshot = (value: PlacementRow) => JSON.stringify({
+      band: value.band, axis_scores: value.axis_scores, rationale: value.rationale,
+      confirmed: value.validated, suggested_band: value.suggested_band, suggested_rationale: value.suggested_rationale,
+      actor_name: value.actor_name, actor_function: value.actor_function, at: value.at,
+      human_axes: humanAxesOf(value), human_band: value.human_band, run_id: value.run_id,
+    });
+    const edit = await recordEdit({
+      workspace_id: args.workspace_id, stage: "S8", entity_type: "gap", entity_id: args.gap_id,
+      field: "placement", action: confirm ? "validate" : current ? "edit" : "add",
+      before: current ? snapshot(current) : null, after: snapshot(row), rationale: reason, actor: args.actor,
+    }, tx);
+    return { row, current, eventId: edit.id };
   });
-  await captureValidatedBand(current, args.band, rationale, args.actor, decisionEdit.id, args.workspace_id);
-  return toRecord(row);
+  if (confirm && result.eventId) {
+    await captureValidatedBand(result.current, result.row.band as Band, reason, args.actor, result.eventId, args.workspace_id);
+  }
+  return toRecord(result.row);
+}
+
+/** Confirmation and reconfirmation retain the previous rationale unless explicitly edited. */
+export async function validatePlacement(args: ManualDecision & { band: Band }): Promise<PlacementRecord> {
+  return saveManualDecision(args, (current) => ({
+    band: args.band, axis_scores: (current?.axis_scores as Record<string, number>) ?? {},
+    human_axes: humanAxesOf(current), validated: true,
+  }), true);
 }
 
 /** Both validation surfaces observe the same proven model origin and saved event. */
@@ -795,19 +792,10 @@ async function captureValidatedBand(current: PlacementRow | null | undefined, ba
  * the band, as the validate gate does; otherwise a validated gap keeps its
  * validation only while its band is unchanged.
  */
-export async function setPlacement(args: {
-  gap_id: string;
-  axis_scores?: Record<string, number>;
-  x_axis?: string;
-  y_axis?: string;
-  band?: Band;
-  validate?: boolean;
-  rationale: string;
-  actor: Actor;
-  workspace_id?: string;
+export async function setPlacement(args: ManualDecision & {
+  axis_scores?: Record<string, number>; x_axis?: string; y_axis?: string; band?: Band; validate?: boolean;
 }): Promise<PlacementRecord> {
-  await ensurePlacementSchema();
-  const rationale = requireRationale(args.rationale);
+  requireDecisionReason(args.reason);
   const axes = await loadAxes();
   const typed: Record<string, number> = {};
   for (const [id, value] of Object.entries(args.axis_scores ?? {})) {
@@ -822,148 +810,34 @@ export async function setPlacement(args: {
   const yAxis = args.y_axis ? axes.axes.find((axis) => axis.id === args.y_axis) : undefined;
   if ((args.x_axis && !xAxis) || (args.y_axis && !yAxis)) throw new Error("Unknown matrix axis.");
   if (xAxis && yAxis && xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
-  if (Object.keys(typed).length === 0 && !args.band) {
-    throw new Error("Give an axis score or a band to place the gap.");
-  }
-
-  const current = await currentPlacement(args.gap_id);
-  if (!current) await requireOpenGap(args.gap_id);
-  const axis_scores = { ...((current?.axis_scores as Record<string, number> | undefined) ?? {}), ...typed };
-  const quadrant =
-    xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
-      ? quadrantBand({ xAxis, yAxis, scores: axis_scores })
-      : null;
-  const before = current ? ((current.band ?? current.suggested_band) as Band) : null;
-  const band = args.band ?? quadrant ?? before;
-  if (!band) throw new Error("Give a band, or score both plotted axes so the quadrant sets it.");
-  const human_axes = [...new Set([...humanAxesOf(current), ...Object.keys(typed)])];
-  const validated = Boolean(args.validate) || Boolean(current?.validated && current.band === band);
-
-  let row: PlacementRow;
-  if (!current) {
-    row = await insertManualPlacement({
-      gap_id: args.gap_id,
-      axis_scores,
-      band,
-      validated,
-      rationale,
-      actor: args.actor,
-      human_axes,
-    });
-  } else {
-    const values = {
-      axis_scores,
-      band,
-      validated,
-      rationale,
-      actor_name: args.actor.name,
-      actor_function: args.actor.function,
-      at: nowIso(),
-      human_axes,
-      human_band: true,
-    };
-    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
-    row = { ...current, ...values };
-  }
-  const scoreText = (scores: Record<string, number>) =>
-    Object.entries(scores)
-      .map(([id, value]) => `${id}=${value}`)
-      .join(", ");
-  const decisionEdit = await recordEdit({
-    workspace_id: args.workspace_id,
-    stage: "S8",
-    entity_type: "gap",
-    entity_id: args.gap_id,
-    field: "placement",
-    action: current ? "edit" : "add",
-    before: current ? `${before} (${scoreText((current.axis_scores as Record<string, number>) ?? {})})` : null,
-    after: `${band} (${scoreText(axis_scores)})${validated ? " validated" : ""}`,
-    rationale,
-    actor: args.actor,
-  });
-  if (args.validate) await captureValidatedBand(current, band, rationale, args.actor, decisionEdit.id, args.workspace_id);
-  return toRecord(row);
+  if (Object.keys(typed).length === 0 && !args.band) throw new Error("Give an axis score or a band to place the gap.");
+  return saveManualDecision(args, (current) => {
+    const axis_scores = { ...((current?.axis_scores as Record<string, number>) ?? {}), ...typed };
+    const quadrant = xAxis && yAxis && typeof axis_scores[xAxis.id] === "number" && typeof axis_scores[yAxis.id] === "number"
+      ? quadrantBand({ xAxis, yAxis, scores: axis_scores }) : null;
+    const band = args.band ?? quadrant ?? ((current?.band ?? current?.suggested_band) as Band | null);
+    if (!band) throw new Error("Give a band, or score both plotted axes so the quadrant sets it.");
+    return { band, axis_scores, human_axes: [...new Set([...humanAxesOf(current), ...Object.keys(typed)])],
+      validated: Boolean(args.validate) || Boolean(current?.validated && current.band === band) };
+  }, Boolean(args.validate));
 }
 
-/**
- * A drag on the matrix. The gap takes the band of the quadrant it lands in. A
- * validated gap dropped in a different band goes back to unvalidated — the
- * band a human locked is no longer the band on the board — while a nudge
- * inside the same quadrant keeps the validation. The two dragged axes and the
- * band become the person's, so a re-run does not move the gap back. A gap no
- * model has placed yet can be dropped on the matrix too.
- */
-export async function movePlacement(args: {
-  gap_id: string;
-  x_axis: string;
-  y_axis: string;
-  /** Favourable-scale position, 0–100: 100 is the priority end of each axis. */
-  x: number;
-  y: number;
-  actor: Actor;
-  workspace_id?: string;
+/** A drag is a reasoned score edit through the same audited owner as typed scores. */
+export async function movePlacement(args: ManualDecision & {
+  x_axis: string; y_axis: string; x: number; y: number;
 }): Promise<PlacementRecord> {
-  await ensurePlacementSchema();
+  requireDecisionReason(args.reason);
   const axes = await loadAxes();
   const xAxis = axes.axes.find((axis) => axis.id === args.x_axis);
   const yAxis = axes.axes.find((axis) => axis.id === args.y_axis);
   if (!xAxis || !yAxis) throw new Error("Unknown matrix axis.");
   if (xAxis.id === yAxis.id) throw new Error("Pick two different axes for the matrix.");
-  if (![args.x, args.y].every((value) => Number.isFinite(value))) {
-    throw new Error("A matrix position needs two numbers.");
+  if (![args.x, args.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
+    throw new Error("A matrix position needs two numbers from 0 to 100.");
   }
-  const current = await currentPlacement(args.gap_id);
-  if (!current) await requireOpenGap(args.gap_id);
-  const axis_scores = {
-    ...((current?.axis_scores as Record<string, number> | undefined) ?? {}),
-    [xAxis.id]: scoreFromFavourability(xAxis, args.x),
-    [yAxis.id]: scoreFromFavourability(yAxis, args.y),
-  };
-  const before = current ? ((current.band ?? current.suggested_band) as Band) : null;
-  const band = quadrantBand({ xAxis, yAxis, scores: axis_scores });
-  const human_axes = [...new Set([...humanAxesOf(current), xAxis.id, yAxis.id])];
-  let row: PlacementRow;
-  if (!current) {
-    row = await insertManualPlacement({
-      gap_id: args.gap_id,
-      axis_scores,
-      band,
-      validated: false,
-      rationale: null,
-      actor: null,
-      human_axes,
-    });
-  } else {
-    const keepsValidation = current.validated && current.band === band;
-    const values = {
-      axis_scores,
-      band,
-      validated: keepsValidation,
-      rationale: keepsValidation ? current.rationale : null,
-      actor_name: keepsValidation ? current.actor_name : null,
-      actor_function: keepsValidation ? current.actor_function : null,
-      at: nowIso(),
-      human_axes,
-      human_band: true,
-    };
-    await db().update(placementsTable).set(values).where(eq(placementsTable.gap_id, args.gap_id));
-    row = { ...current, ...values };
-  }
-  if (before !== band) {
-    await recordEdit({
-      workspace_id: args.workspace_id,
-      stage: "S8",
-      entity_type: "gap",
-      entity_id: args.gap_id,
-      field: "matrix_band",
-      action: current ? "edit" : "add",
-      before,
-      after: band,
-      rationale: `Moved on the ${xAxis.label} × ${yAxis.label} matrix`,
-      actor: args.actor,
-    });
-  }
-  return toRecord(row);
+  return setPlacement({ ...args, axis_scores: {
+    [xAxis.id]: scoreFromFavourability(xAxis, args.x), [yAxis.id]: scoreFromFavourability(yAxis, args.y),
+  } });
 }
 
 export type { StoredAxes };

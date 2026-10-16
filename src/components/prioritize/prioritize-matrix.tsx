@@ -24,6 +24,7 @@ import { isPresenting } from "@/lib/room/presenting";
 
 export type PrioritizeGap = {
   gap_id: string;
+  version?: string | null;
   gap_name: string;
   statement: string;
   objective?: PriorityObjective | null;
@@ -372,8 +373,9 @@ function GapDetail({
       {mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
-          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id }}
+          payload={{ action: "set_placement", gap_id: gap.gap_id, x_axis: xAxis.id, y_axis: yAxis.id, expected_version: gap.version ?? null }}
           fields={[
+            { name: "rationale", label: "Priority rationale (optional)", type: "textarea", defaultValue: gap.rationale ?? "", hint: "Why this priority is appropriate. Kept separately from the reason for this change." },
             {
               name: "y_score",
               label: `${yAxis.label} score (0–100)`,
@@ -433,6 +435,8 @@ function GapDetail({
           }
           confirmLabel="Save placement"
           requireRationale
+          rationaleFieldName="reason"
+          rationaleLabel="Reason for change (required)"
           identity={identity}
           variant="outline"
           size="sm"
@@ -441,12 +445,14 @@ function GapDetail({
       {band && mayPrioritize ? (
         <ActionDialog
           endpoint="/api/plan"
-          payload={{ action: "validate_band", gap_id: gap.gap_id, band }}
+          payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null }}
           label={gap.validated ? "Review or change priority" : "Review and confirm priority"}
           title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
-          description="Locks this priority band for the gap in every setting. To change the band, drag the gap to another quadrant first."
+          description="Confirms this priority across all settings and records your reason, including when you retain the same band and scores. Edit scores or drag the gap to change the band."
           confirmLabel="Confirm priority"
           requireRationale
+          rationaleFieldName="reason"
+          rationaleLabel="Reason for change (required)"
           identity={identity}
           variant={gap.validated ? "outline" : "default"}
           size="sm"
@@ -483,6 +489,7 @@ export function PrioritizeMatrix({
   const { refresh } = usePageRefresh();
   const ai = useAiEnabled("prioritization");
   const plotRef = useRef<HTMLDivElement>(null);
+  const matrixRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     gapId: string;
     startX: number;
@@ -491,14 +498,10 @@ export function PrioritizeMatrix({
     /** Dragged in from the "Not placed yet" list: a drop outside the matrix places nothing. */
     fromList: boolean;
   } | null>(null);
-  // One debounce per gap: nudging a second gap never drops the first one's save (KAN-18).
-  const nudges = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; point: Point }>());
-  const commitRef = useRef<(gapId: string, point: Point) => Promise<void>>(async () => undefined);
-  const bodyRef = useRef<(gapId: string, point: Point) => Record<string, unknown>>(() => ({}));
+  const [pendingMove, setPendingMove] = useState<{ gapId: string; point: Point; version: string | null } | null>(null);
   const autoPlaced = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Record<string, Point>>({});
-  const [bands, setBands] = useState<Record<string, { band: Band; validated: boolean }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   // An error is announced as an alert; a summary (re-suggest finished) is quiet text.
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -509,7 +512,6 @@ export function PrioritizeMatrix({
   if (seenGaps !== gaps) {
     setSeenGaps(gaps);
     setPositions({});
-    setBands({});
   }
 
   // A gap dropped on the matrix leaves this list at once, not after the refresh.
@@ -540,9 +542,8 @@ export function PrioritizeMatrix({
 
   const view = gaps.map((gap) => {
     const point = positions[gap.gap_id] ?? pointOf(gap, xAxis, yAxis);
-    const local = bands[gap.gap_id];
-    const band = local?.band ?? gap.band ?? gap.suggested_band;
-    return { gap, point, band, validated: local ? local.validated : gap.validated };
+    const band = gap.band ?? gap.suggested_band;
+    return { gap, point, band, validated: gap.validated };
   });
   const placed = view.filter((row) => row.point);
   const selected = gaps.find((gap) => gap.gap_id === selectedId) ?? null;
@@ -563,71 +564,18 @@ export function PrioritizeMatrix({
     };
   }
 
-  function placementBody(gapId: string, point: Point) {
-    return {
-      action: "move_placement",
-      gap_id: gapId,
-      x_axis: xAxis.id,
-      y_axis: yAxis.id,
-      x: Math.round(point.x),
-      y: Math.round(point.y),
-      actor_name: identity.actor_name,
-      actor_function: identity.actor_function,
-    };
-  }
-
-  async function commit(gapId: string, point: Point) {
-    setMessage(null);
-    const res = await postJson("/api/plan", placementBody(gapId, point));
-    const json = res.json as {
-      error?: string;
-      placement?: { band: Band; validated: boolean };
-    };
-    if (!res.ok || !json.placement) {
-      showError(json.error ?? "Could not move the gap.");
-      setPositions((current) => {
-        const next = { ...current };
-        delete next[gapId];
-        return next;
-      });
+  function requestMove(gapId: string, point: Point) {
+    const gap = gaps.find((candidate) => candidate.gap_id === gapId);
+    if (!gap) return;
+    const rounded = { x: Math.round(point.x), y: Math.round(point.y) };
+    const saved = pointOf(gap, xAxis, yAxis);
+    if (saved && Math.round(saved.x) === rounded.x && Math.round(saved.y) === rounded.y) {
+      dropPosition(gapId);
       return;
     }
-    setBands((current) => ({ ...current, [gapId]: json.placement! }));
-    refresh();
+    // Preview only. Nothing is sent on cancellation, navigation or pagehide.
+    setPendingMove({ gapId, point: rounded, version: gap.version ?? null });
   }
-
-  useEffect(() => {
-    commitRef.current = commit;
-    bodyRef.current = placementBody;
-  });
-
-  // Leaving the page saves any nudge still waiting on its debounce: on unmount (moving within
-  // the app) and on pagehide (reload, closing the tab, typing another address), where only a
-  // keepalive request survives the page going away.
-  useEffect(() => {
-    const waiting = nudges.current;
-    const flushOnUnload = () => {
-      for (const [gapId, { timer, point }] of waiting) {
-        clearTimeout(timer);
-        void fetch("/api/plan", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(bodyRef.current(gapId, point)),
-          keepalive: true,
-        }).catch(() => undefined);
-      }
-      waiting.clear();
-    };
-    window.addEventListener("pagehide", flushOnUnload);
-    return () => {
-      window.removeEventListener("pagehide", flushOnUnload);
-      for (const [gapId, { timer, point }] of waiting) {
-        clearTimeout(timer);
-        void commitRef.current(gapId, point);
-      }
-      waiting.clear();
-    };
-  }, []);
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, gapId: string) {
     if (!mayPrioritize || event.button !== 0) return;
@@ -706,7 +654,7 @@ export function PrioritizeMatrix({
     }
     setSelectedId(drag.gapId);
     const point = pointFromEvent(event);
-    if (point) void commit(drag.gapId, point);
+    if (point) requestMove(drag.gapId, point);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, gapId: string, point: Point) {
@@ -727,13 +675,7 @@ export function PrioritizeMatrix({
     };
     setSelectedId(gapId);
     setPositions((current) => ({ ...current, [gapId]: next }));
-    const pending = nudges.current.get(gapId);
-    if (pending) clearTimeout(pending.timer);
-    const timer = setTimeout(() => {
-      nudges.current.delete(gapId);
-      void commit(gapId, next);
-    }, 450);
-    nudges.current.set(gapId, { timer, point: next });
+    requestMove(gapId, next);
   }
 
   async function resuggest() {
@@ -783,7 +725,7 @@ export function PrioritizeMatrix({
   }
 
   return (
-    <div className="grid gap-4">
+    <div ref={matrixRef} className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Highlight a priority">
         {BANDS.map((b) => {
           const on = highlight === b;
@@ -870,6 +812,32 @@ export function PrioritizeMatrix({
         <p className="text-[12px] text-muted-foreground">{message.text}</p>
       ) : null}
 
+      {pendingMove ? (
+        <ActionDialog
+          key={pendingMove.gapId}
+          endpoint="/api/plan"
+          payload={{ action: "move_placement", gap_id: pendingMove.gapId,
+            x_axis: xAxis.id, y_axis: yAxis.id, x: pendingMove.point.x, y: pendingMove.point.y,
+            expected_version: pendingMove.version }}
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              dropPosition(pendingMove.gapId);
+              setPendingMove(null);
+              requestAnimationFrame(() => matrixRef.current?.querySelector<HTMLButtonElement>(`button[data-gap-id="${pendingMove.gapId}"]`)?.focus());
+            }
+          }}
+          trigger={null}
+          label="Save matrix move"
+          title={`Review matrix move for ${gaps.find((gap) => gap.gap_id === pendingMove.gapId)?.gap_name ?? pendingMove.gapId}`}
+          description={`${xAxis.label}: ${scoreFromFavourability(xAxis, pendingMove.point.x)}; ${yAxis.label}: ${scoreFromFavourability(yAxis, pendingMove.point.y)}. Proposed band: ${BAND_LABELS[bandAt(pendingMove.point, xAxis, yAxis)]}. Give a reason to save this move. Closing cancels it.`}
+          confirmLabel="Save matrix move"
+          rationaleFieldName="reason"
+          rationaleLabel="Reason for change (required)"
+          identity={identity}
+        />
+      ) : null}
+
       {/* The matrix and its side panel share one screen (KAN-56): the matrix shrinks to the
           window height, so a gap in "Not placed yet" can be dragged on without scrolling. */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,auto)_minmax(280px,1fr)] lg:items-start">
@@ -893,11 +861,12 @@ export function PrioritizeMatrix({
                 return (
                   <button
                     key={gap.gap_id}
+                    data-gap-id={gap.gap_id}
                     type="button"
                     onPointerDown={(event) => onPointerDown(event, gap.gap_id)}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
-                    onPointerCancel={() => (dragRef.current = null)}
+                    onPointerCancel={() => { dragRef.current = null; dropPosition(gap.gap_id); }}
                     onKeyDown={(event) => onKeyDown(event, gap.gap_id, point!)}
                     onClick={() => setSelectedId(gap.gap_id)}
                     aria-label={`${gap.gap_name}: ${band ? BAND_LABELS[band] : "unplaced"}${validated ? ", priority confirmed" : ", priority not confirmed"}. Arrow keys move it.`}
@@ -942,7 +911,7 @@ export function PrioritizeMatrix({
           </div>
           <p className="pl-7 text-[11px] leading-4 text-muted-foreground">
             Drag a gap to change its priority, or select it and use the arrow keys (Shift for bigger
-            steps). A dashed edge means the priority is not confirmed yet.
+            steps). Every saved move needs a reason. A dashed edge means the priority is not confirmed yet.
           </p>
         </div>
 
@@ -978,6 +947,7 @@ export function PrioritizeMatrix({
                       <button
                         type="button"
                         data-testid="unplaced-gap"
+                        data-gap-id={gap.gap_id}
                         onPointerDown={(event) => onListPointerDown(event, gap.gap_id)}
                         onClick={() => setSelectedId(gap.gap_id)}
                         aria-label={`${gap.gap_name}: not placed. Drag onto the matrix, or select to type its scores.`}

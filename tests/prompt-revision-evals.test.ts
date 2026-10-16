@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 /** Strict comparable evidence gates promotion independently of execution. */
 import { describe, it, expect } from 'vitest';
 import { promotionEligibility, type RevisionEvaluation } from '@/modules/kernel/prompt-revision-evals';
@@ -186,7 +187,7 @@ import { frozenReplayCase, projectReplayDecision, scoreDecisionReplay } from '@/
 it('preserves future S9 pre-generation slots through a rationale-only edit and full isolated replay', async () => {
     const f = await evaluationFixture();
     await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
-        await validatePlacement({ gap_id: f.gap.id, band: 'high', rationale: 'This blocks the decision.', actor, workspace_id: f.ws.id });
+        await validatePlacement({ ...await priorityDecision(f.gap.id, 'This blocks the decision.'), gap_id: f.gap.id, band: 'high', rationale: 'This blocks the decision.', actor, workspace_id: f.ws.id });
         vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
         vi.spyOn(routing, 'resolveRoute').mockImplementation(async (stage) => ({ ...route, stage }));
         const calls: string[] = [];

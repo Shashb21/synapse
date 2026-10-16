@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({
@@ -198,7 +199,7 @@ describe("rejected mappings", () => {
 
 describe("rejected S9 proposals", () => {
   it("puts a rejected idea back to Proposed with a rationale", async () => {
-    await validatePlacement({ gap_id: gapB, band: "high", rationale: "Long-term safety blocks the dossier", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(gapB, "Long-term safety blocks the dossier"), gap_id: gapB, band: "high", rationale: "Long-term safety blocks the dossier", actor: ACTOR });
     const proposal = await addIdeationProposal({
       gap_id: gapB,
       fields: { name: "Linked registry follow-up", type: "long_term_followup", evidence_question: "Five-year AESI rate?" },

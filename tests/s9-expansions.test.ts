@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 /** Behavioral S9 expansion source gate: edits, acceptance, stale targets and priority. */
 import { beforeEach, describe, expect, it } from 'vitest';
 import '@/modules';
@@ -15,7 +16,7 @@ beforeEach(async () => {
     await resetDemoSetup();
     await wipePlatform();
     gapId = await createGap({ statement: 'Long-term safety in elderly patients is unknown.', actor_name: actor.name, actor_function: actor.function });
-    await validatePlacement({ gap_id: gapId, band: 'high', rationale: 'Blocks dossier', actor });
+    await validatePlacement({ ...await priorityDecision(gapId, 'Blocks dossier'), gap_id: gapId, band: 'high', rationale: 'Blocks dossier', actor });
     targetId = await createProposedTactic({ name: 'Completed trial', type: 'phase3_trial', description: 'Original trial', evidence_question: 'Overall safety', population: 'Adults', intervention: 'Asset', comparator: 'SOC', outcomes: 'AE', owner: actor.name, function: actor.function, residual_ids: [], status: 'completed', actor_name: actor.name, actor_function: actor.function });
 });
 describe('S9 expansion source gate', () => {
@@ -101,7 +102,7 @@ describe('S9 expansion source gate', () => {
         expect((await loadState()).expansions[0]).toMatchObject({status:'proposed',scope:{prospective_enrolment:true,protocol_amendment:true}});
     });
     it('rejects manual ideas for Medium or unvalidated gaps', async () => {
-        await validatePlacement({ gap_id: gapId, band: 'medium', rationale: 'Later cycle', actor });
+        await validatePlacement({ ...await priorityDecision(gapId, 'Later cycle'), gap_id: gapId, band: 'medium', rationale: 'Later cycle', actor });
         await expect(add()).rejects.toThrow(/High/);
     });
 });

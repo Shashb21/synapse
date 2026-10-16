@@ -27,6 +27,7 @@ import { GapRecordSections } from "@/components/gap-record-sections";
 import type { GapRecord } from "@/lib/iegp/gap-record";
 import { buildSeed } from "@/lib/iegp/seed";
 import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
+import { EntityHistory } from "@/components/entity-history";
 import { AudienceView } from "@/components/room/audience-view";
 import { NETWORK_ERROR } from "@/lib/post-json";
 import type { ReviewGapCard } from "@/lib/iegp/engine";
@@ -56,6 +57,20 @@ afterEach(() => {
 
 const byText = (text: string) =>
   [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === text) as HTMLButtonElement;
+
+it("priority history exposes complete old/new judgements and identifies missing historical reasons", () => {
+  const snapshot = JSON.stringify({ band: "high", axis_scores: { impact: 80 }, rationale: "The full priority explanation ".repeat(15), confirmed: true });
+  act(() => root.render(createElement(EntityHistory, { entries: [{
+    id: "legacy-decision", at: "2025-01-01T00:00:00Z", kind: "edit", entity_type: "gap", entity_id: "GAP-A",
+    action: "validate", field: "placement", before: snapshot, after: snapshot, rationale: null,
+    actor_name: "Earlier reviewer", actor_function: "medical_affairs", actor_principal: null, actor_role: null, request_id: null,
+  }] })));
+  expect(container.textContent).toContain("Reason not recorded");
+  const full = container.querySelector("details");
+  expect(full?.querySelector("summary")?.textContent).toBe("Show full change");
+  expect(full?.textContent).toContain("Priority confirmed");
+  expect(full?.textContent).toContain("The full priority explanation ".repeat(15).trim());
+});
 
 describe("a dialog whose request fails never sticks on Saving…", () => {
   it("LockForm shows the network error as an alert and frees its button", async () => {
@@ -279,7 +294,7 @@ describe("the full gap record priority", () => {
 });
 
 describe("Prioritize matrix nudges", () => {
-  it("nudging a second gap still saves the first one", async () => {
+  it("keyboard movement opens a reason step without saving either gap", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ placement: { band: "high", validated: true } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -312,12 +327,13 @@ describe("Prioritize matrix nudges", () => {
       .filter((body) => body.action === "move_placement")
       .map((body) => body.gap_id)
       .sort();
-    expect(moved).toEqual(["GAP-A", "GAP-B"]);
+    expect(moved).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Reason for change");
   });
 });
 
 describe("Prioritize matrix nudges on unload", () => {
-  it("a nudge still waiting on its debounce is sent with keepalive when the page goes away", () => {
+  it("leaving with unreasoned keyboard movements never sends a save", () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ placement: { band: "high", validated: true } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -350,7 +366,7 @@ describe("Prioritize matrix nudges on unload", () => {
       .filter((body) => body.action === "move_placement")
       .map((body) => `${body.gap_id}:${body.x},${body.y}`)
       .sort();
-    expect(sent).toEqual(["GAP-A:42,40", "GAP-B:60,62"]);
+    expect(sent).toEqual([]);
   });
 });
 

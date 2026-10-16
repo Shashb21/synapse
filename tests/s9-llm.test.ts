@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/modules";
 import * as routing from '@/modules/kernel/routing';
@@ -141,7 +142,7 @@ describe("S9 on the model path", () => {
       .map((gap) => gap.id)
       .slice(0, 2);
     expect(ids).toHaveLength(2);
-    for (const gap_id of ids) await validatePlacement({gap_id,band:"high",rationale:"Blocks dossier",actor:ACTOR});
+    for (const gap_id of ids) await validatePlacement({ ...await priorityDecision(gap_id, "Blocks dossier"),gap_id,band:"high",rationale:"Blocks dossier",actor:ACTOR});
     libraryId = state.tactics[0]!.id;
   }, 60_000);
 
@@ -166,11 +167,11 @@ describe("S9 on the model path", () => {
   const input = (per_gap = 1) => ideationModule.inputSchema.parse({ gap_ids: ids, per_gap, dry_run: true });
 
   it("explicit IDs cannot bypass human-validated High priority", async () => {
-    await validatePlacement({gap_id:ids[0]!,band:"medium",rationale:"Later cycle",actor:ACTOR});
+    await validatePlacement({ ...await priorityDecision(ids[0]!, "Later cycle"),gap_id:ids[0]!,band:"medium",rationale:"Later cycle",actor:ACTOR});
     const {ctx} = context(call => call.purpose === "ideation-proposer" ? {tactics:gapsOf(call).map(g=>tactic(g.id,"Eligible"))} : call.purpose === "ideation-critic" ? keepAll(call) : judgeFirst(call,1));
     const {output} = await ideationModule.run(input(),ctx);
     expect(output.gaps_considered).toBe(1); expect(output.proposals.map(p=>p.gap_id)).toEqual([ids[1]]);
-    await validatePlacement({gap_id:ids[0]!,band:"high",rationale:"Blocks dossier",actor:ACTOR});
+    await validatePlacement({ ...await priorityDecision(ids[0]!, "Blocks dossier"),gap_id:ids[0]!,band:"high",rationale:"Blocks dossier",actor:ACTOR});
   });
   it("throws before doing anything when no LLM is connected", async () => {
     const { ctx, calls } = context(() => ({}), false);

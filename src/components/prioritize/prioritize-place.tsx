@@ -111,6 +111,7 @@ export async function PrioritizePlace({
       domain_label: DOMAIN_LABELS[gap.domain],
       settings: gap.settings ?? [],
       tactic_count: mappedTactics(state, gap.id).length,
+      version: placement?.version ?? null,
       axis_scores: placement?.axis_scores ?? null,
       band: (placement?.band ?? null) as Band | null,
       validated: placement?.validated ?? false,

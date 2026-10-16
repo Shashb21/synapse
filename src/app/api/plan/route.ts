@@ -171,9 +171,11 @@ export async function POST(request: Request) {
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
           gap_id: String(body.gap_id ?? ""),
           band: field(bandSchema, body.band, "band"),
-          rationale,
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, placement });
@@ -181,6 +183,8 @@ export async function POST(request: Request) {
       case "move_placement": {
         assertCan(identity.role, "prioritize");
         const placement = await movePlacement({
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
           gap_id: String(body.gap_id ?? ""),
           x_axis: String(body.x_axis ?? ""),
           y_axis: String(body.y_axis ?? ""),
@@ -218,13 +222,15 @@ export async function POST(request: Request) {
           axis_scores[yAxis] = yScore;
         }
         const placement = await setPlacement({
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
           gap_id: String(body.gap_id ?? ""),
           axis_scores,
           x_axis: xAxis,
           y_axis: yAxis,
           band: body.band ? field(bandSchema, body.band, "band") : undefined,
           validate: body.validate === true || body.validate === "yes" || body.validate === "true",
-          rationale,
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, placement });

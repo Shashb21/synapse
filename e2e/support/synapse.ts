@@ -98,6 +98,10 @@ export async function runStageExpectingError(
 }
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const current = (await planState(request)).placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, reason: body.rationale, ...body };
+  }
   return postJson(request, "/api/plan", body);
 }
 
@@ -105,6 +109,10 @@ export async function planActionExpectingError(
   request: APIRequestContext,
   body: Record<string, unknown>,
 ): Promise<{ status: number; error: string }> {
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const current = (await planState(request)).placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, reason: body.rationale, ...body };
+  }
   const response = await request.post("/api/plan", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({ ...ACTOR, ...body }),
@@ -139,6 +147,7 @@ export async function planState(request: APIRequestContext) {
   return (await response.json()) as {
     placements: {
       gap_id: string;
+      version: string;
       axis_scores: Record<string, number>;
       suggested_band: string;
       suggested_rationale: string;

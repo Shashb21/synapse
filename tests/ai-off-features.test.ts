@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -242,6 +243,7 @@ describe("a whole plan by hand with AI off", () => {
 
   it("validates a band by hand", async () => {
     const placed = await plan({
+      ...await priorityDecision(openGap, "Blocks the HTA dossier"),
       action: "set_placement",
       gap_id: openGap,
       band: "high",

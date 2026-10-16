@@ -1,5 +1,5 @@
 import type { Actor } from "@/modules/kernel/contracts";
-import { validatePlacement } from "@/modules/stages/s8-prioritization/module";
+import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 import {
   addTimelineActivity,
   createTimelineActivity,
@@ -25,7 +25,8 @@ export const DEMO_BANDS = [
 export async function loadDemoPlan(workspaceId?: string): Promise<void> {
   const common = { rationale: WHY, actor: DEMO_ACTOR, workspace_id: workspaceId };
   for (const { gap_id, band } of DEMO_BANDS) {
-    await validatePlacement({ gap_id, band, ...common });
+    const current = (await listPlacements()).find((row) => row.gap_id === gap_id);
+    await validatePlacement({ gap_id, band, ...common, reason: WHY, expected_version: current?.version ?? null });
   }
   // Mapped tactics, dated from their start to when evidence is available.
   const claims = await addTimelineActivity({
