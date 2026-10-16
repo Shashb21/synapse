@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Download, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +47,15 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
     >
       <DemoBadge testId="demo-bar-badge" />
       <span>Demo workspace with the Velmara sample plan.</span>
+      {/* The seven input documents, to upload during the demo or hand to the client (KAN-139). */}
+      <a
+        href="/api/demo/files"
+        download
+        className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        <Download className="size-3" aria-hidden />
+        Download demo files
+      </a>
       {owner ? (
         <Dialog
           open={open}
@@ -56,7 +65,7 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
             if (!next) setError(null);
           }}
         >
-          <Button type="button" size="xs" variant="outline" className="ml-auto" onClick={() => setOpen(true)}>
+          <Button type="button" size="xs" variant="outline" onClick={() => setOpen(true)}>
             <RotateCcw className="size-3" aria-hidden />
             Reset demo
           </Button>
