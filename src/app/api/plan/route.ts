@@ -288,9 +288,12 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const result = await decideIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           decision: field(decisionSchema, body.decision, "decision"),
+          judgement_origin: body.judgement_origin === undefined ? undefined : field(z.enum(["model", "manual"]), body.judgement_origin, "judgement_origin"),
           rationale,
           actor: identity.actor,
+          workspace_id: identity.workspace?.id,
           fields: proposalFieldsOf(body),
         });
         return NextResponse.json({ ok: true, ...result });
@@ -299,6 +302,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const proposal = await restoreIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           rationale,
           actor: identity.actor,
           workspace_id: identity.workspace?.id,
@@ -309,6 +313,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const proposal = await editIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           fields: proposalFieldsOf(body),
           rationale,
           actor: identity.actor,

@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +33,10 @@ import { RejectedMappings, RejectedTactics, SetAsideGaps } from "@/components/re
 const ACTOR = { name: "Restore Tester", function: "medical_affairs" as const };
 
 async function iegp(body: Record<string, unknown>) {
+  if (["lock_tactic", "lock_tactic_review", "restore_tactic"].includes(String(body.action))) {
+    const tactic = (await loadState()).tactics.find(row => row.id === body.tactic_id);
+    body = { expected_tactic: tactic ? tacticEditVersion(tactic) : "", ...body };
+  }
   const res = await iegpPost(
     new Request("http://localhost/api/iegp", {
       method: "POST",
@@ -43,6 +48,10 @@ async function iegp(body: Record<string, unknown>) {
 }
 
 async function plan(body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
+    const current = (await listIdeationProposals()).find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
   const res = await planPost(
     new Request("http://localhost/api/plan", {
       method: "POST",

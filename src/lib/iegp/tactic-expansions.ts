@@ -127,6 +127,7 @@ export async function setExpansionStatus(args: {
     if (!row) throw new Error("Expansion not found in this workspace.");
     const child = row as TacticExpansion;
     if (child.version !== args.expected_version) throw new Error("Expansion changed; refresh the stale version.");
+    if (child.status === args.status) return child;
     for (const gapId of [...child.gap_ids].sort()) await tx.select().from(t.gaps).where(eq(t.gaps.id, gapId)).for("update");
     const at = nowIso(), version = newId("EXV");
     const updated: TacticExpansion = {...child, status: args.status, updated_at: at, version,

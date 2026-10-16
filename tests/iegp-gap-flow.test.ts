@@ -54,7 +54,7 @@ async function makePartialGap() {
     actor_name: "A. Rao",
     actor_function: "heor",
   });
-  await lockTactic({
+  await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle",
     tactic_id: tacticId,
     status: "planned",
     actor_name: "A. Rao",
@@ -175,7 +175,7 @@ describe("partial split and rewrite", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    await lockTactic({
+    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: tacticId,
       status: "completed",
       actor_name: "A. Rao",
@@ -225,7 +225,7 @@ describe("partial split and rewrite", () => {
       actor_name: "A. Rao",
       actor_function: "heor",
     });
-    await lockTactic({
+    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: secondTacticId,
       status: "planned",
       actor_name: "A. Rao",

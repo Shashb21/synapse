@@ -1,11 +1,11 @@
 import { withRelationshipChange } from "./relationship-change";
 import { relationshipSnapshot, relationshipVersion } from "./relationship-version";
-import { and, eq } from "drizzle-orm";
-import { db } from "./db";
+import { and, eq, sql } from "drizzle-orm";
+import { db, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import type { ActorFunction } from "./enums";
-import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, makeLock, NOT_CONFIRMED, syncComputedGapStatuses } from "./store";
+import { appendAudit, ensureGapHasConstituentNeed, isMappingRowKey, loadState, lockTacticReview, makeLock, NOT_CONFIRMED, syncComputedGapStatuses } from "./store";
 
 /**
  * Undo for every "set aside" decision (KAN-16): an excluded gap, a rejected
@@ -124,28 +124,16 @@ export async function restoreRejectedNeed(args: RestoreActor & { need_id: string
 }
 
 /** A tactic a person rejected goes back into the library (accepted), ready to map. */
-export async function restoreRejectedTactic(args: RestoreActor & { tactic_id: string }) {
+export async function restoreRejectedTactic(args: RestoreActor & { tactic_id: string; expected_tactic?: unknown }) {
   const rationale = requireRationale(args.rationale);
-  const state = await loadState();
-  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
-  if (tactic.review_status !== "rejected") throw new Error("This tactic is not rejected.");
-  await db()
-    .update(t.tactics)
-    .set({ review_status: "accepted", lock: makeLock(args.actor_name, args.actor_function, rationale) })
-    .where(eq(t.tactics.id, args.tactic_id));
-  await fileRestore({
-    stage: "S3",
-    entity_type: "tactic",
-    entity_id: args.tactic_id,
-    field: "review_status",
-    before: "rejected",
-    after: "accepted",
-    rationale,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    audit_entity: "tactic",
-    audit_action: "restore",
+  await loadState();
+  return withWorkspaceTransaction(async () => {
+    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const tactic = (await loadState()).tactics.find(row => row.id === args.tactic_id);
+    if (!tactic) throw new Error("Tactic not found");
+    if (tactic.review_status !== "rejected") throw new Error("This tactic is not rejected.");
+    await lockTacticReview({ ...args, review_status: "accepted", note: rationale });
+    await appendAudit(args.actor_name, args.actor_function, "tactic", args.tactic_id, "restore", rationale);
   });
 }
 

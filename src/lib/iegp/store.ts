@@ -1848,6 +1848,8 @@ type LibraryTacticDraft = {
   actor_function: ActorFunction;
   audit_action: string;
   note?: string;
+  /** An initiating decision reason for history; does not change the tactic lock. */
+  audit_reason?: string;
   /** A person's own type name and colour (KAN-51); the standard type still decides mapping. */
   custom_type?: CustomTacticType | null;
 };
@@ -1896,6 +1898,7 @@ export function customTypeFromFields(label: unknown, color: unknown): CustomTact
 
 /** Canonical library insertion; source owners may compose it with their existing transaction. */
 export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?: StoreTransaction) {
+  const creationReason = args.audit_reason === undefined ? null : requireRationale(args.audit_reason);
   const state = transaction ? await readState(transaction) : await loadState();
   const d = transaction ?? db();
   const custom_type = args.custom_type ?? null;
@@ -1943,7 +1946,7 @@ export async function insertLibraryTactic(args: LibraryTacticDraft, transaction?
     "tactic",
     id,
     args.audit_action,
-    args.name.trim(),
+    creationReason ? `${args.name.trim()}: ${creationReason}` : args.name.trim(),
     transaction,
   );
   return id;
@@ -2968,6 +2971,17 @@ export async function modifyGap(args: {
 
 export async function lockTactic(args: {
   tactic_id: string;
+  expected_tactic?: unknown;
+  status: IegpState["tactics"][0]["status"];
+  actor_name: string;
+  actor_function: ActorFunction;
+  note?: string;
+}) {
+  return modifyTactic({ ...args, rationale: args.note });
+}
+
+async function applyTacticStatus(args: {
+  tactic_id: string;
   status: IegpState["tactics"][0]["status"];
   actor_name: string;
   actor_function: ActorFunction;
@@ -3001,14 +3015,6 @@ export async function lockTactic(args: {
       await syncComputedGapStatuses(c.gap_id);
     }
   }
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "tactic",
-    args.tactic_id,
-    "lock_status",
-    `${prev} → ${args.status}`,
-  );
 }
 
 /**
@@ -3672,46 +3678,30 @@ export async function clearNewSourceFlag(args: {
 
 export async function lockTacticReview(args: {
   tactic_id: string;
+  expected_tactic?: unknown;
   review_status: "accepted" | "rejected";
   actor_name: string;
   actor_function: ActorFunction;
   note?: string;
 }) {
-  const state = await loadState();
-  const tactic = state.tactics.find((x) => x.id === args.tactic_id);
-  if (!tactic) throw new Error("Tactic not found");
-  if (args.review_status === "rejected" && !args.note?.trim()) {
-    throw new Error("Rejecting a tactic requires a note.");
-  }
-  await db()
-    .update(t.tactics)
-    .set({
-      review_status: args.review_status,
-      lock: makeLock(args.actor_name, args.actor_function, args.note),
-    })
-    .where(eq(t.tactics.id, args.tactic_id));
-  await appendAudit(
-    args.actor_name,
-    args.actor_function,
-    "tactic",
-    args.tactic_id,
-    "lock_review",
-    `${tactic.review_status} → ${args.review_status}`,
-  );
-  const rationale = args.note?.trim() ?? "";
-  if (rationale.length >= 3) {
-    await recordEdit({
-      stage: "S3",
-      entity_type: "tactic",
-      entity_id: args.tactic_id,
-      field: "review_status",
-      action: args.review_status === "accepted" ? "accept" : "reject",
-      before: tactic.review_status,
-      after: args.review_status,
-      rationale,
+  const rationale = requireRationale(args.note);
+  if (!["accepted", "rejected"].includes(args.review_status)) throw new Error("Invalid tactic review status.");
+  await loadState();
+  return withWorkspaceTransaction(async () => {
+    await db().execute(sql`SELECT id FROM tactics WHERE id = ${args.tactic_id} FOR UPDATE`);
+    const tactic = (await readState()).tactics.find(row => row.id === args.tactic_id);
+    if (!tactic) throw new Error("Tactic not found");
+    if (args.expected_tactic !== undefined && args.expected_tactic !== tacticEditVersion(tactic)) {
+      throw new Error("Tactic changed since you opened it. Your decision and reason have not been saved. Reopen the latest record before retrying.");
+    }
+    if (tactic.review_status === args.review_status) return;
+    await db().update(t.tactics).set({ review_status: args.review_status, lock: makeLock(args.actor_name, args.actor_function, rationale) }).where(eq(t.tactics.id, args.tactic_id));
+    await recordEdit({ stage: "S3", entity_type: "tactic", entity_id: args.tactic_id,
+      field: "review_status", action: args.review_status === "accepted" ? "accept" : "reject",
+      before: tactic.review_status, after: args.review_status, rationale,
       actor: { name: args.actor_name, function: args.actor_function },
     });
-  }
+  });
 }
 
 /** Tactic fields a person can edit on /tactics/[id]. Dates are YYYY-MM or YYYY-MM-DD, or blank. */
@@ -3844,7 +3834,7 @@ export async function modifyTactic(args: {
     });
     if (changes.some(change => change.field === "status")) {
       // Reuse the lifecycle owner for residual unlocking and related gap recomputation.
-      await lockTactic({ tactic_id: tactic.id, status: args.status as IegpState["tactics"][0]["status"],
+      await applyTacticStatus({ tactic_id: tactic.id, status: args.status as IegpState["tactics"][0]["status"],
         actor_name: args.actor_name, actor_function: args.actor_function, note: rationale });
     } else if (changes.some(change => change.field === "type")) {
       const gapIds = new Set(state.coverages.filter(c => c.tactic_id === tactic.id).map(c => c.gap_id));

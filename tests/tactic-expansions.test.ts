@@ -6,7 +6,7 @@ import "@/modules";
 import * as tables from "@/lib/iegp/schema";
 import { db } from "@/lib/iegp/db";
 import { buildSeed } from "@/lib/iegp/seed";
-import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap } from "@/lib/iegp/store";
 import { acceptTacticExpansion, setExpansionStatus, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { POST } from "@/app/api/plan/route";
@@ -187,6 +187,7 @@ describe("canonical expansion acceptance", () => {
       const planned = await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Separate workspace approved", actor, expected_version: child.version});
       expect((await loadState()).expansions[0]!.status).toBe("planned");
       expect(planned.history).toHaveLength(2);
+      expect(await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "No substantive lifecycle change", actor, expected_version: planned.version })).toEqual(planned);
     });
   });
   it("legacy parent mapping row edits preserve distinct child scopes", async () => {
@@ -391,6 +392,7 @@ describe("canonical expansion acceptance", () => {
     const before = await loadState();
     const planned = await setExpansionStatus({expansion_id:expansion.id,status:"planned",rationale:"Resource committed",actor,expected_version:expansion.version});
     expect(planned.history).toHaveLength(2);
+    expect(await setExpansionStatus({ expansion_id: expansion.id, status: "planned", rationale: "No substantive lifecycle change", actor, expected_version: planned.version })).toEqual(planned);
     expect(planned.version).not.toBe(expansion.version);
     const after = await loadState();
     expect(after.tactics).toEqual(before.tactics);

@@ -63,9 +63,12 @@ const gapsOf = (call: Call) => call.body.gaps as PromptGap[];
 const tacticsOf = (call: Call) => call.body.tactics as PromptTactic[];
 const judgeGapsOf = (call: Call) => call.body.gaps as JudgeGap[];
 
+const support = (gapId: string) => [{ entity_type: "gap", entity_id: gapId, reason: "The supplied gap identifies the evidence need considered by this judgement" }];
+
 function tactic(gap_id: string, name: string, overrides: Record<string, unknown> = {}) {
   return {
     gap_id,
+    references: support(gap_id),
     proposal_kind: "new",
     target_tactic_id: null,
     expansion_scope: null,
@@ -88,7 +91,7 @@ function tactic(gap_id: string, name: string, overrides: Record<string, unknown>
 }
 
 const keepAll = (call: Call) => ({
-  reviews: tacticsOf(call).map((row) => ({ id: row.id, verdict: "keep", confidence: 70, note: `holds: ${row.name}` })),
+  reviews: tacticsOf(call).map((row) => ({ id: row.id, references: support(row.gap_id), verdict: "keep", confidence: 70, note: `holds: ${row.name}` })),
 });
 
 /** Accepts the first `take` candidates of each gap, ranked in order. */
@@ -97,6 +100,7 @@ const judgeFirst = (call: Call, take: number) => ({
     gap_id: gap.id,
     decisions: gap.candidates.map((candidate, index) => ({
       id: candidate.id,
+      references: support(gap.id),
       verdict: index < take ? "accept" : "reject",
       rank: index < take ? index + 1 : null,
       confidence: 90 - index * 10,
@@ -205,10 +209,10 @@ describe("S9 on the model path", () => {
         return {
           reviews: tacticsOf(call).map((row) =>
             row.name === "A1"
-              ? { id: row.id, verdict: "revise", confidence: 40, note: "comparator should be physician's choice", issues: ["comparator"] }
+              ? { id: row.id, references: support(row.gap_id), verdict: "revise", confidence: 40, note: "comparator should be physician's choice", issues: ["comparator"] }
               : row.name === "A2"
-                ? { id: row.id, verdict: "drop", confidence: 10, note: "library already has this", duplicate_of: libraryId }
-                : { id: row.id, verdict: "keep", confidence: 75, note: `holds: ${row.name}` },
+                ? { id: row.id, references: support(row.gap_id), verdict: "drop", confidence: 10, note: "library already has this", duplicate_of: libraryId }
+                : { id: row.id, references: support(row.gap_id), verdict: "keep", confidence: 75, note: `holds: ${row.name}` },
           ),
         };
       }
@@ -218,6 +222,7 @@ describe("S9 on the model path", () => {
           gap_id: gap.id,
           decisions: gap.candidates.map((candidate) => ({
             id: candidate.id,
+      references: support(gap.id),
             verdict: candidate.name === "B1" ? "reject" : "accept",
             rank: candidate.name === "B1" ? null : 1,
             confidence: candidate.name === "B1" ? 30 : 88,
@@ -348,6 +353,22 @@ describe("S9 on the model path", () => {
     await expect(ideationModule.run({...input(),dry_run:false},ctx)).rejects.toThrow(/complete set of tactic designs/);
     expect(await listIdeationProposals()).toEqual(before);
   });
+  it.each(["proposer", "critic", "judge"])("refuses unsupported %s output without persisting an option", async stage => {
+    const { listIdeationProposals } = await import("@/modules/stages/s9-ideation/module");
+    const before = await listIdeationProposals();
+    const { ctx } = context(call => {
+      if (call.purpose === "ideation-proposer") return { tactics: gapsOf(call).map(g => tactic(g.id, "Unsupported fixture", stage === "proposer" ? { references: [{ entity_type: "gap", entity_id: "foreign-gap", reason: "An inaccessible record is not supplied support" }] } : {})) };
+      if (call.purpose === "ideation-critic") {
+        const result = keepAll(call);
+        return stage === "critic" ? { reviews: result.reviews.map(row => ({ ...row, references: [] })) } : result;
+      }
+      const result = judgeFirst(call, 1);
+      return stage === "judge" ? { gaps: result.gaps.map(gap => ({ ...gap, decisions: gap.decisions.map(row => ({ ...row, references: [] })) })) } : result;
+    });
+    await expect(ideationModule.run({ ...input(), dry_run: false }, ctx)).rejects.toThrow(/did not return a complete/);
+    expect(await listIdeationProposals()).toEqual(before);
+  });
+
   it("asks again for a gap whose tactic has an invalid type or no duration", async () => {
     const [a, b] = ids as [string, string];
     let firstProposal = true;
@@ -431,7 +452,7 @@ describe("S9 on the model path", () => {
         criticCalls += 1;
         if (criticCalls === 1) {
           return {
-            reviews: tacticsOf(call).map((row) => ({ id: row.id, verdict: "drop", confidence: 5, note: "dup", duplicate_of: "not-a-tactic" })),
+            reviews: tacticsOf(call).map((row) => ({ id: row.id, references: support(row.gap_id), verdict: "drop", confidence: 5, note: "dup", duplicate_of: "not-a-tactic" })),
           };
         }
         return keepAll(call);
@@ -470,7 +491,10 @@ describe("S9 on the model path", () => {
       await db().update(ideationProposals).set({ design: stored }).where(sql`${ideationProposals.id} = ${row.id}`);
     }
     process.env.SYNAPSE_TEST_STUB_LLM = "1";
-    const post = (body: Record<string, unknown>) => POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor_name: ACTOR.name, actor_function: ACTOR.function, id: row.id, rationale: "Review rationale", ...body }) }));
+    const post = async (body: Record<string, unknown>) => {
+      const current = (await (await import("@/modules/stages/s9-ideation/module")).listIdeationProposals()).find(p => p.id === row.id)!;
+      return POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor_name: ACTOR.name, actor_function: ACTOR.function, id: row.id, expected_version: current.version, rationale: "Review rationale", ...body }) }));
+    };
     if (flow === "saved-edit") expect((await post({ action: "edit_proposal", name: "Human idea", population: "Human population" })).status).toBe(200);
     const humanComparison = "Human comparison: existing analyses cannot measure this outcome; the new registry costs more but has feasible recruitment.";
     if (flow === "comparison-edit") expect((await post({ action: "edit_proposal", comparative_rationale: humanComparison })).status).toBe(200);

@@ -3,7 +3,7 @@ import { DrizzleQueryError, eq, sql } from "drizzle-orm";
 import * as tables from "./schema";
 import { db, withWorkspaceTransaction } from "./db";
 import { gapResolutionVersion, relationshipSnapshot, relationshipVersion } from "./relationship-version";
-import { inspectJudgementReferences, suppliedJudgementRecords, type JudgementReference } from "./judgement-references";
+import { matchesSuppliedJudgementRecords, inspectJudgementReferences, suppliedJudgementRecords, type JudgementReference } from "./judgement-references";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { tacticEditVersion } from "./tactic-edit-version";
 import type { ActorFunction } from "./enums";
@@ -31,7 +31,7 @@ export async function withRelationshipChange<T>(args: ChangeActor, change: () =>
     if (args.model && args.supplied_records) {
       const gapIds = args.supplied_records.filter(record => record.entity_type === "gap").map(record => record.entity_id);
       const tactic = before.tactics.find(row => row.id === args.tactic_id);
-      if (relationshipVersion(args.supplied_records) !== relationshipVersion(suppliedJudgementRecords(before, gapIds)) ||
+      if (!matchesSuppliedJudgementRecords(before, gapIds, args.supplied_records) ||
           !tactic || args.expected_tactic_version !== tacticEditVersion(tactic)) {
         throw new Error("Model judgement context changed. Regenerate it or make a manual judgement with a reason.");
       }

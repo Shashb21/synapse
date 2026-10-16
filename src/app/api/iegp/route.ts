@@ -491,7 +491,7 @@ async function handleAction(request: Request): Promise<Response> {
         await restoreRejectedNeed({ need_id: body.need_id, rationale: rationaleOf(body), actor_name, actor_function });
         break;
       case "restore_tactic":
-        await restoreRejectedTactic({ tactic_id: body.tactic_id, rationale: rationaleOf(body), actor_name, actor_function });
+        await restoreRejectedTactic({ tactic_id: body.tactic_id, expected_tactic: body.expected_tactic ?? "", rationale: rationaleOf(body), actor_name, actor_function });
         break;
       case "restore_mapping":
         await restoreRejectedMapping({
@@ -801,6 +801,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "lock_tactic_review":
         await lockTacticReview({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic ?? "",
           review_status: body.review_status as "accepted" | "rejected",
           actor_name,
           actor_function,
@@ -810,7 +811,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "modify_tactic":
         await modifyTactic({
           tactic_id: body.tactic_id,
-          expected_tactic: body.expected_tactic,
+          expected_tactic: body.expected_tactic ?? "",
           status: typeof body.status === "string" ? body.status : undefined,
           fields: tacticFieldsOf(body),
           custom_type: customTypeOf(body),
@@ -912,10 +913,11 @@ async function handleAction(request: Request): Promise<Response> {
       case "lock_tactic":
         await lockTactic({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic ?? "",
           status: body.status as never,
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the

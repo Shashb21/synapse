@@ -38,6 +38,10 @@ const X = "effort_cost";
 const Y = "decision_impact";
 
 async function post(body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
+    const current = (await listIdeationProposals()).find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
   if (["set_placement", "validate_band", "move_placement"].includes(String(body.action))) {
     body = { ...await priorityDecision(String(body.gap_id), String(body.rationale ?? "")), ...body };
   }

@@ -48,7 +48,10 @@ export async function entityHistory(entityIds: string[], options: { since?: stri
   // Only this instance of the record (KAN-97): history from before the workspace's
   // last reset belongs to a plan that no longer exists.
   const since = options.since ?? null;
-  const editMatch = or(inArray(kernel.editRecords.entity_id, ids), and(
+  const relatedOptions = db().select({ id: kernel.ideationProposals.id }).from(kernel.ideationProposals).where(or(
+    inArray(kernel.ideationProposals.gap_id, ids), inArray(kernel.ideationProposals.tactic_id, ids), inArray(kernel.ideationProposals.target_tactic_id, ids),
+  ));
+  const editMatch = or(inArray(kernel.editRecords.entity_id, ids), inArray(kernel.editRecords.entity_id, relatedOptions), and(
     sql`${kernel.editRecords.entity_type} = 'gap_tactic'`,
     or(inArray(sql`split_part(${kernel.editRecords.entity_id}, '::', 1)`, ids), inArray(sql`split_part(${kernel.editRecords.entity_id}, '::', 2)`, ids)),
   ));
@@ -81,7 +84,9 @@ export async function entityHistory(entityIds: string[], options: { since?: stri
     edits.push(...retainedEdits.filter(row => !edits.some(edit => edit.id === row.id)));
     actions.push(...retainedActions.filter(row => !actions.some(action => action.id === row.id)));
   }
-  const referenceState = edits.some(row => row.supporting_references?.length || row.entity_type === "gap_tactic") ? await (await import("./store")).loadState() : null;
+  const referenceState = edits.some(row => row.supporting_references?.length || row.entity_type === "gap_tactic" || row.entity_type === "ideation_proposal") ? await (await import("./store")).loadState() : null;
+  const optionIds = edits.filter(row => row.entity_type === "ideation_proposal").map(row => row.entity_id);
+  const optionsById = new Map((optionIds.length ? await db().select().from(kernel.ideationProposals).where(inArray(kernel.ideationProposals.id, optionIds)) : []).map(row => [row.id, row]));
   const editKeys = new Set(edits.filter((row) => row.request_id).map((row) => `${row.request_id}|${row.entity_id}`));
   const entries: HistoryEntry[] = [
     ...edits.map((row) => ({
@@ -127,6 +132,11 @@ export async function entityHistory(entityIds: string[], options: { since?: stri
       })),
   ];
   for (const entry of entries) {
+    const option = entry.entity_type === "ideation_proposal" ? optionsById.get(entry.entity_id) : null;
+    if (option && referenceState) {
+      entry.counterpart_gaps = referenceState.gaps.filter(gap => gap.id === option.gap_id).map(gap => ({ id: gap.id, name: gap.name }));
+      entry.counterpart_tactics = referenceState.tactics.filter(tactic => tactic.id === option.tactic_id || tactic.id === option.target_tactic_id).map(tactic => ({ id: tactic.id, name: tactic.name }));
+    }
     const pair = retainedCoverages.get(entry.entity_id);
     if (!pair || !referenceState) continue;
     entry.counterpart_gaps = referenceState.gaps.filter(gap => gap.id === pair.gap_id).map(gap => ({ id: gap.id, name: gap.name }));

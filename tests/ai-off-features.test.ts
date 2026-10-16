@@ -1,3 +1,4 @@
+import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
 import { priorityDecision } from "./support/priority-decision";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -60,6 +61,10 @@ async function iegp(body: Record<string, string>) {
 }
 
 async function plan(body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
+    const current = (await listIdeationProposals()).find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
   const res = await planPost(
     new Request("http://localhost/api/plan", {
       method: "POST",

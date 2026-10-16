@@ -390,7 +390,7 @@ describe("IEGP postgres store", () => {
       population: "", intervention: "", comparator: "", outcomes: "", geography: "US", owner: "A. Rao", function: "heor",
       residual_ids: [], actor_name: "A. Rao", actor_function: "heor",
     });
-    await lockTactic({ tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
+    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
     await expect(
       assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
     ).rejects.toThrow(/Unknown coverage/i);
@@ -531,7 +531,7 @@ describe("IEGP postgres store", () => {
     });
     expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
 
-    await lockTactic({
+    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: tacticId,
       status: "planned",
       actor_name: "A. Rao",

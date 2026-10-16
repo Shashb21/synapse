@@ -120,7 +120,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
     {record.permissions.edit ? <div className="flex flex-wrap gap-2">
       {!editing ? <button type="button" className="underline" onClick={() => setEditing(true)}>Edit tactic</button> : null}
       {(["accepted", "rejected"] as const).filter(status => status !== tactic.review_status).map(status => <ActionDialog key={status} onSuccess={onRefresh} protectUnsavedChanges
-        endpoint="/api/iegp" payload={{ action: "lock_tactic_review", tactic_id: tactic.id, review_status: status }}
+        endpoint="/api/iegp" payload={{ action: "lock_tactic_review", tactic_id: tactic.id, expected_tactic: record.version, review_status: status }}
         identity={identity} label={status === "accepted" ? "Accept tactic" : "Reject tactic"}
         description={status === "accepted" ? "Accepts this tactic into the library. The decision is locked to you." : "Marks this tactic rejected: it stays on record but is not a real study for this plan."}
         confirmLabel={status === "accepted" ? "Accept" : "Reject"} />)}

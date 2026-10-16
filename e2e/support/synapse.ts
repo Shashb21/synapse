@@ -98,6 +98,10 @@ export async function runStageExpectingError(
 }
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action)) && body.expected_version === undefined) {
+    const current = (await planState(request)).proposals.find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
   if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
     const snapshot = await planState(request);
     const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
@@ -166,6 +170,7 @@ export async function planState(request: APIRequestContext) {
       updated_by: string;
     };
     proposals: {
+      version: string;
       id: string;
       gap_id: string;
       name: string;

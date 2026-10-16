@@ -1,3 +1,4 @@
+import { addTimelineActivity, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -8,7 +9,7 @@ vi.mock("next/headers", () => ({
 import "@/modules";
 import { GET } from "@/app/api/tactics/[id]/route";
 import { POST } from "@/app/api/iegp/route";
-import { assignTacticToGap, createGap, createProposedTactic, resetDemoSetup } from "@/lib/iegp/store";
+import { assignTacticToGap, createGap, createProposedTactic, loadState, modifyTactic, resetDemoSetup } from "@/lib/iegp/store";
 import { createWorkspace, withWorkspace, type Workspace } from "@/modules/workspaces/store";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
 import { createSession } from "@/modules/auth/session";
@@ -88,6 +89,43 @@ it("saves fields and status together with a reason, rejects stale drafts, and le
   expect(await stale.json()).toMatchObject({ error: expect.stringContaining("Tactic changed") });
   expect((await save({ budget: "$480K", status: "planned", expected_tactic: saved.version, rationale: "No substantive change" })).status).toBe(400);
   expect((await record()).history).toEqual(saved.history);
+});
+
+it.each(["field", "status"])("requires the HTTP opening token for %s changes and leaves rejected writes and history unchanged", async kind => {
+  const id = await withWorkspace(own.id, () => create(`Snapshot guarded ${kind}`));
+  const currentRecord = async () => (await (await read(id)).json()) as TacticRecord;
+  const initial = await currentRecord();
+  const change = kind === "field" ? { budget: "$100K" } : { status: "planned" };
+  const nextChange = kind === "field" ? { budget: "$999K" } : { status: "ongoing" };
+  const before = await withWorkspace(own.id, loadState);
+  const missing = await save({ tactic_id: id, ...change, rationale: "This request has no opening snapshot" });
+  expect(missing.status).toBe(400);
+  expect(await missing.json()).toMatchObject({ error: expect.stringContaining("Tactic changed") });
+  expect(await withWorkspace(own.id, loadState)).toEqual(before);
+  expect((await currentRecord()).history).toEqual(initial.history);
+  expect((await save({ tactic_id: id, ...change, expected_tactic: initial.version, rationale: "Save this reviewed opening snapshot" })).status).toBe(200);
+  const saved = await currentRecord();
+  const savedState = await withWorkspace(own.id, loadState);
+  for (const token of [{}, { expected_tactic: initial.version }, { expected_tactic: null }]) {
+    const response = await save({ tactic_id: id, ...nextChange, ...token, rationale: "An absent or stale opening cannot overwrite a newer review" });
+    expect(response.status).toBe(400);
+    expect(await withWorkspace(own.id, loadState)).toEqual(savedState);
+    expect((await currentRecord()).history).toEqual(saved.history);
+  }
+  await withWorkspace(own.id, () => modifyTactic({ tactic_id: id, fields: { owner: "Trusted internal owner" }, rationale: "An internal owner retains the existing optional-token contract", ...actor }));
+  expect((await currentRecord()).tactic.owner).toBe("Trusted internal owner");
+});
+
+it("loads the opening tactic token for timeline detail editors", async () => {
+  const id = await withWorkspace(own.id, () => create("Timeline token cohort"));
+  const initial = (await (await read(id)).json()) as TacticRecord;
+  const model = await withWorkspace(own.id, async () => {
+    await addTimelineActivity({ tactic_id: id, start_date: "2027-01-01", end_date: "2027-06-30", rationale: "Schedule this manually reviewed cohort", actor: { name: actor.actor_name, function: actor.actor_function } });
+    return timelineModel();
+  });
+  expect(model.activities.some(activity => activity.tactic_id === id)).toBe(true);
+  expect(model.tactic_versions?.[id]).toBe(initial.version);
+  expect((await save({ tactic_id: id, budget: "$250K", expected_tactic: model.tactic_versions?.[id], rationale: "Budget reviewed from the timeline opening" })).status).toBe(200);
 });
 
 it("rolls fields, lifecycle, related state and history back if the required edit record fails", async () => {

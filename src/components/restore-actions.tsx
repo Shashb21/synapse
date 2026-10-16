@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import Link from "next/link";
 import { LockForm } from "@/components/lock-form";
 import { EXCLUSION_LABELS, type ExclusionReason } from "@/lib/iegp/enums";
@@ -49,12 +50,12 @@ export function RestoreNeedButton({ needId }: { needId: string }) {
   );
 }
 
-export function RestoreTacticButton({ tacticId }: { tacticId: string }) {
+export function RestoreTacticButton({ tacticId, expectedTactic }: { tacticId: string; expectedTactic?: string }) {
   return (
     <LockForm
       label="Restore tactic"
       action="restore_tactic"
-      extra={{ tactic_id: tacticId }}
+      extra={{ tactic_id: tacticId, expected_tactic: expectedTactic ?? "" }}
       confirmLabel="Restore"
       description="Puts the tactic back in the library, ready to map onto gaps."
       note={RATIONALE}
@@ -159,7 +160,7 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
                 {tactic.lock.note ? ` · “${tactic.lock.note}”` : ""}
               </p>
             </div>
-            <RestoreTacticButton tacticId={tactic.id} />
+            <RestoreTacticButton tacticId={tactic.id} expectedTactic={tacticEditVersion(tactic)} />
           </li>
         ))}
       </ul>

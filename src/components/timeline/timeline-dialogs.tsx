@@ -137,11 +137,11 @@ export function CreateActivityDialog({
 }
 
 /** Edits the activity's own record (the tactic): name, type and evidence question. */
-export function EditActivityDialog({ identity, activity }: { identity: ActionIdentity; activity: TimelineActivity }) {
+export function EditActivityDialog({ identity, activity, expectedTactic }: { identity: ActionIdentity; activity: TimelineActivity; expectedTactic: string }) {
   return (
     <ActionDialog
       endpoint="/api/iegp"
-      payload={{ action: "modify_tactic", tactic_id: activity.tactic_id }}
+      payload={{ action: "modify_tactic", tactic_id: activity.tactic_id, expected_tactic: expectedTactic }}
       label="Edit details"
       title={`Edit ${activity.tactic_name}`}
       description="Changes the tactic behind this activity. Your values are locked as yours."
@@ -311,15 +311,20 @@ export function DragRescheduleDialog({
  */
 export function ActivitySheetEditor({
   identity,
-  activity,
+  activity: openingActivity,
+  expectedTactic: openingTactic,
   canEditDetails,
   onDone,
 }: {
   identity: ActionIdentity;
   activity: TimelineActivity;
+  expectedTactic: string;
   canEditDetails: boolean;
   onDone: () => void;
 }) {
+  // Revalidation refreshes the record behind this editor, never its opening draft/token.
+  const [activity] = useState(openingActivity);
+  const [expectedTactic] = useState(openingTactic);
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -394,7 +399,7 @@ export function ActivitySheetEditor({
         ? await post("/api/plan", { action: "move_activity", id: activity.id, ...schedule, rationale })
         : null) ??
       (Object.keys(details).length > 0
-        ? await post("/api/iegp", { action: "modify_tactic", tactic_id: activity.tactic_id, ...details, rationale })
+        ? await post("/api/iegp", { action: "modify_tactic", tactic_id: activity.tactic_id, expected_tactic: expectedTactic, ...details, rationale })
         : null);
     setPending(false);
     if (failed) {

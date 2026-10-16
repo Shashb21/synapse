@@ -546,6 +546,7 @@ export function TimelineBoard({
                   <ActivitySheetEditor
                     identity={identity}
                     activity={datedSelection}
+                    expectedTactic={model.tactic_versions?.[datedSelection.tactic_id] ?? ""}
                     canEditDetails={canEditDetails && !selected.expansion_id}
                     onDone={() => setEditingId(null)}
                   />

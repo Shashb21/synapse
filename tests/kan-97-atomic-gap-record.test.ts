@@ -81,7 +81,7 @@ async function makePartialGap() {
     gap_id: gapId,
     ...who,
   });
-  await lockTactic({ tactic_id: tacticId, status: "planned", ...who });
+  await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", ...who });
   await syncComputedGapStatuses(gapId);
   const gap = (await loadState()).gaps.find((g) => g.id === gapId)!;
   expect(displayedGapStatus(gap)).toBe("validated_partial");

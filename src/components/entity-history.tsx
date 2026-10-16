@@ -43,7 +43,7 @@ function changeText(value: string | null, field: string | null): string | null {
 }
 
 function hasSuggestion(entry: HistoryEntry): boolean {
-  if (entry.field === "model_relationship") return true;
+  if (entry.field === "model_suggestion" || entry.field === "supported_model_status" || entry.field === "model_relationship") return true;
   if (/suggest|model|(?:^|[._])ai(?:[._]|$)/.test(entry.action)) return true;
   if (entry.field !== "placement" || !entry.after) return false;
   try {
