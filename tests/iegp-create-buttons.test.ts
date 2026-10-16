@@ -14,15 +14,20 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(src).toContain("SplitGapDialog");
     expect(src).toContain("card.gap_id");
     expect(src).toContain("Confirm status");
-    expect(src).toContain("Unconfirmed");
+    expect(src).toContain("Assessment unconfirmed");
     expect(src).toContain("No tactics mapped");
     // The compact list row stays statement-free; the full statement is one click away in the detail pane.
-    const listRowSrc = src.slice(src.indexOf("function GapListRow"), src.indexOf("function GapDetailPane"));
+    const rowStart = src.indexOf("data-gap-id={card.gap_id}", src.indexOf("<tbody>"));
+    expect(rowStart).toBeGreaterThan(-1);
+    const rowEnd = src.indexOf("</tr>", rowStart);
+    expect(rowEnd).toBeGreaterThan(rowStart);
+    const listRowSrc = src.slice(rowStart, rowEnd);
+    expect(listRowSrc).toContain("card.gap_name");
     expect(listRowSrc).not.toContain("card.statement");
     expect(src).toContain("{card.statement}");
-    expect(src).toContain("View constituent needs");
-    expect(src).toContain("Where this gap comes from");
-    expect(src).toContain("If several sources identified the same gap");
+    expect(src).toContain("Sources and supporting statements");
+    expect(src).toContain("Open full gap and evidence record");
+    expect(src).toContain("Several statements can join one gap; every linked source is listed below.");
     expect(src).not.toContain("CoverageDimensionsMenu");
     expect(src).not.toContain("Needs validation");
     expect(src).not.toContain('label="Add tactic"');
@@ -142,8 +147,8 @@ describe("Gaps workbench buttons and leftover inbox", () => {
     expect(badges).not.toContain(">Stale — re-lock<");
     expect(badges).not.toContain(">Needs review<");
     const workbench = readFileSync(path.join(process.cwd(), "src/components/gaps-workbench.tsx"), "utf8");
-    expect(workbench).toContain("View constituent needs");
-    expect(workbench).toContain("Where this gap comes from");
+    expect(workbench).toContain("Sources and supporting statements");
+    expect(workbench).toContain("Open full gap and evidence record");
     expect(workbench).not.toContain("CoverageDimensionsMenu");
     expect(workbench).not.toContain("StaleFlag");
     expect(workbench).not.toContain("re-lock");

@@ -27,7 +27,7 @@ function WordingFields({ name, statement }: { name: string; statement: string })
 function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
   const label = gapNumberLabel(suggestion.gap_number);
   return (
-    <li className="rounded-lg border border-border bg-card p-4" data-suggestion-id={suggestion.id}>
+    <li tabIndex={-1} id={`source-suggestion-${suggestion.id}`} className="min-w-0 break-words rounded-lg border border-border bg-card p-4 focus-visible:outline-2 focus-visible:outline-ring" data-suggestion-id={suggestion.id}>
       <p className="text-[11px] text-muted-foreground">
         Overlaps <span className="font-mono">{label}</span> · {suggestion.gap_name}
       </p>
@@ -59,14 +59,14 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
         </div>
       </dl>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Merge into this gap">
-          <p className="text-[12px] font-semibold text-foreground">Merge into this gap</p>
+        <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Merge into existing gap">
+          <p className="text-[12px] font-semibold text-foreground">Merge into existing gap</p>
           <p className="mt-1 text-[12px] font-medium text-foreground">{suggestion.merged_name}</p>
           <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{suggestion.merged_statement}</p>
           <div className="mt-2">
             <LockForm
-              label="Accept merge"
-              triggerName={`Accept merge into gap ${label}`}
+              label="Merge into existing gap"
+              triggerName={`Merge into existing gap ${label}`}
               action="accept_gap_merge"
               extra={{ suggestion_id: suggestion.id }}
               confirmLabel="Merge"
@@ -78,14 +78,14 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
             </LockForm>
           </div>
         </section>
-        <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Keep as a separate gap">
-          <p className="text-[12px] font-semibold text-foreground">Keep as a separate gap</p>
+        <section className="rounded-md border border-border bg-muted/30 p-3" aria-label="Create separate gap">
+          <p className="text-[12px] font-semibold text-foreground">Create separate gap</p>
           <p className="mt-1 text-[12px] font-medium text-foreground">{suggestion.split_name}</p>
           <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{suggestion.split_statement}</p>
           <div className="mt-2">
             <LockForm
-              label="Accept split"
-              triggerName={`Accept split from gap ${label}`}
+              label="Create separate gap"
+              triggerName={`Create separate gap from ${label}`}
               action="accept_gap_split"
               extra={{ suggestion_id: suggestion.id }}
               confirmLabel="Add separate gap"
@@ -99,8 +99,8 @@ function SuggestionItem({ suggestion }: { suggestion: GapSuggestionCard }) {
       </div>
       <div className="mt-3">
         <LockForm
-          label="Reject"
-              triggerName={`Reject the suggestion for gap ${label}`}
+          label="Reject suggestion"
+          triggerName={`Reject suggestion for gap ${label}`}
           action="reject_gap_suggestion"
           extra={{ suggestion_id: suggestion.id }}
           confirmLabel="Reject suggestion"
@@ -125,18 +125,20 @@ export function GapSuggestions({ suggestions }: { suggestions: GapSuggestionCard
       className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/5"
       data-testid="gap-suggestions"
     >
-      <h2 id="gap-suggestions-heading" className="text-[13px] font-semibold text-foreground">
-        Suggested changes ({suggestions.length})
-      </h2>
-      <p className="mt-1 text-[12px] text-muted-foreground">
-        A new source shares part of an existing gap&apos;s question and adds something of its own. Merge it into the
-        gap, keep the new part as a separate gap, or reject it. Nothing changes until you decide.
-      </p>
-      <ul className="mt-3 grid gap-3">
-        {suggestions.map((suggestion) => (
-          <SuggestionItem key={suggestion.id} suggestion={suggestion} />
-        ))}
-      </ul>
+      <details id="source-suggestions">
+        <summary id="gap-suggestions-heading" className="cursor-pointer text-[13px] font-semibold text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+          Pending source suggestions: {suggestions.length}
+        </summary>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          A new source shares part of an existing gap&apos;s question and adds something of its own. Merge it into the
+          gap, keep the new part as a separate gap, or reject it. Nothing changes until you decide.
+        </p>
+        <ul className="mt-3 grid gap-3">
+          {suggestions.map((suggestion) => (
+            <SuggestionItem key={suggestion.id} suggestion={suggestion} />
+          ))}
+        </ul>
+      </details>
     </section>
   );
 }

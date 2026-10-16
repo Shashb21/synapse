@@ -38,17 +38,26 @@ describe("the Prep readiness strip says the real next step", () => {
     // Once Tactics is open, a gap reopened on Gaps shows in the counts, not as "Not ready".
     expect(
       readinessText({ ...GAPS_DONE, readyForPrioritize: false, partialCount: 2, tacticsUnlocked: true, prioritized: { validated: 4, open: 4 } }),
-    ).toBe("4 of 4 validated · Tactics open");
+    ).toBe("4 of 4 Open gaps with validated priority · Tactics open");
     expect(readinessText({ ...GAPS_DONE, prioritized: { validated: 1, open: 2 } })).toBe(
-      "Prioritizing · 1 of 2 validated",
+      "Prioritizing · 1 of 2 Open gaps with validated priority",
     );
     expect(readinessText({ ...GAPS_DONE, prioritized: { validated: 2, open: 2 } })).toBe(
-      "2 of 2 validated · Ready for Tactics",
+      "2 of 2 Open gaps with validated priority · Ready for Tactics",
     );
     expect(readinessText({ ...GAPS_DONE, tacticsUnlocked: true, prioritized: { validated: 2, open: 2 } })).toBe(
-      "2 of 2 validated · Tactics open",
+      "2 of 2 Open gaps with validated priority · Tactics open",
     );
     expect(readinessText({ ...GAPS_DONE, tacticsUnlocked: true })).toBe("Tactics open");
+  });
+
+  it("keeps outstanding inventory review visible on an unlocked plan", () => {
+    const html = renderToStaticMarkup(createElement(Provider, { enabled: true },
+      createElement(Chrome, { active: "timeline", nav: { ...GAPS_DONE, inventoryAttentionCount: 1,
+        tacticsUnlocked: true, prioritized: { validated: 2, open: 2 } } }, "body")));
+    expect(html).toContain("Inventory review: 1 gaps needing attention");
+    expect(html).toContain("2 of 2 Open gaps with validated priority · Tactics open");
+    expect(html).toContain('/?place=gaps&amp;gap_filter=needs_attention');
   });
 
   it("renders the verdict in the strip on Timeline once tactics are unlocked", () => {
@@ -64,7 +73,7 @@ describe("the Prep readiness strip says the real next step", () => {
       ),
     );
     expect(html).toContain('aria-label="Prep readiness"');
-    expect(html).toContain("2 of 2 validated · Tactics open");
+    expect(html).toContain("2 of 2 Open gaps with validated priority · Tactics open");
     expect(html).not.toContain("Ready for Prioritize");
   });
 });

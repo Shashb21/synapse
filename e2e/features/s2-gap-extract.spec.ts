@@ -58,9 +58,10 @@ test.describe("S2 evidence gap extraction", () => {
 
     await page.goto("/?place=gaps");
     await expect(page.getByRole("heading", { name: /^evidence inventory$/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
     await openInventoryRow(page);
-    await expect(page.getByRole("button", { name: /view constituent needs/i }).first()).toBeVisible();
+    await expect(page.getByRole("region", { name: "Sources and supporting statements" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open full gap and evidence record" })).toBeVisible();
   });
 
   test("scores itself against its gold cases", async ({ request }) => {

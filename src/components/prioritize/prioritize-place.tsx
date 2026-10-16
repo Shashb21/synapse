@@ -169,7 +169,7 @@ export async function PrioritizePlace({
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-semibold text-foreground">
-              {allCounts.validated} of {allCounts.open} Open gaps validated across all settings
+              {allCounts.validated} of {allCounts.open} Open gaps with validated priority across all settings
             </p>
             <p className="text-[11px] text-muted-foreground">
               {state.asset.tactics_unlocked
