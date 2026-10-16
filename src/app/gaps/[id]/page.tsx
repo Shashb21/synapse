@@ -39,6 +39,7 @@ import { EntityHistory } from "@/components/entity-history";
 import { GapConfirmationAndObjective, GapRecordSections, NeedProvenance } from "@/components/gap-record-sections";
 import {
   buildTacticLibrary,
+  relationshipFit,
   computeGapStatus,
   coverageDimensionValues,
   displayedGapStatus,
@@ -329,6 +330,7 @@ export default async function GapDetailPage({
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
           />
           <AssignTacticWithCoverage
+            previews={Object.fromEntries(library.map(tactic => [tactic.id, relationshipFit(state, gap.id, tactic.id)]))}
             requirementBasisVersion={record.requirement_review.version}
             gapId={gap.id}
             availableTactics={library}

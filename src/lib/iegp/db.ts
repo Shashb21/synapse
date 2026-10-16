@@ -342,6 +342,9 @@ CREATE TABLE IF NOT EXISTS coverages (
   overall_lock jsonb NOT NULL, stale boolean NOT NULL DEFAULT false,
   needs_review boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS library_link_requests (
+  request_id text PRIMARY KEY, payload text NOT NULL, coverage_id text NOT NULL
+);
 CREATE TABLE IF NOT EXISTS mapping_suggestions (
   gap_id text NOT NULL, tactic_id text NOT NULL,
   status text NOT NULL, lock jsonb NOT NULL,

@@ -1,4 +1,4 @@
-import { TacticFitSelect } from "@/components/tactic-fit-select";
+import { AssignTacticWithCoverage } from "@/components/assign-tactic-with-coverage";
 import { RelationshipFit } from "@/components/relationship-fit";
 import Link from "next/link";
 import { CoverageBadge, TacticBadge } from "@/components/iegp-badges";
@@ -92,9 +92,7 @@ export function AssignTacticButton({
 }) {
   if (tactics.length === 0) return null;
   return (
-    <LockForm label="Assign from library" action="assign_tactic" extra={{ gap_id: gapId }} confirmLabel="Assign">
-      <TacticFitSelect tactics={tactics} previews={previews} />
-    </LockForm>
+    <AssignTacticWithCoverage label="Assign from library" gapId={gapId} availableTactics={tactics} mappedTacticIds={[]} previews={previews} />
   );
 }
 

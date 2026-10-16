@@ -889,6 +889,8 @@ export type PlanTactic = {
 
 /** Recorded fit facts for one pair. Design text supplies context, never a computed match. */
 export type RelationshipFitModel = {
+  /** Optimistic requirement-basis token for deliberate library confirmation. */
+  requirement_basis_version?: string;
   gap_id: string;
   tactic_id: string;
   expansion_id: string | null;
@@ -961,6 +963,7 @@ export function relationshipFit(state: IegpState, gapId: string, tacticId: strin
     gap_id: gapId, tactic_id: tacticId, expansion_id: expansionId ?? null, coverage_id: coverage?.id ?? null,
     overall: coverage?.overall ?? "unassessed", overall_rationale: coverage?.overall_rationale ?? "",
     assessment_origin: coverage?.assessment_origin ?? null, confirmation: coverage?.overall_lock ?? unlocked(),
+    requirement_basis_version: review.version,
     requirement_confirmation: review.basis.confirmation,
     stale: coverage?.stale ?? false, needs_review: coverage?.needs_review ?? false,
     source_changed: review.source_changed, full_eligible: review.full_eligible, review_reasons: [...new Set(reasons)],

@@ -2191,6 +2191,30 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
 }
 
 /**
+ * Serialize an explicit library request and read its durable successful outcome.
+ * The caller must remain in the same authorized workspace transaction through save.
+ * A request ID is bound to normalized input and the authenticated principal.
+ */
+export async function beginLibraryLinkRequest(requestId: string, payload: string): Promise<string | null> {
+  if (!inWorkspaceTransaction()) throw new Error("Library linking requires a workspace transaction.");
+  if (!/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new Error("A valid library request ID is required.");
+  // Advisory transaction locks coordinate identical requests even before a receipt exists.
+  // The workspace name prevents unrelated workspaces from contending on the same request ID.
+  const scope = `${await currentSchemaName()}:library-link:${requestId}`;
+  await db().execute(sql`select pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
+  const [receipt] = await db().select().from(t.libraryLinkRequests).where(eq(t.libraryLinkRequests.request_id, requestId));
+  if (!receipt) return null;
+  if (receipt.payload !== payload) throw new Error("This request ID already belongs to a different library decision. Reopen the chooser and try again.");
+  return receipt.coverage_id;
+}
+
+/** Save a successful request only after its relationship and audit decisions have succeeded. */
+export async function completeLibraryLinkRequest(requestId: string, payload: string, coverageId: string): Promise<void> {
+  if (!inWorkspaceTransaction()) throw new Error("Library linking requires a workspace transaction.");
+  await db().insert(t.libraryLinkRequests).values({ request_id: requestId, payload, coverage_id: coverageId });
+}
+
+/**
  * Writes one gap ↔ tactic coverage row. `coverage` and `dimensions` carry the
  * verdict of whoever decided the mapping (the S4 model, or a human). Without a
  * verdict the row is "unassessed" with every dimension "unknown" — nothing is

@@ -236,6 +236,13 @@ export const coverages = pgTable("coverages", {
   needs_review: boolean("needs_review").notNull().default(false),
 });
 
+/** Successful explicit library requests survive relationship removal for safe network retries. */
+export const libraryLinkRequests = pgTable("library_link_requests", {
+  request_id: text("request_id").primaryKey(),
+  payload: text("payload").notNull(),
+  coverage_id: text("coverage_id").notNull(),
+});
+
 export const mappingSuggestions = pgTable(
   "mapping_suggestions",
   {

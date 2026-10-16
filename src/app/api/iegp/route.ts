@@ -8,6 +8,8 @@ import {
   acceptResidualGap,
   assignGapToBreakoutGroup,
   assignTacticToGap,
+  beginLibraryLinkRequest,
+  completeLibraryLinkRequest,
   clearGapStatusOverride,
   clearNewSourceFlag,
   completeWizard,
@@ -329,6 +331,32 @@ async function handleAction(request: Request): Promise<Response> {
   const actor_name = identity.actor.name;
   const actor_function = identity.actor.function;
   try {
+    // Only the explicit library flow opts into retry semantics. Old mapping actions keep their contract.
+    let libraryRequest: { id: string; payload: string } | undefined;
+    if (body.action === "assign_tactic") {
+      // This surface previews original parent scope only; never reinterpret child input as parent.
+      if (body.expansion_id) throw new Error("Use the expansion review workflow to link a child scope.");
+      if (body.link_mode !== undefined) {
+        if (body.link_mode !== "unassessed" && body.link_mode !== "assessed") throw new Error("Choose Link as unassessed or Assess and link.");
+        const verdict = coverageInput(body);
+        if (body.link_mode === "unassessed" && (verdict.coverage && verdict.coverage !== "unassessed" || verdict.dimensions)) {
+          throw new Error("Link as unassessed cannot include an assessment.");
+        }
+        if (body.link_mode === "assessed" && (!verdict.coverage || verdict.coverage === "unassessed" || body.confirm_coverage === "false")) {
+          throw new Error("Assess and link requires an explicit confirmed overall verdict.");
+        }
+        const payload = JSON.stringify({
+          principal: identity.principal, actor: identity.actor, workspace: identity.workspace?.id ?? null,
+          gap_id: body.gap_id, tactic_id: body.tactic_id, mode: body.link_mode,
+          overall: verdict.coverage ?? "unassessed",
+          dimensions: Object.entries(verdict.dimensions ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+          rationale: rationaleOf(body), expected_basis_version: body.expected_basis_version ?? null,
+        });
+        libraryRequest = { id: body.request_id ?? "", payload };
+        const replay = await beginLibraryLinkRequest(libraryRequest.id, payload);
+        if (replay) return NextResponse.json({ ok: true, id: replay });
+      }
+    }
     const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
@@ -634,7 +662,7 @@ async function handleAction(request: Request): Promise<Response> {
         if (hasVerdict && rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
-        await assignTacticToGap({
+        createdId = await assignTacticToGap({
           gap_id: body.gap_id,
           expected_basis_version: body.expected_basis_version,
           confirm_coverage: body.confirm_coverage !== "false",
@@ -1027,6 +1055,7 @@ async function handleAction(request: Request): Promise<Response> {
         return NextResponse.json({ error: `Unknown action ${body.action}` }, { status: 400 });
     }
     await fileGateEdit(body, before, actor_name, actor_function);
+    if (libraryRequest && createdId) await completeLibraryLinkRequest(libraryRequest.id, libraryRequest.payload, createdId);
     return NextResponse.json(createdId ? { ok: true, id: createdId } : { ok: true });
   } catch (error) {
     return apiErrorResponse(error, "Failed");
