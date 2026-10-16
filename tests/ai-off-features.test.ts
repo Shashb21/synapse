@@ -169,6 +169,7 @@ describe("the first screen with AI off", () => {
 describe("AI actions on the plan routes with AI off", () => {
   it("answers ingest with 409 ai_off and opens no run", async () => {
     const before = (await listRuns({ limit: 500 })).length;
+    // Use a real source: invalid input is rejected before the AI availability check.
     const demo = await iegp({ action: "ingest_demo", demo_id: "heor-interview" });
     expect(demo.status).toBe(409);
     expect(demo.json.code).toBe("ai_off");

@@ -5,7 +5,16 @@ import { seedMapped } from "../support/synapse";
 test.describe("KAN-114 independent inventory filters", () => {
   freshWorkspace({ name: "KAN-114", seed: (request) => seedMapped(request) });
   test("combines filters, preserves them on reload and resets an empty search", async ({ page }) => {
+    const hydrationErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && /hydration|hydrated|server rendered HTML/i.test(message.text())) {
+        hydrationErrors.push(message.text());
+      }
+    });
     await page.goto("/?place=gaps");
+    // Screenshot tooling must not mutate input styles while React attaches to server HTML.
+    await page.getByRole("searchbox", { name: "Search gaps" }).waitFor();
+    await page.screenshot({ caret: "initial" });
     const attention = page.getByRole("button", { name: /^Needs attention/ });
     await expect(attention).toHaveAttribute("aria-pressed", "false");
     await attention.click();
@@ -19,5 +28,7 @@ test.describe("KAN-114 independent inventory filters", () => {
     await expect(attention).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByTestId("evidence-inventory").locator("tr[data-gap-id]").first()).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Review state", exact: true })).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: "Search gaps" })).not.toHaveAttribute("style", /caret-color/);
+    expect(hydrationErrors).toEqual([]);
   });
 });

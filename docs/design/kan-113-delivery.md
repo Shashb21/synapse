@@ -97,3 +97,13 @@ node node_modules/vitest/vitest.mjs run --testTimeout=120000
 Result: exit0;175/175 test files and1542/1542 tests passed in889.96seconds. All21 CLI benchmark tests passed (415.348seconds for that file). The test-timeout override is limited to the command; project configuration is unchanged. Log: `/private/tmp/kan113-final-full-vitest.log`.
 
 Together with the eight combined Chromium checks on the unchanged product implementation, this resolves the required verification blockers. The final incremental changes are test fixtures and documentation only. Lint/type/whitespace checks passed for those edits, and independent review approved them. The owner requested a live branch preview before merge; no merge or push is authorized by that request.
+
+## Review preview hydration follow-up (2026-10-16)
+
+The reported extra `style={caret-color: transparent}` attribute matches Playwright's default screenshot preparation, which temporarily mutates input styles to hide the cursor. The temporary preview launcher captured a screenshot immediately after finding the server-rendered inventory, allowing screenshot preparation to overlap React hydration. The application search input has no inline caret style. The launcher now uses `caret: "initial"`, preventing this external mutation; no application warning suppression or rendering changes were added.
+
+Verification: `node /private/tmp/kan113-check-hydration.mjs` exited0 after three fresh reloads, interactive search checks and screenshots with caret mutation disabled; no console or page errors and no inline caret style. The existing KAN-114 browser check now guards hydration console errors and uses the same safe screenshot option.
+
+The owner approved the UI and requested a PR into main. Current main was merged into this branch; the sole conflict was an explanatory comment beside the same valid AI-off demo fixture, retained alongside this branch's separate invalid-input test. The preview login mismatch was caused by the isolated database having no password accounts; access was restored through its existing development-only demo session. No normal account credentials were changed.
+
+Post-main integration verification: 15 Chromium checks passed in28.4seconds, covering KAN-114 through KAN-119, readiness strip, source creation and parsing (including authentication setup). `tests/ai-off-features.test.ts`:12 passed, exit0. Scoped ESLint, `tsc --noEmit` and `git diff --check`:exit0. The earlier full1542-test run remains the full-suite evidence; the subsequent changes are test/documentation and main's test updates only.
