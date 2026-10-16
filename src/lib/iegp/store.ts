@@ -245,6 +245,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     breakout_group_gaps,
     gap_suggestions,
     expansions,
+    source_comparisons,
     source_reviews,
   ] = await Promise.all([
     d.select().from(t.assets),
@@ -267,6 +268,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.breakoutGroupGaps),
     d.select().from(t.gapSuggestions),
     d.select().from(t.tacticExpansions),
+    d.select().from(t.sourceComparisons),
     d.select().from(t.sourceReviews),
   ]);
   const asset = assetRows[0];
@@ -280,6 +282,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       setup_complete: Boolean(asset.setup_complete),
       planning_context: asset.planning_context ?? {},
     },
+    source_comparisons: source_comparisons.map(row => row.record),
     source_reviews: source_reviews.map(row => row.record),
     objectives,
     sources: sources.map((s) => ({
@@ -411,6 +414,7 @@ export async function persistState(state: IegpState) {
     const d = db();
     await d.insert(t.assets).values(state.asset);
     if (state.objectives.length) await d.insert(t.objectives).values(state.objectives);
+    if (state.source_comparisons?.length) await d.insert(t.sourceComparisons).values(state.source_comparisons.map(record => ({ source_id: record.source_id, version: record.version, record })));
     if (state.source_reviews?.length) await d.insert(t.sourceReviews).values(state.source_reviews.map(record => ({ id: record.id, version: record.version, record })));
     if (state.sources.length) {
       await d.insert(t.sources).values(state.sources);

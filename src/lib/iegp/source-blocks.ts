@@ -756,6 +756,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
   const current = await listSourceBlocks(args.source_id);
   const metas = await metasFor(args.source_id);
   const quotes = await quotesFor(args.source_id);
+  const citedReviews = (await loadState()).source_reviews?.filter(review => review.source_id === args.source_id) ?? [];
   const kept: SourceBlockView[] = [];
   const replaced: string[] = [];
   let kept_human = 0;
@@ -764,7 +765,7 @@ export const reparseSourceBlocks = assessmentSourceEdit(async function reparseSo
     if (block.human) {
       kept.push(block);
       kept_human += 1;
-    } else if (quotes.some((q) => containsQuote(block.text, q.quote))) {
+    } else if (quotes.some((q) => containsQuote(block.text, q.quote)) || citedReviews.some(review => review.block_id === block.id)) {
       kept.push(block);
       kept_cited += 1;
     } else replaced.push(block.id);

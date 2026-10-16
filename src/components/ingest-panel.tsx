@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { SourceComparisonStatus } from "@/components/source-comparison-status";
+import { listSourceComparisons } from "@/lib/ingest/compare-source";
 import { completedIngestSourceIds } from "@/lib/ingest/status";
 import { LockForm } from "@/components/lock-form";
 import { AddSourceForm } from "@/components/add-source-form";
@@ -23,6 +26,7 @@ export async function IngestPanel({
   demoFiles?: boolean;
 }) {
   const completed = await completedIngestSourceIds();
+  const comparisons = await listSourceComparisons();
   const ingestedTitles = new Set(sources.filter((source) => completed.has(source.id)).map((source) => source.title));
   const savedTitles = new Set(sources.map((source) => source.title));
 
@@ -93,7 +97,8 @@ export async function IngestPanel({
             <div className="grid gap-3">
               {sources.map((s) => (
                 <article key={s.id} className="border border-border bg-card p-4 rounded-lg">
-                  <p className="text-[13px] text-foreground">{s.title}</p>
+                  <Link href={`/sources/${encodeURIComponent(s.id)}`} className="text-[13px] text-foreground underline">{s.title}</Link>
+                  <SourceComparisonStatus comparison={comparisons.find(row => row.source_id === s.id)} sourceId={s.id} />
                   <p className="mt-1 text-[12px] text-muted-foreground">
                     {SOURCE_TYPE_LABELS[s.source_type]} · {FUNCTION_LABELS[s.stakeholder_function]}
                   </p>

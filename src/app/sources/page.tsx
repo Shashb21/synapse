@@ -1,3 +1,5 @@
+import { SourceComparisonStatus } from "@/components/source-comparison-status";
+import { listSourceComparisons } from "@/lib/ingest/compare-source";
 import Link from "next/link";
 import { ClearIngestedFiles } from "@/components/clear-ingested-files";
 import { currentSession } from "@/modules/auth/session";
@@ -13,6 +15,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
   const state = await loadState();
+  const comparisons = await listSourceComparisons();
   const [workspace, session] = await Promise.all([currentWorkspace(), currentSession()]);
   const mayClear = workspace?.role === "owner" && session && can(session.role, "reset_workspace");
   const ai = await aiSectionEnabled("ingestion").catch(() => false);
@@ -76,6 +79,7 @@ export default async function SourcesPage() {
                 <span className="text-[11px] text-muted-foreground">
                   {plural(blockCount.get(source.id) ?? 0, "block")} · {source.stakeholder_function}
                 </span>
+                <SourceComparisonStatus comparison={comparisons.find(row => row.source_id === source.id)} sourceId={source.id} />
               </li>
             ))}
           </ul>

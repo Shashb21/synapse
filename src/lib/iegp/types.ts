@@ -504,6 +504,7 @@ export type SourceReview = {
 };
 
 export type IegpState = {
+  source_comparisons?: import("../ingest/comparison-types").SourceComparison[];
   source_reviews?: SourceReview[];
   asset: Asset;
   objectives: StrategicObjective[];

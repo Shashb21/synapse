@@ -1,3 +1,4 @@
+import { compareSource } from "@/lib/ingest/compare-source";
 import { decidePartialSplit } from "@/modules/stages/s6-partial-split/module";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
@@ -257,7 +258,7 @@ async function fileGateEdit(
  * Actions that run the stage pipeline (model calls). Their stages record their
  * own per-stage transactions and checkpoints, so no transaction spans the whole pipeline.
  */
-const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo"]);
+const NON_ATOMIC_ACTIONS = new Set(["ingest", "ingest_demo", "retry_source_comparison"]);
 
 /** Carries a refused or failed action's response out of its rolled-back transaction. */
 class RolledBack extends Error {
@@ -362,6 +363,10 @@ async function handleAction(request: Request): Promise<Response> {
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
+      case "retry_source_comparison":
+        if (!body.source_id?.trim()) throw new Error("Choose a parsed source to compare.");
+        await compareSource(body.source_id, identity.actor);
+        break;
       case "link_source_support":
       case "create_source_discrepancy": {
         const create = body.action === "link_source_support" ? linkSourceSupport : createSourceDiscrepancy;

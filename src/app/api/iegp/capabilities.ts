@@ -12,6 +12,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   load_demo: "reset_workspace",
   ingest: "upload",
   ingest_demo: "upload",
+  retry_source_comparison: "validate",
   create_tactic: "ideate",
   record_missed_tactic: "ideate",
   promote_tactic_candidate: "ideate",

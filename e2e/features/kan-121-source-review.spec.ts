@@ -1,6 +1,6 @@
 /** Manual cited findings stay proposals until an explicit human decision, including with AI off. */
 import { expect, test } from "@playwright/test";
-import { iegpAction, resetWorkspace } from "../support/synapse";
+import { iegpAction, resetWorkspace, runStage } from "../support/synapse";
 import { freshWorkspace } from "../support/session";
 
 freshWorkspace({ name: "Cited source review" });
@@ -90,6 +90,43 @@ test("KAN-145 keyboard review retains pending, dismissed and accepted outcomes w
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: "/private/tmp/kan145-accepted-mobile.png", fullPage: true });
+  } finally {
+    await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: true } });
+  }
+});
+
+
+test("KAN-146 failed comparison keeps parsed content, keyboard retry and manual review available", async ({ page, request }) => {
+  await resetWorkspace(request);
+  await runStage(request, "S0", { files: [{ title: "Incoming comparison recovery", filename: "comparison-recovery.txt", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", text: "The protocol includes children only. Retained content for manual review." }] });
+  const parsed = await runStage<{ documents: { source_id: string }[] }>(request, "S1");
+  const sourceId = parsed.output.documents[0].source_id;
+  await page.goto(`/sources/${sourceId}`);
+  const comparison = page.getByRole("region", { name: "Automatic source comparison" });
+  await expect(comparison.getByRole("status")).toContainText("Comparison failed");
+  await expect(comparison).not.toContainText("no discrepancies detected");
+  await expect(page.getByText("The protocol includes children only. Retained content for manual review.", { exact: true })).toBeVisible();
+  const manual = page.getByRole("region", { name: "Cited source review" });
+  await expect(manual.getByRole("button", { name: "Attach supporting source", exact: true })).toBeVisible();
+  await expect(manual.getByRole("button", { name: "Raise source discrepancy", exact: true })).toBeVisible();
+  await comparison.getByRole("button", { name: "Retry comparison", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Run comparison", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeHidden();
+  await expect(comparison.getByRole("status")).toContainText("Comparison failed");
+  await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: false } });
+  try {
+    await iegpAction(request, { action: "retry_source_comparison", source_id: sourceId });
+    await page.reload();
+    await expect(comparison.getByRole("status")).toContainText("Comparison not run because AI is disabled");
+    await expect(manual.getByRole("button", { name: "Raise source discrepancy", exact: true })).toBeVisible();
+    await page.goto("/sources");
+    await expect(page.getByRole("region", { name: "Automatic source comparison" }).getByRole("status")).toContainText("AI is disabled");
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: "/private/tmp/kan146-comparison-mobile.png", fullPage: true });
   } finally {
     await request.post("/api/control", { data: { action: "set_ai_enabled", enabled: true } });
   }

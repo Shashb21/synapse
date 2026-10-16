@@ -50,6 +50,13 @@ export const sourceReviews = pgTable("source_reviews", {
   record: jsonb("record").$type<import("./types").SourceReview>().notNull(),
 });
 
+/** Per-source comparison checkpoint; independent of document parsing. */
+export const sourceComparisons = pgTable("source_comparisons", {
+  source_id: text("source_id").primaryKey(),
+  version: text("version").notNull(),
+  record: jsonb("record").$type<import("../ingest/comparison-types").SourceComparison>().notNull(),
+});
+
 export const sourceBlocks = pgTable("source_blocks", {
   id: text("id").primaryKey(),
   source_id: text("source_id").notNull(),
