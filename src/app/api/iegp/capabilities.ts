@@ -40,6 +40,7 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
       "restore_gap",
       "restore_need",
       "restore_mapping",
+      "review_requirement_basis",
       "lock_dimension",
       "lock_overall",
       "confirm_coverage_review",

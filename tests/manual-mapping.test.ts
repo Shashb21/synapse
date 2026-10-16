@@ -5,6 +5,7 @@ import "@/modules";
 import { resetWorkspaceModules, wipePlatform } from "@/modules/kernel/db";
 import type { ModuleContext, ResolvedRoute } from "@/modules/kernel/contracts";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { coverageReviewVersion } from "@/lib/iegp/requirement-basis";
 import { displayedGapStatus } from "@/lib/iegp/engine";
 import { buildMappingTableView } from "@/lib/iegp/mapping-table";
 import {
@@ -296,26 +297,26 @@ describe("/mappings row save is persisted and wins over S4", () => {
 });
 
 describe("manual create with coverage and manual coverage edits", () => {
-  it("maps a tactic with a locked overall and dimensions in one step", async () => {
+  it("confirms overall while supplied dimensions remain separately reviewable", async () => {
     const { gapId, tacticIds } = await workspace(1);
     const covId = await assignTacticToGap({
       gap_id: gapId,
       tactic_id: tacticIds[0]!,
       ...HUMAN,
       note: "Head-to-head RWE in the dossier population.",
-      coverage: "full",
+      coverage: "partial",
       dimensions: { relevance: "yes", population: "yes" },
       human: true,
       lock_coverage: true,
     });
     const cov = (await loadState()).coverages.find((c) => c.id === covId)!;
-    expect(cov.overall).toBe("full");
+    expect(cov.overall).toBe("partial");
     expect(cov.overall_lock.locked).toBe(true);
     expect(cov.dimensions.relevance).toMatchObject({ value: "yes" });
-    expect(cov.dimensions.relevance.lock.locked).toBe(true);
+    expect(cov.dimensions.relevance.lock.locked).toBe(false);
     expect(cov.dimensions.comparator.value).toBe("unknown");
     expect(cov.dimensions.comparator.lock.locked).toBe(false);
-    expect((await gapOf(gapId)).status).toBe("validated_addressed");
+    expect((await gapOf(gapId)).status).toBe("validated_partial");
     await expect(
       assignTacticToGap({
         gap_id: (await createGap({ statement: "Another gap entirely.", ...HUMAN })),
@@ -372,7 +373,7 @@ describe("route actions", () => {
 
     expect((await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no" })).status).toBe(400);
     expect(
-      (await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no", rationale: "Readout is late." })).status,
+      (await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no", rationale: "Readout is late.", expected_version: coverageReviewVersion(cov) })).status,
     ).toBe(200);
     expect((await post({ action: "lock_overall", coverage_id: cov.id, overall: "full" })).status).toBe(400);
 

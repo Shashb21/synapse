@@ -13,14 +13,16 @@ const SELECT = "h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm
 /**
  * Manual create: a person maps a library tactic onto this gap and records the
  * coverage verdict (overall and any dimension) in the same step, with no model.
- * The verdict is the person's and is locked; S4 never rewrites it.
+ * Overall confirmation is explicit; supplied dimensions remain separate proposals.
  */
 export function AssignTacticWithCoverage({
   gapId,
   availableTactics,
   mappedTacticIds,
+  requirementBasisVersion,
 }: {
   gapId: string;
+  requirementBasisVersion?: string;
   availableTactics: TacticLibraryItem[];
   mappedTacticIds: string[];
 }) {
@@ -30,7 +32,7 @@ export function AssignTacticWithCoverage({
     <LockForm
       label="Map tactic with coverage"
       action="assign_tactic"
-      extra={{ gap_id: gapId }}
+      extra={{ gap_id: gapId, ...(requirementBasisVersion ? { expected_basis_version: requirementBasisVersion } : {}) }}
       confirmLabel="Map and record coverage"
       description="Map a library tactic and record your own coverage verdict. Leave a dimension blank to keep it unknown."
     >
@@ -57,6 +59,14 @@ export function AssignTacticWithCoverage({
           ))}
         </select>
       </label>
+      <label className="grid gap-1 text-[12px] text-muted-foreground">
+        Confirmation
+        <select name="confirm_coverage" defaultValue="true" className={SELECT}>
+          <option value="true">Confirm overall judgement</option>
+          <option value="false">Save provisional assessment</option>
+        </select>
+      </label>
+      <p className="text-xs text-muted-foreground">Confirming overall coverage does not confirm individual dimensions. Full confirmation needs a reviewed basis and Yes for every required dimension.</p>
       <fieldset className="grid grid-cols-2 gap-2">
         <legend className="mb-1 text-[12px] text-muted-foreground">Dimensions (optional)</legend>
         {COVERAGE_DIMENSIONS.map((dim) => (

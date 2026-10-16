@@ -115,7 +115,40 @@ export type GapStatusOverride = {
   stale: boolean;
 };
 
+/** A requirement keeps the original linked evidence and the human's applicability decision. */
+export type RequirementSource = {
+  kind: "gap" | "need";
+  gap_id: string;
+  need_id?: string;
+  source_id?: string;
+  block_id?: string | null;
+  quote: string;
+  value: string;
+};
+
+export type RequirementDimension = {
+  applicability: "required" | "not_applicable" | "undetermined";
+  requirement: string;
+  rationale: string;
+  sources: RequirementSource[];
+  /** Distinct sourced values remain visible even after a human resolves the disagreement. */
+  conflicts: string[];
+  resolution: string;
+};
+
+/** A whole-basis review; individual requirement fields need no separate approval. */
+export type RequirementBasis = {
+  version: string;
+  source_version: string;
+  origin: "human" | "ai" | "extraction";
+  dimensions: Record<CoverageDimension, RequirementDimension>;
+  confirmation: Lock;
+  rationale: string;
+  history: Omit<RequirementBasis, "history">[];
+};
+
 export type EvidenceGap = {
+  requirement_basis?: RequirementBasis | null;
   id: string;
   name: string;
   statement: string;
@@ -370,6 +403,9 @@ export type TacticExpansion = {
 };
 
 export type GapTacticCoverage = {
+  /** Exact reviewed basis supporting an explicit overall confirmation; absent on historical rows. */
+  confirmed_requirement_basis?: RequirementBasis | null;
+  review_version?: string | null;
   id: string;
   /** Null/absent means original parent scope; otherwise this assessment is child-only. */
   expansion_id?: string | null;

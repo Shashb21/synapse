@@ -1,3 +1,4 @@
+import { getRequirementBasisReview } from "./requirement-basis";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import * as kernel from "@/modules/kernel/schema";
@@ -19,6 +20,7 @@ type Gap = IegpState["gaps"][0];
  */
 export type GapRecord = {
   gap: Gap;
+  requirement_review: ReturnType<typeof getRequirementBasisReview>;
   objective: IegpState["objectives"][0] | null;
   confirmation: {
     confirmed: boolean;
@@ -40,6 +42,7 @@ export type GapRecord = {
   /** S2 candidate rows that became or joined this gap. */
   candidates: (typeof gapCandidates.$inferSelect)[];
   coverages: (IegpState["coverages"][0] & {
+    requirement_review: ReturnType<typeof getRequirementBasisReview>;
     tactic: Pick<IegpState["tactics"][0], "id" | "name" | "type" | "status"> | null;
     expansion: Pick<IegpState["expansions"][0], "id" | "status" | "scope"> | null;
   })[];
@@ -86,6 +89,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   );
   return {
     gap,
+    requirement_review: getRequirementBasisReview(state, gap.id),
     objective: state.objectives.find((o) => o.id === gap.objective_id) ?? null,
     confirmation: {
       confirmed: gap.human_validated,
@@ -116,6 +120,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
       const expansion = c.expansion_id ? state.expansions.find((e) => e.id === c.expansion_id) : undefined;
       return {
         ...c,
+        requirement_review: getRequirementBasisReview(state, gap.id, c),
         tactic: tactic ? { id: tactic.id, name: tactic.name, type: tactic.type, status: tactic.status } : null,
         expansion: expansion ? { id: expansion.id, status: expansion.status, scope: expansion.scope } : null,
       };

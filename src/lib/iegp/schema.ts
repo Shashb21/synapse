@@ -77,6 +77,7 @@ export const needs = pgTable("needs", {
 });
 
 export const gaps = pgTable("gaps", {
+  requirement_basis: jsonb("requirement_basis").$type<import("./types").RequirementBasis>(),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   statement: text("statement").notNull(),
@@ -220,6 +221,8 @@ export const tacticExpansions = pgTable("tactic_expansions", {
 });
 
 export const coverages = pgTable("coverages", {
+  confirmed_requirement_basis: jsonb("confirmed_requirement_basis").$type<import("./types").RequirementBasis>(),
+  review_version: text("review_version"),
   expansion_id: text("expansion_id"),
   id: text("id").primaryKey(),
   gap_id: text("gap_id").notNull(),

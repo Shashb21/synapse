@@ -5,7 +5,7 @@ import "@/modules";
 import * as tables from "@/lib/iegp/schema";
 import { db } from "@/lib/iegp/db";
 import { buildSeed } from "@/lib/iegp/seed";
-import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, syncComputedGapStatuses } from "@/lib/iegp/store";
+import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, syncComputedGapStatuses, reviewRequirementBasis } from "@/lib/iegp/store";
 import { acceptTacticExpansion, setExpansionStatus, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { POST } from "@/app/api/plan/route";
@@ -13,6 +13,7 @@ import { kgMappingModule } from "@/modules/stages/s4-kg-mapping/module";
 import type { ModuleContext } from "@/modules/kernel/contracts";
 import { computeGapStatus, unlocked, countingCoverages } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
+import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import type { ExpansionScope } from "@/lib/iegp/types";
 
 const actor = { name: "A. Rao", function: "heor" as const };
@@ -24,6 +25,16 @@ const scope: ExpansionScope = {
   protocol_amendment: false, start_date: "2026-10-08", evidence_available: "2026-12-01",
 };
 let args: Parameters<typeof acceptTacticExpansion>[0];
+
+/** Review this fixture's narrow population question without inventing requirements from omissions. */
+async function reviewPopulationRequirement(gapId: string) {
+  const state = await loadState();
+  await reviewRequirementBasis({ gap_id: gapId, expected_version: getRequirementBasisReview(state, gapId).version,
+    dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map(dim => [dim, {
+      applicability: dim === "population" ? "required" : "not_applicable", requirement: dim === "population" ? "Community patients" : "",
+      rationale: "This fixture's narrow safety question requires only population fit", resolution: "Population scope limited to community clinics",
+    }])), rationale: "Reviewed the scope of this population-only safety question", actor_name: actor.name, actor_function: actor.function });
+}
 
 beforeEach(async () => {
   const state = buildSeed();
@@ -127,7 +138,8 @@ describe("canonical expansion acceptance", () => {
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child only", actor, expected_version: after.expansions.find(e => e.id === child.id)!.version});
     const cancelled = await loadState();
     expect(countingCoverages(cancelled.coverages.filter(c => c.gap_id === result.addressedId), cancelled.tactics, cancelled.expansions)).toHaveLength(1);
-    expect(cancelled.gaps.find(g => g.id === result.addressedId)!.computed_status).toBe("validated_addressed");
+    // Split-created historical Full has no reviewed basis, so the remaining parent cannot verify Full.
+    expect(cancelled.gaps.find(g => g.id === result.addressedId)!.computed_status).toBe("validated_partial");
   });
   it("rewrite keeps child Full scoped and cancellation recomputes it Open", async () => {
     const child = await acceptTacticExpansion(args);
@@ -147,6 +159,8 @@ describe("canonical expansion acceptance", () => {
     await persistState(state);
     const child = await acceptTacticExpansion({...args, expected_tactic_version: tacticVersion(state.tactics.find(t => t.id === args.tactic_id)!)});
     const coverage = (await loadState()).coverages[0]!;
+    await reviewPopulationRequirement(gap.id);
+    await lockCoverageDimension({coverage_id: coverage.id, dimension: "population", value: "yes", rationale: "Community population fits", actor_name: actor.name, actor_function: actor.function});
     await lockCoverageOverall({coverage_id: coverage.id, overall: "full", rationale: "Human validates child only", actor_name: actor.name, actor_function: actor.function});
     expect((await loadState()).gaps.find(g => g.id === gap.id)!.computed_status).toBe("validated_open");
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Resources committed", actor, expected_version: child.version});
@@ -189,6 +203,7 @@ describe("canonical expansion acceptance", () => {
     expect(row.overall_lock.locked).toBe(false);
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_partial");
     await lockCoverageDimension({coverage_id: coverage.id, dimension: "population", value: "yes", rationale: "Community population fits", actor_name: actor.name, actor_function: actor.function});
+    await reviewPopulationRequirement(args.gap_id);
     await lockCoverageOverall({coverage_id: coverage.id, overall: "full", rationale: "Scoped question fully covered", actor_name: actor.name, actor_function: actor.function});
     state = await loadState(); row = state.coverages.find(c => c.id === coverage.id)!;
     expect(row.overall_lock.locked).toBe(true);
@@ -211,6 +226,8 @@ describe("canonical expansion acceptance", () => {
     const child = await acceptTacticExpansion(args);
     const state = await loadState();
     const coverage = state.coverages.find(c => c.expansion_id === child.id)!;
+    // Use an independent connection: the competing human commit must survive model rollback.
+    const competing = postgres(process.env.DATABASE_URL!);
     const d = db(), originalUpdate = d.update.bind(d);
     let injected = false;
     const spy = vi.spyOn(d, "update").mockImplementation((table) => {
@@ -221,7 +238,7 @@ describe("canonical expansion acceptance", () => {
         if (key === "then") return async (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => {
           if (!injected) {
             injected = true;
-            await originalUpdate(tables.coverages).set({overall: "limited", overall_lock: {...coverage.overall_lock, locked: true, actor_name: actor.name}}).where(eq(tables.coverages.id, coverage.id));
+            await competing`update coverages set overall = 'limited', overall_lock = ${competing.json({...coverage.overall_lock, locked: true, actor_name: actor.name})} where id = ${coverage.id}`;
           }
           return Reflect.apply(value, target, [resolve, reject]);
         };
@@ -236,7 +253,7 @@ describe("canonical expansion acceptance", () => {
       const after = (await loadState()).coverages.find(c => c.id === coverage.id)!;
       expect(after.overall).toBe("limited");
       expect(after.overall_lock.locked).toBe(true);
-    } finally { spy.mockRestore(); }
+    } finally { spy.mockRestore(); await competing.end(); }
   });
   it("lets source owners compose child acceptance with their decision in one transaction", async () => {
     const before = await loadState();

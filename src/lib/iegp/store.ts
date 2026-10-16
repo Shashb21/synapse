@@ -1,3 +1,5 @@
+import { coverageReviewVersion, fullConfirmationIssues, getRequirementBasisReview, reviewedRequirementDimensions, type RequirementReviewInput } from "./requirement-basis";
+import type { RequirementBasis } from "./types";
 import { and, eq, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
@@ -1660,14 +1662,72 @@ export async function classifyMappedGap(args: {
   });
 }
 
+/** Reviews the whole sourced basis once, preserving earlier decisions and original disagreements. */
+export async function reviewRequirementBasis(args: {
+  gap_id: string;
+  expected_version: string;
+  dimensions: RequirementReviewInput;
+  rationale: string;
+  actor_name: string;
+  actor_function: ActorFunction;
+  origin?: RequirementBasis["origin"];
+  confirm?: boolean;
+}): Promise<RequirementBasis> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => reviewRequirementBasis(args));
+  const rationale = requireRationale(args.rationale);
+  const origin = args.origin ?? "human";
+  const confirm = args.confirm !== false;
+  if (confirm && origin !== "human") throw new Error("Only a human coverage reviewer can confirm requirements.");
+  await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
+  const state = await loadState();
+  const review = getRequirementBasisReview(state, args.gap_id);
+  if (!args.expected_version || args.expected_version !== review.version) throw new Error("Requirement basis changed; refresh before reviewing.");
+  const dimensions = reviewedRequirementDimensions(state, args.gap_id, args.dimensions);
+  const previous = state.gaps.find(g => g.id === args.gap_id)!.requirement_basis;
+  const history = previous ? [...previous.history, (({ history: _history, ...entry }) => entry)(previous)] : [];
+  const basis: RequirementBasis = {
+    version: newId("requirements"), source_version: review.basis.source_version,
+    origin, dimensions, rationale, history,
+    confirmation: confirm ? makeLock(args.actor_name, args.actor_function, rationale) : unlocked(),
+  };
+  await db().update(t.gaps).set({ requirement_basis: basis }).where(eq(t.gaps.id, args.gap_id));
+  await appendAudit(args.actor_name, args.actor_function, "gap", args.gap_id, "review_requirement_basis", `${confirm ? "Confirmed" : "Proposed"}: ${rationale}`);
+  return basis;
+}
+
+/** Rejects stale forms before any field is written. Row locks serialize competing reviewers. */
+async function reviewedCoverage(coverage_id: string, expected_version?: string) {
+  const initial = (await loadState()).coverages.find(c => c.id === coverage_id);
+  if (!initial) throw new Error("Coverage not found");
+  // Use the same gap-then-coverage lock order as assignment and requirement review.
+  await db().execute(sql`select id from gaps where id = ${initial.gap_id} for update`);
+  await db().execute(sql`select id from coverages where id = ${coverage_id} for update`);
+  const state = await loadState();
+  const row = state.coverages.find(c => c.id === coverage_id);
+  if (!row) throw new Error("Coverage not found");
+  if (expected_version !== undefined && coverageReviewVersion(row) !== expected_version) throw new Error("Coverage changed; refresh before reviewing.");
+  return { state, row };
+}
+
+/** Full needs an explicit human basis and Yes for every required dimension. */
+function requireSupportedFull(state: IegpState, gap_id: string, dimensions: IegpState["coverages"][0]["dimensions"], expected_basis_version?: string) {
+  const review = getRequirementBasisReview(state, gap_id);
+  if (expected_basis_version !== undefined && expected_basis_version !== review.version) throw new Error("Requirement basis changed; refresh before confirming coverage.");
+  const issues = fullConfirmationIssues(review.basis, { dimensions });
+  if (issues.length) throw new Error(issues.join(" "));
+  return review.basis;
+}
+
 export async function lockCoverageDimension(args: {
   coverage_id: string;
+  expected_version?: string;
   dimension: keyof IegpState["coverages"][0]["dimensions"];
   value: IegpState["coverages"][0]["dimensions"][typeof args.dimension]["value"];
   rationale: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => lockCoverageDimension(args));
   if (!(COVERAGE_DIMENSIONS as readonly string[]).includes(args.dimension)) {
     throw new Error(`Unknown coverage dimension "${String(args.dimension)}".`);
   }
@@ -1675,9 +1735,7 @@ export async function lockCoverageDimension(args: {
     throw new Error(`Choose a dimension value (${DIMENSION_VALUES.join(", ")}).`);
   }
   const rationale = requireRationale(args.rationale);
-  const state = await loadState();
-  const row = state.coverages.find((c) => c.id === args.coverage_id);
-  if (!row) throw new Error("Coverage not found");
+  const { row } = await reviewedCoverage(args.coverage_id, args.expected_version);
   const before = row.dimensions[args.dimension]?.value;
   const dimensions = {
     ...row.dimensions,
@@ -1689,7 +1747,7 @@ export async function lockCoverageDimension(args: {
   };
   await db()
     .update(t.coverages)
-    .set({ dimensions, stale: false, needs_review: false })
+    .set({ dimensions, review_version: newId("coverage") })
     .where(eq(t.coverages.id, args.coverage_id));
   await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
   await appendAudit(
@@ -1705,26 +1763,29 @@ export async function lockCoverageDimension(args: {
 
 export async function lockCoverageOverall(args: {
   coverage_id: string;
+  expected_version?: string;
+  expected_basis_version?: string;
   overall: IegpState["coverages"][0]["overall"];
   rationale: string;
   actor_name: string;
   actor_function: ActorFunction;
-}) {
+}): Promise<void> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => lockCoverageOverall(args));
   if (!(ASSESSED_COVERAGE as readonly string[]).includes(args.overall)) {
     throw new Error(`Choose a coverage verdict (${ASSESSED_COVERAGE.join(", ")}).`);
   }
   const rationale = requireRationale(args.rationale);
+  const { row } = await reviewedCoverage(args.coverage_id, args.expected_version);
   const state = await loadState();
-  const row = state.coverages.find((c) => c.id === args.coverage_id);
-  if (!row) throw new Error("Coverage not found");
+  const basis = args.overall === "full" ? requireSupportedFull(state, row.gap_id, row.dimensions, args.expected_basis_version) : null;
   await db()
     .update(t.coverages)
     .set({
       overall: args.overall,
       overall_rationale: rationale,
       overall_lock: makeLock(args.actor_name, args.actor_function, rationale),
-      stale: false,
-      needs_review: false,
+      confirmed_requirement_basis: basis,
+      review_version: newId("coverage"),
     })
     .where(eq(t.coverages.id, args.coverage_id));
   await flagSiblingCoveragesForReview(row.tactic_id, row.gap_id, row.expansion_id);
@@ -2141,6 +2202,8 @@ export function humanRejectedPairs(state: IegpState): Set<string> {
  */
 export async function assignTacticToGap(args: {
   gap_id: string;
+  expected_basis_version?: string;
+  confirm_coverage?: boolean;
   tactic_id: string;
   expansion_id?: string | null;
   actor_name: string;
@@ -2149,9 +2212,11 @@ export async function assignTacticToGap(args: {
   coverage?: OverallCoverage | null;
   dimensions?: Partial<Record<CoverageDimension, DimensionValue>> | null;
   human?: boolean;
-  /** Human only: the given verdict and dimensions are the person's and are locked. */
+  /** Human only: confirms the overall verdict; dimension confirmations remain separate. */
   lock_coverage?: boolean;
 }): Promise<string> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => assignTacticToGap(args));
+  await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
   const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
@@ -2182,20 +2247,20 @@ export async function assignTacticToGap(args: {
   }
   const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
   const lockVerdict =
-    Boolean(args.human && args.lock_coverage) && (overall !== "unassessed" || givenDimensions.length > 0);
+    Boolean(args.human && args.lock_coverage && args.confirm_coverage !== false) && (overall !== "unassessed" || givenDimensions.length > 0);
   const rationale = lockVerdict
     ? requireRationale(args.note)
     : args.note ||
       "Assigned from the plan. Coverage is not assessed until a model or a human records it.";
   const dimensions = coverageDimensions(args.dimensions, args.note ?? "");
-  if (lockVerdict) {
-    for (const dim of givenDimensions) {
-      dimensions[dim] = { ...dimensions[dim], lock: makeLock(args.actor_name, args.actor_function, rationale) };
-    }
-  }
+  // Overall confirmation never silently confirms individual dimensions.
+  const confirmedBasis = lockVerdict && overall === "full"
+    ? requireSupportedFull(state, args.gap_id, dimensions, args.expected_basis_version) : null;
   const coverageId = existing?.id ?? (await allocateId("COV", state.coverages.map((c) => c.id)));
   const row = {
     id: coverageId,
+    confirmed_requirement_basis: confirmedBasis,
+    review_version: newId("coverage"),
     gap_id: args.gap_id,
     tactic_id: args.tactic_id,
     expansion_id: args.expansion_id ?? null,

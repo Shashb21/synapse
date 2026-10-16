@@ -23,6 +23,7 @@ import {
   unlinkNeedFromGap,
   TACTIC_EDIT_FIELDS,
   recordMissedTactic,
+  reviewRequirementBasis,
   lockCoverageDimension,
   lockCoverageOverall,
   confirmCoverageReview,
@@ -161,6 +162,7 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
   unassign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
   save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
+  review_requirement_basis: { stage: "S5", entity: "gap", field: "requirement_basis", action: "validate" },
   lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
   lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
@@ -185,6 +187,8 @@ function gateFieldValue(state: IegpState, mapping: GateEdit, body: Record<string
     case "computed_status":
       if (!gap) return null;
       return gap.status_override ? `${gap.status_override.status} (override)` : gap.computed_status;
+    case "requirement_basis":
+      return gap?.requirement_basis ? JSON.stringify(gap.requirement_basis) : null;
     case "human_validated":
       return gap ? String(gap.human_validated) : null;
     case "status":
@@ -493,12 +497,29 @@ async function handleAction(request: Request): Promise<Response> {
           actor_function,
         });
         break;
+      case "review_requirement_basis":
+        await reviewRequirementBasis({
+          gap_id: body.gap_id,
+          expected_version: body.expected_version,
+          dimensions: body.requirements ? JSON.parse(body.requirements) : Object.fromEntries(COVERAGE_DIMENSIONS.map(dim => [dim, {
+            applicability: body[`req_${dim}_applicability`] || "undetermined",
+            requirement: body[`req_${dim}_requirement`] || "",
+            rationale: body[`req_${dim}_rationale`] || "",
+            resolution: body[`req_${dim}_resolution`] || "",
+          }])),
+          rationale: rationaleOf(body),
+          actor_name, actor_function,
+          origin: "human", confirm: true,
+        });
+        break;
       case "lock_dimension":
+        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageDimension({
           coverage_id: body.coverage_id,
+          expected_version: body.expected_version,
           dimension: body.dimension as CoverageDimension,
           value: body.value as never,
           rationale: body.rationale || body.note || "",
@@ -507,11 +528,15 @@ async function handleAction(request: Request): Promise<Response> {
         });
         break;
       case "lock_overall":
+        if (body.overall === "full" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
+        if (!body.expected_version) return NextResponse.json({ error: "Refresh coverage before reviewing." }, { status: 400 });
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
         await lockCoverageOverall({
           coverage_id: body.coverage_id,
+          expected_version: body.expected_version,
+          expected_basis_version: body.expected_basis_version,
           overall: body.overall as never,
           rationale: body.rationale || body.note || "",
           actor_name,
@@ -603,6 +628,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "assign_tactic": {
         // A person's mapping. A coverage verdict set in the same step is theirs and is locked.
         const verdict = coverageInput(body);
+        if (verdict.coverage === "full" && body.confirm_coverage !== "false" && !body.expected_basis_version) return NextResponse.json({ error: "Review the requirement basis before confirming Full." }, { status: 400 });
         const hasVerdict =
           Boolean(verdict.coverage && verdict.coverage !== "unassessed") || Boolean(verdict.dimensions);
         if (hasVerdict && rationaleOf(body).length < 3) {
@@ -610,6 +636,8 @@ async function handleAction(request: Request): Promise<Response> {
         }
         await assignTacticToGap({
           gap_id: body.gap_id,
+          expected_basis_version: body.expected_basis_version,
+          confirm_coverage: body.confirm_coverage !== "false",
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,

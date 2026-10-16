@@ -1,3 +1,4 @@
+import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { AppShell, PageIntro } from "@/components/app-shell";
@@ -170,7 +171,7 @@ export default async function TacticDetailPage({
           {state.coverages.filter(c => c.expansion_id === child.id && c.tactic_id === child.tactic_id && child.gap_ids.includes(c.gap_id)).map(coverage => <div key={coverage.id} className="mb-3 text-[13px]">
             <p className="mb-2">Coverage for {state.gaps.find(g => g.id === coverage.gap_id)?.name ?? coverage.gap_id}</p>
             <div className="mb-2 flex flex-wrap items-center gap-2"><CoverageBadge overall={coverage.overall} /><LockMeta lock={coverage.overall_lock} /></div>
-            <ActionDialog endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id}}
+            <ActionDialog endpoint="/api/iegp" payload={{action: "lock_overall", coverage_id: coverage.id, expected_version: coverageReviewVersion(coverage), expected_basis_version: getRequirementBasisReview(state, coverage.gap_id).version}}
               identity={identity} label="Review expansion coverage" title={`Review expansion coverage: ${child.scope.name}`}
               description="Validate the added scope's coverage for this gap. Proposed and cancelled expansions still do not count."
               confirmLabel="Validate coverage" fields={[{name: "overall", label: "Overall", type: "select", required: true,
@@ -179,7 +180,7 @@ export default async function TacticDetailPage({
             <details className="mt-2"><summary>Coverage dimensions</summary>
               <dl className="mt-2 grid gap-2 sm:grid-cols-2">{COVERAGE_DIMENSIONS.map(dimension => <div key={dimension}>
                 <dt>{DIMENSION_LABELS[dimension]}</dt><dd className="mb-1">{coverage.dimensions[dimension].value}</dd>
-                <ActionDialog endpoint="/api/iegp" payload={{action: "lock_dimension", coverage_id: coverage.id, dimension}}
+                <ActionDialog endpoint="/api/iegp" payload={{action: "lock_dimension", coverage_id: coverage.id, dimension, expected_version: coverageReviewVersion(coverage)}}
                   identity={identity} label={`Review ${DIMENSION_LABELS[dimension]}`} title={`Review ${DIMENSION_LABELS[dimension]}: ${child.scope.name}`}
                   confirmLabel="Validate dimension" fields={[{name: "value", label: "Assessment", type: "select", defaultValue: coverage.dimensions[dimension].value,
                     options: DIMENSION_VALUES.map(value => ({value, label: value}))}]} />

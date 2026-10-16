@@ -1,3 +1,4 @@
+import { hasSupportedFullConfirmation } from "./requirement-basis";
 import {
   COVERAGE_DIMENSIONS,
   DOMAIN_LABELS,
@@ -146,7 +147,7 @@ export function computeGapStatus(
   const pool = tactics ? countingCoverages(coverages, tactics, extras?.expansions) : coverages.filter((c) => !c.expansion_id);
   const relevant = pool.filter((c) => c.overall !== "not_relevant");
   if (relevant.length === 0) return "validated_open";
-  if (relevant.some((c) => c.overall === "full" && c.overall_lock.locked)) {
+  if (relevant.some((c) => hasSupportedFullConfirmation(c))) {
     return "validated_addressed";
   }
   return "validated_partial";
