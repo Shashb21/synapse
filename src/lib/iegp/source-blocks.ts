@@ -294,7 +294,7 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
         : undefined);
       if (!sourceId) throw new Error("Source block not found.");
       await db().execute(sql`select id from sources where id = ${sourceId} for update`);
-      await lockAssessmentOwners({ source_ids: [sourceId] });
+      const assessmentGapIds = await lockAssessmentOwners({ source_ids: [sourceId] });
       const before = await loadState();
       const result = await edit(args);
       // Resolve citations against the actual post-edit reading order. A retained
@@ -321,7 +321,7 @@ function assessmentSourceEdit<A extends { source_id?: string; block_id?: string;
         await db().update(t.needs).set({ block_id: blockId,
           source_basis_text: !quote && support ? retained : null }).where(eq(t.needs.id, need.id));
       }
-      await invalidateRelationshipAssessments({ before, reason: "Supporting source passage changed.",
+      await invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "Supporting source passage changed.",
         actor_name: args.actor?.name ?? "Source parser", actor_function: args.actor?.function ?? "evidence_lead" });
       return result;
     });

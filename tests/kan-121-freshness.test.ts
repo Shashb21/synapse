@@ -2,12 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
 import "@/modules";
+import { sql } from "drizzle-orm";
 import { POST } from "@/app/api/iegp/route";
 import { POST as planPost } from "@/app/api/plan/route";
 import { POST as sourcePost } from "@/app/api/sources/blocks/route";
 import { wipePlatform } from "@/modules/kernel/db";
 import { createManualSource } from "@/lib/iegp/source-blocks";
-import { withWorkspaceTransaction } from "@/lib/iegp/db";
+import { db, poolSize, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { setupContextFromState } from "@/lib/iegp/planning-context";
 import { planVersion } from "@/modules/stages/s10-timeline/module";
 import * as store from "@/lib/iegp/store";
@@ -84,6 +85,95 @@ describe("KAN-144 assessment freshness through real actions", () => {
   expect(current.assessment_history?.some(e => e.action === "invalidate" && e.overall_lock.locked_at === old.overall_lock.locked_at)).toBe(true);
   expect(current.assessment_history?.some(e => e.action === "reassess" && e.overall_lock.locked_at === stale.overall_lock.locked_at)).toBe(true);
   expect(displayedGapStatus((await store.loadState()).gaps.find(g => g.id === gapId)!)).toBe("validated_addressed");
+ });
+ it("rejects a form opened at C when a real design transition returns from C to historical B", async () => {
+  const original = await row();
+  for (const population of ["Design B", "Design C"]) {
+   expect((await post({ action: "modify_tactic", tactic_id: tacticId, population, rationale: "Accepted population amendment" })).status).toBe(200);
+  }
+  const atC = await row();
+  expect((await post({ action: "modify_tactic", tactic_id: tacticId, population: "Design B", rationale: "Return to earlier population" })).status).toBe(200);
+  const atB = await row();
+  expect(coverageReviewVersion(atB)).not.toBe(coverageReviewVersion(atC));
+  expect(atB.assessment_history).toHaveLength(atC.assessment_history!.length + 1);
+  expect(atB.overall_lock).toEqual(original.overall_lock);
+  const refused = await post({ action: "lock_overall", coverage_id: atC.id, overall: "full", expected_version: coverageReviewVersion(atC), expected_basis_version: getRequirementBasisReview(await store.loadState(), gapId).version, rationale: "Obsolete form from design C" });
+  expect(refused.status).toBe(400);
+  expect(await row()).toEqual(atB);
+ });
+ it.each([false, true])("rejects old overall and dimension tokens on an unassessed relationship (dimension confirmed: %s)", async confirmed => {
+  const other = await store.createGap({ statement: "Unassessed question", ...actor });
+  await review(other);
+  expect((await post({ action: "assign_tactic", gap_id: other, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() })).status).toBe(200);
+  let unassessed = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
+  if (confirmed) {
+   expect((await post({ action: "lock_dimension", coverage_id: unassessed.id, dimension: "population", value: "yes", expected_version: coverageReviewVersion(unassessed), rationale: "Reviewed original population" })).status).toBe(200);
+   unassessed = (await store.loadState()).coverages.find(c => c.id === unassessed.id)!;
+  }
+  expect((await post({ action: "modify_tactic", tactic_id: tacticId, population: "Different population", rationale: "Accepted design amendment" })).status).toBe(200);
+  for (const action of ["lock_dimension", "lock_overall"]) {
+   const result = await post({ action, coverage_id: unassessed.id, expected_version: coverageReviewVersion(unassessed), dimension: "population", value: "yes", overall: "partial", rationale: "Old form before design amendment" });
+   expect(result.status, action).toBe(400);
+  }
+  const after = (await store.loadState()).coverages.find(c => c.id === unassessed.id)!;
+  expect(after.overall).toBe("unassessed");
+  expect(after.dimensions).toEqual(unassessed.dimensions);
+  expect(coverageReviewVersion(after)).not.toBe(coverageReviewVersion(unassessed));
+ });
+ // Run with DATABASE_POOL_MAX=2 or more; a one-connection pool cannot interleave transactions.
+ it.skipIf(poolSize("workspace") < 2)("keeps an independent transaction's newly reassessed relationship and complete history unchanged", async () => {
+  const other = await store.createGap({ statement: "Independent B decision", ...actor });
+  const otherTactic = await store.recordMissedTactic({ name: "Independent B study", type: "rwe_study", evidence_question: "Independent B evidence", status: "ongoing", ...actor });
+  await review(other); await link(other, otherTactic);
+  let ready!: () => void, resume!: () => void;
+  const captured = new Promise<void>(resolve => { ready = resolve; });
+  const proceed = new Promise<void>(resolve => { resume = resolve; });
+  let backendA: unknown;
+  const transactionA = withWorkspaceTransaction(async () => {
+   const assessmentGapIds = await store.lockAssessmentOwners({ gap_ids: [gapId] });
+   backendA = (await db().execute(sql`select pg_backend_pid() as pid`))[0].pid;
+   const before = await store.loadState();
+   await post({ action: "modify_gap", gap_id: gapId, statement: "Accepted A decision", rationale: "Independent A amendment" });
+   ready();
+   await proceed;
+   // Replay A's accepted operation after B has changed and been reviewed independently.
+   await store.invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "A amendment replay", ...actor });
+  });
+  await Promise.race([captured, transactionA.then(() => { throw new Error("A finished before its barrier"); })]);
+  let reviewedB: Awaited<ReturnType<typeof row>>;
+  try {
+   reviewedB = await withWorkspaceTransaction(async () => {
+    const backendB = (await db().execute(sql`select pg_backend_pid() as pid`))[0].pid;
+    expect(backendB).not.toBe(backendA);
+    expect((await post({ action: "modify_gap", gap_id: other, statement: "Accepted B decision", rationale: "Independent B amendment" })).status).toBe(200);
+    expect((await review(other)).status).toBe(200);
+    const current = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
+    expect((await post({ action: "lock_overall", coverage_id: current.id, overall: "full", expected_version: coverageReviewVersion(current), expected_basis_version: getRequirementBasisReview(await store.loadState(), other).version, rationale: "Explicitly reassessed current B" })).status).toBe(200);
+    return (await store.loadState()).coverages.find(c => c.id === current.id)!;
+   });
+  } finally {
+   resume();
+   await transactionA;
+  }
+  expect(reviewedB!.stale).toBe(false);
+  expect(reviewedB!.assessment_history!.length).toBeGreaterThan(1);
+  const afterB = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
+  expect(afterB).toEqual(reviewedB!);
+  expect(displayedGapStatus((await store.loadState()).gaps.find(g => g.id === other)!)).toBe("validated_addressed");
+ });
+ it("marks a freshly reassessed relationship outdated when its rejected linked need is restored", async () => {
+  const needId = (await store.loadState()).need_gap_links.find(l => l.gap_id === gapId)!.need_id;
+  expect((await post({ action: "lock_need", need_id: needId, status: "rejected", note: "Requirement set aside" })).status).toBe(200);
+  expect((await reassess()).status).toBe(200);
+  const before = await row();
+  expect(before.stale).toBe(false);
+  expect((await post({ action: "restore_need", need_id: needId, note: "Restore for a new decision" })).status).toBe(200);
+  const after = await row();
+  expect(after.stale).toBe(true);
+  expect(after.overall_lock).toEqual(before.overall_lock);
+  expect(after.confirmed_requirement_basis).toEqual(before.confirmed_requirement_basis);
+  expect(after.assessment_history).toHaveLength(before.assessment_history!.length + 1);
+  expect(displayedGapStatus((await store.loadState()).gaps.find(g => g.id === gapId)!)).toBe("validated_partial");
  });
  it("retains Addressed with another current Full and preserves lifecycle eligibility", async () => {
   await store.recordMissedTactic({ name: "Independent study", type: "rwe_study", evidence_question: "Adult evidence", status: "ongoing", ...actor });
@@ -196,11 +286,11 @@ describe("KAN-144 assessment freshness through real actions", () => {
  });
  it("does not duplicate invalidation history when the shared accepted-edit operation is retried", async () => {
   await withWorkspaceTransaction(async () => {
-   await store.lockAssessmentOwners({ tactic_ids: [tacticId] });
+   const assessmentGapIds = await store.lockAssessmentOwners({ tactic_ids: [tacticId] });
    const before = await store.loadState();
    await store.modifyTactic({ tactic_id: tacticId, fields: { comparator: "New comparator" }, rationale: "Accepted correction", ...actor });
    const count = (await row()).assessment_history!.length;
-   expect(await store.invalidateRelationshipAssessments({ before, reason: "Retry accepted correction", ...actor })).toEqual([]);
+   expect(await store.invalidateRelationshipAssessments({ before, gap_ids: assessmentGapIds, reason: "Retry accepted correction", ...actor })).toEqual([]);
    expect((await row()).assessment_history).toHaveLength(count);
   });
  });
