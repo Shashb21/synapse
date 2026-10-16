@@ -5,6 +5,7 @@ import { ownerGate } from "@/modules/auth/owner";
 import { recordAudit } from "@/modules/kernel/audit";
 import { replaceContentsOf } from "@/modules/workspaces/contents";
 import { getWorkspace, setWorkspaceDemoMode } from "@/modules/workspaces/store";
+import { forgetDemoMode } from "@/lib/demo/mode";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,9 +27,11 @@ export async function POST(request: Request) {
     if (!workspace) return NextResponse.json({ error: "Choose a workspace." }, { status: 404 });
     if (body.enabled) {
       await setWorkspaceDemoMode(workspace.id, true);
+      forgetDemoMode(workspace.id);
       await replaceContentsOf(workspace.id, "client_demo");
     } else {
       await setWorkspaceDemoMode(workspace.id, false);
+      forgetDemoMode(workspace.id);
     }
     await recordAudit({
       category: "workspace",

@@ -23,7 +23,7 @@ import path from "node:path";
 describe("GET /api/demo/files", () => {
   it("returns a ZIP of every demo-pack file, byte for byte", async () => {
     guard.signedIn = true;
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/demo/files"));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
     expect(res.headers.get("content-disposition")).toContain('filename="velmara-demo-files.zip"');
@@ -34,7 +34,7 @@ describe("GET /api/demo/files", () => {
 
   it("is refused when signed out", async () => {
     guard.signedIn = false;
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/demo/files"));
     expect(res.status).not.toBe(200);
     expect(res.headers.get("content-type")).not.toBe("application/zip");
   });
