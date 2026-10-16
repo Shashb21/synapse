@@ -21,7 +21,7 @@ import * as store from "@/lib/iegp/store";
 import { db } from "@/lib/iegp/db";
 import * as schema from "@/lib/iegp/schema";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
-import { computeGapStatus } from "@/lib/iegp/engine";
+import { buildPlanWorkspace, computeGapStatus, displayedGapStatus } from "@/lib/iegp/engine";
 import * as requirements from "@/lib/iegp/requirement-basis";
 
 const actor = { actor_name: "Coverage reviewer", actor_function: "heor" as const };
@@ -53,6 +53,46 @@ describe("KAN-141 requirement review through public actions", () => {
     expect((await store.loadState()).coverages).toHaveLength(0);
     expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId })).status).toBe(200);
     expect((await store.loadState()).coverages[0]?.overall).toBe("unassessed");
+  });
+  it.each(["split_partial_gap", "rewrite_partial_gap", "create_addressed_gap"])("%s saves provisional coverage and engine status until the new requirements are reviewed", async action => {
+    // Arrange: even a reviewed parent cannot confirm a differently worded successor.
+    await review();
+    if (action !== "create_addressed_gap") expect((await link(yes, "partial")).status).toBe(200);
+    const name = `New scope from ${action}`;
+    const result = await post({
+      action, parent_gap_id: gapId, gap_id: gapId, name, statement: name,
+      addressed_name: name, open_name: "Residual comparator question",
+      domain: "comparative_effectiveness", status: "validated_addressed", tactic_id: tacticId,
+      note: "Narrow the original question to the available evidence",
+    });
+    expect(result.status).toBe(200);
+
+    // Assert the saved state immediately, before another mutation can recompute it.
+    const state = await store.loadState();
+    const created = state.gaps.find(g => g.name === name)!;
+    const coverage = state.coverages.find(c => c.gap_id === created.id)!;
+    expect(coverage.overall).toBe("full");
+    expect(coverage.overall_lock.locked).toBe(false);
+    expect(coverage.confirmed_requirement_basis).toBeNull();
+    expect(created.requirement_basis).toBeNull();
+    expect(created.status).toBe("validated_partial");
+    expect(created.computed_status).toBe("validated_partial");
+    expect(created.human_validated).toBe(false);
+    expect(displayedGapStatus(created)).toBe("validated_partial");
+    expect(buildPlanWorkspace(state).review.find(g => g.gap_id === created.id)?.gap_status).toBe("validated_partial");
+    const currentReview = requirements.getRequirementBasisReview(state, created.id, coverage);
+    expect(currentReview.full_eligible).toBe(false);
+    expect(currentReview.legacy_unsupported_full).toBe(false);
+
+    // A later explicit confirmation is rejected atomically until review is complete.
+    const refused = await post({ action: "lock_overall", coverage_id: coverage.id, overall: "full",
+      rationale: "Attempt confirmation without reviewing the new scope",
+      expected_version: requirements.coverageReviewVersion(coverage), expected_basis_version: currentReview.version });
+    expect(refused.status).toBe(400);
+    const after = await store.loadState();
+    expect(after.coverages).toEqual(state.coverages);
+    expect(after.gaps).toEqual(state.gaps);
+    expect(after.audit).toEqual(state.audit);
   });
   it("persists sourced human requirements and confirms overall separately from dimensions", async () => {
     const initial = await basis();

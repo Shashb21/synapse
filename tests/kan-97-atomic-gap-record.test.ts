@@ -148,12 +148,13 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     }
     expect(state.gap_suggestions.find((row) => row.id === suggestionId)!.gap_id).toBe(openId);
     expect(state.residuals.filter((r) => r.gap_id === gapId).every((r) => r.review_status === "rejected")).toBe(true);
-    // Children inherit the objective and are confirmed by the person who split.
+    // Both inherit the objective; only the Open slice has a confirmed final status.
     for (const child of [addressedId, openId].map((id) => state.gaps.find((g) => g.id === id)!)) {
       expect(child.objective_id).toBe(before.objective_id);
-      expect(child.validated_by).toMatchObject({ name: ACTOR.name, function: "heor" });
-      expect(child.validated_at).toBeTruthy();
     }
+    expect(state.gaps.find(g => g.id === openId)).toMatchObject({ validated_by: { name: ACTOR.name, function: "heor" } });
+    expect(state.gaps.find(g => g.id === openId)!.validated_at).toBeTruthy();
+    expect(state.gaps.find(g => g.id === addressedId)).toMatchObject({ status: "validated_partial", human_validated: false, validated_by: null, validated_at: null });
     // The version remembers what the retired gap held and where it went.
     const version = state.gap_versions.find((row) => row.live_gap_id === openId && row.retired_gap_id === gapId)!;
     expect(version.snapshot).toMatchObject({ settings: before.settings, objective_id: before.objective_id });
@@ -162,7 +163,7 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     expect(await findGapOrphans()).toEqual([]);
   });
 
-  it("a rewrite as Addressed closes pending ideas and drops the priority, leaving no orphans", async () => {
+  it("an intended Addressed rewrite stays provisional and preserves carry/close behavior without orphans", async () => {
     const { gapId, tacticId } = await makePartialGap();
     await decorate(gapId, tacticId);
     const liveId = await rewritePartialGap({
@@ -173,6 +174,8 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     expect(idea!.decision_rationale).toMatch(/Superseded/);
     expect(await db().select().from(kernel.priorityPlacements).where(eq(kernel.priorityPlacements.gap_id, gapId))).toHaveLength(0);
     const state = await loadState();
+    expect(state.gaps.find(g => g.id === liveId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial", human_validated: false, validated_by: null });
+    expect(state.coverages.find(c => c.gap_id === liveId)).toMatchObject({ overall: "full", overall_lock: { locked: false }, confirmed_requirement_basis: null });
     expect(state.gap_suggestions.filter((row) => row.status === "pending").every((row) => row.gap_id === liveId)).toBe(true);
     expect(await findGapOrphans()).toEqual([]);
   });

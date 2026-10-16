@@ -95,7 +95,7 @@ describe("canonical expansion acceptance", () => {
       await pg.end();
     }
   });
-  it("split retains addressed and residual child identities, locks and cancellation eligibility", async () => {
+  it("split retains child identities and dimension locks while Full remains provisional", async () => {
     const child = await acceptTacticExpansion(args);
     const sibling = await acceptTacticExpansion({...args, proposal_id: "s9:sibling", scope: {...scope, name: "Sibling scope"}});
     const planned = await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version});
@@ -105,8 +105,9 @@ describe("canonical expansion acceptance", () => {
     const result = await splitPartialGap({parent_gap_id: args.gap_id, addressed_name: "Community evidence covered", open_name: "Comparator still missing", tactic_ids: [child.id], open_tactic_ids: [sibling.id], actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
     const addressed = after.coverages.filter(c => c.gap_id === result.addressedId);
+    expect(after.gaps.find(g => g.id === result.addressedId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial", human_validated: false });
     expect(addressed).toHaveLength(1);
-    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, overall: "full", overall_lock: {locked: true}, dimensions: source.dimensions});
+    expect(addressed[0]).toMatchObject({tactic_id: args.tactic_id, expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null, dimensions: source.dimensions});
     expect(after.coverages.find(c => c.gap_id === result.openId)).toMatchObject({tactic_id: args.tactic_id, expansion_id: sibling.id, overall: "unassessed"});
     const inherited = after.expansions.find(e => e.id === child.id)!;
     expect(inherited.gap_ids).toContain(result.addressedId);
@@ -134,11 +135,13 @@ describe("canonical expansion acceptance", () => {
     const after = await loadState();
     const inherited = after.coverages.filter(c => c.gap_id === result.addressedId);
     expect(inherited).toHaveLength(2);
+    expect(inherited.every(c => !c.overall_lock.locked && c.confirmed_requirement_basis === null)).toBe(true);
+    expect(after.gaps.find(g => g.id === result.addressedId)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
     expect(new Set(inherited.map(c => c.expansion_id ?? "parent"))).toEqual(new Set([child.id, "parent"]));
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child only", actor, expected_version: after.expansions.find(e => e.id === child.id)!.version});
     const cancelled = await loadState();
     expect(countingCoverages(cancelled.coverages.filter(c => c.gap_id === result.addressedId), cancelled.tactics, cancelled.expansions)).toHaveLength(1);
-    // Split-created historical Full has no reviewed basis, so the remaining parent cannot verify Full.
+    // The split proposal is still provisional, so the remaining parent cannot verify Full.
     expect(cancelled.gaps.find(g => g.id === result.addressedId)!.computed_status).toBe("validated_partial");
   });
   it("rewrite keeps child Full scoped and cancellation recomputes it Open", async () => {
@@ -146,7 +149,8 @@ describe("canonical expansion acceptance", () => {
     await setExpansionStatus({expansion_id: child.id, status: "planned", rationale: "Child funded", actor, expected_version: child.version});
     const id = await rewritePartialGap({gap_id: args.gap_id, name: "Community addressed", status: "validated_addressed", tactic_ids: [child.id], actor_name: actor.name, actor_function: actor.function});
     const after = await loadState();
-    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, overall: "full"}]);
+    expect(after.coverages.filter(c => c.gap_id === id)).toMatchObject([{expansion_id: child.id, overall: "full", overall_lock: {locked: false}, confirmed_requirement_basis: null}]);
+    expect(after.gaps.find(g => g.id === id)).toMatchObject({ status: "validated_partial", computed_status: "validated_partial" });
     await setExpansionStatus({expansion_id: child.id, status: "cancelled", rationale: "Cancel child", actor, expected_version: after.expansions[0]!.version});
     expect((await loadState()).gaps.find(g => g.id === id)!.computed_status).toBe("validated_open");
   });

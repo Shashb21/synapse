@@ -4240,13 +4240,12 @@ async function retireGap(gap_id: string, transaction?: StoreTransaction) {
     .where(eq(t.gaps.id, gap_id));
 }
 
-async function insertClosingCoverage(args: {
+/** Save an intended closing relationship provisionally until its new scope is reviewed. */
+async function insertProvisionalClosingCoverage(args: {
   gap_id: string;
   tactic_id: string;
   expansion_id?: string | null;
   source?: IegpState["coverages"][0];
-  actor_name: string;
-  actor_function: ActorFunction;
   note: string;
 }, transaction?: StoreTransaction) {
   const state = transaction ? await readState(transaction) : await loadState();
@@ -4259,7 +4258,8 @@ async function insertClosingCoverage(args: {
       .set({
         overall: "full",
         overall_rationale: args.note,
-        overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+        overall_lock: unlocked(),
+        confirmed_requirement_basis: null,
         stale: false,
         needs_review: false,
       })
@@ -4276,7 +4276,8 @@ async function insertClosingCoverage(args: {
     dimensions: args.source?.dimensions ?? emptyDimensions(),
     overall: "full",
     overall_rationale: args.note,
-    overall_lock: makeLock(args.actor_name, args.actor_function, args.note),
+    overall_lock: unlocked(),
+    confirmed_requirement_basis: null,
     stale: false,
     needs_review: false,
   });
@@ -4450,8 +4451,8 @@ export async function splitPartialGap(args: {
     await ensureGapHasConstituentNeed(openId, transaction);
     for (const selected of addressedScopes) {
       await inheritSplitScope(selected, parent.id, addressedId, args, transaction);
-      await insertClosingCoverage({gap_id: addressedId, tactic_id: selected.tactic_id, expansion_id: selected.expansion_id, source: selected.source,
-        actor_name: args.actor_name, actor_function: args.actor_function, note: "Split: this scope closes the addressed slice."}, transaction);
+      await insertProvisionalClosingCoverage({gap_id: addressedId, tactic_id: selected.tactic_id, expansion_id: selected.expansion_id, source: selected.source,
+        note: "Split: proposed Full for this slice; requirement review pending."}, transaction);
     }
     for (const selected of leftoverScopes) {
       await inheritSplitScope(selected, parent.id, openId, args, transaction);
@@ -4461,16 +4462,6 @@ export async function splitPartialGap(args: {
         overall_lock: unlocked(), stale: false, needs_review: false});
     }
     await syncComputedGapStatuses(addressedId, undefined, transaction);
-    await transaction
-      .update(t.gaps)
-      .set({
-        status: "validated_addressed",
-        computed_status: "validated_addressed",
-        human_validated: true,
-        lock: makeLock(args.actor_name, args.actor_function, "Split addressed slice."),
-        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Split from ${parent.id}: addressed slice.`)),
-      })
-      .where(eq(t.gaps.id, addressedId));
     await transaction
       .update(t.gaps)
       .set({
@@ -4569,28 +4560,28 @@ export async function rewritePartialGap(args: {
     if (args.status === "validated_addressed") {
       for (const selected of scopes) {
         await inheritSplitScope(selected, original.id, liveId, args, transaction);
-        await insertClosingCoverage({
+        await insertProvisionalClosingCoverage({
           gap_id: liveId,
           tactic_id: selected.tactic_id,
           expansion_id: selected.expansion_id,
           source: selected.source,
-          actor_name: args.actor_name,
-          actor_function: args.actor_function,
-          note: "Rewritten as Addressed with this scope.",
+          note: "Rewrite: proposed Full for this scope; requirement review pending.",
         }, transaction);
       }
     }
     await syncComputedGapStatuses(liveId, undefined, transaction);
-    await transaction
-      .update(t.gaps)
-      .set({
-        status: args.status,
-        computed_status: args.status,
-        human_validated: true,
-        lock: makeLock(args.actor_name, args.actor_function, args.note),
-        ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Rewritten from ${original.id}.`)),
-      })
-      .where(eq(t.gaps.id, liveId));
+    if (args.status === "validated_open") {
+      await transaction
+        .update(t.gaps)
+        .set({
+          status: args.status,
+          computed_status: args.status,
+          human_validated: true,
+          lock: makeLock(args.actor_name, args.actor_function, args.note),
+          ...(await confirmationBy(args.actor_name, args.actor_function, args.note || `Rewritten from ${original.id}.`)),
+        })
+        .where(eq(t.gaps.id, liveId));
+    }
     const carried = await carryRetiredGapLinks(transaction, {
       from: original,
       targets: { open: args.status === "validated_open" ? liveId : null, all: [liveId] },
@@ -4679,23 +4670,12 @@ export async function createAddressedGap(args: {
     actor_function: args.actor_function,
     note: args.note,
   });
-  await insertClosingCoverage({
+  await insertProvisionalClosingCoverage({
     gap_id: id,
     tactic_id: tacticId,
-    actor_name: args.actor_name,
-    actor_function: args.actor_function,
-    note: "Created as Addressed with accompanying tactic.",
+    note: "Created with proposed Full coverage; requirement review pending.",
   });
-  await db()
-    .update(t.gaps)
-    .set({
-      status: "validated_addressed",
-      computed_status: "validated_addressed",
-      human_validated: true,
-      lock: makeLock(args.actor_name, args.actor_function, args.note),
-      ...(await confirmationBy(args.actor_name, args.actor_function, args.note || "Created as Addressed with its accompanying tactic.")),
-    })
-    .where(eq(t.gaps.id, id));
+  await syncComputedGapStatuses(id);
   return id;
 }
 
