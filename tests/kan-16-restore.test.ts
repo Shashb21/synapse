@@ -1,3 +1,5 @@
+import { gapRecord } from "@/lib/iegp/gap-record";
+import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
 import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -33,6 +35,13 @@ import { RejectedMappings, RejectedTactics, SetAsideGaps } from "@/components/re
 const ACTOR = { name: "Restore Tester", function: "medical_affairs" as const };
 
 async function iegp(body: Record<string, unknown>) {
+  // Capture the record opened by this request; explicit stale/missing tokens still win.
+  const opening = await loadState();
+  const coverage = opening.coverages.find(row => row.id === body.coverage_id);
+  const gapId = String(coverage?.gap_id ?? body.gap_id ?? "");
+  const tacticId = String(coverage?.tactic_id ?? body.tactic_id ?? "");
+  body = { expected_relationship: relationshipVersion(relationshipSnapshot(opening, gapId, tacticId)), ...body };
+
   if (["lock_tactic", "lock_tactic_review", "restore_tactic"].includes(String(body.action))) {
     const tactic = (await loadState()).tactics.find(row => row.id === body.tactic_id);
     body = { expected_tactic: tactic ? tacticEditVersion(tactic) : "", ...body };
@@ -202,7 +211,7 @@ describe("rejected mappings", () => {
     expect(humanRejectedPairs(state).has(`${gapB}::${tacticId}`)).toBe(false);
     expect(state.coverages.some((c) => c.gap_id === gapB && c.tactic_id === tacticId)).toBe(false);
     expect(await listRejectedMappings()).toEqual([]);
-    expect(await audited(`${gapB}::${tacticId}`, "restore_mapping")).toBe(true);
+    expect((await gapRecord(gapB))!.history).toContainEqual(expect.objectContaining({ entity_type: "gap_tactic", rationale: "Population matches after all" }));
   });
 });
 

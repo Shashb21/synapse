@@ -236,7 +236,7 @@ describe("KAN-90 attributable plan edits", () => {
     expect(html).toContain("Medical Affairs");
     expect(html).toContain(`${target} (override)`);
     expect(html).toContain("Reviewed the registry readout");
-    expect(html).toContain("No rationale given.");
+    expect(html).toContain("Reason not recorded");
     expect(renderToStaticMarkup(createElement(EntityHistory, { entries: [] }))).toContain("No changes recorded yet.");
   });
 });

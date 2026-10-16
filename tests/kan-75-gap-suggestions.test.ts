@@ -1,3 +1,4 @@
+import { modelMappingSupport } from "./support/model-mapping";
 import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -93,7 +94,7 @@ describe("KAN-75 merge", () => {
     await validatePlacement({ ...await priorityDecision(gapId, "blocks the HTA decision"), gap_id: gapId, band: "high", rationale: "blocks the HTA decision", actor: ACTOR });
     await recordMissedTactic({ name: `Registry ${gapId}`, type: "registry", evidence_question: "q", status: "ongoing", ...who });
     const tacticId = (await loadState()).tactics.at(-1)!.id;
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...who, coverage: "partial", note: "covers part" });
+    await assignTacticToGap({ ...await modelMappingSupport(gapId, tacticId), gap_id: gapId, tactic_id: tacticId, ...who, coverage: "partial", note: "covers part" });
     suggestionId = await overlapOn(gapId);
   });
 

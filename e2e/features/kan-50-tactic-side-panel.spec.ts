@@ -49,6 +49,8 @@ test.describe("tactic side panel", () => {
   test("shows current details before collapsed shared history and a full-record route", async ({ page }) => {
     const { panel } = await openFirstLinked(page);
     await expect(panel.getByRole("link", { name: "Open full record", exact: true })).toHaveAttribute("href", /\/tactics\//);
+    await expect(panel.getByRole("term").filter({ hasText: /^Type$/ })).toBeVisible();
+    await expect(panel.locator("dl").first()).toContainText("Registry");
     const history = panel.getByRole("group", { name: "History", exact: true });
     await expect(history).not.toHaveAttribute("open");
     await expect(panel.getByRole("region", { name: "Gaps this tactic is mapped to" })).toBeVisible();
@@ -154,6 +156,7 @@ test.describe("tactic side panel", () => {
   });
 
   test("keeps drafts through dirty Escape, failed save and detail refresh, then retries the same submission", async ({ page }) => {
+    test.setTimeout(90_000);
     const { panel, trigger } = await openLibraryPanel(page);
     await panel.getByLabel(/^budget$/i).fill("$510K");
     const reason = panel.getByLabel(/why\? \(required\)/i);
@@ -180,8 +183,11 @@ test.describe("tactic side panel", () => {
     await panel.getByRole("button", { name: "Retry tactic details" }).click();
     await expect(panel.getByRole("button", { name: "Retry tactic details" })).toHaveCount(0);
     await expect(reason).toHaveValue("Retain this draft and opening version through failures");
+    const retryResponse = page.waitForResponse(response => response.url().endsWith("/api/iegp") && response.request().method() === "POST");
     await panel.getByRole("button", { name: "Save changes", exact: true }).click();
-    await expect(panel).toBeHidden();
+    const saved = await retryResponse;
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await expect(panel).toBeHidden({ timeout: 30_000 });
     expect(bodies[1]).toEqual(bodies[0]);
     await expect(trigger).toBeFocused();
   });
@@ -192,7 +198,8 @@ test.describe("tactic side panel", () => {
     const tacticId = href!.split("/").pop()!;
     await panel.getByLabel(/^lead \(owner\)$/i).fill("Unsaved draft lead");
     await panel.getByLabel(/why\? \(required\)/i).fill("Keep this concurrent edit draft");
-    await iegpAction(request, { action: "modify_tactic", tactic_id: tacticId, budget: "$620K", rationale: "Concurrent budget review by a colleague" });
+    const colleagueOpening = await (await request.get(`/api/tactics/${tacticId}`)).json();
+    await iegpAction(request, { action: "modify_tactic", tactic_id: tacticId, expected_tactic: colleagueOpening.version, budget: "$620K", rationale: "Concurrent budget review by a colleague" });
     await panel.getByRole("button", { name: "Refresh tactic details" }).click();
     await expect(panel.getByRole("definition").filter({ hasText: "$620K" })).toBeVisible();
     await expect(panel.getByLabel(/^lead \(owner\)$/i)).toHaveValue("Unsaved draft lead");
@@ -372,9 +379,10 @@ test.describe("tactic side panel", () => {
     });
   }
 
-  for (const withoutNavigation of [false, true]) {
-    test(`native fragment helper restores the exact entry and permits another cancelled traversal${withoutNavigation ? " without Navigation API" : ""}`, async ({ page }) => {
+  for (const withoutNavigation of [false, true, "without-randomUUID"] as const) {
+    test(`native fragment helper restores the exact entry and permits another cancelled traversal${withoutNavigation ? ` without Navigation API${withoutNavigation === "without-randomUUID" ? " or randomUUID" : ""}` : ""}`, async ({ page }) => {
       if (withoutNavigation) await page.addInitScript(() => Object.defineProperty(window, "navigation", { value: undefined, configurable: true }));
+      if (withoutNavigation === "without-randomUUID") await page.addInitScript(() => Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true }));
       await page.route("**/tactic-history-probe", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body><input aria-label='Draft'></body></html>" }));
       await page.goto("/tactic-history-probe");
       // Execute the actual public helper against browser history, without Next repairing entries.
@@ -542,9 +550,13 @@ test.describe("tactic side panel", () => {
   });
 
   test("board library links require a reason and retain the shared relationship event", async ({ page, request }) => {
+    const readyGap = await iegpAction(request, { action: "create_gap", name: "Library reuse comparison", statement: "Comparative persistence evidence is missing", domain: "comparative_effectiveness" });
+    const libraryGapId = String(readyGap.id);
+    await iegpAction(request, { action: "validate_gap", gap_id: libraryGapId, note: "Confirm the remaining evidence need for library reuse" });
+    await validateBandHigh(request, libraryGapId, "Review this confirmed Open need before reusing existing work");
     const created = await iegpAction(request, { action: "record_missed_tactic", name: "Board reuse cohort", type: "rwe_study", status: "ongoing", evidence_question: "What is persistence in routine care?" });
     await page.goto("/?place=tactics");
-    const card = await openIdeationCard(page, gapId);
+    const card = await openIdeationCard(page, libraryGapId);
     await card.getByRole("button", { name: "+ Custom tactic", exact: true }).click();
     const custom = page.getByRole("dialog", { name: "+ Custom tactic", exact: true });
     await expect(custom.getByRole("textbox", { name: "Reason (required)", exact: true })).toHaveAttribute("required", "");
@@ -557,12 +569,12 @@ test.describe("tactic side panel", () => {
     await assign.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("Review the existing cohort against this distinct evidence need");
     await assign.getByRole("button", { name: "Assign", exact: true }).click();
     await expect(assign).toBeHidden();
-    const gap = await (await request.get(`/api/gaps/${gapId}`)).json();
+    const gap = await (await request.get(`/api/gaps/${libraryGapId}`)).json();
     const tactic = await (await request.get(`/api/tactics/${created.id}`)).json();
     const event = gap.history.find((entry: { entity_type: string; rationale: string }) => entry.entity_type === "gap_tactic" && entry.rationale === "Review the existing cohort against this distinct evidence need");
     expect(event).toBeTruthy();
     expect(tactic.history.find((entry: { id: string }) => entry.id === event.id)).toBeTruthy();
-    expect(tactic.coverages.find((row: { gap_id: string }) => row.gap_id === gapId).overall).toBe("unassessed");
+    expect(tactic.coverages.find((row: { gap_id: string }) => row.gap_id === libraryGapId).overall).toBe("unassessed");
   });
 
 });

@@ -501,7 +501,7 @@ export function IdeationBoard({
           </button>
         ) : null}
         <span className="ml-auto text-[11px] text-muted-foreground">
-          {filtered.length} of {gaps.length}
+          {filtered.length} of {gaps.length} currently eligible gaps
         </span>
       </div>
 

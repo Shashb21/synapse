@@ -43,14 +43,11 @@ test.describe("S6 partial gap split", () => {
     await page.goto("/?place=gaps");
     // The inventory's row actions are client components: wait until they are live.
     await page.waitForLoadState("networkidle");
-    await openInventoryRow(page, partial!.gap_id);
-    const card = page
-      .locator("article")
-      .filter({ has: page.getByRole("button", { name: /resolve this partially addressed gap/i }) })
-      .first();
-    await expect(card).toBeVisible();
-    // A Partial card offers split or rewrite, and cannot simply be confirmed.
-    await expect(card.getByRole("button", { name: /^confirm status$/i })).toHaveCount(0);
+    const panel = await openInventoryRow(page, partial!.gap_id);
+    await expect(panel.getByRole("link", { name: "Resolve — split or rewrite", exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /^confirm status$/i })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
     await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
   });
 
@@ -76,8 +73,9 @@ test.describe("S6 partial gap split", () => {
     expect(partial).toBeTruthy();
     await page.goto("/?place=gaps");
     await page.waitForLoadState("networkidle");
-    await openInventoryRow(page, partial!.gap_id);
-    const card = page.locator(`article[data-gap-id="${partial!.gap_id}"]`);
+    const panel = await openInventoryRow(page, partial!.gap_id);
+    await panel.getByRole("link", { name: "Resolve — split or rewrite", exact: true }).click();
+    const card = page.locator("main");
     const gapId = partial!.gap_id;
     await card.getByRole("button", { name: /resolve this partially addressed gap/i }).click();
 
@@ -86,9 +84,9 @@ test.describe("S6 partial gap split", () => {
     await dialog.getByRole("button", { name: /suggest a split/i }).click();
     await expect(dialog.getByText(/Proposed with confidence/)).toBeVisible({ timeout: 30_000 });
 
-    // Accepting the suggestion as-is needs no rationale.
+    // Every accepted split needs an attributable reason.
     await fillNameIfAsked(dialog, "A. Rao");
-    await expect(dialog.getByText(/needs no rationale/i)).toBeVisible();
+    await expect(dialog.getByPlaceholder(/why this split or rewrite/i)).toBeVisible();
 
     // Editing the suggested title is a change: the gate now requires a rationale.
     const addressedTitle = dialog.getByRole("textbox", { name: /^title$/i }).first();

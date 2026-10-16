@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import "@/modules";
@@ -66,6 +67,7 @@ async function makePartialGap() {
     ...who,
   });
   const tacticId = await createProposedTactic({
+    rationale: "Develop a study for the remaining evidence need",
     name: "Elderly chart review",
     type: "chart_review",
     description: "Chart review in patients aged 65 and over.",
@@ -125,6 +127,7 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     const { suggestionId } = await decorate(gapId, tacticId);
     const before = (await loadState()).gaps.find((g) => g.id === gapId)!;
     const { addressedId, openId } = await splitPartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       parent_gap_id: gapId,
       addressed_name: "Elderly outcomes covered by the chart review",
       open_name: "Comparator evidence in frail elderly",
@@ -166,6 +169,7 @@ describe("KAN-97 split and rewrite carry the gap's record", () => {
     const { gapId, tacticId } = await makePartialGap();
     await decorate(gapId, tacticId);
     const liveId = await rewritePartialGap({
+      expected_resolution: gapResolutionVersion(await loadState(), gapId), note: "Separate the covered and remaining evidence scope",
       gap_id: gapId, name: "Covered by the chart review", status: "validated_addressed", tactic_id: tacticId, ...who,
     });
     const [idea] = await db().select().from(kernel.ideationProposals).where(eq(kernel.ideationProposals.id, `IDEA-${gapId}`));

@@ -1,3 +1,4 @@
+import { suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
 import { priorityDecision } from "./support/priority-decision";
 import { RunRecorder, openRun, closeRun } from "@/modules/kernel/observability";
 import * as routing from "@/modules/kernel/routing";
@@ -416,7 +417,7 @@ describe("review round one real decision paths", () => {
       const original = { proposal_kind: "new", comparative_rationale:"New cohort supplies missing data", name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "AI question", design };
       const {validatePlacement}=await import("@/modules/stages/s8-prioritization/module");
       await validatePlacement({ ...await priorityDecision(gap, "Blocks review decision"),gap_id:gap,band:"high",rationale:"Blocks review decision",actor});
-      await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original }, created_at: new Date().toISOString() });
+      await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original, supporting_references: [{ entity_type: "gap", entity_id: gap, reason: "The supplied question identifies the unanswered evidence need" }], supplied_records: suppliedJudgementRecords(await (await import("@/lib/iegp/store")).loadState(), [gap]) }, created_at: new Date().toISOString() });
       if (edited) await editIdeationProposal({ id, fields: { name: "Human idea", population: "Human population" }, rationale: "Narrow population", actor });
       await decideIdeationProposal({ id, decision: "accept", rationale: "Adopt this idea", actor });
       const rows = await sharedDb().execute(sql`select ai_output, final, outcome, run_id, actor from decision_examples where workspace_id = ${ws.id}`);

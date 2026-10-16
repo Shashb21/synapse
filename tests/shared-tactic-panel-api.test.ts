@@ -1,3 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TacticRecordContent } from "@/components/tactic-record-content";
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 import { addTimelineActivity, timelineModel } from "@/modules/stages/s10-timeline/module";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => new Map<string, string>());
@@ -172,4 +176,18 @@ it("returns only the 200 newest recorded changes and preserves missing legacy re
   expect(loaded.history).toHaveLength(200);
   expect(loaded.history[0]).toMatchObject({ id: "KAN134-long-204", before: "Lead 204", after: "Lead 205", rationale: null, actor_name: actor.actor_name });
   expect(loaded.history[199]!.id).toBe("KAN134-long-5");
+});
+
+it.each([false, true])("read-only current type is visible for panel=%s with viewer and editor permissions", async panel => {
+  const current = await record();
+  for (const edit of [false, true]) {
+    for (const custom_type of [null, { label: "Advisory board", color: "#be185d" }]) {
+      const html = renderToStaticMarkup(createElement(TacticRecordContent, {
+        panel,
+        record: { ...current, tactic: { ...current.tactic, type: "rwe_study", custom_type }, permissions: { edit, coverage: edit } },
+      }));
+      expect(html).toContain(">Type</dt>");
+      expect(html).toContain(`>${custom_type ? "Advisory board" : "RWE study"}</dd>`);
+    }
+  }
 });

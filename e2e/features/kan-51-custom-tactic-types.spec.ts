@@ -42,6 +42,7 @@ test.describe("custom tactic types", () => {
     await hex.fill("pink");
     await expect(dialog.getByText("Use a hex colour like #4f46e5.")).toBeVisible();
     await hex.fill("#be185d");
+    await dialog.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("A caregiver advisory board addresses the missing burden evidence");
     await dialog.getByRole("button", { name: /^add tactic$/i }).click();
     await expect(dialog).toBeHidden();
 
@@ -53,6 +54,7 @@ test.describe("custom tactic types", () => {
     await row.click();
     const panel = page.getByTestId("tactic-panel");
     await expect(panel.getByLabel("Custom type name")).toHaveValue("Advisory board");
+    await expect(panel.locator("dt").filter({ hasText: /^Type$/ }).locator("..").locator("dd")).toHaveText("Advisory board");
     // Colour buttons do not emit a native form change; they still create a protected draft.
     await panel.getByRole("radio", { name: "#4f46e5" }).click();
     page.once("dialog", dialog => dialog.dismiss());
@@ -60,6 +62,8 @@ test.describe("custom tactic types", () => {
     await expect(panel.getByLabel("Custom type colour (hex)")).toHaveValue("#4f46e5");
     page.once("dialog", dialog => dialog.accept());
     await panel.getByRole("link", { name: "Open full record", exact: true }).click();
+    await expect(page.locator("dt").filter({ hasText: /^Type$/ }).locator("..").locator("dd")).toHaveText("Advisory board");
+    await page.getByRole("button", { name: "Edit tactic", exact: true }).click();
     await expect(page.getByText(/Advisory board · counts as Patient \/ caregiver survey/i)).toBeVisible();
   });
 });

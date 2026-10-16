@@ -35,7 +35,7 @@ async function openFirstPriority(page: Page, name: string) {
   await page.goto("/?place=plan&setting=all");
   await page.getByTestId("unplaced-gap").filter({ hasText: name }).click();
   await page.getByRole("button", { name: "Set priority", exact: true }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: `Place ${name}`, exact: true });
   await dialog.locator('select[name="band"]').selectOption("high");
   await dialog.locator('select[name="validate"]').selectOption("yes");
   await dialog.getByLabel(/^Reason for change/).fill("Reviewed High priority for this decision");

@@ -54,7 +54,7 @@ test.describe("Tactic Ideation place", () => {
   test("filters by search and by whether a gap has tactics", async ({ page }) => {
     await page.goto("/?place=tactics");
     const board = page.getByTestId("tactic-ideation");
-    await expect(board.getByText(/^1 of 1$/)).toBeVisible();
+    await expect(board.getByText("1 of 1 currently eligible gaps", { exact: true })).toBeVisible();
     const search = board.getByRole("searchbox", { name: /search high-priority gaps/i });
     // Retry until the page has hydrated; typing before that changes nothing.
     await expect(async () => {
@@ -90,6 +90,7 @@ test.describe("Tactic Ideation place", () => {
     await dialog.getByPlaceholder("Tactic name").fill(name);
     await dialog.getByRole("combobox", { name: /tactic type/i }).selectOption("rwe_study");
     await dialog.getByPlaceholder("Evidence question").fill("Does it hold in routine care?");
+    await dialog.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("A new routine-care study answers the missing comparison");
     await dialog.getByRole("button", { name: /^add tactic$/i }).click();
     await expect(dialog).toBeHidden();
 
@@ -290,6 +291,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await page.goto("/?place=tactics");
     const search = page.getByRole("searchbox", { name: /Search high-priority gaps/ });
     await search.fill("Renewed review");
+    await expect(page.getByText(/^0 of \d+ currently eligible gaps$/)).toBeVisible();
     const existing = page.getByRole("region", { name: "Existing options and planned work", exact: true });
     await expect(existing).toContainText("Needs priority review");
     await expect(page.locator(`[data-testid="ideation-gap"][data-gap-id="${reviewedId}"]`)).toHaveCount(0);

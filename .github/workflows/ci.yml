@@ -75,6 +75,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://synapse:synapse@127.0.0.1:5432/synapse_e2e
+      E2E_DATABASE_URL: postgres://synapse:synapse@127.0.0.1:5432/synapse_e2e
+      SYNAPSE_MAX_WORKSPACES_PER_USER: "10000"
       E2E_PORT: "43217"
     steps:
       - uses: actions/checkout@v4

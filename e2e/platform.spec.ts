@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fillNameIfAsked, freshWorkspace } from "./support/session";
-import { resolveFinalPlanGaps } from "./support/synapse";
+import { iegpAction, resolveFinalPlanGaps } from "./support/synapse";
 
 const ACTOR = { actor_name: "E2E Platform", actor_function: "medical_affairs" };
 
@@ -146,11 +146,12 @@ test.describe("platform surfaces", () => {
     const consolidated = await runStage(page, "S7");
     expect(consolidated.summary).toMatch(/open/);
 
+    const freshGap = await iegpAction(page.request, { action: "create_gap", name: "Gate rationale comparison", statement: "Fresh comparative evidence is missing", domain: "comparative_effectiveness" });
     const detail = await page.request.post("/api/iegp", {
       headers: { "content-type": "application/json" },
       data: JSON.stringify({
         action: "validate_gap",
-        gap_id: "GAP-001",
+        gap_id: String(freshGap.id),
         note: "Both source quotes check out for this gap",
         ...ACTOR,
       }),

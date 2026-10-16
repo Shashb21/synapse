@@ -1,3 +1,4 @@
+import { modelMappingSupport } from "./support/model-mapping";
 import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { describe, expect, it, vi } from "vitest";
 import { persistState, resetDemoSetup, resetDemo, loadState, lockGapStatus, commitExtractedRecords, modifyGap, assignTacticToGap, lockTactic, completeWizard, createProposedTactic, createGap, acceptMapping, lockCoverageOverall, acceptResidualGap, rejectResidualGap, modifyResidualGap, listResidualGapDrafts, classifyMappedGap, overrideGapStatus, rewritePartialGap, ensureAllLiveGapsHaveNeeds, parkGap, unparkGap, createBreakoutGroup, deleteBreakoutGroup, assignGapToBreakoutGroup, unassignGapFromBreakoutGroup, persistSourceAndBlocks, saveMappingTableRow, requireMappingRowStatus } from "@/lib/iegp/store";
@@ -175,6 +176,7 @@ describe("IEGP postgres store", () => {
     );
     if (!already) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: before.gaps[0]!.id,
         tactic_id: tactic!.id,
         actor_name: "A. Rao",
@@ -217,6 +219,7 @@ describe("IEGP postgres store", () => {
     expect(firstGap && secondGap).toBeTruthy();
     if (!ingested.coverages.some((c) => c.gap_id === firstGap!.id && c.tactic_id === tactic.id)) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: firstGap!.id,
         tactic_id: tactic.id,
         actor_name: "A. Rao",
@@ -225,6 +228,7 @@ describe("IEGP postgres store", () => {
     }
     if (!ingested.coverages.some((c) => c.gap_id === secondGap!.id && c.tactic_id === tactic.id)) {
       await assignTacticToGap({
+        note: "The study informs this gap assessment",
         gap_id: secondGap!.id,
         tactic_id: tactic.id,
         actor_name: "A. Rao",
@@ -392,9 +396,10 @@ describe("IEGP postgres store", () => {
     });
     await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle", tactic_id: tacticId, status: "planned", actor_name: "A. Rao", actor_function: "heor" });
     await expect(
-      assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
+      assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId), gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor", coverage: "bogus" as never }),
     ).rejects.toThrow(/Unknown coverage/i);
     await assignTacticToGap({
+      note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId),
       gap_id: gapId, tactic_id: tacticId, actor_name: "S4", actor_function: "heor",
       coverage: "full", dimensions: { population: "yes", comparator: "no" },
     });
@@ -478,6 +483,7 @@ describe("IEGP postgres store", () => {
     });
     // No engine-ranked suggestion: a human maps it (or S4 does).
     await acceptMapping({
+      note: "Reviewed the study against this evidence need",
       gap_id: createdId,
       tactic_id: tactic.id,
       actor_name: "A. Rao",
@@ -531,7 +537,8 @@ describe("IEGP postgres store", () => {
     });
     expect((await loadState()).gaps.find((g) => g.id === gapId)?.status).toBe("validated_open");
 
-    await lockTactic({ note: "The reviewer confirmed resources for this tactic lifecycle",
+    await lockTactic({
+      note: "The reviewer confirmed resources for this tactic lifecycle",
       tactic_id: tacticId,
       status: "planned",
       actor_name: "A. Rao",

@@ -410,6 +410,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
       if (issue === "partial") {
         const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
           gap: { name: string };
+          resolution_version: string;
           coverages: {
             tactic_id: string;
             expansion_id: string | null;
@@ -434,6 +435,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 data: JSON.stringify({
                   ...ACTOR,
                   action: "rewrite_partial_gap",
+                  expected_resolution: record.resolution_version,
                   gap_id,
                   name: record.gap.name,
                   status: "validated_addressed",
@@ -445,6 +447,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
         if (!addressed?.ok()) {
           await iegpAction(request, {
             action: "rewrite_partial_gap",
+            expected_resolution: record.resolution_version,
             gap_id,
             name: record.gap.name,
             status: "validated_open",

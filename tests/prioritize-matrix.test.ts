@@ -77,8 +77,8 @@ describe("Prioritize on a setting's matrix", () => {
       .filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open")
       .map((gap) => gap.id);
     expect(openIds.length).toBeGreaterThanOrEqual(2);
-    await setGapSettings({ gap_id: openIds[0]!, settings: ["1L", "Perioperative"], actor_name: ACTOR.name, actor_function: ACTOR.function });
-    await setGapSettings({ gap_id: openIds[1]!, settings: ["1l"], actor_name: ACTOR.name, actor_function: ACTOR.function });
+    await setGapSettings({ gap_id: openIds[0]!, settings: ["1L", "Perioperative"], expected_settings: state.gaps.find(gap => gap.id === openIds[0])!.settings, rationale: "Scope this gap to both treatment settings", actor_name: ACTOR.name, actor_function: ACTOR.function });
+    await setGapSettings({ gap_id: openIds[1]!, settings: ["1l"], expected_settings: state.gaps.find(gap => gap.id === openIds[1])!.settings, rationale: "Scope this gap to first-line care", actor_name: ACTOR.name, actor_function: ACTOR.function });
   }, 60_000);
 
   it("scopes gaps by setting tag, case-insensitively", async () => {

@@ -94,6 +94,7 @@ describe("S10 on the model path", () => {
     // A tactic with no dates of its own: every schedule field is the model's.
     const before = new Set(state.tactics.map((tactic) => tactic.id));
     await createProposedTactic({
+      rationale: "Develop a study for the remaining evidence need",
       name: "Model-dated registry",
       type: "registry",
       description: "Test tactic with no dates",

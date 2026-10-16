@@ -9,6 +9,7 @@ import { useTacticDraftGuard, type TacticDraftGuard } from "@/components/tactic-
 import { TacticEditor } from "@/components/tactic-ideation/tactic-editor";
 import { ASSESSED_COVERAGE, COVERAGE_DIMENSIONS, DIMENSION_LABELS, DIMENSION_VALUES, OVERALL_COVERAGE_LABELS, TACTIC_STATUSES } from "@/lib/iegp/enums";
 import { isLiveGap } from "@/lib/iegp/engine";
+import { tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import type { TacticRecord } from "@/lib/iegp/tactic-record";
 
 /** Current information and responsible editors shared by the panel and full record. */
@@ -30,6 +31,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
     <p>{tactic.description}</p>
     <div className="flex flex-wrap items-center gap-2"><TacticBadge status={tactic.status} /><span>Review: {tactic.review_status}</span><LockMeta lock={tactic.lock} /></div>
       <dl className="mb-6 grid gap-2 text-[13px] sm:grid-cols-2">
+        <Item k="Type" v={tacticTypeLabel(tactic)} />
         <Item k="Tactic evidence question" v={tactic.evidence_question} />
         <Item k="Population" v={tactic.population} />
         <Item k="Intervention" v={tactic.intervention} />

@@ -79,6 +79,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await page.reload();
   await expect(page.getByTestId("gap-priority")).toContainText("Review changed context and reconfirm");
   await expect(page.getByTestId("gap-priority")).toContainText("Evidence blocks the committee decision");
+  if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
   await expect(page.getByTestId("entity-history")).toContainText("The committee needs longer follow-up evidence");
   await expect(page.getByText("Missing long-term comparative survival evidence", { exact: true }).first()).toBeVisible();
   await expect(page.getByTestId("gap-ideas")).toContainText("Existing committee study");
@@ -105,6 +106,7 @@ test("audits direct gap edits, retains failed input and previous judgement, and 
   await page.reload();
   await expect(page.getByTestId("gap-objective")).toContainText("Safety committee");
   await expect(page.getByTestId("gap-priority")).toContainText("Review changed context and reconfirm");
+  if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
   await expect(page.getByTestId("entity-history")).toContainText("Evidence now serves safety monitoring");
   await expect(page.getByTestId("gap-ideas")).toContainText("Existing committee study");
   expect((await planState(request)).placements.find(row => row.gap_id === visibleGap)).toMatchObject({ band: "high", validated: false, needs_review: true, axis_scores: { decision_impact: 80, time_pressure: 75 }, rationale: "Evidence blocks the committee decision" });

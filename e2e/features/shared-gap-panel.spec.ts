@@ -41,6 +41,12 @@ test("Inventory opens a keyboard accessible gap panel with collapsed history and
   await trigger.click();
   await panel.getByRole("link", { name: "Open full record", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/gaps/${gapId}$`));
+  const fullHistory = page.getByRole("group", { name: "History", exact: true });
+  await expect(fullHistory).not.toHaveAttribute("open");
+  await expect(fullHistory.getByTestId("entity-history")).toBeHidden();
+  await fullHistory.locator("summary").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(fullHistory.getByTestId("entity-history")).toContainText("Initial priority review");
   await expect(page.getByTestId("gap-priority")).toContainText("Evidence blocks the committee decision");
 });
 
@@ -170,6 +176,7 @@ test("Prioritisation addressed records use shared details after new unresolved I
   await page.getByTestId("gap-row-toggle").filter({ hasText: "New unresolved inventory evidence" }).click();
   await panel.getByRole("link", { name: "Edit gap and mappings", exact: true }).click();
   await page.getByRole("button", { name: "Confirm status", exact: true }).click();
+  await page.getByRole("dialog").getByRole("textbox", { name: /reason|rationale|note/i }).fill("Reviewed the newly added evidence need against current study coverage");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm Open", exact: true }).click();
   await expect(page.getByTestId("gap-confirmation")).toContainText("Confirmed by");
 });
@@ -222,7 +229,7 @@ test("dirty keyboard matrix moves retain the proposed move and reason through Es
 test("Partial and unconfirmed panels share coverage context and full-record next steps", async ({ page, request }) => {
   const open = await iegpAction(request, { action: "create_gap", name: "Unconfirmed coverage panel", statement: "Unreviewed evidence need", domain: "unmet_need" });
   const partial = await iegpAction(request, { action: "create_gap", name: "Partial coverage panel", statement: "Some comparative evidence is missing", domain: "unmet_need" });
-  await iegpAction(request, { action: "record_missed_tactic", gap_id: String(partial.id), name: "Existing partial evidence study", evidence_question: "What evidence is available in the studied population?", type: "chart_review", status: "planned", description: "Existing study addresses part of the population", catch_up_reason: "remembered_while_reviewing" });
+  await iegpAction(request, { action: "record_missed_tactic", gap_id: String(partial.id), name: "Existing partial evidence study", rationale: "Record existing work that addresses the studied population", evidence_question: "What evidence is available in the studied population?", type: "chart_review", status: "planned", description: "Existing study addresses part of the population", catch_up_reason: "remembered_while_reviewing" });
   for (const [id, name, status, next] of [[String(open.id), "Unconfirmed coverage panel", "Open", "Confirm evidence coverage"], [String(partial.id), "Partial coverage panel", "Partially Addressed", "Resolve — split or rewrite"]]) {
     await page.goto("/?place=gaps");
     await page.getByTestId("gap-row-toggle").filter({ hasText: name }).click();

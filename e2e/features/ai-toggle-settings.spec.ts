@@ -1,3 +1,5 @@
+import { freshWorkspace } from "../support/session";
+import { iegpAction, resetWorkspace, validateBandHigh } from "../support/synapse";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { openRail } from "../support/rail";
 
@@ -6,6 +8,16 @@ import { openRail } from "../support/rail";
  * have no AI switch; where a section is off they see its manual flow only.
  */
 test.describe.configure({ mode: "serial", timeout: 180_000 });
+
+freshWorkspace({ name: "Per-section assistance", seed: async request => {
+  await resetWorkspace(request);
+  const gap = await iegpAction(request, { action: "create_gap", name: "Section assistance comparison", statement: "Comparative evidence is missing for the decision", domain: "comparative_effectiveness" });
+  const id = String(gap.id);
+  await iegpAction(request, { action: "validate_gap", gap_id: id, note: "Reviewed the missing comparative evidence" });
+  await validateBandHigh(request, id, "The comparison is required for the decision");
+  await iegpAction(request, { action: "complete_wizard", note: "The section-assistance inventory is reviewed" });
+  await iegpAction(request, { action: "unlock_tactics", note: "The initial priority is confirmed" });
+} });
 
 async function control(request: APIRequestContext, data: Record<string, unknown>) {
   const res = await request.post("/api/control", { data });

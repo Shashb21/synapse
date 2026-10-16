@@ -96,6 +96,12 @@ function trackedEntry(state: unknown): TrackedEntry | null {
     ? entry : null;
 }
 
+let fallbackEntrySequence = 0;
+function entryIdentifier(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `history-${Date.now().toString(36)}-${fallbackEntrySequence++}-${Math.random().toString(36).slice(2)}`;
+}
+
 function installHistoryStateNavigation(): DraftNavigation {
   const push = history.pushState.bind(history);
   const replace = history.replaceState.bind(history);
@@ -103,7 +109,7 @@ function installHistoryStateNavigation(): DraftNavigation {
   // The active entry carries the complete ordering snapshot. A reload retains
   // it, including forward entries; no storage service or sentinel is required.
   const order = initial?.order.slice() ?? [];
-  let current = initial?.key ?? crypto.randomUUID();
+  let current = initial?.key ?? entryIdentifier();
   if (!order.includes(current)) order.push(current);
   let restoring: string | null = null;
   const guards = new Set<CanLeave>();
@@ -118,7 +124,7 @@ function installHistoryStateNavigation(): DraftNavigation {
     };
   }
   function insert() {
-    const key = crypto.randomUUID();
+    const key = entryIdentifier();
     // Retaining obsolete keys is intentional: native replace and push-with-one-
     // forward-entry are indistinguishable. Both put the new entry immediately
     // after the source in this ordering, without changing other live entries.

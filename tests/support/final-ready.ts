@@ -1,3 +1,4 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { priorityDecision } from "./priority-decision";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { loadState, lockGapStatus, rewritePartialGap, validateGap } from "@/lib/iegp/store";
@@ -17,6 +18,7 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
     const tacticIds = [...new Set(state.coverages.filter((c) => c.gap_id === gap.id).map((c) => c.expansion_id ?? c.tactic_id))];
     await rewritePartialGap({
       gap_id: gap.id,
+      expected_resolution: gapResolutionVersion(await loadState(), gap.id),
       name: gap.name,
       status: tacticIds.length > 0 ? "validated_addressed" : "validated_open",
       tactic_ids: tacticIds.length > 0 ? tacticIds : undefined,

@@ -1,3 +1,4 @@
+import { requireDisposableDatabase } from "./disposable-database";
 import "../../src/modules";
 import { prioritizationModule } from "../../src/modules/stages/s8-prioritization/module";
 import { withWorkspace } from "../../src/modules/workspaces/store";
@@ -19,5 +20,5 @@ async function generate(workspaceId: string, gapId: string) {
 }
 
 // A separate tsx process gives the application its normal alias resolution and closes all DB pools on exit.
-if (!/^postgres(?:ql)?:\/\/[^/]+(?:127\.0\.0\.1|localhost):5433\/synapse_e2e(?:\?|$)/.test(process.env.DATABASE_URL ?? "")) throw new Error("Disposable loopback:5433/synapse_e2e required");
+requireDisposableDatabase(process.env.DATABASE_URL);
 generate(process.argv[2]!, process.argv[3]!).then(() => process.exit(0), error => { console.error(error); process.exit(1); });

@@ -614,7 +614,10 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      <EntityHistory entries={history} />
+      <details aria-label="History" className="mb-8 border-t border-border pt-3">
+        <summary className="cursor-pointer font-medium">History</summary>
+        <EntityHistory entries={history} />
+      </details>
 
       {!gap.retired && gap.status === "excluded" ? (
         <section

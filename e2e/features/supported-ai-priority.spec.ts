@@ -1,14 +1,14 @@
+import { requireDisposableDatabase } from "../support/disposable-database";
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
 import { freshWorkspace } from "../support/session";
-import { iegpAction, planAction, planState, runStage } from "../support/synapse";
+import { iegpAction, newestRunId, planAction, planState, runStage, waitForNewRun } from "../support/synapse";
 import { execFileSync } from "node:child_process";
 
 test.use({ actionTimeout: 10_000 });
 
 let supported = "", legacy = "", confirmed = "";
-const databaseUrl = process.env.DATABASE_URL!;
-if (!databaseUrl || !/^postgres(?:ql)?:\/\/[^/]+(?:127\.0\.0\.1|localhost):5433\/synapse_e2e(?:\?|$)/.test(databaseUrl)) throw new Error("This fixture requires disposable loopback:5433/synapse_e2e");
+const databaseUrl = requireDisposableDatabase(process.env.DATABASE_URL);
 const workspace = freshWorkspace({ name: "KAN132 supported AI priority", seed: async request => {
   await iegpAction(request, { action: "save_product_setup", mark_complete: true, reason: "Record committee context", context: {
     asset_name: "Support fixture", therapeutic_area: "Immunology", indications: [{ name: "Psoriasis", status: "current" }], lifecycle_stage: "growth", markets: ["US"], plan_owner: "Evidence lead", sponsoring_function: "Medical Affairs", stakeholders: [{ function: "HEOR", lead: "Evidence lead" }], treatment_settings: ["1L"],
@@ -39,7 +39,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await page.goto("/?place=plan&setting=all");
   await page.getByRole("button", { name: /^Supported comparison: High, priority not confirmed/ }).focus();
   await page.keyboard.press("Enter");
-  const article = page.locator("article").filter({ hasText: "Supported comparison" });
+  const article = page.getByTestId("gap-panel");
   await page.route("**/api/plan/references?*", route => route.fulfill({ status: 500, body: "Reference load failed" }), { times: 1 });
   await article.getByRole("button", { name: "Inspect supporting references" }).click();
   await expect(article.getByRole("alert")).toContainText("could not be loaded");
@@ -52,7 +52,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await expect(article.getByText("Supports: This supplied record explains the committee evidence need").first()).toBeVisible();
   await expect(article.getByRole("link", { name: "Committee submission", exact: true })).toBeVisible();
   await article.getByRole("button", { name: "Accept supported AI suggestion", exact: true }).click();
-  const dialog = page.getByRole("dialog");
+  let dialog = page.getByRole("dialog", { name: "Accept AI priority for Supported comparison", exact: true });
   await dialog.getByLabel("Reason for acceptance (required)").fill("Inspected the comparison and committee context");
   await page.route("**/api/plan", route => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Acceptance failed; retry safely" }) }), { times: 1 });
   await dialog.getByRole("button", { name: "Accept supported AI suggestion", exact: true }).click();
@@ -65,21 +65,29 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await expect(page.getByTestId("gap-priority")).toContainText("Priority confirmed");
   await page.getByTestId("gap-priority").getByRole("button", { name: "Inspect supporting references" }).click();
   await expect(page.getByTestId("gap-priority").getByText("Supports: This supplied record explains the committee evidence need").first()).toBeVisible();
+  if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
   await expect(page.getByTestId("entity-history")).toContainText("Inspected the comparison and committee context");
   await expect(page.getByRole("list", { name: "Decision supporting references" })).toContainText("This supplied record explains the committee evidence need");
 
   await page.goto("/?place=plan&setting=all");
   await page.getByRole("button", { name: /^Older unsupported suggestion: High, priority not confirmed/ }).focus();
   await page.keyboard.press("Enter");
-  const older = page.locator("article").filter({ hasText: "Older unsupported suggestion" });
+  const older = page.getByTestId("gap-panel");
   await expect(older).toContainText("Supporting references not recorded for this suggestion");
   await expect(older).toContainText("Reason not recorded");
   await expect(older.getByRole("button", { name: "Accept supported AI suggestion", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(older).toBeHidden();
+  const beforeRun = await newestRunId(request, "S8");
   await page.getByRole("button", { name: "Re-suggest unvalidated", exact: true }).click();
+  await waitForNewRun(request, "S8", beforeRun);
+  await page.getByRole("button", { name: /^Older unsupported suggestion: / }).focus();
+  await page.keyboard.press("Enter");
   await expect(older).toContainText("Test stub: no model was called.");
   await expect(older).toContainText("Supporting references not recorded for this suggestion");
   await expect(older.getByRole("button", { name: "Accept supported AI suggestion", exact: true })).toHaveCount(0);
   await older.getByRole("button", { name: "Make manual judgement", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: /^Confirm .* priority for Older unsupported suggestion$/ });
   await expect(dialog).toContainText("explicit manual judgement");
   await dialog.getByLabel("Reason for change (required)").fill("My judgement from committee experience");
   await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
@@ -94,6 +102,7 @@ test("inspects supplied support, accepts atomically, offers manual legacy review
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/gaps/${legacy}`);
   await expect(page.getByTestId("gap-priority")).toContainText("Human rationale retained on rerun");
+  if (await page.getByRole("group", { name: "History", exact: true }).getAttribute("open") === null) await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
   await expect(page.getByTestId("entity-history")).toContainText("My judgement from committee experience");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
