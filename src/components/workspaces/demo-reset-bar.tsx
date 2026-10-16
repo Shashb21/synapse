@@ -46,7 +46,11 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
       className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/30 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground sm:px-6"
     >
       <DemoBadge testId="demo-bar-badge" />
-      <span>Demo workspace with the Velmara sample plan.</span>
+      <span>
+        {workspace.demo_mode
+          ? "Client demo mode: AI steps replay a recorded run, so no model is called."
+          : "Demo workspace with the Velmara sample plan."}
+      </span>
       {/* The seven input documents, to upload during the demo or hand to the client (KAN-139). */}
       <a
         href="/api/demo/files"
@@ -73,8 +77,9 @@ export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["curr
             <DialogHeader>
               <DialogTitle>Reset the demo?</DialogTitle>
               <DialogDescription>
-                Everything changed in {workspace.name} since the demo was loaded is deleted, including saved plan versions,
-                and the clean Velmara demo is put back. Use it before each client demo.
+                {workspace.demo_mode
+                  ? `Everything in ${workspace.name} is deleted, including uploads and saved plan versions, and the demo restarts at upload with setup done. Use it before each client demo.`
+                  : `Everything changed in ${workspace.name} since the demo was loaded is deleted, including saved plan versions, and the clean Velmara demo is put back. Use it before each client demo.`}
               </DialogDescription>
             </DialogHeader>
             {error ? (

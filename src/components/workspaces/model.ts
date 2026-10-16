@@ -4,7 +4,8 @@ import { NETWORK_ERROR } from "@/lib/post-json";
 /** What the workspace tag needs: the open workspace, the others, and who is signed in. */
 export type WorkspaceTagModel = {
   /** `demo`: the workspace holds the Velmara demo data (badged "Demo"). */
-  current: { id: string; name: string; role: WorkspaceRole; demo: boolean };
+  /** `demo_mode`: client demo mode (KAN-138), AI steps replay the recorded run. */
+  current: { id: string; name: string; role: WorkspaceRole; demo: boolean; demo_mode?: boolean };
   /** AI assistance: the open workspace's own setting and the platform master switch. */
   ai?: { workspace: boolean; platform: boolean };
   workspaces: { id: string; name: string; role: WorkspaceRole; demo: boolean }[];

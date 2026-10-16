@@ -33,6 +33,8 @@ const DDL = [
   // AI assistance for this workspace, set by its owner. The platform switch
   // (modules/kernel/ai-switch.ts) still overrides it for every workspace.
   `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true`,
+  // KAN-138: a client-demo workspace replays a recorded AI run instead of calling a model. Admin-set.
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS demo_mode boolean NOT NULL DEFAULT false`,
 ];
 
 /** The workspace that holds the data from before workspaces existed. */
@@ -49,6 +51,8 @@ export type Workspace = {
   demo: boolean;
   /** The owner's AI assistance setting (on until they turn it off). Effective AI also needs the platform switch. */
   ai_enabled: boolean;
+  /** Client demo mode (KAN-138): every AI step replays the recorded demo run; no model is called. */
+  demo_mode: boolean;
 };
 export type WorkspaceWithRole = Workspace & { role: WorkspaceRole };
 export type WorkspaceMember = { principal: string; role: WorkspaceRole; added_by: string; added_at: string };
@@ -93,6 +97,7 @@ function toWorkspace(row: Row): Workspace {
     created_at: String(row.created_at),
     demo: row.demo === true,
     ai_enabled: row.ai_enabled !== false,
+    demo_mode: row.demo_mode === true,
   };
 }
 
@@ -175,7 +180,7 @@ export async function createWorkspace(args: {
     values (${id}, ${name}, ${schemaName}, ${normalizePrincipal(args.owner)}, ${created_at}, ${demo}, ${ai_enabled})`);
   await addMember({ workspace_id: id, principal: args.owner, role: "owner", added_by: args.owner });
   schemaCache.set(id, schemaName);
-  const workspace = { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled };
+  const workspace = { id, name, schema_name: schemaName, created_by: normalizePrincipal(args.owner), created_at, demo, ai_enabled, demo_mode: false };
   await auditWorkspace("workspace.create", id, args.owner, null, { name, owner: workspace.created_by, demo, ai_enabled });
   return workspace;
 }
@@ -229,6 +234,11 @@ export async function assertCanCreateWorkspace(principal: string, limit = worksp
 /** Marks whether the workspace holds demo data. Set by load demo, cleared by reset to blank. */
 export async function setWorkspaceDemo(workspaceId: string, demo: boolean): Promise<void> {
   await rows(sql`update workspaces set demo = ${demo} where id = ${workspaceId}`);
+}
+
+/** Turns client demo mode on or off (KAN-138). The caller checks it is the platform owner and audits it. */
+export async function setWorkspaceDemoMode(workspaceId: string, on: boolean): Promise<void> {
+  await rows(sql`update workspaces set demo_mode = ${on} where id = ${workspaceId}`);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { currentSchemaName, db, ensureSchema, inWorkspaceTransaction, wipeIegp, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
-import { buildBlankWorkspace, buildDemoSetupWorkspace } from "./blank";
+import { buildBlankWorkspace, buildClientDemoWorkspace, buildDemoSetupWorkspace } from "./blank";
 import { buildSeed } from "./seed";
 import { WORKSPACE_RESET_ACTION } from "./gap-history";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
@@ -465,11 +465,12 @@ export async function persistState(state: IegpState) {
  * - `demo_setup`: the Velmara demo's asset and objectives only, setup not done
  *   (what the stage tests start from).
  */
-export type WorkspaceContents = "blank" | "demo" | "demo_setup";
+export type WorkspaceContents = "blank" | "demo" | "demo_setup" | "client_demo";
 
 export function buildWorkspaceContents(contents: WorkspaceContents): IegpState {
   if (contents === "demo") return buildSeed();
   if (contents === "demo_setup") return buildDemoSetupWorkspace();
+  if (contents === "client_demo") return buildClientDemoWorkspace();
   return buildBlankWorkspace();
 }
 
@@ -488,7 +489,13 @@ export async function replaceWorkspaceContents(
     "plan",
     state.asset.id,
     WORKSPACE_RESET_ACTION,
-    contents === "blank" ? "Reset the workspace to blank." : contents === "demo" ? "Loaded the demo data." : "Loaded the demo setup.",
+    contents === "blank"
+      ? "Reset the workspace to blank."
+      : contents === "demo"
+        ? "Loaded the demo data."
+        : contents === "client_demo"
+          ? "Reset the client demo."
+          : "Loaded the demo setup.",
   );
   return loadState();
 }
