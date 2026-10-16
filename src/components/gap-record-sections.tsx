@@ -1,3 +1,4 @@
+import { SuggestionReferences } from "@/components/prioritize/suggestion-references";
 import Link from "next/link";
 import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
 import type { ReactNode } from "react";
@@ -141,11 +142,12 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
             priority={priority ? { ...priority, band, axis_scores: priority.axis_scores as Record<string, number> | null } : null}
             axes={axes}
           />
-          {priority?.suggested_band && priority.suggested_rationale ? (
+          {priority?.suggested_band && (priority.run_id || priority.suggested_rationale) ? (
             <AiOnly section="prioritization">
               <p className="mt-2 text-[12px] text-muted-foreground">
-                Model suggested {priority.suggested_band}: {priority.suggested_rationale}
+                Model suggested {priority.suggested_band}: {priority.suggested_rationale || "Reason not recorded"}
               </p>
+              <SuggestionReferences key={`${record.gap.id}-${priority.version}`} gapId={record.gap.id} version={priority.version ?? null} references={priority.suggested_references} />
             </AiOnly>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">

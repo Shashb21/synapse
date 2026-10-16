@@ -20,6 +20,8 @@ vi.mock("next/navigation", () => ({
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { SuggestionReferences } from "@/components/prioritize/suggestion-references";
+import { AiStatusProvider } from "@/components/platform/ai-status";
 import { LockForm } from "@/components/lock-form";
 import { GapsWorkbench } from "@/components/gaps-workbench";
 import { PrioritizeMatrix, type PrioritizeGap } from "@/components/prioritize/prioritize-matrix";
@@ -249,6 +251,18 @@ describe("priority decision context", () => {
 
 });
 
+it("withholds newer references when inspecting an earlier displayed suggestion", async () => {
+  const reference = { entity_type: "gap" as const, entity_id: "GAP-A", reason: "Supports suggestion A" };
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ version: "version-b", references: [{
+    entity_type: "gap", entity_id: "GAP-B", reason: "Supports suggestion B", title: "Newer suggestion B reference", excerpt: "Evidence supplied for B", href: "/gaps/GAP-B",
+  }] }), { status: 200, headers: { "content-type": "application/json" } })));
+  act(() => root.render(createElement(SuggestionReferences, { gapId: "GAP-A", version: "version-a", references: [reference] })));
+  await act(async () => { byText("Inspect supporting references").click(); });
+  expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/suggestion changed.*refresh.*inspect/i);
+  expect(container.textContent).not.toContain("Newer suggestion B reference");
+  expect(container.querySelector('a[href="/gaps/GAP-B"]')).toBeNull();
+});
+
 describe("the full gap record priority", () => {
   const seed = buildSeed();
   const record = (priority: GapRecord["priority"]): GapRecord => ({
@@ -259,7 +273,7 @@ describe("the full gap record priority", () => {
     ideas: [], timeline: [], breakout_groups: [], pending_suggestions: [], residuals: [], versions: [], history: [],
   });
   const priority: NonNullable<GapRecord["priority"]> = {
-    gap_id: seed.gaps[0]!.id, band: null, suggested_band: "high", suggested_rationale: "Suggested for the dossier",
+    gap_id: seed.gaps[0]!.id, run_id: null, band: null, suggested_band: "high", suggested_references: [], suggested_rationale: "Suggested for the dossier",
     axis_scores: { impact: 82, urgency: 76 }, validated: false, rationale: null, needs_review: false, review_reason: null, review_event_id: null,
     actor_name: "Reviewer", actor_function: "medical_affairs", at: "2026-10-16T13:00:00Z",
   };
@@ -272,6 +286,20 @@ describe("the full gap record priority", () => {
     expect(section.textContent).toContain("76 / 100");
     expect(section.textContent).toContain("Reason not recorded");
     expect([...section.querySelectorAll("a")].map((a) => a.textContent)).toContain("Review and confirm priority");
+  });
+
+  it("labels an older model suggestion with missing reasoning and references honestly", () => {
+    act(() => root.render(createElement(AiStatusProvider, { enabled: true }, createElement(GapRecordSections, { record: record({ ...priority, run_id: "older-model-run", suggested_rationale: "" }), axes: [], open: true }))));
+    const section = container.querySelector('[data-testid="gap-priority"]')!;
+    expect(section.textContent).toContain("Reason not recorded");
+    expect(section.textContent).toContain("Supporting references not recorded for this suggestion");
+  });
+
+  it("does not present a wholly manual placement as an unsupported model suggestion", () => {
+    act(() => root.render(createElement(AiStatusProvider, { enabled: true }, createElement(GapRecordSections, { record: record({ ...priority, run_id: null, suggested_rationale: "", rationale: "Human planning judgement" }), axes: [], open: true }))));
+    const section = container.querySelector('[data-testid="gap-priority"]')!;
+    expect(section.textContent).toContain("Human planning judgement");
+    expect(section.textContent).not.toContain("Supporting references not recorded for this suggestion");
   });
 
   it.each([

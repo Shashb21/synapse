@@ -1,3 +1,4 @@
+import { recordedJudgementReferences } from "./judgement-references";
 import { and, desc, gte, inArray } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
 import * as kernel from "@/modules/kernel/schema";
@@ -26,6 +27,7 @@ export type HistoryEntry = {
   request_id: string | null;
   /** A linked objective event, rather than a direct edit to this gap. */
   shared_context?: boolean;
+  supporting_references?: ReturnType<typeof recordedJudgementReferences>;
 };
 
 const LIMIT = 200;
@@ -51,6 +53,7 @@ export async function entityHistory(entityIds: string[], options: { since?: stri
       .where(since ? and(inArray(t.audit.entity_id, ids), gte(t.audit.at, since)) : inArray(t.audit.entity_id, ids))
       .orderBy(desc(t.audit.at)).limit(LIMIT),
   ]);
+  const referenceState = edits.some(row => row.supporting_references?.length) ? await (await import("./store")).loadState() : null;
   const editKeys = new Set(edits.filter((row) => row.request_id).map((row) => `${row.request_id}|${row.entity_id}`));
   const entries: HistoryEntry[] = [
     ...edits.map((row) => ({
@@ -64,6 +67,7 @@ export async function entityHistory(entityIds: string[], options: { since?: stri
       before: row.before,
       after: row.after,
       rationale: row.rationale,
+      supporting_references: referenceState ? recordedJudgementReferences(referenceState, row.supporting_references) : [],
       actor_name: row.actor_name,
       actor_function: row.actor_function,
       actor_principal: row.actor_principal ?? null,

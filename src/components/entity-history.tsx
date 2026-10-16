@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { HistoryEntry } from "@/lib/iegp/entity-history";
 import { ROLE_LABELS } from "@/modules/auth/roles";
 
@@ -22,7 +23,7 @@ function changeText(value: string | null, field: string | null): string | null {
     const snapshot = JSON.parse(value);
     if (!snapshot || typeof snapshot !== "object" || !("confirmed" in snapshot)) return value;
     const scores = Object.entries(snapshot.axis_scores ?? {}).map(([axis, score]) => `${label(axis)}: ${score}`).join(", ") || "Unscored";
-    return `Band: ${label(String(snapshot.band ?? "Unset"))}. Scores: ${scores}. Priority rationale: ${snapshot.rationale || "Not recorded"}. ${snapshot.confirmed ? "Priority confirmed" : "Priority not confirmed"}.${snapshot.actor_name ? ` Recorded by: ${snapshot.actor_name}.` : ""}${snapshot.at ? ` Recorded at: ${when(snapshot.at)}.` : ""}${snapshot.suggested_rationale ? ` Suggested band: ${snapshot.suggested_band}. Suggested rationale: ${snapshot.suggested_rationale}` : ""}`;
+    return `Band: ${label(String(snapshot.band ?? "Unset"))}. Scores: ${scores}. Priority rationale: ${snapshot.rationale || "Not recorded"}. ${snapshot.confirmed ? "Priority confirmed" : "Priority not confirmed"}.${snapshot.actor_name ? ` Recorded by: ${snapshot.actor_name}.` : ""}${snapshot.at ? ` Recorded at: ${when(snapshot.at)}.` : ""}${snapshot.decision_origin ? ` Decision: ${label(snapshot.decision_origin)}.` : ""}${snapshot.suggested_rationale ? ` Suggested band: ${snapshot.suggested_band}. Suggested rationale: ${snapshot.suggested_rationale}` : ""}`;
   } catch {
     // Older placement history used plain text; retain it verbatim.
     return value;
@@ -80,6 +81,11 @@ export function EntityHistory({ entries, empty = "No changes recorded yet." }: {
                     <p className="mt-1 whitespace-pre-wrap">After: {after || "—"}</p>
                   </details>
                 ) : null}
+                {entry.supporting_references?.length ? <ul aria-label="Decision supporting references" className="mt-2 grid gap-1">
+                  {entry.supporting_references.map((reference, index) => <li key={index}>
+                    {reference.target ? <Link href={reference.target.href}>{reference.target.title} ({label(reference.entity_type)} {reference.entity_id})</Link> : <span>Reference unavailable ({label(reference.entity_type)} {reference.entity_id})</span>}: {reference.reason}
+                  </li>)}
+                </ul> : null}
                 <p className="mt-1 text-muted-foreground">
                   {entry.rationale ? `“${entry.rationale}”` : "Reason not recorded"}
                 </p>

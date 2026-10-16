@@ -1,3 +1,4 @@
+import type { JudgementReference } from "@/lib/iegp/judgement-references";
 import { boolean, integer, jsonb, numeric, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 /**
@@ -39,6 +40,7 @@ export const editRecords = pgTable("edit_records", {
   after: text("after"),
   /** Null when the person gave no reason (a gate action without one still leaves its record, KAN-90). */
   rationale: text("rationale"),
+  supporting_references: jsonb("supporting_references").$type<JudgementReference[]>().notNull().default([]),
   actor_name: text("actor_name").notNull(),
   actor_function: text("actor_function").notNull(),
   /** Who, verifiably (KAN-90): account id or email, their role, and the request that made the change. */
@@ -145,9 +147,11 @@ export const priorityAxes = pgTable("priority_axes", {
 
 export const priorityPlacements = pgTable("priority_placements", {
   gap_id: text("gap_id").primaryKey(),
+  run_id: text("run_id"),
   axis_scores: jsonb("axis_scores").notNull(),
   suggested_band: text("suggested_band").notNull(),
   suggested_rationale: text("suggested_rationale").notNull(),
+  suggested_references: jsonb("suggested_references").$type<JudgementReference[]>().notNull().default([]),
   band: text("band"),
   validated: boolean("validated").notNull().default(false),
   needs_review: boolean("needs_review").notNull().default(false),

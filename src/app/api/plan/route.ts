@@ -169,9 +169,11 @@ export async function POST(request: Request) {
         });
         return NextResponse.json({ok: true, expansion});
       }
+      case "accept_priority_suggestion":
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
+          accept_suggestion: body.action === "accept_priority_suggestion",
           reason: typeof body.reason === "string" ? body.reason : "",
           expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
           expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),

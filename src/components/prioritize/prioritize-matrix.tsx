@@ -1,5 +1,7 @@
 "use client";
 
+import { SuggestionReferences } from "./suggestion-references";
+import type { JudgementReference } from "@/lib/iegp/judgement-references";
 import Link from "next/link";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Loader2 } from "lucide-react";
@@ -24,6 +26,7 @@ import { isPresenting } from "@/lib/room/presenting";
 
 export type PrioritizeGap = {
   gap_id: string;
+  run_id?: string | null;
   version?: string | null;
   context_version?: string | null;
   gap_name: string;
@@ -40,6 +43,8 @@ export type PrioritizeGap = {
   review_reason?: string | null;
   suggested_band: Band | null;
   suggested_rationale: string | null;
+  suggested_references?: JudgementReference[];
+  support_status?: "supported" | "unsupported";
   /** Axis ids a person set; a model re-run keeps their scores. */
   human_axes?: string[];
   /** The band is a person's; a model re-run keeps it. */
@@ -350,11 +355,19 @@ function GapDetail({
       </div>
       <EvidenceDecisionContext statement={gap.statement} objective={gap.objective} />
       <PriorityJudgementDetails priority={{ ...gap, band }} axes={[yAxis, xAxis]} />
-      {ai && gap.suggested_band && gap.suggested_rationale ? (
+      {ai && gap.suggested_band && (gap.run_id || gap.suggested_rationale) ? (
         <p className="text-[11px] leading-4 text-muted-foreground">
           <span className="text-foreground">Model suggested {BAND_LABELS[gap.suggested_band]}.</span>{" "}
-          {gap.suggested_rationale}
+          {gap.suggested_rationale || "Reason not recorded"}
         </p>
+      ) : null}
+      {ai && gap.suggested_band && (gap.run_id || gap.suggested_rationale) ? <SuggestionReferences key={`${gap.gap_id}-${gap.version}`} gapId={gap.gap_id} version={gap.version ?? null} references={gap.support_status === "supported" ? gap.suggested_references : []} /> : null}
+      {ai && band && mayPrioritize && !gap.validated && !gap.needs_review && !gap.human_band && !gap.human_axes?.length && gap.support_status === "supported" ? (
+        <ActionDialog endpoint="/api/plan"
+          payload={{ action: "accept_priority_suggestion", gap_id: gap.gap_id, band: gap.suggested_band, expected_version: gap.version ?? null }}
+          label="Accept supported AI suggestion" title={`Accept AI priority for ${gap.gap_name}`}
+          description="Inspect the supporting records before accepting this suggestion. Your reason and its references will be retained in history."
+          confirmLabel="Accept supported AI suggestion" requireRationale rationaleFieldName="reason" rationaleLabel="Reason for acceptance (required)" identity={identity} />
       ) : null}
       {quadrant && band && quadrant !== band ? (
         <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
@@ -449,9 +462,9 @@ function GapDetail({
         <ActionDialog
           endpoint="/api/plan"
           payload={{ action: "validate_band", gap_id: gap.gap_id, band, expected_version: gap.version ?? null, expected_context_version: gap.context_version ?? null }}
-          label={gap.needs_review ? "Review changed context and reconfirm" : gap.validated ? "Review or change priority" : "Review and confirm priority"}
+          label={gap.needs_review ? "Review changed context and reconfirm" : gap.validated ? "Review or change priority" : ai && (gap.run_id || gap.suggested_rationale) && !gap.human_band ? "Make manual judgement" : "Review and confirm priority"}
           title={`Confirm ${BAND_LABELS[band]} priority for ${gap.gap_name}`}
-          description="Confirms this priority across all settings and records your reason, including when you retain the same band and scores. Edit scores or drag the gap to change the band."
+          description="Make an explicit manual judgement across all settings and record your own reason. Supporting references are not required for a manual judgement, including when you retain the same band and scores."
           confirmLabel="Confirm priority"
           requireRationale
           rationaleFieldName="reason"

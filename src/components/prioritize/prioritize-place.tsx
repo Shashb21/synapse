@@ -105,6 +105,7 @@ export async function PrioritizePlace({
     const placement = placementByGap.get(gap.id);
     return {
       gap_id: gap.id,
+      run_id: placement?.run_id ?? null,
       gap_name: gap.name,
       statement: gap.statement,
       objective: state.objectives.find((objective) => objective.id === gap.objective_id) ?? null,
@@ -120,6 +121,8 @@ export async function PrioritizePlace({
       review_reason: placement?.review_reason ?? null,
       suggested_band: (placement?.suggested_band ?? null) as Band | null,
       suggested_rationale: placement?.suggested_rationale ?? null,
+      suggested_references: placement?.suggested_references ?? [],
+      support_status: placement?.support_status,
       human_axes: placement?.human_axes ?? [],
       human_band: placement?.human_band ?? false,
       rationale: placement?.rationale ?? null,

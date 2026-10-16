@@ -1,3 +1,5 @@
+import { gapRecord } from "@/lib/iegp/gap-record";
+import { sources } from "@/lib/iegp/schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -8,7 +10,8 @@ vi.mock("next/headers", () => ({
 
 import "@/modules";
 import { POST } from "@/app/api/plan/route";
-import { createGap, resetDemoSetup } from "@/lib/iegp/store";
+import { GET as referenceGET } from "@/app/api/plan/references/route";
+import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { db, sharedDb } from "@/modules/kernel/db";
 import { sql } from "drizzle-orm";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
@@ -155,7 +158,7 @@ describe("audited manual priority decisions", () => {
   it("rejects missing/short reasons and missing versions for every priority entry point", async () => {
     const current = (await scoped(listPlacements)).find((row) => row.gap_id === gapId)!;
     const history = await scoped(() => entityHistory([gapId]));
-    for (const action of ["set_placement", "move_placement", "validate_band"]) {
+    for (const action of ["set_placement", "move_placement", "validate_band", "accept_priority_suggestion"]) {
       for (const reason of [undefined, "  ", "x"]) {
         const result = await post({ action, band: "high", x_axis: "decision_impact", y_axis: "time_pressure", x: 80, y: 80, reason, expected_version: current.version });
         expect(result.status).toBe(400);
@@ -167,6 +170,73 @@ describe("audited manual priority decisions", () => {
     expect(await scoped(() => entityHistory([gapId]))).toEqual(history);
   });
 
+  it("accepts supplied support into the same attributable history and rejects unsupported or unrelated targets", async () => {
+    await scoped(() => db().insert(sources).values({ id: "kan132-audit-source", filename: "committee.txt", title: "Committee interview", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", ingested_at: "2026-10-16T00:00:00Z", full_text: "Comparative evidence is required for the committee." }));
+    const id = await scoped(() => createGap({ statement: "Comparative evidence is required for the committee.", source_id: "kan132-audit-source", source_quote: "Comparative evidence is required for the committee.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    const reference = { entity_type: "gap" as const, entity_id: id, reason: "The evidence statement describes the missing comparison" };
+    const state = await scoped(loadState);
+    const references = [reference, { entity_type: "objective" as const, entity_id: state.gaps.find(row => row.id === id)!.objective_id, reason: "The linked objective identifies the affected decision" }, { entity_type: "source" as const, entity_id: "kan132-audit-source", reason: "The interview explicitly describes the committee evidence need" }];
+    await scoped(() => db().insert(kernel.priorityPlacements).values({ gap_id: id, axis_scores: { decision_impact: 80, time_pressure: 75 }, suggested_band: "high", suggested_rationale: "The comparison supports the committee decision", suggested_references: references, band: "high", validated: false, at: "2026-01-01T00:00:00.000Z" }));
+    const current = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
+    expect((await scoped(() => gapRecord(id)))?.priority).toMatchObject({ version: current.version, suggested_rationale: current.suggested_rationale });
+    const inspected = await scoped(() => referenceGET(new Request(`http://localhost/api/plan/references?gap_id=${id}`)));
+    expect(inspected.status).toBe(200);
+    const inspectedBody = await inspected.json();
+    expect(inspectedBody).toMatchObject({ version: current.version, references });
+    expect(inspectedBody.references.find((ref: { entity_type: string }) => ref.entity_type === "source")).toMatchObject({ excerpt: "Comparative evidence is required for the committee.", href: "/sources/kan132-audit-source" });
+    const missing = await scoped(() => referenceGET(new Request("http://localhost/api/plan/references?gap_id=foreign-gap")));
+    expect(missing.status).toBe(404);
+    const accepted = await post({ action: "accept_priority_suggestion", gap_id: id, band: "high", expected_version: current.version, reason: "Inspected the supplied evidence need" });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.placement).toMatchObject({ validated: true, rationale: "The comparison supports the committee decision", suggested_references: references });
+    const entry = (await scoped(() => entityHistory([id]))).find(row => row.field === "placement")!;
+    expect(entry).toMatchObject({ rationale: "Inspected the supplied evidence need", actor_principal: owner, supporting_references: references });
+    const audit = await listAuditEvents({ entity_id: id, category: "plan" });
+    expect(audit.events.some(row => JSON.stringify(row).includes("supporting_references"))).toBe(true);
+    // Simulate older/invalid persisted model output through the existing persistence fixture boundary.
+    for (const references of [[], [{ ...reference, entity_id: "not-in-this-workspace" }], [{ ...reference, entity_id: gapId }], [{ ...reference, reason: "" }]]) {
+      await scoped(() => db().execute(sql`UPDATE priority_placements SET validated = false, human_band = false, suggested_references = ${JSON.stringify(references)}::jsonb WHERE gap_id = ${id}`));
+      const before = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
+      const history = await scoped(() => entityHistory([id]));
+      const denied = await post({ action: "accept_priority_suggestion", gap_id: id, band: "high", expected_version: before.version, reason: "Cannot accept unsupported output" });
+      expect(denied.status).toBe(400);
+      expect(denied.body.error).toMatch(/Supporting references/);
+      expect((await scoped(listPlacements)).find(row => row.gap_id === id)).toEqual(before);
+      expect(await scoped(() => entityHistory([id]))).toEqual(history);
+    }
+    await scoped(() => db().execute(sql`UPDATE priority_placements SET needs_review = true, suggested_references = ${JSON.stringify([reference])}::jsonb WHERE gap_id = ${id}`));
+    const changedContext = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
+    const staleSupport = await post({ action: "accept_priority_suggestion", gap_id: id, band: "high", expected_version: changedContext.version, reason: "Cannot endorse stale model context" });
+    expect(staleSupport.status).toBe(400);
+    expect(staleSupport.body.error).toMatch(/manual judgement/);
+    const beforeManual = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
+    const manual = await post({ action: "validate_band", gap_id: id, band: "high", expected_version: beforeManual.version, reason: "My explicit judgement from committee experience" });
+    expect(manual.status).toBe(200);
+    expect((await scoped(() => entityHistory([id]))).find(row => row.rationale === "My explicit judgement from committee experience")?.supporting_references).toEqual([]);
+  });
+
+  it("rolls back supported acceptance and its references if the audit insert fails", async () => {
+    const id = await scoped(() => createGap({ statement: "No comparative survival evidence.", actor_name: "Priority Reviewer", actor_function: "medical_affairs" }));
+    await scoped(() => db().insert(kernel.priorityPlacements).values({ gap_id: id, axis_scores: { decision_impact: 80 }, suggested_band: "high", suggested_rationale: "Missing survival evidence informs access", suggested_references: [{ entity_type: "gap", entity_id: id, reason: "The statement identifies the missing survival evidence" }], band: "high", validated: false, at: "2026-01-01T00:00:00.000Z" }));
+    const before = (await scoped(listPlacements)).find(row => row.gap_id === id)!;
+    const history = await scoped(() => entityHistory([id]));
+    await scoped(async () => {
+      await db().execute(sql.raw("CREATE FUNCTION fail_supported_priority() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected supported-priority audit failure'; END $$"));
+      await db().execute(sql.raw("CREATE TRIGGER fail_supported_priority BEFORE INSERT ON edit_records FOR EACH ROW EXECUTE FUNCTION fail_supported_priority()"));
+    });
+    try {
+      const failed = await post({ action: "accept_priority_suggestion", gap_id: id, band: "high", expected_version: before.version, reason: "Reviewed the supplied evidence statement" });
+      expect(failed.status).toBe(400);
+      expect((await scoped(listPlacements)).find(row => row.gap_id === id)).toEqual(before);
+      expect(await scoped(() => entityHistory([id]))).toEqual(history);
+    } finally {
+      await scoped(async () => {
+        await db().execute(sql.raw("DROP TRIGGER fail_supported_priority ON edit_records"));
+        await db().execute(sql.raw("DROP FUNCTION fail_supported_priority()"));
+      });
+    }
+  });
+
   it("refuses all priority actions for a viewer and prevents cross-workspace writes", async () => {
     const current = (await scoped(listPlacements)).find((row) => row.gap_id === gapId)!;
     const history = await scoped(() => entityHistory([gapId]));
@@ -174,7 +244,7 @@ describe("audited manual priority decisions", () => {
     await inviteMember({ workspace_id: workspace.id, email: viewer, by: owner });
     await signIn("viewer", viewer);
     try {
-      for (const action of ["set_placement", "move_placement", "validate_band"]) {
+      for (const action of ["set_placement", "move_placement", "validate_band", "accept_priority_suggestion"]) {
         const result = await post({ action, band: "high", x_axis: "decision_impact", y_axis: "time_pressure", x: 80, y: 80, reason: "Forged viewer decision", expected_version: current.version });
         expect(result.status).toBe(403);
       }

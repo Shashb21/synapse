@@ -1,3 +1,5 @@
+import { readPlacementSnapshot } from "@/modules/stages/s8-prioritization/module";
+import { inspectJudgementReferences } from "./judgement-references";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import * as kernel from "@/modules/kernel/schema";
@@ -45,7 +47,7 @@ export type GapRecord = {
   })[];
   expansions: IegpState["expansions"];
   mapping_rejections: IegpState["mapping_suggestions"];
-  priority: typeof kernel.priorityPlacements.$inferSelect | null;
+  priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string }) | null;
   ideas: (typeof kernel.ideationProposals.$inferSelect)[];
   timeline: (typeof kernel.timelineActivities.$inferSelect)[];
   breakout_groups: IegpState["breakout_groups"];
@@ -66,8 +68,8 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   const needIds = links.map((link) => link.need_id);
   const candidateRowIds = state.needs.filter((n) => needIds.includes(n.id) && n.candidate_row_id).map((n) => n.candidate_row_id!);
   const d = db();
-  const [placements, ideas, timeline, candidates] = await Promise.all([
-    d.select().from(kernel.priorityPlacements).where(sql`${kernel.priorityPlacements.gap_id} = ${gap.id}`),
+  const [priority, ideas, timeline, candidates] = await Promise.all([
+    readPlacementSnapshot(gap.id),
     d.select().from(kernel.ideationProposals).where(sql`${kernel.ideationProposals.gap_id} = ${gap.id}`),
     d.select().from(kernel.timelineActivities).where(sql`${kernel.timelineActivities.gap_ids} @> ${JSON.stringify([gap.id])}::jsonb`),
     d.select().from(gapCandidates).where(
@@ -122,7 +124,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     }),
     expansions: state.expansions.filter((e) => e.gap_ids.includes(gap.id)),
     mapping_rejections: state.mapping_suggestions.filter((m) => m.gap_id === gap.id && m.status === "rejected"),
-    priority: placements[0] ?? null,
+    priority: priority ? { ...priority, suggested_references: inspectJudgementReferences(state, [gap.id], priority.suggested_references).map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })) } : null,
     ideas,
     timeline,
     breakout_groups: state.breakout_groups.filter((g) => groupIds.has(g.id)),
