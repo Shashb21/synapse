@@ -69,8 +69,8 @@ test.describe("gaps then prioritize then tactics", () => {
     await expect(
       page.getByText(/Every evidence gap with its mapped tactics and computed status/i),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
     await expect(page.getByTestId("evidence-inventory").getByText(/economic burden|comparative effectiveness/i).first()).toBeVisible();
     // Rows start collapsed (KAN-56); opening one shows its actions.
     await openInventoryRow(page);

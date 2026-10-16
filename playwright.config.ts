@@ -24,6 +24,10 @@ if (databaseName === "synapse" && process.env.E2E_ALLOW_DEV_DB !== "1") {
   );
 }
 
+// Direct database specs and the server must use the same safety-checked database.
+process.env.DATABASE_URL = databaseUrl;
+process.env.E2E_DATABASE_URL = databaseUrl;
+
 export default defineConfig({
   testDir: "./e2e",
   workers: 1,
@@ -45,6 +49,8 @@ export default defineConfig({
       // Set here, so Next does not take the dev DATABASE_URL from .env.local.
       DATABASE_URL: databaseUrl,
       SYNAPSE_TEST_STUB_LLM: "1",
+      // Isolated suite capacity includes fresh workspaces and CI retries; production stays at 20.
+      SYNAPSE_MAX_WORKSPACES_PER_USER: "1000",
       // Never reach a real model from e2e, and keep every provider at "No key"
       // on a machine that has keys in its shell or .env.local (Next does not
       // override a variable that is already set, even when it is empty).

@@ -50,7 +50,7 @@ test.describe("S6 partial gap split", () => {
     await expect(card).toBeVisible();
     // A Partial card offers split or rewrite, and cannot simply be confirmed.
     await expect(card.getByRole("button", { name: /^confirm status$/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 
   test("proposes the addressed slice and the open leftover through three exchanges", async ({ request }) => {

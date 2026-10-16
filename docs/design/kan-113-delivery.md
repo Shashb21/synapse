@@ -107,3 +107,22 @@ Verification: `node /private/tmp/kan113-check-hydration.mjs` exited0 after three
 The owner approved the UI and requested a PR into main. Current main was merged into this branch; the sole conflict was an explanatory comment beside the same valid AI-off demo fixture, retained alongside this branch's separate invalid-input test. The preview login mismatch was caused by the isolated database having no password accounts; access was restored through its existing development-only demo session. No normal account credentials were changed.
 
 Post-main integration verification: 15 Chromium checks passed in28.4seconds, covering KAN-114 through KAN-119, readiness strip, source creation and parsing (including authentication setup). `tests/ai-off-features.test.ts`:12 passed, exit0. Scoped ESLint, `tsc --noEmit` and `git diff --check`:exit0. The earlier full1542-test run remains the full-suite evidence; the subsequent changes are test/documentation and main's test updates only.
+
+## PR #107 browser CI repair (2026-10-16)
+
+Both initial GitHub runs passed type checking, lint and the full unit suite. Browser failures had three causes: legacy selectors expected retired filter/progress labels; KAN-117 read E2E_DATABASE_URL although CI supplied only DATABASE_URL; and the expanded suite exceeded the shared test user's production-default limit of 20 workspaces.
+
+Playwright configuration now assigns its existing safety-checked, isolated database URL to both environment variables before tests run. Direct database fixtures and the app server therefore use the same database in CI and locally. The development-database guard remains intact. The Playwright-launched server uses the existing workspace-capacity override (1,000) to allow fresh test workspaces and retries; the production default and enforcement remain unchanged. Legacy assertions now check the approved review/evidence filters, exact priority-progress wording, supporting-statements region and evidence-record link. No tests were disabled and no product code changed.
+
+Full local CI-mode browser run against a fresh disposable database:
+
+```bash
+CI=1 DATABASE_URL=postgres://synapse:synapse@127.0.0.1:55413/synapse_kan113_ci_fix \
+E2E_PORT=43231 NEXT_TELEMETRY_DISABLED=1 npx playwright test
+```
+
+Result before the final supporting-statements assertion correction: exit1,207 passed,1 failed,9 skipped,1 did not run in6.2minutes. The sole failure revealed another retired label (`View constituent needs`) hidden behind the earlier filter assertion; it is now replaced with checks for the actual evidence region and record link. All other observed CI failures were resolved. Log: `/private/tmp/kan113-full-browser-ci-fix.log`. The existing skipped tests remain unchanged.
+
+The initial six-file repair passed `npx tsc --noEmit`, scoped ESLint and `git diff --check`, all exit0. Independent read-only review approved the database invariant, production-limit preservation and behavioral assertions. Final focused extraction and GitHub verification results follow below.
+
+Final focused command: same CI-mode environment as above with `npx playwright test e2e/features/s2-gap-extract.spec.ts`; exit0,5 passed (including setup) in11.5seconds. Log: `/private/tmp/kan113-s2-browser-fixed.log`. Scoped ESLint and whitespace verification after the final correction also exited0. The complete suite will run again on GitHub for the published commit; no local all-green full-suite result is claimed for this intermediate run.

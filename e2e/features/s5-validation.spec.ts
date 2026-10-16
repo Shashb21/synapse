@@ -20,8 +20,8 @@ test.describe("S5 classification and validation gate", () => {
       page.getByText(/Every evidence gap with its mapped tactics and computed status/),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /accept gap/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^all \(/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^partial \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^all gaps \(/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^partially addressed \(/i })).toBeVisible();
   });
 
   test("confirms a gap's status from the workbench and records who did it", async ({ page, request }) => {
