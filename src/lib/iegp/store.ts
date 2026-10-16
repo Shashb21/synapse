@@ -1800,7 +1800,8 @@ export async function reviewRequirementBasis(args: {
 async function reviewedCoverage(coverage_id: string, expected_version?: string) {
   const initial = (await loadState()).coverages.find(c => c.id === coverage_id);
   if (!initial) throw new Error("Coverage not found");
-  // Use the same gap-then-coverage lock order as assignment and requirement review.
+  // Serialize sibling warnings with other reviews and design edits before any gap/coverage lock.
+  await db().execute(sql`select id from tactics where id = ${initial.tactic_id} for update`);
   await db().execute(sql`select id from gaps where id = ${initial.gap_id} for update`);
   await db().execute(sql`select id from coverages where id = ${coverage_id} for update`);
   const state = await loadState();
@@ -2335,6 +2336,9 @@ export async function completeLibraryLinkRequest(requestId: string, payload: str
 export async function assignTacticToGap(args: {
   gap_id: string;
   expected_basis_version?: string;
+  expected_design_version?: string;
+  /** Explicit preview-based library assessments require both displayed basis tokens. Other callers retain their existing contract. */
+  require_preview_basis?: boolean;
   confirm_coverage?: boolean;
   tactic_id: string;
   expansion_id?: string | null;
@@ -2350,6 +2354,8 @@ export async function assignTacticToGap(args: {
   assessment_origin?: IegpState["coverages"][0]["assessment_origin"];
 }): Promise<string> {
   if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => assignTacticToGap(args));
+  // Match canonical tactic edits: lock the shared design before discovering/locking its gap.
+  await db().execute(sql`select id from tactics where id = ${args.tactic_id} for update`);
   await db().execute(sql`select id from gaps where id = ${args.gap_id} for update`);
   const overall = coverageVerdict(args.coverage) ?? "unassessed";
   const state = await loadState();
@@ -2378,6 +2384,14 @@ export async function assignTacticToGap(args: {
   );
   if (existing && !(args.expansion_id && existing.overall === "unassessed" && !existing.overall_lock.locked && Object.values(existing.dimensions).every((d) => !d.lock.locked))) {
     throw new Error("That tactic is already assigned to this gap.");
+  }
+  if (args.require_preview_basis) {
+    if (!args.expected_basis_version || args.expected_basis_version !== getRequirementBasisReview(state, args.gap_id).version) {
+      throw new Error("Requirement basis changed; refresh the preview before assessing and linking.");
+    }
+    if (!args.expected_design_version || args.expected_design_version !== assessmentBasis(state, args).design) {
+      throw new Error("Tactic design changed; refresh the preview before assessing and linking.");
+    }
   }
   const givenDimensions = Object.keys(args.dimensions ?? {}) as CoverageDimension[];
   const lockVerdict =
@@ -2619,16 +2633,23 @@ export async function saveMappingTableRow(args: {
   actor_name: string;
   actor_function: ActorFunction;
   rationale: string;
-}) {
+}): Promise<{ decision_event_id: string; parent_tactic_ids: string[] }> {
+  if (!inWorkspaceTransaction()) return withWorkspaceTransaction(() => saveMappingTableRow(args));
   const mapping_status = requireMappingRowStatus(args.mapping_status);
   const rationale = requireRationale(args.rationale);
+  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
+  const previous = await loadState();
+  // Reserve every existing parent before any removal or assignment can lock the gap.
+  await lockAssessmentOwners({
+    tactic_ids: [...uniqueIds, ...previous.coverages.filter(c => !c.expansion_id && c.gap_id === args.gap_id).map(c => c.tactic_id)],
+    gap_ids: [args.gap_id],
+  });
   const state = await loadState();
   const gap = state.gaps.find((g) => g.id === args.gap_id);
   if (!gap) throw new Error("Gap not found");
   if (!gapEligibleForMapping(gap.status)) {
     throw new Error("Only live gaps eligible for mapping can be edited here.");
   }
-  const uniqueIds = [...new Set(args.tactic_ids.map((id) => id.trim()).filter(Boolean))];
   if (mapping_status !== "open" && uniqueIds.length === 0) {
     throw new Error("Addressed or partially addressed rows need at least one tactic.");
   }

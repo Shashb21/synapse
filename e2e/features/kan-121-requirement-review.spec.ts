@@ -19,13 +19,14 @@ test("KAN-141 reviews the sourced basis with a keyboard and retains rejected Ful
   await expect(dialog).toBeHidden();
   await page.getByRole("button", { name: "Map tactic with coverage", exact: true }).click();
   const assessment = page.getByRole("dialog");
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
   await assessment.getByLabel("Overall coverage").selectOption("full");
   await assessment.getByLabel("Rationale (required)").fill("This attempted Full must retain my input");
-  await assessment.getByRole("button", { name: "Map and record coverage" }).click();
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
   await expect(assessment.getByRole("alert")).toContainText("not yet determined");
   await expect(assessment.getByLabel("Rationale (required)")).toHaveValue("This attempted Full must retain my input");
   await assessment.getByLabel("Overall coverage").selectOption("partial");
-  await assessment.getByRole("button", { name: "Map and record coverage" }).click();
+  await assessment.getByRole("button", { name: "Assess and link", exact: true }).click();
   await expect(assessment).toBeHidden();
   await expect(page.getByText("Requirement review study", { exact: true }).first()).toBeVisible();
 });

@@ -44,6 +44,40 @@ beforeEach(async () => {
  expect((await review()).status).toBe(200); expect((await link()).status).toBe(200);
 });
 describe("KAN-144 assessment freshness through real actions", () => {
+ it.skipIf(poolSize("workspace") < 4).each(["lock_overall", "lock_dimension"])("serializes shared-tactic %s/overall reviews before either gap owner", async action => {
+  const other = await store.createGap({ statement: "Independent shared-tactic decision", ...actor });
+  await review(other); await link(other);
+  await db().execute(sql`update coverages set needs_review = false where tactic_id = ${tacticId}`);
+  const first = await row();
+  const second = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
+  let ready!: () => void, release!: () => void;
+  const held = new Promise<void>(resolve => { ready = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const owner = withWorkspaceTransaction(async () => {
+   await db().execute(sql`select id from tactics where id = ${tacticId} for update`);
+   ready(); await resume;
+  });
+  await held;
+  const pending = [post({ action, coverage_id: first.id, expected_version: coverageReviewVersion(first), overall: "limited", dimension: "population", value: "no", rationale: "First independent review" }),
+   post({ action: "lock_overall", coverage_id: second.id, expected_version: coverageReviewVersion(second), overall: "partial", rationale: "Second independent review" })];
+  try {
+   // Observe actual PostgreSQL waits; no sleep decides when the owner is released.
+   await vi.waitFor(async () => {
+    const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%from tactics where id = %for update%'`);
+    expect(waiting.length).toBe(2);
+   }, { timeout: 3000, interval: 20 });
+  } finally { release(); await owner; await Promise.all(pending); }
+  expect((await Promise.all(pending)).map(result => result.status)).toEqual([200, 200]);
+  const rows = (await store.loadState()).coverages;
+  expect(rows.find(c => c.id === second.id)).toMatchObject({ overall: "partial", overall_rationale: "Second independent review", needs_review: true });
+  const reviewed = rows.find(c => c.id === first.id)!;
+  expect(reviewed.needs_review).toBe(true);
+  if (action === "lock_overall") {
+   expect(reviewed).toMatchObject({ overall: "limited", overall_rationale: "First independent review" });
+   expect(reviewed.assessment_history!.at(-1)!.overall).toBe("full");
+  } else expect(reviewed.dimensions.population).toMatchObject({ value: "no", rationale: "First independent review", lock: { locked: true } });
+ });
+
  it("retains freshness after titles change but invalidates every shared parent design assessment", async () => {
   const second = await store.createGap({ statement: "Another payer decision", ...actor });
   await review(second); await link(second);

@@ -11,10 +11,10 @@ import { requirementSourceVersion } from "@/lib/iegp/requirement-basis";
 import { createSourceDiscrepancy, linkSourceSupport, sourceReviewCitationCurrent } from "@/lib/iegp/source-review";
 import { aiSectionEnabled } from "@/modules/kernel/ai-switch";
 import { completionFor, resolveRoute } from "@/modules/kernel/routing";
-import { RunRecorder } from "@/modules/kernel/observability";
+import { closeRun, openRun, RunRecorder } from "@/modules/kernel/observability";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
-import type { Actor } from "@/modules/kernel/contracts";
+import type { Actor, ResolvedRoute } from "@/modules/kernel/contracts";
 import type { IegpState } from "@/lib/iegp/types";
 import type { ComparisonOutcome, SourceComparison, SourceComparisonView } from "./comparison-types";
 
@@ -107,23 +107,26 @@ function normalizedTarget(state: IegpState, target: ComparisonTarget): Compariso
   }
   return normalized;
 }
+/** Invalid saved batches must be regenerated; transient application failures remain resumable. */
+class InvalidComparisonOutcomes extends Error {}
+
 async function validateOutcomes(state: IegpState, sourceId: string, outcomes: ComparisonOutcome[]): Promise<void> {
   const plan = await facts(state, sourceId);
   for (const outcome of outcomes) {
-    if (!sourceReviewCitationCurrent(state, { source_id: sourceId, ...outcome })) throw new Error("Comparison must cite an actual passage in a retained source block.");
+    if (!sourceReviewCitationCurrent(state, { source_id: sourceId, ...outcome })) throw new InvalidComparisonOutcomes("Comparison must cite an actual passage in a retained source block.");
     if (outcome.match === "new") {
-      if (outcome.gap_id || outcome.tactic_id || outcome.coverage_id || outcome.judgment !== "unknown") throw new Error("New unrelated claims establish neither support nor conflict with an existing record.");
+      if (outcome.gap_id || outcome.tactic_id || outcome.coverage_id || outcome.judgment !== "unknown") throw new InvalidComparisonOutcomes("New unrelated claims establish neither support nor conflict with an existing record.");
       continue;
     }
-    if (!outcome.gap_id && !outcome.tactic_id) throw new Error("Comparison must identify a relevant current plan target.");
-    if (outcome.gap_id && !plan.gaps.some(g => g.id === outcome.gap_id)) throw new Error("Comparison gap is not a current gap in this plan.");
-    if (outcome.tactic_id && !plan.tactics.some(t => t.id === outcome.tactic_id)) throw new Error("Comparison tactic is not a current tactic in this plan.");
+    if (!outcome.gap_id && !outcome.tactic_id) throw new InvalidComparisonOutcomes("Comparison must identify a relevant current plan target.");
+    if (outcome.gap_id && !plan.gaps.some(g => g.id === outcome.gap_id)) throw new InvalidComparisonOutcomes("Comparison gap is not a current gap in this plan.");
+    if (outcome.tactic_id && !plan.tactics.some(t => t.id === outcome.tactic_id)) throw new InvalidComparisonOutcomes("Comparison tactic is not a current tactic in this plan.");
     if (outcome.coverage_id) {
-      if (!plan.coverages.some(c => c.id === outcome.coverage_id && c.gap_id === outcome.gap_id && c.tactic_id === outcome.tactic_id)) throw new Error("Comparison relationship must match its gap and tactic in this plan.");
+      if (!plan.coverages.some(c => c.id === outcome.coverage_id && c.gap_id === outcome.gap_id && c.tactic_id === outcome.tactic_id)) throw new InvalidComparisonOutcomes("Comparison relationship must match its gap and tactic in this plan.");
     } else if (outcome.gap_id && outcome.tactic_id) {
       const relationships = plan.coverages.filter(c => c.gap_id === outcome.gap_id && c.tactic_id === outcome.tactic_id);
-      if (!relationships.length) throw new Error("Comparison targets have no relationship in this plan.");
-      if (relationships.length > 1) throw new Error("Comparison must identify an explicit relationship when a gap and tactic have multiple scopes.");
+      if (!relationships.length) throw new InvalidComparisonOutcomes("Comparison targets have no relationship in this plan.");
+      if (relationships.length > 1) throw new InvalidComparisonOutcomes("Comparison must identify an explicit relationship when a gap and tactic have multiple scopes.");
     }
   }
 }
@@ -178,9 +181,18 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     if (attempt.outcomes === null) {
       const state = await loadState();
       const recorder = new RunRecorder({ workspace_id: await scopedWorkspaceId() ?? "default", stage: "S1", module_id: "incoming-source-comparison", module_version: "1", actor, input: { source_id: sourceId, basis_version } }, version);
-      const complete = completionFor(await resolveRoute("S1"), recorder);
-      const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
-      attempt.outcomes = reply.outcomes;
+      await openRun(recorder);
+      let route: ResolvedRoute | null = null;
+      try {
+        route = await resolveRoute("S1");
+        const complete = completionFor(route, recorder);
+        const reply = replySchema.parse(await complete({ system: SYSTEM, user: JSON.stringify(await facts(state, sourceId)), purpose: "incoming-source-comparison" }));
+        attempt.outcomes = reply.outcomes;
+        await closeRun({ recorder, status: "ok", route, output: reply, summary: "Incoming comparison provider reply received." });
+      } catch (error) {
+        await closeRun({ recorder, status: "error", route, error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     }
     const pendingOutcomes = attempt.outcomes;
     // Normalize and validate the entire reply under current owner locks before saving or applying it.
@@ -227,7 +239,7 @@ export async function compareSource(sourceId: string, actor: Actor): Promise<voi
     if (!attempt) throw error;
     // CAS prevents an older worker's error from replacing a newer attempt or completion.
     const [current] = await db().select().from(sourceComparisons).where(and(eq(sourceComparisons.source_id, sourceId), eq(sourceComparisons.version, attempt.version)));
-    if (current) await write({ ...current.record, status: "failed", error: error instanceof Error ? error.message : String(error), updated_at: nowIso() });
+    if (current) await write({ ...current.record, outcomes: error instanceof InvalidComparisonOutcomes ? null : current.record.outcomes, status: "failed", error: error instanceof Error ? error.message : String(error), updated_at: nowIso() });
   }
 }
 /** Post-commit runner used by direct S1 runs and the outer ingestion checkpoint owner. */

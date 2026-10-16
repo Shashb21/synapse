@@ -353,6 +353,8 @@ async function handleAction(request: Request): Promise<Response> {
           overall: verdict.coverage ?? "unassessed",
           dimensions: Object.entries(verdict.dimensions ?? {}).sort(([a], [b]) => a.localeCompare(b)),
           rationale: rationaleOf(body), expected_basis_version: body.expected_basis_version ?? null,
+          // Preserve pre-design-token receipt encoding for exact retries from older clients.
+          ...(body.expected_design_version !== undefined ? { expected_design_version: body.expected_design_version } : {}),
         });
         libraryRequest = { id: body.request_id ?? "", payload };
         const replay = await beginLibraryLinkRequest(libraryRequest.id, payload);
@@ -685,6 +687,8 @@ async function handleAction(request: Request): Promise<Response> {
         }
         createdId = await assignTacticToGap({
           gap_id: body.gap_id,
+          require_preview_basis: body.link_mode === "assessed",
+          expected_design_version: body.expected_design_version,
           expected_basis_version: body.expected_basis_version,
           confirm_coverage: body.confirm_coverage !== "false",
           tactic_id: body.tactic_id,

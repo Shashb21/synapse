@@ -55,6 +55,8 @@ export function AssignTacticWithCoverage({ gapId, availableTactics, mappedTactic
       payload.overall = String(values.get("overall"));
       payload.rationale = String(values.get("rationale"));
       if (basisVersion) payload.expected_basis_version = basisVersion;
+      const designVersion = previews?.[tacticId]?.design_version;
+      if (designVersion) payload.expected_design_version = designVersion;
       for (const dimension of COVERAGE_DIMENSIONS) {
         const value = values.get(`dim_${dimension}`);
         if (value) payload[`dim_${dimension}`] = String(value);

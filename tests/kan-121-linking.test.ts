@@ -17,9 +17,9 @@ import { setAiEnabled } from "@/modules/kernel/ai-switch";
 import { createSession } from "@/modules/auth/session";
 import { WORKSPACE_COOKIE, workspaceCookieValue } from "@/modules/workspaces/context";
 import { createWorkspace, inviteMember, withWorkspace } from "@/modules/workspaces/store";
-import { db } from "@/lib/iegp/db";
+import { db, poolSize, withWorkspaceTransaction } from "@/lib/iegp/db";
 import * as schema from "@/lib/iegp/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { listEdits } from "@/modules/kernel/edit-records";
 
 const actor = { actor_name: "Fit reviewer", actor_function: "medical_affairs" as const };
@@ -44,6 +44,55 @@ beforeEach(async () => { jar.values.clear(); await store.resetDemoSetup(); await
 afterEach(async () => { jar.values.clear(); await setAiEnabled({ enabled: true, actor_name: actor.actor_name }); });
 
 describe("KAN-143 deliberate library linking", () => {
+  it.skipIf(poolSize("workspace") < 3)("waits for a canonical design edit before validating a new assessed link", async () => {
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    let ready!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { ready = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const edit = withWorkspaceTransaction(async () => {
+      await store.modifyTactic({ tactic_id: tacticId, fields: { population: "Children" }, rationale: "Concurrent accepted design edit", ...actor });
+      ready(); await resume;
+    });
+    await held;
+    const receipts = await db().select().from(schema.libraryLinkRequests);
+    const pending = post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "partial",
+      expected_basis_version: preview.requirement_basis_version, expected_design_version: preview.design_version,
+      rationale: "Reviewed adults before the amendment" });
+    try {
+      await vi.waitFor(async () => {
+        const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%from tactics where id = %for update%'`);
+        expect(waiting.length).toBe(1);
+      }, { timeout: 3000, interval: 20 });
+    } finally { release(); await edit; await pending; }
+    expect((await pending).status).toBe(400);
+    expect((await store.loadState()).coverages).toHaveLength(0);
+    expect(await db().select().from(schema.libraryLinkRequests)).toEqual(receipts);
+  });
+
+  it.each(["full", "partial", "limited", "not_relevant"])("rejects stale preview requirements and design for %s without receipts or decisions", async overall => {
+    await reviewBasis();
+    for (const change of ["requirements", "design"]) {
+      const state = await store.loadState();
+      const preview = engine.relationshipFit(state, gapId, tacticId);
+      const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall,
+        expected_basis_version: preview.requirement_basis_version,
+        expected_design_version: preview.design_version,
+        dimensions: JSON.stringify(Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))), rationale: "Reviewed the previewed scientific design" };
+      if (change === "requirements") await reviewBasis();
+      else expect((await post({ action: "modify_tactic", tactic_id: tacticId, population: "Children", rationale: "Changed accepted population" })).status).toBe(200);
+      const before = await store.loadState();
+      const receipts = await db().select().from(schema.libraryLinkRequests);
+      const result = await post(payload);
+      expect(result.status, `${overall}/${change}: ${JSON.stringify(result.body)}`).toBe(400);
+      expect(await store.loadState()).toEqual(before);
+      expect(await db().select().from(schema.libraryLinkRequests)).toEqual(receipts);
+    }
+    const fresh = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall,
+      expected_basis_version: fresh.requirement_basis_version, expected_design_version: fresh.design_version,
+      dimensions: JSON.stringify(Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))), rationale: "Reviewed refreshed scientific design" })).status).toBe(200);
+  });
+
   it("links unresolved requirements as unassessed and replays identical concurrent saves without new decisions", async () => {
     // Arrange an accepted library tactic and an unresolved gap; Act through the public action.
     const before = await store.loadState();
@@ -64,7 +113,8 @@ describe("KAN-143 deliberate library linking", () => {
     expect(results[1]!.body.id).toBe(state.coverages[0]!.id);
   });
   it("atomically assesses and links with a human rationale, preserving independent dimension confirmation", async () => {
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "partial", dimensions: JSON.stringify({ comparator: "no", population: "yes" }), rationale: "Comparator differs from the question" };
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", expected_design_version: preview.design_version, expected_basis_version: preview.requirement_basis_version,  request_id: crypto.randomUUID(), overall: "partial", dimensions: JSON.stringify({ comparator: "no", population: "yes" }), rationale: "Comparator differs from the question" };
     expect((await post(payload)).status).toBe(200);
     const state = await store.loadState();
     expect(state.coverages).toHaveLength(1);
@@ -75,9 +125,48 @@ describe("KAN-143 deliberate library linking", () => {
     expect((await post({ ...payload, rationale: "A different decision under the old request" })).status).toBe(400);
     expect(await store.loadState()).toEqual(state);
   });
+  it("replays a committed assessed request after its displayed requirements and design change", async () => {
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "partial",
+      expected_basis_version: preview.requirement_basis_version, expected_design_version: preview.design_version, rationale: "Reviewed original design" };
+    const saved = await post(payload);
+    expect(saved.status).toBe(200);
+    await reviewBasis();
+    expect((await post({ action: "modify_tactic", tactic_id: tacticId, population: "Children", rationale: "New accepted design" })).status).toBe(200);
+    const before = await store.loadState();
+    expect(await post(payload)).toEqual(saved);
+    expect(await store.loadState()).toEqual(before);
+  });
+  it.each(["expected_basis_version", "expected_design_version"])("rejects an assessed preview missing %s", async missing => {
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload: Record<string, unknown> = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "partial",
+      expected_basis_version: preview.requirement_basis_version, expected_design_version: preview.design_version, rationale: "Reviewed design" };
+    delete payload[missing];
+    const before = await store.loadState();
+    const receipts = await db().select().from(schema.libraryLinkRequests);
+    expect((await post(payload)).status).toBe(400);
+    expect(await store.loadState()).toEqual(before);
+    expect(await db().select().from(schema.libraryLinkRequests)).toEqual(receipts);
+  });
+  it.each(["assessed", "unassessed"])("replays a legacy %s receipt that predates design tokens", async mode => {
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload: Record<string, unknown> = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: mode, request_id: crypto.randomUUID(),
+      ...(mode === "assessed" ? { overall: "partial", rationale: "Legacy assessed decision", expected_basis_version: preview.requirement_basis_version, expected_design_version: preview.design_version } : {}) };
+    const saved = await post(payload);
+    expect(saved.status).toBe(200);
+    const [receipt] = await db().select().from(schema.libraryLinkRequests).where(eq(schema.libraryLinkRequests.request_id, String(payload.request_id)));
+    const legacy = JSON.parse(receipt.payload);
+    delete legacy.expected_design_version;
+    await db().update(schema.libraryLinkRequests).set({ payload: JSON.stringify(legacy) }).where(eq(schema.libraryLinkRequests.request_id, receipt.request_id));
+    delete payload.expected_design_version;
+    const before = await store.loadState();
+    expect(await post(payload)).toEqual(saved);
+    expect(await store.loadState()).toEqual(before);
+  });
   it("rejects unresolved Full without a partial relationship or acceptance, then permits a corrected retry", async () => {
     const before = await store.loadState();
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "full", expected_basis_version: getRequirementBasisReview(before, gapId).version, rationale: "A complete design was intended" };
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", expected_design_version: preview.design_version,  request_id: crypto.randomUUID(), overall: "full", expected_basis_version: getRequirementBasisReview(before, gapId).version, rationale: "A complete design was intended" };
     expect((await post(payload)).status).toBe(400);
     expect(await store.loadState()).toEqual(before);
     expect((await post({ ...payload, overall: "partial" })).status).toBe(200);
@@ -97,7 +186,8 @@ describe("KAN-143 deliberate library linking", () => {
     }
   });
   it("does not silently replace a saved assessment when a different save races the first", async () => {
-    const base = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", overall: "partial", rationale: "Explicit partial judgement" };
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const base = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", expected_design_version: preview.design_version, expected_basis_version: preview.requirement_basis_version,  overall: "partial", rationale: "Explicit partial judgement" };
     const before = await store.loadState();
     const results = await Promise.all([post({ ...base, request_id: crypto.randomUUID() }), post({ ...base, request_id: crypto.randomUUID(), overall: "limited" })]);
     expect(results.map(r => r.status).sort()).toEqual([200, 400]);
@@ -114,7 +204,8 @@ describe("KAN-143 deliberate library linking", () => {
   it("confirms supported Full through the same atomic library action", async () => {
     await reviewBasis();
     const before = await store.loadState();
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", request_id: crypto.randomUUID(), overall: "full", expected_basis_version: getRequirementBasisReview(before, gapId).version, dimensions: JSON.stringify(Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))), rationale: "All reviewed requirements are satisfied by the documented design" };
+    const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "assessed", expected_design_version: preview.design_version,  request_id: crypto.randomUUID(), overall: "full", expected_basis_version: getRequirementBasisReview(before, gapId).version, dimensions: JSON.stringify(Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]))), rationale: "All reviewed requirements are satisfied by the documented design" };
     expect((await post(payload)).status).toBe(200);
     const record = await gapRecord(gapId);
     expect(record!.coverages[0]!.fit).toMatchObject({ overall: "full", confirmation: { locked: true }, full_eligible: true });

@@ -22,6 +22,7 @@ import { POST as blockPost } from "@/app/api/sources/blocks/route";
 import "@/modules";
 import { POST } from "@/app/api/iegp/route";
 import { advanceIngest } from "@/app/api/iegp/ingest-pipeline";
+import { getRun } from "@/modules/kernel/observability";
 import { runStage } from "@/modules/kernel/run";
 import { findProvider } from "@/modules/llm/provider";
 import { listParsedDocuments } from "@/modules/stages/s1-parse/module";
@@ -54,6 +55,25 @@ beforeEach(async () => {
 });
 afterEach(async () => { jar.values.clear(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await setAiEnabled({ enabled: true, actor_name: actor.name }); });
 describe("KAN-146 incoming document comparison", () => {
+ it("keeps intentional dry parsing free of comparison checkpoints and checkpoint errors", async () => {
+  await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" });
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  await runStage({ stage: "S1", input: { dry_run: true }, actor, role: "medical_affairs" });
+  expect((await store.loadState()).source_comparisons).toHaveLength(0);
+  expect(errors).not.toHaveBeenCalled();
+  expect(calls).toHaveLength(0);
+ });
+ it.each([false, true])("persists the comparison provider run lifecycle (failure=%s)", async failure => {
+  if (failure) respond = () => { throw new Error("Traceable provider failure"); };
+  await parse();
+  const checkpoint = await comparison();
+  const run = await getRun(checkpoint.version);
+  expect(run).toMatchObject({ module_id: "incoming-source-comparison", status: failure ? "error" : "ok", route: { provider_id: "xai-grok" }, finished_at: expect.any(String) });
+  expect(run!.steps.some(step => step.name.startsWith("llm:"))).toBe(true);
+  if (failure) expect(run!.error).toContain("Traceable provider failure");
+  else expect(run!.output).toMatchObject({ outcomes: [expect.objectContaining({ coverage_id: coverage })] });
+ });
+
  it("compares a direct parse against current plan records and preserves the human verdict", async () => {
   const before = await store.loadState(); await parse();
   expect((await listParsedDocuments())).toHaveLength(1);
@@ -212,9 +232,13 @@ describe("KAN-146 incoming document comparison", () => {
    scope: { name: "Paediatric scope", evidence_question: "Paediatric outcomes", population: "Children", outcomes: "", geography: "", data_cut: "", analysis: "", instrument: "", study_design: "Cohort", gap_coverage: "Paediatric outcomes", cost_effort: "One team", timing: "Next year", feasibility_risks: "Recruitment", post_hoc: false, prospective_enrolment: false, protocol_amendment: true, start_date: null, evidence_available: null },
    rationale: "Reviewed additional scope", actor, expected_tactic_version: tacticVersion(parent) });
   const reply = (input: any) => ({ outcomes: [outcome(input, "support"), outcome(input, "conflict", { coverage_id: null })] });
-  respond = mode === "model" ? reply : () => ({ outcomes: [] });
+  respond = mode === "model" ? reply : input => ({ outcomes: [outcome(input, "conflict")] });
   await parse();
+  let decided: NonNullable<Awaited<ReturnType<typeof store.loadState>>["source_reviews"]>[number] | undefined;
   if (mode === "saved") {
+   const finding = (await store.loadState()).source_reviews![0];
+   expect((await post({ action: "resolve_source_discrepancy", review_id: finding.id, expected_version: finding.version, decision: "dismiss", rationale: "Human reviewed before the interrupted legacy batch" })).status).toBe(200);
+   decided = (await store.loadState()).source_reviews!.find(row => row.id === finding.id);
    const saved = (await store.loadState()).source_comparisons![0];
    await db().update(sourceComparisons).set({ record: { ...saved, status: "failed", outcomes: reply(calls[0]).outcomes, error: "Interrupted old ambiguous reply" } }).where(eq(sourceComparisons.source_id, saved.source_id));
    const callCount = calls.length;
@@ -222,7 +246,15 @@ describe("KAN-146 incoming document comparison", () => {
    expect(calls).toHaveLength(callCount);
   }
   expect(await comparison()).toMatchObject({ status: "failed", error: expect.stringContaining("explicit relationship") });
-  expect((await store.loadState()).source_reviews).toHaveLength(0);
+  expect((await store.loadState()).source_reviews).toEqual(decided ? [decided] : []);
+  const failed = await comparison();
+  respond = input => ({ outcomes: [outcome(input, "support"), outcome(input, "conflict")] });
+  const previousCalls = calls.length;
+  expect((await post({ action: "retry_source_comparison", source_id: failed.source_id })).status).toBe(200);
+  expect(await comparison()).toMatchObject({ status: "completed", basis_current: true });
+  expect(calls).toHaveLength(previousCalls + 1);
+  expect((await store.loadState()).source_reviews).toHaveLength(2);
+  if (decided) expect((await store.loadState()).source_reviews!.find(row => row.id === decided.id)).toEqual(decided);
  });
  it("persists pending before prompting and refuses an older concurrent completion", async () => {
   respond = async input => {
