@@ -19,9 +19,25 @@ export function requirementSourceVersion(state: IegpState, gapId: string): strin
   const gap = state.gaps.find(g => g.id === gapId);
   if (!gap) throw new Error("Gap not found");
   const ids = new Set(state.need_gap_links.filter(l => l.gap_id === gapId).map(l => l.need_id));
-  return JSON.stringify([gap.id, gap.statement, gap.objective_id, gap.metadata, gap.settings,
+  const objective = state.objectives.find(o => o.id === gap.objective_id);
+  // A quote identifies the narrow supporting meaning; block ids and surrounding
+  // prose may change without changing that meaning. Source owners validate and
+  // retain actual cited text for legacy block-only needs across split/merge.
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  const support = (need: EvidenceNeed) => {
+    const blocks = state.blocks.filter(block => block.source_id === need.source_id);
+    const quote = normalize(need.source_quote ?? "");
+    if (quote) return [quote, blocks.some(block => normalize(block.text).includes(quote))];
+    if (need.source_basis_text) return normalize(need.source_basis_text);
+    if (need.block_id) return normalize(blocks.find(block => block.id === need.block_id)?.text ?? "");
+    // Legacy records without a concrete citation conservatively depend on the source.
+    return blocks.map(block => normalize(block.text)).sort();
+  };
+  return JSON.stringify([gap.id, gap.statement, gap.domain, gap.objective_id,
+    objective && [objective.description, objective.lifecycle_stage, objective.indication, objective.geography, objective.key_decision, objective.decision_date],
+    gap.metadata.geography, gap.metadata.regional_nuances, gap.settings.slice().sort(),
     state.needs.filter(n => ids.has(n.id)).sort((a, b) => a.id.localeCompare(b.id)).map(n =>
-      [n.id, n.statement, n.population, n.intervention, n.comparator, n.outcome, n.geography, n.timing, n.decision_supported, n.source_id, n.source_quote, n.block_id ?? null])]);
+      [n.id, n.status, n.domain, n.statement, n.population, n.intervention, n.comparator, n.outcome, n.geography, n.timing, n.decision_supported, n.source_id, support(n)])]);
 }
 
 /** Reconstructs source-backed proposals without interpreting omitted fields as irrelevant. */
@@ -71,7 +87,7 @@ export function hasSupportedFullConfirmation(coverage: GapTacticCoverage): boole
 
 /** A comparison token for overall/dimension writes, including imported historical records. */
 export function coverageReviewVersion(coverage: GapTacticCoverage): string {
-  return JSON.stringify([coverage.review_version ?? null, coverage.overall, coverage.overall_rationale, coverage.overall_lock, coverage.dimensions, coverage.confirmed_requirement_basis?.version ?? null]);
+  return JSON.stringify([coverage.review_version ?? null, coverage.overall, coverage.overall_rationale, coverage.overall_lock, coverage.dimensions, coverage.confirmed_requirement_basis?.version ?? null, coverage.stale, coverage.assessed_basis ?? null]);
 }
 
 /** User-visible sourced basis, unresolved reasons, and per-relationship Full eligibility. */
@@ -113,4 +129,33 @@ export function reviewedRequirementDimensions(state: IegpState, gapId: string, i
     dimensions[dim] = { ...dimensions[dim], applicability: entry.applicability, requirement, rationale, resolution: entry.resolution?.trim() ?? "" };
   }
   return dimensions;
+}
+
+/** Semantic requirement meaning, separate from whole-record/form versions and review attribution. */
+export function assessmentRequirementVersion(state: IegpState, gapId: string): string {
+  const review = getRequirementBasisReview(state, gapId);
+  return JSON.stringify([requirementSourceVersion(state, gapId), COVERAGE_DIMENSIONS.map(dim => {
+    const requirement = review.basis.dimensions[dim];
+    return [dim, requirement.applicability, requirement.requirement, requirement.conflicts, requirement.resolution];
+  })]);
+}
+
+/** Fields that change the study's ability to answer a requirement. Titles and administration are cosmetic. */
+export function assessmentDesignVersion(state: IegpState, coverage: Pick<GapTacticCoverage, "tactic_id" | "expansion_id">): string {
+  if (coverage.expansion_id) {
+    const child = state.expansions.find(e => e.id === coverage.expansion_id);
+    if (!child) throw new Error("Expansion not found");
+    const { name: _name, cost_effort: _cost, feasibility_risks: _risks, ...design } = child.scope;
+    return JSON.stringify(design);
+  }
+  const tactic = state.tactics.find(t => t.id === coverage.tactic_id);
+  if (!tactic) throw new Error("Tactic not found");
+  return JSON.stringify([tactic.type, tactic.evidence_question, tactic.description, tactic.population,
+    tactic.intervention, tactic.comparator, tactic.outcomes, tactic.study_design, tactic.data_source,
+    tactic.geography, tactic.start_date, tactic.evidence_available, tactic.intended_use, tactic.source_quote]);
+}
+
+/** The exact semantic basis retained alongside the last overall judgement. */
+export function assessmentBasis(state: IegpState, coverage: Pick<GapTacticCoverage, "gap_id" | "tactic_id" | "expansion_id">) {
+  return { requirements: assessmentRequirementVersion(state, coverage.gap_id), design: assessmentDesignVersion(state, coverage) };
 }

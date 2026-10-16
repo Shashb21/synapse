@@ -26,7 +26,7 @@ import { GAP_CANDIDATES_DDL, gapCandidates } from "@/modules/stages/s2-gap-extra
 
 /**
  * KAN-75: a person decides each overlap suggestion. Merge rewords the gap, adds
- * the source, flags its mappings and resets its validated priority; split makes a
+ * the source, marks its assessments outdated and resets its validated priority; split makes a
  * related gap with only the new part; reject leaves the plan as it was and keeps
  * the candidate promotable.
  */
@@ -96,7 +96,7 @@ describe("KAN-75 merge", () => {
     suggestionId = await overlapOn(gapId);
   });
 
-  it("rewords the gap, adds the source, flags its mappings and resets its validated priority", async () => {
+  it("rewords the gap, adds the source, marks its assessments outdated and resets its validated priority", async () => {
     const result = await acceptGapMergeSuggestion({
       suggestion_id: suggestionId,
       name: "Comparative effectiveness incl. elderly",
@@ -116,7 +116,8 @@ describe("KAN-75 merge", () => {
     expect(needs).toContainEqual(
       expect.objectContaining({ role: "supporting", need: expect.objectContaining({ source_id: sourceId }) }),
     );
-    expect(state.coverages.filter((row) => row.gap_id === gapId).every((row) => row.needs_review)).toBe(true);
+    expect(state.coverages.filter((row) => row.gap_id === gapId).every((row) => row.stale)).toBe(true);
+    expect(state.coverages.filter((row) => row.gap_id === gapId).every((row) => !row.needs_review)).toBe(true);
     const placement = (await listPlacements()).find((row) => row.gap_id === gapId)!;
     expect(placement).toMatchObject({ validated: false, band: "high" });
     expect(state.gap_suggestions.find((row) => row.id === suggestionId)).toMatchObject({

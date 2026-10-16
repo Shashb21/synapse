@@ -424,6 +424,9 @@ function iegpStatements(): string[] {
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS needs_review boolean NOT NULL DEFAULT false",
     "ALTER TABLE gaps ADD COLUMN IF NOT EXISTS requirement_basis jsonb",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS confirmed_requirement_basis jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessed_basis jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS stale_reasons jsonb NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessment_history jsonb NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS review_version text",
     "ALTER TABLE coverages ADD COLUMN IF NOT EXISTS assessment_origin text",
     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS setup_complete boolean NOT NULL DEFAULT false",
@@ -449,6 +452,7 @@ function iegpStatements(): string[] {
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS run_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS candidate_row_id text",
     "ALTER TABLE needs ADD COLUMN IF NOT EXISTS block_id text",
+    "ALTER TABLE needs ADD COLUMN IF NOT EXISTS source_basis_text text",
     "ALTER TABLE gap_versions ADD COLUMN IF NOT EXISTS snapshot jsonb",
     // KAN-15: per-prefix id counters that only move up, so ids are never reissued.
     "CREATE TABLE IF NOT EXISTS id_counters (key text PRIMARY KEY, last bigint NOT NULL)",

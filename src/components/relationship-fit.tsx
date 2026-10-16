@@ -21,8 +21,8 @@ function confirmationText(lock: Lock): string {
 export function RelationshipFit({ fit, tacticName }: { fit: RelationshipFitModel; tacticName: string }) {
   const unanswered = fit.dimensions.filter(d => d.unanswered);
   const freshness = [
-    fit.stale ? "Marked stale" : null,
-    fit.needs_review ? "Relationship review requested" : null,
+    fit.stale ? "Outdated — explicit reassessment required" : null,
+    fit.needs_review ? "Sibling-assessment warning" : null,
     fit.source_changed ? "Requirement sources changed" : null,
   ].filter(Boolean).join("; ") || "No recorded freshness warning";
   return (

@@ -66,6 +66,8 @@ export const needs = pgTable("needs", {
   timing: text("timing").notNull(),
   source_id: text("source_id").notNull(),
   source_quote: text("source_quote").notNull(),
+  /** Original cited block text retained through structural edits for legacy unquoted needs. */
+  source_basis_text: text("source_basis_text"),
   /** Null until a model or a human scores it; never a placeholder. */
   confidence: real("confidence"),
   status: text("status").notNull(),
@@ -222,6 +224,9 @@ export const tacticExpansions = pgTable("tactic_expansions", {
 
 export const coverages = pgTable("coverages", {
   assessment_origin: text("assessment_origin").$type<"human" | "ai" | "workflow">(),
+  assessed_basis: jsonb("assessed_basis").$type<{ requirements: string; design: string }>(),
+  stale_reasons: jsonb("stale_reasons").$type<string[]>().notNull().default([]),
+  assessment_history: jsonb("assessment_history").$type<import("./types").AssessmentHistoryEntry[]>().notNull().default([]),
   confirmed_requirement_basis: jsonb("confirmed_requirement_basis").$type<import("./types").RequirementBasis>(),
   review_version: text("review_version"),
   expansion_id: text("expansion_id"),

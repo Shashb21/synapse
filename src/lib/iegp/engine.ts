@@ -953,8 +953,8 @@ export function relationshipFit(state: IegpState, gapId: string, tacticId: strin
   const reasons: string[] = [];
   if (!coverage || coverage.overall === "unassessed") reasons.push("This relationship has not been assessed.");
   else if (!coverage.overall_lock.locked) reasons.push("The saved overall judgement has not been confirmed by a human.");
-  if (coverage?.stale) reasons.push("The recorded assessment is marked stale; review it against the current question and tactic design.");
-  if (coverage?.needs_review) reasons.push("This relationship is marked for review; reassess its question and tactic design independently.");
+  if (coverage?.stale) reasons.push(...(coverage.stale_reasons?.length ? coverage.stale_reasons : ["The recorded assessment is outdated; review it against the current question and tactic design."]));
+  if (coverage?.needs_review) reasons.push("A sibling assessment changed; this relationship is marked for review independently. Acknowledgement does not reassess an outdated basis.");
   if (review.source_changed) reasons.push("Requirement sources changed since the saved basis review.");
   if (review.legacy_unsupported_full) reasons.push("Historical Full has no confirmed requirement basis and does not supply verified current Full.");
   if (!review.basis.confirmation.locked) reasons.push("The requirement basis has not been confirmed by a human.");

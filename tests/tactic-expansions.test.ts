@@ -213,10 +213,11 @@ describe("canonical expansion acceptance", () => {
     expect(row.overall_lock.locked).toBe(true);
     expect(row.dimensions.population.lock.locked).toBe(true);
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_addressed");
+    const parentAssessmentsAfterRequirementReview = state.coverages.filter(c => !c.expansion_id);
     await setExpansionStatus({expansion_id: child.id, status: "proposed", rationale: "Resources withdrawn", actor, expected_version: planned.version});
     state = await loadState(); row = state.coverages.find(c => c.id === coverage.id)!;
     expect(computeGapStatus([row], state.tactics, {expansions: state.expansions})).toBe("validated_open");
-    expect(state.coverages.filter(c => !c.expansion_id)).toEqual(before.coverages.filter(c => !c.expansion_id));
+    expect(state.coverages.filter(c => !c.expansion_id)).toEqual(parentAssessmentsAfterRequirementReview);
   });
   it.each(["status", "evidence_question"] as const)("detects an actual changed parent %s rather than an inert version field", async field => {
     const before = await loadState();

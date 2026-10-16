@@ -94,6 +94,8 @@ export type EvidenceNeed = {
   timing: string;
   source_id: string;
   source_quote: string;
+  /** Original cited text retained when an unquoted block is split or merged. */
+  source_basis_text?: string | null;
   /** Null until a model or a human scores it. */
   confidence: number | null;
   status: NeedStatus;
@@ -402,7 +404,23 @@ export type TacticExpansion = {
   actor: Actor;
 };
 
+/** Previous judgements remain available after invalidation and explicit reassessment. */
+export type AssessmentHistoryEntry = {
+  action: "invalidate" | "reassess";
+  at: string;
+  reason: string;
+  basis: { requirements: string; design: string };
+  overall: OverallCoverage;
+  overall_lock: Lock;
+  overall_rationale: string;
+  dimensions: Record<CoverageDimension, DimensionAssessment>;
+  confirmed_requirement_basis: RequirementBasis | null;
+};
+
 export type GapTacticCoverage = {
+  assessed_basis?: { requirements: string; design: string } | null;
+  stale_reasons?: string[];
+  assessment_history?: AssessmentHistoryEntry[];
   /** Author of the current overall judgement, not the reviewer or relationship creator. Null for unrecorded history. */
   assessment_origin?: "human" | "ai" | "workflow" | null;
   /** Exact reviewed basis supporting an explicit overall confirmation; absent on historical rows. */
@@ -417,7 +435,7 @@ export type GapTacticCoverage = {
   overall: OverallCoverage;
   overall_rationale: string;
   overall_lock: Lock;
-  /** Unused. Coverage is not marked outdated. Kept on the row for schema compatibility. */
+  /** The relationship’s own requirement/design basis changed after its judgement. */
   stale: boolean;
   /** Sibling coverage flagged after a dimension/overall change on another live gap for the same tactic. Values are not copied. */
   needs_review: boolean;
