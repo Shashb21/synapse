@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import Link from "next/link";
 import type { GapRecord } from "@/lib/iegp/gap-record";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
-import { RecordPanel } from "@/components/record-panel";
+import { RecordNavigation, RecordPanel } from "@/components/record-panel";
 import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
 import { GapCoverageContext, GapRecordSections } from "@/components/gap-record-sections";
 import { GapMetadataView } from "@/components/gap-metadata";
 import { SettingChips } from "@/components/gap-settings-editor";
 import { EntityHistory } from "@/components/entity-history";
+import type { TacticDraftGuard } from "@/components/tactic-ideation/use-tactic-draft-guard";
+import { TacticPanelRecord, TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import { GapPriorityActions } from "@/components/prioritize/gap-priority-actions";
 import type { PrioritizeGap } from "@/components/prioritize/prioritize-matrix";
 
@@ -20,9 +22,41 @@ export function GapPanel({ gapId, onClose, returnFocusRef, priorityEditor, refre
   priorityEditor?: PriorityEditor;
   refreshVersion?: string;
 }) {
-  return <RecordPanel open={gapId !== null} onClose={onClose} returnFocusRef={returnFocusRef}
-    title="Gap details" description="Current evidence context, next actions and recorded history.">
-    {gapId ? <GapPanelRecord key={gapId} gapId={gapId} priorityEditor={priorityEditor} refreshVersion={refreshVersion} /> : null}
+  const [detailRevision, setDetailRevision] = useState(0);
+  const [tacticId, setTacticId] = useState<string | null>(null);
+  const backButtonRef = useRef<HTMLButtonElement | null>(null);
+  const tacticFocusRef = useRef<HTMLElement | null>(null);
+  const tacticDraftRef = useRef<TacticDraftGuard | null>(null);
+  // Move focus in the commit that swaps visible content, before the sheet restores
+  // focus to its container when the previously focused element disappears.
+  useLayoutEffect(() => {
+    if (tacticId) backButtonRef.current?.focus();
+    else tacticFocusRef.current?.focus();
+  }, [tacticId]);
+  function backToGap() {
+    if (tacticDraftRef.current && !tacticDraftRef.current.allowDiscard()) return;
+    tacticDraftRef.current?.reset();
+    setTacticId(null);
+    setDetailRevision(value => value + 1);
+  }
+  function close() {
+    if (tacticId) backToGap();
+    else onClose();
+  }
+  return <RecordPanel open={gapId !== null} onClose={close} returnFocusRef={returnFocusRef}
+    title={tacticId ? "Tactic details" : "Gap details"} description="Current evidence context, next actions and recorded history.">
+    <RecordNavigation.Provider value={{ openTactic: (id, trigger) => {
+      tacticFocusRef.current = trigger;
+      setTacticId(id);
+    } }}>
+      <div hidden={tacticId !== null}>
+        {gapId ? <GapPanelRecord key={gapId} gapId={gapId} priorityEditor={priorityEditor} refreshVersion={`${refreshVersion ?? ""}:${detailRevision}`} /> : null}
+      </div>
+      {tacticId ? <>
+        <button ref={backButtonRef} type="button" className="mb-3 underline" onClick={backToGap}>Back to gap</button>
+        <TacticPanelRecord key={tacticId} tacticId={tacticId} draftGuardRef={tacticDraftRef} onClose={backToGap} onSaved={backToGap} />
+      </> : null}
+    </RecordNavigation.Provider>
   </RecordPanel>;
 }
 
@@ -89,7 +123,7 @@ function GapPanelRecord({ gapId, priorityEditor, refreshVersion }: { gapId: stri
       <section aria-label="Linked tactics">
         <h2 className="font-medium">Linked tactics</h2>
         {record.coverages.length ? <ul className="grid gap-2">{record.coverages.map(coverage => <li key={coverage.id}>
-          <Link href={`/tactics/${encodeURIComponent(coverage.tactic_id)}`}>{coverage.tactic?.name || coverage.tactic_id}</Link> · {coverage.overall}
+          <TacticRecordLink tacticId={coverage.tactic_id}>{coverage.tactic?.name || coverage.tactic_id}</TacticRecordLink> · {coverage.tactic?.status ?? "Tactic unavailable"} · {coverage.overall}
         </li>)}</ul> : <p>No tactics mapped.</p>}
       </section>
       <section aria-label="Constituent needs">

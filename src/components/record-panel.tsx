@@ -1,7 +1,11 @@
 "use client";
 
-import type { ReactNode, RefObject } from "react";
+import { createContext, useContext, type ReactNode, type RefObject } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+
+/** A record can replace the current panel body without opening a second sheet. */
+export const RecordNavigation = createContext<{ openTactic: (id: string, trigger: HTMLElement) => void } | null>(null);
+export const useRecordNavigation = () => useContext(RecordNavigation);
 
 /** Common modal record interaction: retained workspace, contained focus and an explicit return target. */
 export function RecordPanel({ open, onClose, title, description, returnFocusRef, children }: {

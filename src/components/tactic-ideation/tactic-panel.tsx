@@ -7,7 +7,7 @@ import type { ActorFunction, TacticStatus, TacticType } from "@/lib/iegp/enums";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
 import type { TacticRecord } from "@/lib/iegp/tactic-record";
 import type { TacticDraftGuard } from "@/components/tactic-ideation/use-tactic-draft-guard";
-import { RecordPanel } from "@/components/record-panel";
+import { RecordPanel, useRecordNavigation } from "@/components/record-panel";
 import { TacticRecordContent } from "@/components/tactic-record-content";
 
 /** The fields the side panel edits (KAN-50). */
@@ -52,7 +52,7 @@ export function TacticPanel({ tacticId, onClose, returnFocusRef, refreshVersion 
   </RecordPanel>;
 }
 
-function TacticPanelRecord({ tacticId, refreshVersion, draftGuardRef, onClose, onSaved }: {
+export function TacticPanelRecord({ tacticId, refreshVersion, draftGuardRef, onClose, onSaved }: {
   tacticId: string; refreshVersion?: string; draftGuardRef: RefObject<TacticDraftGuard | null>;
   onClose: () => void; onSaved: () => void;
 }) {
@@ -89,11 +89,14 @@ function TacticPanelRecord({ tacticId, refreshVersion, draftGuardRef, onClose, o
 export function TacticRecordLink({ tacticId, children, onClick, ...props }: Omit<ComponentProps<typeof Link>, "href"> & { tacticId: string }) {
   const triggerRef = useRef<HTMLAnchorElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const navigation = useRecordNavigation();
   return <>
     <Link {...props} ref={triggerRef} href={`/tactics/${encodeURIComponent(tacticId)}`} aria-haspopup="dialog" onClick={event => {
       onClick?.(event);
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || props.target === "_blank") return;
-      event.preventDefault(); setSelected(tacticId);
+      event.preventDefault();
+      if (navigation) navigation.openTactic(tacticId, event.currentTarget);
+      else setSelected(tacticId);
     }}>{children}</Link>
     <TacticPanel tacticId={selected} onClose={() => setSelected(null)} returnFocusRef={triggerRef} />
   </>;

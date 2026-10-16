@@ -1,3 +1,5 @@
+import { ProposalCard } from "@/components/ideation/proposal-card";
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import { GapBadge, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
 import { GapStatusDisagreement } from "@/components/gap-status-override";
 import { GAP_STATUS_DEFINITIONS } from "@/lib/iegp/enums";
@@ -183,9 +185,30 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
           </div>
         </div>
       </Section>
+      <section aria-label="Tactic planning routes" data-testid="gap-planning-routes" className={CARD}>
+        <h2 className={HEADING}>Tactic options and planned work</h2>
+        <p>Existing options, decisions and linked tactics remain available when evidence status or priority changes.</p>
+        <p className="mt-2">{open && priority?.validated && band === "high" && !priority.needs_review
+          ? "Current High/Open gap: new AI ideation is available from Tactics when unlocked and AI assistance is enabled."
+          : priority?.needs_review
+            ? "Review changed context and reconfirm a High/Open priority before new AI ideation. Existing work is retained."
+            : band === "medium" || band === "low"
+              ? "Medium and Low gaps use the manual or library route. New AI ideation requires a confirmed High/Open priority."
+              : "New AI ideation requires a confirmed High/Open priority. Existing work is retained."}</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {tacticsUnlocked ? <Link href="/?place=tactics">Open Tactics and existing work</Link> : <Link href="/?place=plan&setting=all">Review initial plan-wide priorities</Link>}
+          {!record.gap.retired && !record.gap.parked_at && record.gap.status !== "excluded" ? <Link href={`/gaps/${encodeURIComponent(record.gap.id)}#gap-tactic-mappings`}>Map from library or add a tactic by hand</Link> : null}
+          {ideas.length ? <Link href="/ideation">Review existing option decisions</Link> : null}
+        </div>
+      </section>
       <Section title="Ideas" testId="gap-ideas">
         {ideas.length === 0 ? (
           <p className={`${CARD} text-muted-foreground`}>No tactic ideas for this gap yet.</p>
+        ) : record.options ? (
+          <>
+            <p className="mb-2 text-[12px] text-muted-foreground">{ideas.filter(idea => idea.status === "accepted").length} accepted · {ideas.filter(idea => idea.status === "rejected").length} rejected · {ideas.filter(idea => idea.status === "proposed").length} proposed</p>
+            <div className="grid gap-2">{record.options.map(option => <ProposalCard key={option.id} proposal={option} mayIdeate={false} readOnly identity={{ signed_in: false, actor_name: "", actor_function: "medical_affairs" }} />)}</div>
+          </>
         ) : (
           <ul className="grid gap-2">
             {ideas.map((idea) => (
@@ -209,7 +232,7 @@ export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, 
             {timeline.map((activity) => (
               <li key={activity.id} className={CARD}>
                 <p>
-                  {activity.tactic_id} · {activity.start_date} → {activity.end_date}
+                  <TacticRecordLink tacticId={activity.tactic_id}>{activity.tactic_id}</TacticRecordLink> · {activity.start_date} → {activity.end_date}
                   {activity.readout_date ? ` · readout ${activity.readout_date}` : null}
                 </p>
               </li>

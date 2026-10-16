@@ -13,7 +13,9 @@ import { GapMetadataView } from "@/components/gap-metadata";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { TacticEditPanel, type TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
 import type { OpenGapCard, PlanTactic, TacticLibraryItem } from "@/lib/iegp/engine";
-import { DOMAIN_LABELS } from "@/lib/iegp/enums";
+import type { RetainedTacticGap } from "@/components/tactic-ideation/data";
+import { BAND_LABELS } from "@/components/matrix/bands";
+import { DOMAIN_LABELS, GAP_STATUS_LABELS } from "@/lib/iegp/enums";
 import { tacticColor, tacticTypeLabel } from "@/lib/iegp/tactic-type-colors";
 import { customTypesInUse, type CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { cn } from "@/lib/utils";
@@ -139,9 +141,9 @@ function GapIdeationCard({
               {linked.length} tactic{linked.length === 1 ? "" : "s"}
             </span>
           ) : null}
-          {ai && suggestions.length > 0 ? (
+          {suggestions.length > 0 ? (
             <span className="rounded-full bg-muted px-2 py-px text-[10px] font-medium text-muted-foreground">
-              {suggestions.length} suggestion{suggestions.length === 1 ? "" : "s"}
+              {suggestions.length} option{suggestions.length === 1 ? "" : "s"}
             </span>
           ) : null}
           <span className="rounded-sm bg-rose-50 px-1.5 py-px text-[10px] text-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
@@ -190,21 +192,19 @@ function GapIdeationCard({
             )}
           </section>
 
-          {ai ? (
-            <section aria-label={`Suggested tactics for ${card.gap_name}`}>
+          {ai || suggestions.length > 0 ? (
+            <section aria-label={`Tactic options for ${card.gap_name}`}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Suggested</h3>
-                <span className="rounded-sm bg-primary/10 px-1.5 py-px text-[10px] text-indigo-800 dark:text-indigo-300">
-                  AI-assisted
-                </span>
-                <div className="ml-auto">
+                <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Current and prior options</h3>
+                {ai ? <span className="rounded-sm bg-primary/10 px-1.5 py-px text-[10px] text-indigo-800 dark:text-indigo-300">AI-assisted</span> : null}
+                {ai && mayIdeate ? <div className="ml-auto">
                   <RunStageButton
                     stage="S9"
                     input={{ gap_ids: [card.gap_id] }}
                     label={suggestions.length === 0 ? "Suggest tactics" : "Suggest more"}
                     identity={identity}
                   />
-                </div>
+                </div> : null}
               </div>
               {suggestions.length === 0 ? (
                 <p className="rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
@@ -349,12 +349,13 @@ function LibraryPanel({ items, onEdit }: { items: TacticLibraryItem[]; onEdit?: 
 }
 
 /**
- * Tactic Ideation (KAN-8): the High-priority Open gaps as collapsible cards, each with its
+ * Tactic Ideation: current High-priority Open gaps and retained work, each with its
  * linked tactics, AI suggestions (AI on only) and a hand-written custom tactic, then the
  * tactic library.
  */
 export function IdeationBoard({
   gaps,
+  retainedGaps = [],
   proposals,
   library,
   identity,
@@ -362,6 +363,7 @@ export function IdeationBoard({
   tactics = {},
 }: {
   gaps: OpenGapCard[];
+  retainedGaps?: RetainedTacticGap[];
   proposals: ProposalCardModel[];
   library: TacticLibraryItem[];
   identity: ActionIdentity;
@@ -386,7 +388,7 @@ export function IdeationBoard({
   // Every card starts collapsed (owner feedback, KAN-56).
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
-  const domains = useMemo(() => [...new Set(gaps.map((gap) => gap.domain))].sort(), [gaps]);
+  const domains = useMemo(() => [...new Set([...gaps, ...retainedGaps].map(gap => gap.domain))].sort(), [gaps, retainedGaps]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return gaps.filter((gap) => {
@@ -397,8 +399,17 @@ export function IdeationBoard({
       return true;
     });
   }, [gaps, query, domain, coverage]);
-  const waiting = (gapId: string) =>
-    proposals.filter((proposal) => proposal.gap_id === gapId && proposal.status === "proposed");
+  const existing = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return retainedGaps.filter(gap => {
+      if (q && !gap.gap_name.toLowerCase().includes(q) && !gap.gap_id.toLowerCase().includes(q) && !gapNumberLabel(gap.number).includes(q)) return false;
+      if (domain && gap.domain !== domain) return false;
+      if (coverage === "linked" && gap.tactic_count === 0) return false;
+      if (coverage === "unlinked" && gap.tactic_count > 0) return false;
+      return true;
+    });
+  }, [retainedGaps, query, domain, coverage]);
+  const options = (gapId: string) => proposals.filter(proposal => proposal.gap_id === gapId);
   const toggle = (gapId: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -451,7 +462,7 @@ export function IdeationBoard({
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5">
         <input
           type="search"
-          aria-label="Search high-priority gaps"
+          aria-label="Search high-priority gaps and existing work"
           placeholder="Search gaps…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -495,13 +506,14 @@ export function IdeationBoard({
       </div>
 
       <div className="grid gap-2">
+        <h2 className="text-[13px] font-semibold">Current eligible ideation</h2>
         {filtered.map((card) => (
           <GapIdeationCard
             key={card.gap_id}
             card={card}
             expanded={expanded.has(card.gap_id)}
             onToggle={() => toggle(card.gap_id)}
-            suggestions={waiting(card.gap_id)}
+            suggestions={options(card.gap_id)}
             library={library}
             identity={identity}
             mayIdeate={mayIdeate}
@@ -510,7 +522,7 @@ export function IdeationBoard({
         ))}
         {gaps.length === 0 ? (
           <div className="rounded-lg border border-border bg-card p-8 text-center text-[12px] text-muted-foreground">
-            No high-priority gaps. Use the{" "}
+            No confirmed High/Open gaps eligible for new ideation. Use the{" "}
             <Link href="/?place=plan" className="text-foreground">
               Prioritization Matrix
             </Link>{" "}
@@ -523,6 +535,15 @@ export function IdeationBoard({
         ) : null}
       </div>
 
+      <section aria-label="Existing options and planned work" className="grid gap-2 rounded-lg border border-border bg-card p-3">
+        <h2 className="text-[13px] font-semibold">Existing options and planned work</h2>
+        <p className="text-[12px] text-muted-foreground">Prior work remains here when a gap leaves current High/Open eligibility. Open a gap to inspect its options, linked tactics and decision history. Search and filters above also apply here.</p>
+        {existing.length ? <ul className="grid gap-2">{existing.map(gap => <li key={gap.gap_id} className="rounded-md border border-border p-3 text-[12px]">
+          <GapRecordLink gapId={gap.gap_id} className="font-medium underline">{gapNumberLabel(gap.number)} · {gap.gap_name}</GapRecordLink>
+          <p className="mt-1 text-muted-foreground">{GAP_STATUS_LABELS[gap.gap_status]} · {gap.band ? BAND_LABELS[gap.band] : "Priority unset"} · {gap.needs_review ? "Needs priority review" : gap.priority_confirmed ? "Priority confirmed" : "Priority not confirmed"}</p>
+          <p className="text-muted-foreground">{gap.option_count} option{gap.option_count === 1 ? "" : "s"} · {gap.tactic_count} linked tactic{gap.tactic_count === 1 ? "" : "s"}</p>
+        </li>)}</ul> : <p className="text-[12px] text-muted-foreground">{retainedGaps.length ? "No existing work matches the current filters." : "No prior work outside current eligible ideation yet. Existing options are shown with their eligible gap above."}</p>}
+      </section>
       <LibraryPanel items={library} onEdit={canEdit ? (id) => void openEditor(id) : undefined} />
       <TacticEditPanel
         tactic={editingId ? (tactics[editingId] ?? null) : null}

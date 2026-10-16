@@ -30,7 +30,7 @@ import { displayedGapStatus, isLiveGap, emptyDimensions, unlocked } from "@/lib/
 import { listPlacements } from "@/modules/stages/s8-prioritization/module";
 import { plural } from "@/lib/plural";
 import { acceptTacticExpansion, expansionScopeSchema, tacticVersion, type ExpansionTransaction } from "@/lib/iegp/tactic-expansions";
-import type { ExpansionScope, Tactic } from "@/lib/iegp/types";
+import type { ExpansionScope, IegpState, Tactic } from "@/lib/iegp/types";
 import { captureProposalDecision } from "@/lib/iegp/learning-capture";
 
 /**
@@ -1165,32 +1165,35 @@ export async function listIdeationProposals(): Promise<IdeationProposalRecord[]>
   await ensurePlatformSchema();
   const rows = await db().select().from(t.ideationProposals).orderBy(desc(t.ideationProposals.created_at));
   const state = await loadState();
-  return rows.map((row) => {
-    const { design, meta } = splitDesign(row.design);
-    return {
-      id: row.id,
-      version: proposalVersion(row),
-      supporting_references: recordedJudgementReferences(state, meta.supporting_references),
-      gap_id: row.gap_id,
-      name: row.name,
-      type: row.type,
-      rationale: row.rationale,
-      evidence_question: row.evidence_question,
-      design,
-      status: row.status,
-      critic_note: row.critic_note,
-      judge_score: row.judge_score,
-      created_at: row.created_at,
-      decided_by: row.decided_by,
-      decision_rationale: row.decision_rationale,
-      tactic_id: row.tactic_id,
-      proposal_kind: row.proposal_kind as "new" | "expansion", target_tactic_id: row.target_tactic_id, expansion_id: row.expansion_id, expansion_scope: row.expansion_scope as ExpansionScope | null, reviewed_parent: row.reviewed_parent as Tactic | null, comparative_rationale: row.comparative_rationale,
-      rank: meta.rank ?? null,
-      origin: meta.origin ?? "ai",
-      edited_by: meta.edited_by ?? null,
-      edited_at: meta.edited_at ?? null,
-    };
-  });
+  return rows.map(row => ideationProposalReadback(row, state));
+}
+
+/** Shared, authorised option inspection for review and gap details; never a write snapshot refresh. */
+export function ideationProposalReadback(row: typeof t.ideationProposals.$inferSelect, state: IegpState): IdeationProposalRecord {
+  const { design, meta } = splitDesign(row.design);
+  return {
+    id: row.id,
+    version: proposalVersion(row),
+    supporting_references: recordedJudgementReferences(state, meta.supporting_references),
+    gap_id: row.gap_id,
+    name: row.name,
+    type: row.type,
+    rationale: row.rationale,
+    evidence_question: row.evidence_question,
+    design,
+    status: row.status,
+    critic_note: row.critic_note,
+    judge_score: row.judge_score,
+    created_at: row.created_at,
+    decided_by: row.decided_by,
+    decision_rationale: row.decision_rationale,
+    tactic_id: row.tactic_id,
+    proposal_kind: row.proposal_kind as "new" | "expansion", target_tactic_id: row.target_tactic_id, expansion_id: row.expansion_id, expansion_scope: row.expansion_scope as ExpansionScope | null, reviewed_parent: row.reviewed_parent as Tactic | null, comparative_rationale: row.comparative_rationale,
+    rank: meta.rank ?? null,
+    origin: meta.origin ?? "ai",
+    edited_by: meta.edited_by ?? null,
+    edited_at: meta.edited_at ?? null,
+  };
 }
 
 /** The fields a person may write on an idea, by hand or as an edit. */

@@ -1,3 +1,4 @@
+import { ideationProposalReadback, type IdeationProposalRecord } from "@/modules/stages/s9-ideation/module";
 import { gapResolutionVersion } from "./relationship-version";
 import { readPlacementSnapshot } from "@/modules/stages/s8-prioritization/module";
 import { inspectJudgementReferences } from "./judgement-references";
@@ -55,6 +56,8 @@ export type GapRecord = {
   mapping_rejections: IegpState["mapping_suggestions"];
   priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string; human_axes?: string[]; human_band?: boolean }) | null;
   ideas: (typeof kernel.ideationProposals.$inferSelect)[];
+  /** Shared S9 presentation, including authorised model support. Raw ideas remain compatible. */
+  options?: IdeationProposalRecord[];
   timeline: (typeof kernel.timelineActivities.$inferSelect)[];
   breakout_groups: IegpState["breakout_groups"];
   pending_suggestions: IegpState["gap_suggestions"];
@@ -145,6 +148,7 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     mapping_rejections: state.mapping_suggestions.filter((m) => m.gap_id === gap.id && m.status === "rejected"),
     priority: priority ? { ...priority, suggested_references: inspectJudgementReferences(state, [gap.id], priority.suggested_references).map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })) } : null,
     ideas,
+    options: ideas.map(row => ideationProposalReadback(row, state)),
     timeline,
     breakout_groups: state.breakout_groups.filter((g) => groupIds.has(g.id)),
     pending_suggestions: state.gap_suggestions.filter((row) => row.gap_id === gap.id && row.status === "pending"),

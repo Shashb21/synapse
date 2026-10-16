@@ -38,10 +38,13 @@ export function ProposalCard({
   proposal,
   identity,
   mayIdeate,
+  readOnly = false,
 }: {
   proposal: ProposalCardModel;
   identity: ActionIdentity;
   mayIdeate: boolean;
+  /** Record inspection keeps decisions in their existing review surface. */
+  readOnly?: boolean;
 }) {
   const settled = proposal.status !== "proposed";
   return (
@@ -110,7 +113,7 @@ export function ProposalCard({
           Rationale and critic note
         </summary>
         <div className="mt-1 grid gap-1 border-l border-border pl-2">
-          <p className="text-[11px] leading-4 text-muted-foreground">{proposal.rationale}</p>
+          <p className="text-[11px] leading-4 text-muted-foreground">{proposal.rationale || "Reason not recorded"}</p>
           <p className="text-[11px] leading-4 text-muted-foreground">
             Critic: {proposal.critic_note?.trim() ? proposal.critic_note : "no note recorded"}
           </p>
@@ -143,7 +146,7 @@ export function ProposalCard({
               {proposal.expansion_id ? `Expansion ${proposal.expansion_id} on tactic ${proposal.tactic_id}` : `Tactic ${proposal.tactic_id}`}
             </TacticRecordLink>
           ) : null}
-          {proposal.status === "rejected" && mayIdeate ? (
+          {proposal.status === "rejected" && mayIdeate && !readOnly ? (
             <div>
               <ActionDialog
                 protectUnsavedChanges
@@ -162,7 +165,7 @@ export function ProposalCard({
             </div>
           ) : null}
         </div>
-      ) : (
+      ) : readOnly ? null : (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
           {mayIdeate ? (
             <>
