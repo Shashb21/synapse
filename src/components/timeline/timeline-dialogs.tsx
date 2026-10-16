@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,7 @@ import { dependencyConflicts, type DependencyConflict } from "@/modules/stages/s
 import { postJson } from "@/lib/post-json";
 
 const SMALL_TRIGGER = <Button size="xs" variant="outline" />;
+const ICON_TRIGGER = <Button size="icon-xs" variant="ghost" />;
 
 /** Dates an activity by hand, with no model: start, end, readout, and optionally a lane and rationale. */
 export function ManualDatesDialog({
@@ -95,11 +96,14 @@ export function CreateActivityDialog({
   gap,
   label = "Add activity",
   small = true,
+  icon = false,
 }: {
   identity: ActionIdentity;
   gap: { gap_id: string; gap_name: string; statement: string };
   label?: string;
   small?: boolean;
+  /** A compact "+" on each Gantt gap row, so the gap name keeps its room. */
+  icon?: boolean;
 }) {
   return (
     <ActionDialog
@@ -110,7 +114,8 @@ export function CreateActivityDialog({
       description="Creates a proposed tactic mapped to this gap. Leave the dates empty to keep it unscheduled. Everything you enter is yours and no rebuild overwrites it."
       confirmLabel="Add activity"
       identity={identity}
-      trigger={small ? SMALL_TRIGGER : undefined}
+      trigger={icon ? ICON_TRIGGER : small ? SMALL_TRIGGER : undefined}
+      triggerContent={icon ? <Plus aria-hidden /> : undefined}
       fields={[
         { name: "name", label: "Activity name", required: true, placeholder: "e.g. Real-world treatment patterns study" },
         {
