@@ -1,0 +1,88 @@
+"use client";
+
+import { useState } from "react";
+import { Loader2, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { DemoBadge } from "./demo-badge";
+import { sendJson, type WorkspaceTagModel } from "./model";
+
+/**
+ * Shown on every page of a demo workspace (KAN-127): says it holds the Velmara
+ * demo and, for its owner, resets it to the clean demo in one confirm, so a
+ * client demo can start fresh. Same "load_demo" action as Workspace settings.
+ */
+export function DemoResetBar({ workspace }: { workspace: WorkspaceTagModel["current"] }) {
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const owner = workspace.role === "owner";
+
+  async function reset() {
+    setPending(true);
+    setError(null);
+    try {
+      await sendJson("/api/iegp", { action: "load_demo" });
+      // A full load from the home page, so nothing from before the reset stays on screen.
+      window.location.assign("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The demo could not be reset.");
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      data-app-chrome
+      data-testid="demo-reset-bar"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/30 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground sm:px-6"
+    >
+      <DemoBadge testId="demo-bar-badge" />
+      <span>Demo workspace with the Velmara sample plan.</span>
+      {owner ? (
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            if (pending) return;
+            setOpen(next);
+            if (!next) setError(null);
+          }}
+        >
+          <Button type="button" size="xs" variant="outline" className="ml-auto" onClick={() => setOpen(true)}>
+            <RotateCcw className="size-3" aria-hidden />
+            Reset demo
+          </Button>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reset the demo?</DialogTitle>
+              <DialogDescription>
+                Everything changed in {workspace.name} since the demo was loaded is deleted, including saved plan versions,
+                and the clean Velmara demo is put back. Use it before each client demo.
+              </DialogDescription>
+            </DialogHeader>
+            {error ? (
+              <p role="alert" className="text-[12px] text-destructive">
+                {error}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <DialogClose render={<Button type="button" size="sm" variant="outline" disabled={pending} />}>Cancel</DialogClose>
+              <Button type="button" size="sm" onClick={() => void reset()} disabled={pending}>
+                {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+                {pending ? "Resetting…" : "Reset demo"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </div>
+  );
+}

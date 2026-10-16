@@ -26,6 +26,7 @@ import { useAiEnabled } from "@/components/platform/ai-status";
 import type { PlanPlace } from "@/lib/iegp/engine";
 import { RestartWalkthroughButton } from "@/components/walkthrough";
 import { WorkspaceTag } from "@/components/workspaces/workspace-tag";
+import { DemoResetBar } from "@/components/workspaces/demo-reset-bar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { WorkspaceTagModel } from "@/components/workspaces/model";
 
@@ -428,6 +429,7 @@ export function PlanChrome({
           <p className="text-[13px] font-medium text-foreground">{current}</p>
         </header>
         )}
+        {workspace?.current.demo && !present ? <DemoResetBar workspace={workspace.current} /> : null}
         {showReadiness && !present ? <ReadinessStrip nav={nav} /> : null}
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-6">{children}</main>
       </div>
