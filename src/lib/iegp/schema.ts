@@ -43,6 +43,13 @@ export const sources = pgTable("sources", {
   full_text: text("full_text").notNull(),
 });
 
+/** Citations survive changes to the original source and keep immutable human decisions. */
+export const sourceReviews = pgTable("source_reviews", {
+  id: text("id").primaryKey(),
+  version: text("version").notNull(),
+  record: jsonb("record").$type<import("./types").SourceReview>().notNull(),
+});
+
 export const sourceBlocks = pgTable("source_blocks", {
   id: text("id").primaryKey(),
   source_id: text("source_id").notNull(),

@@ -1,3 +1,5 @@
+import { SourceClaimReview } from "@/components/source-claim-review";
+import { can } from "@/modules/auth/roles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
@@ -55,6 +57,7 @@ export default async function SourceBlocksPage({ params }: { params: Promise<{ i
           All sources
         </Link>
       </PageIntro>
+      <SourceClaimReview state={state} identity={identity} canReview={can(identityContext.role, "validate")} sourceId={id} />
 
       <section className="mb-4 border border-border bg-card p-3 rounded-lg" aria-labelledby="stakeholder">
         <h2 id="stakeholder" className="text-[12px] font-semibold text-foreground">

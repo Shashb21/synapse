@@ -492,7 +492,19 @@ export type ResidualGapSuggestionRecord = {
   lock: Lock;
 };
 
+/** Saved citation and review decision, independent of coverage freshness and verdicts. */
+export type SourceReview = {
+  id: string; version: string; kind: "support" | "discrepancy"; origin: "human" | "ai";
+  source_id: string; block_id: string; passage: string; source_title: string; source_location: string;
+  gap_id: string | null; tactic_id: string | null; coverage_id: string | null;
+  rationale: string; status: "linked" | "pending" | "dismissed" | "accepted";
+  created_at: string; created_by: { name: string; function: ActorFunction };
+  history: { decision: "dismiss" | "accept"; rationale: string; at: string; actor: { name: string; function: ActorFunction };
+    correction?: { target: "gap" | "tactic"; field: string; before: string; value: string } }[];
+};
+
 export type IegpState = {
+  source_reviews?: SourceReview[];
   asset: Asset;
   objectives: StrategicObjective[];
   sources: SourceDocument[];

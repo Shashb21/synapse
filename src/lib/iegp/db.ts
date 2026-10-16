@@ -289,6 +289,9 @@ CREATE TABLE IF NOT EXISTS sources (
   source_type text NOT NULL, stakeholder_function text NOT NULL,
   ingested_at text NOT NULL, full_text text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_reviews (
+  id text PRIMARY KEY, version text NOT NULL, record jsonb NOT NULL
+);
 CREATE TABLE IF NOT EXISTS source_blocks (
   id text PRIMARY KEY, source_id text NOT NULL, heading text NOT NULL,
   text text NOT NULL, location text NOT NULL
@@ -566,6 +569,7 @@ export async function ensureCurrentSchemaTables(): Promise<void> {
 export async function wipeIegp() {
   const d = db();
   const tables = [
+    "source_reviews",
     "tactic_suggestions",
     "tactic_source_references",
     "gap_suggestions",

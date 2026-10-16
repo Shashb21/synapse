@@ -24,6 +24,9 @@ export const IEGP_ACTION_CAPABILITY: Record<string, Capability> = {
   // residuals, setup and breakout groups.
   ...Object.fromEntries(
     [
+      "link_source_support",
+      "create_source_discrepancy",
+      "resolve_source_discrepancy",
       "lock_need",
       "create_need",
       "edit_need",

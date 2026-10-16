@@ -1,3 +1,5 @@
+import { SourceClaimReview } from "@/components/source-claim-review";
+import { can } from "@/modules/auth/roles";
 import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -50,6 +52,7 @@ export default async function TacticDetailPage({
       >
         {tactic.description}
       </PageIntro>
+      <SourceClaimReview state={state} identity={identity} canReview={can(session.role, "validate")} tacticId={id} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <TacticBadge status={tactic.status} />
         <span className="text-[11px] capitalize text-muted-foreground">

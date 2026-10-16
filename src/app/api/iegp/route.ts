@@ -71,6 +71,7 @@ import {
   requireCustomerContext,
   type CustomerContext,
 } from "@/modules/auth/api-guard";
+import { linkSourceSupport, createSourceDiscrepancy, resolveSourceDiscrepancy } from "@/lib/iegp/source-review";
 import { iegpActionCapability, retiredActionMessage } from "./capabilities";
 import { latestS4MappingRows } from "@/lib/iegp/mapping-table";
 import { captureMappingRowDecision } from "@/lib/iegp/learning-capture";
@@ -361,6 +362,21 @@ async function handleAction(request: Request): Promise<Response> {
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
     let createdId: string | undefined;
     switch (body.action) {
+      case "link_source_support":
+      case "create_source_discrepancy": {
+        const create = body.action === "link_source_support" ? linkSourceSupport : createSourceDiscrepancy;
+        createdId = await create({ source_id: body.source_id, block_id: body.block_id, passage: body.passage,
+          gap_id: body.gap_id, tactic_id: body.tactic_id, coverage_id: body.coverage_id,
+          rationale: rationaleOf(body), origin: "human", actor_name, actor_function });
+        break;
+      }
+      case "resolve_source_discrepancy":
+        if (body.decision === "accept" && body.correction_target === "tactic") requireCapability(identity, "ideate");
+        await resolveSourceDiscrepancy({ review_id: body.review_id, expected_version: body.expected_version,
+          decision: body.decision, rationale: rationaleOf(body), reviewed_change: body.reviewed_change === "true",
+          correction_target: body.correction_target, correction_field: body.correction_field, correction_value: body.correction_value,
+          expected_target_version: body.expected_target_version, actor_name, actor_function });
+        break;
       case "clear_ingested_files":
         if (body.confirmation !== "clear_ingested_files") return NextResponse.json({ error: "Confirm clearing all current ingested files first.", code: "invalid_request" }, { status: 400 });
         await clearIngestedFiles();

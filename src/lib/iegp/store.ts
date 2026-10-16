@@ -245,6 +245,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     breakout_group_gaps,
     gap_suggestions,
     expansions,
+    source_reviews,
   ] = await Promise.all([
     d.select().from(t.assets),
     d.select().from(t.objectives),
@@ -266,6 +267,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
     d.select().from(t.breakoutGroupGaps),
     d.select().from(t.gapSuggestions),
     d.select().from(t.tacticExpansions),
+    d.select().from(t.sourceReviews),
   ]);
   const asset = assetRows[0];
   // loadState fills an empty schema; callers holding a transaction always have an asset.
@@ -278,6 +280,7 @@ export async function readState(d: Pick<ReturnType<typeof db>, "select"> = db())
       setup_complete: Boolean(asset.setup_complete),
       planning_context: asset.planning_context ?? {},
     },
+    source_reviews: source_reviews.map(row => row.record),
     objectives,
     sources: sources.map((s) => ({
       ...s,
@@ -408,6 +411,7 @@ export async function persistState(state: IegpState) {
     const d = db();
     await d.insert(t.assets).values(state.asset);
     if (state.objectives.length) await d.insert(t.objectives).values(state.objectives);
+    if (state.source_reviews?.length) await d.insert(t.sourceReviews).values(state.source_reviews.map(record => ({ id: record.id, version: record.version, record })));
     if (state.sources.length) {
       await d.insert(t.sources).values(state.sources);
     }

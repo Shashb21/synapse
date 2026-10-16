@@ -953,6 +953,13 @@ export function relationshipFit(state: IegpState, gapId: string, tacticId: strin
   const reasons: string[] = [];
   if (!coverage || coverage.overall === "unassessed") reasons.push("This relationship has not been assessed.");
   else if (!coverage.overall_lock.locked) reasons.push("The saved overall judgement has not been confirmed by a human.");
+  for (const finding of state.source_reviews ?? []) {
+    if (finding.kind === "discrepancy" && finding.status === "pending" &&
+      (finding.coverage_id ? finding.coverage_id === coverage?.id :
+        (!finding.gap_id || finding.gap_id === gapId) && (!finding.tactic_id || finding.tactic_id === tacticId))) {
+      reasons.push(`Pending source discrepancy (${finding.id}): ${finding.rationale}. Current confirmation is challenged; recorded verdict is retained.`);
+    }
+  }
   if (coverage?.stale) reasons.push(...(coverage.stale_reasons?.length ? coverage.stale_reasons : ["The recorded assessment is outdated; review it against the current question and tactic design."]));
   if (coverage?.needs_review) reasons.push("A sibling assessment changed; this relationship is marked for review independently. Acknowledgement does not reassess an outdated basis.");
   if (review.source_changed) reasons.push("Requirement sources changed since the saved basis review.");

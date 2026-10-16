@@ -1,3 +1,5 @@
+import { SourceClaimReview } from "@/components/source-claim-review";
+import { can } from "@/modules/auth/roles";
 import { RelationshipFit } from "@/components/relationship-fit";
 import { RequirementBasisReview } from "@/components/requirement-basis-review";
 import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
@@ -108,6 +110,7 @@ export default async function GapDetailPage({
   return (
     <AppShell active="gaps">
       <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
+      <SourceClaimReview state={state} identity={identity} canReview={can(session.role, "validate")} gapId={gap.id} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>
