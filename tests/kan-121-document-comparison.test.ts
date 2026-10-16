@@ -6,6 +6,11 @@ vi.mock("next/headers", () => ({ cookies: async () => ({
  set: (name: string, value: string) => void jar.values.set(name, value),
  delete: (name: string) => void jar.values.delete(name),
 }), headers: async () => new Headers() }));
+import { eq, sql } from "drizzle-orm";
+import { db } from "@/lib/iegp/db";
+import type { ComparisonOutcome } from "@/lib/ingest/comparison-types";
+import { sourceComparisons, sourceReviews } from "@/lib/iegp/schema";
+import { acceptTacticExpansion, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SourceComparisonStatus } from "@/components/source-comparison-status";
@@ -35,7 +40,7 @@ let calls: any[];
 async function post(body: Record<string, unknown>) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...body }) })); return { status: response.status, body: await response.json() }; }
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
-function outcome(input: any, judgment = "conflict", extra = {}) { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
+function outcome(input: any, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }
 beforeEach(async () => {
  jar.values.clear();
  await store.resetDemoSetup(); await wipePlatform(["source_files", "parsed_documents"]); await setAiEnabled({ enabled: true, actor_name: actor.name });
@@ -120,6 +125,104 @@ describe("KAN-146 incoming document comparison", () => {
   respond = input => ({ outcomes: [outcome(input, "conflict", { rationale: "Paraphrased same population concern" })] });
   await post({ action: "retry_source_comparison", source_id: finding.source_id });
   const after = await store.loadState(); expect(after.source_reviews).toHaveLength(1); expect(after.source_reviews![0].status).toBe("accepted"); expect(after.tactics.find(t => t.id === tactic)!.population).toBe("Children");
+ });
+ it.each([
+  ["accept", "explicit"], ["accept", "omitted"], ["dismiss", "explicit"], ["dismiss", "omitted"],
+ ] as const)("preserves the %s decision after a basis change from an %s relationship encoding", async (decision, firstEncoding) => {
+  respond = input => ({ outcomes: [outcome(input, "conflict", { coverage_id: firstEncoding === "explicit" ? coverage : null })] });
+  await parse(); const before = await store.loadState(); const finding = before.source_reviews![0];
+  expect((await post({ action: "resolve_source_discrepancy", review_id: finding.id, expected_version: finding.version,
+   decision, rationale: "Human reviewed this population concern", ...(decision === "accept" ? {
+    expected_target_version: reviews.sourceReviewTargetVersion(before, finding, "tactic"), reviewed_change: "true",
+    correction_target: "tactic", correction_field: "population", correction_value: "Children",
+   } : {}) })).status).toBe(200);
+  const decided = (await store.loadState()).source_reviews![0];
+  expect((await post({ action: "modify_tactic", tactic_id: tactic, population: "All ages", rationale: "New reviewed population basis" })).status).toBe(200);
+  expect(await comparison()).toMatchObject({ status: "pending", basis_current: false });
+  respond = input => ({ outcomes: [outcome(input, "conflict", { coverage_id: firstEncoding === "explicit" ? null : coverage, rationale: "Paraphrased population concern" })] });
+  expect((await post({ action: "retry_source_comparison", source_id: finding.source_id })).status).toBe(200);
+  expect((await store.loadState()).source_reviews).toEqual([decided]);
+  expect(await comparison()).toMatchObject({ status: "completed", basis_current: true, outcomes: [expect.objectContaining({ coverage_id: coverage })] });
+ });
+ it.each([
+  ["accept", "explicit"], ["accept", "omitted"], ["dismiss", "explicit"], ["dismiss", "omitted"],
+ ] as const)("normalizes legacy saved outcomes against the %s decision on a legacy %s review during durable retry", async (decision, reviewEncoding) => {
+  await parse(); const before = await store.loadState(); const finding = before.source_reviews![0];
+  expect((await post({ action: "resolve_source_discrepancy", review_id: finding.id, expected_version: finding.version,
+   decision, rationale: "Human reviewed the legacy population concern", ...(decision === "accept" ? {
+    expected_target_version: reviews.sourceReviewTargetVersion(before, finding, "tactic"), reviewed_change: "true",
+    correction_target: "tactic", correction_field: "population", correction_value: "Children",
+   } : {}) })).status).toBe(200);
+  // Refresh the accepted correction's basis, then simulate pre-normalization persisted data.
+  expect((await post({ action: "retry_source_comparison", source_id: finding.source_id })).status).toBe(200);
+  const decided = { ...(await store.loadState()).source_reviews![0], coverage_id: reviewEncoding === "explicit" ? coverage : null };
+  await db().update(sourceReviews).set({ record: decided }).where(eq(sourceReviews.id, decided.id));
+  const saved = (await store.loadState()).source_comparisons![0];
+  const legacyOutcomes = saved.outcomes!.map(row => ({ ...row, coverage_id: reviewEncoding === "explicit" ? null : coverage, rationale: "Saved paraphrase from an interrupted old attempt" }));
+  await db().update(sourceComparisons).set({ record: { ...saved, status: "failed", outcomes: legacyOutcomes, error: "Interrupted old attempt" } }).where(eq(sourceComparisons.source_id, saved.source_id));
+  const callCount = calls.length;
+  expect((await post({ action: "retry_source_comparison", source_id: saved.source_id })).status).toBe(200);
+  expect(calls).toHaveLength(callCount);
+  expect((await store.loadState()).source_reviews).toEqual([decided]);
+  expect(await comparison()).toMatchObject({ status: "completed", outcomes: [expect.objectContaining({ coverage_id: coverage })] });
+ });
+ it.each([
+  ["coverage_id", "model"], ["gap_id", "model"], ["tactic_id", "model"],
+  ["coverage_id", "saved"], ["gap_id", "saved"], ["tactic_id", "saved"],
+ ] as const)("normalizes empty %s in a %s reply against a decided missing-target encoding", async (field, mode) => {
+  const target = { coverage_id: null, [field]: null };
+  respond = input => ({ outcomes: [outcome(input, "conflict", target)] });
+  await parse(); const finding = (await store.loadState()).source_reviews![0];
+  expect((await post({ action: "resolve_source_discrepancy", review_id: finding.id, expected_version: finding.version, decision: "dismiss", rationale: "Human reviewed this omitted-target concern" })).status).toBe(200);
+  const callCount = calls.length;
+  if (mode === "saved") {
+   // Older JSON records may omit a nullable key entirely; keep that immutable review intact.
+   await db().update(sourceReviews).set({ record: sql`${sourceReviews.record} - ${field}::text` }).where(eq(sourceReviews.id, finding.id));
+   const saved = (await store.loadState()).source_comparisons![0];
+   await db().update(sourceComparisons).set({ record: { ...saved, status: "failed", outcomes: saved.outcomes!.map(row => ({ ...row, [field]: "", rationale: "Legacy paraphrase of this omitted-target concern" })) } }).where(eq(sourceComparisons.source_id, saved.source_id));
+  } else {
+   await post({ action: "modify_tactic", tactic_id: tactic, population: "All ages", rationale: "Changed scientific basis for omitted-target recheck" });
+   respond = input => ({ outcomes: [outcome(input, "conflict", { ...target, [field]: "", rationale: "New paraphrase of this omitted-target concern" })] });
+  }
+  const decided = (await store.loadState()).source_reviews;
+  expect((await post({ action: "retry_source_comparison", source_id: finding.source_id })).status).toBe(200);
+  if (mode === "saved") expect(calls).toHaveLength(callCount);
+  expect((await store.loadState()).source_reviews).toEqual(decided);
+  expect(await comparison()).toMatchObject({ status: "completed", outcomes: [expect.objectContaining({ [field]: field === "coverage_id" ? coverage : null })] });
+ });
+ it("keeps explicit parent and sibling expansion concerns distinct across a public recheck", async () => {
+  const parent = (await store.loadState()).tactics.find(row => row.id === tactic)!;
+  const scope = { name: "Added paediatric scope", evidence_question: "Paediatric outcomes", population: "Children", outcomes: "", geography: "", data_cut: "", analysis: "", instrument: "", study_design: "Cohort", gap_coverage: "Paediatric outcomes", cost_effort: "One team", timing: "Next year", feasibility_risks: "Recruitment", post_hoc: false, prospective_enrolment: false, protocol_amendment: true, start_date: null, evidence_available: null };
+  for (const [name, population] of [["Child", "Children"], ["Sibling", "Adolescents"]]) await acceptTacticExpansion({ proposal_id: `comparison-${name}`, tactic_id: tactic, gap_id: gap, scope: { ...scope, name, population }, rationale: "Reviewed separate additional scope", actor, expected_tactic_version: tacticVersion(parent) });
+  const ids = (await store.loadState()).coverages.filter(row => row.gap_id === gap && row.tactic_id === tactic).map(row => row.id);
+  expect(ids).toHaveLength(3);
+  respond = input => ({ outcomes: ids.map(id => outcome(input, "conflict", { coverage_id: id })) });
+  await parse(); const findings = (await store.loadState()).source_reviews!;
+  expect(new Set(findings.map(row => row.coverage_id))).toEqual(new Set(ids));
+  for (const finding of findings) expect((await post({ action: "resolve_source_discrepancy", review_id: finding.id, expected_version: finding.version, decision: "dismiss", rationale: "Human reviewed this separate scope" })).status).toBe(200);
+  const decided = (await store.loadState()).source_reviews;
+  await post({ action: "modify_tactic", tactic_id: tactic, population: "All ages", rationale: "Changed parent scientific basis" });
+  expect((await post({ action: "retry_source_comparison", source_id: findings[0].source_id })).status).toBe(200);
+  expect((await store.loadState()).source_reviews).toEqual(decided);
+  expect(await comparison()).toMatchObject({ status: "completed" });
+ });
+ it.each(["model", "saved"] as const)("rejects ambiguous omitted expansion scope in an entire %s reply before applying outcomes", async mode => {
+  const parent = (await store.loadState()).tactics.find(row => row.id === tactic)!;
+  await acceptTacticExpansion({ proposal_id: "comparison-ambiguous", tactic_id: tactic, gap_id: gap,
+   scope: { name: "Paediatric scope", evidence_question: "Paediatric outcomes", population: "Children", outcomes: "", geography: "", data_cut: "", analysis: "", instrument: "", study_design: "Cohort", gap_coverage: "Paediatric outcomes", cost_effort: "One team", timing: "Next year", feasibility_risks: "Recruitment", post_hoc: false, prospective_enrolment: false, protocol_amendment: true, start_date: null, evidence_available: null },
+   rationale: "Reviewed additional scope", actor, expected_tactic_version: tacticVersion(parent) });
+  const reply = (input: any) => ({ outcomes: [outcome(input, "support"), outcome(input, "conflict", { coverage_id: null })] });
+  respond = mode === "model" ? reply : () => ({ outcomes: [] });
+  await parse();
+  if (mode === "saved") {
+   const saved = (await store.loadState()).source_comparisons![0];
+   await db().update(sourceComparisons).set({ record: { ...saved, status: "failed", outcomes: reply(calls[0]).outcomes, error: "Interrupted old ambiguous reply" } }).where(eq(sourceComparisons.source_id, saved.source_id));
+   const callCount = calls.length;
+   expect((await post({ action: "retry_source_comparison", source_id: saved.source_id })).status).toBe(200);
+   expect(calls).toHaveLength(callCount);
+  }
+  expect(await comparison()).toMatchObject({ status: "failed", error: expect.stringContaining("explicit relationship") });
+  expect((await store.loadState()).source_reviews).toHaveLength(0);
  });
  it("persists pending before prompting and refuses an older concurrent completion", async () => {
   respond = async input => {
