@@ -100,6 +100,7 @@ test("KAN-143 deliberately links unassessed and retains a rejected assessment fo
   expect((await (await request.get(`/api/gaps/${gap.id}`)).json()).coverages).toHaveLength(0);
   await page.keyboard.press("Enter");
   dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Rationale (required)", { exact: true }).fill("Link this study for a later coverage assessment");
   await dialog.getByRole("button", { name: "Link as unassessed", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(dialog).toBeHidden();

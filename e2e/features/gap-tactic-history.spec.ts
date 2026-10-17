@@ -21,11 +21,12 @@ test("reason-required links share history across both records, preserve reused c
     await page.goto(`/gaps/${gaps[index]}`);
     await page.getByRole("button", { name: "Map tactic with coverage", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Map tactic with coverage", exact: true });
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
     await dialog.getByLabel("Overall coverage").selectOption(coverage);
-    await dialog.getByRole("button", { name: "Map and record coverage", exact: true }).click();
-    await expect(dialog.getByRole("alert")).toContainText("Rationale");
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText("Enter a rationale of at least three characters.");
     await dialog.getByLabel("Rationale (required)").fill(`Registry supports gap ${index + 1} at ${coverage} coverage`);
-    await dialog.getByRole("button", { name: "Map and record coverage", exact: true }).click();
+    await dialog.getByRole("button", { name: "Assess and link", exact: true }).click();
     await expect(dialog).not.toBeVisible();
     await expect(page.getByTestId("entity-history")).toContainText(`Registry supports gap ${index + 1} at ${coverage} coverage`);
   }
