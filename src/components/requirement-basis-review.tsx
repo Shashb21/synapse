@@ -6,8 +6,9 @@ import type { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 const CONTROL = "rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-foreground";
 
 /** Shows the sourced proposal and collects one human confirmation for the basis. */
-export function RequirementBasisReview({ gapId, review }: {
+export function RequirementBasisReview({ gapId, review, onRefresh }: {
   gapId: string;
+  onRefresh?: () => void;
   review: ReturnType<typeof getRequirementBasisReview>;
 }) {
   const { basis } = review;
@@ -17,7 +18,7 @@ export function RequirementBasisReview({ gapId, review }: {
         Requirement basis: {basis.confirmation.locked ? `confirmed by ${basis.confirmation.actor_name}` : "needs human review"}.
         {review.source_changed ? " Sources changed since the previous review." : ""}
       </p>
-      <LockForm label="Review requirement basis" action="review_requirement_basis"
+      <LockForm onSuccess={onRefresh} label="Review requirement basis" action="review_requirement_basis"
         extra={{ gap_id: gapId, expected_version: review.version }} size="lg"
         confirmLabel="Confirm requirement basis"
         description="Review the linked needs and gap context together. Unresolved requirements can be saved, but prevent confirmed Full coverage. Unknown means the information is missing, not that the tactic fails it.">

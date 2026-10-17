@@ -1,3 +1,6 @@
+import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
+import { listIdeationProposals } from "@/modules/stages/s9-ideation/module";
+import { priorityDecision } from "./support/priority-decision";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -50,6 +53,9 @@ const ACTOR = { name: "AI Off Planner", function: "medical_affairs" as const };
 const src = (file: string) => readFileSync(path.join(process.cwd(), file), "utf8");
 
 async function iegp(body: Record<string, string>) {
+  const opening = await loadState();
+  body = { expected_relationship: relationshipVersion(relationshipSnapshot(opening, body.gap_id, body.tactic_id)), ...body };
+
   const res = await iegpPost(
     new Request("http://localhost/api/iegp", {
       method: "POST",
@@ -61,6 +67,10 @@ async function iegp(body: Record<string, string>) {
 }
 
 async function plan(body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
+    const current = (await listIdeationProposals()).find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
   const res = await planPost(
     new Request("http://localhost/api/plan", {
       method: "POST",
@@ -148,13 +158,8 @@ describe("the first screen with AI off", () => {
     expect(matrix).toMatch(/\{ai \? \(\s*<button[\s\S]*Re-suggest unvalidated/);
     expect(src("src/components/split-gap-dialog.tsx")).toMatch(/\{ai \? \(\s*<Button[\s\S]*Suggest a split/);
     const ideation = src("src/app/ideation/page.tsx");
-    // Every run button is AI-gated; the empty-state one also yields to the list's (KAN-18).
-    expect(
-      ideation.match(
-        /\{ai( && withoutProposal\.length === 0)? \? \(\s*(total === 0 && withoutProposal\.length > 0 \? null : \(\s*)?(<div>\s*)?<RunStageButton/g,
-      )?.length,
-    ).toBe(3);
-    // One run button per page: with no ideas yet, the header button gives way to the list's (KAN-18).
+    // All three run entry points remain AI-gated, including the eligibility/readiness guards.
+    expect(ideation.match(/\{ai(?: && [^?\n]+)? \? \(\s*(?:total === 0 && withoutProposal\.length > 0 \? null : \(\s*)?(?:<div>\s*)?<RunStageButton/g)?.length).toBe(3);
     expect(ideation).toContain("total === 0 && withoutProposal.length > 0 ? null");
     expect(ideation).toContain("<AddIdeaDialog");
     expect(src("src/app/tactics/page.tsx")).toContain("ai || rejected.length > 0");
@@ -260,6 +265,7 @@ describe("a whole plan by hand with AI off", () => {
 
   it("validates a band by hand", async () => {
     const placed = await plan({
+      ...await priorityDecision(openGap, "Blocks the HTA dossier"),
       action: "set_placement",
       gap_id: openGap,
       band: "high",

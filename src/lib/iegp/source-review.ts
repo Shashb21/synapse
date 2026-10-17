@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { db, ensureSchema, withWorkspaceTransaction } from "./db";
 import * as t from "./schema";
-import { appendAudit, loadState, lockAssessmentOwners, modifyGap, modifyTactic, type TacticEditField } from "./store";
+import { gapEditSnapshot } from "./gap-edit";
+import { tacticEditVersion } from "./tactic-edit-version";
+import { lockRelationships } from "./relationship-change";
+import { appendAudit, loadState, lockObjectiveContext, lockAssessmentOwners, modifyGap, modifyTactic, type TacticEditField } from "./store";
 import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { newId, nowIso } from "@/modules/kernel/ids";
 import type { ActorFunction } from "./enums";
@@ -67,6 +70,8 @@ async function createReview(kind: SourceReview["kind"], args: SourceReviewInput)
   return withWorkspaceTransaction(async () => {
     const rationale = requireRationale(args.rationale);
     if (args.origin !== "human" && args.origin !== "ai") throw new Error("Source review origin is required.");
+    // Source review and S4 share this lock before taking source/tactic owners.
+    await lockRelationships();
     const selected = await loadState();
     const coverage = args.coverage_id ? selected.coverages.find(c => c.id === args.coverage_id) : undefined;
     const block = selected.blocks.find(b => b.id === args.block_id);
@@ -104,6 +109,8 @@ export async function resolveSourceDiscrepancy(args: ActorArgs & {
     const rationale = requireRationale(args.rationale);
     const initial = (await db().select().from(t.sourceReviews).where(eq(t.sourceReviews.id, args.review_id)))[0]?.record;
     if (!initial) throw new Error("Source review not found in this plan.");
+    await lockRelationships();
+    await lockObjectiveContext();
     await lockTargets(initial);
     const current = (await db().select().from(t.sourceReviews).where(eq(t.sourceReviews.id, args.review_id)).for("update"))[0];
     if (!current || !args.expected_version || current.version !== args.expected_version || current.record.status !== "pending") throw new Error("Source review changed; refresh before deciding.");
@@ -123,8 +130,8 @@ export async function resolveSourceDiscrepancy(args: ActorArgs & {
       const record = target === "gap" ? state.gaps.find(g => g.id === row.gap_id)! : state.tactics.find(tactic => tactic.id === row.tactic_id)!;
       correction = { target, field, before: String((record as unknown as Record<string, unknown>)[field] ?? ""), value: args.correction_value.trim() };
       if (correction.before === correction.value) throw new Error("Review an actual underlying change before accepting.");
-      if (target === "gap") await modifyGap({ gap_id: row.gap_id!, [field]: correction.value, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
-      else await modifyTactic({ tactic_id: row.tactic_id!, fields: { [field as TacticEditField]: correction.value }, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
+      if (target === "gap") await modifyGap({ gap_id: row.gap_id!, expected_gap: gapEditSnapshot(state.gaps.find(gap => gap.id === row.gap_id)!), [field]: correction.value, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
+      else await modifyTactic({ tactic_id: row.tactic_id!, expected_tactic: tacticEditVersion(state.tactics.find(tactic => tactic.id === row.tactic_id)!), fields: { [field as TacticEditField]: correction.value }, rationale, actor_name: args.actor_name, actor_function: args.actor_function });
     }
     const updated: SourceReview = { ...row, version: newId("review"), status: args.decision === "accept" ? "accepted" : "dismissed",
       history: [...row.history, { decision: args.decision, rationale, at: nowIso(), actor: { name: args.actor_name, function: args.actor_function }, ...(correction ? { correction } : {}) }] };
@@ -133,3 +140,22 @@ export async function resolveSourceDiscrepancy(args: ActorArgs & {
     await recordDecision(updated, args, args.decision === "accept" ? "accept" : "reject", JSON.stringify(row), rationale);
   });
 }
+
+/** Source review presentation with server-computed correction tokens for shared panels. */
+export function sourceClaimReviewData(state: IegpState, scope: { sourceId?: string; gapId?: string; tacticId?: string }) {
+  const { sourceId, gapId, tacticId } = scope;
+  return {
+    scope,
+    blocks: state.blocks.filter(block => !sourceId || block.source_id === sourceId).map(block => ({ id: block.id, label: `${state.sources.find(source => source.id === block.source_id)?.title ?? block.source_id} · ${block.heading} · ${block.id}` })),
+    relationships: state.coverages.filter(row => (!gapId || row.gap_id === gapId) && (!tacticId || row.tactic_id === tacticId)).map(row => ({ id: row.id, label: `${row.gap_id} · ${state.gaps.find(gap => gap.id === row.gap_id)?.name} ↔ ${state.tactics.find(tactic => tactic.id === row.tactic_id)?.name}${row.expansion_id ? ` · ${row.expansion_id}` : ""}` })),
+    rows: (state.source_reviews ?? []).filter(row => (!sourceId || row.source_id === sourceId) && (!gapId || row.gap_id === gapId) && (!tacticId || row.tactic_id === tacticId)).map(row => ({
+      ...row, current: sourceReviewCitationCurrent(state, row),
+      corrections: (["gap", "tactic"] as const).flatMap(target => {
+        const record = target === "gap" ? state.gaps.find(gap => gap.id === row.gap_id) : state.tactics.find(tactic => tactic.id === row.tactic_id);
+        return record ? [{ target, version: sourceReviewTargetVersion(state, row, target), fields: SOURCE_CORRECTION_FIELDS[target].map(field => ({ value: field, label: `${field.replaceAll("_", " ")} · Current: ${String((record as unknown as Record<string, unknown>)[field] ?? "Not recorded")}` })) }] : [];
+      }),
+    })),
+  };
+}
+
+export type SourceClaimReviewData = ReturnType<typeof sourceClaimReviewData>;

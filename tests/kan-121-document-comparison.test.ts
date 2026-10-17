@@ -1,3 +1,4 @@
+import { openingActionTokens } from "./support/opening-action-tokens";
 /** Incoming comparison exercises real parse, ingestion actions and retained review outcomes. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
@@ -44,7 +45,7 @@ type ComparisonInput = Pick<IegpState, "blocks" | "gaps"> & {
 };
 let respond: (input: ComparisonInput) => unknown | Promise<unknown>;
 let calls: ComparisonInput[];
-async function post(body: Record<string, unknown>) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...body }) })); return { status: response.status, body: await response.json() }; }
+async function post(body: Record<string, unknown>) { const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, ...await openingActionTokens(body), ...body }) })); return { status: response.status, body: await response.json() }; }
 async function parse() { await runStage({ stage: "S0", input: { files: [file] }, actor, role: "medical_affairs" }); return runStage({ stage: "S1", input: {}, actor, role: "medical_affairs" }); }
 async function comparison() { const { listSourceComparisons } = await import("@/lib/ingest/compare-source"); return (await listSourceComparisons())[0]; }
 function outcome(input: ComparisonInput, judgment: ComparisonOutcome["judgment"] = "conflict", extra: Partial<ComparisonOutcome> = {}): ComparisonOutcome { return { block_id: input.blocks[0].id, passage: "The study includes children only.", match: "same", judgment, gap_id: gap, tactic_id: tactic, coverage_id: coverage, rationale: "The source challenges the adult population", ...extra }; }

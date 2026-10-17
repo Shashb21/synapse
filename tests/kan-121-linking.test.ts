@@ -1,3 +1,4 @@
+import { openingActionTokens } from "./support/opening-action-tokens";
 /** Public-action tests: arrange records, act through the API, assert saved relationship explanations. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
@@ -25,7 +26,7 @@ import { listEdits } from "@/modules/kernel/edit-records";
 const actor = { actor_name: "Fit reviewer", actor_function: "medical_affairs" as const };
 let gapId: string, tacticId: string;
 async function post(body: Record<string, unknown>) {
-  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...await openingActionTokens(body), ...body }) }));
   return { status: response.status, body: await response.json() };
 }
 async function createPair() {
@@ -34,7 +35,7 @@ async function createPair() {
   tacticId = (await store.loadState()).tactics.find(t => t.name === "Shared adult study")!.id;
 }
 async function link(gap = gapId, extra: Record<string, unknown> = {}) {
-  expect((await post({ action: "assign_tactic", gap_id: gap, tactic_id: tacticId, ...extra })).status).toBe(200);
+  expect((await post({ action: "assign_tactic", gap_id: gap, tactic_id: tacticId, rationale: "Link this study for explicit review", ...extra })).status).toBe(200);
 }
 async function reviewBasis() {
   const dimensions = Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, { applicability: "required", requirement: `Required ${d}`, rationale: "Decision needs this information" }]));
@@ -96,7 +97,7 @@ describe("KAN-143 deliberate library linking", () => {
   it("links unresolved requirements as unassessed and replays identical concurrent saves without new decisions", async () => {
     // Arrange an accepted library tactic and an unresolved gap; Act through the public action.
     const before = await store.loadState();
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() };
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", rationale: "Link this study without an assessment", request_id: crypto.randomUUID() };
     const results = await Promise.all([post(payload), post(payload)]);
     expect(results.map(r => r.status)).toEqual([200, 200]);
     const state = await store.loadState();
@@ -150,7 +151,7 @@ describe("KAN-143 deliberate library linking", () => {
   });
   it.each(["assessed", "unassessed"])("replays a legacy %s receipt that predates design tokens", async mode => {
     const preview = engine.relationshipFit(await store.loadState(), gapId, tacticId);
-    const payload: Record<string, unknown> = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: mode, request_id: crypto.randomUUID(),
+    const payload: Record<string, unknown> = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: mode, rationale: "Link this study without an assessment", request_id: crypto.randomUUID(),
       ...(mode === "assessed" ? { overall: "partial", rationale: "Legacy assessed decision", expected_basis_version: preview.requirement_basis_version, expected_design_version: preview.design_version } : {}) };
     const saved = await post(payload);
     expect(saved.status).toBe(200);
@@ -193,11 +194,11 @@ describe("KAN-143 deliberate library linking", () => {
     expect(results.map(r => r.status).sort()).toEqual([200, 400]);
     const state = await store.loadState();
     expect(state.coverages).toHaveLength(1);
-    expect(state.audit.filter(e => e.action === "assign_tactic" && !before.audit.some(old => old.id === e.id))).toHaveLength(1);
+    expect((await listEdits({ entity_id: `${gapId}::${tacticId}` })).filter(e => e.entity_type === "gap_tactic" && e.rationale === base.rationale)).toHaveLength(1);
   });
   it("rejects child identities that do not belong to the selected parent and gap", async () => {
     const before = await store.loadState();
-    const response = await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, expansion_id: "OTHER-CHILD", link_mode: "unassessed", request_id: crypto.randomUUID() });
+    const response = await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, expansion_id: "OTHER-CHILD", link_mode: "unassessed", rationale: "Link this study without an assessment", request_id: crypto.randomUUID() });
     expect(response.status).toBe(400);
     expect(await store.loadState()).toEqual(before);
   });
@@ -213,7 +214,7 @@ describe("KAN-143 deliberate library linking", () => {
     expect(engine.computeGapStatus(state.coverages, state.tactics)).toBe("validated_addressed");
   });
   it("does not resurrect a removed relationship on a delayed retry, and preserves the rejected-pair rule", async () => {
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() };
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", rationale: "Link this study without an assessment", request_id: crypto.randomUUID() };
     const linked = await post(payload);
     expect(linked.status).toBe(200);
     expect((await post({ action: "unassign_tactic", gap_id: gapId, tactic_id: tacticId, rationale: "This contribution is no longer needed" })).status).toBe(200);
@@ -227,7 +228,7 @@ describe("KAN-143 deliberate library linking", () => {
     expect((await post({ ...payload, request_id: crypto.randomUUID() })).status).toBe(200);
   });
   it("binds a successful request to its gap and actor while reusing one tactic across gaps", async () => {
-    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() };
+    const payload = { action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", rationale: "Link this study without an assessment", request_id: crypto.randomUUID() };
     expect((await post(payload)).status).toBe(200);
     const otherGap = await store.createGap({ statement: "Separate decision requirements", ...actor });
     const before = await store.loadState();
@@ -244,7 +245,7 @@ describe("KAN-143 deliberate library linking", () => {
     const original = (await store.loadState()).coverages[0]!;
     await db().insert(schema.coverages).values({ ...original, id: "COV-LEGACY-DUPLICATE", overall: "partial" });
     const before = await store.loadState();
-    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() })).status).toBe(400);
+    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, link_mode: "unassessed", rationale: "Link this study without an assessment", request_id: crypto.randomUUID() })).status).toBe(400);
     expect(await store.loadState()).toEqual(before);
     expect(before.coverages).toHaveLength(2);
   });

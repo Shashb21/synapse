@@ -1,7 +1,18 @@
+import { ProposalCard } from "@/components/ideation/proposal-card";
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
+import { GapBadge, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
+import { GapStatusDisagreement } from "@/components/gap-status-override";
+import { GAP_STATUS_DEFINITIONS } from "@/lib/iegp/enums";
+import { SuggestionReferences } from "@/components/prioritize/suggestion-references";
 import Link from "next/link";
+import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
 import type { ReactNode } from "react";
+import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
+import { PriorityJudgementDetails, priorityNextAction } from "@/components/prioritize/priority-context";
+import type { Band } from "@/components/matrix/bands";
 import type { GapRecord } from "@/lib/iegp/gap-record";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
+import { AiOnly } from "@/components/platform/ai-status";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 
 const HEADING = "mb-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -28,6 +39,44 @@ function GapLink({ gap }: { gap: { id: string; name: string; number: number } })
   );
 }
 
+/** One saved coverage/status/confirmation readback for the full record and shared panel. */
+export function GapCoverageContext({ record }: { record: GapRecord }) {
+  const { confirmation, gap, origin, coverage_status } = record;
+  const nextAction = gap.retired ? "Open full record" : coverage_status.shown === "validated_partial" ? "Resolve — split or rewrite" : !confirmation.confirmed ? "Confirm evidence coverage" : "Review evidence coverage and mappings";
+  return <section className={CARD} aria-label="Evidence coverage" data-testid="gap-coverage-context">
+    <div className="mb-2 flex flex-wrap items-center gap-2">
+      <GapBadge status={coverage_status.shown} />
+      <NeedsReviewFlag needsReview={coverage_status.needs_review} />
+      {gap.parked_at ? <ParkedFlag reason={gap.parked_reason} /> : null}
+      {gap.retired ? <span>Retired gap</span> : null}
+    </div>
+    <p className="mb-2 text-muted-foreground">{GAP_STATUS_DEFINITIONS[coverage_status.shown]}</p>
+    <GapStatusDisagreement computedStatus={coverage_status.computed} override={gap.status_override} />
+
+    <p className="text-[12px] font-medium text-muted-foreground">Evidence coverage review</p>
+    {confirmation.confirmed && confirmation.by ? (
+      <p className="mt-1">
+        Confirmed by <span className="font-medium">{confirmation.by.name}</span>
+        {confirmation.by.principal && confirmation.by.principal !== "anonymous" ? ` (${confirmation.by.principal})` : null}
+        {" · "}
+        {when(confirmation.at)}
+        {confirmation.rationale ? <span className="block text-muted-foreground">“{confirmation.rationale}”</span> : null}
+      </p>
+    ) : confirmation.confirmed ? (
+      <p className="mt-1">Confirmed (before who confirmed was recorded).</p>
+    ) : (
+      <p className="mt-1 text-muted-foreground">Not confirmed yet. Validate the gap to confirm it.</p>
+    )}
+    {origin ? (
+      <p className="mt-2 text-[12px] text-muted-foreground">
+        Taken from <GapLink gap={origin} /> by an accepted split suggestion.
+      </p>
+    ) : null}
+
+    <Link href={`/gaps/${encodeURIComponent(gap.id)}#gap-coverage-actions`} className="mt-3 inline-block underline">{nextAction}</Link>
+  </section>;
+}
+
 /**
  * Who confirmed the gap and which objective it serves (KAN-97). The objective
  * can be changed here; the change is on the gap's history.
@@ -41,30 +90,10 @@ export function GapConfirmationAndObjective({
   objectives: { id: string; name: string }[];
   identity: ActionIdentity;
 }) {
-  const { confirmation, objective, gap, origin } = record;
+  const { objective, gap } = record;
   return (
     <div className="mb-4 grid gap-3 sm:grid-cols-2" data-testid="gap-confirmation">
-      <div className={CARD}>
-        <p className="text-[12px] font-medium text-muted-foreground">Confirmation</p>
-        {confirmation.confirmed && confirmation.by ? (
-          <p className="mt-1">
-            Confirmed by <span className="font-medium">{confirmation.by.name}</span>
-            {confirmation.by.principal && confirmation.by.principal !== "anonymous" ? ` (${confirmation.by.principal})` : null}
-            {" · "}
-            {when(confirmation.at)}
-            {confirmation.rationale ? <span className="block text-muted-foreground">“{confirmation.rationale}”</span> : null}
-          </p>
-        ) : confirmation.confirmed ? (
-          <p className="mt-1">Confirmed (before who confirmed was recorded).</p>
-        ) : (
-          <p className="mt-1 text-muted-foreground">Not confirmed yet. Validate the gap to confirm it.</p>
-        )}
-        {origin ? (
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            Taken from <GapLink gap={origin} /> by an accepted split suggestion.
-          </p>
-        ) : null}
-      </div>
+      <GapCoverageContext record={record} />
       <div className={CARD} data-testid="gap-objective">
         <p className="text-[12px] font-medium text-muted-foreground">Objective it serves</p>
         <p className="mt-1">{objective ? `${objective.id} · ${objective.name}` : "No objective linked yet."}</p>
@@ -72,12 +101,14 @@ export function GapConfirmationAndObjective({
           <div className="mt-2">
             <ActionDialog
               endpoint="/api/iegp"
-              payload={{ action: "set_gap_objective", gap_id: gap.id }}
+              payload={{ action: "set_gap_objective", gap_id: gap.id, expected_objective_id: gap.objective_id, expected_gap: gapEditSnapshot(gap) }}
               identity={identity}
               label="Change objective"
               title={`Objective for ${gapNumberLabel(gap.number)}`}
-              description="The plan objective whose decision this gap's evidence serves. The change is kept on the gap's history."
+              description="Choose the objective whose decision this evidence serves and give a meaningful reason. Open gaps need priority review again; their previous judgement is retained. No supporting reference is required."
               confirmLabel="Save objective"
+              requireRationale
+              rationaleLabel="Reason for objective change (required)"
               fields={[
                 {
                   name: "objective_id",
@@ -87,7 +118,6 @@ export function GapConfirmationAndObjective({
                   options: objectives.map((o) => ({ value: o.id, label: `${o.id} · ${o.name}` })),
                   required: true,
                 },
-                { name: "rationale", label: "Why (optional)", type: "textarea" },
               ]}
             />
           </div>
@@ -119,32 +149,66 @@ export function NeedProvenance({ entry }: { entry: GapRecord["needs"][number] })
 }
 
 /** Priority, ideas, timeline, groups and waiting suggestions: the rest of the gap's record (KAN-97). */
-export function GapRecordSections({ record }: { record: GapRecord }) {
+export function GapRecordSections({ record, axes = [], tacticsUnlocked = false, open = false }: {
+  record: GapRecord;
+  axes?: PriorityAxis[];
+  tacticsUnlocked?: boolean;
+  open?: boolean;
+}) {
   const { priority, ideas, timeline, breakout_groups, pending_suggestions } = record;
+  const band = (priority?.band ?? priority?.suggested_band ?? null) as Band | null;
   return (
     <>
       <Section title="Priority" testId="gap-priority">
-        {priority ? (
-          <div className={CARD}>
-            <p>
-              {priority.band ? <span className="font-medium capitalize">{priority.band}</span> : "No band yet"}
-              {" · "}
-              {priority.validated ? "validated" : "not validated"}
-              {priority.actor_name ? ` · ${priority.actor_name}` : null}
-              {" · "}
-              {when(priority.at)}
-            </p>
-            {priority.rationale || priority.suggested_rationale ? (
-              <p className="mt-1 text-muted-foreground">{priority.rationale || priority.suggested_rationale}</p>
+        <div className={CARD}>
+          <PriorityJudgementDetails
+            priority={priority ? { ...priority, band, axis_scores: priority.axis_scores as Record<string, number> | null } : null}
+            axes={axes}
+          />
+          {priority?.suggested_band && (priority.run_id || priority.suggested_rationale) ? (
+            <AiOnly section="prioritization">
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                Model suggested {priority.suggested_band}: {priority.suggested_rationale || "Reason not recorded"}
+              </p>
+              <SuggestionReferences key={`${record.gap.id}-${priority.version}`} gapId={record.gap.id} version={priority.version ?? null} references={priority.suggested_references} />
+            </AiOnly>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+            <Link href={priority?.validated && band === "high" && open && tacticsUnlocked ? "/?place=tactics" : "/?place=plan&setting=all"}>
+              {priorityNextAction({ band, validated: priority?.validated ?? false, needs_review: priority?.needs_review, tacticsUnlocked, open })}
+            </Link>
+            {priority?.validated ? (
+              <Link href="/?place=plan&setting=all">
+                {tacticsUnlocked ? "Review or change priority" : "Review remaining plan-wide priorities"}
+              </Link>
             ) : null}
           </div>
-        ) : (
-          <p className={`${CARD} text-muted-foreground`}>Not on the prioritization matrix yet.</p>
-        )}
+        </div>
       </Section>
+      <section aria-label="Tactic planning routes" data-testid="gap-planning-routes" className={CARD}>
+        <h2 className={HEADING}>Tactic options and planned work</h2>
+        <p>Existing options, decisions and linked tactics remain available when evidence status or priority changes.</p>
+        <p className="mt-2">{open && priority?.validated && band === "high" && !priority.needs_review
+          ? "Current High/Open gap: new AI ideation is available from Tactics when unlocked and AI assistance is enabled."
+          : priority?.needs_review
+            ? "Review changed context and reconfirm a High/Open priority before new AI ideation. Existing work is retained."
+            : band === "medium" || band === "low"
+              ? "Medium and Low gaps use the manual or library route. New AI ideation requires a confirmed High/Open priority."
+              : "New AI ideation requires a confirmed High/Open priority. Existing work is retained."}</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {tacticsUnlocked ? <Link href="/?place=tactics">Open Tactics and existing work</Link> : <Link href="/?place=plan&setting=all">Review initial plan-wide priorities</Link>}
+          {!record.gap.retired && !record.gap.parked_at && record.gap.status !== "excluded" ? <Link href={`/gaps/${encodeURIComponent(record.gap.id)}#gap-tactic-mappings`}>Map from library or add a tactic by hand</Link> : null}
+          {ideas.length ? <Link href="/ideation">Review existing option decisions</Link> : null}
+        </div>
+      </section>
       <Section title="Ideas" testId="gap-ideas">
         {ideas.length === 0 ? (
           <p className={`${CARD} text-muted-foreground`}>No tactic ideas for this gap yet.</p>
+        ) : record.options ? (
+          <>
+            <p className="mb-2 text-[12px] text-muted-foreground">{ideas.filter(idea => idea.status === "accepted").length} accepted · {ideas.filter(idea => idea.status === "rejected").length} rejected · {ideas.filter(idea => idea.status === "proposed").length} proposed</p>
+            <div className="grid gap-2">{record.options.map(option => <ProposalCard key={option.id} proposal={option} mayIdeate={false} readOnly identity={{ signed_in: false, actor_name: "", actor_function: "medical_affairs" }} />)}</div>
+          </>
         ) : (
           <ul className="grid gap-2">
             {ideas.map((idea) => (
@@ -168,7 +232,7 @@ export function GapRecordSections({ record }: { record: GapRecord }) {
             {timeline.map((activity) => (
               <li key={activity.id} className={CARD}>
                 <p>
-                  {activity.tactic_id} · {activity.start_date} → {activity.end_date}
+                  <TacticRecordLink tacticId={activity.tactic_id}>{activity.tactic_id}</TacticRecordLink> · {activity.start_date} → {activity.end_date}
                   {activity.readout_date ? ` · readout ${activity.readout_date}` : null}
                 </p>
               </li>

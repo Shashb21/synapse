@@ -3,20 +3,25 @@ import { can } from "@/modules/auth/roles";
 import { RelationshipFit } from "@/components/relationship-fit";
 import { RequirementBasisReview } from "@/components/requirement-basis-review";
 import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
+import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
+import { TacticRecordLink } from "@/components/tactic-ideation/tactic-panel";
 import Link from "next/link";
+import { gapEditSnapshot } from "@/lib/iegp/gap-edit";
+import { EvidenceDecisionContext } from "@/components/prioritize/priority-context";
+import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
 import { gapNumberLabel } from "@/lib/iegp/gap-number";
 import { GapDetailsEditor } from "@/components/gap-metadata";
 import { GapSettingsEditor, SettingChips } from "@/components/gap-settings-editor";
 import { notFound } from "next/navigation";
 import { AppShell, PageIntro } from "@/components/app-shell";
-import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag, ParkedFlag } from "@/components/iegp-badges";
+import { CoverageBadge, GapBadge, LockMeta, NeedsReviewFlag } from "@/components/iegp-badges";
 import { CoverageDimensionsMenu } from "@/components/coverage-dimensions-menu";
 import { LockForm } from "@/components/lock-form";
 import { RestoreGapButton, UnparkGapButton } from "@/components/restore-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { MapExistingTactic, RecordMissedTactic } from "@/components/gap-tactic-actions";
 import { AssignTacticWithCoverage, UnassignTactic } from "@/components/assign-tactic-with-coverage";
-import { GapStatusDisagreement, GapStatusOverride } from "@/components/gap-status-override";
+import { GapStatusOverride } from "@/components/gap-status-override";
 import { SplitGapDialog } from "@/components/split-gap-dialog";
 import { NewSourceNote } from "@/components/gap-suggestions";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
@@ -31,7 +36,6 @@ import {
   DIMENSION_VALUES,
   EXCLUSION_LABELS,
   EXCLUSION_REASONS,
-  GAP_STATUS_DEFINITIONS,
   GAP_STATUS_LABELS,
   ASSESSED_COVERAGE,
 } from "@/lib/iegp/enums";
@@ -44,7 +48,6 @@ import {
   relationshipFit,
   computeGapStatus,
   coverageDimensionValues,
-  displayedGapStatus,
   liveGapsMappedToTactic,
   mappedTactics,
   persistedResidualGaps,
@@ -59,10 +62,11 @@ export default async function GapDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [state, session, ai] = await Promise.all([
+  const [state, session, ai, priorityAxes] = await Promise.all([
     loadState(),
     sessionContext(),
     aiSectionEnabled("partial_split").catch(() => false),
+    loadAxes(),
   ]);
   const identity: ActionIdentity = {
     signed_in: session.signed_in,
@@ -81,14 +85,7 @@ export default async function GapDetailPage({
   const history = record.history;
   const provenanceByNeed = new Map(record.needs.map((entry) => [entry.need.id, entry]));
   const children = state.gaps.filter((g) => g.parent_gap_id === gap.id);
-  const computed = computeGapStatus(coverages, state.tactics, {
-    hasAcceptedChild: children.length > 0,
-    expansions: state.expansions,
-  });
-  const shown = displayedGapStatus({
-    ...gap,
-    computed_status: gap.computed_status ?? computed,
-  });
+  const { computed, shown } = record.coverage_status;
   // Only a leftover a person saved is shown; drafts come from S6 on demand.
   const leftover = persistedResidualGaps(state).find((row) => row.parent_gap_id === gap.id);
   const tactics = mappedTactics(state, gap.id);
@@ -111,12 +108,13 @@ export default async function GapDetailPage({
     <AppShell active="gaps">
       <PageIntro kicker={`Gap ${gapNumberLabel(gap.number)}`} title={gap.name} />
       <SourceClaimReview state={state} identity={identity} canReview={can(session.role, "validate")} gapId={gap.id} />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div id="gap-coverage-actions" className="mb-4 flex flex-wrap items-center gap-2">
         {shown === "validated_partial" ? (
           <>
             <GapBadge status={shown} />
             <SplitGapDialog
               gapId={gap.id}
+              resolutionVersion={record.resolution_version}
               gapName={gap.name}
               residualName={leftover?.statement || gap.name}
               tactics={tactics}
@@ -132,7 +130,10 @@ export default async function GapDetailPage({
         ) : (
           <GapBadge status={shown} />
         )}
-        {gap.parked_at ? <ParkedFlag reason={gap.parked_reason} /> : null}
+        {!gap.retired && !gap.human_validated && shown !== "validated_partial" ? (
+          <LockForm label="Confirm status" action="validate_gap" extra={{ gap_id: gap.id }}
+            note={{ label: "Reason (required)", required: true }} confirmLabel={`Confirm ${GAP_STATUS_LABELS[shown]}`} variant="default" />
+        ) : null}
         {mapped && !gap.status_override ? (
           <span className="text-[11px] text-muted-foreground">
             Engine computed {GAP_STATUS_LABELS[computed]}
@@ -141,14 +142,13 @@ export default async function GapDetailPage({
           <LockMeta lock={gap.status_lock} />
         )}
       </div>
-      <GapStatusDisagreement computedStatus={computed} override={gap.status_override} />
       {gap.new_source_at ? (
         <div className="mb-4">
           <NewSourceNote gapId={gap.id} newSource={newSourceOf(state, gap.new_source_at, gap.new_source_need_id ?? null)} />
         </div>
       ) : null}
       <div className="mb-4 border border-border bg-card p-3 rounded-lg">
-        <p className="text-[13px] leading-5 text-foreground">{gap.statement}</p>
+        <EvidenceDecisionContext statement={gap.statement} objective={record.objective} />
         {(gap.related_gap_ids ?? []).length > 0 ? (
           <p className="mt-2 text-[12px] text-muted-foreground" data-testid="related-gaps">
             Related:{" "}
@@ -170,15 +170,15 @@ export default async function GapDetailPage({
           {gap.retired ? null : (
             <ActionDialog
               endpoint="/api/iegp"
-              payload={{ action: "modify_gap", gap_id: gap.id }}
+              payload={{ action: "modify_gap", gap_id: gap.id, expected_gap: gapEditSnapshot(gap) }}
               identity={identity}
               label="Edit gap"
               title={`Edit ${gap.id}`}
-              description="Your wording replaces the current name, statement and domain. It is locked to you and kept on every later AI run; the AI only adds needs to a gap, it never rewrites one."
+              description="Changing Evidence needed requires priority review again if this gap is Open. Its previous band, scores and priority rationale remain available. Name-only or domain-only changes retain priority confirmation. Give a meaningful reason; no supporting reference is required. Your wording is retained on later AI runs."
               confirmLabel="Save edit"
               fields={[
                 { name: "name", label: "Name", defaultValue: gap.name, required: true },
-                { name: "statement", label: "Statement", type: "textarea", defaultValue: gap.statement, required: true },
+                { name: "statement", label: "Evidence needed", type: "textarea", defaultValue: gap.statement, required: true },
                 {
                   name: "domain",
                   label: "Domain",
@@ -204,13 +204,6 @@ export default async function GapDetailPage({
         objectives={state.objectives.map((o) => ({ id: o.id, name: o.name }))}
         identity={identity}
       />
-      <p className="mb-6 text-[12px] leading-5 text-muted-foreground">
-        {GAP_STATUS_DEFINITIONS[shown]}{" "}
-        {shown === "validated_partial"
-          ? "Click Partially Addressed to split (Addressed + tactic on the left, Open leftover on the right) or rewrite the original. Partial cannot stay."
-          : "Click Open or Addressed to override with a required reason. Cancel does not change status."}
-      </p>
-
       <section className="mb-8">
         <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Constituent needs — sources</h2>
         <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
@@ -317,7 +310,7 @@ export default async function GapDetailPage({
         </div>
       </section>
 
-      <section className="mb-8">
+      <section className="mb-8" id="gap-tactic-mappings">
         <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Tactic mappings (many-to-many, dimensional)
         </h2>
@@ -331,6 +324,7 @@ export default async function GapDetailPage({
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
+            expectedRelationships={JSON.stringify(Object.fromEntries(library.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))])))}
           />
           <AssignTacticWithCoverage
             previews={Object.fromEntries(library.map(tactic => [tactic.id, relationshipFit(state, gap.id, tactic.id)]))}
@@ -338,6 +332,7 @@ export default async function GapDetailPage({
             gapId={gap.id}
             availableTactics={library}
             mappedTacticIds={coverages.map((c) => c.tactic_id)}
+            expectedRelationships={JSON.stringify(Object.fromEntries(library.map(tactic => [tactic.id, relationshipVersion(relationshipSnapshot(state, gap.id, tactic.id))])))}
           />
           <RecordMissedTactic gapId={gap.id} />
         </div>
@@ -349,16 +344,16 @@ export default async function GapDetailPage({
           return (
             <article key={c.id} className="mb-4 border border-border bg-card p-4 rounded-lg">
               <div className="flex flex-wrap items-center gap-2">
-                <Link href={`/tactics/${c.tactic_id}`} className="text-[13px] text-foreground">
+                <TacticRecordLink tacticId={c.tactic_id} className="text-[13px] text-foreground">
                   {tactic?.name}
-                </Link>
+                </TacticRecordLink>
                 <CoverageBadge overall={c.overall} />
                 <NeedsReviewFlag needsReview={c.needs_review} />
                 <CoverageDimensionsMenu
                   overall={c.overall}
                   dimensions={coverageDimensionValues(c.dimensions)}
                 />
-                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} />
+                <UnassignTactic gapId={gap.id} tacticId={c.tactic_id} expectedRelationship={relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id))} />
               </div>
               {relationship?.fit ? (
                 <RelationshipFit fit={relationship.fit} tacticName={relationship.expansion?.scope.name ?? tactic?.name ?? c.tactic_id} />
@@ -394,9 +389,9 @@ export default async function GapDetailPage({
                   <LockForm
                     label="Confirm coverage"
                     action="confirm_coverage_review"
-                    extra={{ coverage_id: c.id }}
+                    extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id }}
                     confirmLabel="Confirm coverage"
-                    note={{ label: "Note (optional)" }}
+                    note={{ label: "Reason (required)", required: true }}
                     description="This records who confirmed coverage after a sibling-gap change. Values stay on this gap."
                   />
                 </div>
@@ -427,7 +422,7 @@ export default async function GapDetailPage({
                             <LockForm
                               label="Change dimension"
                               action="lock_dimension"
-                              extra={{ coverage_id: c.id, dimension: dim, expected_version: coverageReviewVersion(c) }}
+                              extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, dimension: dim, expected_version: coverageReviewVersion(c) }}
                               confirmLabel="Change dimension"
                               description="This records who changed coverage and flags other gaps that use this tactic. Dimension values are not copied across gaps."
                             >
@@ -472,7 +467,7 @@ export default async function GapDetailPage({
                 <LockForm
                   label="Change overall coverage"
                   action="lock_overall"
-                  extra={{ coverage_id: c.id, expected_version: coverageReviewVersion(c), expected_basis_version: record.requirement_review.version }}
+                  extra={{ expected_relationship: relationshipVersion(relationshipSnapshot(state, gap.id, c.tactic_id)), coverage_id: c.id, expected_version: coverageReviewVersion(c), expected_basis_version: record.requirement_review.version }}
                   confirmLabel="Change overall coverage"
                   description="This records who changed coverage and flags other gaps that use this tactic. Overall values stay per gap."
                 >
@@ -612,7 +607,12 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      <GapRecordSections record={record} />
+      <GapRecordSections
+        record={record}
+        axes={priorityAxes.axes}
+        tacticsUnlocked={state.asset.tactics_unlocked}
+        open={record.open}
+      />
 
       {record.versions.length > 0 ? (
         <section className="mb-8">
@@ -631,7 +631,10 @@ export default async function GapDetailPage({
         </section>
       ) : null}
 
-      <EntityHistory entries={history} />
+      <details aria-label="History" className="mb-8 border-t border-border pt-3">
+        <summary className="cursor-pointer font-medium">History</summary>
+        <EntityHistory entries={history} />
+      </details>
 
       {!gap.retired && gap.status === "excluded" ? (
         <section

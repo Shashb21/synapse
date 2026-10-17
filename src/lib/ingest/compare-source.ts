@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, ensureSchema, inWorkspaceTransaction, withWorkspaceTransaction } from "@/lib/iegp/db";
 import { tacticSourceReferences } from "@/modules/stages/s3-tactic-extract/schema";
 import { sourceComparisons } from "@/lib/iegp/schema";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { loadState, lockAssessmentOwners } from "@/lib/iegp/store";
 import { isLiveGap } from "@/lib/iegp/engine";
 import { requirementSourceVersion } from "@/lib/iegp/requirement-basis";
@@ -138,6 +139,8 @@ Use only supplied target IDs; identify affected relationships where present. Whe
 
 /** Lock concrete evidence sources in ID order before target owners, then recheck membership and meaning. */
 async function lockedCurrent(sourceId: string, version: string, expectedBasis: string) {
+  // Join source review and S4 before reserving either source or target owners.
+  await lockRelationships();
   const selected = await facts(await loadState(), sourceId);
   for (const id of selected.provenance_source_ids) await db().execute(sql`select id from sources where id = ${id} for update`);
   await lockAssessmentOwners({ source_ids: selected.provenance_source_ids,

@@ -1,3 +1,5 @@
+import { modelMappingSupport } from "./support/model-mapping";
+import { openingActionTokens } from "./support/opening-action-tokens";
 /** Public-action tests: arrange records, act through the API, assert saved relationship explanations. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
@@ -28,7 +30,7 @@ import { eq } from "drizzle-orm";
 const actor = { actor_name: "Fit reviewer", actor_function: "medical_affairs" as const };
 let gapId: string, tacticId: string;
 async function post(body: Record<string, unknown>) {
-  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...await openingActionTokens(body), ...body }) }));
   return { status: response.status, body: await response.json() };
 }
 async function createPair() {
@@ -37,7 +39,7 @@ async function createPair() {
   tacticId = (await store.loadState()).tactics.find(t => t.name === "Shared adult study")!.id;
 }
 async function link(gap = gapId, extra: Record<string, unknown> = {}) {
-  expect((await post({ action: "assign_tactic", gap_id: gap, tactic_id: tacticId, ...extra })).status).toBe(200);
+  expect((await post({ action: "assign_tactic", gap_id: gap, tactic_id: tacticId, rationale: "Link this study for explicit review", ...extra })).status).toBe(200);
 }
 async function fit(gap = gapId) { return engine.mappedTactics(await store.loadState(), gap)[0]!.fit; }
 async function reviewBasis() {
@@ -160,14 +162,14 @@ describe("KAN-142 independent relationship fit", () => {
     expect((await store.loadState()).expansions).toHaveLength(0);
   });
   it("keeps historical origin unknown despite locks and labels new AI proposals separately from human review", async () => {
-    await store.assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, coverage: "partial", dimensions: { comparator: "no" }, note: "Historical judgement", ...actor });
+    await store.assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, coverage: "partial", dimensions: { comparator: "no" }, note: "Historical judgement", ...await modelMappingSupport(gapId, tacticId), ...actor });
     let state = await store.loadState();
     const coverage = state.coverages[0]!;
     await db().update(schema.coverages).set({ overall_lock: { ...coverage.overall_lock, locked: true, actor_name: "Past human" } }).where(eq(schema.coverages.id, coverage.id));
     expect((await fit())?.assessment_origin).toBeNull();
     const other = await store.createGap({ statement: "An AI assessment question", ...actor });
     // S4's writer supplies origin explicitly; the actor executing a model is not its author.
-    await store.assignTacticToGap({ gap_id: other, tactic_id: tacticId, coverage: "partial", assessment_origin: "ai", dimensions: { population: "yes" }, note: "Sourced model judgement", ...actor });
+    await store.assignTacticToGap({ gap_id: other, tactic_id: tacticId, coverage: "partial", assessment_origin: "ai", dimensions: { population: "yes" }, note: "Sourced model judgement", ...await modelMappingSupport(other, tacticId), ...actor });
     expect((await fit(other))!.assessment_origin).toBe("ai");
     expect((await fit(other))!.confirmation.locked).toBe(false);
     state = await store.loadState();

@@ -1,3 +1,4 @@
+import { openingActionTokens } from "./support/opening-action-tokens";
 /** Public edits retain historical judgements while current coverage follows reviewed inputs. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
@@ -21,11 +22,11 @@ const required = Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, { applicabi
 const yes = Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]));
 let gapId: string, tacticId: string;
 async function post(body: Record<string, unknown>) {
- const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+ const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...await openingActionTokens(body), ...body }) }));
  return { status: response.status, body: await response.json() };
 }
 async function actionRoute(handler: (request: Request) => Promise<Response>, body: Record<string, unknown>) {
- const response = await handler(new Request("http://localhost/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+ const response = await handler(new Request("http://localhost/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...await openingActionTokens(body), ...body }) }));
  return { status: response.status, body: await response.json() };
 }
 async function reassess() {
@@ -58,16 +59,28 @@ describe("KAN-144 assessment freshness through real actions", () => {
    ready(); await resume;
   });
   await held;
-  const pending = [post({ action, coverage_id: first.id, expected_version: coverageReviewVersion(first), overall: "limited", dimension: "population", value: "no", rationale: "First independent review" }),
-   post({ action: "lock_overall", coverage_id: second.id, expected_version: coverageReviewVersion(second), overall: "partial", rationale: "Second independent review" })];
+  const firstOpening = await openingActionTokens({ coverage_id: first.id });
+  const secondOpening = await openingActionTokens({ coverage_id: second.id });
+  const requests = [{ ...firstOpening, action, coverage_id: first.id, expected_version: coverageReviewVersion(first), overall: "limited", dimension: "population", value: "no", rationale: "First independent review" },
+   { ...secondOpening, action: "lock_overall", coverage_id: second.id, expected_version: coverageReviewVersion(second), overall: "partial", rationale: "Second independent review" }];
+  const pending = requests.map(request => post(request));
   try {
    // Observe actual PostgreSQL waits; no sleep decides when the owner is released.
    await vi.waitFor(async () => {
     const waiting = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%from tactics where id = %for update%'`);
-    expect(waiting.length).toBe(2);
+    expect(waiting.length).toBe(1);
+    const advisory = await db().execute(sql`select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%pg_advisory_xact_lock%'`);
+    expect(advisory.length).toBe(1);
    }, { timeout: 3000, interval: 20 });
   } finally { release(); await owner; await Promise.all(pending); }
-  expect((await Promise.all(pending)).map(result => result.status)).toEqual([200, 200]);
+  const results = await Promise.all(pending);
+  expect(results.map(result => result.status).sort()).toEqual([200, 400]);
+  const rejected = results.findIndex(result => result.status === 400);
+  expect(results[rejected].body.error).toContain("Relationship changed");
+  // The first review changes the sibling warning, so deliberately reload before retrying.
+  const retryOpening = await openingActionTokens(requests[rejected]);
+  expect(retryOpening.expected_relationship).not.toBe([firstOpening, secondOpening][rejected].expected_relationship);
+  expect((await post({ ...requests[rejected], ...retryOpening })).status).toBe(200);
   const rows = (await store.loadState()).coverages;
   expect(rows.find(c => c.id === second.id)).toMatchObject({ overall: "partial", overall_rationale: "Second independent review", needs_review: true });
   const reviewed = rows.find(c => c.id === first.id)!;
@@ -138,7 +151,7 @@ describe("KAN-144 assessment freshness through real actions", () => {
  it.each([false, true])("rejects old overall and dimension tokens on an unassessed relationship (dimension confirmed: %s)", async confirmed => {
   const other = await store.createGap({ statement: "Unassessed question", ...actor });
   await review(other);
-  expect((await post({ action: "assign_tactic", gap_id: other, tactic_id: tacticId, link_mode: "unassessed", request_id: crypto.randomUUID() })).status).toBe(200);
+  expect((await post({ action: "assign_tactic", gap_id: other, tactic_id: tacticId, link_mode: "unassessed", rationale: "Link for a later explicit assessment", request_id: crypto.randomUUID() })).status).toBe(200);
   let unassessed = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
   if (confirmed) {
    expect((await post({ action: "lock_dimension", coverage_id: unassessed.id, dimension: "population", value: "yes", expected_version: coverageReviewVersion(unassessed), rationale: "Reviewed original population" })).status).toBe(200);
@@ -167,7 +180,7 @@ describe("KAN-144 assessment freshness through real actions", () => {
    const assessmentGapIds = await store.lockAssessmentOwners({ gap_ids: [gapId] });
    backendA = (await db().execute(sql`select pg_backend_pid() as pid`))[0].pid;
    const before = await store.loadState();
-   await post({ action: "modify_gap", gap_id: gapId, statement: "Accepted A decision", rationale: "Independent A amendment" });
+   expect((await actionRoute(planPost, { action: "set_gap_settings", gap_id: gapId, settings: ["hospital"], rationale: "Independent A amendment" })).status).toBe(200);
    ready();
    await proceed;
    // Replay A's accepted operation after B has changed and been reviewed independently.
@@ -179,7 +192,7 @@ describe("KAN-144 assessment freshness through real actions", () => {
    reviewedB = await withWorkspaceTransaction(async () => {
     const backendB = (await db().execute(sql`select pg_backend_pid() as pid`))[0].pid;
     expect(backendB).not.toBe(backendA);
-    expect((await post({ action: "modify_gap", gap_id: other, statement: "Accepted B decision", rationale: "Independent B amendment" })).status).toBe(200);
+    expect((await actionRoute(planPost, { action: "set_gap_settings", gap_id: other, settings: ["community"], rationale: "Independent B amendment" })).status).toBe(200);
     expect((await review(other)).status).toBe(200);
     const current = (await store.loadState()).coverages.find(c => c.gap_id === other)!;
     expect((await post({ action: "lock_overall", coverage_id: current.id, overall: "full", expected_version: coverageReviewVersion(current), expected_basis_version: getRequirementBasisReview(await store.loadState(), other).version, rationale: "Explicitly reassessed current B" })).status).toBe(200);
@@ -249,14 +262,15 @@ describe("KAN-144 assessment freshness through real actions", () => {
  it("keeps objective titles, owners and gap notes cosmetic but invalidates objective meaning", async () => {
   const context = setupContextFromState(await store.loadState());
   // Normalize the wizard context first; this may fill previously absent meaning fields.
-  await post({ action: "save_product_setup", context }); await reassess();
+  await post({ action: "save_product_setup", context, rationale: "Normalize the reviewed planning context" }); await reassess();
   const current = setupContextFromState(await store.loadState());
   current.objectives = current.objectives.map(o => ({ ...o, name: `${o.name} title`, owner: "New administrator" }));
-  expect((await post({ action: "save_product_setup", context: current })).status).toBe(200);
+  expect((await post({ action: "save_product_setup", context: current, rationale: "Reviewed objective context changes" })).status).toBe(200);
   expect((await actionRoute(planPost, { action: "set_gap_metadata", gap_id: gapId, metadata: { notes: "Administrative meeting note" }, rationale: "Add context note" })).status).toBe(200);
   expect((await row()).stale).toBe(false);
+  current.saved_at = setupContextFromState(await store.loadState()).saved_at;
   current.objectives[0]!.key_decision = "A different regulatory decision";
-  expect((await post({ action: "save_product_setup", context: current })).status).toBe(200);
+  expect((await post({ action: "save_product_setup", context: current, rationale: "Reviewed objective context changes" })).status).toBe(200);
   expect((await row()).stale).toBe(true);
  });
  it("preserves quoted support when unrelated passages, headings and surrounding context change", async () => {

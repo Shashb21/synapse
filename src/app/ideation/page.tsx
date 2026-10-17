@@ -8,7 +8,7 @@ import {
 } from "@/components/ideation/gap-proposal-group";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
 import { displayedGapStatus, isLiveGap, mappedTactics } from "@/lib/iegp/engine";
-import { DOMAIN_LABELS } from "@/lib/iegp/enums";
+import { GAP_STATUS_LABELS, DOMAIN_LABELS } from "@/lib/iegp/enums";
 import { loadState } from "@/lib/iegp/store";
 import { can } from "@/modules/auth/roles";
 import { sessionContext } from "@/modules/auth/session";
@@ -66,8 +66,11 @@ export default async function IdeationPage() {
       gap_name: gap.name,
       statement: gap.statement,
       domain_label: DOMAIN_LABELS[gap.domain],
-      band: placement ? (placement.validated && placement.band ? placement.band : placement.suggested_band) : null,
+      band: placement?.band ?? placement?.suggested_band ?? null,
       band_validated: Boolean(placement?.validated),
+      eligible: bandOrder.has(gap.id),
+      needs_priority_review: placement?.needs_review ?? false,
+      evidence_status: GAP_STATUS_LABELS[displayedGapStatus(gap)],
       mapped_tactic_count: mappedTactics(state, gap.id).length,
       proposals: gapProposals.map((proposal): ProposalCardModel => ({ ...proposal })),
     });
@@ -80,13 +83,18 @@ export default async function IdeationPage() {
   ];
   for (const gapId of orphanGapIds) {
     const gap = state.gaps.find((row) => row.id === gapId);
+    const placement = placements.find(row => row.gap_id === gapId);
     groups.push({
       gap_id: gapId,
       gap_name: gap?.name ?? gapId,
       statement: gap?.statement ?? "This gap is no longer a live Open gap.",
       domain_label: gap ? DOMAIN_LABELS[gap.domain] : "Unknown domain",
-      band: null,
-      band_validated: false,
+      band: placement?.band ?? null,
+      band_validated: placement?.validated ?? false,
+      eligible: false,
+      needs_priority_review: placement?.needs_review ?? false,
+      evidence_status: gap ? GAP_STATUS_LABELS[displayedGapStatus(gap)] : undefined,
+      record_available: Boolean(gap),
       mapped_tactic_count: gap ? mappedTactics(state, gapId).length : 0,
       proposals: proposals
         .filter((proposal) => proposal.gap_id === gapId)
@@ -136,7 +144,7 @@ export default async function IdeationPage() {
             </li>
           </ul>
           {/* With no ideas yet, the gaps-without-a-proposal list below runs the same thing (KAN-18). */}
-          {ai ? (
+          {ai && mayIdeate && eligibleCount > 0 ? (
             total === 0 && withoutProposal.length > 0 ? null : (
               <RunStageButton
                 stage="S9"
@@ -147,7 +155,7 @@ export default async function IdeationPage() {
               />
             )
           ) : (
-            <p className="text-[11px] text-muted-foreground">Add ideas by hand.</p>
+            <p className="text-[11px] text-muted-foreground">{eligibleCount ? "Add ideas by hand." : "Existing work remains available. New AI ideation requires a confirmed High/Open priority."}</p>
           )}
         </div>
 
@@ -207,7 +215,7 @@ export default async function IdeationPage() {
               first{ai ? " (by hand or with the model), then generate ideas here or add them by hand." : ", then add ideas by hand here."}
             </p>
             {/* One run button per page: the gaps list above already has it (KAN-18). */}
-            {ai && withoutProposal.length === 0 ? (
+            {ai && mayIdeate && eligibleCount > 0 && withoutProposal.length === 0 ? (
               <div>
                 <RunStageButton
                   stage="S9"

@@ -124,7 +124,7 @@ test.describe("KAN-16: manual start, server gates, restore", () => {
       status: "ongoing",
       evidence_question: "What is 12-month persistence?",
     });
-    await iegpAction(request, { action: "reject_mapping", gap_id: firstGap, tactic_id: String(tactic.id), rationale: "Wrong population" });
+    await iegpAction(request, { action: "reject_mapping", gap_id: firstGap, tactic_id: String(tactic.id), expected_relationship: JSON.stringify({ coverages: [], decision: null }), rationale: "Wrong population" });
     await page.goto("/mappings");
     const section = page.getByTestId("rejected-mappings");
     await expect(section).toContainText("Rejected mappings (1)");

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { GapRecordLink } from "@/components/gap-panel";
 import { ActionDialog, type ActionIdentity } from "@/components/platform/action-dialog";
 import { proposalFields } from "@/components/ideation/proposal-fields";
 import { ProposalCard, type ProposalCardModel } from "@/components/ideation/proposal-card";
@@ -11,6 +11,10 @@ export type GapProposalGroup = {
   domain_label: string;
   band: "high" | "medium" | "low" | "defer" | null;
   band_validated: boolean;
+  eligible?: boolean;
+  needs_priority_review?: boolean;
+  evidence_status?: string;
+  record_available?: boolean;
   mapped_tactic_count: number;
   proposals: ProposalCardModel[];
 };
@@ -69,7 +73,7 @@ export function GapProposalGroupCard({
               }}
             >
               {group.band === "high" ? "High" : group.band === "medium" ? "Medium" : group.band === "low" ? "Low" : "Defer"}
-              {group.band_validated ? " · validated" : " · suggested"}
+              {group.needs_priority_review ? " · needs priority review" : group.band_validated ? " · priority confirmed" : " · not confirmed"}
             </span>
           ) : null}
           <span className="rounded-4xl border border-border px-1.5 py-px text-[10px] text-muted-foreground">
@@ -79,12 +83,13 @@ export function GapProposalGroupCard({
             {plural(group.mapped_tactic_count, "mapped tactic")}
           </span>
         </div>
-        <Link
-          href={`/gaps/${group.gap_id}`}
+        {group.record_available === false ? <p className="text-[13px]">{group.gap_name} · Gap record unavailable</p> : <GapRecordLink
+          gapId={group.gap_id}
           className="text-[13px] leading-5 text-foreground no-underline hover:underline"
         >
           {group.gap_name}
-        </Link>
+        </GapRecordLink>}
+        <p className="text-[12px] text-muted-foreground">{group.eligible === false ? `Existing options and planned work${group.evidence_status ? ` · ${group.evidence_status}` : ""}. New AI ideation requires a confirmed High/Open priority. Medium and Low gaps use the manual or library route on the gap.` : "Current High/Open ideation"}</p>
         <p className="max-w-3xl text-[12px] leading-4 text-muted-foreground">{group.statement}</p>
         <p className="text-[11px] text-muted-foreground">
           {plural(group.proposals.length, "proposal")} · {open} awaiting a decision · {accepted} accepted
@@ -102,6 +107,7 @@ export function GapProposalGroupCard({
             proposal={proposal}
             identity={identity}
             mayIdeate={mayIdeate}
+            readOnly={group.eligible === false}
           />
         ))}
       </div>

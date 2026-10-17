@@ -1,4 +1,8 @@
+import { sql } from "drizzle-orm";
+import { lockRelationships } from "@/lib/iegp/relationship-change";
 import { withWorkspaceTransaction } from "@/lib/iegp/db";
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
+import { judgementReferenceSchema, suppliedJudgementRecordSchema, suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, ensurePlatformSchema } from "@/modules/kernel/db";
@@ -51,6 +55,10 @@ const tacticMappingSchema = z.object({
   rationale: z.string(),
   /** Per-dimension coverage; null when the model judged the tactic not relevant. */
   dimensions: dimensionsSchema.nullable(),
+  references: z.array(judgementReferenceSchema).optional(),
+  /** Server-authored generation context; absent on legacy proposals. */
+  supplied_records: z.array(suppliedJudgementRecordSchema).optional(),
+  expected_tactic_version: z.string().optional(),
 });
 
 const reviewSchema = z.object({
@@ -124,6 +132,8 @@ At most max_tactics_per_gap mappings per gap may have coverage other than "not_r
 When a gap carries a previous row and a critic objection, answer the objection: change the mappings or status it names, or keep them and say why in the rationale.
 
 Return a row for every gap you are given.
+
+Every mapping must include references: [{"entity_type":"gap|objective|source","entity_id":"an ID from supporting_records","reason":"what this supplied record supports"}]. Cite only supplied supporting_records. Unsupported judgements cannot be committed; never invent support.
 
 Return JSON only: {"rows":[{"gap_id":"","mapping_status":"open|addressed|partially_addressed","confidence":0,"rationale":"","mappings":[{"tactic_id":"","coverage":"full|partial|limited|not_relevant","confidence":0,"rationale":"","dimensions":{"relevance":"yes"}}]}]}`;
 
@@ -227,6 +237,7 @@ function localTableRows(state: IegpState, input: MappingInput): Row[] {
       tactic_name: tactic.name,
       coverage: "partial",
       confidence: 50,
+      references: [{ entity_type: "gap", entity_id: gap.id, reason: "The supplied evidence need defines the coverage being assessed." }],
       rationale: `Test stub: no model was called (${result.reasons.slice(0, 2).join("; ")}).`,
       dimensions: Object.fromEntries(COVERAGE_DIMENSIONS.map((dimension) => [dimension, "unknown"])) as TacticMapping["dimensions"],
     }));
@@ -250,6 +261,7 @@ type RawMapping = {
   confidence?: unknown;
   rationale?: unknown;
   dimensions?: unknown;
+  references?: unknown;
 };
 
 type RawRow = {
@@ -310,6 +322,7 @@ function parseProposedRow(
       coverage: coverage.data,
       confidence: clampScore(item.confidence),
       rationale: note,
+      references: z.array(judgementReferenceSchema).safeParse(item.references).success ? z.array(judgementReferenceSchema).parse(item.references) : [],
       dimensions,
     });
   }
@@ -366,6 +379,7 @@ function promptRow(row: Row) {
       confidence: mapping.confidence,
       rationale: mapping.rationale,
       dimensions: mapping.dimensions,
+      references: mapping.references,
     })),
   };
 }
@@ -428,6 +442,7 @@ async function llmProposals(
         };
       }),
       tactics: promptTactics(shared.tactics),
+      supporting_records: suppliedJudgementRecords(shared.state, args.gapIds),
       max_tactics_per_gap: shared.input.max_per_gap,
     }),
     purpose: "mapping-table-proposer",
@@ -461,6 +476,7 @@ async function llmReviews(
         : undefined,
       rows: args.rows.map((row) => ({ gap: promptGap(shared, row.gap_id), ...promptRow(row) })),
       tactics: promptTactics(shared.tactics),
+      supporting_records: suppliedJudgementRecords(shared.state, args.rows.map(row => row.gap_id)),
       max_tactics_per_gap: shared.input.max_per_gap,
     }),
     purpose: "mapping-table-critic",
@@ -540,7 +556,7 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
   manifest: {
     id: "s4-kg-mapping.scored-pcj",
     stage: "S4",
-    version: "3.2.0",
+    version: "3.3.0",
     title: "LLM mapping table (proposer ↔ critic ×3 → judge)",
     summary:
       "A model proposes one row per gap with a coverage verdict, confidence and rationale for each tactic; a model critic challenges each row over three exchanges and a model judge accepts or rejects it. Needs a connected LLM.",
@@ -716,6 +732,19 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
           .filter(mapping => !shared.blocked.has(pairKey(row.gap_id, mapping.tactic_id)))
           .map(mapping => ({ gap_id: row.gap_id, tactic_id: mapping.parent_tactic_id ?? mapping.tactic_id })));
         // A batch must own all parent designs before its first gap/coverage write.
+        await lockRelationships();
+        // Match Setup before taking tactic/objective rows.
+        await db().execute(sql`LOCK TABLE gaps IN ROW EXCLUSIVE MODE`);
+        for (const id of [...new Set(assignments.map(item => item.tactic_id))].sort()) {
+          await db().execute(sql`SELECT id FROM tactics WHERE id = ${id} FOR UPDATE`);
+        }
+        const supplied = suppliedJudgementRecords(shared.state, assignments.map(item => item.gap_id));
+        for (const kind of ["objective", "source"] as const) {
+          const table = kind === "objective" ? "objectives" : "sources";
+          for (const id of [...new Set(supplied.filter(record => record.entity_type === kind).map(record => record.entity_id))].sort()) {
+            await db().execute(sql`SELECT id FROM ${sql.raw(table)} WHERE id = ${id} FOR UPDATE`);
+          }
+        }
         await lockAssessmentOwners({ tactic_ids: assignments.map(item => item.tactic_id), gap_ids: assignments.map(item => item.gap_id) });
         for (const row of outcome.accepted) {
           const joined: string[] = [];
@@ -733,6 +762,10 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
                 coverage: mapping.coverage,
                 assessment_origin: "ai",
                 dimensions: mapping.dimensions,
+                references: mapping.references,
+                model: true,
+                supplied_records: suppliedJudgementRecords(shared.state, [row.gap_id]),
+                expected_tactic_version: tacticEditVersion(shared.state.tactics.find(tactic => tactic.id === (mapping.parent_tactic_id ?? mapping.tactic_id))!),
               });
               joined.push(mapping.tactic_id);
             } catch (error) {
@@ -750,6 +783,11 @@ export const kgMappingModule: SynapseModule<MappingInput, MappingOutput> = {
 
     const toOut = (item: (typeof outcome.judged)[number]): MappingTableRow => ({
       ...item.candidate,
+      mappings: item.candidate.mappings.map(mapping => ({
+        ...mapping,
+        supplied_records: suppliedJudgementRecords(shared.state, [item.candidate.gap_id]),
+        expected_tactic_version: tacticEditVersion(shared.state.tactics.find(tactic => tactic.id === (mapping.parent_tactic_id ?? mapping.tactic_id))!),
+      })),
       verdict: item.verdict,
       verdict_note: item.note,
     });

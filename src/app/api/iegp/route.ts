@@ -1,9 +1,12 @@
 import { compareSource } from "@/lib/ingest/compare-source";
+import { relationshipVersion } from "@/lib/iegp/relationship-version";
+import { lockRelationships, requireGapResolutionSnapshot, requireRelationshipSnapshot } from "@/lib/iegp/relationship-change";
 import { decidePartialSplit } from "@/modules/stages/s6-partial-split/module";
 import type { CustomTacticType } from "@/lib/iegp/custom-tactic-type";
 import { BREAKOUT_THEMES, createBreakoutGroupsByTheme, type BreakoutTheme } from "@/lib/iegp/breakout-themes";
 import { NextResponse } from "next/server";
-import { currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
+import { sql } from "drizzle-orm";
+import { db, currentSchemaName, withWorkspaceTransaction } from "@/lib/iegp/db";
 import {
   acceptMapping,
   acceptResidualGap,
@@ -161,14 +164,8 @@ const GATE_EDITS: Record<string, { stage: StageId; entity: string; field: string
   validate_gap: { stage: "S5", entity: "gap", field: "human_validated", action: "validate" },
   // modify_gap, modify_tactic, need edits, leftover decisions and promotions file
   // their own edit records (with before/after) in the store.
-  assign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
-  accept_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "accept" },
-  reject_mapping: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
-  unassign_tactic: { stage: "S5", entity: "gap", field: "mapping", action: "reject" },
   save_mapping_row: { stage: "S4", entity: "gap", field: "mapping_table_row", action: "edit" },
   review_requirement_basis: { stage: "S5", entity: "gap", field: "requirement_basis", action: "validate" },
-  lock_dimension: { stage: "S5", entity: "coverage", field: "dimension", action: "edit" },
-  lock_overall: { stage: "S5", entity: "coverage", field: "overall", action: "edit" },
   rewrite_partial_gap: { stage: "S6", entity: "gap", field: "statement", action: "edit" },
   lock_gap: { stage: "S5", entity: "gap", field: "status", action: "edit" },
   park_gap: { stage: "S5", entity: "gap", field: "parked_at", action: "edit" },
@@ -239,6 +236,7 @@ async function fileGateEdit(
   const rationale = (body.rationale || body.reason || body.note || body.override_reason || "").trim();
   const after =
     mapping.field === "created" ? body.name?.trim() || null : gateFieldValue(await loadState(), mapping, body);
+  if (before === after && mapping.field !== "created") return;
   await recordEdit({
     stage: mapping.stage,
     entity_type: mapping.entity,
@@ -360,6 +358,21 @@ async function handleAction(request: Request): Promise<Response> {
         const replay = await beginLibraryLinkRequest(libraryRequest.id, payload);
         if (replay) return NextResponse.json({ ok: true, id: replay });
       }
+    }
+    if (["assign_tactic", "unassign_tactic", "accept_mapping", "reject_mapping", "save_mapping_row", "lock_dimension", "lock_overall", "confirm_coverage_review", "restore_mapping"].includes(body.action)) {
+      requireRationale(rationaleOf(body));
+      await lockRelationships();
+      if (body.action === "unassign_tactic") {
+        // Canonical design edits also own these rows. Recheck only after they commit.
+        await db().execute(sql`select id from tactics where id = ${body.tactic_id} for update`);
+        await db().execute(sql`select id from gaps where id = ${body.gap_id} for update`);
+      }
+      requireRelationshipSnapshot(await loadState(), body);
+    }
+    if (["split_partial_gap", "rewrite_partial_gap"].includes(body.action)) {
+      requireRationale(rationaleOf(body));
+      await lockRelationships();
+      requireGapResolutionSnapshot(await loadState(), body.parent_gap_id || body.gap_id, body.expected_resolution);
     }
     const before = await gateBefore(body);
     // The id of a gap or tactic this action created, so the caller can address it without guessing (ids are never reissued).
@@ -507,6 +520,8 @@ async function handleAction(request: Request): Promise<Response> {
         await setGapObjective({
           gap_id: body.gap_id,
           objective_id: body.objective_id,
+          expected_objective_id: body.expected_objective_id,
+          expected_gap: body.expected_gap,
           rationale: body.rationale || body.note || null,
           actor_name,
           actor_function,
@@ -537,7 +552,7 @@ async function handleAction(request: Request): Promise<Response> {
         await restoreRejectedNeed({ need_id: body.need_id, rationale: rationaleOf(body), actor_name, actor_function });
         break;
       case "restore_tactic":
-        await restoreRejectedTactic({ tactic_id: body.tactic_id, rationale: rationaleOf(body), actor_name, actor_function });
+        await restoreRejectedTactic({ tactic_id: body.tactic_id, expected_tactic: body.expected_tactic ?? "", rationale: rationaleOf(body), actor_name, actor_function });
         break;
       case "restore_mapping":
         await restoreRejectedMapping({
@@ -599,12 +614,13 @@ async function handleAction(request: Request): Promise<Response> {
           coverage_id: body.coverage_id,
           actor_name,
           actor_function,
-          note: body.note,
+          note: rationaleOf(body),
         });
         break;
       case "create_tactic":
         if (body.origin === "gaps") {
           await recordMissedTactic({
+            rationale: rationaleOf(body),
             name: body.name,
             type: body.type as never,
             description: body.description,
@@ -629,6 +645,7 @@ async function handleAction(request: Request): Promise<Response> {
           break;
         }
         await createProposedTactic({
+          rationale: rationaleOf(body),
           name: body.name,
           type: body.type as never,
           description: body.description,
@@ -654,6 +671,7 @@ async function handleAction(request: Request): Promise<Response> {
         break;
       case "record_missed_tactic":
         createdId = await recordMissedTactic({
+          rationale: rationaleOf(body),
           name: body.name,
           type: body.type as never,
           description: body.description,
@@ -713,19 +731,30 @@ async function handleAction(request: Request): Promise<Response> {
           actor_function,
         });
         break;
-      case "accept_mapping":
+      case "accept_mapping": {
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
         }
+        const suggestion = body.judgement_origin === "model"
+          ? (await latestS4MappingRows())?.find(row => row.gap_id === body.gap_id)?.mappings.find(row => row.tactic_id === body.tactic_id)
+          : undefined;
+        if (body.judgement_origin === "model" && (!suggestion || body.expected_suggestion !== relationshipVersion(suggestion))) {
+          throw new Error("Model suggestion changed or is unavailable. Review the current suggestion or make a manual judgement with a reason.");
+        }
         await acceptMapping({
+          model: body.judgement_origin === "model",
+          references: suggestion?.references,
+          supplied_records: suggestion?.supplied_records,
+          expected_tactic_version: suggestion?.expected_tactic_version,
           gap_id: body.gap_id,
           tactic_id: body.tactic_id,
           actor_name,
           actor_function,
           note: rationaleOf(body),
-          ...coverageInput(body),
+          ...(suggestion ? { coverage: suggestion.coverage, dimensions: suggestion.dimensions } : coverageInput(body)),
         });
         break;
+      }
       case "reject_mapping":
         if (rationaleOf(body).length < 3) {
           return NextResponse.json({ error: RATIONALE_REQUIRED }, { status: 400 });
@@ -758,7 +787,7 @@ async function handleAction(request: Request): Promise<Response> {
           actor_function,
           rationale,
         });
-        if (aiRow) {
+        if (aiRow && mappingDecision.decision_event_id) {
           const gap = (await loadState().catch(() => null))?.gaps.find((row) => row.id === body.gap_id);
           if (gap) {
             await captureMappingRowDecision({
@@ -849,6 +878,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "modify_gap":
         await modifyGap({
           gap_id: body.gap_id,
+          expected_gap: body.expected_gap,
           name: typeof body.name === "string" ? body.name : undefined,
           statement: typeof body.statement === "string" ? body.statement : undefined,
           domain: body.domain || undefined,
@@ -860,6 +890,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "lock_tactic_review":
         await lockTacticReview({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic ?? "",
           review_status: body.review_status as "accepted" | "rejected",
           actor_name,
           actor_function,
@@ -869,6 +900,8 @@ async function handleAction(request: Request): Promise<Response> {
       case "modify_tactic":
         await modifyTactic({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic ?? "",
+          status: typeof body.status === "string" ? body.status : undefined,
           fields: tacticFieldsOf(body),
           custom_type: customTypeOf(body),
           rationale: rationaleOf(body),
@@ -894,6 +927,7 @@ async function handleAction(request: Request): Promise<Response> {
           actor_name,
           actor_function,
           mark_complete: String(body.mark_complete) === "true",
+          reason: typeof body.reason === "string" ? body.reason : rationaleOf(body),
         });
         return NextResponse.json({ ok: true, context: saved });
       }
@@ -922,6 +956,7 @@ async function handleAction(request: Request): Promise<Response> {
           decision: "accept",
           actor: identity.actor,
           apply: {
+            expected_resolution: body.expected_resolution,
             addressed_name: body.addressed_name,
             addressed_statement: body.addressed_statement || undefined,
             open_name: body.open_name,
@@ -935,6 +970,7 @@ async function handleAction(request: Request): Promise<Response> {
       case "rewrite_partial_gap":
         await rewritePartialGap({
           gap_id: body.gap_id,
+          expected_resolution: body.expected_resolution,
           name: body.name,
           statement: body.statement || undefined,
           status: body.status as "validated_open" | "validated_addressed",
@@ -966,10 +1002,11 @@ async function handleAction(request: Request): Promise<Response> {
       case "lock_tactic":
         await lockTactic({
           tactic_id: body.tactic_id,
+          expected_tactic: body.expected_tactic ?? "",
           status: body.status as never,
           actor_name,
           actor_function,
-          note: body.note,
+          note: requireRationale(rationaleOf(body)),
         });
         break;
       // Ingest is the S0→S4 stage pipeline; S2–S4 need a connected LLM and the

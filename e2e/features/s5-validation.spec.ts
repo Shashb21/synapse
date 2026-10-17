@@ -1,3 +1,4 @@
+import { openInventoryRow } from "../support/inventory";
 import { expect, test } from "@playwright/test";
 import { freshWorkspace } from "../support/session";
 import {
@@ -29,21 +30,16 @@ test.describe("S5 classification and validation gate", () => {
     const target = before.open[0]!;
 
     await page.goto("/?place=gaps");
-    // The workbench is a list and one detail pane: pick the gap in the list, and
-    // retry the pick until the page has hydrated (a click before that does nothing).
-    const card = page.locator(`article[data-gap-id="${target.gap_id}"]`);
-    const confirm = card.getByRole("button", { name: /^confirm status$/i });
-    await expect(async () => {
-      await page.getByRole("button", { name: target.name }).first().click({ timeout: 5_000 });
-      await expect(confirm).toBeVisible({ timeout: 2_000 });
-    }).toPass({ timeout: 30_000 });
+    const panel = await openInventoryRow(page, target.gap_id);
+    await panel.getByRole("link", { name: "Confirm evidence coverage", exact: true }).click();
+    const confirm = page.getByRole("button", { name: /^confirm status$/i });
     await confirm.click();
 
-    // Signed in, so no name is asked: just an optional note and "Confirm <status>".
+    // Signed in, so confirmation records the required reason under the current identity.
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(/recorded in the audit trail under your name/i)).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: /^name$/i })).toHaveCount(0);
-    await dialog.getByRole("textbox", { name: /note \(optional\)/i }).fill("Both source quotes support this gap");
+    await dialog.getByRole("textbox", { name: "Reason (required)", exact: true }).fill("Both source quotes support this gap");
     await dialog.getByRole("button", { name: /^confirm open$/i }).click();
     await expect(dialog).toBeHidden();
     await expect(confirm).toHaveCount(0);

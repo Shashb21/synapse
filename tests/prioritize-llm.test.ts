@@ -1,3 +1,6 @@
+import { sources } from "@/lib/iegp/schema";
+import { sql } from "drizzle-orm";
+import { db } from "@/modules/kernel/db";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "@/modules";
 import { wipePlatform } from "@/modules/kernel/db";
@@ -6,7 +9,7 @@ import { NoRouteError } from "@/modules/llm/provider";
 import { displayedGapStatus, isLiveGap } from "@/lib/iegp/engine";
 import { createGap, loadState, resetDemoSetup } from "@/lib/iegp/store";
 import { DEFAULT_AXES, quadrantBand } from "@/modules/stages/s8-prioritization/axes";
-import { prioritizationModule } from "@/modules/stages/s8-prioritization/module";
+import { listPlacements, setPlacement, prioritizationModule } from "@/modules/stages/s8-prioritization/module";
 
 /**
  * The model path of S8, with a scripted model in place of a provider: no
@@ -71,11 +74,12 @@ describe("S8 on the model path", () => {
   beforeAll(async () => {
     await resetDemoSetup();
     await wipePlatform();
+    await db().insert(sources).values({ id: "kan132-source", filename: "committee.txt", title: "Committee evidence interview", source_type: "stakeholder_interview", stakeholder_function: "medical_affairs", ingested_at: "2026-10-16T00:00:00Z", full_text: "Comparative effectiveness and elderly safety evidence are missing for the committee submission." });
     for (const statement of [
       "No comparative effectiveness data versus standard of care for the payer dossier.",
       "Long-term safety in elderly patients is unknown.",
     ]) {
-      await createGap({ statement, actor_name: ACTOR.name, actor_function: ACTOR.function });
+      await createGap({ statement, source_id: "kan132-source", source_quote: statement, actor_name: ACTOR.name, actor_function: ACTOR.function });
     }
     const state = await loadState();
     ids = state.gaps
@@ -136,8 +140,24 @@ describe("S8 on the model path", () => {
     expect(byId.get(a)).toMatchObject({ axis_scores: { [X]: 90, [Y]: 85 }, rationale: "revised: blocks the payer dossier" });
     expect(byId.get(b)).toMatchObject({ axis_scores: { [X]: 30, [Y]: 70 }, rationale: "model reason" });
     for (const row of output.placements) {
+      expect(row).toMatchObject({ references: [], support_status: "unsupported" });
       expect(row.suggested_band).toBe(quadrantBand({ xAxis: axis(X), yAxis: axis(Y), scores: row.axis_scores }));
     }
+  });
+
+  it("carries only supplied record references and the reasoning they support", async () => {
+    const { ctx, calls } = context((call) => {
+      if (call.purpose === "priority-critic") return reviewed(reviewIdsOf(call));
+      return { gaps: gapIdsOf(call).map((gap_id, index) => ({ gap_id, scores: { [X]: 80, [Y]: 70 },
+        rationale: "The evidence need affects the dossier",
+        references: [{ entity_type: "gap", entity_id: index === 0 ? gap_id : "invented-gap", reason: "The supplied evidence statement identifies the missing comparison" }],
+      })) };
+    });
+    const { output } = await prioritizationModule.run(input(), ctx);
+    const supplied = (calls.find(call => call.purpose === "priority-suggester")!.body.gaps as { references: unknown[] }[])[0]!;
+    expect(supplied.references).toEqual(expect.arrayContaining([expect.objectContaining({ entity_type: "gap", entity_id: ids[0] })]));
+    expect(output.placements[0]).toMatchObject({ references: [{ entity_type: "gap", entity_id: ids[0], reason: "The supplied evidence statement identifies the missing comparison" }], support_status: "supported" });
+    expect(output.placements[1]).toMatchObject({ references: [], support_status: "unsupported" });
   });
 
   it("asks again for a gap the model left unscored instead of filling it in", async () => {
@@ -179,4 +199,56 @@ describe("S8 on the model path", () => {
     );
     await expect(prioritizationModule.run(input(), ctx)).rejects.toThrow(/did not return a complete review/);
   });
+  it("retains supplied source context when reserving a gap for replay", async () => {
+    const facts = await prioritizationModule.freeze!(input());
+    const reserved = await prioritizationModule.evals!.reserveGold!(facts, [ids[0]!]);
+    const { ctx } = context(call => {
+      if (call.purpose === "priority-critic") return reviewed(reviewIdsOf(call));
+      const gaps = call.body.gaps as { id: string; references: { entity_type: string; entity_id: string }[] }[];
+      expect(gaps[0]!.references).toEqual(expect.arrayContaining([expect.objectContaining({ entity_type: "source", entity_id: "kan132-source" })]));
+      return scored(gaps.map(gap => gap.id), { [X]: 80, [Y]: 75 });
+    });
+    ctx.replay = { evaluation: true, input: input(), facts: reserved.facts, examples: [], module_id: prioritizationModule.manifest.id, module_version: prioritizationModule.manifest.version, prompt_version: "fixture" };
+    const { output } = await prioritizationModule.run({ ...input(), gap_ids: [ids[0]!] }, ctx);
+    expect(output.placements).toHaveLength(1);
+  });
+
+  it("persists model-authored supplied gap/objective/source support and preserves human values on reruns", async () => {
+    const { ctx } = context(call => {
+      if (call.purpose === "priority-critic") return reviewed(reviewIdsOf(call));
+      return { gaps: (call.body.gaps as { id: string; references: { entity_type: string; entity_id: string }[] }[]).map(gap => ({
+        gap_id: gap.id, scores: { [X]: 80, [Y]: 75 }, rationale: "Supplied records explain the evidence need",
+        references: gap.references.map(ref => ({ entity_type: ref.entity_type, entity_id: ref.entity_id, reason: "This record describes the evidence need affecting the decision" })),
+      })) };
+    });
+    await prioritizationModule.run({ ...input(), dry_run: false }, ctx);
+    const [a, b] = ids as [string, string];
+    const saved = (await listPlacements()).find(row => row.gap_id === a)!;
+    expect(saved).toMatchObject({ support_status: "supported", suggested_references: expect.arrayContaining([{ entity_type: "gap", entity_id: a, reason: "This record describes the evidence need affecting the decision" }]) });
+    expect(saved.suggested_references?.some(ref => ref.entity_type === "objective")).toBe(true);
+    expect(saved.suggested_references).toContainEqual({ entity_type: "source", entity_id: "kan132-source", reason: "This record describes the evidence need affecting the decision" });
+    const human = await setPlacement({ gap_id: a, actor: ACTOR, band: "low", axis_scores: { [X]: 23, [Y]: 34 }, rationale: "Human assessment must survive reruns", reason: "Reviewed with the planning team", expected_version: saved.version });
+    await prioritizationModule.run({ ...input(), dry_run: false }, ctx);
+    expect((await listPlacements()).find(row => row.gap_id === a)).toMatchObject({ band: "low", axis_scores: { [X]: 23, [Y]: 34 }, rationale: human.rationale, human_axes: [X, Y], human_band: true });
+    // A previously scored gap must not stop only-missing from saving a later gap.
+    await db().execute(sql`DELETE FROM priority_placements WHERE gap_id = ${b}`);
+    await prioritizationModule.run({ ...input(), dry_run: false, only_missing: true }, ctx);
+    expect((await listPlacements()).find(row => row.gap_id === b)?.support_status).toBe("supported");
+  });
+
+  it("keeps all prior suggestions if a later placement write fails", async () => {
+    const before = await listPlacements();
+    const failId = [...ids].sort().at(-1)!;
+    await db().execute(sql.raw("CREATE FUNCTION fail_s8_batch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected S8 batch failure'; END $$"));
+    await db().execute(sql.raw(`CREATE TRIGGER fail_s8_batch BEFORE UPDATE ON priority_placements FOR EACH ROW WHEN (NEW.gap_id = '${failId}') EXECUTE FUNCTION fail_s8_batch()`));
+    try {
+      const { ctx } = context(call => call.purpose === "priority-critic" ? reviewed(reviewIdsOf(call)) : scored(gapIdsOf(call), { [X]: 12, [Y]: 15 }, "New suggestion must roll back"));
+      await expect(prioritizationModule.run({ ...input(), dry_run: false }, ctx)).rejects.toThrow();
+      expect(await listPlacements()).toEqual(before);
+    } finally {
+      await db().execute(sql.raw("DROP TRIGGER fail_s8_batch ON priority_placements"));
+      await db().execute(sql.raw("DROP FUNCTION fail_s8_batch()"));
+    }
+  });
+
 });

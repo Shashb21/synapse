@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { gapRecord } from "@/lib/iegp/gap-record";
+import { relationshipSnapshot, relationshipVersion } from "@/lib/iegp/relationship-version";
+import { modelMappingSupport } from "./support/model-mapping";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import "@/modules";
@@ -60,6 +63,13 @@ const coverageOf = async (gapId: string, tacticId: string) =>
   (await loadState()).coverages.find((c) => c.gap_id === gapId && c.tactic_id === tacticId);
 
 async function post(body: Record<string, unknown>) {
+  // Capture the record opened by this request; explicit stale/missing tokens still win.
+  const opening = await loadState();
+  const coverage = opening.coverages.find(row => row.id === body.coverage_id);
+  const gapId = String(coverage?.gap_id ?? body.gap_id ?? "");
+  const tacticId = String(coverage?.tactic_id ?? body.tactic_id ?? "");
+  body = { expected_relationship: relationshipVersion(relationshipSnapshot(opening, gapId, tacticId)), ...body };
+
   const res = await POST(
     new Request("http://localhost/api/iegp", {
       method: "POST",
@@ -75,7 +85,7 @@ describe("human validation survives a model re-run (syncComputedGapStatuses)", (
     const { gapId, tacticIds } = await workspace(1);
     await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked: nothing covers this yet." });
     // A model run maps an ongoing tactic: the engine would now compute Partial.
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...MODEL, coverage: "partial" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticIds[0]!), gap_id: gapId, tactic_id: tacticIds[0]!, ...MODEL, coverage: "partial" });
     const gap = await gapOf(gapId);
     expect(gap.human_validated).toBe(true);
     expect(gap.status_lock.locked).toBe(true);
@@ -102,7 +112,7 @@ describe("human rejections and removals bind every later model run", () => {
     const { gapId, tacticIds } = await workspace(1);
     const tacticId = tacticIds[0]!;
     await rejectMapping({ gap_id: gapId, tactic_id: tacticId, ...HUMAN, note: "Wrong population." });
-    await expect(assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...MODEL })).rejects.toThrow(
+    await expect(assignTacticToGap({ note: "The study informs this gap assessment", gap_id: gapId, tactic_id: tacticId, ...MODEL })).rejects.toThrow(
       /rejected or removed/,
     );
     expect(await coverageOf(gapId, tacticId)).toBeUndefined();
@@ -115,23 +125,23 @@ describe("human rejections and removals bind every later model run", () => {
   it("unassigns with a rationale and audit, and the model cannot re-add the pair", async () => {
     const { gapId, tacticIds } = await workspace(1);
     const tacticId = tacticIds[0]!;
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...MODEL, coverage: "partial" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId), gap_id: gapId, tactic_id: tacticId, ...MODEL, coverage: "partial" });
     await expect(
       unassignTacticFromGap({ gap_id: gapId, tactic_id: tacticId, rationale: "x", ...HUMAN }),
     ).rejects.toThrow(/rationale/i);
     await unassignTacticFromGap({ gap_id: gapId, tactic_id: tacticId, rationale: "Does not bear on it.", ...HUMAN });
     const state = await loadState();
     expect(state.coverages.some((c) => c.gap_id === gapId && c.tactic_id === tacticId)).toBe(false);
-    expect(state.audit.some((a) => a.action === "unassign_tactic" && a.detail.includes("Does not bear on it."))).toBe(true);
+    expect((await gapRecord(gapId))!.history).toContainEqual(expect.objectContaining({ entity_type: "gap_tactic", rationale: "Does not bear on it." }));
     expect((await gapOf(gapId)).status).toBe("validated_open");
-    await expect(assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...MODEL })).rejects.toThrow(/rejected or removed/);
+    await expect(assignTacticToGap({ note: "The study informs this gap assessment", gap_id: gapId, tactic_id: tacticId, ...MODEL })).rejects.toThrow(/rejected or removed/);
   });
 
   it("reject on a pair S4 already committed removes it; accept on one marks it human-accepted", async () => {
     const { gapId, tacticIds } = await workspace(2);
     const [t1, t2] = tacticIds as [string, string];
-    await assignTacticToGap({ gap_id: gapId, tactic_id: t1, ...MODEL, coverage: "partial" });
-    await assignTacticToGap({ gap_id: gapId, tactic_id: t2, ...MODEL, coverage: "limited" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, t1), gap_id: gapId, tactic_id: t1, ...MODEL, coverage: "partial" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, t2), gap_id: gapId, tactic_id: t2, ...MODEL, coverage: "limited" });
     await acceptMapping({ gap_id: gapId, tactic_id: t1, ...HUMAN, note: "Agreed." });
     await rejectMapping({ gap_id: gapId, tactic_id: t2, ...HUMAN, note: "Too thin." });
     const state = await loadState();
@@ -207,6 +217,7 @@ describe("S4 re-run leaves human decisions alone", () => {
                 confidence: 90,
                 rationale: `${tactic_id} covers it`,
                 dimensions: dims,
+                references: [{ entity_type: "gap", entity_id: id, reason: "The supplied question defines the comparison this study assesses" }],
               })),
             })),
           };
@@ -233,7 +244,8 @@ describe("S4 re-run leaves human decisions alone", () => {
       },
     };
     const { output } = await kgMappingModule.run(
-      kgMappingModule.inputSchema.parse({ gap_ids: [gapId], tactic_ids: tacticIds, dry_run: false }),
+      kgMappingModule.inputSchema.parse({
+      gap_ids: [gapId], tactic_ids: tacticIds, dry_run: false }),
       ctx,
     );
     const gapPrompt = (bodies[0]!.gaps as { id: string; human_rejected_tactic_ids?: string[] }[])[0]!;
@@ -255,7 +267,7 @@ describe("/mappings row save is persisted and wins over S4", () => {
   it("stores the status and exact tactic set, unassigning removed tactics", async () => {
     const { gapId, tacticIds } = await workspace(2);
     const [t1, t2] = tacticIds as [string, string];
-    await assignTacticToGap({ gap_id: gapId, tactic_id: t1, ...MODEL, coverage: "partial" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, t1), gap_id: gapId, tactic_id: t1, ...MODEL, coverage: "partial" });
     await expect(
       saveMappingTableRow({ gap_id: gapId, tactic_ids: [t2], mapping_status: "partially_addressed", ...HUMAN, rationale: "" }),
     ).rejects.toThrow(/rationale/i);
@@ -272,7 +284,7 @@ describe("/mappings row save is persisted and wins over S4", () => {
       mapping_status: "partially_addressed",
       rationale: "t2 is the relevant study, not t1.",
     });
-    await expect(assignTacticToGap({ gap_id: gapId, tactic_id: t1, ...MODEL })).rejects.toThrow(/rejected or removed/);
+    await expect(assignTacticToGap({ note: "The study informs this gap assessment", gap_id: gapId, tactic_id: t1, ...MODEL })).rejects.toThrow(/rejected or removed/);
 
     const proposal: MappingTableRow = {
       gap_id: gapId,
@@ -323,7 +335,8 @@ describe("manual create with coverage and manual coverage edits", () => {
     expect((await gapOf(gapId)).status).toBe("validated_partial");
     await expect(
       assignTacticToGap({
-        gap_id: (await createGap({ statement: "Another gap entirely.", ...HUMAN })),
+        gap_id: (await createGap({
+        statement: "Another gap entirely.", ...HUMAN })),
         tactic_id: tacticIds[0]!,
         ...HUMAN,
         coverage: "full",
@@ -335,7 +348,7 @@ describe("manual create with coverage and manual coverage edits", () => {
 
   it("requires a person's own rationale for coverage edits", async () => {
     const { gapId, tacticIds } = await workspace(1);
-    const covId = await assignTacticToGap({ gap_id: gapId, tactic_id: tacticIds[0]!, ...MODEL, coverage: "partial" });
+    const covId = await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticIds[0]!), gap_id: gapId, tactic_id: tacticIds[0]!, ...MODEL, coverage: "partial" });
     await expect(
       lockCoverageDimension({ coverage_id: covId, dimension: "relevance", value: "yes", rationale: "", ...HUMAN }),
     ).rejects.toThrow(/rationale/i);
@@ -371,8 +384,9 @@ describe("route actions", () => {
     expect(cov.dimensions.relevance.value).toBe("yes");
     expect(cov.dimensions.population.value).toBe("unknown");
 
-    // Plain assign with no verdict still works without a rationale (Map existing tactic).
-    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: t2 })).status).toBe(200);
+    // Linking existing work is also an audited change and requires a reason.
+    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: t2 })).status).toBe(400);
+    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: t2, note: "Track this existing study against the gap" })).status).toBe(200);
     expect((await coverageOf(gapId, t2))?.overall).toBe("unassessed");
 
     expect((await post({ action: "lock_dimension", coverage_id: cov.id, dimension: "timing", value: "no" })).status).toBe(400);
@@ -391,7 +405,8 @@ describe("route actions", () => {
       gap_id: gapId,
       tactic_id: t2,
       overall: "limited",
-      dimensions: JSON.stringify({ relevance: "partial" }),
+      dimensions: JSON.stringify({
+      relevance: "partial" }),
       rationale: "Accept the S4 proposal.",
     });
     expect(accepted.status).toBe(200);
@@ -421,7 +436,7 @@ describe("KAN-68 the mapping table's status is the gap's", () => {
     const tacticId = tacticIds[0]!;
     await validateGap({ gap_id: gapId, ...HUMAN, note: "Checked." });
     // A model "full" no person has locked does not make the gap Addressed.
-    await assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, ...MODEL, coverage: "full" });
+    await assignTacticToGap({ note: "The study informs this gap assessment", ...await modelMappingSupport(gapId, tacticId), gap_id: gapId, tactic_id: tacticId, ...MODEL, coverage: "full" });
     const state = await loadState();
     const gap = state.gaps.find((g) => g.id === gapId)!;
     const proposal: MappingTableRow = {

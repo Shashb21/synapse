@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 /** Strict comparable evidence gates promotion independently of execution. */
 import { describe, it, expect } from 'vitest';
 import { promotionEligibility, type RevisionEvaluation } from '@/modules/kernel/prompt-revision-evals';
@@ -186,7 +187,7 @@ import { frozenReplayCase, projectReplayDecision, scoreDecisionReplay } from '@/
 it('preserves future S9 pre-generation slots through a rationale-only edit and full isolated replay', async () => {
     const f = await evaluationFixture();
     await runInWorkspace({ workspace_id: f.ws.id, schema: f.ws.schema_name }, async () => {
-        await validatePlacement({ gap_id: f.gap.id, band: 'high', rationale: 'This blocks the decision.', actor, workspace_id: f.ws.id });
+        await validatePlacement({ ...await priorityDecision(f.gap.id, 'This blocks the decision.'), gap_id: f.gap.id, band: 'high', rationale: 'This blocks the decision.', actor, workspace_id: f.ws.id });
         vi.spyOn(llm, 'isTestStub').mockReturnValue(false);
         vi.spyOn(routing, 'resolveRoute').mockImplementation(async (stage) => ({ ...route, stage }));
         const calls: string[] = [];
@@ -197,19 +198,19 @@ it('preserves future S9 pre-generation slots through a rationale-only edit and f
             if (args.purpose === 'prompt-revision') return { instruction_text: 'Candidate instruction' };
             if (args.purpose === 'ideation-critic')
                 return { reviews: body.tactics.map((t: {
-                        id: string;
-                    }) => ({ id: t.id, verdict: 'keep', confidence: 90, note: 'Supported', duplicate_of: null })) };
+                        id: string; gap_id: string;
+                    }) => ({ id: t.id, verdict: 'keep', confidence: 90, note: 'Supported', duplicate_of: null, references: [{ entity_type: 'gap', entity_id: t.gap_id, reason: 'This supplied gap defines the evidence need' }] })) };
             if (args.purpose === 'ideation-judge')
                 return { gaps: body.gaps.map((g: {
                         id: string;
                         candidates: {
                             id: string;
                         }[];
-                    }) => ({ gap_id: g.id, decisions: g.candidates.map((p, index) => ({ id: p.id, verdict: 'accept', rank: index + 1, confidence: 90, reason: 'Complete design' })) })) };
+                    }) => ({ gap_id: g.id, decisions: g.candidates.map((p, index) => ({ id: p.id, verdict: 'accept', rank: index + 1, confidence: 90, reason: 'Complete design', references: [{ entity_type: 'gap', entity_id: g.id, reason: 'The supplied gap identifies the evidence need' }] })) })) };
             return { tactics: body.gaps.flatMap((g: {
                     id: string;
                     proposal_slots: string[];
-                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, proposal_kind:'new',target_tactic_id:null,expansion_scope:null, name: 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', rationale: args.system.includes('Edited design') ? 'Corrected proposal explanation' : 'Answer the evidence gap', comparative_rationale:'New registry answers unavailable scope; credible feasibility but slower and costlier than secondary analysis', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
+                }) => g.proposal_slots.map(id => ({ id, gap_id: g.id, proposal_kind:'new',target_tactic_id:null,expansion_scope:null, name: 'Original study', type: 'rwe_study', evidence_question: 'Compare outcomes', references: [{ entity_type: 'gap', entity_id: g.id, reason: 'The supplied gap defines this study question' }], rationale: args.system.includes('Edited design') ? 'Corrected proposal explanation' : 'Answer the evidence gap', comparative_rationale:'New registry answers unavailable scope; credible feasibility but slower and costlier than secondary analysis', population: 'Adults', comparator: 'Standard care', outcomes: 'Survival', data_source: 'Registry', study_design: 'Retrospective cohort', duration_months: 12, readout_lag_months: 2, timing_rationale: 'Annual data cycle' }))) };
         });
         const live = await runStage({ stage: 'S9', workspace_id: f.ws.id, input: { gap_ids: [f.gap.id], per_gap: 1 }, actor, role: 'medical_affairs' });
         const [proposal] = await listIdeationProposals();

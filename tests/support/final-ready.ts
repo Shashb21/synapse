@@ -3,6 +3,8 @@ import { countingCoverages, displayedGapStatus, isLiveGap } from "@/lib/iegp/eng
 import { loadState, lockCoverageDimension, lockCoverageOverall, lockGapStatus, reviewRequirementBasis, rewritePartialGap, validateGap } from "@/lib/iegp/store";
 import { COVERAGE_DIMENSIONS, type ActorFunction } from "@/lib/iegp/enums";
 import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
+import { priorityDecision } from "./priority-decision";
 import { listPlacements, validatePlacement } from "@/modules/stages/s8-prioritization/module";
 
 /**
@@ -18,6 +20,7 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
     const tacticIds = [...new Set(countingCoverages(state.coverages.filter((c) => c.gap_id === gap.id), state.tactics, state.expansions).map((c) => c.expansion_id ?? c.tactic_id))];
     const rewrittenGapId = await rewritePartialGap({
       gap_id: gap.id,
+      expected_resolution: gapResolutionVersion(await loadState(), gap.id),
       name: gap.name,
       status: tacticIds.length > 0 ? "validated_addressed" : "validated_open",
       tactic_ids: tacticIds.length > 0 ? tacticIds : undefined,
@@ -73,6 +76,6 @@ export async function makeFinalReady(actor: { name: string; function: ActorFunct
   const banded = new Set((await listPlacements()).filter((p) => p.validated && p.band).map((p) => p.gap_id));
   for (const gap of state.gaps.filter(isLiveGap)) {
     if (displayedGapStatus(gap) !== "validated_open" || banded.has(gap.id)) continue;
-    await validatePlacement({ gap_id: gap.id, band: "low", rationale: "Banded for the final plan", actor });
+    await validatePlacement({ ...await priorityDecision(gap.id, "Banded for the final plan"), gap_id: gap.id, band: "low", rationale: "Banded for the final plan", actor });
   }
 }

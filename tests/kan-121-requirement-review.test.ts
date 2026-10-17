@@ -1,3 +1,5 @@
+import { modelMappingSupport } from "./support/model-mapping";
+import { openingActionTokens } from "./support/opening-action-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /** Browser cookies let the public route exercise real identity and permissions. */
@@ -29,7 +31,7 @@ const yes = Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, "yes"]));
 const required = Object.fromEntries(COVERAGE_DIMENSIONS.map(d => [d, { applicability: "required", requirement: `Reviewed ${d}`, rationale: "Required for this decision" }]));
 let gapId: string, tacticId: string;
 async function post(body: Record<string, unknown>) {
-  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+  const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...await openingActionTokens(body), ...body }) }));
   return { status: response.status, body: await response.json() };
 }
 async function basis() { return requirements.getRequirementBasisReview(await store.loadState(), gapId); }
@@ -51,7 +53,7 @@ describe("KAN-141 requirement review through public actions", () => {
     const result = await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, overall: "full", rationale: "It looks comprehensive" });
     expect(result.status).toBe(400);
     expect((await store.loadState()).coverages).toHaveLength(0);
-    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId })).status).toBe(200);
+    expect((await post({ action: "assign_tactic", gap_id: gapId, tactic_id: tacticId, rationale: "Link for a later explicit assessment" })).status).toBe(200);
     expect((await store.loadState()).coverages[0]?.overall).toBe("unassessed");
   });
   it.each(["split_partial_gap", "rewrite_partial_gap", "create_addressed_gap"])("%s saves provisional coverage and engine status until the new requirements are reviewed", async action => {
@@ -160,7 +162,7 @@ describe("KAN-141 requirement review through public actions", () => {
     expect((await link()).status).toBe(200);
   });
   it("flags historical unsupported Full and warning acknowledgement never verifies it", async () => {
-    const id = await store.assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, coverage: "full", ...actor });
+    const id = await store.assignTacticToGap({ gap_id: gapId, tactic_id: tacticId, coverage: "full", note: "Historical sourced proposal", ...await modelMappingSupport(gapId, tacticId), ...actor });
     const row = (await store.loadState()).coverages[0]!;
     await db().update(schema.coverages).set({ overall_lock: { ...row.overall_lock, locked: true, actor_name: "Historical reviewer" }, needs_review: true }).where(eq(schema.coverages.id, id));
     const before = await store.loadState();

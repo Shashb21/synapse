@@ -1,3 +1,4 @@
+import { openingActionTokens } from "./support/opening-action-tokens";
 /** Cited manual source review through the public action and persisted read model. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const jar = vi.hoisted(() => ({ values: new Map<string, string>() }));
@@ -22,7 +23,8 @@ import { relationshipFit } from "@/lib/iegp/engine";
 const actor = { actor_name: "Source reviewer", actor_function: "medical_affairs" as const };
 let gapId: string, tacticId: string, coverageId: string, sourceId: string, blockId: string;
 async function post(body: Record<string, unknown>) {
- const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...body }) }));
+ const opening = await openingActionTokens(body);
+ const response = await POST(new Request("http://localhost/api/iegp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actor, ...opening, ...body }) }));
  return { status: response.status, body: await response.json() };
 }
 function claim(action = "create_source_discrepancy", extra: Record<string, unknown> = {}) { return post({ action, source_id: sourceId, block_id: blockId, passage: "The study includes children only.", gap_id: gapId, tactic_id: tacticId, coverage_id: coverageId, rationale: "The retained protocol challenges the adult population", ...extra }); }

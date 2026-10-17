@@ -1,3 +1,5 @@
+import { entityHistory } from "@/lib/iegp/entity-history";
+import { priorityDecision } from "./support/priority-decision";
 /** Behavioral S9 expansion source gate: edits, acceptance, stale targets and priority. */
 import { beforeEach, describe, expect, it } from 'vitest';
 import '@/modules';
@@ -15,7 +17,7 @@ beforeEach(async () => {
     await resetDemoSetup();
     await wipePlatform();
     gapId = await createGap({ statement: 'Long-term safety in elderly patients is unknown.', actor_name: actor.name, actor_function: actor.function });
-    await validatePlacement({ gap_id: gapId, band: 'high', rationale: 'Blocks dossier', actor });
+    await validatePlacement({ ...await priorityDecision(gapId, 'Blocks dossier'), gap_id: gapId, band: 'high', rationale: 'Blocks dossier', actor });
     targetId = await createProposedTactic({ name: 'Completed trial', type: 'phase3_trial', description: 'Original trial', evidence_question: 'Overall safety', population: 'Adults', intervention: 'Asset', comparator: 'SOC', outcomes: 'AE', owner: actor.name, function: actor.function, residual_ids: [], status: 'completed', actor_name: actor.name, actor_function: actor.function });
 });
 describe('S9 expansion source gate', () => {
@@ -31,6 +33,10 @@ describe('S9 expansion source gate', () => {
         expect(after.expansions).toHaveLength(1);
         expect(after.expansions[0]).toMatchObject({ tactic_id: targetId, status: 'proposed', scope: { cost_effort: 'One analyst month' } });
         expect(after.coverages.find(c => c.expansion_id === after.expansions[0].id)?.overall).toBe('unassessed');
+        const fromGap = (await entityHistory([gapId])).filter(entry => entry.entity_type === 'gap_tactic' && entry.rationale === 'Suitable existing data');
+        const fromTactic = (await entityHistory([targetId])).filter(entry => entry.entity_type === 'gap_tactic' && entry.rationale === 'Suitable existing data');
+        expect(fromGap).toHaveLength(1);
+        expect(fromTactic.map(entry => entry.id)).toEqual(fromGap.map(entry => entry.id));
         expect((await listIdeationProposals()).find(p => p.id === proposal.id)).toMatchObject({ status: 'accepted', tactic_id: targetId, expansion_id: after.expansions[0].id });
     });
     it('preserves edited child design, reconciles one-sided fields and rejects conflicting edits', async()=>{
@@ -101,7 +107,7 @@ describe('S9 expansion source gate', () => {
         expect((await loadState()).expansions[0]).toMatchObject({status:'proposed',scope:{prospective_enrolment:true,protocol_amendment:true}});
     });
     it('rejects manual ideas for Medium or unvalidated gaps', async () => {
-        await validatePlacement({ gap_id: gapId, band: 'medium', rationale: 'Later cycle', actor });
+        await validatePlacement({ ...await priorityDecision(gapId, 'Later cycle'), gap_id: gapId, band: 'medium', rationale: 'Later cycle', actor });
         await expect(add()).rejects.toThrow(/High/);
     });
 });

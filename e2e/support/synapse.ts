@@ -1,5 +1,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import type { GapRecord } from "../../src/lib/iegp/gap-record";
+import { relationshipVersion } from "../../src/lib/iegp/relationship-version";
+import { gapEditSnapshot } from "../../src/lib/iegp/gap-edit";
 import { coverageReviewVersion } from "../../src/lib/iegp/requirement-basis";
 
 /**
@@ -100,6 +102,15 @@ export async function runStageExpectingError(
 }
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action)) && body.expected_version === undefined) {
+    const current = (await planState(request)).proposals.find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   return postJson(request, "/api/plan", body);
 }
 
@@ -107,6 +118,11 @@ export async function planActionExpectingError(
   request: APIRequestContext,
   body: Record<string, unknown>,
 ): Promise<{ status: number; error: string }> {
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   const response = await request.post("/api/plan", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({ ...ACTOR, ...body }),
@@ -116,6 +132,30 @@ export async function planActionExpectingError(
 }
 
 export async function iegpAction(request: APIRequestContext, body: Record<string, unknown>) {
+  // Fixtures open the same record as a person; explicitly supplied stale tokens stay intact.
+  if (["assign_tactic", "unassign_tactic", "accept_mapping", "reject_mapping"].includes(String(body.action)) && body.expected_relationship === undefined) {
+    const response = await request.get(`/api/gaps/${encodeURIComponent(String(body.gap_id))}`);
+    if (!response.ok()) throw new Error(`Opening gap record failed: ${response.status()}`);
+    const record = await response.json() as GapRecord;
+    const coverages = record.coverages.filter(row => row.tactic_id === body.tactic_id)
+      .map(coverage => {
+        const row = { ...coverage };
+        for (const field of ["fit", "requirement_review", "tactic", "expansion"]) Reflect.deleteProperty(row, field);
+        return row;
+      })
+      .sort((a, b) => a.id.localeCompare(b.id));
+    body = { expected_relationship: relationshipVersion({ coverages, decision: record.mapping_rejections.find(row => row.tactic_id === body.tactic_id) ?? null }), ...body };
+  }
+  if (["modify_tactic", "lock_tactic_review"].includes(String(body.action)) && body.expected_tactic === undefined) {
+    const response = await request.get(`/api/tactics/${encodeURIComponent(String(body.tactic_id))}`);
+    if (!response.ok()) throw new Error(`Opening tactic record failed: ${response.status()}`);
+    body = { expected_tactic: (await response.json()).version, ...body };
+  }
+  if (body.action === "modify_gap" && body.expected_gap === undefined) {
+    const response = await request.get(`/api/gaps/${encodeURIComponent(String(body.gap_id))}`);
+    if (!response.ok()) throw new Error(`Opening gap record failed: ${response.status()}`);
+    body = { expected_gap: gapEditSnapshot((await response.json() as GapRecord).gap), ...body };
+  }
   return postJson(request, "/api/iegp", body);
 }
 
@@ -139,8 +179,10 @@ export async function planState(request: APIRequestContext) {
   const response = await request.get("/api/plan");
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
+    priority_context_versions: Record<string, string | null>;
     placements: {
       gap_id: string;
+      version: string;
       axis_scores: Record<string, number>;
       suggested_band: string;
       suggested_rationale: string;
@@ -156,6 +198,7 @@ export async function planState(request: APIRequestContext) {
       updated_by: string;
     };
     proposals: {
+      version: string;
       id: string;
       gap_id: string;
       name: string;
@@ -416,6 +459,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 data: JSON.stringify({
                   ...ACTOR,
                   action: "rewrite_partial_gap",
+                  expected_resolution: record.resolution_version,
                   gap_id,
                   name: record.gap.name,
                   status: "validated_addressed",
@@ -466,6 +510,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
         } else {
           await iegpAction(request, {
             action: "rewrite_partial_gap",
+            expected_resolution: record.resolution_version,
             gap_id,
             name: record.gap.name,
             status: "validated_open",
