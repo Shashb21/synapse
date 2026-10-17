@@ -7,7 +7,7 @@ import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 /** Capture fixture opening state; explicit test tokens override these defaults. */
 export async function openingActionTokens(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   // Source review owns its own citation/target versions; no relationship snapshot is consumed.
-  if (["link_source_support", "create_source_discrepancy", "resolve_source_discrepancy"].includes(String(body.action))) return {};
+  if (["link_source_support", "create_source_discrepancy", "resolve_source_discrepancy", "retry_source_comparison"].includes(String(body.action))) return {};
   const state = await loadState();
   const coverage = state.coverages.find(row => row.id === body.coverage_id);
   const gapId = coverage?.gap_id ?? String(body.gap_id ?? "");

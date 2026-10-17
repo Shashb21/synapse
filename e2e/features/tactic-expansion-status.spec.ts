@@ -3,9 +3,8 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 import { COVERAGE_DIMENSIONS } from "../../src/lib/iegp/enums";
 import type { GapRecord } from "../../src/lib/iegp/gap-record";
-import { coverageReviewVersion } from "../../src/lib/iegp/requirement-basis";
 import { freshWorkspace } from "../support/session";
-import { iegpAction, resetWorkspace } from "../support/synapse";
+import { coverageOpeningTokens, iegpAction, resetWorkspace } from "../support/synapse";
 
 /** Prepare this synthetic positive coverage through the ordinary requirement review actions. */
 async function reviewPositiveFixture(request: APIRequestContext, gapId: string, coverageId: string) {
@@ -35,7 +34,7 @@ async function reviewPositiveFixture(request: APIRequestContext, gapId: string, 
     const current = (await readGap()).coverages.find(coverage => coverage.id === coverageId)!;
     await iegpAction(request, {
       action: "lock_dimension", coverage_id: coverageId, dimension, value: "yes",
-      expected_version: coverageReviewVersion(current),
+      ...await coverageOpeningTokens(request, current.tactic_id, current.id),
       rationale: "Synthetic positive fixture: the added design satisfies this sourced requirement",
     });
   }
@@ -176,7 +175,7 @@ test("split selects a counting child independently and gap details agree before 
     const coverage = reviewed.coverages.find(row => row.id === inheritedCoverage!.id)!;
     await iegpAction(request, {
       action: "lock_overall", coverage_id: coverage.id, overall: "full",
-      expected_version: coverageReviewVersion(coverage), expected_basis_version: reviewed.requirement_review.version,
+      ...await coverageOpeningTokens(request, coverage.tactic_id, coverage.id), expected_basis_version: reviewed.requirement_review.version,
       rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
     });
     await page.reload();

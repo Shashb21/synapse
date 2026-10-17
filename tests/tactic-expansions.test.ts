@@ -1,21 +1,27 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TacticRecordContent } from "@/components/tactic-record-content";
+import { tacticRecord } from "@/lib/iegp/tactic-record";
 import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { eq, sql } from "drizzle-orm";
 import "@/modules";
 import * as tables from "@/lib/iegp/schema";
 import { db } from "@/lib/iegp/db";
 import { buildSeed } from "@/lib/iegp/seed";
-import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, syncComputedGapStatuses, reviewRequirementBasis } from "@/lib/iegp/store";
+import { assignTacticToGap, loadState, persistState, rejectMapping, lockCoverageOverall, lockCoverageDimension, saveMappingTableRow, splitPartialGap, rewritePartialGap, reviewRequirementBasis } from "@/lib/iegp/store";
 import { acceptTacticExpansion, setExpansionStatus, tacticVersion } from "@/lib/iegp/tactic-expansions";
 import { runInWorkspace } from "@/modules/workspaces/context";
 import { POST } from "@/app/api/plan/route";
 import { kgMappingModule } from "@/modules/stages/s4-kg-mapping/module";
 import type { ModuleContext } from "@/modules/kernel/contracts";
-import { computeGapStatus, unlocked, countingCoverages } from "@/lib/iegp/engine";
+import { computeGapStatus, unlocked, countingCoverages, relationshipFit } from "@/lib/iegp/engine";
 import { COVERAGE_DIMENSIONS } from "@/lib/iegp/enums";
-import { getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
+import { coverageReviewVersion, getRequirementBasisReview } from "@/lib/iegp/requirement-basis";
 import type { ExpansionScope } from "@/lib/iegp/types";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 
 const actor = { name: "A. Rao", function: "heor" as const };
 const scope: ExpansionScope = {
@@ -114,6 +120,39 @@ describe("canonical expansion acceptance", () => {
       await pg.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await pg.end();
     }
+  });
+  it.each(["split", "rewrite"])("keeps historical coverage readable after an expansion %s while explaining current fit", async operation => {
+    const child = await acceptTacticExpansion(args);
+    await setExpansionStatus({ expansion_id: child.id, status: "planned", rationale: "Funded child", actor, expected_version: child.version });
+    const before = await loadState();
+    const historical = before.coverages.find(row => row.expansion_id === child.id)!;
+    const opening = gapResolutionVersion(before, args.gap_id);
+    const currentGapId = operation === "split"
+      ? (await splitPartialGap({ expected_resolution: opening, parent_gap_id: args.gap_id, addressed_name: "Covered child scope", open_name: "Unanswered comparator", tactic_ids: [child.id], note: "Reviewed child scope and remaining question", actor_name: actor.name, actor_function: actor.function })).addressedId
+      : await rewritePartialGap({ expected_resolution: opening, gap_id: args.gap_id, name: "Covered child scope", status: "validated_addressed", tactic_ids: [child.id], note: "Reviewed child scope and remaining question", actor_name: actor.name, actor_function: actor.function });
+    const after = await loadState();
+    expect(after.gaps.find(row => row.id === args.gap_id)!.retired).toBe(true);
+    expect(after.coverages.find(row => row.id === historical.id)).toEqual(historical);
+    expect(() => relationshipFit(after, args.gap_id, args.tactic_id, child.id)).toThrow("Expansion scope does not belong to this tactic and gap");
+
+    const record = (await tacticRecord(args.tactic_id))!;
+    expect(record.coverages.map(row => row.id).sort()).toEqual(after.coverages.filter(row => row.tactic_id === args.tactic_id).map(row => row.id).sort());
+    expect(record.coverages.find(row => row.id === historical.id)).toMatchObject({ ...historical, review_version: coverageReviewVersion(historical), fit: null });
+    expect(record.coverages.find(row => row.gap_id === currentGapId && row.expansion_id === child.id)!.fit).toEqual(relationshipFit(after, currentGapId, args.tactic_id, child.id));
+    expect(await loadState()).toEqual(after);
+  });
+  it.each([false, true])("renders a mapped gap with nullable fit=%s without losing its link", async missingFit => {
+    const record = (await tacticRecord(args.tactic_id))!;
+    const coverage = record.coverages.find(row => row.gap_id === args.gap_id)!;
+    expect(coverage.fit).not.toBeNull();
+    const html = renderToStaticMarkup(createElement(TacticRecordContent, {
+      panel: false,
+      record: { ...record, permissions: { edit: false, coverage: false },
+        coverages: [{ ...coverage, fit: missingFit ? null : coverage.fit }] },
+    }));
+    expect(html).toContain(`href="/gaps/${coverage.gap_id}"`);
+    expect(html).toContain(coverage.gap!.name);
+    expect(html.includes('data-testid="relationship-fit"')).toBe(!missingFit);
   });
   it("split retains child identities and dimension locks while Full remains provisional", async () => {
     const child = await acceptTacticExpansion(args);

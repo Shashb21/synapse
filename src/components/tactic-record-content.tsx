@@ -63,7 +63,7 @@ export function TacticRecordContent({ record, identity = { signed_in: true, acto
                 <span>{gap?.name}{c.expansion_id ? ` · ${expansions.find(e => e.id === c.expansion_id)?.scope.name ?? "Expansion"}` : ""}</span>
                 <CoverageBadge overall={c.overall} />
               </Link>
-              <RelationshipFit fit={c.fit} tacticName={tactic.name} />
+              {c.fit ? <RelationshipFit fit={c.fit} tacticName={tactic.name} /> : null}
               {record.permissions.coverage ? <RequirementBasisReview onRefresh={onRefresh} gapId={c.gap_id} review={c.requirement_review} /> : null}
               </div>
             );

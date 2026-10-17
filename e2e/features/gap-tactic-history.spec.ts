@@ -73,7 +73,7 @@ test("coverage failure and stale rejection preserve the entered judgement and re
   await expect(editor.getByLabel("Your rationale (required)")).toHaveValue("Retain this registry review reason on failure");
   const record = await (await request.get(`/api/tactics/${tacticId}`)).json();
   const coverage = record.coverages.find((row: { gap_id: string }) => row.gap_id === gaps[1]);
-  await iegpAction(request, { action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, overall: "not_relevant", rationale: "Concurrent reviewer corrected the coverage" });
+  await iegpAction(request, { action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, expected_version: coverage.review_version, overall: "not_relevant", rationale: "Concurrent reviewer corrected the coverage" });
   await editor.getByRole("button", { name: "Change overall coverage", exact: true }).click();
   await expect(editor.getByRole("alert")).toContainText("Relationship changed");
   await expect(editor.getByRole("combobox", { name: "Overall", exact: true })).toHaveValue("full");

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import type { GapRecord } from "../../src/lib/iegp/gap-record";
 import {
   consolidate,
+  coverageOpeningTokens,
   iegpAction,
   planState,
   firstOpenGap,
@@ -234,7 +236,7 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
 
     // Priority editing serves Open gaps. Reopen through the existing relationship editor first.
     const initialLink = planned.coverages.find((row: { gap_id: string }) => row.gap_id === gapId);
-    await iegpAction(request, { action: "lock_overall", coverage_id: initialLink.id, expected_relationship: initialLink.relationship_version, overall: "not_relevant", rationale: "Review shows this cohort does not cover the remaining comparison" });
+    await iegpAction(request, { action: "lock_overall", coverage_id: initialLink.id, expected_relationship: initialLink.relationship_version, expected_version: initialLink.review_version, overall: "not_relevant", rationale: "Review shows this cohort does not cover the remaining comparison" });
     for (const band of ["medium", "low"] as const) {
       await planAction(request, { action: "set_placement", gap_id: gapId, band, validate: true, rationale: `Review the ${band} priority after initial planning`, reason: "Evidence planning priorities have changed" });
       await page.reload();
@@ -256,9 +258,37 @@ test.describe("Retained tactic discovery (KAN-137)", () => {
     await reuse.getByRole("button", { name: "Map tactic", exact: true }).click();
     await expect(reuse).toBeHidden();
     await iegpAction(request, { action: "create_gap", name: "New unresolved Inventory work", statement: "New evidence needs review", domain: "unmet_need" });
-    const linked = await request.get(`/api/tactics/${tacticId}`).then(response => response.json());
-    const coverage = linked.coverages.find((row: { gap_id: string }) => row.gap_id === gapId);
-    await iegpAction(request, { action: "lock_overall", coverage_id: coverage.id, expected_relationship: coverage.relationship_version, overall: "full", rationale: "The reviewed evidence now addresses this comparison" });
+    // This synthetic positive fixture must review requirements and dimensions before Full.
+    let reviewed: GapRecord = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
+    await iegpAction(request, {
+      action: "review_requirement_basis", gap_id: gapId,
+      expected_version: reviewed.requirement_review.version,
+      requirements: JSON.stringify(Object.fromEntries(Object.entries(reviewed.requirement_review.basis.dimensions).map(([dimension, requirement]) => [dimension, {
+        applicability: requirement.requirement.trim() ? "required" : "not_applicable",
+        requirement: requirement.requirement,
+        rationale: "Synthetic discovery fixture: sourced requirements are required; unspecified dimensions are outside this fixture's decision",
+        resolution: requirement.conflicts.length ? "Fixture reviewer requires the combined sourced requirements" : "",
+      }]))),
+      rationale: "Explicit requirement review for the positive retained-discovery fixture",
+    });
+    reviewed = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
+    for (const [dimension, requirement] of Object.entries(reviewed.requirement_review.basis.dimensions)) {
+      if (requirement.applicability !== "required") continue;
+      const current: GapRecord = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
+      const coverage = current.coverages.find(row => row.tactic_id === tacticId)!;
+      await iegpAction(request, {
+        action: "lock_dimension", coverage_id: coverage.id, dimension, value: "yes",
+        ...await coverageOpeningTokens(request, tacticId, coverage.id),
+        rationale: "Synthetic positive fixture: the retained design satisfies this sourced requirement",
+      });
+    }
+    reviewed = await request.get(`/api/gaps/${gapId}`).then(response => response.json());
+    const coverage = reviewed.coverages.find(row => row.tactic_id === tacticId)!;
+    await iegpAction(request, {
+      action: "lock_overall", coverage_id: coverage.id,
+      ...await coverageOpeningTokens(request, tacticId, coverage.id), expected_basis_version: reviewed.requirement_review.version,
+      overall: "full", rationale: "The reviewed evidence now addresses this comparison",
+    });
     await page.goto("/?place=tactics");
     await expect(existing).toContainText("Addressed");
     await expect(existing).toContainText("Second decision using the cohort");

@@ -2,7 +2,6 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import type { GapRecord } from "../../src/lib/iegp/gap-record";
 import { relationshipVersion } from "../../src/lib/iegp/relationship-version";
 import { gapEditSnapshot } from "../../src/lib/iegp/gap-edit";
-import { coverageReviewVersion } from "../../src/lib/iegp/requirement-basis";
 
 /**
  * Shared harness for the feature specs. Setup goes through the module API so each
@@ -129,6 +128,20 @@ export async function planActionExpectingError(
   });
   const payload = (await response.json()) as { error?: string };
   return { status: response.status(), error: payload.error ?? "" };
+}
+
+/** Read opening tokens explicitly for a valid current-coverage fixture review. */
+export async function coverageOpeningTokens(request: APIRequestContext, tacticId: string, coverageId: string) {
+  const response = await request.get(`/api/tactics/${encodeURIComponent(tacticId)}`);
+  if (!response.ok()) throw new Error(`Opening tactic record failed: ${response.status()} ${await response.text()}`);
+  const record = await response.json() as {
+    coverages: { id: string; review_version: string; relationship_version: string }[];
+  };
+  const coverage = record.coverages.find(row => row.id === coverageId);
+  if (!coverage?.review_version || !coverage.relationship_version) {
+    throw new Error(`Opening coverage ${coverageId} is missing its review tokens`);
+  }
+  return { expected_version: coverage.review_version, expected_relationship: coverage.relationship_version };
 }
 
 export async function iegpAction(request: APIRequestContext, body: Record<string, unknown>) {
@@ -495,7 +508,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
             const current = (await readGap(rewrittenId)).coverages.find(coverage => coverage.id === coverageId)!;
             await iegpAction(request, {
               action: "lock_dimension", coverage_id: coverageId,
-              expected_version: coverageReviewVersion(current), dimension, value: "yes",
+              ...await coverageOpeningTokens(request, current.tactic_id, current.id), dimension, value: "yes",
               rationale: "Synthetic positive fixture: planned design satisfies this sourced requirement",
             });
           }
@@ -503,7 +516,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
           const current = rewritten.coverages.find(coverage => coverage.id === coverageId)!;
           await iegpAction(request, {
             action: "lock_overall", coverage_id: coverageId, overall: "full",
-            expected_version: coverageReviewVersion(current),
+            ...await coverageOpeningTokens(request, current.tactic_id, current.id),
             expected_basis_version: rewritten.requirement_review.version,
             rationale: "Explicit Full review after all required positive-fixture dimensions are satisfied",
           });
