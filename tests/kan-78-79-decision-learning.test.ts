@@ -1,3 +1,5 @@
+import { suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
+import { priorityDecision } from "./support/priority-decision";
 import { RunRecorder, openRun, closeRun } from "@/modules/kernel/observability";
 import * as routing from "@/modules/kernel/routing";
 import { loadState, persistState } from "@/lib/iegp/store";
@@ -335,15 +337,15 @@ describe("distinct human decision events", () => {
     const actor = { name: "Band reviewer", function: "medical_affairs" as const };
     await runInWorkspace({ workspace_id: workspace.id, schema: workspace.schema_name }, async () => {
       const gap = await createGap({ statement: "Unanswered evidence question", actor_name: actor.name, actor_function: actor.function });
-      await setPlacement({ gap_id: gap, band: "high", rationale: "Manual placement", actor });
-      await validatePlacement({ gap_id: gap, band: "high", rationale: "Manual validation", actor });
+      await setPlacement({ ...await priorityDecision(gap, "Manual placement"), gap_id: gap, band: "high", rationale: "Manual placement", actor });
+      await validatePlacement({ ...await priorityDecision(gap, "Manual validation"), gap_id: gap, band: "high", rationale: "Manual validation", actor });
       expect(await sharedDb().execute(sql`select id from decision_examples where workspace_id = ${workspace.id}`)).toHaveLength(0);
       const recorder = new RunRecorder({ workspace_id: workspace.id, stage: "S8", module_id: "s8.test", module_version: "test", actor, input: { gap_ids: [gap] } });
       await openRun(recorder); await closeRun({ recorder, status: "ok", output: { placements: [{ gap_id: gap, suggested_band: "high" }] } });
       const { db } = await import("@/modules/kernel/db");
       await db().execute(sql`update priority_placements set run_id = ${recorder.id}, suggested_band = 'high', suggested_rationale = 'Model explanation' where gap_id = ${gap}`);
-      await validatePlacement({ gap_id: gap, band: "high", rationale: "Model validation", actor });
-      await validatePlacement({ gap_id: gap, band: "high", rationale: "Model validation", actor });
+      await validatePlacement({ ...await priorityDecision(gap, "Model validation"), gap_id: gap, band: "high", rationale: "Model validation", actor });
+      await validatePlacement({ ...await priorityDecision(gap, "Model validation"), gap_id: gap, band: "high", rationale: "Model validation", actor });
       const rows = await sharedDb().execute(sql`select outcome, run_id from decision_examples where workspace_id = ${workspace.id}`);
       expect(rows).toHaveLength(2); expect(rows).toEqual(expect.arrayContaining([{ outcome: "accepted", run_id: recorder.id }]));
     });
@@ -383,13 +385,13 @@ describe("review round one real decision paths", () => {
     const actor = { name: "Reviewer", function: "medical_affairs" as const };
     await runInWorkspace({ workspace_id: ws.id, schema: ws.schema_name }, async () => {
       const gap = await createGap({ statement: "Unanswered population question", actor_name: actor.name, actor_function: actor.function });
-      await setPlacement({ gap_id: gap, band: "high", actor, rationale: "Initial placement" });
+      await setPlacement({ ...await priorityDecision(gap, "Initial placement"), gap_id: gap, band: "high", actor, rationale: "Initial placement" });
       const recorder = new RunRecorder({ workspace_id: ws.id, stage: "S8", module_id: "s8.test", module_version: "test", actor, input: {} });
       await openRun(recorder); await closeRun({ recorder, status: "ok", output: {} });
       await db().execute(sql`update priority_placements set run_id = ${recorder.id}, suggested_band = 'high' where gap_id = ${gap}`);
       const { POST } = await import("@/app/api/plan/route");
       for (const band of ["high", "low"]) {
-        const response = await POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "set_placement", gap_id: gap, band, validate: true, actor_name: actor.name, actor_function: actor.function, rationale: "Review model band" }) }));
+        const response = await POST(new Request("http://localhost/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...await priorityDecision(gap, "Review model band"), action: "set_placement", gap_id: gap, band, validate: true, actor_name: actor.name, actor_function: actor.function, rationale: "Review model band" }) }));
         expect(response.status).toBe(200);
       }
       const rows = await sharedDb().execute(sql`select outcome, run_id, actor, capture_key from decision_examples where workspace_id = ${ws.id}`);
@@ -414,8 +416,8 @@ describe("review round one real decision paths", () => {
       const design = { population: "Original population", comparator: "Care", outcomes: "Survival", data_source: "Registry", study_design: "Cohort", duration_months: 12, readout_lag_months: 2, timing_rationale: "Follow-up" };
       const original = { proposal_kind: "new", comparative_rationale:"New cohort supplies missing data", name: "AI idea", type: "rwe_study", rationale: "AI rationale", evidence_question: "AI question", design };
       const {validatePlacement}=await import("@/modules/stages/s8-prioritization/module");
-      await validatePlacement({gap_id:gap,band:"high",rationale:"Blocks review decision",actor});
-      await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original }, created_at: new Date().toISOString() });
+      await validatePlacement({ ...await priorityDecision(gap, "Blocks review decision"),gap_id:gap,band:"high",rationale:"Blocks review decision",actor});
+      await db().insert(ideationProposals).values({ id, gap_id: gap, ...original, design: { ...design, origin: "ai", run_id: recorder.id, original_ai: original, supporting_references: [{ entity_type: "gap", entity_id: gap, reason: "The supplied question identifies the unanswered evidence need" }], supplied_records: suppliedJudgementRecords(await (await import("@/lib/iegp/store")).loadState(), [gap]) }, created_at: new Date().toISOString() });
       if (edited) await editIdeationProposal({ id, fields: { name: "Human idea", population: "Human population" }, rationale: "Narrow population", actor });
       await decideIdeationProposal({ id, decision: "accept", rationale: "Adopt this idea", actor });
       const rows = await sharedDb().execute(sql`select ai_output, final, outcome, run_id, actor from decision_examples where workspace_id = ${ws.id}`);

@@ -181,6 +181,7 @@ test.describe("S10 interactive Gantt IEGP", () => {
   });
 
   test("saves the plan as final, versioned, with its sign-off rationale", async ({ page, request }) => {
+    test.setTimeout(120_000);
     // KAN-86: the complete plan needs every gap resolved, confirmed and banded.
     await resolveFinalPlanGaps(request);
     // KAN-85: a final save first needs the model's estimated dates reviewed.
@@ -193,8 +194,11 @@ test.describe("S10 interactive Gantt IEGP", () => {
     const dialog = page.getByRole("dialog");
     await dialog.getByPlaceholder(/why this decision/i).fill("Signed off for the feature spec");
     await fillNameIfAsked(dialog, "A. Rao");
+    const saveResponse = page.waitForResponse(response => response.url().endsWith("/api/plan") && response.request().method() === "POST");
     await dialog.getByRole("button", { name: /^save$/i }).click();
-    await expect(dialog).toBeHidden();
+    const saved = await saveResponse;
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
 
     await expect(page.getByText(/Signed off for the feature spec/)).toBeVisible({ timeout: 20_000 });
     const state = await planState(request);

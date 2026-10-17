@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { usePageRefresh } from "@/components/platform/use-page-refresh";
 import { Button } from "@/components/ui/button";
 import { useAiEnabled } from "@/components/platform/ai-status";
@@ -77,9 +77,11 @@ export function splitPayload(args: {
   addressedTacticIds: string[];
   openTacticIds: string[];
   originatingRunId?: string | null;
+  expectedResolution?: string;
 }) {
   return {
     action: "split_partial_gap",
+    expected_resolution: args.expectedResolution,
     ...(args.originatingRunId ? { originating_run_id: args.originatingRunId } : {}),
     parent_gap_id: args.gapId,
     addressed_name: args.addressedName,
@@ -113,15 +115,20 @@ export function SplitGapDialog({
   gapId,
   gapName,
   residualName,
-  tactics,
+  resolutionVersion,
+  tactics: suppliedTactics,
 }: {
   gapId: string;
   gapName: string;
   residualName: string;
   tactics: PlanTactic[];
+  resolutionVersion?: string;
 }) {
   const { refreshing, refresh } = usePageRefresh();
   const [open, setOpen] = useState(false);
+  const opening = useRef(resolutionVersion);
+  const [reviewedTactics, setReviewedTactics] = useState(suppliedTactics);
+  const tactics = open ? reviewedTactics : suppliedTactics;
   const [mode, setMode] = useState<"split" | "rewrite">("split");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -148,15 +155,15 @@ export function SplitGapDialog({
   const [suggested, setSuggested] = useState(() => hasSuggestedSplit(gapName, residualName));
   /**
    * Tracks whether the user edited the split themselves, as opposed to just
-   * accepting the suggested (default or proposed) split. A rationale is only
-   * required once they touch a name or tactic selection — see onSubmit.
+   * accepting the suggested (default or proposed) split. Every saved change
+   * still requires the person’s reason for the new relationships.
    */
   const [touched, setTouched] = useState(false);
   const leftoverTactics = useMemo(
     () => tactics.filter((t) => !addressedTacticIds.includes(t.expansion_id ?? t.id)),
     [tactics, addressedTacticIds],
   );
-  const rationaleRequired = mode === "rewrite" || touched;
+  const rationaleRequired = true;
 
   function reset() {
     setOriginatingRunId(null);
@@ -214,6 +221,7 @@ export function SplitGapDialog({
       output?: {
         mode: "llm" | "deterministic";
         proposal: {
+          expected_resolution?: string;
           addressed_name: string;
           addressed_statement?: string;
           open_name: string;
@@ -238,6 +246,7 @@ export function SplitGapDialog({
     }
     // Only model runs are learning evidence; deterministic suggestions remain manual splits.
     setOriginatingRunId(json.output?.mode === "llm" ? json.run_id ?? null : null);
+    opening.current = proposal.expected_resolution;
     setMode("split");
     setAddressedName(proposal.addressed_name);
     setOpenName(proposal.open_name);
@@ -292,6 +301,7 @@ export function SplitGapDialog({
             ...splitPayload({
               gapId,
               originatingRunId,
+              expectedResolution: opening.current,
               addressedName,
               addressedStatement,
               openName,
@@ -303,6 +313,7 @@ export function SplitGapDialog({
           }
         : {
             action: "rewrite_partial_gap",
+            expected_resolution: opening.current,
             gap_id: gapId,
             name: rewriteName,
             status: rewriteStatus,
@@ -325,7 +336,11 @@ export function SplitGapDialog({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) reset();
+        if (next) {
+          opening.current = resolutionVersion;
+          setReviewedTactics(suppliedTactics);
+          reset();
+        }
       }}
     >
       <DialogTrigger
@@ -538,7 +553,7 @@ export function SplitGapDialog({
               {mode === "split" && suggested
                 ? touched
                   ? "Required because you changed the suggested split. Stored on the edit record."
-                  : "Accepting the split as suggested needs no rationale."
+                  : "Required for the saved split and its gap–tactic relationships."
                 : "Stored on the edit record."}
             </span>
           </label>

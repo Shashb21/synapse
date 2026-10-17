@@ -49,10 +49,11 @@ test.describe("Place by hand", () => {
     const first = unplaced.getByRole("listitem").first();
     const gapName = (await first.locator(".truncate").first().innerText()).trim();
 
-    const trigger = page.getByRole("button", { name: "Type scores" });
-    const dialog = page.getByRole("dialog");
+    const trigger = page.getByRole("button", { name: "Set priority", exact: true });
+    const panel = page.getByRole("dialog", { name: "Gap details", exact: true });
+    const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
     await expect(async () => {
-      await first.getByRole("button").click();
+      if (!(await panel.isVisible())) await first.getByRole("button").click();
       await trigger.click({ timeout: 1_000 });
       await expect(dialog).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 30_000 });
@@ -72,6 +73,7 @@ test.describe("Place by hand", () => {
     await expect(dialog.getByText(/y_score|x_score/)).toHaveCount(0);
 
     // The server refuses it the same way, naming the axis.
+    const invalidOpening = await (await page.request.get("/api/plan")).json();
     const res = await page.request.post("/api/plan", {
       data: {
         action: "set_placement",
@@ -80,7 +82,10 @@ test.describe("Place by hand", () => {
         y_axis: "payer_value",
         y_score: 150,
         x_score: 60,
-        rationale: "e2e",
+        rationale: "Assess the manual axis scores",
+        reason: "Assess the manual axis scores",
+        expected_version: invalidOpening.placements.find((row: { gap_id: string }) => row.gap_id === gapIds[0])?.version ?? null,
+        expected_context_version: invalidOpening.priority_context_versions[gapIds[0]!],
       },
     });
     expect(res.status()).toBe(400);
@@ -90,6 +95,7 @@ test.describe("Place by hand", () => {
     await dialog.getByRole("button", { name: "Save placement" }).click();
     await expect(dialog).toBeHidden();
 
+    await page.keyboard.press("Escape");
     // No reload: the gap leaves Not placed yet and shows on the matrix.
     await expect(async () => {
       const after = (await unplaced.isVisible()) ? await unplaced.getByRole("listitem").count() : 0;
@@ -105,11 +111,12 @@ test.describe("Place by hand", () => {
     await expect(unplaced.getByRole("listitem")).toHaveCount(1);
     const row = unplaced.getByRole("listitem").first();
     const gapName = (await row.locator(".truncate").first().innerText()).trim();
-    const trigger = page.getByRole("button", { name: "Type scores" });
-    const dialog = page.getByRole("dialog");
+    const trigger = page.getByRole("button", { name: "Set priority", exact: true });
+    const panel = page.getByRole("dialog", { name: "Gap details", exact: true });
+    const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
     const open = async () =>
       expect(async () => {
-        await row.getByRole("button").click();
+        if (!(await panel.isVisible())) await row.getByRole("button").click();
         await trigger.click({ timeout: 1_000 });
         await expect(dialog).toBeVisible({ timeout: 1_000 });
       }).toPass({ timeout: 30_000 });
@@ -138,8 +145,11 @@ test.describe("Place by hand", () => {
     await dialog.locator('input[name="x_score"]').fill("30");
     await save.click();
     await expect(dialog.getByText("Try again.")).toBeVisible();
+    await expect(dialog.locator('input[name="x_score"]')).toHaveValue("30");
+    await expect(rationale).toHaveValue("Placed by hand in the e2e");
 
-    // Reopening starts clean: the old error does not linger.
+    // Reopening starts clean after explicitly discarding the unsaved draft.
+    page.once("dialog", confirmation => confirmation.accept());
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await open();
@@ -151,6 +161,7 @@ test.describe("Place by hand", () => {
     await rationale.fill("Placed by hand in the e2e");
     await save.click();
     await expect(dialog).toBeHidden();
+    await page.keyboard.press("Escape");
     expect(refused).toBe(1);
     await expect(unplaced).toHaveCount(0);
     await expect(page.getByRole("region", { name: /(High|Medium|Low) gaps/ }).getByText(gapName).first()).toBeVisible();
@@ -158,6 +169,7 @@ test.describe("Place by hand", () => {
 
   // Owner feedback (KAN-52): drag a gap from the list onto the matrix; where it lands sets its scores.
   test("a gap dragged from the list onto the matrix is placed where it is dropped", async ({ page, request }) => {
+    test.setTimeout(90_000);
     const created = await iegpAction(request, {
       action: "create_gap",
       name: "Drag gap three",
@@ -191,6 +203,31 @@ test.describe("Place by hand", () => {
     await page.mouse.move(to.x, to.y, { steps: 12 });
     await page.mouse.up();
 
+    const decision = page.getByRole("dialog", { name: "Review matrix move for Drag gap three", exact: true });
+    await expect(decision).toBeVisible();
+    await decision.getByLabel("Reason for change (required)").fill("Cancelled preview must not be recorded");
+    page.once("dialog", confirmation => confirmation.accept());
+    await page.keyboard.press("Escape");
+    await expect(item).toBeVisible();
+    await expect(item).toBeFocused();
+    await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    const cancelled = await (await request.get("/api/plan")).json();
+    expect(cancelled.placements.find((row: { gap_id: string }) => row.gap_id === String(created.id))).toBeUndefined();
+    const retry = (await item.boundingBox())!;
+    const retryPlot = (await plot.boundingBox())!;
+    await page.mouse.move(retry.x + retry.width / 2, retry.y + retry.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(retryPlot.x + retryPlot.width * 0.8, retryPlot.y + retryPlot.height * 0.2, { steps: 12 });
+    await page.mouse.up();
+    await expect(decision).toBeVisible();
+    await decision.getByRole("button", { name: "Save matrix move" }).click();
+    await expect(decision.getByRole("alert")).toContainText("reason is required");
+    await decision.getByLabel("Reason for change (required)").fill("Dragged after reviewing payer impact");
+    const saveResponse = page.waitForResponse(response => response.url().endsWith("/api/plan") && response.request().method() === "POST");
+    await decision.getByRole("button", { name: "Save matrix move" }).click();
+    const saved = await saveResponse;
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await expect(decision).toBeHidden({ timeout: 30_000 });
     await expect(item).toHaveCount(0);
     const chip = plot.getByRole("button", { name: /^Drag gap three: High/ });
     await expect(chip).toBeVisible();
@@ -198,4 +235,76 @@ test.describe("Place by hand", () => {
     await page.reload();
     await expect(page.getByRole("group", { name: /^Prioritization matrix:/ }).getByRole("button", { name: /^Drag gap three: High/ })).toBeVisible();
   });
+
+  test("manual change, stale retry, keyboard move and reconfirmation retain attributable history after refresh", async ({ page }) => {
+    test.setTimeout(120_000);
+    const gapId = gapIds[0]!;
+    await page.goto("/?place=plan&setting=all");
+    const plot = page.getByRole("group", { name: /^Prioritization matrix:/ });
+    await plot.getByRole("button", { name: /^Hand gap one:/ }).click();
+    await page.getByRole("button", { name: "Edit scores", exact: true }).click();
+    const dialog = page.getByRole("dialog").filter({ hasNot: page.getByRole("heading", { name: "Gap details", exact: true }) });
+    await dialog.locator('input[name="x_score"]').fill("90");
+    await dialog.locator('textarea[name="rationale"]').fill("Needed before the payer decision");
+    const reason = dialog.getByLabel("Reason for change (required)");
+    await reason.fill("Updated following manual assessment");
+    const state = await (await page.request.get("/api/plan")).json();
+    const current = state.placements.find((row: { gap_id: string }) => row.gap_id === gapId);
+    const competingBand = current.band === "medium" ? "low" : "medium";
+    const competing = await page.request.post("/api/plan", { data: { action: "set_placement", gap_id: gapId, band: competingBand, reason: "Colleague changed the band", expected_version: current.version, expected_context_version: state.priority_context_versions[gapId] } });
+    expect(competing.ok(), await competing.text()).toBe(true);
+    const changed = await (await page.request.get("/api/plan")).json();
+    const changedPlacement = changed.placements.find((row: { gap_id: string }) => row.gap_id === gapId);
+    expect(changedPlacement.band).toBe(competingBand);
+    expect(changedPlacement.version).not.toBe(current.version);
+    await dialog.getByRole("button", { name: "Save placement" }).click();
+    await expect(dialog.getByRole("alert")).toContainText("review the latest priority");
+    await expect(dialog.locator('input[name="x_score"]')).toHaveValue("90");
+    await expect(reason).toHaveValue("Updated following manual assessment");
+    page.once("dialog", confirmation => confirmation.accept());
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await plot.getByRole("button", { name: /^Hand gap one:/ }).click();
+    await page.getByRole("button", { name: "Edit scores", exact: true }).click();
+    await dialog.locator('input[name="x_score"]').fill("90");
+    await dialog.locator('textarea[name="rationale"]').fill("Needed before the payer decision");
+    await reason.fill("Updated following manual assessment");
+    await dialog.getByRole("button", { name: "Save placement" }).click();
+    await expect(dialog).toBeHidden();
+    await page.getByRole("button", { name: "Review and confirm priority", exact: true }).click();
+    await reason.fill("Confirmed after reviewing the manual change");
+    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Gap details", exact: true })).not.toBeVisible();
+    const chip = plot.getByRole("button", { name: /^Hand gap one:/ });
+    await chip.focus();
+    await expect(chip).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog).toBeVisible();
+    await reason.fill("Fine-tuned the score with the keyboard");
+    await dialog.getByRole("button", { name: "Save matrix move" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(chip).toBeFocused();
+    await chip.click();
+    await page.getByRole("button", { name: "Review or change priority", exact: true }).click();
+    await reason.fill("Team deliberately reconfirmed the same band");
+    await dialog.getByRole("button", { name: "Confirm priority", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await page.goto(`/gaps/${gapId}`);
+    await page.reload();
+    await page.getByRole("group", { name: "History", exact: true }).locator("summary").first().click();
+    const history = page.getByTestId("entity-history");
+    await expect(history).toContainText("Updated following manual assessment");
+    await expect(history).toContainText("Confirmed after reviewing the manual change");
+    await expect(history).toContainText("Fine-tuned the score with the keyboard");
+    await expect(history).toContainText("Team deliberately reconfirmed the same band");
+    const latest = history.getByTestId("history-entry").first();
+    await expect(latest).toContainText("Feature E2E");
+    await latest.getByText("Show full change", { exact: true }).click();
+    await expect(latest.locator("details")).toContainText("Priority confirmed");
+    await expect(latest.locator("details")).toContainText("Needed before the payer decision");
+    await expect(page.getByTestId("gap-priority")).toContainText("Needed before the payer decision");
+  });
+
 });

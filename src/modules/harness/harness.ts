@@ -283,8 +283,9 @@ export async function runHarness(args: { case: AiSectionId; input: HarnessInput;
           const gapId = await customGap();
           const axes = await loadAxes();
           // Ideation serves gaps a person validated as High, so the sandbox copy is placed and validated High.
-          await movePlacement({ gap_id: gapId, x_axis: axes.x_axis, y_axis: axes.y_axis, x: 90, y: 90, actor: args.actor });
-          await validatePlacement({ gap_id: gapId, band: "high", rationale: "AI harness: treated as High", actor: args.actor });
+          const contextVersion = (await loadState()).gaps.find(gap => gap.id === gapId)?.priority_context_version ?? null;
+          const placed = await movePlacement({ expected_context_version: contextVersion, expected_version: null, reason: "AI harness: place this sandbox gap for ideation", gap_id: gapId, x_axis: axes.x_axis, y_axis: axes.y_axis, x: 90, y: 90, actor: args.actor });
+          await validatePlacement({ expected_version: placed.version, reason: "AI harness: confirm the sandbox ideation case", gap_id: gapId, band: "high", rationale: "AI harness: treated as High", actor: args.actor });
           await run("S9", { gap_ids: [gapId], dry_run: true });
           return `Your gap “${input.gap_name || input.gap_statement}”, treated as High priority`;
         }

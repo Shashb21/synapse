@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StepWaiting } from "@/components/step-waiting";
 import type { ActionIdentity } from "@/components/platform/action-dialog";
+import type { RetainedTacticGap } from "@/components/tactic-ideation/data";
 import type { ProposalCardModel } from "@/components/ideation/proposal-card";
 import { IdeationBoard } from "@/components/tactic-ideation/ideation-board";
 import type { TacticEditModel } from "@/components/tactic-ideation/tactic-panel";
@@ -10,12 +11,13 @@ const NO_IDENTITY: ActionIdentity = { signed_in: false, actor_name: "", actor_fu
 
 /**
  * Tactic Ideation (KAN-8, from the Figma design). Ideate proposed tactics here after Prioritize:
- * only the Open gaps validated as High are listed. Medium and Low gaps get their tactics mapped
+ * current Open gaps validated as High and retained work are distinguished. Medium and Low gaps get their tactics mapped
  * on Evidence Inventory.
  */
 export function TacticsPlace({
   ready,
   highGaps,
+  retainedGaps = [],
   otherCount = 0,
   availableTactics,
   proposals = [],
@@ -26,6 +28,7 @@ export function TacticsPlace({
   /** False until Prioritize is finished. The place still shows; the banner says what it waits on. */
   ready: boolean;
   highGaps: OpenGapCard[];
+  retainedGaps?: RetainedTacticGap[];
   otherCount?: number;
   availableTactics: TacticLibraryItem[];
   proposals?: ProposalCardModel[];
@@ -45,6 +48,7 @@ export function TacticsPlace({
       ) : null}
       <IdeationBoard
         gaps={highGaps}
+        retainedGaps={retainedGaps}
         proposals={proposals}
         library={availableTactics}
         identity={identity}

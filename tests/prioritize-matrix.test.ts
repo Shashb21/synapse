@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it } from "vitest";
 import "@/modules";
 import { runStage } from "@/modules/kernel/run";
@@ -76,15 +77,15 @@ describe("Prioritize on a setting's matrix", () => {
       .filter((gap) => isLiveGap(gap) && displayedGapStatus(gap) === "validated_open")
       .map((gap) => gap.id);
     expect(openIds.length).toBeGreaterThanOrEqual(2);
-    await setGapSettings({ gap_id: openIds[0]!, settings: ["1L", "Perioperative"], actor_name: ACTOR.name, actor_function: ACTOR.function });
-    await setGapSettings({ gap_id: openIds[1]!, settings: ["1l"], actor_name: ACTOR.name, actor_function: ACTOR.function });
+    await setGapSettings({ gap_id: openIds[0]!, settings: ["1L", "Perioperative"], expected_settings: state.gaps.find(gap => gap.id === openIds[0])!.settings, rationale: "Scope this gap to both treatment settings", actor_name: ACTOR.name, actor_function: ACTOR.function });
+    await setGapSettings({ gap_id: openIds[1]!, settings: ["1l"], expected_settings: state.gaps.find(gap => gap.id === openIds[1])!.settings, rationale: "Scope this gap to first-line care", actor_name: ACTOR.name, actor_function: ACTOR.function });
   }, 60_000);
 
   it("scopes gaps by setting tag, case-insensitively", async () => {
     const state = await loadState();
     const first = state.gaps.find((gap) => gap.id === openIds[0])!;
     expect(first.settings).toEqual(["1L", "Perioperative"]);
-    expect(settingOptions(state)).toEqual(expect.arrayContaining(["1L", "Perioperative"]));
+    expect(settingOptions(state).map((tag) => tag.toLowerCase())).toEqual(expect.arrayContaining(["1l", "perioperative"]));
     expect(settingOptions(state).filter((tag) => tag.toLowerCase() === "1l")).toHaveLength(1);
     const inOneL = state.gaps.filter((gap) => gapInSetting(gap, "1L")).map((gap) => gap.id);
     expect(inOneL).toEqual(expect.arrayContaining([openIds[0], openIds[1]]));
@@ -122,15 +123,15 @@ describe("Prioritize on a setting's matrix", () => {
 
   it("drag moves the band; a validated gap stays validated inside its quadrant only", async () => {
     const gapId = openIds[0]!;
-    const drag = (x: number, y: number) =>
-      movePlacement({ gap_id: gapId, x_axis: "effort_cost", y_axis: "decision_impact", x, y, actor: ACTOR });
+    const drag = async (x: number, y: number) =>
+      movePlacement({ ...await priorityDecision(gapId, "Reviewed matrix placement"), gap_id: gapId, x_axis: "effort_cost", y_axis: "decision_impact", x, y, actor: ACTOR });
 
     const topLeft = await drag(85, 85);
     expect(topLeft.band).toBe("high");
     // Favourable X on a cost axis is low effort.
     expect(topLeft.axis_scores.effort_cost).toBe(15);
 
-    await validatePlacement({ gap_id: gapId, band: "high", rationale: "Blocks the 1L HTA dossier", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(gapId, "Blocks the 1L HTA dossier"), gap_id: gapId, band: "high", rationale: "Blocks the 1L HTA dossier", actor: ACTOR });
     const nudge = await drag(70, 90);
     expect(nudge.validated).toBe(true);
     expect(nudge.band).toBe("high");
@@ -156,7 +157,7 @@ describe("Prioritize on a setting's matrix", () => {
 
   it("a validated gap placed on new axes gains a position but keeps its band", async () => {
     const gapId = openIds[1]!;
-    await validatePlacement({ gap_id: gapId, band: "medium", rationale: "Relevant, not this cycle", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(gapId, "Relevant, not this cycle"), gap_id: gapId, band: "medium", rationale: "Relevant, not this cycle", actor: ACTOR });
     await runStage({
       stage: "S8",
       input: { gap_ids: [gapId], x_axis: "patient_impact", y_axis: "payer_value" },

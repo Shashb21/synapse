@@ -1,3 +1,5 @@
+import { suppliedJudgementRecords } from "@/lib/iegp/judgement-references";
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "@/modules";
 import { wipePlatform } from "@/modules/kernel/db";
@@ -61,7 +63,7 @@ const mapped = (gap_id: string, tactic_id: string, coverage = "partial", rationa
   mapping_status: coverage === "full" ? "addressed" : "partially_addressed",
   confidence: 70,
   rationale,
-  mappings: [{ tactic_id, coverage, confidence: 65, rationale: `${tactic_id} overlaps`, dimensions: dims }],
+  mappings: [{ tactic_id, coverage, confidence: 65, rationale: `${tactic_id} overlaps`, dimensions: dims, references: [{ entity_type: "gap", entity_id: gap_id, reason: "The supplied gap states the evidence need this tactic covers" }] }],
 });
 const unmapped = (gap_id: string) => ({ gap_id, mapping_status: "open", confidence: 80, rationale: "nothing bears on it", mappings: [] });
 const reviewsFor = (call: Call, verdict: (id: string) => "keep" | "revise" | "drop" = () => "keep") => ({
@@ -408,15 +410,35 @@ describe("S4 on the model path", () => {
       return { rows: gapIdsOf(call).map((id) => (id === a ? mapped(id, t1, "partial") : unmapped(id))) };
     });
 
-    await kgMappingModule.run(
+    const original = await loadState();
+    const { output } = await kgMappingModule.run(
       kgMappingModule.inputSchema.parse({ gap_ids: gapIds, tactic_ids: tacticIds, dry_run: false }),
       ctx,
     );
 
+    const mapping = output.rows.find(row => row.gap_id === a)!.mappings[0];
+    expect(mapping.supplied_records).toEqual(suppliedJudgementRecords(original, [a]));
+    expect(mapping.expected_tactic_version).toBe(tacticEditVersion(original.tactics.find(row => row.id === t1)!));
     const coverage = (await loadState()).coverages.find((row) => row.gap_id === a && row.tactic_id === t1)!;
     expect(coverage.overall).toBe("partial");
     for (const [dimension, value] of Object.entries(dims)) {
       expect(coverage.dimensions[dimension as keyof typeof coverage.dimensions].value).toBe(value);
     }
   });
+  it.each(["missing", "inaccessible"])("does not commit a model relationship with %s support", async support => {
+    const id = await createGap({ statement: "Comparative outcomes needed for the committee", actor_name: ACTOR.name, actor_function: ACTOR.function });
+    const tacticId = tacticIds[0];
+    const { ctx, calls } = context(call => {
+      if (call.purpose === "mapping-table-critic") return reviewsFor(call);
+      if (call.purpose === "mapping-table-judge") return verdictsFor(call);
+      const row = mapped(id, tacticId);
+      row.mappings[0].references = support === "missing" ? [] : [{ entity_type: "gap", entity_id: "not-a-supplied-gap", reason: "Claiming unrelated evidence" }];
+      return { rows: [row] };
+    });
+    const result = await kgMappingModule.run(kgMappingModule.inputSchema.parse({ gap_ids: [id], tactic_ids: [tacticId] }), ctx);
+    expect(result.output.committed).toEqual([]);
+    expect((await loadState()).coverages.some(row => row.gap_id === id)).toBe(false);
+    expect(calls.find(call => call.purpose === "mapping-table-proposer")!.body.supporting_records).toEqual(expect.arrayContaining([expect.objectContaining({ entity_type: "gap", entity_id: id, excerpt: "Comparative outcomes needed for the committee" })]));
+  });
+
 });

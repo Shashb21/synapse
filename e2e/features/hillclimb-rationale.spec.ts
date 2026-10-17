@@ -58,7 +58,7 @@ test.describe("Hillclimb from edit rationales", () => {
     const partial = await firstPartialGap(request);
     if (!partial) return;
     const correction = `Keep the comparator question out of the addressed slice ${Date.now()}`;
-    const proposed = await runStage<{ proposal: { addressed_name: string; addressed_statement: string; open_name: string; open_statement: string; addressed_tactic_ids: string[] } | null }>(
+    const proposed = await runStage<{ proposal: { expected_resolution: string; addressed_name: string; addressed_statement: string; open_name: string; open_statement: string; addressed_tactic_ids: string[] } | null }>(
       request,
       "S6",
       { gap_id: partial.gap_id },
@@ -67,6 +67,7 @@ test.describe("Hillclimb from edit rationales", () => {
     await runStage(request, "S6", {
       gap_id: partial.gap_id,
       apply: {
+        expected_resolution: proposal.expected_resolution,
         addressed_name: proposal.addressed_name,
         addressed_statement: proposal.addressed_statement,
         open_name: proposal.open_name,

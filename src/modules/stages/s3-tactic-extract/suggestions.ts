@@ -1,3 +1,4 @@
+import { withRelationshipChange } from "@/lib/iegp/relationship-change";
 /** S3 source review: immutable model baseline, source provenance and atomic human decisions. */
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
@@ -102,7 +103,7 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
   const rationale = requireRationale(args.rationale); requireActor(args.actor);
   if (!["expand", "separate", "reject"].includes(args.decision)) throw new Error("Unknown tactic suggestion decision.");
   await ensureTacticSuggestionSchema();
-  const updated = await db().transaction(async tx => {
+  const updated = await withRelationshipChange({ actor_name: args.actor.name, actor_function: args.actor.function, rationale }, () => db().transaction(async tx => {
     const row = await pending(tx, args.id, args.expected_version);
     const [source] = await tx.select().from(t.sources).where(eq(t.sources.id, row.source_id)).for("update");
     if (!source) throw new Error("Documented source no longer exists in this workspace.");
@@ -126,7 +127,7 @@ export async function decideTacticSuggestion(args: {id: string; decision: "expan
     const at = nowIso(), result: TacticSuggestion = {...row, status: args.decision === "expand" ? "expanded" : args.decision === "separate" ? "separate" : "rejected", result_expansion_id, result_tactic_id, updated_at: at, version: newId("TSV"), history: [...row.history, {action: args.decision, actor: args.actor, rationale, at, expansion: row.expansion, separate: row.separate, gap_id: row.gap_id}]};
     await save(tx, result); await appendAudit(args.actor.name, args.actor.function, "tactic_suggestion", row.id, args.decision, rationale, tx);
     return result;
-  });
+  }));
   // The learning owner uses its own connection only after the source transaction commits.
   await captureTacticSuggestionDecision({suggestion: updated, decision: args.decision, rationale, actor: args.actor});
   return updated;

@@ -1,3 +1,4 @@
+import { inspectJudgementReferences, type JudgementReference } from "@/lib/iegp/judgement-references";
 import { desc, eq } from "drizzle-orm";
 import { db, ensurePlatformSchema } from "./db";
 import * as t from "./schema";
@@ -21,6 +22,7 @@ export type EditRecord = {
   after: string | null;
   /** Null when no reason was given (a gate action without one, KAN-90). */
   rationale: string | null;
+  supporting_references?: JudgementReference[];
   actor: Actor;
   /** Account id or email of the signed-in person; "anonymous"/"demo"/"system" otherwise. Null on legacy rows. */
   actor_principal: string | null;
@@ -55,6 +57,8 @@ export async function recordEdit(args: {
   after?: string | null;
   rationale: string | null | undefined;
   rationale_optional?: boolean;
+  references?: JudgementReference[];
+  reference_gap_ids?: string[];
   actor: Actor;
   signal_kind?: "user_edit" | "user_rejected_proposal" | "user_accepted_proposal";
   /** Background jobs and tests: who to attribute the edit to instead of the request's session. */
@@ -62,6 +66,11 @@ export async function recordEdit(args: {
 }, transaction?: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0]): Promise<EditRecord> {
   if (!transaction) await ensurePlatformSchema();
   const rationale = args.rationale_optional ? (args.rationale ?? "").trim() || null : requireRationale(args.rationale);
+  const references = args.references ?? [];
+  if (references.length) {
+    const { loadState } = await import("@/lib/iegp/store");
+    if (!args.reference_gap_ids?.length || !inspectJudgementReferences(await loadState(), args.reference_gap_ids, references).length) throw new Error("Supporting references are missing, inaccessible or unrelated to this judgement.");
+  }
   const attribution = args.attribution ?? (await currentAttribution());
   const record: EditRecord = {
     id: newId("edit"),
@@ -75,6 +84,7 @@ export async function recordEdit(args: {
     before: args.before ?? null,
     after: args.after ?? null,
     rationale,
+    supporting_references: references,
     actor: args.actor,
     actor_principal: attribution.principal,
     actor_role: attribution.role,
@@ -93,6 +103,7 @@ export async function recordEdit(args: {
     before: record.before,
     after: record.after,
     rationale: record.rationale,
+    supporting_references: references,
     actor_name: record.actor.name,
     actor_function: record.actor.function,
     actor_principal: record.actor_principal,
@@ -110,7 +121,7 @@ export async function recordEdit(args: {
     rationale: record.rationale,
     actor: attributedActor(attribution, record.actor.name),
     workspace_id: record.workspace_id,
-    meta: { source: "edit_record", edit_id: record.id, stage: record.stage, field: record.field, actor_function: record.actor.function },
+    meta: { supporting_references: references, source: "edit_record", edit_id: record.id, stage: record.stage, field: record.field, actor_function: record.actor.function },
   });
   await recordSignal({
     stage: args.stage,
@@ -149,6 +160,7 @@ function toRecord(row: typeof t.editRecords.$inferSelect): EditRecord {
     before: row.before,
     after: row.after,
     rationale: row.rationale,
+    supporting_references: row.supporting_references ?? [],
     actor: { name: row.actor_name, function: row.actor_function as Actor["function"] },
     actor_principal: row.actor_principal ?? null,
     actor_role: row.actor_role ?? null,

@@ -1,10 +1,11 @@
+import { gapResolutionVersion } from "@/lib/iegp/relationship-version";
 import { getRun } from "@/modules/kernel/observability";
 import { scopedWorkspaceId } from "@/modules/workspaces/context";
 import { captureResidualDecision } from "@/lib/iegp/learning-capture";
 import type { Actor } from "@/modules/kernel/contracts";
 import { z } from "zod";
 import { registerModule } from "@/modules/kernel/registry";
-import { recordEdit } from "@/modules/kernel/edit-records";
+import { recordEdit, requireRationale } from "@/modules/kernel/edit-records";
 import { PROPOSER_CRITIC_EXCHANGES, runAgenticCycle } from "@/modules/kernel/agentic";
 import { completeAll, isTestStub, requireLlm } from "@/modules/kernel/llm";
 import { NoRouteError } from "@/modules/llm/provider";
@@ -19,6 +20,7 @@ const inputSchema = z.object({
   apply: z
     .object({
       originating_run_id: z.string().min(1).optional(),
+      expected_resolution: z.string().optional(),
       addressed_name: z.string().min(3),
       addressed_statement: z.string().optional(),
       open_name: z.string().min(3),
@@ -33,6 +35,7 @@ const inputSchema = z.object({
 
 const proposalSchema = z.object({
   parent_gap_id: z.string(),
+  expected_resolution: z.string().optional(),
   addressed_name: z.string(),
   addressed_statement: z.string(),
   addressed_tactic_ids: z.array(z.string()),
@@ -411,7 +414,7 @@ export const partialSplitModule: SynapseModule<SplitInput, SplitOutput> = {
     const accepted = outcome.judged.find((item) => item.verdict === "accept");
     const rejected = outcome.rejected[0];
     const proposal = accepted
-      ? { ...accepted.candidate, rationale: [...accepted.candidate.rationale, `Judge: ${accepted.note}`] }
+      ? { ...accepted.candidate, expected_resolution: gapResolutionVersion(state, gap.id), rationale: [...accepted.candidate.rationale, `Judge: ${accepted.note}`] }
       : null;
 
     return {
@@ -494,10 +497,12 @@ export async function decidePartialSplit(args: {
   const edited = original && JSON.stringify(proposedFields) !== JSON.stringify(final);
   const suppliedRationale = (args.rationale ?? apply?.rationale ?? "").trim();
   if (original && (edited || args.decision === "reject") && suppliedRationale.length < 3) throw new Error("Give a short reason for editing or rejecting the proposed split.");
-  const rationale = suppliedRationale || (original ? "Accepted split as proposed." : "Manual split saved.");
+  const rationale = requireRationale(suppliedRationale);
   if (args.decision === "accept" && apply) {
     await splitPartialGap({
       parent_gap_id: gap.id,
+      expected_resolution: apply.expected_resolution,
+      ...(original ? { expected_proposal_resolution: original.expected_resolution ?? "" } : {}),
       addressed_name: apply.addressed_name,
       addressed_statement: apply.addressed_statement,
       open_name: apply.open_name,

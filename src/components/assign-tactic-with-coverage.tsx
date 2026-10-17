@@ -19,10 +19,12 @@ export function AssignTacticWithCoverage({
   gapId,
   availableTactics,
   mappedTacticIds,
+  expectedRelationships,
 }: {
   gapId: string;
   availableTactics: TacticLibraryItem[];
   mappedTacticIds: string[];
+  expectedRelationships: string;
 }) {
   const unmapped = availableTactics.filter((tactic) => !mappedTacticIds.includes(tactic.id));
   if (unmapped.length === 0) return null;
@@ -30,7 +32,7 @@ export function AssignTacticWithCoverage({
     <LockForm
       label="Map tactic with coverage"
       action="assign_tactic"
-      extra={{ gap_id: gapId }}
+      extra={{ gap_id: gapId, expected_relationships: expectedRelationships }}
       confirmLabel="Map and record coverage"
       description="Map a library tactic and record your own coverage verdict. Leave a dimension blank to keep it unknown."
     >
@@ -88,12 +90,12 @@ export function AssignTacticWithCoverage({
 }
 
 /** Removes a mapping. The pair is recorded as rejected so S4 never maps it again. */
-export function UnassignTactic({ gapId, tacticId }: { gapId: string; tacticId: string }) {
+export function UnassignTactic({ gapId, tacticId, expectedRelationship }: { gapId: string; tacticId: string; expectedRelationship: string }) {
   return (
     <LockForm
       label="Remove mapping"
       action="unassign_tactic"
-      extra={{ gap_id: gapId, tactic_id: tacticId }}
+      extra={{ gap_id: gapId, tactic_id: tacticId, expected_relationship: expectedRelationship }}
       confirmLabel="Remove mapping"
       description="Unmaps this tactic from this gap and records it as rejected, so a later AI mapping run does not map it again. You can map it again by hand."
     >

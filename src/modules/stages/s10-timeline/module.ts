@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import { expansionScopeSchema } from "@/lib/iegp/tactic-expansions";
 import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -191,7 +192,9 @@ export async function timelineModel(anchor?: string): Promise<TimelineModel> {
     storedActivities(),
     tacticDesigns(),
   ]);
-  return buildTimeline({ state, placements, overrides, designs, anchor });
+  return { ...buildTimeline({ state, placements, overrides, designs, anchor }),
+    tactic_versions: Object.fromEntries(state.tactics.map(tactic => [tactic.id, tacticEditVersion(tactic)])),
+  };
 }
 
 const DEPENDENCY_SYSTEM = `You sequence the activities of a pharma Integrated Evidence Generation Plan (IEGP).
@@ -1005,6 +1008,7 @@ export async function createTimelineActivity(args: {
   const gap = state.gaps.find((row) => row.id === args.gap_id);
   if (!gap) throw new Error(`Unknown gap ${args.gap_id}.`);
   const tacticId = await createProposedTactic({
+    rationale,
     name: args.name.trim(),
     type: args.type as Tactic["type"],
     description: args.name.trim(),

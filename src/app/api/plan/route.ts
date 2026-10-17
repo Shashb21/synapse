@@ -67,7 +67,8 @@ export async function GET() {
   // What must be resolved before a final save: the roadmap (KAN-85) and the gap inventory (KAN-86).
   const timeline_issues = planIssues(timeline);
   const final_blockers = await finalPlanBlockers();
-  return NextResponse.json({ placements, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
+  const priority_context_versions = Object.fromEntries(state.gaps.map(gap => [gap.id, gap.priority_context_version ?? null]));
+  return NextResponse.json({ placements, priority_context_versions, axes, proposals, timeline, timeline_view, timeline_issues, final_blockers, plan, history, tactic_suggestions });
 }
 
 const bandSchema = z.enum(["high", "medium", "low", "defer"]);
@@ -168,12 +169,17 @@ export async function POST(request: Request) {
         });
         return NextResponse.json({ok: true, expansion});
       }
+      case "accept_priority_suggestion":
       case "validate_band": {
         assertCan(identity.role, "prioritize");
         const placement = await validatePlacement({
+          accept_suggestion: body.action === "accept_priority_suggestion",
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           band: field(bandSchema, body.band, "band"),
-          rationale,
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, placement });
@@ -181,6 +187,9 @@ export async function POST(request: Request) {
       case "move_placement": {
         assertCan(identity.role, "prioritize");
         const placement = await movePlacement({
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           x_axis: String(body.x_axis ?? ""),
           y_axis: String(body.y_axis ?? ""),
@@ -218,13 +227,16 @@ export async function POST(request: Request) {
           axis_scores[yAxis] = yScore;
         }
         const placement = await setPlacement({
+          reason: typeof body.reason === "string" ? body.reason : "",
+          expected_version: body.expected_version === null ? null : field(z.string().trim().min(1), body.expected_version, "expected_version"),
+          expected_context_version: body.expected_context_version == null ? null : field(z.string().trim().min(1), body.expected_context_version, "expected_context_version"),
           gap_id: String(body.gap_id ?? ""),
           axis_scores,
           x_axis: xAxis,
           y_axis: yAxis,
           band: body.band ? field(bandSchema, body.band, "band") : undefined,
           validate: body.validate === true || body.validate === "yes" || body.validate === "true",
-          rationale,
+          rationale: typeof body.rationale === "string" ? body.rationale : undefined,
           actor: identity.actor,
         });
         return NextResponse.json({ ok: true, placement });
@@ -243,6 +255,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const settings = await setGapSettings({
           gap_id: String(body.gap_id ?? ""),
+          expected_settings: body.expected_settings,
           settings: Array.isArray(body.settings) ? body.settings.map(String) : [],
           rationale: typeof body.rationale === "string" ? body.rationale : null,
           actor_name: identity.actor.name,
@@ -254,6 +267,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "validate");
         const metadata = await setGapMetadata({
           gap_id: String(body.gap_id ?? ""),
+          expected_metadata: body.expected_metadata,
           // A metadata object, or the flat fields a dialog form posts (stakeholders comma-separated).
           metadata:
             body.metadata && typeof body.metadata === "object"
@@ -274,9 +288,12 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const result = await decideIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           decision: field(decisionSchema, body.decision, "decision"),
+          judgement_origin: body.judgement_origin === undefined ? undefined : field(z.enum(["model", "manual"]), body.judgement_origin, "judgement_origin"),
           rationale,
           actor: identity.actor,
+          workspace_id: identity.workspace?.id,
           fields: proposalFieldsOf(body),
         });
         return NextResponse.json({ ok: true, ...result });
@@ -285,6 +302,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const proposal = await restoreIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           rationale,
           actor: identity.actor,
           workspace_id: identity.workspace?.id,
@@ -295,6 +313,7 @@ export async function POST(request: Request) {
         assertCan(identity.role, "ideate");
         const proposal = await editIdeationProposal({
           id: String(body.id ?? ""),
+          expected_version: typeof body.expected_version === "string" ? body.expected_version : "",
           fields: proposalFieldsOf(body),
           rationale,
           actor: identity.actor,

@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -81,7 +82,7 @@ describe("plan API field errors name what the person sees", () => {
     expect(bySetter.json.error).toBe(`${feasibility.label} score must be a number from 0 to 100.`);
 
     await expect(
-      setPlacement({ gap_id: "GAP-ANY", axis_scores: { payer_value: 101 }, rationale: "Direct call", actor: ACTOR }),
+      setPlacement({ ...await priorityDecision("GAP-ANY", "Direct call"), gap_id: "GAP-ANY", axis_scores: { payer_value: 101 }, rationale: "Direct call", actor: ACTOR }),
     ).rejects.toThrow(`${payer.label} score must be a number from 0 to 100.`);
   });
 

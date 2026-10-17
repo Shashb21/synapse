@@ -1,3 +1,4 @@
+import { relationshipVersion } from "@/lib/iegp/relationship-version";
 /** Parent-row saves preserve child evidence and capture only the reviewed parent selection. */
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import '@/modules';
@@ -17,7 +18,7 @@ it('captures unchanged and changed parent selections without claiming a child de
  const child=await acceptTacticExpansion({proposal_id:`mapping-${crypto.randomUUID()}`,tactic_id:parent.id,gap_id:gap.id,scope,actor,rationale:'Additional scope',expected_tactic_version:tacticVersion(parent)});
  const childCoverage=(await loadState()).coverages.filter(c=>c.expansion_id===child.id);
  vi.spyOn(mapping,'latestS4MappingRows').mockResolvedValue([{gap_id:gap.id,mapping_status:'partially_addressed',tactic_ids:[parent.id,child.id],gap_name:gap.name,tactic_names:[parent.name,child.scope.name],confidence:90,rationale:['Fixture model row'],mappings:[],review:null}] as Awaited<ReturnType<typeof mapping.latestS4MappingRows>>);
- const save=async(ids:string[])=>POST(new Request('http://localhost/api/iegp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'save_mapping_row',gap_id:gap.id,tactic_ids:ids.join(','),mapping_status:'partially_addressed',rationale:'Review parent selection',actor_name:actor.name,actor_function:actor.function})}));
+ const save=async(ids:string[])=>{ const opening=await loadState(); return POST(new Request('http://localhost/api/iegp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_relationship:relationshipVersion({coverages:opening.coverages.filter(c=>c.gap_id===gap.id),decisions:opening.mapping_suggestions.filter(c=>c.gap_id===gap.id)}),action:'save_mapping_row',gap_id:gap.id,tactic_ids:ids.join(','),mapping_status:'partially_addressed',rationale:'Review parent selection',actor_name:actor.name,actor_function:actor.function})})); };
  for (const ids of [[parent.id],[before.tactics[1].id]]) {
   const response=await save(ids);expect(response.status).toBe(200);
   expect((await loadState()).coverages.filter(c=>c.expansion_id===child.id)).toEqual(childCoverage);

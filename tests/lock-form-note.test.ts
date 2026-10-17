@@ -48,6 +48,9 @@ describe("LockForm note field", () => {
         "assign_tactic",
         "clear_new_source_flag",
         "confirm_coverage_review",
+        "create_addressed_gap",
+        "create_tactic",
+        "record_missed_tactic",
         "lock_gap",
         "lock_need",
         "reject_gap_suggestion",
@@ -57,7 +60,7 @@ describe("LockForm note field", () => {
     );
     for (const { file, tag } of lockFormTags()) {
       const action = actionOf(tag);
-      if (["create_tactic", "create_gap", "record_missed_tactic", "unlock_tactics"].includes(action)) {
+      if (["create_gap", "unlock_tactics"].includes(action)) {
         expect(tag, `${file} ${action}`).not.toMatch(/\bnote=\{\{/);
       }
     }

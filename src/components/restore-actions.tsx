@@ -1,3 +1,4 @@
+import { tacticEditVersion } from "@/lib/iegp/tactic-edit-version";
 import Link from "next/link";
 import { LockForm } from "@/components/lock-form";
 import { EXCLUSION_LABELS, type ExclusionReason } from "@/lib/iegp/enums";
@@ -49,12 +50,12 @@ export function RestoreNeedButton({ needId }: { needId: string }) {
   );
 }
 
-export function RestoreTacticButton({ tacticId }: { tacticId: string }) {
+export function RestoreTacticButton({ tacticId, expectedTactic }: { tacticId: string; expectedTactic?: string }) {
   return (
     <LockForm
       label="Restore tactic"
       action="restore_tactic"
-      extra={{ tactic_id: tacticId }}
+      extra={{ tactic_id: tacticId, expected_tactic: expectedTactic ?? "" }}
       confirmLabel="Restore"
       description="Puts the tactic back in the library, ready to map onto gaps."
       note={RATIONALE}
@@ -62,12 +63,12 @@ export function RestoreTacticButton({ tacticId }: { tacticId: string }) {
   );
 }
 
-export function RestoreMappingButton({ gapId, tacticId }: { gapId: string; tacticId: string }) {
+export function RestoreMappingButton({ gapId, tacticId, expectedRelationship }: { gapId: string; tacticId: string; expectedRelationship: string }) {
   return (
     <LockForm
       label="Restore"
       action="restore_mapping"
-      extra={{ gap_id: gapId, tactic_id: tacticId }}
+      extra={{ gap_id: gapId, tactic_id: tacticId, expected_relationship: expectedRelationship }}
       confirmLabel="Lift rejection"
       description="Lifts the rejection. The pair is not mapped: map it by hand, or a later mapping run may propose it again for you to decide."
       note={RATIONALE}
@@ -159,7 +160,7 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
                 {tactic.lock.note ? ` · “${tactic.lock.note}”` : ""}
               </p>
             </div>
-            <RestoreTacticButton tacticId={tactic.id} />
+            <RestoreTacticButton tacticId={tactic.id} expectedTactic={tacticEditVersion(tactic)} />
           </li>
         ))}
       </ul>
@@ -168,6 +169,7 @@ export function RejectedTactics({ tactics }: { tactics: IegpState["tactics"] }) 
 }
 
 export type RejectedMappingRow = {
+  relationship_version: string;
   gap_id: string;
   tactic_id: string;
   gap_name: string;
@@ -217,7 +219,7 @@ export function RejectedMappings({ rows }: { rows: RejectedMappingRow[] }) {
                   {row.note ? ` · “${row.note}”` : ""}
                 </p>
               </div>
-              <RestoreMappingButton gapId={row.gap_id} tacticId={row.tactic_id} />
+              <RestoreMappingButton gapId={row.gap_id} tacticId={row.tactic_id} expectedRelationship={row.relationship_version} />
             </li>
           ))}
         </ul>

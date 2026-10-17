@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GapRecordLink } from "@/components/gap-panel";
 import { CoverageBadge, TacticBadge } from "@/components/iegp-badges";
 import { LockForm } from "@/components/lock-form";
 import { GapFormFields } from "@/components/gap-form-fields";
@@ -65,6 +66,7 @@ export function CustomTacticButton({
   return (
     <LockForm
       label="+ Custom tactic"
+      note={{ label: "Reason (required)", required: true }}
       action="create_tactic"
       extra={{ gap_id: gapId }}
       confirmLabel="Add tactic"
@@ -80,14 +82,18 @@ export function CustomTacticButton({
 /** Tag a library tactic onto one gap; the tactic is shared, not copied. */
 export function AssignTacticButton({
   gapId,
+  expectedRelationships,
+  label = "Assign from library",
   tactics,
 }: {
   gapId: string;
+  expectedRelationships: string;
+  label?: string;
   tactics: TacticLibraryItem[];
 }) {
   if (tactics.length === 0) return null;
   return (
-    <LockForm label="Assign from library" action="assign_tactic" extra={{ gap_id: gapId }} confirmLabel="Assign">
+    <LockForm label={label} action="assign_tactic" extra={{ gap_id: gapId, expected_relationships: expectedRelationships }} confirmLabel="Assign" note={{ label: "Reason (required)", required: true }}>
       <label className="grid gap-1 text-[12px] text-muted-foreground">
         From tactic library
         <select
@@ -323,10 +329,12 @@ export function ManualStartAlongsideUpload({ gapCount, tacticCount }: { gapCount
 
 function GapTacticsBlock({
   gapId,
+  expectedRelationships,
   tactics,
   availableTactics,
 }: {
   gapId: string;
+  expectedRelationships: string;
   tactics: PlanTactic[];
   availableTactics: AvailableTactic[];
 }) {
@@ -354,27 +362,7 @@ function GapTacticsBlock({
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {unmapped.length > 0 ? (
-          <LockForm
-            label="Assign tactic"
-            action="assign_tactic"
-            extra={{ gap_id: gapId }}
-            confirmLabel="Assign"
-          >
-            <label className="grid gap-1 text-[12px] text-muted-foreground">
-              From tactic library
-              <select
-                name="tactic_id"
-                required
-                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground"
-              >
-                {unmapped.map((tactic) => (
-                  <option key={tactic.id} value={tactic.id}>
-                    {tacticOptionLabel(tactic)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </LockForm>
+          <AssignTacticButton gapId={gapId} tactics={unmapped} expectedRelationships={expectedRelationships} label="Assign tactic" />
         ) : availableTactics.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
             Tactic library is empty. Create a tactic on Gaps or Tactics, or add one on the first screen.
@@ -403,14 +391,15 @@ export function GapPlanCard({
         />
       </div>
       <GapStatusDisagreement computedStatus={card.computed_status} override={card.status_override} />
-      <Link
-        href={`/gaps/${card.gap_id}`}
+      <GapRecordLink
+        gapId={card.gap_id}
         className="mt-2 block text-[13px] leading-5 text-foreground no-underline hover:underline"
       >
         {card.gap_name}
-      </Link>
+      </GapRecordLink>
       <GapTacticsBlock
         gapId={card.gap_id}
+        expectedRelationships={JSON.stringify(card.relationship_versions ?? {})}
         tactics={card.tactics}
         availableTactics={availableTactics}
       />

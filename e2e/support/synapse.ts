@@ -98,6 +98,15 @@ export async function runStageExpectingError(
 }
 
 export async function planAction(request: APIRequestContext, body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action)) && body.expected_version === undefined) {
+    const current = (await planState(request)).proposals.find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   return postJson(request, "/api/plan", body);
 }
 
@@ -105,6 +114,11 @@ export async function planActionExpectingError(
   request: APIRequestContext,
   body: Record<string, unknown>,
 ): Promise<{ status: number; error: string }> {
+  if (["validate_band", "set_placement", "move_placement"].includes(String(body.action))) {
+    const snapshot = await planState(request);
+    const current = snapshot.placements.find((row) => row.gap_id === body.gap_id);
+    body = { expected_version: current?.version ?? null, expected_context_version: snapshot.priority_context_versions[String(body.gap_id)] ?? null, reason: body.rationale, ...body };
+  }
   const response = await request.post("/api/plan", {
     headers: { "content-type": "application/json" },
     data: JSON.stringify({ ...ACTOR, ...body }),
@@ -137,8 +151,10 @@ export async function planState(request: APIRequestContext) {
   const response = await request.get("/api/plan");
   expect(response.ok()).toBeTruthy();
   return (await response.json()) as {
+    priority_context_versions: Record<string, string | null>;
     placements: {
       gap_id: string;
+      version: string;
       axis_scores: Record<string, number>;
       suggested_band: string;
       suggested_rationale: string;
@@ -154,6 +170,7 @@ export async function planState(request: APIRequestContext) {
       updated_by: string;
     };
     proposals: {
+      version: string;
       id: string;
       gap_id: string;
       name: string;
@@ -393,6 +410,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
       if (issue === "partial") {
         const record = (await (await request.get(`/api/gaps/${gap_id}`)).json()) as {
           gap: { name: string };
+          resolution_version: string;
           coverages: {
             tactic_id: string;
             expansion_id: string | null;
@@ -417,6 +435,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
                 data: JSON.stringify({
                   ...ACTOR,
                   action: "rewrite_partial_gap",
+                  expected_resolution: record.resolution_version,
                   gap_id,
                   name: record.gap.name,
                   status: "validated_addressed",
@@ -428,6 +447,7 @@ export async function resolveFinalPlanGaps(request: APIRequestContext) {
         if (!addressed?.ok()) {
           await iegpAction(request, {
             action: "rewrite_partial_gap",
+            expected_resolution: record.resolution_version,
             gap_id,
             name: record.gap.name,
             status: "validated_open",

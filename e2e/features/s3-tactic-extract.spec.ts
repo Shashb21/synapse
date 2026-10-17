@@ -50,7 +50,8 @@ test.describe("S3 tactic extraction", () => {
     expect(dry.output.proposed).toBeGreaterThan(0);
 
     await page.goto("/?place=gaps");
-    await openInventoryRow(page);
+    const panel = await openInventoryRow(page);
+    await panel.getByRole("link", { name: "Edit gap and mappings", exact: true }).click();
     const dialog = page.getByRole("dialog");
     // Retry until the page has hydrated; a click before that does nothing.
     await expect(async () => {

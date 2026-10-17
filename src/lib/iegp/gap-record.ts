@@ -1,3 +1,7 @@
+import { ideationProposalReadback, type IdeationProposalRecord } from "@/modules/stages/s9-ideation/module";
+import { gapResolutionVersion } from "./relationship-version";
+import { readPlacementSnapshot } from "@/modules/stages/s8-prioritization/module";
+import { inspectJudgementReferences } from "./judgement-references";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import * as kernel from "@/modules/kernel/schema";
@@ -5,7 +9,10 @@ import { gapCandidates } from "@/modules/stages/s2-gap-extract/schema";
 import { loadState } from "./store";
 import { gapVersionsFor, lastResetAt } from "./gap-history";
 import { entityHistory, type HistoryEntry } from "./entity-history";
-import { isLiveGap } from "./engine";
+import { loadAxes } from "@/modules/stages/s8-prioritization/axes";
+import type { PriorityAxis } from "@/modules/stages/s8-prioritization/axis-math";
+import { computeGapStatus, displayedGapStatus, isLiveGap } from "./engine";
+import type { GapStatus, MappedGapStatus } from "./enums";
 import type { IegpState } from "./types";
 
 type Gap = IegpState["gaps"][0];
@@ -18,8 +25,10 @@ type Gap = IegpState["gaps"][0];
  * history. The gap page reads it, and GET /api/gaps/[id] exports it.
  */
 export type GapRecord = {
+  resolution_version?: string;
   gap: Gap;
   objective: IegpState["objectives"][0] | null;
+  coverage_status: { computed: MappedGapStatus; shown: GapStatus; needs_review: boolean };
   confirmation: {
     confirmed: boolean;
     by: Gap["validated_by"];
@@ -45,14 +54,19 @@ export type GapRecord = {
   })[];
   expansions: IegpState["expansions"];
   mapping_rejections: IegpState["mapping_suggestions"];
-  priority: typeof kernel.priorityPlacements.$inferSelect | null;
+  priority: (typeof kernel.priorityPlacements.$inferSelect & { version?: string; human_axes?: string[]; human_band?: boolean }) | null;
   ideas: (typeof kernel.ideationProposals.$inferSelect)[];
+  /** Shared S9 presentation, including authorised model support. Raw ideas remain compatible. */
+  options?: IdeationProposalRecord[];
   timeline: (typeof kernel.timelineActivities.$inferSelect)[];
   breakout_groups: IegpState["breakout_groups"];
   pending_suggestions: IegpState["gap_suggestions"];
   residuals: IegpState["residuals"];
   versions: IegpState["gap_versions"];
   history: HistoryEntry[];
+  priority_axes?: PriorityAxis[];
+  tactics_unlocked?: boolean;
+  open?: boolean;
 };
 
 const brief = (gap: Gap | undefined) => (gap ? { id: gap.id, name: gap.name, number: gap.number } : null);
@@ -66,8 +80,8 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
   const needIds = links.map((link) => link.need_id);
   const candidateRowIds = state.needs.filter((n) => needIds.includes(n.id) && n.candidate_row_id).map((n) => n.candidate_row_id!);
   const d = db();
-  const [placements, ideas, timeline, candidates] = await Promise.all([
-    d.select().from(kernel.priorityPlacements).where(sql`${kernel.priorityPlacements.gap_id} = ${gap.id}`),
+  const [priority, ideas, timeline, candidates, axes] = await Promise.all([
+    readPlacementSnapshot(gap.id),
     d.select().from(kernel.ideationProposals).where(sql`${kernel.ideationProposals.gap_id} = ${gap.id}`),
     d.select().from(kernel.timelineActivities).where(sql`${kernel.timelineActivities.gap_ids} @> ${JSON.stringify([gap.id])}::jsonb`),
     d.select().from(gapCandidates).where(
@@ -75,17 +89,27 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
         ? sql`${gapCandidates.committed_gap_id} = ${gap.id} OR ${inArray(gapCandidates.id, candidateRowIds)}`
         : sql`${gapCandidates.committed_gap_id} = ${gap.id}`,
     ),
+    loadAxes(),
   ]);
   const candidateById = new Map(candidates.map((row) => [row.id, row]));
   const coverages = state.coverages.filter((c) => c.gap_id === gap.id);
+  const computed = computeGapStatus(coverages, state.tactics, {
+    hasAcceptedChild: state.gaps.some(row => row.parent_gap_id === gap.id), expansions: state.expansions,
+  });
+  const shown = displayedGapStatus({ ...gap, computed_status: gap.computed_status ?? computed });
   const residuals = state.residuals.filter((r) => r.gap_id === gap.id);
   const groupIds = new Set(state.breakout_group_gaps.filter((row) => row.gap_id === gap.id).map((row) => row.group_id));
   const history = await entityHistory(
-    [gap.id, ...coverages.map((c) => c.id), ...residuals.map((r) => r.id)],
+    [gap.id, gap.objective_id, ...coverages.map((c) => c.id), ...residuals.map((r) => r.id)],
     { since: lastResetAt(state) },
   );
   return {
+    resolution_version: gapResolutionVersion(state, gap.id),
     gap,
+    priority_axes: axes.axes,
+    tactics_unlocked: state.asset.tactics_unlocked,
+    open: !gap.retired && !gap.parked_at && shown === "validated_open",
+    coverage_status: { computed, shown, needs_review: coverages.some(row => row.needs_review) },
     objective: state.objectives.find((o) => o.id === gap.objective_id) ?? null,
     confirmation: {
       confirmed: gap.human_validated,
@@ -122,14 +146,15 @@ export async function gapRecord(gapId: string, preloaded?: IegpState): Promise<G
     }),
     expansions: state.expansions.filter((e) => e.gap_ids.includes(gap.id)),
     mapping_rejections: state.mapping_suggestions.filter((m) => m.gap_id === gap.id && m.status === "rejected"),
-    priority: placements[0] ?? null,
+    priority: priority ? { ...priority, suggested_references: inspectJudgementReferences(state, [gap.id], priority.suggested_references).map(({ entity_type, entity_id, reason }) => ({ entity_type, entity_id, reason })) } : null,
     ideas,
+    options: ideas.map(row => ideationProposalReadback(row, state)),
     timeline,
     breakout_groups: state.breakout_groups.filter((g) => groupIds.has(g.id)),
     pending_suggestions: state.gap_suggestions.filter((row) => row.gap_id === gap.id && row.status === "pending"),
     residuals,
     versions: gapVersionsFor(state, gap.id),
-    history,
+    history: history.map(entry => entry.entity_type === "objective" ? { ...entry, shared_context: true } : entry),
   };
 }
 

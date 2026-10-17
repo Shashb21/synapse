@@ -135,6 +135,8 @@ describe("setup wizard steps", () => {
 
     const objectives = step(ObjectivesStep, FILLED);
     expect(objectives).toContain("Strategic importance (1–5)");
+    expect(objectives).toContain("Evidence needed by");
+    expect(objectives).toContain("papers due 10 June");
     expect(objectives).toContain('value="NICE submission"');
     expect(objectives).toContain('value="2028-01-15"');
     expect(objectives).toContain('aria-checked="true"');
@@ -153,6 +155,14 @@ describe("setup wizard steps", () => {
     expect(settings).toContain("Perioperative");
     expect(settings).toContain("scope on Prioritize");
     expect(settings).toContain("2L"); // suggestion not yet chosen
+  });
+
+  it("shows valid unusual and elapsed evidence deadlines without blocking the form", () => {
+    const form = parsePlanningContext({ ...FILLED, objectives: [{ ...FILLED.objectives[0], evidence_needed_by: "2020-07-01", decision_date: "2020-06-30" }] });
+    const html = step(ObjectivesStep, form);
+    expect(html).toContain("Evidence deadline passed");
+    expect(html).toContain("Evidence deadline follows the decision date");
+    expect(html).toContain('value="2020-07-01"');
   });
 
   it("the summary flags sections with missing answers", () => {

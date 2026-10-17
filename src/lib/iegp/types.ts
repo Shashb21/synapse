@@ -58,6 +58,8 @@ export type StrategicObjective = {
   strategic_importance: number;
   key_decision: string;
   decision_date: string;
+  /** Separate shared evidence deadline; absent on older records, never inferred. */
+  evidence_needed_by?: string | null;
   owner: string;
 };
 
@@ -121,6 +123,8 @@ export type EvidenceGap = {
   statement: string;
   domain: EvidenceDomain;
   objective_id: string;
+  /** Initiating context-edit event; null until this gap first changes context. */
+  priority_context_version?: string | null;
   status: GapStatus;
   exclusion_reason: ExclusionReason | null;
   exclusion_note: string | null;

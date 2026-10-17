@@ -1,3 +1,4 @@
+import { priorityDecision } from "./support/priority-decision";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // The plan API reads the session cookie; outside a request there is none.
@@ -37,6 +38,13 @@ const X = "effort_cost";
 const Y = "decision_impact";
 
 async function post(body: Record<string, unknown>) {
+  if (["edit_proposal", "decide_proposal", "restore_proposal"].includes(String(body.action))) {
+    const current = (await listIdeationProposals()).find(row => row.id === body.id);
+    body = { expected_version: current?.version ?? "", ...body };
+  }
+  if (["set_placement", "validate_band", "move_placement"].includes(String(body.action))) {
+    body = { ...await priorityDecision(String(body.gap_id), String(body.rationale ?? "")), ...body };
+  }
   const res = await planPost(
     new Request("http://localhost/api/plan", {
       method: "POST",
@@ -75,7 +83,7 @@ describe("S8 manual placement", () => {
     const gapId = ids[0]!;
     expect(await placementOf(gapId)).toBeUndefined();
     // Low effort (cost axis) and high impact: favourable on both, so High.
-    const placement = await setPlacement({
+    const placement = await setPlacement({ ...await priorityDecision(gapId, "Cheap ITC that unblocks the HTA dossier"),
       gap_id: gapId,
       axis_scores: { [X]: 20, [Y]: 85 },
       x_axis: X,
@@ -93,19 +101,19 @@ describe("S8 manual placement", () => {
     expect(edits.some((edit) => edit.field === "placement" && edit.action === "add")).toBe(true);
   });
 
-  it("refuses a manual placement without a rationale and creates nothing", async () => {
+  it("refuses a manual placement without a reason and creates nothing", async () => {
     await expect(
-      setPlacement({ gap_id: ids[4]!, band: "low", rationale: "x", actor: ACTOR }),
-    ).rejects.toThrow(/rationale/i);
+      setPlacement({ ...await priorityDecision(ids[4]!, "x"), gap_id: ids[4]!, band: "low", rationale: "x", actor: ACTOR }),
+    ).rejects.toThrow(/reason/i);
     expect(await placementOf(ids[4]!)).toBeUndefined();
     await expect(
-      setPlacement({ gap_id: ids[4]!, axis_scores: { [X]: 140 }, rationale: "Out of range", actor: ACTOR }),
+      setPlacement({ ...await priorityDecision(ids[4]!, "Out of range"), gap_id: ids[4]!, axis_scores: { [X]: 140 }, rationale: "Out of range", actor: ACTOR }),
     ).rejects.toThrow(/0 to 100/);
   });
 
   it("validates a band on a gap no model has placed", async () => {
     const gapId = ids[1]!;
-    const placement = await validatePlacement({
+    const placement = await validatePlacement({ ...await priorityDecision(gapId, "Elderly QoL blocks the German submission"),
       gap_id: gapId,
       band: "high",
       rationale: "Elderly QoL blocks the German submission",
@@ -117,7 +125,7 @@ describe("S8 manual placement", () => {
   });
 
   it("drops a gap no model has placed straight onto the matrix", async () => {
-    const placement = await movePlacement({ gap_id: ids[2]!, x_axis: X, y_axis: Y, x: 10, y: 10, actor: ACTOR });
+    const placement = await movePlacement({ ...await priorityDecision(ids[2]!, "Reviewed matrix placement"), gap_id: ids[2]!, x_axis: X, y_axis: Y, x: 10, y: 10, actor: ACTOR });
     // Unfavourable on both axes: the Defer quadrant (KAN-8).
     expect(placement.band).toBe("defer");
     expect(placement.human_axes?.sort()).toEqual([Y, X].sort());
@@ -142,13 +150,13 @@ describe("S8 manual placement", () => {
 
     const refused = await post({ action: "set_placement", gap_id: ids[3]!, band: "low", rationale: "" });
     expect(refused.status).toBe(400);
-    expect(String(refused.json.error)).toMatch(/rationale/i);
+    expect(String(refused.json.error)).toMatch(/reason/i);
   });
 
   it("a re-run keeps every human score and band, and only refreshes its own suggestion", async () => {
     const dragged = ids[2]!; // dragged to Defer above
     const banded = ids[4]!;
-    await setPlacement({ gap_id: banded, band: "low", rationale: "Sequencing is a later-cycle question", actor: ACTOR });
+    await setPlacement({ ...await priorityDecision(banded, "Sequencing is a later-cycle question"), gap_id: banded, band: "low", rationale: "Sequencing is a later-cycle question", actor: ACTOR });
     const typed = ids[0]!; // typed 20/85 above
 
     // The test stub scores every axis 50, which lands in Prioritize (top-right): High.
@@ -215,7 +223,7 @@ describe("S9 manual ideas and edits", () => {
 
   it("ideation serves validated High gaps only, as in the Figma design (KAN-8)", async () => {
     const [high, low, medium] = [ids[1]!, ids[2]!, ids[3]!];
-    await validatePlacement({ gap_id: low, band: "low", rationale: "Later-cycle question", actor: ACTOR });
+    await validatePlacement({ ...await priorityDecision(low, "Later-cycle question"), gap_id: low, band: "low", rationale: "Later-cycle question", actor: ACTOR });
     const order = ideationBandOrder(await listPlacements());
     expect(order.get(high)).toBe(0);
     expect(order.has(medium)).toBe(false);
@@ -248,7 +256,7 @@ describe("S9 manual ideas and edits", () => {
   });
 
   it("adds an idea by hand for an Open gap, audited, with timing left for S10", async () => {
-    await validatePlacement({gap_id:ids[3]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
+    await validatePlacement({ ...await priorityDecision(ids[3]!, "Now blocks dossier"),gap_id:ids[3]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
     const proposal = await addIdeationProposal({
       gap_id: ids[3]!,
       fields: {
@@ -375,7 +383,7 @@ describe("S9 manual ideas and edits", () => {
   });
 
   it("adds an idea through the plan API", async () => {
-    await validatePlacement({gap_id:ids[4]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
+    await validatePlacement({ ...await priorityDecision(ids[4]!, "Now blocks dossier"),gap_id:ids[4]!,band:"high",rationale:"Now blocks dossier",actor:ACTOR});
     const { status, json } = await post({
       action: "add_proposal",
       gap_id: ids[4]!,

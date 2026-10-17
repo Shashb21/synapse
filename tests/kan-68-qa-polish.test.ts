@@ -77,7 +77,7 @@ describe("KAN-68 QA polish", () => {
     const board = src("src/components/tactic-ideation/ideation-board.tsx");
     expect(board).not.toContain("when AI is on");
     expect(board).toMatch(/\{ai \? ", write a custom tactic, or accept a suggestion\." : " or write a custom tactic\."\}/);
-    const matrix = src("src/components/prioritize/prioritize-matrix.tsx");
+    const matrix = src("src/components/prioritize/gap-priority-actions.tsx");
     expect(matrix).toMatch(/hint: ai\s*\? "A band you set here is yours: a later model run/);
     expect(matrix).toMatch(/ai\s*\? "Type the exact axis scores[^"]*No model run is needed[^"]*"\s*: "Type the exact axis scores and, if you want, the band\."/);
   });
